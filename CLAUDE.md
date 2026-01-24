@@ -1,6 +1,6 @@
-# Codebase Overview: vibe-web
+# Codebase Overview: vibest
 
-The `vibe-web` repository is a monorepo dedicated to enhancing the web development experience and productivity by integrating AI coding agents directly into the browser. Its primary purpose is to provide AI agents with rich, accurate context from a developer's running web application, facilitating tasks like code generation, debugging, and code reviews. This project stands out by offering in-browser developer tooling that combines a chat interface with DOM inspection, eliminating the need for external context-bridging tools. It is currently in active development, with a focus on React and Vue projects, primarily leveraging Vite for its build process.
+The `vibest` repository is a monorepo dedicated to enhancing the web development experience and productivity by integrating AI coding agents directly into the browser. Its primary purpose is to provide AI agents with rich, accurate context from a developer's running web application, facilitating tasks like code generation, debugging, and code reviews. This project stands out by offering in-browser developer tooling that combines a chat interface with DOM inspection, eliminating the need for external context-bridging tools. It is currently in active development, with a focus on React and Vue projects, primarily leveraging Vite for its build process.
 
 ## Architectural Overview
 
@@ -20,7 +20,7 @@ The repository is structured into several key applications (`apps`) and shared p
 
 ### Applications (`apps/`)
 
-*   **`apps/web`**: The main web application, built with React and TanStack Router. It serves as a standalone interface for interacting with the Claude Code AI. It consumes shared UI components from `@vibe-web/ui` and communicates with the local CLI server via `@orpc/client`.
+*   **`apps/web`**: The main web application, built with React and TanStack Router. It serves as a standalone interface for interacting with the Claude Code AI. It consumes shared UI components from `@vibest/ui` and communicates with the local CLI server via `@orpc/client`.
 *   **`apps/chrome-side-panel`**: The user interface for the Chrome browser extension's side panel. This React application is built with Vite and uses `webext-bridge` for communication with other parts of the extension and the inspected web page. It provides a chat interface similar to the main web app but within the browser's context.
 
 ### Packages (`packages/`)
@@ -39,13 +39,13 @@ The repository is structured into several key applications (`apps`) and shared p
     *   **`ai-elements`**: Specialized components for building AI chat interfaces (e.g., `Conversation`, `Message`, `PromptInput`).
     *   **`claude-code`**: Components for rendering Claude Code-specific outputs, such as detailed visualizations of AI tool invocations (`ClaudeCodeBashTool`, `ClaudeCodeReadTool`, etc.).
     *   **`components`**: General-purpose UI components (e.g., `Avatar`, `Button`, `Collapsible`, `DropdownMenu`) that are reused across all frontend applications.
-*   **`packages/vibe-web-devtools`**: A Vite plugin designed to inject the in-app chat panel and element inspector into a developer's web server. This package transforms the web application's code to enable the devtools functionality.
-*   **`packages/vibe-web-devtools-client`**: The client-side UI for the framework devtools, providing the actual chat panel and inspector that appears within the developer's web app.
+*   **`packages/vibest-devtools`**: A Vite plugin designed to inject the in-app chat panel and element inspector into a developer's web server. This package transforms the web application's code to enable the devtools functionality.
+*   **`packages/vibest-devtools-client`**: The client-side UI for the framework devtools, providing the actual chat panel and inspector that appears within the developer's web app.
 *   **`packages/webext-bridge`**: A library for robust cross-context messaging within Web Extensions, used to facilitate communication between content scripts, background scripts, and the side panel.
 
 ### Examples (`examples/`)
 
-*   **`examples/vite-react`**: A fully-featured example React application that demonstrates the integration and usage of the `vibe-web-devtools` plugin, showcasing various UI components and features.
+*   **`examples/vite-react`**: A fully-featured example React application that demonstrates the integration and usage of the `vibest-devtools` plugin, showcasing various UI components and features.
 
 ## High-Level Functionality
 
@@ -61,10 +61,10 @@ The repository provides a suite of tools that collectively offer:
 
 ## Data Flow and Interactions
 
-Data flow in the `vibe-web` system is orchestrated across several layers:
+Data flow in the `vibest` system is orchestrated across several layers:
 
 1.  **User Interaction (Client-side):**
-    *   A developer interacts with the UI, either through the main `apps/web` application, the `apps/chrome-side-panel`, or the `vibe-web-devtools-client` injected into their web app.
+    *   A developer interacts with the UI, either through the main `apps/web` application, the `apps/chrome-side-panel`, or the `vibest-devtools-client` injected into their web app.
     *   **Text Input:** User types a prompt into the chat interface.
     *   **DOM Inspection:** User clicks on an element in their running web application. The `code-inspector-web` package captures metadata (file path, line, column, component name) associated with that element. This data is then sent to the `chrome-extension`.
 
@@ -89,12 +89,12 @@ Data flow in the `vibe-web` system is orchestrated across several layers:
 
 6.  **UI Rendering:**
     *   The client (web app or side panel) receives the streamed AI response.
-    *   Components from `@vibe-web/ui` (specifically `ai-elements` and `claude-code/message-parts`) parse and render the AI's output, including markdown text, code blocks, and visual representations of executed tools (e.g., `ClaudeCodeBashTool`, `ClaudeCodeReadTool`).
+    *   Components from `@vibest/ui` (specifically `ai-elements` and `claude-code/message-parts`) parse and render the AI's output, including markdown text, code blocks, and visual representations of executed tools (e.g., `ClaudeCodeBashTool`, `ClaudeCodeReadTool`).
     *   Inspector data is also rendered, allowing the user to see which elements were focused.
 
 ## Engineering Practices
 
-The `vibe-web` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
+The `vibest` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
 
 *   **Monorepo Management:** `pnpm` and `Turborepo` are used for dependency management and build orchestration across multiple packages, enabling faster builds and consistent environments.
 *   **TypeScript:** The entire codebase is written in TypeScript, providing static type checking for improved code reliability, readability, and developer experience.
@@ -102,7 +102,7 @@ The `vibe-web` project adheres to several modern engineering practices to ensure
 *   **Automated Testing:** Unit and integration tests are present (e.g., `vitest.config.ts`, `test` directories), ensuring the correctness of individual modules and their interactions.
 *   **CI/CD:** A GitHub Actions workflow (`.github/workflows/quality.yml`) automatically runs `test`, `lint`, and `typecheck` checks on every push and pull request to the `main` branch, maintaining code quality standards.
 *   **Version Management:** `@changesets/cli` is used for managing package versions and generating changelogs, streamlining the release process for the monorepo.
-*   **Component-Based UI Development:** React is used for building modular and reusable UI components, particularly evident in the `@vibe-web/ui` package.
+*   **Component-Based UI Development:** React is used for building modular and reusable UI components, particularly evident in the `@vibest/ui` package.
 
 ## Dependencies and Integrations
 
@@ -236,8 +236,8 @@ The files listed below are important for code generation and running terminal co
 │   ├── server-rpc/
 │   ├── shared/
 │   ├── ui/
-│   ├── vibe-web-devtools/
-│   ├── vibe-web-devtools-client/
+│   ├── vibest-devtools/
+│   ├── vibest-devtools-client/
 │   └── webext-bridge/
 ├── pnpm-workspace.yaml
 ├── tools/

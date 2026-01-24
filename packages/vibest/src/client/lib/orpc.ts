@@ -4,7 +4,7 @@ import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
 import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
-import type { Router } from "@vibe-web/server-rpc/routes";
+import type { Router } from "@vibest/server-rpc/routes";
 import { toast } from "sonner";
 
 export const queryClient = new QueryClient({

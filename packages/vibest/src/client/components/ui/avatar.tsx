@@ -1,5 +1,5 @@
 import * as AvatarPrimitive from "@radix-ui/react-avatar";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 import type * as React from "react";
 
 function Avatar({

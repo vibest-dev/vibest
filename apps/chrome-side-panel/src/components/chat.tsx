@@ -1,16 +1,16 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { InspectedTargetData } from "@vibe-web/code-inspector-web";
-import { ViwebExtensionMessage } from "@vibe-web/shared/extension/message";
-import { Action, Actions } from "@vibe-web/ui/ai-elements/actions";
+import type { InspectedTargetData } from "@vibest/code-inspector-web";
+import { VibestExtensionMessage } from "@vibest/shared/extension/message";
+import { Action, Actions } from "@vibest/ui/ai-elements/actions";
 import {
 	Conversation,
 	ConversationContent,
 	ConversationScrollButton,
-} from "@vibe-web/ui/ai-elements/conversation";
-import { Loader } from "@vibe-web/ui/ai-elements/loader";
-import { Message, MessageContent } from "@vibe-web/ui/ai-elements/message";
+} from "@vibest/ui/ai-elements/conversation";
+import { Loader } from "@vibest/ui/ai-elements/loader";
+import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import {
 	PromptInput,
 	PromptInputModelSelect,
@@ -22,20 +22,20 @@ import {
 	PromptInputTextarea,
 	PromptInputToolbar,
 	PromptInputTools,
-} from "@vibe-web/ui/ai-elements/prompt-input";
+} from "@vibest/ui/ai-elements/prompt-input";
 import {
 	Reasoning,
 	ReasoningContent,
 	ReasoningTrigger,
-} from "@vibe-web/ui/ai-elements/reasoning";
-import { Response } from "@vibe-web/ui/ai-elements/response";
+} from "@vibest/ui/ai-elements/reasoning";
+import { Response } from "@vibest/ui/ai-elements/response";
 import {
 	Source,
 	Sources,
 	SourcesContent,
 	SourcesTrigger,
-} from "@vibe-web/ui/ai-elements/sources";
-import { Suggestion, Suggestions } from "@vibe-web/ui/ai-elements/suggestion";
+} from "@vibest/ui/ai-elements/sources";
+import { Suggestion, Suggestions } from "@vibest/ui/ai-elements/suggestion";
 import { CopyIcon, RefreshCcwIcon } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import invariant from "tiny-invariant";
@@ -97,7 +97,7 @@ export function Chat() {
 
 	useEffect(() => {
 		const unsubscribe = onMessage(
-			ViwebExtensionMessage.Inspected,
+			VibestExtensionMessage.Inspected,
 			({ data }) => {
 				setInspectedTargets(data.targets);
 				const lastTarget = data.targets.at(-1);

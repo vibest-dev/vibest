@@ -10,9 +10,9 @@
 	},
 	"devDependencies": {
 		"@types/chrome": "^0.1.6",
-		"@vibe-web/code-inspector-web": "workspace:*",
-		"@vibe-web/shared": "workspace:*",
-		"@vibe-web/typescript": "workspace:*",
+		"@vibest/code-inspector-web": "workspace:*",
+		"@vibest/shared": "workspace:*",
+		"@vibest/typescript": "workspace:*",
 		"tsdown": "^0.13.5",
 		"webext-bridge": "workspace:*",
 		"webextension-polyfill": "^0.9.0"

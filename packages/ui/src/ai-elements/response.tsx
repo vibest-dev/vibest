@@ -3,8 +3,8 @@
 import {
 	CodeBlock,
 	CodeBlockCopyButton,
-} from "@vibe-web/ui/ai-elements/code-block";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/ai-elements/code-block";
+import { cn } from "@vibest/ui/lib/utils";
 import {
 	cloneElement,
 	type DetailedHTMLProps,

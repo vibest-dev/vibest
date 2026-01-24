@@ -1,10 +1,10 @@
 "use client";
 
 import { Slot } from "@radix-ui/react-slot";
-import { Button } from "@vibe-web/ui/components/button";
-import { Input } from "@vibe-web/ui/components/input";
-import { useIsMobile } from "@vibe-web/ui/hooks/use-mobile";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { Button } from "@vibest/ui/components/button";
+import { Input } from "@vibest/ui/components/input";
+import { useIsMobile } from "@vibest/ui/hooks/use-mobile";
+import { cn } from "@vibest/ui/lib/utils";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
 import * as React from "react";

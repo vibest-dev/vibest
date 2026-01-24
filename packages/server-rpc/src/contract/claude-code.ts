@@ -1,5 +1,5 @@
 import { oc, type } from "@orpc/contract";
-import type { ToolPermissionRequest } from "@vibe-web/agents/claude-code";
+import type { ToolPermissionRequest } from "@vibest/agents/claude-code";
 import type { InferUIMessageChunk, UIMessage } from "ai";
 import {
 	type ClaudeCodeTools,

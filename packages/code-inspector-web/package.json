@@ -1,5 +1,5 @@
 {
-	"name": "@vibe-web/code-inspector-web",
+	"name": "@vibest/code-inspector-web",
 	"version": "0.0.0",
 	"private": true,
 	"description": "Code inspector for vibe coding",
@@ -36,7 +36,7 @@
 	"devDependencies": {
 		"@types/react": "^19.2.2",
 		"@types/react-dom": "^19.2.1",
-		"@vibe-web/ui": "workspace:*",
+		"@vibest/ui": "workspace:*",
 		"tsdown": "^0.13.5"
 	}
 }

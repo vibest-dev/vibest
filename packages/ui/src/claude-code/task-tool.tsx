@@ -1,5 +1,5 @@
-import { Response } from "@vibe-web/ui/ai-elements/response";
-import { Tool, ToolContent, ToolHeader } from "@vibe-web/ui/ai-elements/tool";
+import { Response } from "@vibest/ui/ai-elements/response";
+import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import {
 	isToolUIPart,
 	type ToolUIPart,

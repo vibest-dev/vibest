@@ -5,8 +5,8 @@ import {
 	CollapsibleContent,
 	type CollapsibleProps,
 	CollapsibleTrigger,
-} from "@vibe-web/ui/components/collapsible";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/collapsible";
+import { cn } from "@vibest/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import { SquareMinusIcon, SquarePlusIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";

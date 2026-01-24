@@ -10,7 +10,7 @@ export function InspectorBabelPlugin(
 	options: InspectorBabelPluginOptions,
 ): PluginObj {
 	return {
-		name: "@vibe-web/code-inspector-node/inspector-babel-plugin",
+		name: "@vibest/code-inspector-node/inspector-babel-plugin",
 		visitor: createBabelPluginVisitor({
 			rootPath: options.rootPath,
 			relativePath: options.relativePath,

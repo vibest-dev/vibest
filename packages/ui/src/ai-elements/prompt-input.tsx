@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@vibe-web/ui/components/button";
+import { Button } from "@vibest/ui/components/button";
 import {
 	Select,
 	SelectContent,
@@ -8,9 +8,9 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValueText,
-} from "@vibe-web/ui/components/select";
-import { Textarea } from "@vibe-web/ui/components/textarea";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/select";
+import { Textarea } from "@vibest/ui/components/textarea";
+import { cn } from "@vibest/ui/lib/utils";
 import type { ChatStatus } from "ai";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
 import type {

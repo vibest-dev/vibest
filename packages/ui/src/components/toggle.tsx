@@ -1,7 +1,7 @@
 "use client";
 
 import { Toggle as TogglePrimitive } from "@ark-ui/react/toggle";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 

@@ -23,7 +23,7 @@
 		"orpc",
 		"pushable",
 		"Unplugin",
-		"vibe-web"
+		"vibest"
 	],
 	"tailwindCSS.experimental.configFile": {
 		"./packages/ui/src/globals.css": "./packages/ui/src/globals.css"

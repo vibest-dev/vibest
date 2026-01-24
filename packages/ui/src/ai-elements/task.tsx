@@ -4,8 +4,8 @@ import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@vibe-web/ui/components/collapsible";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/collapsible";
+import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 

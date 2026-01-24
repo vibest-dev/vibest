@@ -1,5 +1,5 @@
-import { VIWEB_EXTENSION_NAMESPACE } from "@vibe-web/shared/extension";
-import { ViwebExtensionMessage } from "@vibe-web/shared/extension/message";
+import { VIBEST_EXTENSION_NAMESPACE } from "@vibest/shared/extension";
+import { VibestExtensionMessage } from "@vibest/shared/extension/message";
 import {
 	allowWindowMessaging,
 	onMessage,
@@ -10,18 +10,18 @@ import {
 
 console.log("content");
 
-allowWindowMessaging(VIWEB_EXTENSION_NAMESPACE);
+allowWindowMessaging(VIBEST_EXTENSION_NAMESPACE);
 // proxy, content-script window -> sidepanel
-onMessage(ViwebExtensionMessage.WebAppInit, async (event) => {
+onMessage(VibestExtensionMessage.WebAppInit, async (event) => {
 	return await sendMessage(
-		ViwebExtensionMessage.WebAppInit,
+		VibestExtensionMessage.WebAppInit,
 		event.data,
 		"sidepanel",
 	);
 });
-onMessage(ViwebExtensionMessage.Inspected, async (event) => {
+onMessage(VibestExtensionMessage.Inspected, async (event) => {
 	return await sendMessage(
-		ViwebExtensionMessage.Inspected,
+		VibestExtensionMessage.Inspected,
 		event.data,
 		"sidepanel",
 	);

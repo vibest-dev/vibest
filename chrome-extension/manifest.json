@@ -1,10 +1,10 @@
 {
-	"name": "Viweb",
-	"description": "Viweb browser extension",
+	"name": "Vibest",
+	"description": "Vibest browser extension",
 	"version": "0.0.0",
 	"version_name": "0.0.0",
 	"action": {
-		"default_title": "Viweb"
+		"default_title": "Vibest"
 	},
 	"background": {
 		"service_worker": "dist/background.js",

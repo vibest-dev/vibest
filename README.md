@@ -31,9 +31,9 @@ https://github.com/user-attachments/assets/fd57a0ad-eb63-46cf-8166-cc3af18b1967
 ### Install
 
 ```bash
-npm install --save-dev vibe-web-devtools
-# pnpm add -D vibe-web-devtools
-# yarn add -D vibe-web-devtools
+npm install --save-dev vibest-devtools
+# pnpm add -D vibest-devtools
+# yarn add -D vibest-devtools
 ```
 
 ### Config
@@ -44,11 +44,11 @@ This example uses the Vite adapter. Register it before other framework plugins:
 // vite.config.ts
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import vibeWeb from "vibe-web-devtools/vite";
+import vibest from "vibest-devtools/vite";
 
 export default defineConfig({
   plugins: [
-    vibeWeb(),
+    vibest(),
     react(),
   ],
 });

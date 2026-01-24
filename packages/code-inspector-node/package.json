@@ -1,5 +1,5 @@
 {
-	"name": "@vibe-web/code-inspector-node",
+	"name": "@vibest/code-inspector-node",
 	"version": "0.0.0",
 	"type": "module",
 	"private": true,
@@ -68,7 +68,7 @@
 		"@babel/types": "^7.28.2",
 		"@types/babel__core": "^7.20.5",
 		"@types/babel__traverse": "^7.28.0",
-		"@vibe-web/typescript": "workspace:*",
+		"@vibest/typescript": "workspace:*",
 		"@vue/babel-plugin-jsx": "^1.5.0",
 		"@vue/compiler-dom": "^3.5.19",
 		"@vue/compiler-sfc": "^3.5.19",

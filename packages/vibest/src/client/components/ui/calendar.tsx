@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 import {
 	ChevronDownIcon,
 	ChevronLeftIcon,

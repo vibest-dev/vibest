@@ -1,5 +1,5 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 import type * as React from "react";
 
 function TooltipProvider({

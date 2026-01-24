@@ -1,7 +1,7 @@
 import { createServer as createHttpServer, type Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createNodeRPCHandler, createWsRPCHandler } from "@vibe-web/server-rpc";
+import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server-rpc";
 import express from "express";
 import sirv from "sirv";
 import { createServer as createViteDevServer } from "vite";

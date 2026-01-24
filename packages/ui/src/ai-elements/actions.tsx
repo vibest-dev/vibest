@@ -1,13 +1,13 @@
 "use client";
 
-import { Button } from "@vibe-web/ui/components/button";
+import { Button } from "@vibest/ui/components/button";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipProvider,
 	TooltipTrigger,
-} from "@vibe-web/ui/components/tooltip";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/tooltip";
+import { cn } from "@vibest/ui/lib/utils";
 import type { ComponentProps } from "react";
 
 export type ActionsProps = ComponentProps<"div">;
