@@ -1,31 +1,31 @@
-import type { InspectedTargetData } from "@vibe-web/code-inspector-web";
-import { VIWEB_EXTENSION_NAMESPACE } from "@vibe-web/shared/extension";
-import { ViwebExtensionMessage } from "@vibe-web/shared/extension/message";
+import type { InspectedTargetData } from "@vibest/code-inspector-web";
+import { VIBEST_EXTENSION_NAMESPACE } from "@vibest/shared/extension";
+import { VibestExtensionMessage } from "@vibest/shared/extension/message";
 import { sendMessage, setNamespace } from "webext-bridge/window";
 
 declare global {
 	interface Window {
-		VIWEB_LOCAL_URL: string;
-		VIWEB_BROWSER_EXTENSION_API: {
+		VIBEST_LOCAL_URL: string;
+		VIBEST_BROWSER_EXTENSION_API: {
 			inspected: (data: { targets: InspectedTargetData[] }) => void;
 		};
 	}
 }
 
-setNamespace(VIWEB_EXTENSION_NAMESPACE);
+setNamespace(VIBEST_EXTENSION_NAMESPACE);
 
-console.log("content-main-world", window.VIWEB_LOCAL_URL);
+console.log("content-main-world", window.VIBEST_LOCAL_URL);
 
-if (window.VIWEB_LOCAL_URL) {
+if (window.VIBEST_LOCAL_URL) {
 	sendMessage(
-		ViwebExtensionMessage.WebAppInit,
-		{ url: window.VIWEB_LOCAL_URL },
+		VibestExtensionMessage.WebAppInit,
+		{ url: window.VIBEST_LOCAL_URL },
 		"content-script",
 	);
 }
 
-window.VIWEB_BROWSER_EXTENSION_API = {
+window.VIBEST_BROWSER_EXTENSION_API = {
 	inspected: (data: { targets: InspectedTargetData[] }) => {
-		sendMessage(ViwebExtensionMessage.Inspected, data, "content-script");
+		sendMessage(VibestExtensionMessage.Inspected, data, "content-script");
 	},
 };

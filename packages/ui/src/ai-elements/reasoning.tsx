@@ -5,8 +5,8 @@ import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@vibe-web/ui/components/collapsible";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/collapsible";
+import { cn } from "@vibest/ui/lib/utils";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";

@@ -1,6 +1,6 @@
-import { Response } from "@vibe-web/ui/ai-elements/response";
-import { Tool, ToolContent, ToolHeader } from "@vibe-web/ui/ai-elements/tool";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { Response } from "@vibest/ui/ai-elements/response";
+import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
+import { cn } from "@vibest/ui/lib/utils";
 import type { UIDataTypes, UIMessage } from "ai";
 import type {
 	ClaudeCodeTools,

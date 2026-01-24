@@ -4,6 +4,6 @@
 
 ### Patch Changes
 
-- @vibe-web/server-rpc@0.0.1
-- @vibe-web/ui@0.0.1
-- @vibe-web/code-inspector-web@0.0.0
+- @vibest/server-rpc@0.0.1
+- @vibest/ui@0.0.1
+- @vibest/code-inspector-web@0.0.0

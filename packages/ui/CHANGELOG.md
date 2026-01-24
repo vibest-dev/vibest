@@ -1,4 +1,4 @@
-# @vibe-web/ui
+# @vibest/ui
 
 ## 0.0.1
 

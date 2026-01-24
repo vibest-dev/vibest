@@ -1,6 +1,6 @@
-import { Message, MessageContent } from "@vibe-web/ui/ai-elements/message";
-import { Response } from "@vibe-web/ui/ai-elements/response";
-import { ClaudeCodeToolUIPart } from "@vibe-web/ui/claude-code/tools";
+import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
+import { Response } from "@vibest/ui/ai-elements/response";
+import { ClaudeCodeToolUIPart } from "@vibest/ui/claude-code/tools";
 import { isToolUIPart, type UIMessage } from "ai";
 import type { ClaudeCodeTools } from "ai-sdk-agents/claude-code";
 

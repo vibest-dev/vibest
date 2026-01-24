@@ -1,4 +1,4 @@
-import { Button } from "@vibe-web/ui/components/button";
+import { Button } from "@vibest/ui/components/button";
 import { useSelector } from "@xstate/store/react";
 import { MousePointerClickIcon } from "lucide-react";
 import type { ComponentProps } from "react";

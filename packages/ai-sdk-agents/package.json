@@ -31,7 +31,7 @@
 	},
 	"devDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
-		"@vibe-web/typescript": "workspace:*",
+		"@vibest/typescript": "workspace:*",
 		"ai": "^5.0.63",
 		"zod": "^3.24.1",
 		"tsdown": "^0.13.5"

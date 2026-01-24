@@ -1,6 +1,6 @@
 import { ark, type HTMLArkProps } from "@ark-ui/react/factory";
 import { Select as SelectPrimitive, selectAnatomy } from "@ark-ui/react/select";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 
 const parts = selectAnatomy.extendWith("separator").build();

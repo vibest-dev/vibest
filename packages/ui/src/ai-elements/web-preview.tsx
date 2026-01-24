@@ -1,19 +1,19 @@
 "use client";
 
-import { Button } from "@vibe-web/ui/components/button";
+import { Button } from "@vibest/ui/components/button";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@vibe-web/ui/components/collapsible";
-import { Input } from "@vibe-web/ui/components/input";
+} from "@vibest/ui/components/collapsible";
+import { Input } from "@vibest/ui/components/input";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipProvider,
 	TooltipTrigger,
-} from "@vibe-web/ui/components/tooltip";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/tooltip";
+import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { createContext, forwardRef, useContext, useState } from "react";

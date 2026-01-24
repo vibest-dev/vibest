@@ -1,5 +1,5 @@
 {
-	"extends": "@vibe-web/typescript/react-library.json",
+	"extends": "@vibest/typescript/react-library.json",
 	"compilerOptions": {
 		"baseUrl": ".",
 		"paths": {

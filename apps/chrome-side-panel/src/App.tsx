@@ -1,4 +1,4 @@
-import { ViwebExtensionMessage } from "@vibe-web/shared/extension/message";
+import { VibestExtensionMessage } from "@vibest/shared/extension/message";
 import { useEffect, useState } from "react";
 import { onMessage } from "webext-bridge/sidepanel";
 import { Chat } from "@/components/chat";
@@ -11,7 +11,7 @@ export default function SidePanelApp() {
 
 	useEffect(() => {
 		const unsubscribe = onMessage(
-			ViwebExtensionMessage.WebAppInit,
+			VibestExtensionMessage.WebAppInit,
 			({ data }) => {
 				setLocalServerBaseurl(data.url);
 			},

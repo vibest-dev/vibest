@@ -1,6 +1,6 @@
 import { consumeEventIterator } from "@orpc/client";
 import { useNavigate } from "@tanstack/react-router";
-import { Button } from "@vibe-web/ui/components/button";
+import { Button } from "@vibest/ui/components/button";
 import { useEffect, useRef } from "react";
 import { Chat } from "@/components/chat";
 import { orpcClient, orpcWsClient } from "@/lib/orpc";

@@ -4,15 +4,15 @@ import {
 	Conversation,
 	ConversationContent,
 	ConversationScrollButton,
-} from "@vibe-web/ui/ai-elements/conversation";
-import { Loader } from "@vibe-web/ui/ai-elements/loader";
+} from "@vibest/ui/ai-elements/conversation";
+import { Loader } from "@vibest/ui/ai-elements/loader";
 import {
 	PromptInput,
 	PromptInputSubmit,
 	PromptInputTextarea,
 	PromptInputToolbar,
 	PromptInputTools,
-} from "@vibe-web/ui/ai-elements/prompt-input";
+} from "@vibest/ui/ai-elements/prompt-input";
 import {
 	createListCollection,
 	Select,
@@ -21,8 +21,8 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValueText,
-} from "@vibe-web/ui/components/select";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/select";
+import { cn } from "@vibest/ui/lib/utils";
 import { useState } from "react";
 import { MessageParts } from "@/components/message-parts";
 import { orpcClient } from "@/lib/orpc";

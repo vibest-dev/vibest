@@ -1,5 +1,5 @@
-import { CodeBlock } from "@vibe-web/ui/ai-elements/code-block";
-import { Tool, ToolContent, ToolHeader } from "@vibe-web/ui/ai-elements/tool";
+import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
+import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import type { GlobUIToolInvocation } from "ai-sdk-agents/claude-code";
 import { FolderSearchIcon } from "lucide-react";
 

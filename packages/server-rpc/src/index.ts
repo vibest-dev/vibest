@@ -5,7 +5,7 @@ import type { HTTPPath } from "@orpc/server";
 import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
 import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/ws";
-import { ClaudeCodeAgent } from "@vibe-web/agents/claude-code";
+import { ClaudeCodeAgent } from "@vibest/agents/claude-code";
 import { type WebSocket, WebSocketServer } from "ws";
 import { router } from "./routes";
 import type { ClaudeCodeContext } from "./routes/claude-code";

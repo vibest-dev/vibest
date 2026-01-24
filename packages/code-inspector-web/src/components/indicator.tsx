@@ -6,8 +6,8 @@ import {
 	size,
 	useFloating,
 } from "@floating-ui/react";
-import { Badge } from "@vibe-web/ui/components/badge";
-import { Button } from "@vibe-web/ui/components/button";
+import { Badge } from "@vibest/ui/components/badge";
+import { Button } from "@vibest/ui/components/button";
 import { useSelector } from "@xstate/store/react";
 import { Trash2Icon } from "lucide-react";
 import { useEffect } from "react";

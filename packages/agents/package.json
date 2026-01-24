@@ -1,5 +1,5 @@
 {
-	"name": "@vibe-web/agents",
+	"name": "@vibest/agents",
 	"version": "0.0.1",
 	"type": "module",
 	"private": true,
@@ -28,7 +28,7 @@
 	},
 	"devDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
-		"@vibe-web/typescript": "workspace:*",
+		"@vibest/typescript": "workspace:*",
 		"ai": "^5.0.63",
 		"ai-sdk-agents": "workspace:*",
 		"tsdown": "^0.13.5",

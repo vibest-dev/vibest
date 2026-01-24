@@ -1,18 +1,18 @@
 "use client";
 
-import { Badge } from "@vibe-web/ui/components/badge";
+import { Badge } from "@vibest/ui/components/badge";
 import {
 	Carousel,
 	type CarouselApi,
 	CarouselContent,
 	CarouselItem,
-} from "@vibe-web/ui/components/carousel";
+} from "@vibest/ui/components/carousel";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
-} from "@vibe-web/ui/components/hover-card";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/hover-card";
+import { cn } from "@vibest/ui/lib/utils";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import {
 	type ComponentProps,

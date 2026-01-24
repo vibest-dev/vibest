@@ -1,4 +1,4 @@
-export const ViwebExtensionMessage = {
-	WebAppInit: "vibe-web-extension:webapp-init",
-	Inspected: "vibe-web-extension:inspected",
+export const VibestExtensionMessage = {
+	WebAppInit: "vibest-extension:webapp-init",
+	Inspected: "vibest-extension:inspected",
 } as const;

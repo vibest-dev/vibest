@@ -1,5 +1,5 @@
 {
-	"extends": "@vibe-web/typescript/base.json",
+	"extends": "@vibest/typescript/base.json",
 	"compilerOptions": {
 		"module": "ESNext",
 		"moduleResolution": "Bundler"

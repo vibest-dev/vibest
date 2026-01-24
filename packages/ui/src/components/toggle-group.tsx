@@ -1,8 +1,8 @@
 "use client";
 
 import { ToggleGroup as ToggleGroupPrimitive } from "@ark-ui/react/toggle-group";
-import { toggleVariants } from "@vibe-web/ui/components/toggle";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { toggleVariants } from "@vibest/ui/components/toggle";
+import { cn } from "@vibest/ui/lib/utils";
 import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 

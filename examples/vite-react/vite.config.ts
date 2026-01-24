@@ -2,7 +2,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import vibeWeb from "vibe-web-devtools/vite";
+import vibest from "vibest-devtools/vite";
 import { defineConfig } from "vite";
 
 // https://vite.dev/config/
@@ -15,7 +15,7 @@ export default defineConfig({
 			target: "react",
 			autoCodeSplitting: true,
 		}),
-		vibeWeb(),
+		vibest(),
 		react(),
 		tailwindcss(),
 	],

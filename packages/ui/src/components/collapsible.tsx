@@ -5,7 +5,7 @@ import {
 	useCollapsible,
 } from "@ark-ui/react/collapsible";
 
-import { cn } from "@vibe-web/ui/lib/utils";
+import { cn } from "@vibest/ui/lib/utils";
 
 function Collapsible({ ...props }: CollapsiblePrimitive.RootProps) {
 	return <CollapsiblePrimitive.Root {...props} />;

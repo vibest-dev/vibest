@@ -2,8 +2,8 @@ import {
 	Avatar,
 	AvatarFallback,
 	AvatarImage,
-} from "@vibe-web/ui/components/avatar";
-import { cn } from "@vibe-web/ui/lib/utils";
+} from "@vibest/ui/components/avatar";
+import { cn } from "@vibest/ui/lib/utils";
 import type { UIMessage } from "ai";
 import type { ComponentProps, HTMLAttributes } from "react";
 

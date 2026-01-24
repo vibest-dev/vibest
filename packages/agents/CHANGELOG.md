@@ -1,4 +1,4 @@
-# @vibe-web/agents
+# @vibest/agents
 
 ## 0.0.1
 

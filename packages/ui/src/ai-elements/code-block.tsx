@@ -1,7 +1,7 @@
 "use client";
 
-import { Button } from "@vibe-web/ui/components/button";
-import { cn } from "@vibe-web/ui/lib/utils";
+import { Button } from "@vibest/ui/components/button";
+import { cn } from "@vibest/ui/lib/utils";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, JSX, ReactNode } from "react";
