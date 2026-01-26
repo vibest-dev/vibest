@@ -256,8 +256,8 @@ importers:
         specifier: ^1.3.8
         version: 1.4.0
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
       zustand:
         specifier: ^5.0.7
         version: 5.0.10(@types/react@19.2.9)(immer@11.1.3)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
@@ -379,14 +379,14 @@ importers:
         version: 13.0.0
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
-        version: 0.1.77(zod@3.25.76)
+        specifier: ^0.2.19
+        version: 0.2.19(zod@4.3.6)
       '@vibest/typescript':
         specifier: workspace:*
         version: link:../../tools/typescript
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       ai-sdk-agents:
         specifier: workspace:*
         version: link:../ai-sdk-agents
@@ -394,26 +394,26 @@ importers:
         specifier: ^0.13.5
         version: 0.13.5(oxc-resolver@11.16.4)(publint@0.3.17)(typescript@5.9.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
 
   packages/ai-sdk-agents:
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
-        version: 0.1.77(zod@3.25.76)
+        specifier: ^0.2.19
+        version: 0.2.19(zod@4.3.6)
       '@vibest/typescript':
         specifier: workspace:*
         version: link:../../tools/typescript
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       tsdown:
         specifier: ^0.13.5
         version: 0.13.5(oxc-resolver@11.16.4)(publint@0.3.17)(typescript@5.9.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
 
   packages/code-inspector-node:
     devDependencies:
@@ -502,8 +502,8 @@ importers:
         specifier: ^5.20.2
         version: 5.25.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@types/react':
         specifier: ^19.2.2
@@ -521,8 +521,8 @@ importers:
   packages/server-rpc:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
-        version: 0.1.77(zod@3.25.76)
+        specifier: ^0.2.19
+        version: 0.2.19(zod@4.3.6)
       '@orpc/contract':
         specifier: ^1.9.1
         version: 1.13.4(@opentelemetry/api@1.9.0)
@@ -562,7 +562,7 @@ importers:
         version: link:../../tools/typescript
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       superjson:
         specifier: ^2.2.2
         version: 2.2.6
@@ -573,8 +573,8 @@ importers:
         specifier: ^8.18.3
         version: 8.19.0
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
 
   packages/shared:
     devDependencies:
@@ -668,10 +668,10 @@ importers:
     dependencies:
       '@ai-sdk/react':
         specifier: ^2.0.44
-        version: 2.0.125(react@19.2.3)(zod@3.25.76)
+        version: 2.0.125(react@19.2.3)(zod@4.3.6)
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
-        version: 0.1.77(zod@3.25.76)
+        specifier: ^0.2.19
+        version: 0.2.19(zod@4.3.6)
       '@hono/node-server':
         specifier: ^1.19.5
         version: 1.19.9(hono@4.11.5)
@@ -743,7 +743,7 @@ importers:
         version: link:../ui
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       ai-sdk-agents:
         specifier: workspace:*
         version: link:../ai-sdk-agents
@@ -808,8 +808,8 @@ importers:
         specifier: ^8.18.3
         version: 8.19.0
       zod:
-        specifier: ^3.25.61
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@orpc/contract':
         specifier: ^1.9.1
@@ -884,8 +884,8 @@ importers:
   packages/vibest-devtools:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.12
-        version: 0.1.77(zod@3.25.76)
+        specifier: ^0.2.19
+        version: 0.2.19(zod@4.3.6)
       '@babel/core':
         specifier: ^7.28.3
         version: 7.28.6
@@ -918,7 +918,7 @@ importers:
         version: 3.5.27
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       magic-string:
         specifier: ^0.30.18
         version: 0.30.21
@@ -938,8 +938,8 @@ importers:
         specifier: ^8.18.3
         version: 8.19.0
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@types/babel__core':
         specifier: ^7.20.5
@@ -982,7 +982,7 @@ importers:
     dependencies:
       '@ai-sdk/react':
         specifier: ^2.0.44
-        version: 2.0.125(react@19.2.3)(zod@3.25.76)
+        version: 2.0.125(react@19.2.3)(zod@4.3.6)
       '@ark-ui/react':
         specifier: ^5.23.0
         version: 5.30.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1000,7 +1000,7 @@ importers:
         version: 3.15.0(react@19.2.3)
       ai:
         specifier: ^5.0.63
-        version: 5.0.123(zod@3.25.76)
+        version: 5.0.123(zod@4.3.6)
       birpc:
         specifier: ^2.6.1
         version: 2.9.0
@@ -1041,8 +1041,8 @@ importers:
         specifier: ^5.20.2
         version: 5.25.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@orpc/server':
         specifier: ^1.8.6
@@ -1187,11 +1187,11 @@ packages:
   '@antfu/utils@0.7.10':
     resolution: {integrity: sha512-+562v9k4aI80m1+VuMHehNJWLOFjBnXn3tdOitzD0il5b7smkSBal4+a3oKiQTbrwMmN/TBUMDvbdoWDehgOww==}
 
-  '@anthropic-ai/claude-agent-sdk@0.1.77':
-    resolution: {integrity: sha512-ZEjWQtkoB2MEY6K16DWMmF+8OhywAynH0m08V265cerbZ8xPD/2Ng2jPzbbO40mPeFSsMDJboShL+a3aObP0Jg==}
+  '@anthropic-ai/claude-agent-sdk@0.2.19':
+    resolution: {integrity: sha512-DjaX4t3Swjt5PcsZt6krcp5TfBTRxVuUZhkY6L8WWF8kZBJFuuEd5akNg486XRskTXGuwLmitxp0wHB1hJ9muw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
+      zod: ^4.0.0
 
   '@anthropic-ai/sdk@0.61.0':
     resolution: {integrity: sha512-GnlOXrPxow0uoaVB3DGNh9EJBU1MyagCBCLpU+bwDVlj/oOPYIwoiasMWlykkfYcQOrDP2x/zHnRD0xN7PeZPw==}
@@ -7430,26 +7430,12 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@2.0.29(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 2.0.1
-      '@ai-sdk/provider-utils': 3.0.20(zod@3.25.76)
-      '@vercel/oidc': 3.1.0
-      zod: 3.25.76
-
   '@ai-sdk/gateway@2.0.29(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 2.0.1
       '@ai-sdk/provider-utils': 3.0.20(zod@4.3.6)
       '@vercel/oidc': 3.1.0
       zod: 4.3.6
-
-  '@ai-sdk/provider-utils@3.0.20(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 2.0.1
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.0.6
-      zod: 3.25.76
 
   '@ai-sdk/provider-utils@3.0.20(zod@4.3.6)':
     dependencies:
@@ -7461,16 +7447,6 @@ snapshots:
   '@ai-sdk/provider@2.0.1':
     dependencies:
       json-schema: 0.4.0
-
-  '@ai-sdk/react@2.0.125(react@19.2.3)(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider-utils': 3.0.20(zod@3.25.76)
-      ai: 5.0.123(zod@3.25.76)
-      react: 19.2.3
-      swr: 2.3.8(react@19.2.3)
-      throttleit: 2.1.0
-    optionalDependencies:
-      zod: 3.25.76
 
   '@ai-sdk/react@2.0.125(react@19.2.3)(zod@4.3.6)':
     dependencies:
@@ -7494,9 +7470,9 @@ snapshots:
 
   '@antfu/utils@0.7.10': {}
 
-  '@anthropic-ai/claude-agent-sdk@0.1.77(zod@3.25.76)':
+  '@anthropic-ai/claude-agent-sdk@0.2.19(zod@4.3.6)':
     dependencies:
-      zod: 3.25.76
+      zod: 4.3.6
     optionalDependencies:
       '@img/sharp-darwin-arm64': 0.33.5
       '@img/sharp-darwin-x64': 0.33.5
@@ -11112,14 +11088,6 @@ snapshots:
   acorn@8.15.0: {}
 
   agent-base@7.1.4: {}
-
-  ai@5.0.123(zod@3.25.76):
-    dependencies:
-      '@ai-sdk/gateway': 2.0.29(zod@3.25.76)
-      '@ai-sdk/provider': 2.0.1
-      '@ai-sdk/provider-utils': 3.0.20(zod@3.25.76)
-      '@opentelemetry/api': 1.9.0
-      zod: 3.25.76
 
   ai@5.0.123(zod@4.3.6):
     dependencies:

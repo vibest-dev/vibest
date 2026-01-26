@@ -30,6 +30,7 @@ export const McpServerStatusSchema = z.object({
 			version: z.string(),
 		})
 		.optional(),
+	error: z.string().optional(),
 });
 
 /**
@@ -114,7 +115,7 @@ const PermissionUpdateSchema = z.discriminatedUnion("type", [
 export const PermissionResultSchema = z.discriminatedUnion("behavior", [
 	z.object({
 		behavior: z.literal("allow"),
-		updatedInput: z.record(z.string(), z.unknown()),
+		updatedInput: z.record(z.string(), z.unknown()).optional(),
 		updatedPermissions: z.array(PermissionUpdateSchema).optional(),
 		toolUseID: z.string().optional(),
 	}),

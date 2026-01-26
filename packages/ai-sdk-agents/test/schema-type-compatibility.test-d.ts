@@ -73,9 +73,9 @@ describe("Schema Type Compatibility", () => {
 				expectTypeOf<AllowResult["behavior"]>().toEqualTypeOf<"allow">();
 			});
 
-			test("updatedInput is Record<string, unknown>", () => {
+			test("updatedInput is optional Record<string, unknown>", () => {
 				expectTypeOf<AllowResult["updatedInput"]>().toEqualTypeOf<
-					Record<string, unknown>
+					Record<string, unknown> | undefined
 				>();
 			});
 

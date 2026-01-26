@@ -42,7 +42,7 @@
 		"superjson": "^2.2.2",
 		"tsdown": "^0.13.5",
 		"ws": "^8.18.3",
-		"zod": "^3.24.1"
+		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
 		"@orpc/server": "^1.8.6",
@@ -50,10 +50,10 @@
 		"ai": "^5.0.30",
 		"superjson": "^2.2.2",
 		"ws": "^8.18.3",
-		"zod": "^3.25.67"
+		"zod": "^4.3.6"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
+		"@anthropic-ai/claude-agent-sdk": "^0.2.19",
 		"@orpc/contract": "^1.9.1",
 		"@orpc/shared": "^1.9.4",
 		"@vibest/agents": "workspace:*",
