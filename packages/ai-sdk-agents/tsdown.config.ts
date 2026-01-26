@@ -6,4 +6,5 @@ export default defineConfig({
 	dts: true,
 	sourcemap: true,
 	publint: true,
+	unbundle: true,
 });
