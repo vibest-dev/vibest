@@ -40,6 +40,8 @@ export const PermissionModeSchema = z.enum([
 	"acceptEdits",
 	"bypassPermissions",
 	"plan",
+	"delegate",
+	"dontAsk",
 ]);
 
 /**
@@ -55,6 +57,7 @@ const PermissionUpdateDestinationSchema = z.enum([
 	"projectSettings",
 	"localSettings",
 	"session",
+	"cliArg",
 ]);
 
 /**
@@ -113,10 +116,12 @@ export const PermissionResultSchema = z.discriminatedUnion("behavior", [
 		behavior: z.literal("allow"),
 		updatedInput: z.record(z.string(), z.unknown()),
 		updatedPermissions: z.array(PermissionUpdateSchema).optional(),
+		toolUseID: z.string().optional(),
 	}),
 	z.object({
 		behavior: z.literal("deny"),
 		message: z.string(),
 		interrupt: z.boolean().optional(),
+		toolUseID: z.string().optional(),
 	}),
 ]);
