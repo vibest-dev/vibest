@@ -118,7 +118,7 @@ describe("Schema Type Compatibility", () => {
 	describe("Enum Values", () => {
 		test("PermissionMode has correct values", () => {
 			expectTypeOf<PermissionMode>().toEqualTypeOf<
-				"default" | "acceptEdits" | "bypassPermissions" | "plan"
+				"default" | "acceptEdits" | "bypassPermissions" | "plan" | "delegate" | "dontAsk"
 			>();
 		});
 
