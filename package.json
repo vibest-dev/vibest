@@ -32,5 +32,11 @@
 		"typescript": "^5.9.2",
 		"vitest": "^3.2.4"
 	},
-	"packageManager": "pnpm@10.15.1"
+	"packageManager": "pnpm@10.15.1",
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"electron",
+			"esbuild"
+		]
+	}
 }
