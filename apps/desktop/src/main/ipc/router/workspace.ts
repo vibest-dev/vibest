@@ -214,6 +214,41 @@ export const removeWorktree = os.removeWorktree.handler(
 	},
 );
 
+export const archiveWorktree = os.archiveWorktree.handler(
+	async ({ input, context: { app } }) => {
+		const { worktreeId, commitFirst } = input;
+
+		const worktree = app.store.getWorktree(worktreeId);
+		if (!worktree) {
+			throw new Error("Worktree not found");
+		}
+
+		const repository = app.store.getRepository(worktree.repositoryId);
+		if (!repository) {
+			throw new Error("Repository not found");
+		}
+
+		try {
+			// 1. If requested, commit all changes first
+			if (commitFirst) {
+				await app.git.commitAll(worktree.path, "WIP: Auto-commit before archive");
+			}
+
+			// 2. Remove the worktree
+			await app.worktree.removeWorktree(repository.path, worktree.path, true);
+
+			// 3. Delete the branch
+			await app.git.deleteBranch(repository.path, worktree.branch);
+
+			// 4. Update store
+			app.store.removeWorktree(worktreeId);
+		} catch (error) {
+			console.error("[archiveWorktree] Error:", error);
+			throw error;
+		}
+	},
+);
+
 export const openWorktree = os.openWorktree.handler(
 	async ({ input, context: { app } }) => {
 		const { worktreeId } = input;
@@ -245,5 +280,6 @@ export const workspaceRouter = os.router({
 	createWorktree,
 	quickCreateWorktree,
 	removeWorktree,
+	archiveWorktree,
 	openWorktree,
 });

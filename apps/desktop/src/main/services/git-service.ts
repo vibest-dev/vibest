@@ -170,6 +170,17 @@ export class GitService {
 		}
 	}
 
+	async commitAll(path: string, message: string): Promise<void> {
+		const git = this.getGit(path);
+		await git.add("-A");
+		await git.commit(message);
+	}
+
+	async deleteBranch(repositoryPath: string, branchName: string): Promise<void> {
+		const git = this.getGit(repositoryPath);
+		await git.raw(["branch", "-D", branchName]);
+	}
+
 	async getDiff(path: string, staged = false): Promise<DiffResult> {
 		const git = this.getGit(path);
 		const status = await git.status();

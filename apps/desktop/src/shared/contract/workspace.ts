@@ -88,6 +88,13 @@ export const workspaceContract = {
 		}),
 	),
 
+	archiveWorktree: oc.input(
+		z.object({
+			worktreeId: z.string(),
+			commitFirst: z.boolean().optional(),
+		}),
+	),
+
 	openWorktree: oc.input(
 		z.object({
 			worktreeId: z.string(),
