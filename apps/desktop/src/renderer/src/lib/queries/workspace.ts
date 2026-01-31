@@ -1,6 +1,6 @@
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 
-import { uiStore } from "../../stores/ui-store";
+import { appStore } from "../../stores/app-store";
 import { client } from "../client";
 import { queryClient } from "../query-client";
 
@@ -30,7 +30,7 @@ export function removeRepositoryMutationCallbacks() {
   return {
     onSuccess: (_: unknown, variables: { repositoryId: string }) => {
       // Clear selection if the selected worktree belongs to this repository
-      const state = uiStore.getState();
+      const state = appStore.getState();
       const workspaceData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
       if (workspaceData) {
         const worktrees = workspaceData.worktreesByRepository[variables.repositoryId];
@@ -46,7 +46,7 @@ export function removeRepositoryMutationCallbacks() {
 export function createWorktreeMutationCallbacks() {
   return {
     onSuccess: (worktree: { repositoryId: string; path: string }) => {
-      uiStore.getState().expandRepository(worktree.repositoryId);
+      appStore.getState().expandRepository(worktree.repositoryId);
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
       // Prefetch git status for the new worktree
       queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
@@ -57,7 +57,7 @@ export function createWorktreeMutationCallbacks() {
 export function quickCreateWorktreeMutationCallbacks() {
   return {
     onSuccess: (worktree: { repositoryId: string; path: string }) => {
-      uiStore.getState().expandRepository(worktree.repositoryId);
+      appStore.getState().expandRepository(worktree.repositoryId);
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
       // Prefetch git status for the new worktree
       queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
@@ -68,7 +68,7 @@ export function quickCreateWorktreeMutationCallbacks() {
 export function removeWorktreeMutationCallbacks() {
   return {
     onSuccess: (_: unknown, variables: { worktreeId: string; force?: boolean }) => {
-      const state = uiStore.getState();
+      const state = appStore.getState();
       if (state.selectedWorktreeId === variables.worktreeId) {
         state.selectWorktree(null);
       }
@@ -80,7 +80,7 @@ export function removeWorktreeMutationCallbacks() {
 export function archiveWorktreeMutationCallbacks() {
   return {
     onSuccess: (_: unknown, variables: { worktreeId: string; commitFirst?: boolean }) => {
-      const state = uiStore.getState();
+      const state = appStore.getState();
       if (state.selectedWorktreeId === variables.worktreeId) {
         state.selectWorktree(null);
       }
