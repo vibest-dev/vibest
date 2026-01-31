@@ -44,6 +44,7 @@ import { useEffect, useState } from "react";
 import type { Repository, Worktree } from "../../types";
 
 import { orpc } from "../../lib/queries/workspace";
+import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 
 function getBasename(path: string): string {
   return path.split("/").pop() ?? path;
@@ -225,7 +226,7 @@ export function Sidebar({
                             {worktrees.map((worktree) => (
                               <SidebarMenuSubItem key={worktree.id} className="group/worktree">
                                 <div
-                                  className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground flex h-7 w-full min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-lg text-sm"
+                                  className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground relative flex h-10 w-full min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-lg text-sm"
                                   data-active={selectedWorktreeId === worktree.id}
                                 >
                                   <button
@@ -234,11 +235,17 @@ export function Sidebar({
                                     className="ring-sidebar-ring flex h-full min-w-0 flex-1 items-center gap-2 px-2 outline-hidden focus-visible:ring-2"
                                   >
                                     <GitBranch className="size-4 shrink-0" />
-                                    <span className="truncate">{worktree.branch}</span>
+                                    <div className="flex min-w-0 flex-col items-start">
+                                      <span className="truncate">{worktree.branch}</span>
+                                      <span className="text-muted-foreground truncate text-xs font-normal">
+                                        {getBasename(worktree.path)}
+                                      </span>
+                                    </div>
                                   </button>
+                                  <WorktreeDiffStats path={worktree.path} />
                                   <button
                                     type="button"
-                                    className="hover:bg-foreground/10 mr-1 flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/worktree:opacity-100"
+                                    className="hover:bg-foreground/10 absolute right-1 flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/worktree:opacity-100"
                                     onClick={(e) => handleArchiveClick(worktree, e)}
                                     title="Archive worktree"
                                   >
