@@ -1,10 +1,14 @@
 "use client";
 
+import type { CollapsibleRootProps } from "@base-ui/react/collapsible";
 import type { LucideIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@vibest/ui/components/collapsible";
-import type { CollapsibleRootProps } from "@base-ui/react/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
 import { SquareMinusIcon, SquarePlusIcon } from "lucide-react";
 
@@ -46,7 +50,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, children, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-ending-style:opacity-0 data-starting-style:opacity-0 text-popover-foreground outline-none transition-opacity",
+      "text-popover-foreground transition-opacity outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
       className,
     )}
     {...props}

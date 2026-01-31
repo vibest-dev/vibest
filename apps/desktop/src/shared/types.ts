@@ -15,12 +15,19 @@ export const RepositorySchema = z.object({
 
 export type Repository = z.infer<typeof RepositorySchema>;
 
-// Worktree
-export const WorktreeSchema = z.object({
+// Worktree (stored in electron-store, without runtime fields)
+export const StoredWorktreeSchema = z.object({
   id: z.string(), // Derived from path: pathToId(path)
   repositoryId: z.string(), // Derived from repository path: pathToId(repositoryPath)
   path: z.string(), // Full path
   branch: z.string(), // Branch name
+});
+
+export type StoredWorktree = z.infer<typeof StoredWorktreeSchema>;
+
+// Worktree (with runtime fields for API responses)
+export const WorktreeSchema = StoredWorktreeSchema.extend({
+  exists: z.boolean(), // Whether the worktree path exists on disk
 });
 
 export type Worktree = z.infer<typeof WorktreeSchema>;
@@ -50,7 +57,7 @@ export type Branch = z.infer<typeof BranchSchema>;
 // Store Schema
 export interface StoreSchema {
   repositories: Repository[];
-  worktrees: Worktree[];
+  worktrees: StoredWorktree[];
 }
 
 // Git Diff types

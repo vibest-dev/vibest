@@ -9,4 +9,4 @@ packages:
 onlyBuiltDependencies:
   - electron
   - esbuild
-  - '@swc/core'
+  - "@swc/core"
