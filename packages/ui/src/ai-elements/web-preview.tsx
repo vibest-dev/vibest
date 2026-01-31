@@ -127,7 +127,7 @@ export const WebPreviewUrl = ({ value, onChange, onKeyDown, ...props }: WebPrevi
       const target = event.target as HTMLInputElement;
       setUrl(target.value);
     }
-    onKeyDown?.(event);
+    onKeyDown?.(event as Parameters<NonNullable<typeof onKeyDown>>[0]);
   };
 
   return (

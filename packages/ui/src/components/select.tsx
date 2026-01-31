@@ -167,6 +167,10 @@ function SelectGroupLabel(props: SelectPrimitive.GroupLabel.Props) {
   );
 }
 
+const SelectIcon = SelectPrimitive.Icon;
+const SelectList = SelectPrimitive.List;
+const SelectItemText = SelectPrimitive.ItemText;
+
 export {
   Select,
   SelectTrigger,
@@ -174,7 +178,10 @@ export {
   SelectPopup,
   SelectPopup as SelectContent,
   SelectItem,
+  SelectItemText,
   SelectSeparator,
   SelectGroup,
   SelectGroupLabel,
+  SelectIcon,
+  SelectList,
 };
