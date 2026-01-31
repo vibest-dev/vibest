@@ -4,3 +4,8 @@ out
 release
 .DS_Store
 *.log*
+
+# E2E test artifacts
+e2e/results
+e2e/report
+e2e/screenshots

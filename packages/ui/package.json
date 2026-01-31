@@ -40,6 +40,7 @@
 		"use-stick-to-bottom": "^1.1.1"
 	},
 	"dependencies": {
+		"@base-ui/react": "^1.1.0",
 		"@fontsource-variable/geist": "^5.2.8",
 		"@fontsource-variable/geist-mono": "^5.2.7",
 		"ai-sdk-agents": "workspace:*",

@@ -105,18 +105,20 @@ export const WebPreviewNavigationButton = ({
 }: WebPreviewNavigationButtonProps) => (
 	<TooltipProvider>
 		<Tooltip>
-			<TooltipTrigger asChild>
-				<Button
-					className="h-8 w-8 p-0 hover:text-foreground"
-					disabled={disabled}
-					onClick={onClick}
-					size="sm"
-					variant="ghost"
-					{...props}
-				>
-					{children}
-				</Button>
-			</TooltipTrigger>
+			<TooltipTrigger
+				render={
+					<Button
+						className="h-8 w-8 p-0 hover:text-foreground"
+						disabled={disabled}
+						onClick={onClick}
+						size="sm"
+						variant="ghost"
+						{...props}
+					>
+						{children}
+					</Button>
+				}
+			/>
 			<TooltipContent>
 				<p>{tooltip}</p>
 			</TooltipContent>
@@ -139,7 +141,8 @@ export const WebPreviewUrl = ({
 			const target = event.target as HTMLInputElement;
 			setUrl(target.value);
 		}
-		onKeyDown?.(event);
+		// Base UI Input expects a different event type, cast to any for compatibility
+		onKeyDown?.(event as any);
 	};
 
 	return (
@@ -200,24 +203,26 @@ export const WebPreviewConsole = ({
 	return (
 		<Collapsible
 			className={cn("border-t bg-muted/50 font-mono text-sm", className)}
-			onOpenChange={(details) => setConsoleOpen(details.open)}
+			onOpenChange={setConsoleOpen}
 			open={consoleOpen}
 			{...props}
 		>
-			<CollapsibleTrigger asChild>
-				<Button
-					className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"
-					variant="ghost"
-				>
-					Console
-					<ChevronDownIcon
-						className={cn(
-							"h-4 w-4 transition-transform duration-200",
-							consoleOpen && "rotate-180",
-						)}
-					/>
-				</Button>
-			</CollapsibleTrigger>
+			<CollapsibleTrigger
+				render={
+					<Button
+						className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"
+						variant="ghost"
+					>
+						Console
+						<ChevronDownIcon
+							className={cn(
+								"h-4 w-4 transition-transform duration-200",
+								consoleOpen && "rotate-180",
+							)}
+						/>
+					</Button>
+				}
+			/>
 			<CollapsibleContent
 				className={cn(
 					"px-4 pb-4",

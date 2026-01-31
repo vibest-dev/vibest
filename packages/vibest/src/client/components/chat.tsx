@@ -14,13 +14,11 @@ import {
 	PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import {
-	createListCollection,
 	Select,
 	SelectContent,
-	SelectControl,
 	SelectItem,
 	SelectTrigger,
-	SelectValueText,
+	SelectValue,
 } from "@vibest/ui/components/select";
 import { cn } from "@vibest/ui/lib/utils";
 import { useState } from "react";
@@ -28,21 +26,10 @@ import { MessageParts } from "@/components/message-parts";
 import { orpcClient } from "@/lib/orpc";
 import type { ClaudeCodeUIMessage } from "@/types";
 
-const models = createListCollection<{
-	label: "Opus" | "Sonnet";
-	value: "opus" | "sonnet";
-}>({
-	items: [
-		{
-			label: "Opus",
-			value: "opus",
-		},
-		{
-			label: "Sonnet",
-			value: "sonnet",
-		},
-	],
-});
+const models = [
+	{ label: "Opus", value: "opus" },
+	{ label: "Sonnet", value: "sonnet" },
+] as const;
 
 export function Chat({
 	className,
@@ -115,22 +102,18 @@ export function Chat({
 					<PromptInputToolbar>
 						<PromptInputTools>
 							<Select
-								className="relative"
-								collection={models}
-								value={[model]}
-								onValueChange={(details) => {
-									setModel(details.value[0] as "opus" | "sonnet");
+								value={model}
+								onValueChange={(value) => {
+									if (value) setModel(value as "opus" | "sonnet");
 								}}
 							>
-								<SelectControl className="min-h-8">
-									<SelectTrigger className="py-0">
-										<SelectValueText />
-									</SelectTrigger>
-								</SelectControl>
+								<SelectTrigger className="min-h-8 py-0">
+									<SelectValue />
+								</SelectTrigger>
 								<SelectContent>
-									{models.items.map((model) => (
-										<SelectItem key={model.value} item={model}>
-											{model.label}
+									{models.map((m) => (
+										<SelectItem key={m.value} value={m.value}>
+											{m.label}
 										</SelectItem>
 									))}
 								</SelectContent>
