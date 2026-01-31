@@ -21,12 +21,10 @@
 import type { FileDiff } from "../types";
 
 export interface FileTreeNode {
-  name: string;
-  path: string;
-  fullPath: string;
+  path: string;                   // "src/components/auth.tsx" or "src/components"
   isDirectory: boolean;
-  status?: FileDiff["status"];
-  fileIndex?: number;
+  status?: FileDiff["status"];    // only for files
+  fileIndex?: number;             // only for files
   children: FileTreeNode[];
 }
 
@@ -47,13 +45,11 @@ export function buildFileTree(files: FileDiff[]): FileTreeNode[] {
       const isLast = j === parts.length - 1;
       currentPath = currentPath ? `${currentPath}/${part}` : part;
 
-      let existing = currentLevel.find((n) => n.name === part && n.isDirectory === !isLast);
+      let existing = currentLevel.find((n) => n.path === currentPath);
 
       if (!existing) {
         existing = {
-          name: part,
           path: currentPath,
-          fullPath: filename,
           isDirectory: !isLast,
           children: [],
           ...(isLast ? { status: file.status, fileIndex: i } : {}),
@@ -67,14 +63,16 @@ export function buildFileTree(files: FileDiff[]): FileTreeNode[] {
     }
   }
 
-  // Sort: directories first, then alphabetically
+  // Sort: directories first, then alphabetically by name
   const sortNodes = (nodes: FileTreeNode[]): FileTreeNode[] => {
     return nodes
       .sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) {
           return a.isDirectory ? -1 : 1;
         }
-        return a.name.localeCompare(b.name);
+        const nameA = a.path.split("/").pop() ?? "";
+        const nameB = b.path.split("/").pop() ?? "";
+        return nameA.localeCompare(nameB);
       })
       .map((node) => ({
         ...node,
@@ -149,6 +147,7 @@ interface TreeNodeProps {
 function TreeNode({ node, level, onFileClick }: TreeNodeProps) {
   const [isOpen, setIsOpen] = useState(true);
   const paddingLeft = level * 12;
+  const name = node.path.split("/").pop() ?? "";
 
   if (node.isDirectory) {
     return (
@@ -165,7 +164,7 @@ function TreeNode({ node, level, onFileClick }: TreeNodeProps) {
           ) : (
             <Folder className="text-muted-foreground size-4 shrink-0" />
           )}
-          <span className="truncate text-sm">{node.name}</span>
+          <span className="truncate text-sm">{name}</span>
         </CollapsibleTrigger>
         <CollapsibleContent>
           {node.children.map((child) => (
@@ -184,7 +183,7 @@ function TreeNode({ node, level, onFileClick }: TreeNodeProps) {
       onClick={() => node.fileIndex !== undefined && onFileClick(node.fileIndex)}
     >
       <File className="text-muted-foreground size-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-left text-sm">{node.name}</span>
+      <span className="min-w-0 flex-1 truncate text-left text-sm">{name}</span>
       {node.status && (
         <Badge variant={statusVariants[node.status]} size="sm" className="shrink-0">
           {statusLabels[node.status]}
