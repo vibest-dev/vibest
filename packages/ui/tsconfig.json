@@ -1,14 +1,14 @@
 {
-	"extends": "@vibest/typescript/react-library.json",
-	"compilerOptions": {
-		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-		"module": "ESNext",
-		"moduleResolution": "Bundler",
-		"declaration": true,
-		"baseUrl": ".",
-		"paths": {
-			"@vibest/ui/*": ["./src/*"]
-		}
-	},
-	"include": ["src"]
+  "extends": "@vibest/typescript/react-library.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "@vibest/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
 }

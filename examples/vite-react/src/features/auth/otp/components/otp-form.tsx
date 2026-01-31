@@ -3,20 +3,21 @@ import { useNavigate } from "@tanstack/react-router";
 import { type HTMLAttributes, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod/v4";
+
 import { Button } from "@/components/ui/button";
 import {
-	Form,
-	FormControl,
-	FormField,
-	FormItem,
-	FormLabel,
-	FormMessage,
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import {
-	InputOTP,
-	InputOTPGroup,
-	InputOTPSeparator,
-	InputOTPSlot,
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSeparator,
+  InputOTPSlot,
 } from "@/components/ui/input-otp";
 import { cn } from "@/lib/utils";
 import { showSubmittedData } from "@/utils/show-submitted-data";
@@ -24,73 +25,73 @@ import { showSubmittedData } from "@/utils/show-submitted-data";
 type OtpFormProps = HTMLAttributes<HTMLFormElement>;
 
 const formSchema = z.object({
-	otp: z.string().min(1, { message: "Please enter your otp code." }),
+  otp: z.string().min(1, { message: "Please enter your otp code." }),
 });
 
 export function OtpForm({ className, ...props }: OtpFormProps) {
-	const navigate = useNavigate();
-	const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
 
-	const form = useForm<z.infer<typeof formSchema>>({
-		resolver: zodResolver(formSchema),
-		defaultValues: { otp: "" },
-	});
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: { otp: "" },
+  });
 
-	const otp = form.watch("otp");
+  const otp = form.watch("otp");
 
-	function onSubmit(data: z.infer<typeof formSchema>) {
-		setIsLoading(true);
-		showSubmittedData(data);
+  function onSubmit(data: z.infer<typeof formSchema>) {
+    setIsLoading(true);
+    showSubmittedData(data);
 
-		setTimeout(() => {
-			setIsLoading(false);
-			navigate({ to: "/" });
-		}, 1000);
-	}
+    setTimeout(() => {
+      setIsLoading(false);
+      navigate({ to: "/" });
+    }, 1000);
+  }
 
-	return (
-		<Form {...form}>
-			<form
-				onSubmit={form.handleSubmit(onSubmit)}
-				className={cn("grid gap-2", className)}
-				{...props}
-			>
-				<FormField
-					control={form.control}
-					name="otp"
-					render={({ field }) => (
-						<FormItem>
-							<FormLabel className="sr-only">One-Time Password</FormLabel>
-							<FormControl>
-								<InputOTP
-									maxLength={6}
-									{...field}
-									containerClassName='justify-between sm:[&>[data-slot="input-otp-group"]>div]:w-12'
-								>
-									<InputOTPGroup>
-										<InputOTPSlot index={0} />
-										<InputOTPSlot index={1} />
-									</InputOTPGroup>
-									<InputOTPSeparator />
-									<InputOTPGroup>
-										<InputOTPSlot index={2} />
-										<InputOTPSlot index={3} />
-									</InputOTPGroup>
-									<InputOTPSeparator />
-									<InputOTPGroup>
-										<InputOTPSlot index={4} />
-										<InputOTPSlot index={5} />
-									</InputOTPGroup>
-								</InputOTP>
-							</FormControl>
-							<FormMessage />
-						</FormItem>
-					)}
-				/>
-				<Button className="mt-2" disabled={otp.length < 6 || isLoading}>
-					Verify
-				</Button>
-			</form>
-		</Form>
-	);
+  return (
+    <Form {...form}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className={cn("grid gap-2", className)}
+        {...props}
+      >
+        <FormField
+          control={form.control}
+          name="otp"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="sr-only">One-Time Password</FormLabel>
+              <FormControl>
+                <InputOTP
+                  maxLength={6}
+                  {...field}
+                  containerClassName='justify-between sm:[&>[data-slot="input-otp-group"]>div]:w-12'
+                >
+                  <InputOTPGroup>
+                    <InputOTPSlot index={0} />
+                    <InputOTPSlot index={1} />
+                  </InputOTPGroup>
+                  <InputOTPSeparator />
+                  <InputOTPGroup>
+                    <InputOTPSlot index={2} />
+                    <InputOTPSlot index={3} />
+                  </InputOTPGroup>
+                  <InputOTPSeparator />
+                  <InputOTPGroup>
+                    <InputOTPSlot index={4} />
+                    <InputOTPSlot index={5} />
+                  </InputOTPGroup>
+                </InputOTP>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button className="mt-2" disabled={otp.length < 6 || isLoading}>
+          Verify
+        </Button>
+      </form>
+    </Form>
+  );
 }

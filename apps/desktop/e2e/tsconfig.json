@@ -1,15 +1,15 @@
 {
-	"compilerOptions": {
-		"target": "ESNext",
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
-		"strict": true,
-		"esModuleInterop": true,
-		"skipLibCheck": true,
-		"resolveJsonModule": true,
-		"outDir": "./dist",
-		"rootDir": ".",
-		"types": ["node"]
-	},
-	"include": ["tests/**/*.ts", "*.ts"]
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["tests/**/*.ts", "*.ts"]
 }

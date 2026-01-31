@@ -1,22 +1,22 @@
 // See https://go.microsoft.com/fwlink/?LinkId=733558
 // for the documentation about the tasks.json format
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "Build Extension: vscode-extension",
-			"type": "shell",
-			"command": "pnpm",
-			"args": ["run", "build", "--filter", "vibe-coding-devtools-vscode"],
-			"group": "build",
-			"problemMatcher": ["$tsc"],
-			"presentation": {
-				"reveal": "silent",
-				"clear": true
-			},
-			"options": {
-				"cwd": "${workspaceFolder}"
-			}
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Extension: vscode-extension",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["run", "build", "--filter", "vibe-coding-devtools-vscode"],
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "silent",
+        "clear": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    }
+  ]
 }

@@ -5,9 +5,9 @@ export { useInspectorRpcServer } from "./hooks/use-rpc-server";
 export { Inspector } from "./inspector";
 export { inspectorStore, inspectorStoreSync } from "./store";
 export type {
-	InspectedTarget,
-	InspectedTargetData,
-	InspectMetadata,
-	InspectorRpcClientFunctions,
-	InspectorRpcServerFunctions,
+  InspectedTarget,
+  InspectedTargetData,
+  InspectMetadata,
+  InspectorRpcClientFunctions,
+  InspectorRpcServerFunctions,
 } from "./types";

@@ -1,10 +1,10 @@
 {
-	"extends": "@vibest/typescript/react-library.json",
-	"compilerOptions": {
-		"baseUrl": ".",
-		"paths": {
-			"@/*": ["./*"]
-		}
-	},
-	"include": ["./"]
+  "extends": "@vibest/typescript/react-library.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["./"]
 }

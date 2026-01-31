@@ -1,9 +1,9 @@
 {
-	"$schema": "https://json.schemastore.org/tsconfig",
-	"display": "TypeScript Library",
-	"extends": "./base.json",
-	"compilerOptions": {
-		"types": ["node"],
-		"resolveJsonModule": true
-	}
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "TypeScript Library",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "resolveJsonModule": true
+  }
 }

@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "unicorn", "oxc", "jsx-a11y", "vitest", "vue"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "react/exhaustive-deps": [
+      "error",
+      {
+        "additionalHooks": "^use(Effect|Callback|Memo|LayoutEffect|ImperativeHandle)$"
+      }
+    ],
+    "jsx-a11y/role-supports-aria-props": "warn",
+    "jsx-a11y/no-autofocus": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "@typescript-eslint/no-non-null-assertion": "off",
+    "react/react-in-jsx-scope": "off",
+    "unicorn/no-empty-file": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "oxc/no-async-endpoint-handlers": "off",
+    "react/iframe-missing-sandbox": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_"
+      }
+    ]
+  },
+  "ignorePatterns": [
+    "**/routeTree.gen.ts",
+    ".conductor",
+    "packages/webext-bridge/**",
+    "examples/**",
+    "**/dist/**",
+    "**/node_modules/**"
+  ]
+}

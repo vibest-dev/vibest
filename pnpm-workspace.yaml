@@ -1,7 +1,7 @@
 packages:
-- apps/*
-- examples/*
-- packages/*
-- tools/*
-- chrome-extension
-- cli
+  - apps/*
+  - examples/*
+  - packages/*
+  - tools/*
+  - chrome-extension
+  - cli

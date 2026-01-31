@@ -1,42 +1,42 @@
 {
-	"name": "@vibest/code-inspector-web",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Code inspector for vibe coding",
-	"type": "module",
-	"scripts": {
-		"stub": "tsdown",
-		"build": "tsdown",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"clean": "git clean -xdf node_modules .turbo dist"
-	},
-	"module": "./src/index.ts",
-	"exports": {
-		".": "./src/index.ts",
-		"./util": "./src/util.ts",
-		"./package.json": "./package.json"
-	},
-	"dependencies": {
-		"@floating-ui/react": "^0.27.16",
-		"@xstate/store": "^3.9.2",
-		"birpc": "^2.5.0",
-		"class-variance-authority": "^0.7.1",
-		"clsx": "^2.1.1",
-		"lucide-react": "^0.530.0",
-		"react": "^19.2.0",
-		"react-dom": "^19.2.0",
-		"tailwind-merge": "^3.3.1",
-		"tiny-invariant": "^1.3.3",
-		"uuid": "^13.0.0",
-		"vitest": "^3.2.4",
-		"xstate": "^5.20.2",
-		"zod": "^3.24.1"
-	},
-	"devDependencies": {
-		"@types/react": "^19.2.2",
-		"@types/react-dom": "^19.2.1",
-		"@vibest/ui": "workspace:*",
-		"tsdown": "^0.13.5"
-	}
+  "name": "@vibest/code-inspector-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code inspector for vibe coding",
+  "type": "module",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./util": "./src/util.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "stub": "tsdown",
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "git clean -xdf node_modules .turbo dist"
+  },
+  "dependencies": {
+    "@floating-ui/react": "^0.27.16",
+    "@xstate/store": "^3.9.2",
+    "birpc": "^2.5.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.530.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.3.1",
+    "tiny-invariant": "^1.3.3",
+    "uuid": "^13.0.0",
+    "vitest": "^3.2.4",
+    "xstate": "^5.20.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@vibest/ui": "workspace:*",
+    "tsdown": "^0.13.5"
+  }
 }

@@ -1,42 +1,42 @@
 {
-	"name": "Vibest",
-	"description": "Vibest browser extension",
-	"version": "0.0.0",
-	"version_name": "0.0.0",
-	"action": {
-		"default_title": "Vibest"
-	},
-	"background": {
-		"service_worker": "dist/background.js",
-		"type": "module"
-	},
-	"content_scripts": [
-		{
-			"js": ["dist/content.js"],
-			"matches": ["<all_urls>"],
-			"run_at": "document_start"
-		},
-		{
-			"js": ["dist/content-main-world.js"],
-			"matches": ["<all_urls>"],
-			"world": "MAIN",
-			"run_at": "document_end"
-		}
-	],
-	"content_security_policy": {
-		"extension_pages": "script-src 'self'; object-src 'self'"
-	},
-	"side_panel": {
-		"default_path": "dist/side-panel/index.html"
-	},
-	"host_permissions": ["<all_urls>"],
-	"manifest_version": 3,
-	"permissions": ["scripting", "sidePanel"],
-	"web_accessible_resources": [
-		{
-			"extension_ids": [],
-			"matches": ["<all_urls>"],
-			"resources": ["dist/*"]
-		}
-	]
+  "name": "Vibest",
+  "description": "Vibest browser extension",
+  "version": "0.0.0",
+  "version_name": "0.0.0",
+  "action": {
+    "default_title": "Vibest"
+  },
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": ["dist/content.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_start"
+    },
+    {
+      "js": ["dist/content-main-world.js"],
+      "matches": ["<all_urls>"],
+      "world": "MAIN",
+      "run_at": "document_end"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "side_panel": {
+    "default_path": "dist/side-panel/index.html"
+  },
+  "host_permissions": ["<all_urls>"],
+  "manifest_version": 3,
+  "permissions": ["scripting", "sidePanel"],
+  "web_accessible_resources": [
+    {
+      "extension_ids": [],
+      "matches": ["<all_urls>"],
+      "resources": ["dist/*"]
+    }
+  ]
 }

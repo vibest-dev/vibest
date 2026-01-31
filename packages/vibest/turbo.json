@@ -1,15 +1,15 @@
 {
-	"$schema": "https://turborepo.com/schema.v2.json",
-	"extends": ["//"],
-	"tasks": {
-		"dev": {
-			"outputs": ["dist"],
-			"inputs": ["./src/node/**"],
-			"interruptible": true
-		},
-		"build": {
-			"dependsOn": ["^build"],
-			"outputs": ["dist/**"]
-		}
-	}
+  "$schema": "https://turborepo.com/schema.v2.json",
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "outputs": ["dist"],
+      "inputs": ["./src/node/**"],
+      "interruptible": true
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    }
+  }
 }

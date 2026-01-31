@@ -1,64 +1,64 @@
 {
-	"name": "@vibest/server-rpc",
-	"private": true,
-	"type": "module",
-	"version": "0.0.1",
-	"description": "RPC for Vibe Coding Devtools",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		},
-		"./contract": {
-			"types": "./dist/contract/index.d.ts",
-			"default": "./dist/contract/index.js"
-		},
-		"./routes": {
-			"types": "./dist/routes/index.d.ts",
-			"default": "./dist/routes/index.js"
-		}
-	},
-	"typesVersions": {
-		"*": {
-			"*": [
-				"./src/*"
-			]
-		}
-	},
-	"scripts": {
-		"stub": "tsdown",
-		"build": "tsdown",
-		"clean": "git clean -xdf node_modules dist .turbo",
-		"typecheck": "tsc --noEmit"
-	},
-	"devDependencies": {
-		"@anthropic-ai/sdk": "^0.61.0",
-		"@orpc/server": "^1.8.6",
-		"@trpc/server": "^11.5.0",
-		"@types/stream-json": "^1.7.8",
-		"@types/ws": "^8.18.1",
-		"@vibest/typescript": "workspace:*",
-		"ai": "^5.0.63",
-		"superjson": "^2.2.2",
-		"tsdown": "^0.13.5",
-		"ws": "^8.18.3",
-		"zod": "^3.24.1"
-	},
-	"peerDependencies": {
-		"@orpc/server": "^1.8.6",
-		"@trpc/server": "^11.5.0",
-		"ai": "^5.0.30",
-		"superjson": "^2.2.2",
-		"ws": "^8.18.3",
-		"zod": "^3.25.67"
-	},
-	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
-		"@orpc/contract": "^1.9.1",
-		"@orpc/shared": "^1.9.4",
-		"@vibest/agents": "workspace:*",
-		"ai-sdk-agents": "workspace:*",
-		"stream-json": "^1.9.1",
-		"uuid": "^13.0.0"
-	}
+  "name": "@vibest/server-rpc",
+  "version": "0.0.1",
+  "private": true,
+  "description": "RPC for Vibe Coding Devtools",
+  "type": "module",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./src/*"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract/index.d.ts",
+      "default": "./dist/contract/index.js"
+    },
+    "./routes": {
+      "types": "./dist/routes/index.d.ts",
+      "default": "./dist/routes/index.js"
+    }
+  },
+  "scripts": {
+    "stub": "tsdown",
+    "build": "tsdown",
+    "clean": "git clean -xdf node_modules dist .turbo",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.22",
+    "@orpc/contract": "^1.9.1",
+    "@orpc/shared": "^1.9.4",
+    "@vibest/agents": "workspace:*",
+    "ai-sdk-agents": "workspace:*",
+    "stream-json": "^1.9.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.61.0",
+    "@orpc/server": "^1.8.6",
+    "@trpc/server": "^11.5.0",
+    "@types/stream-json": "^1.7.8",
+    "@types/ws": "^8.18.1",
+    "@vibest/typescript": "workspace:*",
+    "ai": "^5.0.63",
+    "superjson": "^2.2.2",
+    "tsdown": "^0.13.5",
+    "ws": "^8.18.3",
+    "zod": "^3.24.1"
+  },
+  "peerDependencies": {
+    "@orpc/server": "^1.8.6",
+    "@trpc/server": "^11.5.0",
+    "ai": "^5.0.30",
+    "superjson": "^2.2.2",
+    "ws": "^8.18.3",
+    "zod": "^3.25.67"
+  }
 }

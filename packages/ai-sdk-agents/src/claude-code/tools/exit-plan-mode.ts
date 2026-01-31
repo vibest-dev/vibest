@@ -2,21 +2,19 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const ExitPlanMode = tool({
-	type: "provider-defined",
-	id: "claude-code.ExitPlanMode",
-	name: "ExitPlanMode",
-	args: {},
-	// Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#exitplanmode
-	inputSchema: z.object({
-		/**
-		 * The plan to run by the user for approval
-		 */
-		plan: z.string(),
-	}),
-	// Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#exitplanmode-2
-	outputSchema: z.string(),
+  type: "provider-defined",
+  id: "claude-code.ExitPlanMode",
+  name: "ExitPlanMode",
+  args: {},
+  // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#exitplanmode
+  inputSchema: z.object({
+    /**
+     * The plan to run by the user for approval
+     */
+    plan: z.string(),
+  }),
+  // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#exitplanmode-2
+  outputSchema: z.string(),
 });
 
-export type ExitPlanModeUIToolInvocation = UIToolInvocation<
-	typeof ExitPlanMode
->;
+export type ExitPlanModeUIToolInvocation = UIToolInvocation<typeof ExitPlanMode>;

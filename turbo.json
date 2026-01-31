@@ -1,35 +1,35 @@
 {
-	"$schema": "https://turborepo.com/schema.v2.json",
-	"tasks": {
-		"stub": {
-			"outputs": ["dist"],
-			"dependsOn": ["^stub"]
-		},
-		"dev": {
-			"cache": false,
-			"persistent": true,
-			"interruptible": true,
-			"dependsOn": ["^stub"],
-			"outputs": ["dist"]
-		},
-		"typecheck": {
-			"outputs": [".tsbuildinfo", "dist/**"],
-			"dependsOn": ["^build"],
-			"cache": true
-		},
-		"build": {
-			"outputs": ["dist/**"],
-			"dependsOn": ["^build"]
-		},
-		"lint": {
-			"dependsOn": ["^lint"]
-		},
-		"test": {},
-		"clean": {
-			"dependsOn": ["^clean"]
-		},
-		"pack": {
-			"dependsOn": ["build"]
-		}
-	}
+  "$schema": "https://turborepo.com/schema.v2.json",
+  "tasks": {
+    "stub": {
+      "outputs": ["dist"],
+      "dependsOn": ["^stub"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "interruptible": true,
+      "dependsOn": ["^stub"],
+      "outputs": ["dist"]
+    },
+    "typecheck": {
+      "outputs": [".tsbuildinfo", "dist/**"],
+      "dependsOn": ["^build"],
+      "cache": true
+    },
+    "build": {
+      "outputs": ["dist/**"],
+      "dependsOn": ["^build"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "test": {},
+    "clean": {
+      "dependsOn": ["^clean"]
+    },
+    "pack": {
+      "dependsOn": ["build"]
+    }
+  }
 }

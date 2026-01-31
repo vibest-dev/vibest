@@ -1,16 +1,14 @@
 import type { InspectedTargetData } from "@vibest/code-inspector-web";
-import { VibestExtensionMessage } from "@vibest/shared/extension/message";
 import type { ProtocolWithReturn } from "webext-bridge";
 
+import { VibestExtensionMessage } from "@vibest/shared/extension/message";
+
 declare module "webext-bridge" {
-	export interface ProtocolMap {
-		[VibestExtensionMessage.WebAppInit]: ProtocolWithReturn<
-			{ url: string },
-			void
-		>;
-		[VibestExtensionMessage.Inspected]: ProtocolWithReturn<
-			{ targets: InspectedTargetData[] },
-			void
-		>;
-	}
+  export interface ProtocolMap {
+    [VibestExtensionMessage.WebAppInit]: ProtocolWithReturn<{ url: string }, void>;
+    [VibestExtensionMessage.Inspected]: ProtocolWithReturn<
+      { targets: InspectedTargetData[] },
+      void
+    >;
+  }
 }

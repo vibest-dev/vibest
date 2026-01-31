@@ -1,31 +1,31 @@
 {
-	"$schema": "https://json.schemastore.org/tsconfig",
-	"display": "Default",
-	"compilerOptions": {
-		// Basic options
-		"target": "ES2022",
-		"module": "Preserve",
-		"lib": ["es2022", "DOM", "DOM.Iterable"],
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Default",
+  "compilerOptions": {
+    // Basic options
+    "target": "ES2022",
+    "module": "Preserve",
+    "lib": ["es2022", "DOM", "DOM.Iterable"],
 
-		// Module resolution
-		"baseUrl": ".",
-		"moduleResolution": "Bundler",
-		"moduleDetection": "force",
-		"resolveJsonModule": true,
-		"esModuleInterop": true,
+    // Module resolution
+    "baseUrl": ".",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
 
-		// Emit options
-		"noEmit": true,
-		"incremental": false,
-		"isolatedModules": true,
+    // Emit options
+    "noEmit": true,
+    "incremental": false,
+    "isolatedModules": true,
 
-		// Type checking
-		"strict": true,
-		"noImplicitOverride": true,
-		"noUncheckedIndexedAccess": true,
+    // Type checking
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
 
-		// Advanced options
-		"skipLibCheck": true,
-		"preserveWatchOutput": true
-	}
+    // Advanced options
+    "skipLibCheck": true,
+    "preserveWatchOutput": true
+  }
 }

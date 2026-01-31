@@ -1,119 +1,119 @@
 {
-	"name": "webext-bridge",
-	"private": true,
-	"version": "6.0.1",
-	"description": "Messaging in Web Extensions made easy. Out of the box.",
-	"keywords": [
-		"chrome",
-		"extension",
-		"messaging",
-		"communication",
-		"protocol",
-		"content",
-		"background",
-		"devtools",
-		"script",
-		"crx",
-		"bridge"
-	],
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/zikaari/webext-bridge.git"
-	},
-	"author": "Neek Sandhu <neek.sandhu@outlook.com>",
-	"scripts": {
-		"build": "tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm,cjs --dts",
-		"watch": "npm run build -- --watch",
-		"release": "bumpp --commit --push --tag && npm run build && npm publish",
-		"typecheck": "tsc --noEmit",
-		"clean": "git clean -xdf node_modules .turbo dist"
-	},
-	"type": "module",
-	"exports": {
-		".": {
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./background": {
-			"import": "./dist/background.js",
-			"require": "./dist/background.cjs"
-		},
-		"./content-script": {
-			"import": "./dist/content-script.js",
-			"require": "./dist/content-script.cjs"
-		},
-		"./devtools": {
-			"import": "./dist/devtools.js",
-			"require": "./dist/devtools.cjs"
-		},
-		"./options": {
-			"import": "./dist/options.js",
-			"require": "./dist/options.cjs"
-		},
-		"./popup": {
-			"import": "./dist/popup.js",
-			"require": "./dist/popup.cjs"
-		},
-		"./window": {
-			"import": "./dist/window.js",
-			"require": "./dist/window.cjs"
-		},
-		"./sidepanel": {
-			"import": "./dist/sidepanel.js",
-			"require": "./dist/sidepanel.cjs"
-		}
-	},
-	"typesVersions": {
-		"*": {
-			"*": [
-				"dist/index.d.ts"
-			],
-			"background": [
-				"dist/background.d.ts"
-			],
-			"content-script": [
-				"dist/content-script.d.ts"
-			],
-			"devtools": [
-				"dist/devtools.d.ts"
-			],
-			"options": [
-				"dist/options.d.ts"
-			],
-			"popup": [
-				"dist/popup.d.ts"
-			],
-			"window": [
-				"dist/window.d.ts"
-			],
-			"sidepanel": [
-				"dist/sidepanel.d.ts"
-			]
-		}
-	},
-	"files": [
-		"README.md",
-		"package.json",
-		"dist/**/*"
-	],
-	"bugs": {
-		"url": "https://github.com/zikaari/webext-bridge/issues"
-	},
-	"homepage": "https://github.com/zikaari/webext-bridge#readme",
-	"dependencies": {
-		"nanoevents": "^6.0.2",
-		"serialize-error": "^9.0.0",
-		"tiny-uid": "^1.1.1",
-		"webextension-polyfill": "^0.9.0"
-	},
-	"devDependencies": {
-		"@types/node": "^22.16.5",
-		"@types/webextension-polyfill": "^0.8.3",
-		"bumpp": "^7.1.1",
-		"tsdown": "^0.13.5",
-		"tsup": "^5.11.13",
-		"type-fest": "^2.11.1",
-		"typescript": "^5.9.2"
-	}
+  "name": "webext-bridge",
+  "version": "6.0.1",
+  "private": true,
+  "description": "Messaging in Web Extensions made easy. Out of the box.",
+  "keywords": [
+    "background",
+    "bridge",
+    "chrome",
+    "communication",
+    "content",
+    "crx",
+    "devtools",
+    "extension",
+    "messaging",
+    "protocol",
+    "script"
+  ],
+  "homepage": "https://github.com/zikaari/webext-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/zikaari/webext-bridge/issues"
+  },
+  "license": "MIT",
+  "author": "Neek Sandhu <neek.sandhu@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zikaari/webext-bridge.git"
+  },
+  "files": [
+    "README.md",
+    "package.json",
+    "dist/**/*"
+  ],
+  "type": "module",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "dist/index.d.ts"
+      ],
+      "background": [
+        "dist/background.d.ts"
+      ],
+      "content-script": [
+        "dist/content-script.d.ts"
+      ],
+      "devtools": [
+        "dist/devtools.d.ts"
+      ],
+      "options": [
+        "dist/options.d.ts"
+      ],
+      "popup": [
+        "dist/popup.d.ts"
+      ],
+      "window": [
+        "dist/window.d.ts"
+      ],
+      "sidepanel": [
+        "dist/sidepanel.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./background": {
+      "import": "./dist/background.js",
+      "require": "./dist/background.cjs"
+    },
+    "./content-script": {
+      "import": "./dist/content-script.js",
+      "require": "./dist/content-script.cjs"
+    },
+    "./devtools": {
+      "import": "./dist/devtools.js",
+      "require": "./dist/devtools.cjs"
+    },
+    "./options": {
+      "import": "./dist/options.js",
+      "require": "./dist/options.cjs"
+    },
+    "./popup": {
+      "import": "./dist/popup.js",
+      "require": "./dist/popup.cjs"
+    },
+    "./window": {
+      "import": "./dist/window.js",
+      "require": "./dist/window.cjs"
+    },
+    "./sidepanel": {
+      "import": "./dist/sidepanel.js",
+      "require": "./dist/sidepanel.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm,cjs --dts",
+    "watch": "npm run build -- --watch",
+    "release": "bumpp --commit --push --tag && npm run build && npm publish",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules .turbo dist"
+  },
+  "dependencies": {
+    "nanoevents": "^6.0.2",
+    "serialize-error": "^9.0.0",
+    "tiny-uid": "^1.1.1",
+    "webextension-polyfill": "^0.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "@types/webextension-polyfill": "^0.8.3",
+    "bumpp": "^7.1.1",
+    "tsdown": "^0.13.5",
+    "tsup": "^5.11.13",
+    "type-fest": "^2.11.1",
+    "typescript": "^5.9.2"
+  }
 }

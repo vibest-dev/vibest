@@ -1,16 +1,16 @@
 # Vibe Web
 
 **Supercharge your web development experience and productivity by seamlessly
-  providing context to Code Agents directly in your browser.**
+providing context to Code Agents directly in your browser.**
 
-A monorepo for building in-browser developer tooling around AI coding agents. It enhances vibe coding and web development by combining a chat interface, DOM inspection, and others so the agent has more accurate context (e.g., file, line, component). No MCP or external context‑bridging tools required. 
+A monorepo for building in-browser developer tooling around AI coding agents. It enhances vibe coding and web development by combining a chat interface, DOM inspection, and others so the agent has more accurate context (e.g., file, line, component). No MCP or external context‑bridging tools required.
 
 > [!NOTE]
 > This project is in active development. Feedback and pull requests are welcome!
 
 ## Framework Devtools
 
- A build‑tool plugin that adds an in‑app chat panel and element inspector to your dev server. It connects your running app to an AI coding agent (currently Claude Code). Vite adapter available today; more adapters for other bundlers/dev servers are planned.
+A build‑tool plugin that adds an in‑app chat panel and element inspector to your dev server. It connects your running app to an AI coding agent (currently Claude Code). Vite adapter available today; more adapters for other bundlers/dev servers are planned.
 
 https://github.com/user-attachments/assets/fd57a0ad-eb63-46cf-8166-cc3af18b1967
 
@@ -47,10 +47,7 @@ import react from "@vitejs/plugin-react";
 import vibest from "vibest-devtools/vite";
 
 export default defineConfig({
-  plugins: [
-    vibest(),
-    react(),
-  ],
+  plugins: [vibest(), react()],
 });
 ```
 

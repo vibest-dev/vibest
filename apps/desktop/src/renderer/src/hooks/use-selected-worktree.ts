@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+
 import { orpc } from "../lib/queries/workspace";
 import { useUIStore } from "../stores/ui-store";
 
@@ -17,18 +18,18 @@ import { useUIStore } from "../stores/ui-store";
  * - Selected worktree no longer exists (was deleted)
  */
 export function useSelectedWorktree() {
-	const { data } = useQuery(orpc.workspace.list.queryOptions({}));
-	const selectedWorktreeId = useUIStore((s) => s.selectedWorktreeId);
+  const { data } = useQuery(orpc.workspace.list.queryOptions({}));
+  const selectedWorktreeId = useUIStore((s) => s.selectedWorktreeId);
 
-	return useMemo(() => {
-		if (!selectedWorktreeId || !data) return null;
+  return useMemo(() => {
+    if (!selectedWorktreeId || !data) return null;
 
-		// Search through all worktrees to find the selected one
-		for (const worktrees of Object.values(data.worktreesByRepository)) {
-			const found = worktrees.find((w) => w.id === selectedWorktreeId);
-			if (found) return found;
-		}
+    // Search through all worktrees to find the selected one
+    for (const worktrees of Object.values(data.worktreesByRepository)) {
+      const found = worktrees.find((w) => w.id === selectedWorktreeId);
+      if (found) return found;
+    }
 
-		return null;
-	}, [selectedWorktreeId, data]);
+    return null;
+  }, [selectedWorktreeId, data]);
 }
