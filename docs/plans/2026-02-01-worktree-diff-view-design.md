@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a diff view to the main content area when a worktree is selected. The view shows all changed files with a collapsible file tree on the left and stacked diffs on the right using `@pierre/diffs`.
+Add a diff view to the main content area when a worktree is selected. The view shows all changed files with stacked diffs on the left and a collapsible file tree on the right using `@pierre/diffs`.
 
 ## Layout
 
@@ -14,18 +14,23 @@ Add a diff view to the main content area when a worktree is selected. The view s
 │    ├─ main         +2-1 │  │ feature/auth-system                        +15 -8 · 5 files     │ │
 │    ├─ feature/*   +15-8 │  ├─────────────────────────────────────────────────────────────────┤ │
 │    └─ bugfix       +3-0 │  │                                                                 │ │
-│                         │  │  ┌─ FILE TREE ─────[◀]┬─ DIFFS ───────────────────────────────┐│ │
-│  ▼ other-repo           │  │  │                    │                                       ││ │
-│    └─ main         +0-0 │  │  │ ▼ Staged (2)       │ ┌─ src/auth.tsx ────────────────────┐││ │
-│                         │  │  │   ├─ M auth.tsx    │ │  - import { old } from 'lib'      │││ │
-│                         │  │  │   └─ A button.tsx  │ │  + import { new } from 'lib'      │││ │
-│                         │  │  │                    │ └───────────────────────────────────┘││ │
-│                         │  │  │ ▼ Unstaged (3)     │                                       ││ │
-│                         │  │  │   ├─ M utils.ts    │ ┌─ src/button.tsx ──────────────────┐││ │
-│                         │  │  │   ├─ D old.ts      │ │  + new file content               │││ │
-│                         │  │  │   └─ M test.ts     │ └───────────────────────────────────┘││ │
-│                         │  │  │                    │                                       ││ │
-│                         │  │  └────────────────────┴───────────────────────────────────────┘│ │
+│                         │  │  ┌─ DIFFS ───────────────────────────────┬─ FILE TREE ─────[▶]┐│ │
+│  ▼ other-repo           │  │  │                                       │                    ││ │
+│    └─ main         +0-0 │  │  │ ┌─ src/auth.tsx ────────────────────┐ │ ▼ Staged (2)       ││ │
+│                         │  │  │ │  - import { old } from 'lib'      │ │   ├─ M auth.tsx    ││ │
+│                         │  │  │ │  + import { new } from 'lib'      │ │   └─ A button.tsx  ││ │
+│                         │  │  │ └───────────────────────────────────┘ │                    ││ │
+│                         │  │  │                                       │ ▼ Unstaged (3)     ││ │
+│                         │  │  │ ┌─ src/button.tsx ──────────────────┐ │   ├─ M utils.ts    ││ │
+│                         │  │  │ │  + new file content               │ │   ├─ D old.ts      ││ │
+│                         │  │  │ └───────────────────────────────────┘ │   └─ M test.ts     ││ │
+│                         │  │  │                                       │                    ││ │
+│                         │  │  │ ┌─ src/utils.ts ────────────────────┐ │                    ││ │
+│                         │  │  │ │  - const x = 1                    │ │                    ││ │
+│                         │  │  │ │  + const x = 2                    │ │                    ││ │
+│                         │  │  │ └───────────────────────────────────┘ │                    ││ │
+│                         │  │  │                                       │                    ││ │
+│                         │  │  └───────────────────────────────────────┴────────────────────┘│ │
 │                         │  └─────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────┴───────────────────────────────────────────────────────────────────────┘
 ```
@@ -34,14 +39,24 @@ Add a diff view to the main content area when a worktree is selected. The view s
 
 ### 1. Normal (File Tree Expanded)
 
-- File tree visible on left side
-- Diffs stacked vertically on right side
+- Diffs stacked vertically on left side
+- File tree visible on right side
 - Click file in tree → smooth scroll to that diff
-- Collapse button `[◀]` in file tree header
+- Collapse button `[▶]` in file tree header
 
 ### 2. File Tree Collapsed
 
-- File tree hidden, only toggle button `[▶]` visible
+```
+┌─ DIFFS (full width) ────────────────────────────────────────────────────────────┬[◀]┐
+│                                                                                 │   │
+│ ┌─ src/auth.tsx ──────────────────────────────────────────────────────────────┐ │   │
+│ │  - import { old } from 'lib'                                                │ │   │
+│ │  + import { new } from 'lib'                                                │ │   │
+│ └─────────────────────────────────────────────────────────────────────────────┘ │   │
+└─────────────────────────────────────────────────────────────────────────────────┴───┘
+```
+
+- File tree hidden, only toggle button `[◀]` visible on right edge
 - Diffs expand to full width
 - Click toggle to expand file tree
 
@@ -98,8 +113,8 @@ Two collapsible sections:
 ### New Components
 
 1. **`WorktreeDiffView`** - Main container for the diff view
-2. **`DiffFileTree`** - Collapsible file tree with Staged/Unstaged sections
-3. **`DiffContent`** - Scrollable container with all diffs
+2. **`DiffFileTree`** - Collapsible file tree with Staged/Unstaged sections (right side)
+3. **`DiffContent`** - Scrollable container with all diffs (left side)
 
 ### Data Flow
 
@@ -112,9 +127,9 @@ Selected Worktree (from sidebar)
          ↓
   ┌──────┴──────┐
   ↓             ↓
-DiffFileTree   DiffContent
-(file tree)    (@pierre/diffs)
-  ↓                  ↑
+DiffContent   DiffFileTree
+(@pierre/diffs) (file tree)
+  ↑                  ↓
   └── scrollToFile ──┘
 ```
 
