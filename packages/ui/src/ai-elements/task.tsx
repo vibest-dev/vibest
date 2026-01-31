@@ -1,12 +1,8 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactElement } from "react";
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@vibest/ui/components/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 
@@ -45,20 +41,25 @@ export const Task = ({ defaultOpen = true, className, ...props }: TaskProps) => 
   />
 );
 
-export type TaskTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+export type TaskTriggerProps = Omit<ComponentProps<typeof CollapsibleTrigger>, "render"> & {
   title: string;
+  render?: ReactElement;
 };
 
-export const TaskTrigger = ({ children, className, title, ...props }: TaskTriggerProps) => (
-  <CollapsibleTrigger asChild className={cn("group", className)} {...props}>
-    {children ?? (
-      <div className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-2">
-        <SearchIcon className="size-4" />
-        <p className="text-sm">{title}</p>
-        <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-      </div>
-    )}
-  </CollapsibleTrigger>
+export const TaskTrigger = ({ className, title, render, ...props }: TaskTriggerProps) => (
+  <CollapsibleTrigger
+    className={cn("group", className)}
+    render={
+      render ?? (
+        <div className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-2">
+          <SearchIcon className="size-4" />
+          <p className="text-sm">{title}</p>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[panel-open]:rotate-180" />
+        </div>
+      )
+    }
+    {...props}
+  />
 );
 
 export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
@@ -66,7 +67,7 @@ export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
 export const TaskContent = ({ children, className, ...props }: TaskContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground data-[state=closed]:animate-out data-[state=open]:animate-in outline-none",
+      "data-ending-style:opacity-0 data-starting-style:opacity-0 text-popover-foreground transition-opacity outline-none",
       className,
     )}
     {...props}

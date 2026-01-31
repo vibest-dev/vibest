@@ -2,7 +2,7 @@
 
 import type { ComponentProps } from "react";
 
-import { useControllableState } from "@radix-ui/react-use-controllable-state";
+import { useControllableState } from "@vibest/ui/hooks/use-controllable-state";
 import {
   Collapsible,
   CollapsibleContent,
@@ -92,10 +92,10 @@ export const Reasoning = memo(
     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosedRef]);
 
     return (
-      <ReasoningContext.Provider value={{ isStreaming, isOpen, setIsOpen, duration }}>
+      <ReasoningContext.Provider value={{ isStreaming, isOpen: isOpen ?? false, setIsOpen, duration: duration ?? 0 }}>
         <Collapsible
           className={cn("not-prose mb-4", className)}
-          onOpenChange={(details) => setIsOpen(details.open)}
+          onOpenChange={setIsOpen}
           open={isOpen}
           {...props}
         >
@@ -146,7 +146,7 @@ export const ReasoningContent = memo(({ className, children, ...props }: Reasoni
   <CollapsibleContent
     className={cn(
       "mt-4 text-sm",
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground data-[state=closed]:animate-out data-[state=open]:animate-in outline-none",
+      "data-ending-style:opacity-0 data-starting-style:opacity-0 text-popover-foreground transition-opacity outline-none",
       className,
     )}
     {...props}

@@ -1,20 +1,59 @@
-import { Splitter as SplitterPrimitive } from "@ark-ui/react/splitter";
+"use client";
+
 import { cn } from "@vibest/ui/lib/utils";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type PanelGroupProps,
+  type PanelProps,
+  type PanelResizeHandleProps,
+} from "react-resizable-panels";
 
-function Splitter(props: SplitterPrimitive.RootProps) {
-  return <SplitterPrimitive.Root {...props} />;
+interface SplitterPanelConfig {
+  id: string;
+  minSize?: number;
+  maxSize?: number;
+  collapsible?: boolean;
 }
-const SplitterContext = SplitterPrimitive.Context;
 
-function SplitterPanel(props: SplitterPrimitive.PanelProps) {
-  return <SplitterPrimitive.Panel {...props} />;
+interface SplitterProps extends Omit<PanelGroupProps, "direction"> {
+  panels?: SplitterPanelConfig[];
+  defaultSize?: number[];
+  direction?: "horizontal" | "vertical";
 }
 
-const SplitterProvider = SplitterPrimitive.RootProvider;
-
-function SplitterResizeTrigger({ className, ...props }: SplitterPrimitive.ResizeTriggerProps) {
+function Splitter({
+  panels: _panels,
+  defaultSize: _defaultSize,
+  className,
+  direction = "horizontal",
+  ...props
+}: SplitterProps) {
   return (
-    <SplitterPrimitive.ResizeTrigger
+    <PanelGroup
+      direction={direction}
+      className={cn("flex", direction === "vertical" ? "flex-col" : "flex-row", className)}
+      {...props}
+    />
+  );
+}
+
+interface SplitterPanelProps extends Omit<PanelProps, "id"> {
+  id?: string;
+}
+
+function SplitterPanel({ className, id, ...props }: SplitterPanelProps) {
+  return <Panel id={id} className={cn("", className)} {...props} />;
+}
+
+interface SplitterResizeTriggerProps extends PanelResizeHandleProps {
+  id?: string;
+}
+
+function SplitterResizeTrigger({ className, id: _id, ...props }: SplitterResizeTriggerProps) {
+  return (
+    <PanelResizeHandle
       className={cn(
         "bg-border relative w-0.5 transition-all duration-200 ease-in-out",
         "hover:bg-accent hover:shadow-accent/50 hover:z-10 hover:scale-x-[3] hover:shadow-lg",
@@ -25,4 +64,5 @@ function SplitterResizeTrigger({ className, ...props }: SplitterPrimitive.Resize
   );
 }
 
-export { Splitter, SplitterContext, SplitterPanel, SplitterProvider, SplitterResizeTrigger };
+export { Splitter, SplitterPanel, SplitterResizeTrigger };
+export type { SplitterProps, SplitterPanelProps, SplitterResizeTriggerProps };

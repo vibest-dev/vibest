@@ -23,8 +23,7 @@
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
-    "@ark-ui/react": "^5.23.0",
-    "@radix-ui/react-use-controllable-state": "^1.2.2",
+    "@base-ui/react": "^1.1.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -35,9 +34,9 @@
     "embla-carousel-react": "^8.6.0",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "lucide-react": "^0.530.0",
-    "radix-ui": "^1.4.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-resizable-panels": "^4.5.6",
     "shiki": "3.12.2",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.12",

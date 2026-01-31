@@ -1,7 +1,10 @@
-import { cn } from "@vibest/ui/lib/utils";
 import { Loader2Icon } from "lucide-react";
+import { cn } from "@vibest/ui/lib/utils";
 
-function Spinner({ className, ...props }: React.ComponentProps<typeof Loader2Icon>) {
+function Spinner({
+  className,
+  ...props
+}: React.ComponentProps<typeof Loader2Icon>) {
   return (
     <Loader2Icon
       aria-label="Loading"

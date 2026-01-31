@@ -7,10 +7,11 @@ import { Button } from "@vibest/ui/components/button";
 import {
   Select,
   SelectContent,
-  SelectControl,
+  SelectIcon,
   SelectItem,
+  SelectList,
   SelectTrigger,
-  SelectValueText,
+  SelectValue,
 } from "@vibest/ui/components/select";
 import { Textarea } from "@vibest/ui/components/textarea";
 import { cn } from "@vibest/ui/lib/utils";
@@ -160,12 +161,14 @@ export const PromptInputSubmit = ({
 
 export const PromptInputModelSelect = Select;
 
-export const PromptInputModelSelectControl = SelectControl;
-
 export const PromptInputModelSelectTrigger = SelectTrigger;
+
+export const PromptInputModelSelectValue = SelectValue;
+
+export const PromptInputModelSelectIcon = SelectIcon;
 
 export const PromptInputModelSelectContent = SelectContent;
 
-export const PromptInputModelSelectItem = SelectItem;
+export const PromptInputModelSelectList = SelectList;
 
-export const PromptInputModelSelectValue = SelectValueText;
+export const PromptInputModelSelectItem = SelectItem;

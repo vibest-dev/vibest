@@ -17,25 +17,18 @@ export function App() {
 
   return (
     <div className="bg-background h-screen">
-      <Splitter
-        panels={[
-          { id: "chat", minSize: 25 },
-          { id: "preview", minSize: 30 },
-        ]}
-        defaultSize={[25, 75]}
-        className="flex h-full"
-      >
+      <Splitter className="flex h-full">
         {/* Left Panel - Chat */}
-        <SplitterPanel id="chat">
+        <SplitterPanel id="chat" defaultSize={25} minSize={25}>
           <ToolbarProviders>
             <Chat className="h-full" />
           </ToolbarProviders>
         </SplitterPanel>
 
-        <SplitterResizeTrigger id="chat:preview" className="" />
+        <SplitterResizeTrigger />
 
         {/* Right Panel - Web Preview */}
-        <SplitterPanel id="preview">
+        <SplitterPanel id="preview" defaultSize={75} minSize={30}>
           <WebPreview defaultUrl="/" className="h-full rounded-none border-none">
             <WebPreviewNavigation>
               <WebPreviewNavigationButton tooltip="Go back" onClick={() => window.history.back()}>
