@@ -25,12 +25,14 @@
 	"dependencies": {
 		"@electron-toolkit/preload": "^3.0.2",
 		"@electron-toolkit/utils": "^4.0.0",
+		"@fontsource-variable/geist": "^5.2.7",
+		"@fontsource-variable/geist-mono": "^5.2.7",
 		"@orpc/client": "^1.9.1",
 		"@orpc/contract": "^1.9.1",
 		"@orpc/server": "^1.8.6",
-		"@fontsource-variable/geist": "^5.2.7",
-		"@fontsource-variable/geist-mono": "^5.2.7",
+		"@orpc/tanstack-query": "^1.13.4",
 		"@pierre/diffs": "^1.0.9",
+		"@tanstack/react-query": "^5.90.20",
 		"@vibest/shared": "workspace:*",
 		"@vibest/ui": "workspace:*",
 		"class-variance-authority": "^0.7.1",
@@ -45,8 +47,8 @@
 		"zustand": "^5.0.5"
 	},
 	"devDependencies": {
-		"@playwright/test": "^1.50.1",
 		"@electron-toolkit/tsconfig": "^2.0.0",
+		"@playwright/test": "^1.50.1",
 		"@tailwindcss/vite": "^4.1.12",
 		"@types/node": "^22.16.5",
 		"@types/react": "^19.2.2",

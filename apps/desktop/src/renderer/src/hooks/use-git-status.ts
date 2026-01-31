@@ -1,24 +1,44 @@
-import { useWorkspaceStore } from "../stores";
-import type { GitStatus } from "../types";
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
+import {
+	gitFetchMutationCallbacks,
+	gitPullMutationCallbacks,
+	orpc,
+} from "../lib/queries/workspace";
+import { queryClient } from "../lib/query-client";
 
-export function useGitStatus(path: string): {
-	status: GitStatus | undefined;
-	isLoading: boolean;
-	refresh: () => void;
-	fetch: () => Promise<void>;
-	pull: () => Promise<void>;
-} {
-	const status = useWorkspaceStore((s) => s.statusCache[path]);
-	const isLoading = useWorkspaceStore((s) => s.isLoadingStatus[path] ?? false);
-	const loadStatus = useWorkspaceStore((s) => s.loadStatus);
-	const fetchRepository = useWorkspaceStore((s) => s.fetchRepository);
-	const pullRepository = useWorkspaceStore((s) => s.pullRepository);
+/**
+ * Hook to fetch git status for a specific worktree path.
+ * Uses TanStack Query via oRPC for caching and automatic refetching.
+ */
+export function useGitStatus(path: string | undefined) {
+	const { data: status, isLoading } = useQuery(
+		orpc.git.status.queryOptions({
+			input: path ? { path } : skipToken,
+		}),
+	);
+
+	const fetchMutation = useMutation({
+		...orpc.git.fetch.mutationOptions(),
+		...gitFetchMutationCallbacks(),
+	});
+
+	const pullMutation = useMutation({
+		...orpc.git.pull.mutationOptions(),
+		...gitPullMutationCallbacks(),
+	});
 
 	return {
 		status,
 		isLoading,
-		refresh: () => loadStatus(path),
-		fetch: () => fetchRepository(path),
-		pull: () => pullRepository(path),
+		refresh: () => {
+			if (path) {
+				queryClient.invalidateQueries({
+					queryKey: orpc.git.status.key({ input: { path } }),
+				});
+			}
+		},
+		fetch: () =>
+			path ? fetchMutation.mutateAsync({ path }) : Promise.resolve(),
+		pull: () => (path ? pullMutation.mutateAsync({ path }) : Promise.resolve()),
 	};
 }

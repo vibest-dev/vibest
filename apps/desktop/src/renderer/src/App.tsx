@@ -1,3 +1,4 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@vibest/ui/components/button";
 import { FolderGit2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -9,27 +10,36 @@ import { CloneRepositoryDialog } from "./components/repositories/clone-repositor
 import { CreateWorktreeDialog } from "./components/worktrees/create-worktree-dialog";
 import { DiffViewer } from "./components/worktrees/diff-viewer";
 import { client } from "./lib/client";
-import { useWorkspaceStore } from "./stores";
+import {
+	addRepositoryMutationCallbacks,
+	archiveWorktreeMutationCallbacks,
+	cloneRepositoryMutationCallbacks,
+	createWorktreeMutationCallbacks,
+	orpc,
+	quickCreateWorktreeMutationCallbacks,
+	removeRepositoryMutationCallbacks,
+} from "./lib/queries/workspace";
+import { useUIStore } from "./stores/ui-store";
 import type { Worktree } from "./types";
 
 function App(): React.JSX.Element {
-	const repositories = useWorkspaceStore((s) => s.repositories);
-	const worktreesByRepository = useWorkspaceStore(
-		(s) => s.worktreesByRepository,
-	);
-	const isLoadingRepositories = useWorkspaceStore(
-		(s) => s.isLoadingRepositories,
-	);
-	const error = useWorkspaceStore((s) => s.error);
+	// Server state - TanStack Query via oRPC
+	const {
+		data: workspaceData,
+		isLoading: isLoadingRepositories,
+		error: queryError,
+	} = useQuery(orpc.workspace.list.queryOptions({}));
 
-	const loadRepositories = useWorkspaceStore((s) => s.loadRepositories);
-	const addRepository = useWorkspaceStore((s) => s.addRepository);
-	const cloneRepository = useWorkspaceStore((s) => s.cloneRepository);
-	const removeRepository = useWorkspaceStore((s) => s.removeRepository);
-	const createWorktree = useWorkspaceStore((s) => s.createWorktree);
-	const quickCreateWorktree = useWorkspaceStore((s) => s.quickCreateWorktree);
-	const clearError = useWorkspaceStore((s) => s.clearError);
+	const repositories = workspaceData?.repositories ?? [];
+	const worktreesByRepository = workspaceData?.worktreesByRepository ?? {};
 
+	// UI state - Zustand
+	const expandedRepositories = useUIStore((s) => s.expandedRepositories);
+	const toggleRepository = useUIStore((s) => s.toggleRepository);
+	const expandRepository = useUIStore((s) => s.expandRepository);
+	const setExpandedRepositories = useUIStore((s) => s.setExpandedRepositories);
+
+	// Local UI state (transient, not persisted)
 	const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(
 		null,
 	);
@@ -40,25 +50,67 @@ function App(): React.JSX.Element {
 		string | null
 	>(null);
 	const [diffWorktree, setDiffWorktree] = useState<Worktree | null>(null);
-	const [expandedRepositories, setExpandedRepositories] =
-		useState<Set<string> | null>(null);
+	const [mutationError, setMutationError] = useState<string | null>(null);
 
-	// Load repositories on mount
-	useEffect(() => {
-		loadRepositories();
-	}, [loadRepositories]);
+	// Mutations using oRPC TanStack Query utils
+	const addRepoMutation = useMutation({
+		...orpc.workspace.addRepository.mutationOptions(),
+		...addRepositoryMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
 
-	// Initialize expanded repositories - expand all repositories by default
+	const cloneRepoMutation = useMutation({
+		...orpc.workspace.cloneRepository.mutationOptions(),
+		...cloneRepositoryMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
+
+	const removeRepoMutation = useMutation({
+		...orpc.workspace.removeRepository.mutationOptions(),
+		...removeRepositoryMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
+
+	const createWorktreeMut = useMutation({
+		...orpc.workspace.createWorktree.mutationOptions(),
+		...createWorktreeMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
+
+	const quickCreateMutation = useMutation({
+		...orpc.workspace.quickCreateWorktree.mutationOptions(),
+		...quickCreateWorktreeMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
+
+	const archiveMutation = useMutation({
+		...orpc.workspace.archiveWorktree.mutationOptions(),
+		...archiveWorktreeMutationCallbacks(),
+		onError: (error) => setMutationError(String(error)),
+	});
+
+	// Initialize expanded repositories - expand all on first load if none are expanded
 	useEffect(() => {
-		if (repositories.length > 0 && expandedRepositories === null) {
-			setExpandedRepositories(new Set(repositories.map((r) => r.id)));
+		if (
+			repositories.length > 0 &&
+			expandedRepositories.length === 0 &&
+			!isLoadingRepositories
+		) {
+			setExpandedRepositories(repositories.map((r) => r.id));
 		}
-	}, [repositories, expandedRepositories]);
+	}, [
+		repositories,
+		expandedRepositories.length,
+		isLoadingRepositories,
+		setExpandedRepositories,
+	]);
 
 	// Get selected repository from diff worktree
 	const selectedRepository = diffWorktree
 		? (repositories.find((r) => r.id === diffWorktree.repositoryId) ?? null)
 		: null;
+
+	const error = queryError ? String(queryError) : mutationError;
 
 	const handleAddRepository = async () => {
 		try {
@@ -73,37 +125,31 @@ function App(): React.JSX.Element {
 
 	const handleCreateWorktree = async (repositoryId: string) => {
 		// Quick create worktree directly without dialog
-		await quickCreateWorktree(repositoryId);
-		// Expand the repository after creating worktree
-		setExpandedRepositories((prev) => new Set(prev ?? []).add(repositoryId));
+		await quickCreateMutation.mutateAsync({ repositoryId });
 	};
 
 	const handleToggleRepository = useCallback(
 		(repositoryId: string, open: boolean) => {
-			setExpandedRepositories((prev) => {
-				const next = new Set(prev ?? []);
-				if (open) {
-					next.add(repositoryId);
-				} else {
-					next.delete(repositoryId);
-				}
-				return next;
-			});
+			if (open) {
+				expandRepository(repositoryId);
+			} else {
+				toggleRepository(repositoryId);
+			}
 		},
-		[],
+		[expandRepository, toggleRepository],
 	);
 
-	const handleCreateWorktreeFrom = useCallback(
-		(repositoryId: string) => {
-			// TODO: Implement create workspace from repository
-			console.log("Create workspace from repository:", repositoryId);
-		},
-		[],
-	);
+	const handleCreateWorktreeFrom = useCallback((repositoryId: string) => {
+		// TODO: Implement create workspace from repository
+		console.log("Create workspace from repository:", repositoryId);
+	}, []);
 
 	const handleRefresh = () => {
-		loadRepositories();
+		// TanStack Query will handle refetching
+		// This is handled by invalidating queries, but we can also force refetch
 	};
+
+	const clearError = () => setMutationError(null);
 
 	return (
 		<div className="flex h-screen bg-background text-foreground">
@@ -111,9 +157,7 @@ function App(): React.JSX.Element {
 				repositories={repositories}
 				worktreesByRepository={worktreesByRepository}
 				selectedWorktreeId={diffWorktree?.id ?? null}
-				expandedRepositories={
-					expandedRepositories ?? new Set(repositories.map((r) => r.id))
-				}
+				expandedRepositories={new Set(expandedRepositories)}
 				isLoading={isLoadingRepositories}
 				onAddRepository={handleAddRepository}
 				onCloneRepository={() => setShowCloneDialog(true)}
@@ -121,12 +165,17 @@ function App(): React.JSX.Element {
 				onCreateWorktreeFrom={handleCreateWorktreeFrom}
 				onToggleRepository={handleToggleRepository}
 				onViewChanges={setDiffWorktree}
+				onArchiveWorktree={(worktreeId, commitFirst) =>
+					archiveMutation.mutate({ worktreeId, commitFirst })
+				}
 			/>
 
 			<div className="flex-1 flex flex-col min-w-0">
 				<Header
 					repository={selectedRepository ?? null}
-					onRemoveRepository={removeRepository}
+					onRemoveRepository={(repositoryId) =>
+						removeRepoMutation.mutate({ repositoryId })
+					}
 					onRefresh={handleRefresh}
 				/>
 
@@ -172,13 +221,17 @@ function App(): React.JSX.Element {
 				isOpen={addRepositoryPath !== null}
 				path={addRepositoryPath}
 				onClose={() => setAddRepositoryPath(null)}
-				onAdd={addRepository}
+				onAdd={async (path, defaultBranch) => {
+					await addRepoMutation.mutateAsync({ path, defaultBranch });
+				}}
 			/>
 
 			<CloneRepositoryDialog
 				isOpen={showCloneDialog}
 				onClose={() => setShowCloneDialog(false)}
-				onClone={cloneRepository}
+				onClone={async (url, targetPath) => {
+					await cloneRepoMutation.mutateAsync({ url, targetPath });
+				}}
 			/>
 
 			<CreateWorktreeDialog
@@ -193,7 +246,9 @@ function App(): React.JSX.Element {
 					setShowCreateWorktreeDialog(false);
 					setCreateWorktreeRepositoryId(null);
 				}}
-				onCreate={createWorktree}
+				onCreate={async (params) => {
+					await createWorktreeMut.mutateAsync(params);
+				}}
 			/>
 		</div>
 	);

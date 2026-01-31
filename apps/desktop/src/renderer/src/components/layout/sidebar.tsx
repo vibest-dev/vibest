@@ -1,3 +1,13 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
+import {
+	AlertDialog,
+	AlertDialogClose,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogPopup,
+	AlertDialogTitle,
+} from "@vibest/ui/components/alert-dialog";
 import { Button } from "@vibest/ui/components/button";
 import {
 	Collapsible,
@@ -24,6 +34,7 @@ import {
 	Sidebar as SidebarRoot,
 } from "@vibest/ui/components/sidebar";
 import {
+	Archive,
 	ChevronRight,
 	Download,
 	FolderGit2,
@@ -33,7 +44,13 @@ import {
 	MoreHorizontal,
 	Plus,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { orpc } from "../../lib/queries/workspace";
 import type { Repository, Worktree } from "../../types";
+
+function getBasename(path: string): string {
+	return path.split("/").pop() ?? path;
+}
 
 interface SidebarProps {
 	repositories: Repository[];
@@ -47,6 +64,7 @@ interface SidebarProps {
 	onCreateWorktreeFrom: (repositoryId: string) => void;
 	onToggleRepository: (repositoryId: string, open: boolean) => void;
 	onViewChanges: (worktree: Worktree) => void;
+	onArchiveWorktree: (worktreeId: string, commitFirst: boolean) => void;
 }
 
 export function Sidebar({
@@ -61,7 +79,52 @@ export function Sidebar({
 	onCreateWorktreeFrom,
 	onToggleRepository,
 	onViewChanges,
+	onArchiveWorktree,
 }: SidebarProps) {
+	const [archiveTarget, setArchiveTarget] = useState<Worktree | null>(null);
+
+	// Fetch git status for the archive target worktree using oRPC
+	const { data: archiveTargetStatus } = useQuery(
+		orpc.git.status.queryOptions({
+			input: archiveTarget ? { path: archiveTarget.path } : skipToken,
+		}),
+	);
+
+	const handleArchiveClick = (worktree: Worktree, e: React.MouseEvent) => {
+		e.stopPropagation();
+		// Set the archive target to trigger status fetch
+		setArchiveTarget(worktree);
+	};
+
+	// Show confirmation dialog only if there are uncommitted changes
+	const showConfirmDialog =
+		archiveTarget !== null &&
+		archiveTargetStatus !== undefined &&
+		!archiveTargetStatus.clean;
+
+	// If status is loaded and clean, archive immediately
+	useEffect(() => {
+		if (
+			archiveTarget !== null &&
+			archiveTargetStatus !== undefined &&
+			archiveTargetStatus.clean
+		) {
+			onArchiveWorktree(archiveTarget.id, false);
+			setArchiveTarget(null);
+		}
+	}, [archiveTarget, archiveTargetStatus, onArchiveWorktree]);
+
+	const handleConfirmArchive = () => {
+		if (archiveTarget) {
+			onArchiveWorktree(archiveTarget.id, true);
+			setArchiveTarget(null);
+		}
+	};
+
+	const archiveFolderName = archiveTarget
+		? getBasename(archiveTarget.path)
+		: "";
+
 	return (
 		<SidebarProvider>
 			<SidebarRoot collapsible="none">
@@ -184,22 +247,39 @@ export function Sidebar({
 													</SidebarMenuButton>
 												</CollapsibleTrigger>
 												<CollapsibleContent>
-													<SidebarMenuSub>
+													<SidebarMenuSub className="mr-0">
 														{worktrees.map((worktree) => (
-															<SidebarMenuSubItem key={worktree.id}>
-																<button
-																	type="button"
-																	onClick={() => onViewChanges(worktree)}
+															<SidebarMenuSubItem
+																key={worktree.id}
+																className="group/worktree"
+															>
+																<div
+																	className="-translate-x-px flex h-7 min-w-0 w-full items-center gap-2 overflow-hidden rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground text-sm"
 																	data-active={
 																		selectedWorktreeId === worktree.id
 																	}
-																	className="-translate-x-px flex h-7 min-w-0 w-full items-center gap-2 overflow-hidden rounded-lg px-2 text-sidebar-foreground outline-hidden ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground text-sm"
 																>
-																	<GitBranch className="size-4 shrink-0" />
-																	<span className="truncate">
-																		{worktree.branch}
-																	</span>
-																</button>
+																	<button
+																		type="button"
+																		onClick={() => onViewChanges(worktree)}
+																		className="flex flex-1 min-w-0 items-center gap-2 px-2 h-full outline-hidden ring-sidebar-ring focus-visible:ring-2"
+																	>
+																		<GitBranch className="size-4 shrink-0" />
+																		<span className="truncate">
+																			{worktree.branch}
+																		</span>
+																	</button>
+																	<button
+																		type="button"
+																		className="size-5 shrink-0 mr-1 flex items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/worktree:opacity-100 hover:bg-foreground/10"
+																		onClick={(e) =>
+																			handleArchiveClick(worktree, e)
+																		}
+																		title="Archive worktree"
+																	>
+																		<Archive className="size-3.5" />
+																	</button>
+																</div>
 															</SidebarMenuSubItem>
 														))}
 													</SidebarMenuSub>
@@ -213,6 +293,28 @@ export function Sidebar({
 					</SidebarGroup>
 				</SidebarContent>
 			</SidebarRoot>
+
+			<AlertDialog
+				open={showConfirmDialog}
+				onOpenChange={(open) => !open && setArchiveTarget(null)}
+			>
+				<AlertDialogPopup>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Archive {archiveFolderName}</AlertDialogTitle>
+						<AlertDialogDescription>
+							This worktree has uncommitted changes. Archiving will commit all
+							changes with a "WIP" message before removing the worktree and
+							deleting the branch.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogClose render={<Button variant="outline" />}>
+							Cancel
+						</AlertDialogClose>
+						<Button onClick={handleConfirmArchive}>Commit and archive</Button>
+					</AlertDialogFooter>
+				</AlertDialogPopup>
+			</AlertDialog>
 		</SidebarProvider>
 	);
 }
