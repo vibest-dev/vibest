@@ -35,7 +35,14 @@ export const McpServerStatusSchema = z.object({
 /**
  * Represents the permission mode for tool usage in Claude Code
  */
-export const PermissionModeSchema = z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]);
+export const PermissionModeSchema = z.enum([
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "delegate",
+  "dontAsk",
+]);
 
 /**
  * Represents the behavior for a permission decision
@@ -50,6 +57,7 @@ const PermissionUpdateDestinationSchema = z.enum([
   "projectSettings",
   "localSettings",
   "session",
+  "cliArg",
 ]);
 
 /**
@@ -108,10 +116,12 @@ export const PermissionResultSchema = z.discriminatedUnion("behavior", [
     behavior: z.literal("allow"),
     updatedInput: z.record(z.string(), z.unknown()),
     updatedPermissions: z.array(PermissionUpdateSchema).optional(),
+    toolUseID: z.string().optional(),
   }),
   z.object({
     behavior: z.literal("deny"),
     message: z.string(),
     interrupt: z.boolean().optional(),
+    toolUseID: z.string().optional(),
   }),
 ]);

@@ -2,12 +2,12 @@
 
 import { cn } from "@vibest/ui/lib/utils";
 import {
+  Group,
   Panel,
-  PanelGroup,
-  PanelResizeHandle,
-  type PanelGroupProps,
+  Separator,
+  type GroupProps,
   type PanelProps,
-  type PanelResizeHandleProps,
+  type SeparatorProps,
 } from "react-resizable-panels";
 
 interface SplitterPanelConfig {
@@ -17,7 +17,7 @@ interface SplitterPanelConfig {
   collapsible?: boolean;
 }
 
-interface SplitterProps extends Omit<PanelGroupProps, "direction"> {
+interface SplitterProps extends Omit<GroupProps, "orientation"> {
   panels?: SplitterPanelConfig[];
   defaultSize?: number[];
   direction?: "horizontal" | "vertical";
@@ -31,8 +31,8 @@ function Splitter({
   ...props
 }: SplitterProps) {
   return (
-    <PanelGroup
-      direction={direction}
+    <Group
+      orientation={direction}
       className={cn("flex", direction === "vertical" ? "flex-col" : "flex-row", className)}
       {...props}
     />
@@ -47,13 +47,13 @@ function SplitterPanel({ className, id, ...props }: SplitterPanelProps) {
   return <Panel id={id} className={cn("", className)} {...props} />;
 }
 
-interface SplitterResizeTriggerProps extends PanelResizeHandleProps {
+interface SplitterResizeTriggerProps extends SeparatorProps {
   id?: string;
 }
 
 function SplitterResizeTrigger({ className, id: _id, ...props }: SplitterResizeTriggerProps) {
   return (
-    <PanelResizeHandle
+    <Separator
       className={cn(
         "bg-border relative w-0.5 transition-all duration-200 ease-in-out",
         "hover:bg-accent hover:shadow-accent/50 hover:z-10 hover:scale-x-[3] hover:shadow-lg",
