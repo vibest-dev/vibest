@@ -23,40 +23,43 @@ import {
 	SidebarProvider,
 	Sidebar as SidebarRoot,
 } from "@vibest/ui/components/sidebar";
-import { Spinner } from "@vibest/ui/components/spinner";
 import {
 	ChevronRight,
 	Download,
 	FolderGit2,
 	FolderPlus,
+	FolderSymlink,
 	GitBranch,
+	MoreHorizontal,
 	Plus,
 } from "lucide-react";
 import type { Repository, Worktree } from "../../types";
 
 interface SidebarProps {
 	repositories: Repository[];
-	worktreesByRepo: Record<string, Worktree[]>;
+	worktreesByRepository: Record<string, Worktree[]>;
 	selectedWorktreeId: string | null;
-	expandedRepos: Set<string>;
+	expandedRepositories: Set<string>;
 	isLoading: boolean;
-	onAddRepo: () => void;
-	onCloneRepo: () => void;
+	onAddRepository: () => void;
+	onCloneRepository: () => void;
 	onCreateWorktree: (repositoryId: string) => void;
-	onToggleRepo: (repoId: string, open: boolean) => void;
+	onCreateWorktreeFrom: (repositoryId: string) => void;
+	onToggleRepository: (repositoryId: string, open: boolean) => void;
 	onViewChanges: (worktree: Worktree) => void;
 }
 
 export function Sidebar({
 	repositories,
-	worktreesByRepo,
+	worktreesByRepository,
 	selectedWorktreeId,
-	expandedRepos,
+	expandedRepositories,
 	isLoading,
-	onAddRepo,
-	onCloneRepo,
+	onAddRepository,
+	onCloneRepository,
 	onCreateWorktree,
-	onToggleRepo,
+	onCreateWorktreeFrom,
+	onToggleRepository,
 	onViewChanges,
 }: SidebarProps) {
 	return (
@@ -81,11 +84,11 @@ export function Sidebar({
 									}
 								/>
 								<MenuPopup side="right" align="start">
-									<MenuItem onClick={onAddRepo}>
+									<MenuItem onClick={onAddRepository}>
 										<FolderPlus />
 										Add Local Repository
 									</MenuItem>
-									<MenuItem onClick={onCloneRepo}>
+									<MenuItem onClick={onCloneRepository}>
 										<Download />
 										Clone from URL
 									</MenuItem>
@@ -102,16 +105,18 @@ export function Sidebar({
 									</p>
 								</div>
 							) : (
-								repositories.map((repo) => {
-									const worktrees = worktreesByRepo[repo.id] ?? [];
+								repositories.map((repository) => {
+									const worktrees = worktreesByRepository[repository.id] ?? [];
 									const hasWorktrees = worktrees.length > 0;
 
 									return (
 										<Collapsible
-									key={repo.id}
-									open={expandedRepos.has(repo.id)}
-									onOpenChange={(open) => onToggleRepo(repo.id, open)}
-								>
+											key={repository.id}
+											open={expandedRepositories.has(repository.id)}
+											onOpenChange={(open) =>
+												onToggleRepository(repository.id, open)
+											}
+										>
 											<SidebarMenuItem>
 												<CollapsibleTrigger
 													disabled={!hasWorktrees}
@@ -122,30 +127,60 @@ export function Sidebar({
 															<FolderGit2
 																className={
 																	hasWorktrees
-																		? "size-4 transition-opacity duration-150 group-hover/menu-item:opacity-0"
+																		? "size-4 absolute inset-0 transition-all duration-200 ease-out group-hover/menu-item:opacity-0 group-hover/menu-item:scale-75"
 																		: "size-4"
 																}
 															/>
 															{hasWorktrees && (
-																<ChevronRight className="size-4 absolute inset-0 opacity-0 transition-all duration-150 group-hover/menu-item:opacity-100 [[data-panel-open]_&]:rotate-90" />
+																<ChevronRight className="size-4 absolute inset-0 opacity-0 scale-75 transition-all duration-200 ease-out group-hover/menu-item:opacity-100 group-hover/menu-item:scale-100 [[data-panel-open]_&]:rotate-90" />
 															)}
 														</span>
 														<div className="flex flex-col items-start min-w-0 flex-1">
-															<span className="truncate w-full">{repo.name}</span>
+															<span className="truncate w-full">
+																{repository.name}
+															</span>
 															<span className="truncate w-full text-xs text-muted-foreground font-normal">
-																{repo.path?.replace(/^\/Users\/[^/]+/, "~") ?? ""}
+																{repository.path?.replace(
+																	/^\/Users\/[^/]+/,
+																	"~",
+																) ?? ""}
 															</span>
 														</div>
-														<button
-															type="button"
-															className="shrink-0 size-5 flex items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent"
-															onClick={(e) => {
-																e.stopPropagation();
-																onCreateWorktree(repo.id);
-															}}
-														>
-															<Plus className="size-4" />
-														</button>
+														<div className="shrink-0 flex items-center gap-0.5">
+															<button
+																type="button"
+																className="size-5 flex items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	onCreateWorktree(repository.id);
+																}}
+															>
+																<Plus className="size-4" />
+															</button>
+															<Menu>
+																<MenuTrigger
+																	render={
+																		<button
+																			type="button"
+																			className="size-5 flex items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent data-[popup-open]:opacity-100 data-[popup-open]:bg-sidebar-accent"
+																			onClick={(e) => e.stopPropagation()}
+																		>
+																			<MoreHorizontal className="size-4" />
+																		</button>
+																	}
+																/>
+																<MenuPopup side="right" align="start">
+																	<MenuItem
+																		onClick={() =>
+																			onCreateWorktreeFrom(repository.id)
+																		}
+																	>
+																		<FolderSymlink />
+																		Create worktree from...
+																	</MenuItem>
+																</MenuPopup>
+															</Menu>
+														</div>
 													</SidebarMenuButton>
 												</CollapsibleTrigger>
 												<CollapsibleContent>

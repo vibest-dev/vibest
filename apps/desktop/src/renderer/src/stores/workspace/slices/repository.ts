@@ -1,66 +1,68 @@
 import type { StateCreator } from "zustand";
 import { client } from "../../../lib/client";
-import type { RepoSlice, WorkspaceStore } from "../types";
+import type { RepositorySlice, WorkspaceStore } from "../types";
 
-export const createRepoSlice: StateCreator<
+export const createRepositorySlice: StateCreator<
 	WorkspaceStore,
 	[],
 	[],
-	RepoSlice
+	RepositorySlice
 > = (set, get) => ({
-	repos: [],
-	isLoadingRepos: true,
+	repositories: [],
+	isLoadingRepositories: true,
 
-	loadRepos: async () => {
-		set({ isLoadingRepos: true, error: null });
+	loadRepositories: async () => {
+		set({ isLoadingRepositories: true, error: null });
 
 		try {
-			const { repositories, worktreesByRepo } = await client.workspace.list();
-			set({ repos: repositories, worktreesByRepo, isLoadingRepos: false });
+			const { repositories, worktreesByRepository } = await client.workspace.list();
+			set({
+				repositories,
+				worktreesByRepository,
+				isLoadingRepositories: false,
+			});
 		} catch (error) {
-			set({ isLoadingRepos: false, error: String(error) });
+			set({ isLoadingRepositories: false, error: String(error) });
 		}
 	},
 
-	addRepo: async (path: string, defaultBranch: string) => {
+	addRepository: async (path: string, defaultBranch: string) => {
 		set({ error: null });
 
 		try {
-			const repo = await client.workspace.addRepo({ path, defaultBranch });
+			await client.workspace.addRepository({ path, defaultBranch });
 			// Reload to get fresh data with worktrees
-			await get().loadRepos();
-			return repo;
+			await get().loadRepositories();
 		} catch (error) {
 			set({ error: String(error) });
 			throw error;
 		}
 	},
 
-	cloneRepo: async (url: string, targetPath: string) => {
+	cloneRepository: async (url: string, targetPath: string) => {
 		set({ error: null });
 
 		try {
-			const repo = await client.workspace.cloneRepo({ url, targetPath });
+			await client.workspace.cloneRepository({ url, targetPath });
 			// Reload to get fresh data with worktrees
-			await get().loadRepos();
-			return repo;
+			await get().loadRepositories();
 		} catch (error) {
 			set({ error: String(error) });
 			throw error;
 		}
 	},
 
-	removeRepo: async (repositoryId: string) => {
+	removeRepository: async (repositoryId: string) => {
 		set({ error: null });
 
 		try {
 			// Pessimistic: wait for API success before updating state
-			await client.workspace.removeRepo({ repositoryId });
+			await client.workspace.removeRepository({ repositoryId });
 
 			set((state) => {
 				// Get worktree paths to clean up status cache
 				const worktreePaths =
-					state.worktreesByRepo[repositoryId]?.map((w) => w.path) ?? [];
+					state.worktreesByRepository[repositoryId]?.map((w) => w.path) ?? [];
 
 				// Clean up status cache
 				const newStatusCache = { ...state.statusCache };
@@ -75,12 +77,12 @@ export const createRepoSlice: StateCreator<
 				delete newIsLoadingWorktrees[repositoryId];
 
 				// Clean up worktrees
-				const newWorktreesByRepo = { ...state.worktreesByRepo };
-				delete newWorktreesByRepo[repositoryId];
+				const newWorktreesByRepository = { ...state.worktreesByRepository };
+				delete newWorktreesByRepository[repositoryId];
 
 				return {
-					repos: state.repos.filter((r) => r.id !== repositoryId),
-					worktreesByRepo: newWorktreesByRepo,
+					repositories: state.repositories.filter((r) => r.id !== repositoryId),
+					worktreesByRepository: newWorktreesByRepository,
 					isLoadingWorktrees: newIsLoadingWorktrees,
 					selectedWorktree:
 						state.selectedWorktree?.repositoryId === repositoryId

@@ -18,7 +18,7 @@ export type Repository = z.infer<typeof RepositorySchema>;
 // Worktree
 export const WorktreeSchema = z.object({
 	id: z.string(), // Derived from path: pathToId(path)
-	repositoryId: z.string(), // Derived from repo path: pathToId(repoPath)
+	repositoryId: z.string(), // Derived from repository path: pathToId(repositoryPath)
 	path: z.string(), // Full path
 	branch: z.string(), // Branch name
 });

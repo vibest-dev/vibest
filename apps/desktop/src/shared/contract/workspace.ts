@@ -3,16 +3,16 @@ import { z } from "zod";
 import { RepositorySchema, WorktreeSchema } from "../types";
 
 export const workspaceContract = {
-	// List all repos and worktrees
+	// List all repositories and worktrees
 	list: oc.output(
 		z.object({
 			repositories: z.array(RepositorySchema),
-			worktreesByRepo: z.record(z.string(), z.array(WorktreeSchema)),
+			worktreesByRepository: z.record(z.string(), z.array(WorktreeSchema)),
 		}),
 	),
 
 	// Repository operations
-	addRepo: oc
+	addRepository: oc
 		.input(
 			z.object({
 				path: z.string(),
@@ -21,7 +21,7 @@ export const workspaceContract = {
 		)
 		.output(RepositorySchema),
 
-	cloneRepo: oc
+	cloneRepository: oc
 		.input(
 			z.object({
 				url: z.string(),
@@ -31,7 +31,7 @@ export const workspaceContract = {
 		)
 		.output(RepositorySchema),
 
-	removeRepo: oc.input(
+	removeRepository: oc.input(
 		z.object({
 			repositoryId: z.string(),
 		}),

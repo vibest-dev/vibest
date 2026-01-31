@@ -27,7 +27,7 @@ import type { Repository } from "../../types";
 
 interface CreateWorktreeDialogProps {
 	isOpen: boolean;
-	repo: Repository | null;
+	repository: Repository | null;
 	onClose: () => void;
 	onCreate: (params: {
 		repositoryId: string;
@@ -39,7 +39,7 @@ interface CreateWorktreeDialogProps {
 
 export function CreateWorktreeDialog({
 	isOpen,
-	repo,
+	repository,
 	onClose,
 	onCreate,
 }: CreateWorktreeDialogProps) {
@@ -54,7 +54,7 @@ export function CreateWorktreeDialog({
 		branches,
 		isLoading: isLoadingBranches,
 		refresh: refreshBranches,
-	} = useBranches(repo?.path ?? null);
+	} = useBranches(repository?.path ?? null);
 
 	useEffect(() => {
 		if (isOpen) {
@@ -77,7 +77,7 @@ export function CreateWorktreeDialog({
 		}
 	}, [branches]);
 
-	if (!repo) return null;
+	if (!repository) return null;
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -98,7 +98,7 @@ export function CreateWorktreeDialog({
 
 		try {
 			await onCreate({
-				repositoryId: repo.id,
+				repositoryId: repository.id,
 				branch,
 				isNewBranch,
 				baseBranch: isNewBranch ? baseBranch : undefined,
@@ -122,7 +122,7 @@ export function CreateWorktreeDialog({
 						<div>
 							<DialogTitle className="text-[15px]">Create Worktree</DialogTitle>
 							<DialogDescription className="text-[13px]">
-								{repo.name}
+								{repository.name}
 							</DialogDescription>
 						</div>
 					</div>

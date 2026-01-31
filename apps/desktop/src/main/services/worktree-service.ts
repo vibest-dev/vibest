@@ -256,9 +256,9 @@ export class WorktreeService {
 	}
 
 	async listWorktrees(
-		repoPath: string,
+		repositoryPath: string,
 	): Promise<Array<{ path: string; branch: string }>> {
-		const git = simpleGit(repoPath);
+		const git = simpleGit(repositoryPath);
 
 		try {
 			// Use git worktree list --porcelain for parseable output
@@ -283,8 +283,8 @@ export class WorktreeService {
 					}
 				}
 
-				// Skip the main worktree (repo path itself)
-				if (path && path !== repoPath) {
+				// Skip the main worktree (repository path itself)
+				if (path && path !== repositoryPath) {
 					worktrees.push({ path, branch });
 				}
 			}
@@ -297,13 +297,13 @@ export class WorktreeService {
 	}
 
 	async createWorktree(
-		repoPath: string,
+		repositoryPath: string,
 		worktreePath: string,
 		branch: string,
 		isNewBranch: boolean,
 		baseBranch?: string,
 	): Promise<void> {
-		const git = simpleGit(repoPath);
+		const git = simpleGit(repositoryPath);
 
 		if (isNewBranch) {
 			// Determine the base ref
@@ -335,11 +335,11 @@ export class WorktreeService {
 	}
 
 	async removeWorktree(
-		repoPath: string,
+		repositoryPath: string,
 		worktreePath: string,
 		force = false,
 	): Promise<void> {
-		const git = simpleGit(repoPath);
+		const git = simpleGit(repositoryPath);
 		const args = ["worktree", "remove", worktreePath];
 		if (force) {
 			args.push("--force");
@@ -349,11 +349,11 @@ export class WorktreeService {
 
 	async syncWorktreesWithStore(
 		repositoryId: string,
-		repoPath: string,
+		repositoryPath: string,
 		_repoName: string,
 	): Promise<Worktree[]> {
 		// Get actual worktrees from git
-		const gitWorktrees = await this.listWorktrees(repoPath);
+		const gitWorktrees = await this.listWorktrees(repositoryPath);
 
 		// Only include worktrees under our workspace directory
 		const workspaceBase = getWorktreeBasePath();
@@ -362,7 +362,7 @@ export class WorktreeService {
 		);
 
 		// Get stored worktrees
-		const storedWorktrees = this.store.getWorktreesByRepoId(repositoryId);
+		const storedWorktrees = this.store.getWorktreesByRepositoryId(repositoryId);
 
 		// Create a map of stored worktrees by path
 		const storedMap = new Map(storedWorktrees.map((w) => [w.path, w]));

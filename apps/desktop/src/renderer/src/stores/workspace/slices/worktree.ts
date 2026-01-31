@@ -9,7 +9,7 @@ export const createWorktreeSlice: StateCreator<
 	[],
 	WorktreeSlice
 > = (set, get) => ({
-	worktreesByRepo: {},
+	worktreesByRepository: {},
 	selectedWorktree: null,
 	isLoadingWorktrees: {},
 
@@ -20,10 +20,10 @@ export const createWorktreeSlice: StateCreator<
 			const worktree = await client.workspace.createWorktree(params);
 
 			set((state) => ({
-				worktreesByRepo: {
-					...state.worktreesByRepo,
+				worktreesByRepository: {
+					...state.worktreesByRepository,
 					[params.repositoryId]: [
-						...(state.worktreesByRepo[params.repositoryId] ?? []),
+						...(state.worktreesByRepository[params.repositoryId] ?? []),
 						worktree,
 					],
 				},
@@ -44,10 +44,10 @@ export const createWorktreeSlice: StateCreator<
 			});
 
 			set((state) => ({
-				worktreesByRepo: {
-					...state.worktreesByRepo,
+				worktreesByRepository: {
+					...state.worktreesByRepository,
 					[repositoryId]: [
-						...(state.worktreesByRepo[repositoryId] ?? []),
+						...(state.worktreesByRepository[repositoryId] ?? []),
 						worktree,
 					],
 				},
@@ -68,9 +68,9 @@ export const createWorktreeSlice: StateCreator<
 			set((state) => {
 				let removedPath: string | null = null;
 
-				const newWorktreesByRepo: Record<string, Worktree[]> = {};
+				const newWorktreesByRepository: Record<string, Worktree[]> = {};
 				for (const [repositoryId, worktrees] of Object.entries(
-					state.worktreesByRepo,
+					state.worktreesByRepository,
 				)) {
 					const filtered = worktrees.filter((w) => {
 						if (w.id === worktreeId) {
@@ -79,7 +79,7 @@ export const createWorktreeSlice: StateCreator<
 						}
 						return true;
 					});
-					newWorktreesByRepo[repositoryId] = filtered;
+					newWorktreesByRepository[repositoryId] = filtered;
 				}
 
 				const newStatusCache = { ...state.statusCache };
@@ -90,7 +90,7 @@ export const createWorktreeSlice: StateCreator<
 				}
 
 				return {
-					worktreesByRepo: newWorktreesByRepo,
+					worktreesByRepository: newWorktreesByRepository,
 					selectedWorktree:
 						state.selectedWorktree?.id === worktreeId
 							? null

@@ -17,30 +17,30 @@ export class StoreService {
 
 	// Repository operations
 	getRepositories(): Repository[] {
-		const repos = this.store.get("repositories", []);
-		// Migrate old repos without defaultBranch
-		return repos.map((r) => ({
+		const repositories = this.store.get("repositories", []);
+		// Migrate old repositories without defaultBranch
+		return repositories.map((r) => ({
 			...r,
 			defaultBranch: r.defaultBranch || "main",
 		}));
 	}
 
 	getRepository(id: string): Repository | undefined {
-		const repos = this.getRepositories();
-		return repos.find((r) => r.id === id);
+		const repositories = this.getRepositories();
+		return repositories.find((r) => r.id === id);
 	}
 
-	addRepository(repo: Repository): void {
-		const repos = this.getRepositories();
-		repos.push(repo);
-		this.store.set("repositories", repos);
+	addRepository(repository: Repository): void {
+		const repositories = this.getRepositories();
+		repositories.push(repository);
+		this.store.set("repositories", repositories);
 	}
 
 	removeRepository(id: string): void {
-		const repos = this.getRepositories();
+		const repositories = this.getRepositories();
 		this.store.set(
 			"repositories",
-			repos.filter((r) => r.id !== id),
+			repositories.filter((r) => r.id !== id),
 		);
 	}
 
@@ -49,7 +49,7 @@ export class StoreService {
 		return this.store.get("worktrees", []);
 	}
 
-	getWorktreesByRepoId(repositoryId: string): Worktree[] {
+	getWorktreesByRepositoryId(repositoryId: string): Worktree[] {
 		const worktrees = this.getWorktrees();
 		return worktrees.filter((w) => w.repositoryId === repositoryId);
 	}
@@ -73,7 +73,7 @@ export class StoreService {
 		);
 	}
 
-	removeWorktreesByRepoId(repositoryId: string): void {
+	removeWorktreesByRepositoryId(repositoryId: string): void {
 		const worktrees = this.getWorktrees();
 		this.store.set(
 			"worktrees",
@@ -83,7 +83,7 @@ export class StoreService {
 
 	// Get used place names for a repository
 	getUsedPlaceNames(repositoryId: string): string[] {
-		const worktrees = this.getWorktreesByRepoId(repositoryId);
+		const worktrees = this.getWorktreesByRepositoryId(repositoryId);
 		return worktrees.map((w) => {
 			const parts = w.path.split("/");
 			return parts[parts.length - 1];

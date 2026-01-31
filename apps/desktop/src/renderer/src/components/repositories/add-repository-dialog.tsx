@@ -71,12 +71,12 @@ export function AddRepositoryDialog({
 	}, [detectedDefault, branchItems, selectedBranch]);
 
 	const loadBranches = useCallback(
-		async (repoPath: string, isRefresh = false) => {
+		async (repositoryPath: string, isRefresh = false) => {
 			setIsLoadingBranches(true);
 			try {
 				const [branchList, defaultBranch] = await Promise.all([
-					client.workspace.getBranches({ path: repoPath }),
-					client.workspace.getDefaultBranch({ path: repoPath }),
+					client.workspace.getBranches({ path: repositoryPath }),
+					client.workspace.getDefaultBranch({ path: repositoryPath }),
 				]);
 				setBranches(branchList);
 				if (!isRefresh) {
@@ -232,7 +232,9 @@ export function AddRepositoryDialog({
 						</DialogClose>
 						<Button
 							type="submit"
-							disabled={isLoading || (branchItems.length === 0 && isLoadingBranches)}
+							disabled={
+								isLoading || (branchItems.length === 0 && isLoadingBranches)
+							}
 							className="text-[13px]"
 						>
 							{isLoading && <Spinner className="h-3.5 w-3.5" />}

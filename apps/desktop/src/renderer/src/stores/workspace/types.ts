@@ -1,17 +1,18 @@
 import type { GitStatus, Repository, Worktree } from "../../../../shared/types";
 
-export interface RepoSlice {
-	repos: Repository[];
-	isLoadingRepos: boolean;
-	loadRepos: () => Promise<void>;
-	addRepo: (path: string, defaultBranch: string) => Promise<void>;
-	cloneRepo: (url: string, targetPath: string) => Promise<void>;
-	removeRepo: (repositoryId: string) => Promise<void>;
+export interface RepositorySlice {
+	repositories: Repository[];
+	isLoadingRepositories: boolean;
+	loadRepositories: () => Promise<void>;
+	addRepository: (path: string, defaultBranch: string) => Promise<void>;
+	cloneRepository: (url: string, targetPath: string) => Promise<void>;
+	removeRepository: (repositoryId: string) => Promise<void>;
 }
 
 export interface WorktreeSlice {
-	worktreesByRepo: Record<string, Worktree[]>;
+	worktreesByRepository: Record<string, Worktree[]>;
 	selectedWorktree: Worktree | null;
+	isLoadingWorktrees: Record<string, boolean>;
 	createWorktree: (params: {
 		repositoryId: string;
 		branch: string;
@@ -28,11 +29,11 @@ export interface GitStatusSlice {
 	statusCache: Record<string, GitStatus>;
 	isLoadingStatus: Record<string, boolean>;
 	loadStatus: (path: string) => Promise<void>;
-	fetchRepo: (path: string) => Promise<void>;
-	pullRepo: (path: string) => Promise<void>;
+	fetchRepository: (path: string) => Promise<void>;
+	pullRepository: (path: string) => Promise<void>;
 }
 
-export type WorkspaceStore = RepoSlice &
+export type WorkspaceStore = RepositorySlice &
 	WorktreeSlice &
 	GitStatusSlice & {
 		error: string | null;

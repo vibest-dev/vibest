@@ -13,51 +13,58 @@ import { useWorkspaceStore } from "./stores";
 import type { Worktree } from "./types";
 
 function App(): React.JSX.Element {
-	const repos = useWorkspaceStore((s) => s.repos);
-	const worktreesByRepo = useWorkspaceStore((s) => s.worktreesByRepo);
-	const isLoadingRepos = useWorkspaceStore((s) => s.isLoadingRepos);
+	const repositories = useWorkspaceStore((s) => s.repositories);
+	const worktreesByRepository = useWorkspaceStore(
+		(s) => s.worktreesByRepository,
+	);
+	const isLoadingRepositories = useWorkspaceStore(
+		(s) => s.isLoadingRepositories,
+	);
 	const error = useWorkspaceStore((s) => s.error);
 
-	const loadRepos = useWorkspaceStore((s) => s.loadRepos);
-	const addRepo = useWorkspaceStore((s) => s.addRepo);
-	const cloneRepo = useWorkspaceStore((s) => s.cloneRepo);
-	const removeRepo = useWorkspaceStore((s) => s.removeRepo);
+	const loadRepositories = useWorkspaceStore((s) => s.loadRepositories);
+	const addRepository = useWorkspaceStore((s) => s.addRepository);
+	const cloneRepository = useWorkspaceStore((s) => s.cloneRepository);
+	const removeRepository = useWorkspaceStore((s) => s.removeRepository);
 	const createWorktree = useWorkspaceStore((s) => s.createWorktree);
 	const quickCreateWorktree = useWorkspaceStore((s) => s.quickCreateWorktree);
 	const clearError = useWorkspaceStore((s) => s.clearError);
 
-	const [addRepoPath, setAddRepoPath] = useState<string | null>(null);
+	const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(
+		null,
+	);
 	const [showCloneDialog, setShowCloneDialog] = useState(false);
 	const [showCreateWorktreeDialog, setShowCreateWorktreeDialog] =
 		useState(false);
-	const [createWorktreeRepoId, setCreateWorktreeRepoId] = useState<
+	const [createWorktreeRepositoryId, setCreateWorktreeRepositoryId] = useState<
 		string | null
 	>(null);
 	const [diffWorktree, setDiffWorktree] = useState<Worktree | null>(null);
-	const [expandedRepos, setExpandedRepos] = useState<Set<string> | null>(null);
+	const [expandedRepositories, setExpandedRepositories] =
+		useState<Set<string> | null>(null);
 
 	// Load repositories on mount
 	useEffect(() => {
-		loadRepos();
-	}, [loadRepos]);
+		loadRepositories();
+	}, [loadRepositories]);
 
-	// Initialize expanded repos - expand all repos by default
+	// Initialize expanded repositories - expand all repositories by default
 	useEffect(() => {
-		if (repos.length > 0 && expandedRepos === null) {
-			setExpandedRepos(new Set(repos.map((r) => r.id)));
+		if (repositories.length > 0 && expandedRepositories === null) {
+			setExpandedRepositories(new Set(repositories.map((r) => r.id)));
 		}
-	}, [repos, expandedRepos]);
+	}, [repositories, expandedRepositories]);
 
-	// Get selected repo from diff worktree
-	const selectedRepo = diffWorktree
-		? (repos.find((r) => r.id === diffWorktree.repositoryId) ?? null)
+	// Get selected repository from diff worktree
+	const selectedRepository = diffWorktree
+		? (repositories.find((r) => r.id === diffWorktree.repositoryId) ?? null)
 		: null;
 
-	const handleAddRepo = async () => {
+	const handleAddRepository = async () => {
 		try {
 			const selectedPath = await client.fs.selectDir();
 			if (selectedPath) {
-				setAddRepoPath(selectedPath);
+				setAddRepositoryPath(selectedPath);
 			}
 		} catch (err) {
 			console.error("Failed to select directory:", err);
@@ -67,45 +74,59 @@ function App(): React.JSX.Element {
 	const handleCreateWorktree = async (repositoryId: string) => {
 		// Quick create worktree directly without dialog
 		await quickCreateWorktree(repositoryId);
-		// Expand the repo after creating worktree
-		setExpandedRepos((prev) => new Set(prev ?? []).add(repositoryId));
+		// Expand the repository after creating worktree
+		setExpandedRepositories((prev) => new Set(prev ?? []).add(repositoryId));
 	};
 
-	const handleToggleRepo = useCallback((repoId: string, open: boolean) => {
-		setExpandedRepos((prev) => {
-			const next = new Set(prev ?? []);
-			if (open) {
-				next.add(repoId);
-			} else {
-				next.delete(repoId);
-			}
-			return next;
-		});
-	}, []);
+	const handleToggleRepository = useCallback(
+		(repositoryId: string, open: boolean) => {
+			setExpandedRepositories((prev) => {
+				const next = new Set(prev ?? []);
+				if (open) {
+					next.add(repositoryId);
+				} else {
+					next.delete(repositoryId);
+				}
+				return next;
+			});
+		},
+		[],
+	);
+
+	const handleCreateWorktreeFrom = useCallback(
+		(repositoryId: string) => {
+			// TODO: Implement create workspace from repository
+			console.log("Create workspace from repository:", repositoryId);
+		},
+		[],
+	);
 
 	const handleRefresh = () => {
-		loadRepos();
+		loadRepositories();
 	};
 
 	return (
 		<div className="flex h-screen bg-background text-foreground">
 			<Sidebar
-				repositories={repos}
-				worktreesByRepo={worktreesByRepo}
+				repositories={repositories}
+				worktreesByRepository={worktreesByRepository}
 				selectedWorktreeId={diffWorktree?.id ?? null}
-				expandedRepos={expandedRepos ?? new Set(repos.map((r) => r.id))}
-				isLoading={isLoadingRepos}
-				onAddRepo={handleAddRepo}
-				onCloneRepo={() => setShowCloneDialog(true)}
+				expandedRepositories={
+					expandedRepositories ?? new Set(repositories.map((r) => r.id))
+				}
+				isLoading={isLoadingRepositories}
+				onAddRepository={handleAddRepository}
+				onCloneRepository={() => setShowCloneDialog(true)}
 				onCreateWorktree={handleCreateWorktree}
-				onToggleRepo={handleToggleRepo}
+				onCreateWorktreeFrom={handleCreateWorktreeFrom}
+				onToggleRepository={handleToggleRepository}
 				onViewChanges={setDiffWorktree}
 			/>
 
 			<div className="flex-1 flex flex-col min-w-0">
 				<Header
-					repo={selectedRepo ?? null}
-					onRemoveRepo={removeRepo}
+					repository={selectedRepository ?? null}
+					onRemoveRepository={removeRepository}
 					onRefresh={handleRefresh}
 				/>
 
@@ -148,28 +169,29 @@ function App(): React.JSX.Element {
 			)}
 
 			<AddRepositoryDialog
-				isOpen={addRepoPath !== null}
-				path={addRepoPath}
-				onClose={() => setAddRepoPath(null)}
-				onAdd={addRepo}
+				isOpen={addRepositoryPath !== null}
+				path={addRepositoryPath}
+				onClose={() => setAddRepositoryPath(null)}
+				onAdd={addRepository}
 			/>
 
 			<CloneRepositoryDialog
 				isOpen={showCloneDialog}
 				onClose={() => setShowCloneDialog(false)}
-				onClone={cloneRepo}
+				onClone={cloneRepository}
 			/>
 
 			<CreateWorktreeDialog
 				isOpen={showCreateWorktreeDialog}
-				repo={
-					createWorktreeRepoId
-						? (repos.find((r) => r.id === createWorktreeRepoId) ?? null)
+				repository={
+					createWorktreeRepositoryId
+						? (repositories.find((r) => r.id === createWorktreeRepositoryId) ??
+							null)
 						: null
 				}
 				onClose={() => {
 					setShowCreateWorktreeDialog(false);
-					setCreateWorktreeRepoId(null);
+					setCreateWorktreeRepositoryId(null);
 				}}
 				onCreate={createWorktree}
 			/>

@@ -31,7 +31,7 @@ export const createGitStatusSlice: StateCreator<
 		}
 	},
 
-	fetchRepo: async (path: string) => {
+	fetchRepository: async (path: string) => {
 		set({ error: null });
 
 		try {
@@ -43,7 +43,7 @@ export const createGitStatusSlice: StateCreator<
 		}
 	},
 
-	pullRepo: async (path: string) => {
+	pullRepository: async (path: string) => {
 		set({ error: null });
 
 		try {

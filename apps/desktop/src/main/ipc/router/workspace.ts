@@ -2,30 +2,34 @@ import { implement } from "@orpc/server";
 import { exec } from "child_process";
 import { basename } from "path";
 import { workspaceContract } from "../../../shared/contract/workspace";
-import { pathToId, type Repository, type Worktree } from "../../../shared/types";
+import {
+	pathToId,
+	type Repository,
+	type Worktree,
+} from "../../../shared/types";
 import type { AppContext } from "../../app";
 
 const os = implement(workspaceContract).$context<AppContext>();
 
-// List all repos and worktrees
+// List all repositories and worktrees
 export const list = os.list.handler(async ({ context: { app } }) => {
 	const repositories = app.store.getRepositories();
-	const worktreesByRepo: Record<string, Worktree[]> = {};
+	const worktreesByRepository: Record<string, Worktree[]> = {};
 
-	for (const repo of repositories) {
-		worktreesByRepo[repo.id] = app.store.getWorktreesByRepoId(repo.id);
+	for (const repository of repositories) {
+		worktreesByRepository[repository.id] = app.store.getWorktreesByRepositoryId(repository.id);
 	}
 
-	return { repositories, worktreesByRepo };
+	return { repositories, worktreesByRepository };
 });
 
 // Repository operations
-export const addRepo = os.addRepo.handler(
+export const addRepository = os.addRepository.handler(
 	async ({ input, context: { app } }) => {
 		const { path, defaultBranch } = input;
 
-		const isRepo = await app.git.isGitRepository(path);
-		if (!isRepo) {
+		const isRepository = await app.git.isGitRepository(path);
+		if (!isRepository) {
 			throw new Error("Not a Git repository");
 		}
 
@@ -34,21 +38,21 @@ export const addRepo = os.addRepo.handler(
 			throw new Error("Repository already added");
 		}
 
-		const repo: Repository = {
+		const repository: Repository = {
 			id: pathToId(path),
 			name: basename(path),
 			path,
 			defaultBranch,
 		};
 
-		app.store.addRepository(repo);
-		await app.worktree.syncWorktreesWithStore(repo.id, repo.path, repo.name);
+		app.store.addRepository(repository);
+		await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-		return repo;
+		return repository;
 	},
 );
 
-export const cloneRepo = os.cloneRepo.handler(
+export const cloneRepository = os.cloneRepository.handler(
 	async ({ input, context: { app } }) => {
 		const { url, targetPath, defaultBranch } = input;
 
@@ -57,25 +61,25 @@ export const cloneRepo = os.cloneRepo.handler(
 		const detectedBranch =
 			defaultBranch || (await app.git.getDefaultBranch(targetPath));
 
-		const repo: Repository = {
+		const repository: Repository = {
 			id: pathToId(targetPath),
 			name: basename(targetPath),
 			path: targetPath,
 			defaultBranch: detectedBranch,
 		};
 
-		app.store.addRepository(repo);
-		await app.worktree.syncWorktreesWithStore(repo.id, repo.path, repo.name);
+		app.store.addRepository(repository);
+		await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-		return repo;
+		return repository;
 	},
 );
 
-export const removeRepo = os.removeRepo.handler(
+export const removeRepository = os.removeRepository.handler(
 	async ({ input, context: { app } }) => {
 		const { repositoryId } = input;
 
-		app.store.removeWorktreesByRepoId(repositoryId);
+		app.store.removeWorktreesByRepositoryId(repositoryId);
 		app.store.removeRepository(repositoryId);
 	},
 );
@@ -84,8 +88,8 @@ export const getDefaultBranch = os.getDefaultBranch.handler(
 	async ({ input, context: { app } }) => {
 		const { path } = input;
 
-		const isRepo = await app.git.isGitRepository(path);
-		if (!isRepo) {
+		const isRepository = await app.git.isGitRepository(path);
+		if (!isRepository) {
 			throw new Error("Not a Git repository");
 		}
 
@@ -97,8 +101,8 @@ export const getBranches = os.getBranches.handler(
 	async ({ input, context: { app } }) => {
 		const { path } = input;
 
-		const isRepo = await app.git.isGitRepository(path);
-		if (!isRepo) {
+		const isRepository = await app.git.isGitRepository(path);
+		if (!isRepository) {
 			throw new Error("Not a Git repository");
 		}
 
@@ -111,19 +115,19 @@ export const createWorktree = os.createWorktree.handler(
 	async ({ input, context: { app } }) => {
 		const { repositoryId, branch, isNewBranch, baseBranch } = input;
 
-		const repo = app.store.getRepository(repositoryId);
-		if (!repo) {
+		const repository = app.store.getRepository(repositoryId);
+		if (!repository) {
 			throw new Error("Repository not found");
 		}
 
 		const usedNames = app.store.getUsedPlaceNames(repositoryId);
 		const { path: worktreePath } = app.worktree.generateWorktreePath(
-			repo.name,
+			repository.name,
 			usedNames,
 		);
 
 		await app.worktree.createWorktree(
-			repo.path,
+			repository.path,
 			worktreePath,
 			branch,
 			isNewBranch,
@@ -147,13 +151,13 @@ export const quickCreateWorktree = os.quickCreateWorktree.handler(
 	async ({ input, context: { app } }) => {
 		const { repositoryId } = input;
 
-		const repo = app.store.getRepository(repositoryId);
-		if (!repo) {
+		const repository = app.store.getRepository(repositoryId);
+		if (!repository) {
 			throw new Error("Repository not found");
 		}
 
 		try {
-			const gitUsername = await app.git.getGitUserName(repo.path);
+			const gitUsername = await app.git.getGitUserName(repository.path);
 			const sanitizedUsername = gitUsername
 				.toLowerCase()
 				.replace(/[^a-z0-9-]/g, "-")
@@ -162,16 +166,16 @@ export const quickCreateWorktree = os.quickCreateWorktree.handler(
 
 			const usedNames = app.store.getUsedPlaceNames(repositoryId);
 			const { path: worktreePath, placeName } =
-				app.worktree.generateWorktreePath(repo.name, usedNames);
+				app.worktree.generateWorktreePath(repository.name, usedNames);
 
 			const branch = `${sanitizedUsername || "user"}/${placeName}`;
 
 			await app.worktree.createWorktree(
-				repo.path,
+				repository.path,
 				worktreePath,
 				branch,
 				true,
-				repo.defaultBranch,
+				repository.defaultBranch,
 			);
 
 			const worktree: Worktree = {
@@ -200,12 +204,12 @@ export const removeWorktree = os.removeWorktree.handler(
 			throw new Error("Worktree not found");
 		}
 
-		const repo = app.store.getRepository(worktree.repositoryId);
-		if (!repo) {
+		const repository = app.store.getRepository(worktree.repositoryId);
+		if (!repository) {
 			throw new Error("Repository not found");
 		}
 
-		await app.worktree.removeWorktree(repo.path, worktree.path, force);
+		await app.worktree.removeWorktree(repository.path, worktree.path, force);
 		app.store.removeWorktree(worktreeId);
 	},
 );
@@ -233,9 +237,9 @@ export const openWorktree = os.openWorktree.handler(
 
 export const workspaceRouter = os.router({
 	list,
-	addRepo,
-	cloneRepo,
-	removeRepo,
+	addRepository,
+	cloneRepository,
+	removeRepository,
 	getDefaultBranch,
 	getBranches,
 	createWorktree,

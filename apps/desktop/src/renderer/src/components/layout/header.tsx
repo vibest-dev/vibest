@@ -18,13 +18,17 @@ import { client } from "../../lib/client";
 import type { Repository } from "../../types";
 
 interface HeaderProps {
-	repo: Repository | null;
-	onRemoveRepo: (repositoryId: string) => void;
+	repository: Repository | null;
+	onRemoveRepository: (repositoryId: string) => void;
 	onRefresh: () => void;
 }
 
-export function Header({ repo, onRemoveRepo, onRefresh }: HeaderProps) {
-	if (!repo) {
+export function Header({
+	repository,
+	onRemoveRepository,
+	onRefresh,
+}: HeaderProps) {
+	if (!repository) {
 		return (
 			<header className="h-12 border-b border-border bg-background/50 backdrop-blur-sm flex items-center px-5 app-drag-region">
 				<span className="text-[13px] text-muted-foreground">
@@ -35,11 +39,11 @@ export function Header({ repo, onRemoveRepo, onRefresh }: HeaderProps) {
 	}
 
 	const handleOpenFinder = () => {
-		client.fs.openFinder({ path: repo.path });
+		client.fs.openFinder({ path: repository.path });
 	};
 
 	const handleOpenTerminal = () => {
-		client.fs.openTerminal({ path: repo.path });
+		client.fs.openTerminal({ path: repository.path });
 	};
 
 	return (
@@ -50,10 +54,10 @@ export function Header({ repo, onRemoveRepo, onRefresh }: HeaderProps) {
 				</div>
 				<div className="min-w-0">
 					<h1 className="text-[13px] font-semibold text-foreground truncate leading-tight">
-						{repo.name}
+						{repository.name}
 					</h1>
 					<p className="text-[11px] text-muted-foreground truncate max-w-sm font-mono leading-tight">
-						{repo.path.replace(/^\/Users\/[^/]+/, "~")}
+						{repository.path.replace(/^\/Users\/[^/]+/, "~")}
 					</p>
 				</div>
 			</div>
@@ -104,7 +108,7 @@ export function Header({ repo, onRemoveRepo, onRefresh }: HeaderProps) {
 						<MenuSeparator />
 						<MenuItem
 							variant="destructive"
-							onClick={() => onRemoveRepo(repo.id)}
+							onClick={() => onRemoveRepository(repository.id)}
 						>
 							<Trash2 className="h-4 w-4" />
 							Remove Repository
