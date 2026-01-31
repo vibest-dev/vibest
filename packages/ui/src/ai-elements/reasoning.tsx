@@ -95,7 +95,7 @@ export const Reasoning = memo(
 			>
 				<Collapsible
 					className={cn("not-prose mb-4", className)}
-					onOpenChange={(details) => setIsOpen(details.open)}
+					onOpenChange={setIsOpen}
 					open={isOpen}
 					{...props}
 				>

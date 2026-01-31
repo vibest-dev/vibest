@@ -3,7 +3,6 @@
 import {
 	Collapsible,
 	CollapsibleContent,
-	type CollapsibleProps,
 	CollapsibleTrigger,
 } from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
@@ -11,13 +10,12 @@ import type { LucideIcon } from "lucide-react";
 import { SquareMinusIcon, SquarePlusIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
-export type ToolProps = CollapsibleProps;
+export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => {
 	return (
 		<Collapsible
 			className={cn("not-prose w-full py-1", className)}
-			lazyMount
 			{...props}
 		/>
 	);
@@ -33,17 +31,16 @@ export const ToolHeader = ({
 	className,
 	icon: Icon,
 	children,
-	...props
 }: ToolHeaderProps) => (
-	<CollapsibleTrigger asChild className={cn("group", className)} {...props}>
+	<CollapsibleTrigger className={cn("group", className)}>
 		<div className="flex items-center gap-2 w-full cursor-pointer text-muted-foreground hover:text-foreground overflow-hidden">
 			<span className="relative">
 				{Icon && (
-					<Icon className="size-4 group-data-[state=open]:opacity-0 group-hover:opacity-0" />
+					<Icon className="size-4 group-data-[open]:opacity-0 group-hover:opacity-0" />
 				)}
-				<div className="size-4 absolute inset-0 opacity-0 group-hover:opacity-100 group-data-[state=open]:opacity-100">
-					<SquarePlusIcon className="size-4 group-data-[state=open]:hidden" />
-					<SquareMinusIcon className="size-4 hidden group-data-[state=open]:block" />
+				<div className="size-4 absolute inset-0 opacity-0 group-hover:opacity-100 group-data-[open]:opacity-100">
+					<SquarePlusIcon className="size-4 group-data-[open]:hidden" />
+					<SquareMinusIcon className="size-4 hidden group-data-[open]:block" />
 				</div>
 			</span>
 			<span className="truncate text-sm">{children}</span>
