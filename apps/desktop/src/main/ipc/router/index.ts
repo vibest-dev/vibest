@@ -5,14 +5,16 @@ import type { AppContext } from "../../app";
 import { contract } from "../../../shared/contract";
 import { fsRouter } from "./fs";
 import { gitRouter } from "./git";
+import { terminalRouter } from "./terminal";
 import { workspaceRouter } from "./workspace";
 
 const os = implement(contract).$context<AppContext>();
 
 export const router = os.router({
-  workspace: workspaceRouter,
-  git: gitRouter,
-  fs: fsRouter,
+	workspace: workspaceRouter,
+	git: gitRouter,
+	fs: fsRouter,
+	terminal: terminalRouter,
 });
 
 export type Router = typeof router;
