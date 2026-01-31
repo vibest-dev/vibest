@@ -1,6 +1,7 @@
 import Store from "electron-store";
+import { existsSync } from "node:fs";
 
-import type { Repository, StoreSchema, Worktree } from "../../shared/types";
+import type { Repository, StoreSchema, StoredWorktree, Worktree } from "../../shared/types";
 
 export class StoreService {
   private store: Store<StoreSchema>;
@@ -46,21 +47,29 @@ export class StoreService {
   }
 
   // Worktree operations
-  getWorktrees(): Worktree[] {
+  getWorktrees(): StoredWorktree[] {
     return this.store.get("worktrees", []);
   }
 
-  getWorktreesByRepositoryId(repositoryId: string): Worktree[] {
+  getWorktreesByRepositoryId(repositoryId: string): StoredWorktree[] {
     const worktrees = this.getWorktrees();
     return worktrees.filter((w) => w.repositoryId === repositoryId);
   }
 
-  getWorktree(id: string): Worktree | undefined {
+  getWorktreesWithExistence(repositoryId: string): Worktree[] {
+    const worktrees = this.getWorktreesByRepositoryId(repositoryId);
+    return worktrees.map((w) => ({
+      ...w,
+      exists: existsSync(w.path),
+    }));
+  }
+
+  getWorktree(id: string): StoredWorktree | undefined {
     const worktrees = this.getWorktrees();
     return worktrees.find((w) => w.id === id);
   }
 
-  addWorktree(worktree: Worktree): void {
+  addWorktree(worktree: StoredWorktree): void {
     const worktrees = this.getWorktrees();
     worktrees.push(worktree);
     this.store.set("worktrees", worktrees);

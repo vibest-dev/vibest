@@ -1,11 +1,12 @@
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import simpleGit from "simple-git";
 
 import type { GitService } from "./git-service";
 import type { StoreService } from "./store-service";
 
-import { pathToId, type Worktree } from "../../shared/types";
+import { pathToId, type StoredWorktree } from "../../shared/types";
 
 // Place names pool (200+ cities)
 const PLACE_NAMES = [
@@ -340,11 +341,37 @@ export class WorktreeService {
     await git.raw(args);
   }
 
+  async safeRemoveWorktree(
+    repositoryPath: string,
+    worktreePath: string,
+    force = false,
+  ): Promise<void> {
+    if (existsSync(worktreePath)) {
+      await this.removeWorktree(repositoryPath, worktreePath, force);
+    }
+  }
+
+  async safeArchiveWorktree(
+    repositoryPath: string,
+    worktreePath: string,
+    branch: string,
+    commitFirst: boolean,
+    gitService: GitService,
+  ): Promise<void> {
+    if (existsSync(worktreePath)) {
+      if (commitFirst) {
+        await gitService.commitAll(worktreePath, "WIP: Auto-commit before archive");
+      }
+      await this.removeWorktree(repositoryPath, worktreePath, true);
+      await gitService.deleteBranch(repositoryPath, branch);
+    }
+  }
+
   async syncWorktreesWithStore(
     repositoryId: string,
     repositoryPath: string,
     _repoName: string,
-  ): Promise<Worktree[]> {
+  ): Promise<StoredWorktree[]> {
     // Get actual worktrees from git
     const gitWorktrees = await this.listWorktrees(repositoryPath);
 
@@ -359,7 +386,7 @@ export class WorktreeService {
     const storedMap = new Map(storedWorktrees.map((w) => [w.path, w]));
 
     // Sync: add any git worktrees not in store
-    const result: Worktree[] = [];
+    const result: StoredWorktree[] = [];
 
     for (const gitWt of managedWorktrees) {
       const existing = storedMap.get(gitWt.path);
@@ -376,7 +403,7 @@ export class WorktreeService {
         storedMap.delete(gitWt.path);
       } else {
         // New worktree found in git, add to store
-        const newWorktree: Worktree = {
+        const newWorktree: StoredWorktree = {
           id: pathToId(gitWt.path),
           repositoryId,
           path: gitWt.path,

@@ -89,6 +89,11 @@ export function Sidebar({
 
   const handleArchiveClick = (worktree: Worktree, e: React.MouseEvent) => {
     e.stopPropagation();
+    // If worktree doesn't exist on disk, archive immediately (just remove from store)
+    if (!worktree.exists) {
+      onArchiveWorktree(worktree.id, false);
+      return;
+    }
     // Set the archive target to trigger status fetch
     setArchiveTarget(worktree);
   };

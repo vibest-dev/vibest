@@ -3,7 +3,11 @@
 import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "@vibest/ui/components/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@vibest/ui/components/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@vibest/ui/components/collapsible";
 import { Input } from "@vibest/ui/components/input";
 import {
   Tooltip,
@@ -199,7 +203,10 @@ export const WebPreviewConsole = ({
           >
             Console
             <ChevronDownIcon
-              className={cn("h-4 w-4 transition-transform duration-200", consoleOpen && "rotate-180")}
+              className={cn(
+                "h-4 w-4 transition-transform duration-200",
+                consoleOpen && "rotate-180",
+              )}
             />
           </Button>
         }
@@ -207,7 +214,7 @@ export const WebPreviewConsole = ({
       <CollapsibleContent
         className={cn(
           "px-4 pb-4",
-          "data-ending-style:opacity-0 data-starting-style:opacity-0 transition-opacity outline-none",
+          "transition-opacity outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         )}
       >
         <div className="max-h-48 space-y-1 overflow-y-auto">

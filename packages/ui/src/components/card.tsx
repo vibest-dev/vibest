@@ -2,17 +2,12 @@
 
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-
 import { cn } from "@vibest/ui/lib/utils";
 
-function Card({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function Card({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "relative flex flex-col rounded-2xl border bg-card not-dark:bg-clip-padding text-card-foreground shadow-xs/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/6%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+      "bg-card text-card-foreground relative flex flex-col rounded-2xl border shadow-xs/5 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/6%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
       className,
     ),
     "data-slot": "card",
@@ -25,14 +20,10 @@ function Card({
   });
 }
 
-function CardFrame({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFrame({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "flex flex-col relative rounded-2xl border bg-background before:absolute before:inset-0 before:rounded-[inherit] before:bg-muted/72 before:pointer-events-none not-dark:bg-clip-padding text-card-foreground shadow-xs/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/6%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)] *:data-[slot=card]:-m-px *:not-last:data-[slot=card]:rounded-b-lg *:not-last:data-[slot=card]:before:rounded-b-[calc(var(--radius-lg)-1px)] *:not-first:data-[slot=card]:rounded-t-lg *:not-first:data-[slot=card]:before:rounded-t-[calc(var(--radius-lg)-1px)] *:data-[slot=card]:[clip-path:inset(-1rem_1px)] *:data-[slot=card]:first:[clip-path:inset(1px_1px_-1rem_1px_round_calc(var(--radius-2xl)-1px))] *:data-[slot=card]:last:[clip-path:inset(-1rem_1px_1px_1px_round_calc(var(--radius-2xl)-1px))] *:data-[slot=card]:shadow-none *:data-[slot=card]:before:hidden *:data-[slot=card]:bg-clip-padding",
+      "bg-background before:bg-muted/72 text-card-foreground relative flex flex-col rounded-2xl border shadow-xs/5 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:rounded-[inherit] before:shadow-[0_1px_--theme(--color-black/6%)] *:data-[slot=card]:-m-px *:data-[slot=card]:bg-clip-padding *:data-[slot=card]:shadow-none *:data-[slot=card]:[clip-path:inset(-1rem_1px)] *:not-first:data-[slot=card]:rounded-t-lg *:not-last:data-[slot=card]:rounded-b-lg *:data-[slot=card]:before:hidden *:not-first:data-[slot=card]:before:rounded-t-[calc(var(--radius-lg)-1px)] *:not-last:data-[slot=card]:before:rounded-b-[calc(var(--radius-lg)-1px)] *:data-[slot=card]:first:[clip-path:inset(1px_1px_-1rem_1px_round_calc(var(--radius-2xl)-1px))] *:data-[slot=card]:last:[clip-path:inset(-1rem_1px_1px_1px_round_calc(var(--radius-2xl)-1px))] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
       className,
     ),
     "data-slot": "card-frame",
@@ -45,11 +36,7 @@ function CardFrame({
   });
 }
 
-function CardFrameHeader({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFrameHeader({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn("flex flex-col px-6 py-4", className),
     "data-slot": "card-frame-header",
@@ -62,13 +49,9 @@ function CardFrameHeader({
   });
 }
 
-function CardFrameTitle({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFrameTitle({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
-    className: cn("font-semibold text-sm", className),
+    className: cn("text-sm font-semibold", className),
     "data-slot": "card-frame-title",
   };
 
@@ -79,11 +62,7 @@ function CardFrameTitle({
   });
 }
 
-function CardFrameDescription({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFrameDescription({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn("text-muted-foreground text-sm", className),
     "data-slot": "card-frame-description",
@@ -96,11 +75,7 @@ function CardFrameDescription({
   });
 }
 
-function CardFrameFooter({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFrameFooter({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn("px-6 py-4", className),
     "data-slot": "card-frame-footer",
@@ -113,11 +88,7 @@ function CardFrameFooter({
   });
 }
 
-function CardHeader({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardHeader({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
       "grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 p-6 in-[[data-slot=card]:has(>[data-slot=card-panel])]:pb-4 has-data-[slot=card-action]:grid-cols-[1fr_auto]",
@@ -133,13 +104,9 @@ function CardHeader({
   });
 }
 
-function CardTitle({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardTitle({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
-    className: cn("font-semibold text-lg leading-none", className),
+    className: cn("text-lg leading-none font-semibold", className),
     "data-slot": "card-title",
   };
 
@@ -150,11 +117,7 @@ function CardTitle({
   });
 }
 
-function CardDescription({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardDescription({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn("text-muted-foreground text-sm", className),
     "data-slot": "card-description",
@@ -167,14 +130,10 @@ function CardDescription({
   });
 }
 
-function CardAction({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardAction({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "col-start-2 row-span-2 row-start-1 self-start justify-self-end inline-flex",
+      "col-start-2 row-span-2 row-start-1 inline-flex self-start justify-self-end",
       className,
     ),
     "data-slot": "card-action",
@@ -187,14 +146,10 @@ function CardAction({
   });
 }
 
-function CardPanel({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardPanel({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "flex-1 p-6 in-[[data-slot=card]:has(>[data-slot=card-header]:not(.border-b))]:pt-0 in-[[data-slot=card]:has(>[data-slot=card-footer]:not(.border-t))]:pb-0",
+      "flex-1 p-6 in-[[data-slot=card]:has(>[data-slot=card-footer]:not(.border-t))]:pb-0 in-[[data-slot=card]:has(>[data-slot=card-header]:not(.border-b))]:pt-0",
       className,
     ),
     "data-slot": "card-panel",
@@ -207,11 +162,7 @@ function CardPanel({
   });
 }
 
-function CardFooter({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">) {
+function CardFooter({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
       "flex items-center p-6 in-[[data-slot=card]:has(>[data-slot=card-panel])]:pt-4",

@@ -1,11 +1,16 @@
 import { implement } from "@orpc/server";
-import { exec } from "child_process";
-import { basename } from "path";
+import { exec } from "node:child_process";
+import { basename } from "node:path";
 
 import type { AppContext } from "../../app";
 
 import { workspaceContract } from "../../../shared/contract/workspace";
-import { pathToId, type Repository, type Worktree } from "../../../shared/types";
+import {
+  pathToId,
+  type Repository,
+  type StoredWorktree,
+  type Worktree,
+} from "../../../shared/types";
 
 const os = implement(workspaceContract).$context<AppContext>();
 
@@ -15,7 +20,7 @@ export const list = os.list.handler(async ({ context: { app } }) => {
   const worktreesByRepository: Record<string, Worktree[]> = {};
 
   for (const repository of repositories) {
-    worktreesByRepository[repository.id] = app.store.getWorktreesByRepositoryId(repository.id);
+    worktreesByRepository[repository.id] = app.store.getWorktreesWithExistence(repository.id);
   }
 
   return { repositories, worktreesByRepository };
@@ -111,16 +116,16 @@ export const createWorktree = os.createWorktree.handler(async ({ input, context:
 
   await app.worktree.createWorktree(repository.path, worktreePath, branch, isNewBranch, baseBranch);
 
-  const worktree: Worktree = {
+  const storedWorktree: StoredWorktree = {
     id: pathToId(worktreePath),
     repositoryId,
     path: worktreePath,
     branch,
   };
 
-  app.store.addWorktree(worktree);
+  app.store.addWorktree(storedWorktree);
 
-  return worktree;
+  return { ...storedWorktree, exists: true };
 });
 
 export const quickCreateWorktree = os.quickCreateWorktree.handler(
@@ -156,16 +161,16 @@ export const quickCreateWorktree = os.quickCreateWorktree.handler(
         repository.defaultBranch,
       );
 
-      const worktree: Worktree = {
+      const storedWorktree: StoredWorktree = {
         id: pathToId(worktreePath),
         repositoryId,
         path: worktreePath,
         branch,
       };
 
-      app.store.addWorktree(worktree);
+      app.store.addWorktree(storedWorktree);
 
-      return worktree;
+      return { ...storedWorktree, exists: true };
     } catch (error) {
       console.error("[quickCreateWorktree] Error:", error);
       throw error;
@@ -186,7 +191,7 @@ export const removeWorktree = os.removeWorktree.handler(async ({ input, context:
     throw new Error("Repository not found");
   }
 
-  await app.worktree.removeWorktree(repository.path, worktree.path, force);
+  await app.worktree.safeRemoveWorktree(repository.path, worktree.path, force);
   app.store.removeWorktree(worktreeId);
 });
 
@@ -204,18 +209,13 @@ export const archiveWorktree = os.archiveWorktree.handler(async ({ input, contex
   }
 
   try {
-    // 1. If requested, commit all changes first
-    if (commitFirst) {
-      await app.git.commitAll(worktree.path, "WIP: Auto-commit before archive");
-    }
-
-    // 2. Remove the worktree
-    await app.worktree.removeWorktree(repository.path, worktree.path, true);
-
-    // 3. Delete the branch
-    await app.git.deleteBranch(repository.path, worktree.branch);
-
-    // 4. Update store
+    await app.worktree.safeArchiveWorktree(
+      repository.path,
+      worktree.path,
+      worktree.branch,
+      commitFirst ?? false,
+      app.git,
+    );
     app.store.removeWorktree(worktreeId);
   } catch (error) {
     console.error("[archiveWorktree] Error:", error);

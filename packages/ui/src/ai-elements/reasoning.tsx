@@ -2,12 +2,12 @@
 
 import type { ComponentProps } from "react";
 
-import { useControllableState } from "@vibest/ui/hooks/use-controllable-state";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@vibest/ui/components/collapsible";
+import { useControllableState } from "@vibest/ui/hooks/use-controllable-state";
 import { cn } from "@vibest/ui/lib/utils";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
@@ -92,7 +92,9 @@ export const Reasoning = memo(
     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosedRef]);
 
     return (
-      <ReasoningContext.Provider value={{ isStreaming, isOpen: isOpen ?? false, setIsOpen, duration: duration ?? 0 }}>
+      <ReasoningContext.Provider
+        value={{ isStreaming, isOpen: isOpen ?? false, setIsOpen, duration: duration ?? 0 }}
+      >
         <Collapsible
           className={cn("not-prose mb-4", className)}
           onOpenChange={setIsOpen}
@@ -146,7 +148,7 @@ export const ReasoningContent = memo(({ className, children, ...props }: Reasoni
   <CollapsibleContent
     className={cn(
       "mt-4 text-sm",
-      "data-ending-style:opacity-0 data-starting-style:opacity-0 text-popover-foreground transition-opacity outline-none",
+      "text-popover-foreground transition-opacity outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
       className,
     )}
     {...props}

@@ -2,7 +2,11 @@
 
 import type { ComponentProps, ReactElement } from "react";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@vibest/ui/components/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
 
@@ -67,7 +71,7 @@ export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
 export const TaskContent = ({ children, className, ...props }: TaskContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-ending-style:opacity-0 data-starting-style:opacity-0 text-popover-foreground transition-opacity outline-none",
+      "text-popover-foreground transition-opacity outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
       className,
     )}
     {...props}

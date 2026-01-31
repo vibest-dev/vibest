@@ -10,7 +10,10 @@ function useControllableState<T>({
   prop,
   defaultProp,
   onChange,
-}: UseControllableStateParams<T>): [T | undefined, (value: T | ((prev: T | undefined) => T)) => void] {
+}: UseControllableStateParams<T>): [
+  T | undefined,
+  (value: T | ((prev: T | undefined) => T)) => void,
+] {
   const [uncontrolledValue, setUncontrolledValue] = useState<T | undefined>(defaultProp);
   const isControlled = prop !== undefined;
   const value = isControlled ? prop : uncontrolledValue;
