@@ -4,31 +4,29 @@ import { createStreamWirings } from "./internal/stream";
 
 // Chrome API types for sidepanel
 declare global {
-	interface Chrome {
-		sidePanel?: {
-			setPanelBehavior: (options: { openPanelOnActionClick: boolean }) => void;
-			setOptions: (options: { path?: string }) => void;
-			onShown: {
-				addListener: (callback: () => void) => void;
-				removeListener: (callback: () => void) => void;
-				hasListener: (callback: () => void) => boolean;
-			};
-			onHidden: {
-				addListener: (callback: () => void) => void;
-				removeListener: (callback: () => void) => void;
-				hasListener: (callback: () => void) => boolean;
-			};
-			// V3 还支持指定页面的侧边栏配置
-			getOptions: (options: { tabId?: number }) => Promise<{ path?: string }>;
-		};
-	}
-	var chrome: Chrome | undefined;
+  interface Chrome {
+    sidePanel?: {
+      setPanelBehavior: (options: { openPanelOnActionClick: boolean }) => void;
+      setOptions: (options: { path?: string }) => void;
+      onShown: {
+        addListener: (callback: () => void) => void;
+        removeListener: (callback: () => void) => void;
+        hasListener: (callback: () => void) => boolean;
+      };
+      onHidden: {
+        addListener: (callback: () => void) => void;
+        removeListener: (callback: () => void) => void;
+        hasListener: (callback: () => void) => boolean;
+      };
+      // V3 还支持指定页面的侧边栏配置
+      getOptions: (options: { tabId?: number }) => Promise<{ path?: string }>;
+    };
+  }
+  var chrome: Chrome | undefined;
 }
 
 const port = createPersistentPort("sidepanel");
-const endpointRuntime = createEndpointRuntime("sidepanel", (message) =>
-	port.postMessage(message),
-);
+const endpointRuntime = createEndpointRuntime("sidepanel", (message) => port.postMessage(message));
 
 port.onMessage((...args) => endpointRuntime.handleMessage(...args));
 
@@ -61,14 +59,14 @@ port.onMessage((...args) => endpointRuntime.handleMessage(...args));
  * @param options.defaultPath Default HTML path for the sidepanel
  */
 export function setupSidepanel(options: { defaultPath?: string } = {}) {
-	if (typeof chrome !== "undefined" && chrome.sidePanel) {
-		// Chrome specific sidepanel API
-		chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  if (typeof chrome !== "undefined" && chrome.sidePanel) {
+    // Chrome specific sidepanel API
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
-		if (options.defaultPath) {
-			chrome.sidePanel.setOptions({ path: options.defaultPath });
-		}
-	}
+    if (options.defaultPath) {
+      chrome.sidePanel.setOptions({ path: options.defaultPath });
+    }
+  }
 }
 
 /**
@@ -77,15 +75,11 @@ export function setupSidepanel(options: { defaultPath?: string } = {}) {
  * @returns 用于移除事件监听器的函数
  */
 export function onSidepanelShown(callback: () => void): () => void {
-	if (
-		typeof chrome !== "undefined" &&
-		chrome.sidePanel &&
-		chrome.sidePanel.onShown
-	) {
-		chrome.sidePanel.onShown.addListener(callback);
-		return () => chrome.sidePanel.onShown.removeListener(callback);
-	}
-	return () => {};
+  if (typeof chrome !== "undefined" && chrome.sidePanel && chrome.sidePanel.onShown) {
+    chrome.sidePanel.onShown.addListener(callback);
+    return () => chrome.sidePanel.onShown.removeListener(callback);
+  }
+  return () => {};
 }
 
 /**
@@ -94,21 +88,16 @@ export function onSidepanelShown(callback: () => void): () => void {
  * @returns 用于移除事件监听器的函数
  */
 export function onSidepanelHidden(callback: () => void): () => void {
-	if (
-		typeof chrome !== "undefined" &&
-		chrome.sidePanel &&
-		chrome.sidePanel.onHidden
-	) {
-		chrome.sidePanel.onHidden.addListener(callback);
-		return () => chrome.sidePanel.onHidden.removeListener(callback);
-	}
-	return () => {};
+  if (typeof chrome !== "undefined" && chrome.sidePanel && chrome.sidePanel.onHidden) {
+    chrome.sidePanel.onHidden.addListener(callback);
+    return () => chrome.sidePanel.onHidden.removeListener(callback);
+  }
+  return () => {};
 }
 
 export function isSidepanelSupported(): boolean {
-	return !!chrome.sidePanel;
+  return !!chrome.sidePanel;
 }
 
 export const { sendMessage, onMessage } = endpointRuntime;
-export const { openStream, onOpenStreamChannel } =
-	createStreamWirings(endpointRuntime);
+export const { openStream, onOpenStreamChannel } = createStreamWirings(endpointRuntime);

@@ -2,37 +2,37 @@ import { tool } from "ai";
 import { z } from "zod/v4";
 
 export const ReadMcpResource = tool({
-	type: "provider-defined",
-	id: "claude-code.ReadMcpResource",
-	name: "ReadMcpResource",
-	args: {},
-	// Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#readmcpresource
-	inputSchema: z.object({
-		/**
-		 * The MCP server name
-		 */
-		server: z.string(),
-		/**
-		 * The resource URI to read
-		 */
-		uri: z.string(),
-	}),
-	// Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#readmcpresource-2
-	outputSchema: z.object({
-		/**
-		 * Resource contents
-		 */
-		contents: z.array(
-			z.object({
-				uri: z.string(),
-				mimeType: z.string().optional(),
-				text: z.string().optional(),
-				blob: z.string().optional(),
-			}),
-		),
-		/**
-		 * Server that provided the resource
-		 */
-		server: z.string(),
-	}),
+  type: "provider-defined",
+  id: "claude-code.ReadMcpResource",
+  name: "ReadMcpResource",
+  args: {},
+  // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#readmcpresource
+  inputSchema: z.object({
+    /**
+     * The MCP server name
+     */
+    server: z.string(),
+    /**
+     * The resource URI to read
+     */
+    uri: z.string(),
+  }),
+  // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#readmcpresource-2
+  outputSchema: z.object({
+    /**
+     * Resource contents
+     */
+    contents: z.array(
+      z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        text: z.string().optional(),
+        blob: z.string().optional(),
+      }),
+    ),
+    /**
+     * Server that provided the resource
+     */
+    server: z.string(),
+  }),
 });

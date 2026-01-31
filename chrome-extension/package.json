@@ -1,20 +1,20 @@
 {
-	"name": "chrome-extension",
-	"version": "0.0.0",
-	"private": true,
-	"scripts": {
-		"dev": "tsdown --watch",
-		"build": "tsdown",
-		"typecheck": "tsc --noEmit",
-		"clean": "git clean -xdf node_modules .turbo dist"
-	},
-	"devDependencies": {
-		"@types/chrome": "^0.1.6",
-		"@vibest/code-inspector-web": "workspace:*",
-		"@vibest/shared": "workspace:*",
-		"@vibest/typescript": "workspace:*",
-		"tsdown": "^0.13.5",
-		"webext-bridge": "workspace:*",
-		"webextension-polyfill": "^0.9.0"
-	}
+  "name": "chrome-extension",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules .turbo dist"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.6",
+    "@vibest/code-inspector-web": "workspace:*",
+    "@vibest/shared": "workspace:*",
+    "@vibest/typescript": "workspace:*",
+    "tsdown": "^0.13.5",
+    "webext-bridge": "workspace:*",
+    "webextension-polyfill": "^0.9.0"
+  }
 }

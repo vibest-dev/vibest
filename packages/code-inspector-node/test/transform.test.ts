@@ -1,48 +1,49 @@
 import { describe, expect, it } from "vitest";
+
 import { transform } from "../src/transform";
 
 describe("transform", () => {
-	const relativePath = "src/components/App.tsx";
+  const relativePath = "src/components/App.tsx";
 
-	describe("Basic JSX transformation", () => {
-		it("should add inspector attributes to simple JSX elements", () => {
-			const code = `import React from 'react';
+  describe("Basic JSX transformation", () => {
+    it("should add inspector attributes to simple JSX elements", () => {
+      const code = `import React from 'react';
 
 function App() {
   return <div>Hello World</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:4:9">Hello World</div>;
 				}"
 			`);
-		});
+    });
 
-		it("should add inspector attributes to self-closing JSX elements", () => {
-			const code = `import React from 'react';
+    it("should add inspector attributes to self-closing JSX elements", () => {
+      const code = `import React from 'react';
 
 function App() {
   return <input type="text" />;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
 				  return <input data-inspector-name="input" data-inspector="src/components/App.tsx:4:9" type="text" />;
 				}"
 			`);
-		});
+    });
 
-		it("should add inspector attributes to nested JSX elements", () => {
-			const code = `import React from 'react';
+    it("should add inspector attributes to nested JSX elements", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -53,9 +54,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -67,12 +68,12 @@ function App() {
 
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("TypeScript Support", () => {
-		it("should handle JSX with type annotations", () => {
-			const code = `import React from 'react';
+  describe("TypeScript Support", () => {
+    it("should handle JSX with type annotations", () => {
+      const code = `import React from 'react';
 
 interface Props {
   name: string;
@@ -82,9 +83,9 @@ function App({ name }: Props) {
   return <div>{name}</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				interface Props {
@@ -95,57 +96,57 @@ function App({ name }: Props) {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:8:9">{name}</div>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle generic components", () => {
-			const code = `import React from 'react';
+    it("should handle generic components", () => {
+      const code = `import React from 'react';
 
 function App<T>() {
   return <div>Generic Component</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App<T>() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:4:9">Generic Component</div>;
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("JSX Attribute Handling", () => {
-		it("should handle JSX elements with existing attributes", () => {
-			const code = `import React from 'react';
+  describe("JSX Attribute Handling", () => {
+    it("should handle JSX elements with existing attributes", () => {
+      const code = `import React from 'react';
 
 function App() {
   return <div className="container" id="app">Content</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:4:9" className="container" id="app">Content</div>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle JSX expression attributes", () => {
-			const code = `import React from 'react';
+    it("should handle JSX expression attributes", () => {
+      const code = `import React from 'react';
 
 function App() {
   const isActive = true;
   return <div className={isActive ? 'active' : 'inactive'}>Content</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -153,12 +154,12 @@ function App() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:5:9" className={isActive ? 'active' : 'inactive'}>Content</div>;
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("Complex JSX Scenarios", () => {
-		it("should handle JSX Fragment", () => {
-			const code = `import React from 'react';
+  describe("Complex JSX Scenarios", () => {
+    it("should handle JSX Fragment", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -169,9 +170,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -183,10 +184,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React.Fragment syntax", () => {
-			const code = `import React from 'react';
+    it("should handle React.Fragment syntax", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -197,9 +198,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -211,10 +212,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle Fragment with key prop", () => {
-			const code = `import React, { Fragment } from 'react';
+    it("should handle Fragment with key prop", () => {
+      const code = `import React, { Fragment } from 'react';
 
 function App() {
   const items = ['a', 'b'];
@@ -230,9 +231,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React, { Fragment } from 'react';
 
 				function App() {
@@ -249,10 +250,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle nested fragments", () => {
-			const code = `import React from 'react';
+    it("should handle nested fragments", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -266,9 +267,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -283,10 +284,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle fragment with mixed content", () => {
-			const code = `import React from 'react';
+    it("should handle fragment with mixed content", () => {
+      const code = `import React from 'react';
 
 function App() {
   const showExtra = true;
@@ -299,9 +300,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -315,10 +316,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle conditional rendering", () => {
-			const code = `import React from 'react';
+    it("should handle conditional rendering", () => {
+      const code = `import React from 'react';
 
 function App() {
   const showContent = true;
@@ -329,9 +330,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -343,10 +344,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle map rendering", () => {
-			const code = `import React from 'react';
+    it("should handle map rendering", () => {
+      const code = `import React from 'react';
 
 function App() {
   const items = ['a', 'b', 'c'];
@@ -359,9 +360,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -375,10 +376,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle component event attributes", () => {
-			const code = `import React from 'react';
+    it("should handle component event attributes", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -390,9 +391,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -405,30 +406,30 @@ function App() {
 
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("Edge Cases", () => {
-		it("should handle empty JSX content", () => {
-			const code = `import React from 'react';
+  describe("Edge Cases", () => {
+    it("should handle empty JSX content", () => {
+      const code = `import React from 'react';
 
 function App() {
   return <div></div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:4:9"></div>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle multi-line JSX attributes", () => {
-			const code = `import React from 'react';
+    it("should handle multi-line JSX attributes", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -442,9 +443,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -459,70 +460,70 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle relative paths", () => {
-			const code = `import React from 'react';
+    it("should handle relative paths", () => {
+      const code = `import React from 'react';
 
 function Button() {
   return <button>Click me</button>;
 }`;
 
-			const result = transform(code, { relativePath: "components/Button.tsx" });
+      const result = transform(code, { relativePath: "components/Button.tsx" });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function Button() {
 				  return <button data-inspector-name="button" data-inspector="components/Button.tsx:4:9">Click me</button>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle different root paths", () => {
-			const code = `import React from 'react';
+    it("should handle different root paths", () => {
+      const code = `import React from 'react';
 
 function Widget() {
   return <div>Widget Content</div>;
 }`;
 
-			const result = transform(code, {
-				relativePath: "app/components/Widget.tsx",
-			});
+      const result = transform(code, {
+        relativePath: "app/components/Widget.tsx",
+      });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function Widget() {
 				  return <div data-inspector-name="div" data-inspector="app/components/Widget.tsx:4:9">Widget Content</div>;
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("Different File Types", () => {
-		it("should handle .jsx files", () => {
-			const code = `import React from 'react';
+  describe("Different File Types", () => {
+    it("should handle .jsx files", () => {
+      const code = `import React from 'react';
 
 function App() {
   return <div>JSX File</div>;
 }`;
 
-			const result = transform(code, {
-				relativePath: "src/components/App.jsx",
-			});
+      const result = transform(code, {
+        relativePath: "src/components/App.jsx",
+      });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.jsx:4:9">JSX File</div>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle .tsx files", () => {
-			const code = `import React from 'react';
+    it("should handle .tsx files", () => {
+      const code = `import React from 'react';
 
 interface Props {
   title: string;
@@ -532,9 +533,9 @@ function App({ title }: Props) {
   return <div>{title}</div>;
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				interface Props {
@@ -545,10 +546,10 @@ function App({ title }: Props) {
 				  return <div data-inspector-name="div" data-inspector="src/components/App.tsx:8:9">{title}</div>;
 				}"
 			`);
-		});
+    });
 
-		it("should handle complex JSX structures", () => {
-			const code = `import React from 'react';
+    it("should handle complex JSX structures", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -565,9 +566,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -585,12 +586,12 @@ function App() {
 
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("Vue JSX Support", () => {
-		it("should handle Vue JSX syntax", () => {
-			const code = `import { defineComponent } from 'vue';
+  describe("Vue JSX Support", () => {
+    it("should handle Vue JSX syntax", () => {
+      const code = `import { defineComponent } from 'vue';
 
 export default defineComponent({
   name: 'MyComponent',
@@ -599,9 +600,9 @@ export default defineComponent({
   }
 });`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import { defineComponent } from 'vue';
 
 				export default defineComponent({
@@ -611,30 +612,30 @@ export default defineComponent({
 				  }
 				});"
 			`);
-		});
+    });
 
-		it("should handle Vue functional components", () => {
-			const code = `import { FunctionalComponent } from 'vue';
+    it("should handle Vue functional components", () => {
+      const code = `import { FunctionalComponent } from 'vue';
 
 const MyComponent: FunctionalComponent = () => {
   return <span>Functional Component</span>;
 };`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import { FunctionalComponent } from 'vue';
 
 				const MyComponent: FunctionalComponent = () => {
 				  return <span data-inspector-name="span" data-inspector="src/components/App.tsx:4:9">Functional Component</span>;
 				};"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("Special JSX Scenarios", () => {
-		it("should handle comments in JSX", () => {
-			const code = `import React from 'react';
+  describe("Special JSX Scenarios", () => {
+    it("should handle comments in JSX", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -645,9 +646,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -659,10 +660,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle text nodes in JSX", () => {
-			const code = `import React from 'react';
+    it("should handle text nodes in JSX", () => {
+      const code = `import React from 'react';
 
 function App() {
   return (
@@ -674,9 +675,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function App() {
@@ -689,10 +690,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle custom components", () => {
-			const code = `import React from 'react';
+    it("should handle custom components", () => {
+      const code = `import React from 'react';
 
 const CustomButton = ({ children }) => <button>{children}</button>;
 
@@ -704,9 +705,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				const CustomButton = ({ children }) => <button data-inspector-name="button" data-inspector="src/components/App.tsx:3:39">{children}</button>;
@@ -719,12 +720,12 @@ function App() {
 
 				}"
 			`);
-		});
-	});
+    });
+  });
 
-	describe("React Native Support", () => {
-		it("should add dataSet attributes to React Native components", () => {
-			const code = `import React from 'react';
+  describe("React Native Support", () => {
+    it("should add dataSet attributes to React Native components", () => {
+      const code = `import React from 'react';
 import { View, Text } from 'react-native';
 
 function App() {
@@ -735,9 +736,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text } from 'react-native';
 
@@ -749,10 +750,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native components with existing props", () => {
-			const code = `import React from 'react';
+    it("should handle React Native components with existing props", () => {
+      const code = `import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 
 function App() {
@@ -765,9 +766,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text, TouchableOpacity } from 'react-native';
 
@@ -781,10 +782,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native components with nested structure", () => {
-			const code = `import React from 'react';
+    it("should handle React Native components with nested structure", () => {
+      const code = `import React from 'react';
 import { View, Text } from 'react-native';
 
 function App() {
@@ -798,9 +799,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text } from 'react-native';
 
@@ -815,10 +816,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle web components separately from React Native", () => {
-			const code = `import React from 'react';
+    it("should handle web components separately from React Native", () => {
+      const code = `import React from 'react';
 
 function WebApp() {
   return (
@@ -829,9 +830,9 @@ function WebApp() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 
 				function WebApp() {
@@ -843,10 +844,10 @@ function WebApp() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native ScrollView and FlatList", () => {
-			const code = `import React from 'react';
+    it("should handle React Native ScrollView and FlatList", () => {
+      const code = `import React from 'react';
 import { ScrollView, FlatList, Text } from 'react-native';
 
 function App() {
@@ -862,9 +863,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { ScrollView, FlatList, Text } from 'react-native';
 
@@ -881,10 +882,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native StyleSheet components", () => {
-			const code = `import React from 'react';
+    it("should handle React Native StyleSheet components", () => {
+      const code = `import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 const styles = StyleSheet.create({
@@ -900,9 +901,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text, StyleSheet } from 'react-native';
 
@@ -919,10 +920,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native Image and ImageBackground", () => {
-			const code = `import React from 'react';
+    it("should handle React Native Image and ImageBackground", () => {
+      const code = `import React from 'react';
 import { View, Image, ImageBackground } from 'react-native';
 
 function App() {
@@ -938,9 +939,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Image, ImageBackground } from 'react-native';
 
@@ -957,10 +958,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native TextInput and Button", () => {
-			const code = `import React from 'react';
+    it("should handle React Native TextInput and Button", () => {
+      const code = `import React from 'react';
 import { View, TextInput, Button } from 'react-native';
 
 function App() {
@@ -975,9 +976,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, TextInput, Button } from 'react-native';
 
@@ -993,10 +994,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native with custom components", () => {
-			const code = `import React from 'react';
+    it("should handle React Native with custom components", () => {
+      const code = `import React from 'react';
 import { View, Text } from 'react-native';
 
 const CustomCard = ({ children }) => (
@@ -1015,9 +1016,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text } from 'react-native';
 
@@ -1037,10 +1038,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native SafeAreaView and StatusBar", () => {
-			const code = `import React from 'react';
+    it("should handle React Native SafeAreaView and StatusBar", () => {
+      const code = `import React from 'react';
 import { SafeAreaView, StatusBar, View, Text } from 'react-native';
 
 function App() {
@@ -1054,9 +1055,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { SafeAreaView, StatusBar, View, Text } from 'react-native';
 
@@ -1071,10 +1072,10 @@ function App() {
 
 				}"
 			`);
-		});
+    });
 
-		it("should handle React Native Modal and Alert", () => {
-			const code = `import React from 'react';
+    it("should handle React Native Modal and Alert", () => {
+      const code = `import React from 'react';
 import { View, Text, Modal, TouchableOpacity } from 'react-native';
 
 function App() {
@@ -1092,9 +1093,9 @@ function App() {
   );
 }`;
 
-			const result = transform(code, { relativePath });
+      const result = transform(code, { relativePath });
 
-			expect(result?.code).toMatchInlineSnapshot(`
+      expect(result?.code).toMatchInlineSnapshot(`
 				"import React from 'react';
 				import { View, Text, Modal, TouchableOpacity } from 'react-native';
 
@@ -1113,6 +1114,6 @@ function App() {
 
 				}"
 			`);
-		});
-	});
+    });
+  });
 });

@@ -2,7 +2,7 @@
 import HelloWorld from "./components/HelloWorld.vue";
 
 const _handleClick = () => {
-	alert("黄色按钮被点击了！");
+  alert("黄色按钮被点击了！");
 };
 
 console.log("HelloWorld", HelloWorld);
@@ -11,13 +11,7 @@ console.log("HelloWorld", HelloWorld);
 <template>
   <div class="app">
     <header>
-      <img
-        alt="Vue logo"
-        class="logo"
-        src="@/assets/logo.svg"
-        width="125"
-        height="125"
-      />
+      <img alt="Vue logo" class="logo" src="@/assets/logo.svg" width="125" height="125" />
 
       <div class="wrapper">
         <nav>

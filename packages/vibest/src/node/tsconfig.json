@@ -1,5 +1,5 @@
 {
-	"extends": "@vibest/typescript/node.json",
-	"compilerOptions": {},
-	"include": ["./"]
+  "extends": "@vibest/typescript/node.json",
+  "compilerOptions": {},
+  "include": ["./"]
 }

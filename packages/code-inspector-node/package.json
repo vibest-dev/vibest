@@ -1,82 +1,82 @@
 {
-	"name": "@vibest/code-inspector-node",
-	"version": "0.0.0",
-	"type": "module",
-	"private": true,
-	"keywords": [
-		"inspector"
-	],
-	"files": [
-		"dist"
-	],
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.cts",
-	"exports": {
-		".": {
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./babel": {
-			"import": "./dist/babel.js",
-			"require": "./dist/babel.cjs"
-		},
-		"./constants": {
-			"import": "./dist/constants.js",
-			"require": "./dist/constants.cjs"
-		},
-		"./transform": {
-			"import": "./dist/transform.js",
-			"require": "./dist/transform.cjs"
-		},
-		"./visitor": {
-			"import": "./dist/visitor.js",
-			"require": "./dist/visitor.cjs"
-		},
-		"./*": "./*"
-	},
-	"typesVersions": {
-		"*": {
-			"*": [
-				"./dist/*",
-				"./*"
-			]
-		}
-	},
-	"publishConfig": {
-		"access": "public"
-	},
-	"scripts": {
-		"stub": "tsdown",
-		"test": "vitest run --typecheck",
-		"build": "tsdown",
-		"typecheck": "tsc --noEmit",
-		"clean": "git clean -xdf node_modules dist .turbo"
-	},
-	"peerDependencies": {
-		"@babel/core": "^7.28.3",
-		"@babel/types": "^7.28.2",
-		"@vue/babel-plugin-jsx": "^1.5.0",
-		"@vue/compiler-dom": "^3.5.19",
-		"@vue/compiler-sfc": "^3.5.19",
-		"magic-string": "^0.30.18",
-		"pathe": "^2.0.3",
-		"tiny-invariant": "^1.3.3"
-	},
-	"devDependencies": {
-		"@babel/core": "^7.28.3",
-		"@babel/types": "^7.28.2",
-		"@types/babel__core": "^7.20.5",
-		"@types/babel__traverse": "^7.28.0",
-		"@vibest/typescript": "workspace:*",
-		"@vue/babel-plugin-jsx": "^1.5.0",
-		"@vue/compiler-dom": "^3.5.19",
-		"@vue/compiler-sfc": "^3.5.19",
-		"magic-string": "^0.30.18",
-		"pathe": "^2.0.3",
-		"publint": "^0.3.12",
-		"tiny-invariant": "^1.3.3",
-		"tsdown": "^0.13.5",
-		"vitest": "^3.2.4"
-	}
+  "name": "@vibest/code-inspector-node",
+  "version": "0.0.0",
+  "private": true,
+  "keywords": [
+    "inspector"
+  ],
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.cts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./*"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./babel": {
+      "import": "./dist/babel.js",
+      "require": "./dist/babel.cjs"
+    },
+    "./constants": {
+      "import": "./dist/constants.js",
+      "require": "./dist/constants.cjs"
+    },
+    "./transform": {
+      "import": "./dist/transform.js",
+      "require": "./dist/transform.cjs"
+    },
+    "./visitor": {
+      "import": "./dist/visitor.js",
+      "require": "./dist/visitor.cjs"
+    },
+    "./*": "./*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "stub": "tsdown",
+    "test": "vitest run --typecheck",
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules dist .turbo"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.3",
+    "@babel/types": "^7.28.2",
+    "@types/babel__core": "^7.20.5",
+    "@types/babel__traverse": "^7.28.0",
+    "@vibest/typescript": "workspace:*",
+    "@vue/babel-plugin-jsx": "^1.5.0",
+    "@vue/compiler-dom": "^3.5.19",
+    "@vue/compiler-sfc": "^3.5.19",
+    "magic-string": "^0.30.18",
+    "pathe": "^2.0.3",
+    "publint": "^0.3.12",
+    "tiny-invariant": "^1.3.3",
+    "tsdown": "^0.13.5",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.28.3",
+    "@babel/types": "^7.28.2",
+    "@vue/babel-plugin-jsx": "^1.5.0",
+    "@vue/compiler-dom": "^3.5.19",
+    "@vue/compiler-sfc": "^3.5.19",
+    "magic-string": "^0.30.18",
+    "pathe": "^2.0.3",
+    "tiny-invariant": "^1.3.3"
+  }
 }

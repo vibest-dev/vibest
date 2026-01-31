@@ -1,20 +1,20 @@
 {
-	"name": "@vibest/shared",
-	"private": true,
-	"version": "0.0.0",
-	"type": "module",
-	"exports": {
-		"./extension": "./src/extension/index.ts",
-		"./extension/message": "./src/extension/message.ts",
-		"./orpc/constants": "./src/orpc/constants.ts",
-		"./*": "./*"
-	},
-	"scripts": {
-		"clean": "git clean -xdf node_modules dist .turbo",
-		"typecheck": "tsc --noEmit"
-	},
-	"devDependencies": {
-		"@vibest/typescript": "workspace:*",
-		"tsdown": "^0.13.5"
-	}
+  "name": "@vibest/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./extension": "./src/extension/index.ts",
+    "./extension/message": "./src/extension/message.ts",
+    "./orpc/constants": "./src/orpc/constants.ts",
+    "./*": "./*"
+  },
+  "scripts": {
+    "clean": "git clean -xdf node_modules dist .turbo",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vibest/typescript": "workspace:*",
+    "tsdown": "^0.13.5"
+  }
 }

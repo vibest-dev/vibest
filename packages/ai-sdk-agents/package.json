@@ -1,44 +1,44 @@
 {
-	"name": "ai-sdk-agents",
-	"version": "0.0.1",
-	"type": "module",
-	"sideEffects": false,
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"stub": "tsdown",
-		"build": "tsdown",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"clean": "git clean -xdf node_modules .turbo dist"
-	},
-	"exports": {
-		"./package.json": "./package.json",
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./claude-code": {
-			"types": "./dist/claude-code/index.d.ts",
-			"import": "./dist/claude-code/index.js",
-			"require": "./dist/claude-code/index.cjs"
-		}
-	},
-	"devDependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
-		"@vibest/typescript": "workspace:*",
-		"ai": "^5.0.63",
-		"zod": "^3.24.1",
-		"tsdown": "^0.13.5"
-	},
-	"peerDependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.1.22",
-		"ai": "^5.0.63",
-		"zod": "^3.24.1"
-	}
+  "name": "ai-sdk-agents",
+  "version": "0.0.1",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./claude-code": {
+      "types": "./dist/claude-code/index.d.ts",
+      "import": "./dist/claude-code/index.js",
+      "require": "./dist/claude-code/index.cjs"
+    }
+  },
+  "scripts": {
+    "stub": "tsdown",
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "git clean -xdf node_modules .turbo dist"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.22",
+    "@vibest/typescript": "workspace:*",
+    "ai": "^5.0.63",
+    "tsdown": "^0.13.5",
+    "zod": "^3.24.1"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.22",
+    "ai": "^5.0.63",
+    "zod": "^3.24.1"
+  }
 }

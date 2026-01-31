@@ -3,19 +3,19 @@
 // Hover to view descriptions of existing attributes.
 // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
 {
-	"version": "0.2.0",
-	"configurations": [
-		{
-			"name": "Run Extension: vscode-extension",
-			"type": "extensionHost",
-			"request": "launch",
-			"runtimeExecutable": "${execPath}",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/apps/vscode",
-				"${workspaceFolder}/playground/formula-vue"
-			],
-			"outFiles": ["${workspaceFolder}/apps/vscode/dist/extension.js"],
-			"preLaunchTask": "Build Extension: vscode-extension"
-		}
-	]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension: vscode-extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode",
+        "${workspaceFolder}/playground/formula-vue"
+      ],
+      "outFiles": ["${workspaceFolder}/apps/vscode/dist/extension.js"],
+      "preLaunchTask": "Build Extension: vscode-extension"
+    }
+  ]
 }

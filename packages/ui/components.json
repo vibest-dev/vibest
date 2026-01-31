@@ -14,12 +14,11 @@
   "aliases": {
     "components": "@vibest/ui/components",
     "utils": "@vibest/ui/lib/utils",
-    "ui": "@vibest/ui/components",
+    "hooks": "@vibest/ui/hooks",
     "lib": "@vibest/ui/lib",
-    "hooks": "@vibest/ui/hooks"
+    "ui": "@vibest/ui/components"
   },
   "registries": {
-    "@shipbase": "https://ui.shipbase.xyz/r/react/{name}.json",
-    "@coss": "https://coss.com/ui/r/{name}.json"
+    "@shipbase": "https://ui.shipbase.xyz/r/react/{name}.json"
   }
 }
