@@ -1,46 +1,45 @@
 "use client";
 
-import { Collapsible as CollapsiblePrimitive, useCollapsible } from "@ark-ui/react/collapsible";
+import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible";
+
 import { cn } from "@vibest/ui/lib/utils";
 
-function Collapsible({ ...props }: CollapsiblePrimitive.RootProps) {
-  return <CollapsiblePrimitive.Root {...props} />;
+function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props) {
+  return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />;
 }
 
-function CollapsibleContent({ className, ...props }: CollapsiblePrimitive.ContentProps) {
+function CollapsibleTrigger({
+  className,
+  ...props
+}: CollapsiblePrimitive.Trigger.Props) {
   return (
-    <CollapsiblePrimitive.Content
-      className={cn(
-        "data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden transition-all",
-        className,
-      )}
+    <CollapsiblePrimitive.Trigger
+      className={cn("cursor-pointer", className)}
+      data-slot="collapsible-trigger"
       {...props}
     />
   );
 }
 
-function CollapsibleContext({ ...props }: CollapsiblePrimitive.ContextProps) {
-  return <CollapsiblePrimitive.Context {...props} />;
-}
-
-function CollapsibleIndicator({ ...props }: CollapsiblePrimitive.IndicatorProps) {
-  return <CollapsiblePrimitive.Indicator {...props} />;
-}
-
-function CollapsibleTrigger({ ...props }: CollapsiblePrimitive.TriggerProps) {
-  return <CollapsiblePrimitive.Trigger {...props} />;
+function CollapsiblePanel({
+  className,
+  ...props
+}: CollapsiblePrimitive.Panel.Props) {
+  return (
+    <CollapsiblePrimitive.Panel
+      className={cn(
+        "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 data-ending-style:h-0 data-starting-style:h-0",
+        className,
+      )}
+      data-slot="collapsible-panel"
+      {...props}
+    />
+  );
 }
 
 export {
   Collapsible,
-  CollapsibleContent,
-  CollapsibleContext,
-  CollapsibleIndicator,
   CollapsibleTrigger,
-  useCollapsible,
+  CollapsiblePanel,
+  CollapsiblePanel as CollapsibleContent,
 };
-
-export type {
-  CollapsibleContentProps,
-  CollapsibleRootProps as CollapsibleProps,
-} from "@ark-ui/react/collapsible";

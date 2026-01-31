@@ -5,3 +5,8 @@ packages:
   - tools/*
   - chrome-extension
   - cli
+
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - '@swc/core'

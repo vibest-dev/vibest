@@ -67,11 +67,15 @@ function Component() {
           <Button size="lg" onClick={handleStartChatting} disabled={isCreatingSession}>
             {isCreatingSession ? "Creating Session..." : "Start Chatting"}
           </Button>
-          <Button variant="outline" size="lg" asChild>
-            <a href="https://docs.claude.com" target="_blank" rel="noopener noreferrer">
-              View Documentation
-            </a>
-          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            render={
+              <a href="https://docs.claude.com" target="_blank" rel="noopener noreferrer">
+                View Documentation
+              </a>
+            }
+          />
         </div>
       </div>
     </div>

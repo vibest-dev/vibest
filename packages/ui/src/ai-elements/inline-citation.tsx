@@ -7,7 +7,7 @@ import {
   CarouselContent,
   CarouselItem,
 } from "@vibest/ui/components/carousel";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@vibest/ui/components/hover-card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@vibest/ui/components/preview-card";
 import { cn } from "@vibest/ui/lib/utils";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import {
@@ -33,8 +33,8 @@ export const InlineCitationText = ({ className, ...props }: InlineCitationTextPr
 
 export type InlineCitationCardProps = ComponentProps<typeof HoverCard>;
 
-export const InlineCitationCard = (props: InlineCitationCardProps) => (
-  <HoverCard closeDelay={0} openDelay={0} {...props} />
+export const InlineCitationCard = ({ ...props }: InlineCitationCardProps) => (
+  <HoverCard {...props} />
 );
 
 export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
@@ -46,17 +46,19 @@ export const InlineCitationCardTrigger = ({
   className,
   ...props
 }: InlineCitationCardTriggerProps) => (
-  <HoverCardTrigger asChild>
-    <Badge className={cn("ml-1 rounded-full", className)} variant="secondary" {...props}>
-      {sources.length ? (
-        <>
-          {new URL(sources[0] ?? "").hostname} {sources.length > 1 && `+${sources.length - 1}`}
-        </>
-      ) : (
-        "unknown"
-      )}
-    </Badge>
-  </HoverCardTrigger>
+  <HoverCardTrigger
+    render={
+      <Badge className={cn("ml-1 rounded-full", className)} variant="secondary" {...props}>
+        {sources.length ? (
+          <>
+            {new URL(sources[0] ?? "").hostname} {sources.length > 1 && `+${sources.length - 1}`}
+          </>
+        ) : (
+          "unknown"
+        )}
+      </Badge>
+    }
+  />
 );
 
 export type InlineCitationCardBodyProps = ComponentProps<"div">;

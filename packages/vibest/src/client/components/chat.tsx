@@ -14,13 +14,14 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import {
-  createListCollection,
   Select,
-  SelectContent,
-  SelectControl,
+  SelectIcon,
   SelectItem,
+  SelectItemText,
+  SelectList,
+  SelectPopup,
   SelectTrigger,
-  SelectValueText,
+  SelectValue,
 } from "@vibest/ui/components/select";
 import { cn } from "@vibest/ui/lib/utils";
 import { useState } from "react";
@@ -30,21 +31,10 @@ import type { ClaudeCodeUIMessage } from "@/types";
 import { MessageParts } from "@/components/message-parts";
 import { orpcClient } from "@/lib/orpc";
 
-const models = createListCollection<{
-  label: "Opus" | "Sonnet";
-  value: "opus" | "sonnet";
-}>({
-  items: [
-    {
-      label: "Opus",
-      value: "opus",
-    },
-    {
-      label: "Sonnet",
-      value: "sonnet",
-    },
-  ],
-});
+const models = [
+  { label: "Opus", value: "opus" as const },
+  { label: "Sonnet", value: "sonnet" as const },
+];
 
 export function Chat({ className, sessionId }: { className?: string; sessionId: string }) {
   const [input, setInput] = useState("");
@@ -111,25 +101,24 @@ export function Chat({ className, sessionId }: { className?: string; sessionId: 
           <PromptInputToolbar>
             <PromptInputTools>
               <Select
-                className="relative"
-                collection={models}
-                value={[model]}
-                onValueChange={(details) => {
-                  setModel(details.value[0] as "opus" | "sonnet");
+                value={model}
+                onValueChange={(value) => {
+                  if (value) setModel(value as "opus" | "sonnet");
                 }}
               >
-                <SelectControl className="min-h-8">
-                  <SelectTrigger className="py-0">
-                    <SelectValueText />
-                  </SelectTrigger>
-                </SelectControl>
-                <SelectContent>
-                  {models.items.map((model) => (
-                    <SelectItem key={model.value} item={model}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectTrigger className="min-h-8 py-0">
+                  <SelectValue placeholder="Model" />
+                  <SelectIcon />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectList>
+                    {models.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        <SelectItemText>{m.label}</SelectItemText>
+                      </SelectItem>
+                    ))}
+                  </SelectList>
+                </SelectPopup>
               </Select>
             </PromptInputTools>
             <PromptInputSubmit disabled={!input || !sessionId} status={status} />

@@ -3,11 +3,7 @@
 import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "@vibest/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@vibest/ui/components/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@vibest/ui/components/collapsible";
 import { Input } from "@vibest/ui/components/input";
 import {
   Tooltip,
@@ -100,18 +96,20 @@ export const WebPreviewNavigationButton = ({
 }: WebPreviewNavigationButtonProps) => (
   <TooltipProvider>
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          className="hover:text-foreground h-8 w-8 p-0"
-          disabled={disabled}
-          onClick={onClick}
-          size="sm"
-          variant="ghost"
-          {...props}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <Button
+            className="hover:text-foreground h-8 w-8 p-0"
+            disabled={disabled}
+            onClick={onClick}
+            size="sm"
+            variant="ghost"
+            {...props}
+          >
+            {children}
+          </Button>
+        }
+      />
       <TooltipContent>
         <p>{tooltip}</p>
       </TooltipContent>
@@ -189,25 +187,27 @@ export const WebPreviewConsole = ({
   return (
     <Collapsible
       className={cn("bg-muted/50 border-t font-mono text-sm", className)}
-      onOpenChange={(details) => setConsoleOpen(details.open)}
+      onOpenChange={setConsoleOpen}
       open={consoleOpen}
       {...props}
     >
-      <CollapsibleTrigger asChild>
-        <Button
-          className="hover:bg-muted/50 flex w-full items-center justify-between p-4 text-left font-medium"
-          variant="ghost"
-        >
-          Console
-          <ChevronDownIcon
-            className={cn("h-4 w-4 transition-transform duration-200", consoleOpen && "rotate-180")}
-          />
-        </Button>
-      </CollapsibleTrigger>
+      <CollapsibleTrigger
+        render={
+          <Button
+            className="hover:bg-muted/50 flex w-full items-center justify-between p-4 text-left font-medium"
+            variant="ghost"
+          >
+            Console
+            <ChevronDownIcon
+              className={cn("h-4 w-4 transition-transform duration-200", consoleOpen && "rotate-180")}
+            />
+          </Button>
+        }
+      />
       <CollapsibleContent
         className={cn(
           "px-4 pb-4",
-          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=open]:animate-in outline-none",
+          "data-ending-style:opacity-0 data-starting-style:opacity-0 transition-opacity outline-none",
         )}
       >
         <div className="max-h-48 space-y-1 overflow-y-auto">

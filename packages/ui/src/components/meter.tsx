@@ -1,11 +1,15 @@
 "use client";
 
 import { Meter as MeterPrimitive } from "@base-ui/react/meter";
+
 import { cn } from "@vibest/ui/lib/utils";
 
 function Meter({ className, children, ...props }: MeterPrimitive.Root.Props) {
   return (
-    <MeterPrimitive.Root className={cn("flex w-full flex-col gap-2", className)} {...props}>
+    <MeterPrimitive.Root
+      className={cn("flex w-full flex-col gap-2", className)}
+      {...props}
+    >
       {children ? (
         children
       ) : (
@@ -20,7 +24,7 @@ function Meter({ className, children, ...props }: MeterPrimitive.Root.Props) {
 function MeterLabel({ className, ...props }: MeterPrimitive.Label.Props) {
   return (
     <MeterPrimitive.Label
-      className={cn("text-foreground text-sm font-medium", className)}
+      className={cn("font-medium text-foreground text-sm", className)}
       data-slot="meter-label"
       {...props}
     />
@@ -30,14 +34,17 @@ function MeterLabel({ className, ...props }: MeterPrimitive.Label.Props) {
 function MeterTrack({ className, ...props }: MeterPrimitive.Track.Props) {
   return (
     <MeterPrimitive.Track
-      className={cn("bg-input block h-2 w-full overflow-hidden", className)}
+      className={cn("block h-2 w-full overflow-hidden bg-input", className)}
       data-slot="meter-track"
       {...props}
     />
   );
 }
 
-function MeterIndicator({ className, ...props }: MeterPrimitive.Indicator.Props) {
+function MeterIndicator({
+  className,
+  ...props
+}: MeterPrimitive.Indicator.Props) {
   return (
     <MeterPrimitive.Indicator
       className={cn("bg-primary transition-all duration-500", className)}
