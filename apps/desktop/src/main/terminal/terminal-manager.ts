@@ -3,26 +3,19 @@ import * as pty from "node-pty";
 
 import type { IPty } from "node-pty";
 
+import type { TerminalEvent } from "../../shared/contract/terminal";
+
 export interface TerminalInstance {
 	id: string;
 	worktreeId: string;
 	pty: IPty;
 	title: string;
+	subscribers: Set<(event: TerminalEvent) => void>;
 }
-
-export type TerminalEventHandler = {
-	onData: (terminalId: string, data: string) => void;
-	onExit: (terminalId: string, exitCode: number) => void;
-};
 
 export class TerminalManager {
 	private terminals: Map<string, TerminalInstance> = new Map();
 	private counter = 0;
-	private eventHandler: TerminalEventHandler | null = null;
-
-	setEventHandler(handler: TerminalEventHandler): void {
-		this.eventHandler = handler;
-	}
 
 	create(worktreeId: string, cwd: string): TerminalInstance {
 		const id = `terminal-${++this.counter}`;
@@ -45,19 +38,44 @@ export class TerminalManager {
 			worktreeId,
 			pty: ptyProcess,
 			title: this.generateTitle(worktreeId),
+			subscribers: new Set(),
 		};
 
 		ptyProcess.onData((data) => {
-			this.eventHandler?.onData(id, data);
+			this.emit(id, { type: "data", data });
 		});
 
 		ptyProcess.onExit(({ exitCode }) => {
+			this.emit(id, { type: "exit", exitCode });
 			this.terminals.delete(id);
-			this.eventHandler?.onExit(id, exitCode);
 		});
 
 		this.terminals.set(id, instance);
 		return instance;
+	}
+
+	subscribe(terminalId: string, callback: (event: TerminalEvent) => void): () => void {
+		const instance = this.terminals.get(terminalId);
+		if (!instance) {
+			// Terminal doesn't exist, return no-op unsubscribe
+			return () => {};
+		}
+
+		instance.subscribers.add(callback);
+
+		// Return unsubscribe function
+		return () => {
+			instance.subscribers.delete(callback);
+		};
+	}
+
+	private emit(terminalId: string, event: TerminalEvent): void {
+		const instance = this.terminals.get(terminalId);
+		if (instance) {
+			for (const callback of instance.subscribers) {
+				callback(event);
+			}
+		}
 	}
 
 	write(terminalId: string, data: string): void {
