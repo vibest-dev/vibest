@@ -62,26 +62,7 @@ export const workspaceContract = {
       ),
     ),
 
-  // Worktree operations
-  createWorktree: oc
-    .input(
-      z.object({
-        repositoryId: z.string(),
-        branch: z.string(),
-        isNewBranch: z.boolean(),
-        baseBranch: z.string().optional(),
-      }),
-    )
-    .output(WorktreeSchema),
-
-  quickCreateWorktree: oc
-    .input(
-      z.object({
-        repositoryId: z.string(),
-      }),
-    )
-    .output(WorktreeSchema),
-
+  // Worktree operations (legacy - worktrees are now created via task.create)
   removeWorktree: oc.input(
     z.object({
       worktreeId: z.string(),
