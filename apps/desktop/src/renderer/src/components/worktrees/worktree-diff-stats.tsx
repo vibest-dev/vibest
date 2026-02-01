@@ -23,9 +23,9 @@ export function WorktreeDiffStats({ path }: WorktreeDiffStatsProps) {
   }
 
   return (
-    <div className="absolute right-1 flex shrink-0 items-center gap-0.5 text-[10px] font-medium tabular-nums transition-opacity duration-150 group-hover/worktree:opacity-0">
-      <span className="text-success">+{stats.insertions}</span>
-      <span className="text-destructive">-{stats.deletions}</span>
+    <div className="mr-1 flex shrink-0 items-center gap-0.5 text-[10px] font-medium tabular-nums transition-opacity duration-150 group-hover/worktree:opacity-0">
+      {stats.insertions > 0 && <span className="text-success">+{stats.insertions}</span>}
+      {stats.deletions > 0 && <span className="text-destructive">-{stats.deletions}</span>}
     </div>
   );
 }
