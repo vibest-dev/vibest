@@ -61,6 +61,10 @@ export class PollingScheduler {
 		}
 	}
 
+	has(id: string): boolean {
+		return this.tasks.has(id);
+	}
+
 	runNow(id: string) {
 		const task = this.tasks.get(id);
 		if (task) {
@@ -127,7 +131,7 @@ export class PollingScheduler {
 				),
 			]);
 			task.failCount = 0;
-		} catch (error) {
+		} catch {
 			task.failCount++;
 			const backoff = Math.min(
 				task.interval * Math.pow(2, task.failCount),

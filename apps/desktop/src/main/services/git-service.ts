@@ -2,6 +2,12 @@ import simpleGit, { type SimpleGit } from "simple-git";
 
 import type { Branch, DiffResult, FileDiff, GitStatus } from "../../shared/types";
 
+export interface DiffStats {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
 export class GitService {
   private getGit(path: string): SimpleGit {
     return simpleGit(path);
@@ -55,6 +61,50 @@ export class GitService {
   async pull(path: string): Promise<void> {
     const git = this.getGit(path);
     await git.pull();
+  }
+
+  /**
+   * Get diff stats (insertions/deletions) for all changes relative to HEAD.
+   * This includes both staged and unstaged changes to tracked files.
+   * For untracked files, counts all lines as insertions.
+   */
+  async getDiffStats(path: string): Promise<DiffStats> {
+    const git = this.getGit(path);
+
+    // Get stats for tracked files (staged + unstaged) relative to HEAD
+    const diffOutput = await git.raw(["diff", "HEAD", "--shortstat"]);
+
+    let filesChanged = 0;
+    let insertions = 0;
+    let deletions = 0;
+
+    // Parse: "12 files changed, 138 insertions(+), 219 deletions(-)"
+    if (diffOutput.trim()) {
+      const filesMatch = diffOutput.match(/(\d+) files? changed/);
+      const insertMatch = diffOutput.match(/(\d+) insertions?\(\+\)/);
+      const deleteMatch = diffOutput.match(/(\d+) deletions?\(-\)/);
+
+      filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+      insertions = insertMatch ? parseInt(insertMatch[1], 10) : 0;
+      deletions = deleteMatch ? parseInt(deleteMatch[1], 10) : 0;
+    }
+
+    // Get untracked files and count their lines
+    const status = await git.status();
+    for (const file of status.not_added) {
+      try {
+        const fs = await import("fs/promises");
+        const nodePath = await import("path");
+        const content = await fs.readFile(nodePath.join(path, file), "utf-8");
+        const lines = content.split("\n").length;
+        insertions += lines;
+        filesChanged += 1;
+      } catch {
+        // Skip files that can't be read (binary, etc.)
+      }
+    }
+
+    return { filesChanged, insertions, deletions };
   }
 
   async getBranches(path: string): Promise<Branch[]> {

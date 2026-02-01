@@ -14,6 +14,7 @@ export class GitWatcherService {
 	private pollInterval: number;
 	private basePriority: number;
 	private lastStats = new Map<string, string>(); // path -> JSON stats
+	private refCounts = new Map<string, number>(); // path -> subscriber count
 
 	constructor(
 		git: GitService,
@@ -34,11 +35,14 @@ export class GitWatcherService {
 	/**
 	 * Start watching a worktree path for git diff changes.
 	 * Events are published to `git:changes:${path}` channel.
+	 * Uses reference counting to handle multiple subscribers.
 	 */
 	watch(path: string, groupId?: string): void {
 		const taskId = `git:diff:${path}`;
+		const currentCount = this.refCounts.get(path) ?? 0;
+		this.refCounts.set(path, currentCount + 1);
 
-		// Already watching
+		// Already watching - just increment ref count
 		if (this.isWatching(path)) {
 			return;
 		}
@@ -47,8 +51,8 @@ export class GitWatcherService {
 			id: taskId,
 			groupId: groupId ?? path,
 			execute: async () => {
-				const diff = await this.git.getDiff(path);
-				const currentStats = JSON.stringify(diff.stats);
+				const stats = await this.git.getDiffStats(path);
+				const currentStats = JSON.stringify(stats);
 				const lastStats = this.lastStats.get(path);
 
 				// Only publish if stats changed
@@ -57,7 +61,7 @@ export class GitWatcherService {
 					this.publisher.publish(`git:changes:${path}`, {
 						type: "diff",
 						path,
-						stats: diff.stats,
+						stats,
 					});
 				}
 			},
@@ -68,8 +72,19 @@ export class GitWatcherService {
 
 	/**
 	 * Stop watching a specific path.
+	 * Only actually stops when all subscribers have unsubscribed.
 	 */
 	unwatch(path: string): void {
+		const currentCount = this.refCounts.get(path) ?? 0;
+		const newCount = Math.max(0, currentCount - 1);
+
+		if (newCount > 0) {
+			this.refCounts.set(path, newCount);
+			return; // Still has subscribers
+		}
+
+		// No more subscribers, actually stop watching
+		this.refCounts.delete(path);
 		const taskId = `git:diff:${path}`;
 		this.scheduler.unregister(taskId);
 		this.lastStats.delete(path);
@@ -80,10 +95,11 @@ export class GitWatcherService {
 	 */
 	unwatchByGroup(groupId: string): void {
 		this.scheduler.unregisterByGroup(groupId);
-		// Clean up lastStats for paths in this group
+		// Clean up lastStats and refCounts for paths in this group
 		for (const path of this.lastStats.keys()) {
 			if (path.includes(groupId)) {
 				this.lastStats.delete(path);
+				this.refCounts.delete(path);
 			}
 		}
 	}
@@ -93,9 +109,7 @@ export class GitWatcherService {
 	 */
 	isWatching(path: string): boolean {
 		const taskId = `git:diff:${path}`;
-		// Access the scheduler's tasks map to check if task exists
-		// Note: This is a simple implementation; could add a public method to scheduler
-		return (this.scheduler as any).tasks?.has(taskId) ?? false;
+		return this.scheduler.has(taskId);
 	}
 
 	/**
@@ -119,5 +133,6 @@ export class GitWatcherService {
 	dispose(): void {
 		this.scheduler.stop();
 		this.lastStats.clear();
+		this.refCounts.clear();
 	}
 }
