@@ -6,6 +6,7 @@ import type { AppContext } from "../../app";
 
 import { workspaceContract } from "../../../shared/contract/workspace";
 import {
+  DEFAULT_LABELS,
   pathToId,
   type Repository,
   type StoredWorktree,
@@ -45,12 +46,13 @@ export const addRepository = os.addRepository.handler(async ({ input, context: {
     name: basename(path),
     path,
     defaultBranch,
+    labels: [...DEFAULT_LABELS],
   };
 
   app.store.addRepository(repository);
-  await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-  return repository;
+  // Return the repository with labels populated
+  return app.store.getRepository(repository.id)!;
 });
 
 export const cloneRepository = os.cloneRepository.handler(async ({ input, context: { app } }) => {
@@ -65,12 +67,13 @@ export const cloneRepository = os.cloneRepository.handler(async ({ input, contex
     name: basename(targetPath),
     path: targetPath,
     defaultBranch: detectedBranch,
+    labels: [...DEFAULT_LABELS],
   };
 
   app.store.addRepository(repository);
-  await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-  return repository;
+  // Return the repository with labels populated
+  return app.store.getRepository(repository.id)!;
 });
 
 export const removeRepository = os.removeRepository.handler(async ({ input, context: { app } }) => {

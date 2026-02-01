@@ -1,9 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@vibest/ui/components/button";
 import { FolderGit2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Worktree } from "./types";
+import type { Task, Worktree } from "./types";
 
 import { Header } from "./components/layout/header";
 import { MainContent } from "./components/layout/main-content";
@@ -11,7 +11,8 @@ import { Sidebar } from "./components/layout/sidebar";
 import { TerminalPanel } from "./components/terminal";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
-import { CreateWorktreeDialog } from "./components/worktrees/create-worktree-dialog";
+import { CreateTaskDialog, EditTaskDialog } from "./components/task";
+import { LabelManagerDialog } from "./components/label";
 import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
@@ -35,22 +36,25 @@ function App(): React.JSX.Element {
     [workspaceData?.worktreesByRepository],
   );
 
-  // UI state - Zustand (only selection and opened tracking)
+  // UI state - Zustand (task selection and worktree tracking)
+  const selectedTaskId = useAppStore((s) => s.selectedTaskId);
+  const selectTask = useAppStore((s) => s.selectTask);
   const selectedWorktreeId = useAppStore((s) => s.selectedWorktreeId);
   const selectWorktree = useAppStore((s) => s.selectWorktree);
   const openedWorktreeIds = useAppStore((s) => s.openedWorktreeIds);
   const markWorktreeOpened = useAppStore((s) => s.markWorktreeOpened);
   const removeWorktreeOpened = useAppStore((s) => s.removeWorktreeOpened);
 
-  // Local UI state - expandedRepositories (not persisted, expands all on load)
-  const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(new Set());
-
   // Local UI state (transient, not persisted)
   const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(null);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
-  const [showCreateWorktreeDialog, setShowCreateWorktreeDialog] = useState(false);
-  const [createWorktreeRepositoryId, setCreateWorktreeRepositoryId] = useState<string | null>(null);
+  const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
+  const [createTaskRepositoryId, setCreateTaskRepositoryId] = useState<string | null>(null);
+  const [showLabelManagerDialog, setShowLabelManagerDialog] = useState(false);
+  const [labelManagerRepositoryId, setLabelManagerRepositoryId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [showEditTaskDialog, setShowEditTaskDialog] = useState(false);
+  const [editTaskTarget, setEditTaskTarget] = useState<Task | null>(null);
 
   // Mutations using oRPC TanStack Query utils with inline callbacks
   const addRepoMutation = useMutation({
@@ -85,44 +89,25 @@ function App(): React.JSX.Element {
     onError: (error) => setMutationError(String(error)),
   });
 
-  const createWorktreeMut = useMutation({
-    ...orpc.workspace.createWorktree.mutationOptions(),
-    onSuccess: (worktree) => {
-      setExpandedRepositories((prev) => new Set([...prev, worktree.repositoryId]));
-      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
-      queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
-    },
-    onError: (error) => setMutationError(String(error)),
-  });
-
-  const quickCreateMutation = useMutation({
-    ...orpc.workspace.quickCreateWorktree.mutationOptions(),
-    onSuccess: (worktree) => {
-      setExpandedRepositories((prev) => new Set([...prev, worktree.repositoryId]));
-      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
-      queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
-    },
-    onError: (error) => setMutationError(String(error)),
-  });
-
-  const archiveMutation = useMutation({
-    ...orpc.workspace.archiveWorktree.mutationOptions(),
-    onSuccess: (_: unknown, variables: { worktreeId: string; commitFirst?: boolean }) => {
-      if (selectedWorktreeId === variables.worktreeId) {
+  const archiveTaskMutation = useMutation({
+    ...orpc.task.delete.mutationOptions(),
+    onSuccess: (
+      _,
+      variables: { taskId: string; deleteWorktree?: boolean; commitFirst?: boolean },
+    ) => {
+      if (selectedTaskId === variables.taskId) {
+        selectTask(null);
         selectWorktree(null);
       }
-      removeWorktreeOpened(variables.worktreeId);
+      // Also remove any opened worktrees belonging to this task
+      if (selectedWorktreeId) {
+        removeWorktreeOpened(selectedWorktreeId);
+      }
+      queryClient.invalidateQueries({ queryKey: orpc.task.key() });
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
     },
     onError: (error) => setMutationError(String(error)),
   });
-
-  // Initialize expanded repositories - expand all on first load
-  useEffect(() => {
-    if (repositories.length > 0 && expandedRepositories.size === 0 && !isLoadingRepositories) {
-      setExpandedRepositories(new Set(repositories.map((r) => r.id)));
-    }
-  }, [repositories, expandedRepositories.size, isLoadingRepositories]);
 
   // Mark worktree as opened when selected
   useEffect(() => {
@@ -149,10 +134,26 @@ function App(): React.JSX.Element {
       .filter((w): w is Worktree => w !== undefined);
   }, [openedWorktreeIds, worktreesByRepository]);
 
-  // Get selected repository from selected worktree
-  const selectedRepository = selectedWorktree
-    ? (repositories.find((r) => r.id === selectedWorktree.repositoryId) ?? null)
-    : null;
+  // Fetch selected task data
+  const { data: selectedTaskData } = useQuery(
+    orpc.task.get.queryOptions({
+      input: selectedTaskId ? { taskId: selectedTaskId } : skipToken,
+    }),
+  );
+
+  const selectedTask = selectedTaskData?.task ?? null;
+  const selectedTaskWorktree = selectedTaskData?.worktrees[0] ?? null;
+
+  // Get selected repository from selected task or worktree
+  const selectedRepository = useMemo(() => {
+    if (selectedTask) {
+      return repositories.find((r) => r.id === selectedTask.repositoryId) ?? null;
+    }
+    if (selectedWorktree) {
+      return repositories.find((r) => r.id === selectedWorktree.repositoryId) ?? null;
+    }
+    return null;
+  }, [selectedTask, selectedWorktree, repositories]);
 
   const error = queryError ? String(queryError) : mutationError;
 
@@ -167,29 +168,49 @@ function App(): React.JSX.Element {
     }
   };
 
-  const handleCreateWorktree = async (repositoryId: string) => {
-    // Quick create worktree directly without dialog
-    await quickCreateMutation.mutateAsync({ repositoryId });
+  const handleCreateTask = (repositoryId: string) => {
+    setCreateTaskRepositoryId(repositoryId);
+    setShowCreateTaskDialog(true);
   };
 
-  const handleToggleRepository = useCallback(
-    (repositoryId: string, open: boolean) => {
-      setExpandedRepositories((prev) => {
-        const next = new Set(prev);
-        if (open) {
-          next.add(repositoryId);
-        } else {
-          next.delete(repositoryId);
-        }
-        return next;
-      });
+  const handleManageLabels = (repositoryId: string) => {
+    setLabelManagerRepositoryId(repositoryId);
+    setShowLabelManagerDialog(true);
+  };
+
+  const handleEditTask = useCallback((task: Task) => {
+    setEditTaskTarget(task);
+    setShowEditTaskDialog(true);
+  }, []);
+
+  const handleHeaderArchiveTask = useCallback(
+    (taskId: string) => {
+      // For header archive, we need to check git status first
+      // For simplicity, just archive without commit - can be enhanced later
+      archiveTaskMutation.mutate({ taskId, deleteWorktree: true, commitFirst: false });
     },
-    [],
+    [archiveTaskMutation],
   );
 
-  const handleCreateWorktreeFrom = useCallback((_repositoryId: string) => {
-    // TODO: Implement create workspace from repository
-  }, []);
+  const handleSelectTask = useCallback(
+    (task: Task, worktree: Worktree | null) => {
+      selectTask(task.id);
+      if (worktree) {
+        selectWorktree(worktree.id);
+        markWorktreeOpened(worktree.id);
+      } else {
+        selectWorktree(null);
+      }
+    },
+    [selectTask, selectWorktree, markWorktreeOpened],
+  );
+
+  const handleArchiveTask = useCallback(
+    (taskId: string, commitFirst: boolean) => {
+      archiveTaskMutation.mutate({ taskId, deleteWorktree: true, commitFirst });
+    },
+    [archiveTaskMutation],
+  );
 
   const handleRefresh = () => {
     // TanStack Query will handle refetching
@@ -203,26 +224,25 @@ function App(): React.JSX.Element {
       <div className="h-full shrink-0">
         <Sidebar
           repositories={repositories}
-          worktreesByRepository={worktreesByRepository}
-          selectedWorktreeId={selectedWorktreeId}
-          expandedRepositories={expandedRepositories}
+          selectedTaskId={selectedTaskId}
           isLoading={isLoadingRepositories}
           onAddRepository={handleAddRepository}
           onCloneRepository={() => setShowCloneDialog(true)}
-          onCreateWorktree={handleCreateWorktree}
-          onCreateWorktreeFrom={handleCreateWorktreeFrom}
-          onToggleRepository={handleToggleRepository}
-          onViewChanges={(worktree) => selectWorktree(worktree?.id ?? null)}
-          onArchiveWorktree={(worktreeId, commitFirst) =>
-            archiveMutation.mutate({ worktreeId, commitFirst })
-          }
+          onCreateTask={handleCreateTask}
+          onSelectTask={handleSelectTask}
+          onArchiveTask={handleArchiveTask}
+          onManageLabels={handleManageLabels}
         />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
-          repository={selectedRepository ?? null}
+          repository={selectedRepository}
+          task={selectedTask}
+          worktree={selectedTaskWorktree}
           onRemoveRepository={(repositoryId) => removeRepoMutation.mutate({ repositoryId })}
+          onEditTask={handleEditTask}
+          onArchiveTask={handleHeaderArchiveTask}
           onRefresh={handleRefresh}
         />
 
@@ -252,10 +272,10 @@ function App(): React.JSX.Element {
                 <FolderGit2 className="text-muted-foreground h-7 w-7" />
               </div>
               <h2 className="text-foreground mb-1 text-[15px] font-semibold">
-                No Worktree Selected
+                No Task Selected
               </h2>
               <p className="text-muted-foreground max-w-xs text-center text-[13px]">
-                Select a worktree from the sidebar to open terminals
+                Select a task from the sidebar to open a terminal
               </p>
             </div>
           )}
@@ -295,19 +315,43 @@ function App(): React.JSX.Element {
         }}
       />
 
-      <CreateWorktreeDialog
-        isOpen={showCreateWorktreeDialog}
+      <CreateTaskDialog
+        isOpen={showCreateTaskDialog}
         repository={
-          createWorktreeRepositoryId
-            ? (repositories.find((r) => r.id === createWorktreeRepositoryId) ?? null)
+          createTaskRepositoryId
+            ? (repositories.find((r) => r.id === createTaskRepositoryId) ?? null)
             : null
         }
         onClose={() => {
-          setShowCreateWorktreeDialog(false);
-          setCreateWorktreeRepositoryId(null);
+          setShowCreateTaskDialog(false);
+          setCreateTaskRepositoryId(null);
         }}
-        onCreate={async (params) => {
-          await createWorktreeMut.mutateAsync(params);
+      />
+
+      <EditTaskDialog
+        isOpen={showEditTaskDialog}
+        task={editTaskTarget}
+        repository={
+          editTaskTarget
+            ? (repositories.find((r) => r.id === editTaskTarget.repositoryId) ?? null)
+            : null
+        }
+        onClose={() => {
+          setShowEditTaskDialog(false);
+          setEditTaskTarget(null);
+        }}
+      />
+
+      <LabelManagerDialog
+        isOpen={showLabelManagerDialog}
+        repository={
+          labelManagerRepositoryId
+            ? (repositories.find((r) => r.id === labelManagerRepositoryId) ?? null)
+            : null
+        }
+        onClose={() => {
+          setShowLabelManagerDialog(false);
+          setLabelManagerRepositoryId(null);
         }}
       />
     </div>

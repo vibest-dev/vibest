@@ -8,6 +8,8 @@ export type {
   FileDiff,
   FileDiffContent,
   GitStatus,
+  Label,
   Repository,
+  Task,
   Worktree,
 } from "../../../shared/types";

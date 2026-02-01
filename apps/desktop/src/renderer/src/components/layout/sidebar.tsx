@@ -9,278 +9,505 @@ import {
   AlertDialogTitle,
 } from "@vibest/ui/components/alert-dialog";
 import { Button } from "@vibest/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@vibest/ui/components/collapsible";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import {
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
   SidebarProvider,
   Sidebar as SidebarRoot,
 } from "@vibest/ui/components/sidebar";
 import {
   Archive,
-  ChevronRight,
+  CheckCircle2,
   Download,
   FolderGit2,
   FolderPlus,
-  FolderSymlink,
-  GitBranch,
   MoreHorizontal,
   Plus,
+  Settings,
+  Tags,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { Repository, Worktree } from "../../types";
+import type { Label, Repository, Task, Worktree } from "../../types";
 
+import { cn } from "../../lib/utils";
 import { orpc } from "../../lib/orpc";
+import { useAppStore } from "../../stores";
 import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 
-function getBasename(path: string): string {
-  return path.split("/").pop() ?? path;
+interface TaskWithWorktrees {
+  task: Task;
+  worktrees: Worktree[];
 }
 
 interface SidebarProps {
   repositories: Repository[];
-  worktreesByRepository: Record<string, Worktree[]>;
-  selectedWorktreeId: string | null;
-  expandedRepositories: Set<string>;
+  selectedTaskId: string | null;
   isLoading: boolean;
   onAddRepository: () => void;
   onCloneRepository: () => void;
-  onCreateWorktree: (repositoryId: string) => void;
-  onCreateWorktreeFrom: (repositoryId: string) => void;
-  onToggleRepository: (repositoryId: string, open: boolean) => void;
-  onViewChanges: (worktree: Worktree) => void;
-  onArchiveWorktree: (worktreeId: string, commitFirst: boolean) => void;
+  onCreateTask: (repositoryId: string) => void;
+  onSelectTask: (task: Task, worktree: Worktree | null) => void;
+  onArchiveTask: (taskId: string, commitFirst: boolean) => void;
+  onManageLabels: (repositoryId: string) => void;
+}
+
+// Label color dot component
+function LabelDots({ labels, repositoryLabels }: { labels: string[]; repositoryLabels: Label[] }) {
+  const taskLabels = repositoryLabels.filter((l) => labels.includes(l.id));
+  if (taskLabels.length === 0) return null;
+
+  return (
+    <div className="flex gap-0.5">
+      {taskLabels.slice(0, 3).map((label) => (
+        <span
+          key={label.id}
+          className="size-2 rounded-full"
+          style={{ backgroundColor: `#${label.color}` }}
+          title={label.name}
+        />
+      ))}
+      {taskLabels.length > 3 && (
+        <span className="text-muted-foreground text-[10px]">+{taskLabels.length - 3}</span>
+      )}
+    </div>
+  );
+}
+
+// Task list item component
+function TaskListItem({
+  taskWithWorktrees,
+  repositoryLabels,
+  isSelected,
+  onSelect,
+  onArchive,
+}: {
+  taskWithWorktrees: TaskWithWorktrees;
+  repositoryLabels: Label[];
+  isSelected: boolean;
+  onSelect: () => void;
+  onArchive: (e: React.MouseEvent) => void;
+}) {
+  const { task, worktrees } = taskWithWorktrees;
+  const worktree = worktrees[0]; // For 1:1, just use first worktree
+
+  return (
+    <SidebarMenuItem className="group/task">
+      <div
+        className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground relative flex h-10 w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg text-sm"
+        data-active={isSelected}
+      >
+        <button
+          type="button"
+          onClick={onSelect}
+          className="ring-sidebar-ring flex h-full min-w-0 flex-1 items-center gap-2 px-2 outline-hidden focus-visible:ring-2"
+        >
+          <CheckCircle2 className="size-4 shrink-0" />
+          <div className="flex min-w-0 flex-1 flex-col items-start">
+            <span className="truncate">{task.name}</span>
+            {worktree && (
+              <span className="text-muted-foreground truncate text-xs font-normal">
+                {worktree.branch}
+              </span>
+            )}
+          </div>
+          <LabelDots labels={task.labels} repositoryLabels={repositoryLabels} />
+        </button>
+        {worktree && <WorktreeDiffStats path={worktree.path} />}
+        <button
+          type="button"
+          className="hover:bg-foreground/10 absolute right-1 flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/task:opacity-100"
+          onClick={onArchive}
+          title="Archive task"
+        >
+          <Archive className="size-3.5" />
+        </button>
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
+// Repo tabs component with dynamic overflow
+function RepoTabs({
+  repositories,
+  selectedRepositoryId,
+  onSelectRepository,
+  onAddRepository,
+  onCloneRepository,
+  className,
+}: {
+  repositories: Repository[];
+  selectedRepositoryId: string | null;
+  onSelectRepository: (id: string) => void;
+  onAddRepository: () => void;
+  onCloneRepository: () => void;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(repositories.length);
+
+  // Calculate how many tabs fit in the container using hidden measurement container
+  const calculateVisibleTabs = useCallback(() => {
+    const container = containerRef.current;
+    const measureContainer = measureRef.current;
+    if (!container || !measureContainer) return;
+
+    // Get available width (container width minus add button and padding)
+    const containerWidth = container.offsetWidth;
+    const addButtonWidth = 28; // size-5 + gap
+    const moreButtonWidth = 40; // estimated width for "+N" button
+    const availableWidth = containerWidth - addButtonWidth - 8; // 8px for gaps
+
+    // Measure each tab's width from the hidden measurement container
+    const tabs = measureContainer.querySelectorAll<HTMLSpanElement>("[data-measure-tab]");
+    let totalWidth = 0;
+    let count = 0;
+
+    for (const tab of tabs) {
+      const tabWidth = tab.offsetWidth + 2; // 2px for gap
+      const needsMoreButton = count < repositories.length - 1;
+      if (totalWidth + tabWidth + (needsMoreButton ? moreButtonWidth : 0) <= availableWidth) {
+        totalWidth += tabWidth;
+        count++;
+      } else {
+        break;
+      }
+    }
+
+    setVisibleCount(Math.max(1, count)); // Show at least 1 tab
+  }, [repositories.length]);
+
+  // Recalculate on mount and when repositories change
+  useLayoutEffect(() => {
+    calculateVisibleTabs();
+  }, [calculateVisibleTabs, repositories]);
+
+  // Recalculate on resize
+  useEffect(() => {
+    const observer = new ResizeObserver(calculateVisibleTabs);
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+    return () => observer.disconnect();
+  }, [calculateVisibleTabs]);
+
+  const visibleRepos = repositories.slice(0, visibleCount);
+  const overflowRepos = repositories.slice(visibleCount);
+
+  return (
+    <div ref={containerRef} className={cn("flex items-center gap-0.5 px-2", className)}>
+      {/* Hidden measurement container - renders all tabs to measure their widths */}
+      <div
+        ref={measureRef}
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute flex items-center gap-0.5"
+      >
+        {repositories.map((repo) => (
+          <span
+            key={repo.id}
+            data-measure-tab
+            className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-sm font-medium"
+          >
+            {repo.name}
+          </span>
+        ))}
+      </div>
+
+      {/* Visible tabs */}
+      <div className="flex min-w-0 flex-1 items-center gap-0.5">
+        {visibleRepos.map((repo) => (
+          <button
+            key={repo.id}
+            type="button"
+            onClick={() => onSelectRepository(repo.id)}
+            className={cn(
+              "shrink-0 truncate rounded px-1.5 py-0.5 text-sm font-medium transition-colors",
+              selectedRepositoryId === repo.id
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+            title={repo.path}
+          >
+            {repo.name}
+          </button>
+        ))}
+        {overflowRepos.length > 0 && (
+          <Menu>
+            <MenuTrigger
+              render={
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded px-1.5 py-0.5 text-sm font-medium transition-colors"
+                >
+                  +{overflowRepos.length}
+                </button>
+              }
+            />
+            <MenuPopup side="bottom" align="start">
+              {overflowRepos.map((repo) => (
+                <MenuItem
+                  key={repo.id}
+                  onClick={() => onSelectRepository(repo.id)}
+                >
+                  {repo.name}
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+        )}
+      </div>
+      <Menu>
+        <MenuTrigger
+          render={
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded transition-colors"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          }
+        />
+        <MenuPopup side="bottom" align="end">
+          <MenuItem onClick={onAddRepository}>
+            <FolderPlus />
+            Add Local Repository
+          </MenuItem>
+          <MenuItem onClick={onCloneRepository}>
+            <Download />
+            Clone from URL
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+    </div>
+  );
 }
 
 export function Sidebar({
   repositories,
-  worktreesByRepository,
-  selectedWorktreeId,
-  expandedRepositories,
+  selectedTaskId,
   isLoading,
   onAddRepository,
   onCloneRepository,
-  onCreateWorktree,
-  onCreateWorktreeFrom,
-  onToggleRepository,
-  onViewChanges,
-  onArchiveWorktree,
+  onCreateTask,
+  onSelectTask,
+  onArchiveTask,
+  onManageLabels,
 }: SidebarProps) {
-  const [archiveTarget, setArchiveTarget] = useState<Worktree | null>(null);
+  const [archiveTaskTarget, setArchiveTaskTarget] = useState<TaskWithWorktrees | null>(null);
 
-  // Fetch git status for the archive target worktree using oRPC
-  const { data: archiveTargetStatus } = useQuery(
-    orpc.git.status.queryOptions({
-      input: archiveTarget ? { path: archiveTarget.path } : skipToken,
+  // Get selected repository from store
+  const selectedRepositoryId = useAppStore((s) => s.selectedRepositoryId);
+  const selectRepository = useAppStore((s) => s.selectRepository);
+
+  // Auto-select first repository if none selected
+  useEffect(() => {
+    if (repositories.length > 0 && !selectedRepositoryId) {
+      selectRepository(repositories[0].id);
+    }
+    // Handle stale selection (repo was deleted)
+    if (selectedRepositoryId && !repositories.find((r) => r.id === selectedRepositoryId)) {
+      selectRepository(repositories[0]?.id ?? null);
+    }
+  }, [repositories, selectedRepositoryId, selectRepository]);
+
+  // Get selected repository
+  const selectedRepository = repositories.find((r) => r.id === selectedRepositoryId) ?? null;
+
+  // Fetch tasks for selected repository
+  const { data: tasksData } = useQuery(
+    orpc.task.list.queryOptions({
+      input: selectedRepositoryId ? { repositoryId: selectedRepositoryId } : skipToken,
     }),
   );
 
-  const handleArchiveClick = (worktree: Worktree, e: React.MouseEvent) => {
+  const tasksWithWorktrees = tasksData ?? [];
+  const repositoryLabels = selectedRepository?.labels ?? [];
+
+  // Fetch git status for archive task target
+  const { data: archiveTaskTargetStatus } = useQuery(
+    orpc.git.status.queryOptions({
+      input: archiveTaskTarget?.worktrees[0]
+        ? { path: archiveTaskTarget.worktrees[0].path }
+        : skipToken,
+    }),
+  );
+
+  const handleArchiveTaskClick = (taskWithWorktrees: TaskWithWorktrees, e: React.MouseEvent) => {
     e.stopPropagation();
-    // If worktree doesn't exist on disk, archive immediately (just remove from store)
-    if (!worktree.exists) {
-      onArchiveWorktree(worktree.id, false);
+    const worktree = taskWithWorktrees.worktrees[0];
+    // If no worktree or doesn't exist, archive immediately
+    if (!worktree || !worktree.exists) {
+      onArchiveTask(taskWithWorktrees.task.id, false);
       return;
     }
-    // Set the archive target to trigger status fetch
-    setArchiveTarget(worktree);
+    setArchiveTaskTarget(taskWithWorktrees);
   };
 
-  // Show confirmation dialog only if there are uncommitted changes
-  const showConfirmDialog =
-    archiveTarget !== null && archiveTargetStatus !== undefined && !archiveTargetStatus.clean;
+  const showTaskConfirmDialog =
+    archiveTaskTarget !== null &&
+    archiveTaskTargetStatus !== undefined &&
+    !archiveTaskTargetStatus.clean;
 
   // If status is loaded and clean, archive immediately
   useEffect(() => {
-    if (archiveTarget !== null && archiveTargetStatus !== undefined && archiveTargetStatus.clean) {
-      onArchiveWorktree(archiveTarget.id, false);
-      setArchiveTarget(null);
+    if (
+      archiveTaskTarget !== null &&
+      archiveTaskTargetStatus !== undefined &&
+      archiveTaskTargetStatus.clean
+    ) {
+      onArchiveTask(archiveTaskTarget.task.id, false);
+      setArchiveTaskTarget(null);
     }
-  }, [archiveTarget, archiveTargetStatus, onArchiveWorktree]);
+  }, [archiveTaskTarget, archiveTaskTargetStatus, onArchiveTask]);
 
-  const handleConfirmArchive = () => {
-    if (archiveTarget) {
-      onArchiveWorktree(archiveTarget.id, true);
-      setArchiveTarget(null);
+  const handleConfirmArchiveTask = () => {
+    if (archiveTaskTarget) {
+      onArchiveTask(archiveTaskTarget.task.id, true);
+      setArchiveTaskTarget(null);
     }
   };
 
-  const archiveFolderName = archiveTarget ? getBasename(archiveTarget.path) : "";
+  const archiveTaskName = archiveTaskTarget?.task.name ?? "";
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-full min-h-0">
       <SidebarRoot collapsible="none">
-        <SidebarHeader className="app-drag-region h-9" />
+        <SidebarHeader className="app-drag-region relative shrink-0 pb-8 pt-9">
+          {/* Repo Tabs - fixed at top, doesn't scroll */}
+          {!isLoading && repositories.length > 0 && (
+            <RepoTabs
+              className="app-no-drag absolute bottom-0 left-0 right-0 pb-1"
+              repositories={repositories}
+              selectedRepositoryId={selectedRepositoryId}
+              onSelectRepository={selectRepository}
+              onAddRepository={onAddRepository}
+              onCloneRepository={onCloneRepository}
+            />
+          )}
+        </SidebarHeader>
 
         <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel className="flex items-center justify-between">
-              <span>Workspace</span>
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button variant="ghost" size="icon" className="app-no-drag size-5">
-                      <Plus className="size-4" />
-                    </Button>
-                  }
-                />
-                <MenuPopup side="right" align="start">
-                  <MenuItem onClick={onAddRepository}>
-                    <FolderPlus />
-                    Add Local Repository
-                  </MenuItem>
-                  <MenuItem onClick={onCloneRepository}>
-                    <Download />
-                    Clone from URL
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            </SidebarGroupLabel>
+          {/* Empty state when no repos */}
+          {!isLoading && repositories.length === 0 && (
+            <div className="px-2 py-8 text-center">
+              <FolderGit2 className="text-muted-foreground mx-auto mb-2 size-8" />
+              <p className="text-muted-foreground mb-3 text-sm">No repositories</p>
+              <div className="flex justify-center gap-2">
+                <Button variant="outline" size="sm" onClick={onAddRepository}>
+                  <FolderPlus className="size-4" />
+                  Add
+                </Button>
+                <Button variant="outline" size="sm" onClick={onCloneRepository}>
+                  <Download className="size-4" />
+                  Clone
+                </Button>
+              </div>
+            </div>
+          )}
 
-            <SidebarMenu>
-              {!isLoading && repositories.length === 0 ? (
-                <div className="px-2 py-8 text-center">
-                  <FolderGit2 className="text-muted-foreground mx-auto mb-2" />
-                  <p className="text-muted-foreground text-sm">No repositories</p>
+          {/* Task list for selected repo */}
+          {selectedRepository && (
+            <SidebarGroup>
+              <div className="flex items-center justify-between px-2 pb-1">
+                <span className="text-muted-foreground text-sm font-medium">Tasks</span>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors"
+                    onClick={() => onCreateTask(selectedRepository.id)}
+                    title="Create task"
+                  >
+                    <Plus className="size-4" />
+                  </button>
+                  <Menu>
+                    <MenuTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors"
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </button>
+                      }
+                    />
+                    <MenuPopup side="right" align="start">
+                      <MenuItem onClick={() => onManageLabels(selectedRepository.id)}>
+                        <Tags />
+                        Manage labels
+                      </MenuItem>
+                    </MenuPopup>
+                  </Menu>
                 </div>
-              ) : (
-                repositories.map((repository) => {
-                  const worktrees = worktreesByRepository[repository.id] ?? [];
-                  const hasWorktrees = worktrees.length > 0;
+              </div>
 
-                  return (
-                    <Collapsible
-                      key={repository.id}
-                      open={expandedRepositories.has(repository.id)}
-                      onOpenChange={(open) => onToggleRepository(repository.id, open)}
+              <SidebarMenu>
+                {tasksWithWorktrees.length === 0 ? (
+                  <div className="px-2 py-6 text-center">
+                    <CheckCircle2 className="text-muted-foreground mx-auto mb-2 size-6" />
+                    <p className="text-muted-foreground text-xs">No tasks yet</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => onCreateTask(selectedRepository.id)}
                     >
-                      <SidebarMenuItem>
-                        <CollapsibleTrigger disabled={!hasWorktrees} className="w-full">
-                          <SidebarMenuButton className="h-auto w-full py-1.5">
-                            <span className="relative flex size-4 shrink-0 items-center justify-center">
-                              <FolderGit2
-                                className={
-                                  hasWorktrees
-                                    ? "absolute inset-0 size-4 transition-all duration-200 ease-out group-hover/menu-item:scale-75 group-hover/menu-item:opacity-0"
-                                    : "size-4"
-                                }
-                              />
-                              {hasWorktrees && (
-                                <ChevronRight className="absolute inset-0 size-4 scale-75 opacity-0 transition-all duration-200 ease-out group-hover/menu-item:scale-100 group-hover/menu-item:opacity-100 [[data-panel-open]_&]:rotate-90" />
-                              )}
-                            </span>
-                            <div className="flex min-w-0 flex-1 flex-col items-start">
-                              <span className="w-full truncate">{repository.name}</span>
-                              <span className="text-muted-foreground w-full truncate text-xs font-normal">
-                                {repository.path?.replace(/^\/Users\/[^/]+/, "~") ?? ""}
-                              </span>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-0.5">
-                              <button
-                                type="button"
-                                className="hover:bg-sidebar-accent flex size-5 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/menu-item:opacity-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onCreateWorktree(repository.id);
-                                }}
-                              >
-                                <Plus className="size-4" />
-                              </button>
-                              <Menu>
-                                <MenuTrigger
-                                  render={
-                                    <button
-                                      type="button"
-                                      className="hover:bg-sidebar-accent data-[popup-open]:bg-sidebar-accent flex size-5 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/menu-item:opacity-100 data-[popup-open]:opacity-100"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <MoreHorizontal className="size-4" />
-                                    </button>
-                                  }
-                                />
-                                <MenuPopup side="right" align="start">
-                                  <MenuItem onClick={() => onCreateWorktreeFrom(repository.id)}>
-                                    <FolderSymlink />
-                                    Create worktree from...
-                                  </MenuItem>
-                                </MenuPopup>
-                              </Menu>
-                            </div>
-                          </SidebarMenuButton>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <SidebarMenuSub className="mr-0">
-                            {worktrees.map((worktree) => (
-                              <SidebarMenuSubItem key={worktree.id} className="group/worktree">
-                                <div
-                                  className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground relative flex h-10 w-full min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-lg text-sm"
-                                  data-active={selectedWorktreeId === worktree.id}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => onViewChanges(worktree)}
-                                    className="ring-sidebar-ring flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 outline-hidden focus-visible:ring-2"
-                                  >
-                                    <GitBranch className="size-4 shrink-0" />
-                                    <div className="flex min-w-0 flex-1 flex-col items-start overflow-hidden">
-                                      <span className="w-full truncate text-left">{worktree.branch}</span>
-                                      <span className="text-muted-foreground w-full truncate text-left text-xs font-normal">
-                                        {getBasename(worktree.path)}
-                                      </span>
-                                    </div>
-                                  </button>
-                                  <WorktreeDiffStats path={worktree.path} />
-                                  <button
-                                    type="button"
-                                    className="hover:bg-foreground/10 absolute right-1 flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/worktree:opacity-100"
-                                    onClick={(e) => handleArchiveClick(worktree, e)}
-                                    title="Archive worktree"
-                                  >
-                                    <Archive className="size-3.5" />
-                                  </button>
-                                </div>
-                              </SidebarMenuSubItem>
-                            ))}
-                          </SidebarMenuSub>
-                        </CollapsibleContent>
-                      </SidebarMenuItem>
-                    </Collapsible>
-                  );
-                })
-              )}
-            </SidebarMenu>
-          </SidebarGroup>
+                      <Plus className="size-4" />
+                      Create task
+                    </Button>
+                  </div>
+                ) : (
+                  tasksWithWorktrees.map((taskWithWorktrees) => (
+                    <TaskListItem
+                      key={taskWithWorktrees.task.id}
+                      taskWithWorktrees={taskWithWorktrees}
+                      repositoryLabels={repositoryLabels}
+                      isSelected={selectedTaskId === taskWithWorktrees.task.id}
+                      onSelect={() => {
+                        const worktree = taskWithWorktrees.worktrees[0];
+                        onSelectTask(taskWithWorktrees.task, worktree ?? null);
+                      }}
+                      onArchive={(e) => handleArchiveTaskClick(taskWithWorktrees, e)}
+                    />
+                  ))
+                )}
+              </SidebarMenu>
+            </SidebarGroup>
+          )}
         </SidebarContent>
+
+        <SidebarFooter className="p-2">
+          <button
+            type="button"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
+            title="Settings"
+          >
+            <Settings className="size-4" />
+          </button>
+        </SidebarFooter>
       </SidebarRoot>
 
+      {/* Archive task confirmation dialog */}
       <AlertDialog
-        open={showConfirmDialog}
-        onOpenChange={(open) => !open && setArchiveTarget(null)}
+        open={showTaskConfirmDialog}
+        onOpenChange={(open) => !open && setArchiveTaskTarget(null)}
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive {archiveFolderName}</AlertDialogTitle>
+            <AlertDialogTitle>Archive task "{archiveTaskName}"</AlertDialogTitle>
             <AlertDialogDescription>
-              This worktree has uncommitted changes. Archiving will commit all changes with a "WIP"
-              message before removing the worktree and deleting the branch.
+              This task has uncommitted changes. Archiving will commit all changes with a "WIP"
+              message before removing the worktree and deleting the task.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button onClick={handleConfirmArchive}>Commit and archive</Button>
+            <Button onClick={handleConfirmArchiveTask}>Commit and archive</Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
