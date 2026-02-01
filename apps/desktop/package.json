@@ -35,7 +35,7 @@
     "@orpc/contract": "^1.9.1",
     "@orpc/experimental-publisher": "^1.13.4",
     "@orpc/server": "^1.8.6",
-    "@orpc/tanstack-query": "^1.13.4",
+    "@orpc/tanstack-query": "^1.8.6",
     "@pierre/diffs": "^1.0.9",
     "@playwright/test": "^1.50.1",
     "@tailwindcss/vite": "^4.1.12",

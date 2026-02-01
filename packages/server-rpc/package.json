@@ -32,7 +32,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.22",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.12",
     "@orpc/contract": "^1.9.1",
     "@orpc/shared": "^1.9.4",
     "@vibest/agents": "workspace:*",
