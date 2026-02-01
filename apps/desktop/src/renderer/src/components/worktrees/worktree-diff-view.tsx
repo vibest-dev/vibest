@@ -22,7 +22,7 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
 
   const { data: diffStats, isLoading, error, refetch } = useDiffStats(worktree.path);
 
-  const allFiles = diffStats?.files ?? [];
+  const allFiles = useMemo(() => diffStats?.files ?? [], [diffStats?.files]);
 
   // Build file trees from stats
   const { stagedFiles, stagedCount, unstagedFiles, unstagedCount } = useMemo(() => {
@@ -36,8 +36,8 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
     };
   }, [allFiles]);
 
-  const handleFileClick = (fileIndex: number) => {
-    const file = allFiles[fileIndex];
+  const handleFileClick = (filePath: string) => {
+    const file = allFiles.find((f) => f.path === filePath);
     if (file) {
       setSelectedFile(file);
     }

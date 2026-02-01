@@ -29,14 +29,14 @@ interface DiffFileTreeProps {
   unstagedFiles: FileTreeNode[];
   stagedCount: number;
   unstagedCount: number;
-  onFileClick: (fileIndex: number) => void;
+  onFileClick: (filePath: string) => void;
   selectedPath?: string;
 }
 
 interface TreeNodeProps {
   node: FileTreeNode;
   level: number;
-  onFileClick: (fileIndex: number) => void;
+  onFileClick: (filePath: string) => void;
   selectedPath?: string;
 }
 
@@ -77,7 +77,7 @@ function TreeNode({ node, level, onFileClick, selectedPath }: TreeNodeProps) {
       type="button"
       className={`flex w-full items-center gap-2 rounded px-2 py-1 ${isSelected ? "bg-accent" : "hover:bg-accent/50"}`}
       style={{ paddingLeft: paddingLeft + 14 }}
-      onClick={() => node.fileIndex !== undefined && onFileClick(node.fileIndex)}
+      onClick={() => onFileClick(node.path)}
     >
       <File className="text-muted-foreground size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left text-sm">{name}</span>

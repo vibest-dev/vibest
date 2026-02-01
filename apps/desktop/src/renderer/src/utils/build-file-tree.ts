@@ -4,16 +4,13 @@ export interface FileTreeNode {
   path: string; // "src/components/auth.tsx" or "src/components"
   isDirectory: boolean;
   status?: DiffFileInfo["status"]; // only for files
-  staged?: boolean; // only for files
-  fileIndex?: number; // only for files
   children: FileTreeNode[];
 }
 
 export function buildFileTree(files: DiffFileInfo[]): FileTreeNode[] {
   const root: FileTreeNode[] = [];
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+  for (const file of files) {
     const filename = file.path;
     if (!filename) continue;
 
@@ -33,7 +30,7 @@ export function buildFileTree(files: DiffFileInfo[]): FileTreeNode[] {
           path: currentPath,
           isDirectory: !isLast,
           children: [],
-          ...(isLast ? { status: file.status, fileIndex: i, staged: file.staged } : {}),
+          ...(isLast ? { status: file.status } : {}),
         };
         currentLevel.push(existing);
       }
