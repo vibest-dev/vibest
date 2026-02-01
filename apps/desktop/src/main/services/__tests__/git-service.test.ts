@@ -32,14 +32,12 @@ describe("GitService.getDiffStats", () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
-	it("should return zeros for clean repo", async () => {
+	it("should return empty for clean repo", async () => {
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats).toEqual({
-			filesChanged: 0,
-			insertions: 0,
-			deletions: 0,
-		});
+		expect(stats.files).toEqual([]);
+		expect(stats.totalInsertions).toBe(0);
+		expect(stats.totalDeletions).toBe(0);
 	});
 
 	it("should count insertions for new lines in tracked file", async () => {
@@ -48,9 +46,9 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(1);
-		expect(stats.insertions).toBe(3);
-		expect(stats.deletions).toBe(0);
+		expect(stats.files.length).toBe(1);
+		expect(stats.totalInsertions).toBe(3);
+		expect(stats.totalDeletions).toBe(0);
 	});
 
 	it("should count deletions for removed lines", async () => {
@@ -65,9 +63,9 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(1);
-		expect(stats.insertions).toBe(0);
-		expect(stats.deletions).toBe(3);
+		expect(stats.files.length).toBe(1);
+		expect(stats.totalInsertions).toBe(0);
+		expect(stats.totalDeletions).toBe(3);
 	});
 
 	it("should count both insertions and deletions", async () => {
@@ -76,9 +74,9 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(1);
-		expect(stats.insertions).toBeGreaterThan(0);
-		expect(stats.deletions).toBeGreaterThan(0);
+		expect(stats.files.length).toBe(1);
+		expect(stats.totalInsertions).toBeGreaterThan(0);
+		expect(stats.totalDeletions).toBeGreaterThan(0);
 	});
 
 	it("should include staged changes", async () => {
@@ -89,8 +87,9 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(1);
-		expect(stats.insertions).toBe(2);
+		expect(stats.files.length).toBe(1);
+		expect(stats.files[0].staged).toBe(true);
+		expect(stats.totalInsertions).toBe(2);
 	});
 
 	it("should include both staged and unstaged changes", async () => {
@@ -105,8 +104,8 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(2);
-		expect(stats.insertions).toBeGreaterThanOrEqual(2);
+		expect(stats.files.length).toBe(2);
+		expect(stats.totalInsertions).toBeGreaterThanOrEqual(2);
 	});
 
 	it("should include untracked files", async () => {
@@ -118,8 +117,9 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(1);
-		expect(stats.insertions).toBe(6); // 5 lines + trailing newline = 6 when split
+		expect(stats.files.length).toBe(1);
+		expect(stats.files[0].staged).toBe(false);
+		expect(stats.totalInsertions).toBe(6); // 5 lines + trailing newline = 6 when split
 	});
 
 	it("should handle multiple files", async () => {
@@ -130,6 +130,6 @@ describe("GitService.getDiffStats", () => {
 
 		const stats = await gitService.getDiffStats(tmpDir);
 
-		expect(stats.filesChanged).toBe(3);
+		expect(stats.files.length).toBe(3);
 	});
 });

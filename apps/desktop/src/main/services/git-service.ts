@@ -10,12 +10,6 @@ import type {
   GitStatus,
 } from "../../shared/types";
 
-export interface DiffStats {
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
-}
-
 export class GitService {
   private getGit(path: string): SimpleGit {
     return simpleGit(path);
@@ -69,50 +63,6 @@ export class GitService {
   async pull(path: string): Promise<void> {
     const git = this.getGit(path);
     await git.pull();
-  }
-
-  /**
-   * Get diff stats (insertions/deletions) for all changes relative to HEAD.
-   * This includes both staged and unstaged changes to tracked files.
-   * For untracked files, counts all lines as insertions.
-   */
-  async getDiffStats(path: string): Promise<DiffStats> {
-    const git = this.getGit(path);
-
-    // Get stats for tracked files (staged + unstaged) relative to HEAD
-    const diffOutput = await git.raw(["diff", "HEAD", "--shortstat"]);
-
-    let filesChanged = 0;
-    let insertions = 0;
-    let deletions = 0;
-
-    // Parse: "12 files changed, 138 insertions(+), 219 deletions(-)"
-    if (diffOutput.trim()) {
-      const filesMatch = diffOutput.match(/(\d+) files? changed/);
-      const insertMatch = diffOutput.match(/(\d+) insertions?\(\+\)/);
-      const deleteMatch = diffOutput.match(/(\d+) deletions?\(-\)/);
-
-      filesChanged = filesMatch ? parseInt(filesMatch[1], 10) : 0;
-      insertions = insertMatch ? parseInt(insertMatch[1], 10) : 0;
-      deletions = deleteMatch ? parseInt(deleteMatch[1], 10) : 0;
-    }
-
-    // Get untracked files and count their lines
-    const status = await git.status();
-    for (const file of status.not_added) {
-      try {
-        const fs = await import("fs/promises");
-        const nodePath = await import("path");
-        const content = await fs.readFile(nodePath.join(path, file), "utf-8");
-        const lines = content.split("\n").length;
-        insertions += lines;
-        filesChanged += 1;
-      } catch {
-        // Skip files that can't be read (binary, etc.)
-      }
-    }
-
-    return { filesChanged, insertions, deletions };
   }
 
   async getBranches(path: string): Promise<Branch[]> {
@@ -443,24 +393,12 @@ export class GitService {
       }
     };
 
-    // Process staged files
-    for (const file of status.staged) {
-      const stats = stagedStats.get(file) ?? { insertions: 0, deletions: 0 };
-      const size = await getFileSize(file);
-      files.push({
-        path: file,
-        status: "modified",
-        staged: true,
-        insertions: stats.insertions,
-        deletions: stats.deletions,
-        size,
-      });
-      totalInsertions += stats.insertions;
-      totalDeletions += stats.deletions;
-    }
+    // Track processed files to avoid duplicates
+    const processedFiles = new Set<string>();
 
-    // Process created files (staged)
+    // Process created files (staged new files)
     for (const file of status.created) {
+      processedFiles.add(file);
       const stats = stagedStats.get(file) ?? { insertions: 0, deletions: 0 };
       const size = await getFileSize(file);
       files.push({
@@ -475,9 +413,28 @@ export class GitService {
       totalDeletions += stats.deletions;
     }
 
+    // Process staged files (modified files that are staged)
+    for (const file of status.staged) {
+      if (processedFiles.has(file)) continue; // Skip created files already processed
+      processedFiles.add(file);
+      const stats = stagedStats.get(file) ?? { insertions: 0, deletions: 0 };
+      const size = await getFileSize(file);
+      files.push({
+        path: file,
+        status: "modified",
+        staged: true,
+        insertions: stats.insertions,
+        deletions: stats.deletions,
+        size,
+      });
+      totalInsertions += stats.insertions;
+      totalDeletions += stats.deletions;
+    }
+
     // Process modified files (unstaged)
     for (const file of status.modified) {
-      if (status.staged.includes(file)) continue; // Already processed as staged
+      if (processedFiles.has(file)) continue; // Already processed
+      processedFiles.add(file);
       const stats = unstagedStats.get(file) ?? { insertions: 0, deletions: 0 };
       const size = await getFileSize(file);
       files.push({
@@ -494,6 +451,8 @@ export class GitService {
 
     // Process untracked files
     for (const file of status.not_added) {
+      if (processedFiles.has(file)) continue; // Already processed
+      processedFiles.add(file);
       const size = await getFileSize(file);
       // Count lines for new files
       let insertions = 0;
@@ -516,6 +475,8 @@ export class GitService {
 
     // Process deleted files
     for (const file of status.deleted) {
+      if (processedFiles.has(file)) continue; // Already processed
+      processedFiles.add(file);
       const isStaged = status.staged.includes(file);
       const stats = (isStaged ? stagedStats : unstagedStats).get(file) ?? { insertions: 0, deletions: 0 };
       files.push({
@@ -532,6 +493,8 @@ export class GitService {
 
     // Process renamed files
     for (const renamed of status.renamed) {
+      if (processedFiles.has(renamed.to)) continue; // Already processed
+      processedFiles.add(renamed.to);
       const isStaged = status.staged.includes(renamed.to);
       const stats = (isStaged ? stagedStats : unstagedStats).get(renamed.to) ?? { insertions: 0, deletions: 0 };
       const size = await getFileSize(renamed.to);
