@@ -27,9 +27,12 @@ export function useDiff({ path, staged = false }: UseDiffOptions): UseDiffReturn
     setError(null);
 
     try {
+      console.log("[useDiff] Fetching diff for path:", path, "staged:", staged);
       const result = await client.git.diff({ path, staged });
+      console.log("[useDiff] Got result:", result);
       setDiff(result);
     } catch (err) {
+      console.error("[useDiff] Error:", err);
       setError(String(err));
     } finally {
       setIsLoading(false);

@@ -26,6 +26,14 @@ export const getDiff = os.diff.handler(async ({ input, context: { app } }) => {
   return app.git.getDiff(input.path, input.staged);
 });
 
+export const getDiffStats = os.diffStats.handler(async ({ input, context: { app } }) => {
+  return app.git.getDiffStats(input.path);
+});
+
+export const getFileDiff = os.fileDiff.handler(async ({ input, context: { app } }) => {
+  return app.git.getFileDiff(input.path, input.filePath, input.staged);
+});
+
 // Streaming subscription for git changes using Publisher
 export const watchChanges = os.watchChanges.handler(async function* ({
   input,
@@ -59,5 +67,7 @@ export const gitRouter = os.router({
   pull: pullGit,
   branches: getBranches,
   diff: getDiff,
+  diffStats: getDiffStats,
+  fileDiff: getFileDiff,
   watchChanges,
 });
