@@ -14,7 +14,9 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**
+icon: resources/icon.png
 mac:
+  icon: resources/icon.icns
   target:
     - dmg
     - zip
