@@ -2,8 +2,11 @@
 export type {
   Branch,
   DiffFileContents,
+  DiffFileInfo,
   DiffResult,
+  DiffStats,
   FileDiff,
+  FileDiffContent,
   GitStatus,
   Repository,
   Worktree,

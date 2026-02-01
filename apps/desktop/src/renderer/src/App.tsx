@@ -12,7 +12,7 @@ import { TerminalPanel } from "./components/terminal";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
 import { CreateWorktreeDialog } from "./components/worktrees/create-worktree-dialog";
-import { DiffViewer } from "./components/worktrees/diff-viewer";
+import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
 import { queryClient } from "./lib/query-client";
@@ -50,7 +50,6 @@ function App(): React.JSX.Element {
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [showCreateWorktreeDialog, setShowCreateWorktreeDialog] = useState(false);
   const [createWorktreeRepositoryId, setCreateWorktreeRepositoryId] = useState<string | null>(null);
-  const [diffWorktree, setDiffWorktree] = useState<Worktree | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   // Mutations using oRPC TanStack Query utils with inline callbacks
@@ -150,9 +149,9 @@ function App(): React.JSX.Element {
       .filter((w): w is Worktree => w !== undefined);
   }, [openedWorktreeIds, worktreesByRepository]);
 
-  // Get selected repository from selected worktree or diff worktree
-  const selectedRepository = (selectedWorktree || diffWorktree)
-    ? (repositories.find((r) => r.id === (selectedWorktree?.repositoryId ?? diffWorktree?.repositoryId)) ?? null)
+  // Get selected repository from selected worktree
+  const selectedRepository = selectedWorktree
+    ? (repositories.find((r) => r.id === selectedWorktree.repositoryId) ?? null)
     : null;
 
   const error = queryError ? String(queryError) : mutationError;
@@ -228,21 +227,26 @@ function App(): React.JSX.Element {
         />
 
         <MainContent fullBleed={openedWorktrees.length > 0}>
-          {/* Render all opened terminals (hidden when not selected) */}
-          <div className="relative h-full">
-            {openedWorktrees.map((worktree) => (
-              <TerminalPanel
-                key={worktree.id}
-                worktreeId={worktree.id}
-                worktreePath={worktree.path}
-                worktreeExists={worktree.exists}
-                isVisible={worktree.id === selectedWorktreeId}
-              />
-            ))}
-          </div>
-          {diffWorktree && !selectedWorktree ? (
-            <DiffViewer worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
-          ) : openedWorktrees.length === 0 ? (
+          {selectedWorktree ? (
+            <div className="flex h-full">
+              {/* Terminal (left side) */}
+              <div className="relative min-w-0 flex-1">
+                {openedWorktrees.map((worktree) => (
+                  <TerminalPanel
+                    key={worktree.id}
+                    worktreeId={worktree.id}
+                    worktreePath={worktree.path}
+                    worktreeExists={worktree.exists}
+                    isVisible={worktree.id === selectedWorktreeId}
+                  />
+                ))}
+              </div>
+              {/* Diff View (right side) */}
+              <div className="border-border h-full w-1/2 shrink-0 border-l">
+                <WorktreeDiffView worktree={selectedWorktree} onClose={() => selectWorktree(null)} />
+              </div>
+            </div>
+          ) : (
             <div className="flex h-full flex-col items-center justify-center">
               <div className="bg-muted mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
                 <FolderGit2 className="text-muted-foreground h-7 w-7" />
@@ -254,7 +258,7 @@ function App(): React.JSX.Element {
                 Select a worktree from the sidebar to open terminals
               </p>
             </div>
-          ) : null}
+          )}
         </MainContent>
       </div>
 

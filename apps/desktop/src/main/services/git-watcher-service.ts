@@ -51,7 +51,13 @@ export class GitWatcherService {
 			id: taskId,
 			groupId: groupId ?? path,
 			execute: async () => {
-				const stats = await this.git.getDiffStats(path);
+				const diffStats = await this.git.getDiffStats(path);
+				// Map to event format
+				const stats = {
+					insertions: diffStats.totalInsertions,
+					deletions: diffStats.totalDeletions,
+					filesChanged: diffStats.files.length,
+				};
 				const currentStats = JSON.stringify(stats);
 				const lastStats = this.lastStats.get(path);
 

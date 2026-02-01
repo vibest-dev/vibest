@@ -86,3 +86,33 @@ export const DiffResultSchema = z.object({
 });
 
 export type DiffResult = z.infer<typeof DiffResultSchema>;
+
+// Lightweight diff stats (no file content)
+export const DiffFileInfoSchema = z.object({
+  path: z.string(),
+  status: z.enum(["modified", "added", "deleted", "renamed"]),
+  staged: z.boolean(),
+  insertions: z.number(),
+  deletions: z.number(),
+  size: z.number(), // file size in bytes
+});
+
+export type DiffFileInfo = z.infer<typeof DiffFileInfoSchema>;
+
+export const DiffStatsSchema = z.object({
+  files: z.array(DiffFileInfoSchema),
+  totalInsertions: z.number(),
+  totalDeletions: z.number(),
+});
+
+export type DiffStats = z.infer<typeof DiffStatsSchema>;
+
+// Single file diff content (lazy loaded)
+export const FileDiffContentSchema = z.object({
+  path: z.string(),
+  oldContent: z.string().nullable(),
+  newContent: z.string().nullable(),
+  error: z.string().optional(), // "too_large" | "binary" | "not_found"
+});
+
+export type FileDiffContent = z.infer<typeof FileDiffContentSchema>;
