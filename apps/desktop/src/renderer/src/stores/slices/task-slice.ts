@@ -2,20 +2,20 @@ import type { StateCreator } from "zustand/vanilla";
 
 export interface TaskSlice {
   // State
-  selectedTaskId: string | null;
-  selectedRepositoryId: string | null;
+  currentTaskId: string | null;
+  currentRepositoryId: string | null;
 
   // Actions
-  selectTask: (id: string | null) => void;
-  selectRepository: (id: string | null) => void;
+  setCurrentTask: (id: string | null) => void;
+  setCurrentRepository: (id: string | null) => void;
 }
 
 export const createTaskSlice: StateCreator<TaskSlice, [], [], TaskSlice> = (set) => ({
   // State
-  selectedTaskId: null,
-  selectedRepositoryId: null,
+  currentTaskId: null,
+  currentRepositoryId: null,
 
   // Actions
-  selectTask: (id) => set({ selectedTaskId: id }),
-  selectRepository: (id) => set({ selectedRepositoryId: id, selectedTaskId: null }),
+  setCurrentTask: (id) => set({ currentTaskId: id }),
+  setCurrentRepository: (id) => set({ currentRepositoryId: id, currentTaskId: null }),
 });
