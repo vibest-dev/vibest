@@ -46,7 +46,7 @@ export function buildFileTree(files: FileDiff[]): FileTreeNode[] {
   // Sort: directories first, then alphabetically by name
   const sortNodes = (nodes: FileTreeNode[]): FileTreeNode[] => {
     return nodes
-      .sort((a, b) => {
+      .toSorted((a, b) => {
         if (a.isDirectory !== b.isDirectory) {
           return a.isDirectory ? -1 : 1;
         }
