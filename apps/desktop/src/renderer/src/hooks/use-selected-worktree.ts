@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { orpc } from "../lib/queries/workspace";
-import { useUIStore } from "../stores/ui-store";
+import { orpc } from "../lib/orpc";
+import { useAppStore } from "../stores";
 
 /**
  * Derives the selected worktree from TanStack Query server state
@@ -19,7 +19,7 @@ import { useUIStore } from "../stores/ui-store";
  */
 export function useSelectedWorktree() {
   const { data } = useQuery(orpc.workspace.list.queryOptions({}));
-  const selectedWorktreeId = useUIStore((s) => s.selectedWorktreeId);
+  const selectedWorktreeId = useAppStore((s) => s.selectedWorktreeId);
 
   return useMemo(() => {
     if (!selectedWorktreeId || !data) return null;

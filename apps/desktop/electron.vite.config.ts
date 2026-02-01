@@ -7,6 +7,9 @@ export default defineConfig({
   main: {
     build: {
       outDir: "dist/main",
+      rollupOptions: {
+        external: ["node-pty"],
+      },
     },
   },
   preload: {

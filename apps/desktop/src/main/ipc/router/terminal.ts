@@ -1,4 +1,5 @@
 import { implement } from "@orpc/server";
+import * as path from "node:path";
 
 import type { AppContext } from "../../app";
 
@@ -8,11 +9,25 @@ const os = implement(terminalContract).$context<AppContext>();
 
 export const create = os.create.handler(async ({ input, context: { app } }) => {
 	const { worktreeId, cwd } = input;
-	const instance = app.terminal.create(worktreeId, cwd);
+
+	// Validate that cwd is within the worktree directory
+	const worktree = app.store.getWorktree(worktreeId);
+	if (!worktree) {
+		throw new Error("Worktree not found");
+	}
+
+	const resolvedCwd = path.resolve(cwd);
+	const worktreePath = path.resolve(worktree.path);
+
+	// Ensure cwd is within worktree directory (prevent path traversal)
+	if (!resolvedCwd.startsWith(worktreePath + path.sep) && resolvedCwd !== worktreePath) {
+		throw new Error("Terminal working directory must be within worktree");
+	}
+
+	const instance = app.terminal.create(worktreeId, resolvedCwd);
 	return {
 		id: instance.id,
 		worktreeId: instance.worktreeId,
-		title: instance.title,
 	};
 });
 
@@ -22,7 +37,6 @@ export const list = os.list.handler(async ({ input, context: { app } }) => {
 	return terminals.map((t) => ({
 		id: t.id,
 		worktreeId: t.worktreeId,
-		title: t.title,
 	}));
 });
 
@@ -38,52 +52,28 @@ export const resize = os.resize.handler(async ({ input, context: { app } }) => {
 
 export const close = os.close.handler(async ({ input, context: { app } }) => {
 	const { terminalId } = input;
-	const instance = app.terminal.get(terminalId);
-	if (instance) {
-		const worktreeId = instance.worktreeId;
-		app.terminal.close(terminalId);
-		app.terminal.recalculateTitles(worktreeId);
-	}
+	app.terminal.close(terminalId);
 });
 
-// Streaming subscription for terminal output
-export const subscribe = os.subscribe.handler(async function* ({ input, context: { app }, signal }) {
+// Streaming subscription for terminal output using Publisher
+export const subscribe = os.subscribe.handler(async function* ({ input, signal, context: { app } }) {
 	const { terminalId } = input;
 
-	// Create a queue to hold events until they're yielded
-	const queue: Array<{ type: "data"; data: string } | { type: "exit"; exitCode: number }> = [];
-	let resolve: (() => void) | null = null;
+	// Validate terminal exists before subscribing
+	const terminal = app.terminal.get(terminalId);
+	if (!terminal) {
+		throw new Error("Terminal not found");
+	}
 
-	const unsubscribe = app.terminal.subscribe(terminalId, (event) => {
-		queue.push(event);
-		if (resolve) {
-			resolve();
-			resolve = null;
+	const iterator = app.terminal.subscribe(terminalId, { signal: signal ?? AbortSignal.timeout(Infinity) });
+
+	for await (const event of iterator) {
+		yield event;
+
+		// Stop iteration on exit event
+		if (event.type === "exit") {
+			return;
 		}
-	});
-
-	try {
-		while (!signal?.aborted) {
-			// Wait for events if queue is empty
-			if (queue.length === 0) {
-				await new Promise<void>((r) => {
-					resolve = r;
-				});
-			}
-
-			// Yield all queued events
-			while (queue.length > 0) {
-				const event = queue.shift()!;
-				yield event;
-
-				// If this is an exit event, we're done
-				if (event.type === "exit") {
-					return;
-				}
-			}
-		}
-	} finally {
-		unsubscribe();
 	}
 });
 

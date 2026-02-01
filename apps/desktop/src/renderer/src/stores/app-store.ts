@@ -1,30 +1,17 @@
 import { useStore } from "zustand";
-import { persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 
-import { createTerminalSlice, createUISlice } from "./slices";
+import { createTerminalSlice, createWorkspaceSlice } from "./slices";
 
-import type { TerminalSlice, UISlice } from "./slices";
+import type { TerminalSlice, WorkspaceSlice } from "./slices";
 
-export type AppStore = UISlice & TerminalSlice;
+export type AppStore = WorkspaceSlice & TerminalSlice;
 
 // Vanilla store - can be used outside React
-export const appStore = createStore<AppStore>()(
-	persist(
-		(...a) => ({
-			...createUISlice(...a),
-			...createTerminalSlice(...a),
-		}),
-		{
-			name: "vibest-app",
-			// Only persist user preferences, not transient UI state
-			partialize: (state) => ({
-				expandedRepositories: state.expandedRepositories,
-				sidebarWidth: state.sidebarWidth,
-			}),
-		},
-	),
-);
+export const appStore = createStore<AppStore>()((...a) => ({
+	...createWorkspaceSlice(...a),
+	...createTerminalSlice(...a),
+}));
 
 // React hook with selector support
 export function useAppStore<T>(selector: (state: AppStore) => T): T {

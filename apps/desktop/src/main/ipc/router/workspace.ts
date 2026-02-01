@@ -1,5 +1,5 @@
 import { implement } from "@orpc/server";
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { basename } from "node:path";
 
 import type { AppContext } from "../../app";
@@ -232,7 +232,7 @@ export const openWorktree = os.openWorktree.handler(async ({ input, context: { a
   }
 
   return new Promise<void>((resolve, reject) => {
-    exec(`code "${worktree.path}"`, (error) => {
+    execFile("code", [worktree.path], (error) => {
       if (error) {
         reject(new Error(`Failed to open editor: ${error.message}`));
       } else {

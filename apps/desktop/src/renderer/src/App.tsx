@@ -8,21 +8,15 @@ import type { Worktree } from "./types";
 import { Header } from "./components/layout/header";
 import { MainContent } from "./components/layout/main-content";
 import { Sidebar } from "./components/layout/sidebar";
+import { TerminalPanel } from "./components/terminal";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
 import { CreateWorktreeDialog } from "./components/worktrees/create-worktree-dialog";
 import { DiffViewer } from "./components/worktrees/diff-viewer";
 import { client } from "./lib/client";
-import {
-  addRepositoryMutationCallbacks,
-  archiveWorktreeMutationCallbacks,
-  cloneRepositoryMutationCallbacks,
-  createWorktreeMutationCallbacks,
-  orpc,
-  quickCreateWorktreeMutationCallbacks,
-  removeRepositoryMutationCallbacks,
-} from "./lib/queries/workspace";
-import { useUIStore } from "./stores/ui-store";
+import { orpc } from "./lib/orpc";
+import { queryClient } from "./lib/query-client";
+import { useAppStore } from "./stores";
 
 function App(): React.JSX.Element {
   // Server state - TanStack Query via oRPC
@@ -36,13 +30,20 @@ function App(): React.JSX.Element {
     () => workspaceData?.repositories ?? [],
     [workspaceData?.repositories],
   );
-  const worktreesByRepository = workspaceData?.worktreesByRepository ?? {};
+  const worktreesByRepository = useMemo(
+    () => workspaceData?.worktreesByRepository ?? {},
+    [workspaceData?.worktreesByRepository],
+  );
 
-  // UI state - Zustand
-  const expandedRepositories = useUIStore((s) => s.expandedRepositories);
-  const toggleRepository = useUIStore((s) => s.toggleRepository);
-  const expandRepository = useUIStore((s) => s.expandRepository);
-  const setExpandedRepositories = useUIStore((s) => s.setExpandedRepositories);
+  // UI state - Zustand (only selection and opened tracking)
+  const selectedWorktreeId = useAppStore((s) => s.selectedWorktreeId);
+  const selectWorktree = useAppStore((s) => s.selectWorktree);
+  const openedWorktreeIds = useAppStore((s) => s.openedWorktreeIds);
+  const markWorktreeOpened = useAppStore((s) => s.markWorktreeOpened);
+  const removeWorktreeOpened = useAppStore((s) => s.removeWorktreeOpened);
+
+  // Local UI state - expandedRepositories (not persisted, expands all on load)
+  const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(new Set());
 
   // Local UI state (transient, not persisted)
   const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(null);
@@ -52,53 +53,106 @@ function App(): React.JSX.Element {
   const [diffWorktree, setDiffWorktree] = useState<Worktree | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // Mutations using oRPC TanStack Query utils
+  // Mutations using oRPC TanStack Query utils with inline callbacks
   const addRepoMutation = useMutation({
     ...orpc.workspace.addRepository.mutationOptions(),
-    ...addRepositoryMutationCallbacks(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
   const cloneRepoMutation = useMutation({
     ...orpc.workspace.cloneRepository.mutationOptions(),
-    ...cloneRepositoryMutationCallbacks(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
   const removeRepoMutation = useMutation({
     ...orpc.workspace.removeRepository.mutationOptions(),
-    ...removeRepositoryMutationCallbacks(),
+    onSuccess: (_: unknown, variables: { repositoryId: string }) => {
+      // Clear selection if the selected worktree belongs to this repository
+      const workspaceQueryData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
+      if (workspaceQueryData) {
+        const worktrees = workspaceQueryData.worktreesByRepository[variables.repositoryId];
+        if (worktrees?.some((w) => w.id === selectedWorktreeId)) {
+          selectWorktree(null);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
   const createWorktreeMut = useMutation({
     ...orpc.workspace.createWorktree.mutationOptions(),
-    ...createWorktreeMutationCallbacks(),
+    onSuccess: (worktree) => {
+      setExpandedRepositories((prev) => new Set([...prev, worktree.repositoryId]));
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+      queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
   const quickCreateMutation = useMutation({
     ...orpc.workspace.quickCreateWorktree.mutationOptions(),
-    ...quickCreateWorktreeMutationCallbacks(),
+    onSuccess: (worktree) => {
+      setExpandedRepositories((prev) => new Set([...prev, worktree.repositoryId]));
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+      queryClient.prefetchQuery(orpc.git.status.queryOptions({ input: { path: worktree.path } }));
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
   const archiveMutation = useMutation({
     ...orpc.workspace.archiveWorktree.mutationOptions(),
-    ...archiveWorktreeMutationCallbacks(),
+    onSuccess: (_: unknown, variables: { worktreeId: string; commitFirst?: boolean }) => {
+      if (selectedWorktreeId === variables.worktreeId) {
+        selectWorktree(null);
+      }
+      removeWorktreeOpened(variables.worktreeId);
+      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
+    },
     onError: (error) => setMutationError(String(error)),
   });
 
-  // Initialize expanded repositories - expand all on first load if none are expanded
+  // Initialize expanded repositories - expand all on first load
   useEffect(() => {
-    if (repositories.length > 0 && expandedRepositories.length === 0 && !isLoadingRepositories) {
-      setExpandedRepositories(repositories.map((r) => r.id));
+    if (repositories.length > 0 && expandedRepositories.size === 0 && !isLoadingRepositories) {
+      setExpandedRepositories(new Set(repositories.map((r) => r.id)));
     }
-  }, [repositories, expandedRepositories.length, isLoadingRepositories, setExpandedRepositories]);
+  }, [repositories, expandedRepositories.size, isLoadingRepositories]);
 
-  // Get selected repository from diff worktree
-  const selectedRepository = diffWorktree
-    ? (repositories.find((r) => r.id === diffWorktree.repositoryId) ?? null)
+  // Mark worktree as opened when selected
+  useEffect(() => {
+    if (selectedWorktreeId) {
+      markWorktreeOpened(selectedWorktreeId);
+    }
+  }, [selectedWorktreeId, markWorktreeOpened]);
+
+  // Find the selected worktree from workspace data
+  const selectedWorktree = useMemo(() => {
+    if (!selectedWorktreeId) return null;
+    for (const worktrees of Object.values(worktreesByRepository)) {
+      const found = worktrees.find((w) => w.id === selectedWorktreeId);
+      if (found) return found;
+    }
+    return null;
+  }, [selectedWorktreeId, worktreesByRepository]);
+
+  // Get all opened worktrees for terminal persistence
+  const openedWorktrees = useMemo(() => {
+    const allWorktrees = Object.values(worktreesByRepository).flat();
+    return openedWorktreeIds
+      .map((id) => allWorktrees.find((w) => w.id === id))
+      .filter((w): w is Worktree => w !== undefined);
+  }, [openedWorktreeIds, worktreesByRepository]);
+
+  // Get selected repository from selected worktree or diff worktree
+  const selectedRepository = (selectedWorktree || diffWorktree)
+    ? (repositories.find((r) => r.id === (selectedWorktree?.repositoryId ?? diffWorktree?.repositoryId)) ?? null)
     : null;
 
   const error = queryError ? String(queryError) : mutationError;
@@ -121,18 +175,21 @@ function App(): React.JSX.Element {
 
   const handleToggleRepository = useCallback(
     (repositoryId: string, open: boolean) => {
-      if (open) {
-        expandRepository(repositoryId);
-      } else {
-        toggleRepository(repositoryId);
-      }
+      setExpandedRepositories((prev) => {
+        const next = new Set(prev);
+        if (open) {
+          next.add(repositoryId);
+        } else {
+          next.delete(repositoryId);
+        }
+        return next;
+      });
     },
-    [expandRepository, toggleRepository],
+    [],
   );
 
-  const handleCreateWorktreeFrom = useCallback((repositoryId: string) => {
+  const handleCreateWorktreeFrom = useCallback((_repositoryId: string) => {
     // TODO: Implement create workspace from repository
-    console.log("Create workspace from repository:", repositoryId);
   }, []);
 
   const handleRefresh = () => {
@@ -143,23 +200,25 @@ function App(): React.JSX.Element {
   const clearError = () => setMutationError(null);
 
   return (
-    <div className="bg-background text-foreground flex h-screen">
-      <Sidebar
-        repositories={repositories}
-        worktreesByRepository={worktreesByRepository}
-        selectedWorktreeId={diffWorktree?.id ?? null}
-        expandedRepositories={new Set(expandedRepositories)}
-        isLoading={isLoadingRepositories}
-        onAddRepository={handleAddRepository}
-        onCloneRepository={() => setShowCloneDialog(true)}
-        onCreateWorktree={handleCreateWorktree}
-        onCreateWorktreeFrom={handleCreateWorktreeFrom}
-        onToggleRepository={handleToggleRepository}
-        onViewChanges={setDiffWorktree}
-        onArchiveWorktree={(worktreeId, commitFirst) =>
-          archiveMutation.mutate({ worktreeId, commitFirst })
-        }
-      />
+    <div className="bg-background text-foreground flex h-screen overflow-hidden">
+      <div className="h-full shrink-0">
+        <Sidebar
+          repositories={repositories}
+          worktreesByRepository={worktreesByRepository}
+          selectedWorktreeId={selectedWorktreeId}
+          expandedRepositories={expandedRepositories}
+          isLoading={isLoadingRepositories}
+          onAddRepository={handleAddRepository}
+          onCloneRepository={() => setShowCloneDialog(true)}
+          onCreateWorktree={handleCreateWorktree}
+          onCreateWorktreeFrom={handleCreateWorktreeFrom}
+          onToggleRepository={handleToggleRepository}
+          onViewChanges={(worktree) => selectWorktree(worktree?.id ?? null)}
+          onArchiveWorktree={(worktreeId, commitFirst) =>
+            archiveMutation.mutate({ worktreeId, commitFirst })
+          }
+        />
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
@@ -168,10 +227,22 @@ function App(): React.JSX.Element {
           onRefresh={handleRefresh}
         />
 
-        <MainContent>
-          {diffWorktree ? (
+        <MainContent fullBleed={openedWorktrees.length > 0}>
+          {/* Render all opened terminals (hidden when not selected) */}
+          <div className="relative h-full">
+            {openedWorktrees.map((worktree) => (
+              <TerminalPanel
+                key={worktree.id}
+                worktreeId={worktree.id}
+                worktreePath={worktree.path}
+                worktreeExists={worktree.exists}
+                isVisible={worktree.id === selectedWorktreeId}
+              />
+            ))}
+          </div>
+          {diffWorktree && !selectedWorktree ? (
             <DiffViewer worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
-          ) : (
+          ) : openedWorktrees.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center">
               <div className="bg-muted mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
                 <FolderGit2 className="text-muted-foreground h-7 w-7" />
@@ -180,10 +251,10 @@ function App(): React.JSX.Element {
                 No Worktree Selected
               </h2>
               <p className="text-muted-foreground max-w-xs text-center text-[13px]">
-                Select a worktree from the sidebar to view changes
+                Select a worktree from the sidebar to open terminals
               </p>
             </div>
-          )}
+          ) : null}
         </MainContent>
       </div>
 

@@ -1,30 +1,115 @@
-import * as os from "node:os";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import * as pty from "node-pty";
 
 import type { IPty } from "node-pty";
 
-import type { TerminalEvent } from "../../shared/contract/terminal";
+import type { AppPublisher } from "../app";
+
+/** Batch duration in ms (same as Hyper) */
+const BATCH_DURATION_MS = 16;
+
+/**
+ * Max size of a session data batch. Note that this value can be exceeded by ~4k
+ * (chunk sizes seem to be 4k at the most)
+ */
+const BATCH_MAX_SIZE = 200 * 1024;
+
+/**
+ * Data coming from the pty is sent to the renderer process for further
+ * vt parsing and rendering. This class batches data to minimize the number of
+ * IPC calls. It also reduces GC pressure and CPU cost.
+ *
+ * Based on Hyper's DataBatcher implementation.
+ */
+class DataBatcher {
+	private decoder = new StringDecoder("utf8");
+	private data = "";
+	private timeout: NodeJS.Timeout | null = null;
+
+	constructor(
+		private readonly terminalId: string,
+		private readonly publisher: AppPublisher,
+	) {}
+
+	write(chunk: Buffer | string): void {
+		if (this.data.length + chunk.length >= BATCH_MAX_SIZE) {
+			// We've reached the max batch size. Flush it and start another one
+			if (this.timeout) {
+				clearTimeout(this.timeout);
+				this.timeout = null;
+			}
+			this.flush();
+		}
+
+		this.data += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
+
+		if (!this.timeout) {
+			this.timeout = setTimeout(() => this.flush(), BATCH_DURATION_MS);
+		}
+	}
+
+	flush(): void {
+		// Reset before publishing to allow for potential reentrancy
+		const data = this.data;
+		this.data = "";
+		this.timeout = null;
+
+		if (data.length > 0) {
+			this.publisher.publish(`terminal:${this.terminalId}`, { type: "data", data });
+		}
+	}
+
+	dispose(): void {
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+			this.timeout = null;
+		}
+		this.data = "";
+	}
+}
 
 export interface TerminalInstance {
 	id: string;
 	worktreeId: string;
 	pty: IPty;
-	title: string;
-	subscribers: Set<(event: TerminalEvent) => void>;
+	batcher: DataBatcher;
+	ended: boolean;
 }
 
 export class TerminalManager {
+	private static readonly MAX_TERMINALS_PER_WORKTREE = 10;
+	private static readonly MAX_TERMINALS_GLOBAL = 50;
+
 	private terminals: Map<string, TerminalInstance> = new Map();
-	private counter = 0;
+
+	constructor(private readonly publisher: AppPublisher) {}
 
 	create(worktreeId: string, cwd: string): TerminalInstance {
-		const id = `terminal-${++this.counter}`;
-		const shell = os.platform() === "win32" ? "powershell.exe" : process.env.SHELL || "bash";
+		// Check global terminal limit
+		if (this.terminals.size >= TerminalManager.MAX_TERMINALS_GLOBAL) {
+			throw new Error(`Maximum terminal limit reached (${TerminalManager.MAX_TERMINALS_GLOBAL})`);
+		}
 
+		// Check per-worktree terminal limit
+		const worktreeTerminals = this.getTerminalsByWorktree(worktreeId);
+		if (worktreeTerminals.length >= TerminalManager.MAX_TERMINALS_PER_WORKTREE) {
+			throw new Error(`Maximum terminals per worktree reached (${TerminalManager.MAX_TERMINALS_PER_WORKTREE})`);
+		}
+
+		if (!fs.existsSync(cwd)) {
+			throw new Error(`Directory does not exist: ${cwd}`);
+		}
+
+		const id = crypto.randomUUID();
+		const shell = process.env.SHELL || "bash";
+
+		// Don't pass cols/rows here - let node-pty use defaults.
+		// The correct size will be set by xterm after mount via resize().
+		// See: https://github.com/vercel/hyper/blob/canary/app/ui/window.ts#L161
 		const ptyProcess = pty.spawn(shell, [], {
 			name: "xterm-256color",
-			cols: 80,
-			rows: 24,
 			cwd,
 			env: {
 				...process.env,
@@ -33,54 +118,40 @@ export class TerminalManager {
 			},
 		});
 
+		const batcher = new DataBatcher(id, this.publisher);
+
 		const instance: TerminalInstance = {
 			id,
 			worktreeId,
 			pty: ptyProcess,
-			title: this.generateTitle(worktreeId),
-			subscribers: new Set(),
+			batcher,
+			ended: false,
 		};
 
-		ptyProcess.onData((data) => {
-			this.emit(id, { type: "data", data });
+		// PTY data → batcher → publisher
+		ptyProcess.onData((chunk) => {
+			if (instance.ended) {
+				return;
+			}
+			batcher.write(chunk);
 		});
 
+		// PTY exit → publish
 		ptyProcess.onExit(({ exitCode }) => {
-			this.emit(id, { type: "exit", exitCode });
-			this.terminals.delete(id);
+			if (!instance.ended) {
+				instance.ended = true;
+				this.publisher.publish(`terminal:${id}`, { type: "exit", exitCode });
+				this.terminals.delete(id);
+			}
 		});
 
 		this.terminals.set(id, instance);
 		return instance;
 	}
 
-	subscribe(terminalId: string, callback: (event: TerminalEvent) => void): () => void {
-		const instance = this.terminals.get(terminalId);
-		if (!instance) {
-			// Terminal doesn't exist, return no-op unsubscribe
-			return () => {};
-		}
-
-		instance.subscribers.add(callback);
-
-		// Return unsubscribe function
-		return () => {
-			instance.subscribers.delete(callback);
-		};
-	}
-
-	private emit(terminalId: string, event: TerminalEvent): void {
-		const instance = this.terminals.get(terminalId);
-		if (instance) {
-			for (const callback of instance.subscribers) {
-				callback(event);
-			}
-		}
-	}
-
 	write(terminalId: string, data: string): void {
 		const instance = this.terminals.get(terminalId);
-		if (instance) {
+		if (instance && !instance.ended) {
 			instance.pty.write(data);
 		}
 	}
@@ -88,14 +159,24 @@ export class TerminalManager {
 	resize(terminalId: string, cols: number, rows: number): void {
 		const instance = this.terminals.get(terminalId);
 		if (instance) {
-			instance.pty.resize(cols, rows);
+			try {
+				instance.pty.resize(cols, rows);
+			} catch (err) {
+				console.error("[TerminalManager] Resize error:", err);
+			}
 		}
 	}
 
 	close(terminalId: string): void {
 		const instance = this.terminals.get(terminalId);
 		if (instance) {
-			instance.pty.kill();
+			instance.batcher.dispose();
+			try {
+				instance.pty.kill();
+			} catch (err) {
+				console.error("[TerminalManager] Kill error:", err);
+			}
+			instance.ended = true;
 			this.terminals.delete(terminalId);
 		}
 	}
@@ -110,25 +191,18 @@ export class TerminalManager {
 
 	dispose(): void {
 		for (const instance of this.terminals.values()) {
-			instance.pty.kill();
+			instance.batcher.dispose();
+			try {
+				instance.pty.kill();
+			} catch (err) {
+				console.error("[TerminalManager] Kill error:", err);
+			}
 		}
 		this.terminals.clear();
 	}
 
-	private generateTitle(worktreeId: string): string {
-		const count = this.getTerminalsByWorktree(worktreeId).length;
-		return count === 0 ? "Terminal" : `Terminal ${count + 1}`;
-	}
-
-	/** Recalculate titles after a terminal is closed */
-	recalculateTitles(worktreeId: string): void {
-		const terminals = this.getTerminalsByWorktree(worktreeId);
-		if (terminals.length === 1) {
-			terminals[0].title = "Terminal";
-		} else {
-			terminals.forEach((t, i) => {
-				t.title = `Terminal ${i + 1}`;
-			});
-		}
+	/** Subscribe to terminal events */
+	subscribe(terminalId: string, options: { signal: AbortSignal }) {
+		return this.publisher.subscribe(`terminal:${terminalId}`, options);
 	}
 }
