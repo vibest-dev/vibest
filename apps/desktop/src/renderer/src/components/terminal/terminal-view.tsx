@@ -2,6 +2,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { consumeEventIterator } from "@orpc/client";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
@@ -40,6 +41,12 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 
 		const fitAddon = new FitAddon();
 		terminal.loadAddon(fitAddon);
+
+		// WebLinksAddon: detect URLs and make them clickable
+		const webLinksAddon = new WebLinksAddon((_event, uri) => {
+			client.shell.openExternal({ url: uri });
+		});
+		terminal.loadAddon(webLinksAddon);
 
 		// Try WebGL renderer for better performance, fallback to canvas
 		try {
