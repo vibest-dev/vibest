@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@vibest/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@vibest/ui/components/tabs";
 import { Plus, X } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useEffect, useRef } from "react";
 
 import type { TerminalInfo } from "../../../../shared/contract/terminal";
@@ -24,6 +25,7 @@ export function TerminalPanel({
   worktreeExists,
   isVisible,
 }: TerminalPanelProps) {
+  const { resolvedTheme } = useTheme();
   const storedActiveTerminalId = useAppStore((state) => state.activeTerminalId[worktreeId] ?? null);
   const setActiveTerminalId = useAppStore((state) => state.setActiveTerminalId);
 
@@ -108,20 +110,24 @@ export function TerminalPanel({
     setActiveTerminalId(worktreeId, terminalId);
   };
 
+  const isDark = resolvedTheme === "dark";
+
   return (
     <div
-      className="absolute inset-0 flex h-full flex-col bg-zinc-950"
+      className={`absolute inset-0 flex h-full flex-col ${isDark ? "bg-[#141414]" : "bg-[#f9f9f9]"}`}
       style={{ visibility: isVisible ? "visible" : "hidden" }}
     >
       {/* Tabs header */}
-      <div className="flex items-center border-b border-zinc-800 bg-zinc-950">
+      <div
+        className={`flex items-center border-b ${isDark ? "border-zinc-800 bg-[#141414]" : "border-zinc-300 bg-[#f9f9f9]"}`}
+      >
         <Tabs value={activeTerminalId ?? ""} onValueChange={handleTabChange} className="flex-1">
           <TabsList className="h-9 rounded-none bg-transparent p-0">
             {terminals.map((terminal, index) => (
               <TabsTrigger
                 key={terminal.id}
                 value={terminal.id}
-                className="relative h-9 rounded-none border-r border-zinc-800 px-3 data-[state=active]:bg-zinc-900 data-[state=active]:shadow-none"
+                className={`relative h-9 rounded-none border-r px-3 data-[state=active]:shadow-none ${isDark ? "border-zinc-800 data-[state=active]:bg-zinc-900" : "border-zinc-300 data-[state=active]:bg-zinc-200"}`}
               >
                 <span className="mr-2">
                   {terminals.length === 1 ? "Terminal" : `Terminal ${index + 1}`}
@@ -159,7 +165,9 @@ export function TerminalPanel({
           />
         ))}
         {terminals.length === 0 && (
-          <div className="flex h-full items-center justify-center text-zinc-500">
+          <div
+            className={`flex h-full items-center justify-center ${isDark ? "text-zinc-500" : "text-zinc-600"}`}
+          >
             {worktreeExists
               ? "No terminals. Click + to create one."
               : "Worktree path does not exist on disk."}
