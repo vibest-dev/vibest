@@ -1,6 +1,7 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, shell } from "electron";
-import { join } from "path";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import icon from "../../resources/icon.png?asset";
 import { App } from "./app";
@@ -21,7 +22,7 @@ function createWindow(appInstance: App): void {
     trafficLightPosition: { x: 16, y: 16 },
     ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
-      preload: join(__dirname, "../preload/index.mjs"),
+      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../preload/index.mjs"),
       sandbox: false,
       contextIsolation: true,
     },
@@ -46,7 +47,7 @@ function createWindow(appInstance: App): void {
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    mainWindow.loadFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer/index.html"));
   }
 }
 
