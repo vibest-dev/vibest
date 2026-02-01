@@ -37,7 +37,7 @@ Remove the dead code.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | YAGNI - remove unused code |
-| 2026-02-01 | Fixed: removed clearActiveTerminalId from interface and implementation | Dead code removed |
+| Date       | Action                                                                 | Learnings                  |
+| ---------- | ---------------------------------------------------------------------- | -------------------------- |
+| 2026-02-01 | Identified via code review                                             | YAGNI - remove unused code |
+| 2026-02-01 | Fixed: removed clearActiveTerminalId from interface and implementation | Dead code removed          |

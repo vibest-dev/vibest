@@ -1,21 +1,21 @@
 import type { StateCreator } from "zustand/vanilla";
 
 export interface TerminalSlice {
-	// Active terminal per worktree
-	activeTerminalId: Record<string, string | null>;
-	setActiveTerminalId: (worktreeId: string, terminalId: string | null) => void;
+  // Active terminal per worktree
+  activeTerminalId: Record<string, string | null>;
+  setActiveTerminalId: (worktreeId: string, terminalId: string | null) => void;
 }
 
 export const createTerminalSlice: StateCreator<TerminalSlice, [], [], TerminalSlice> = (set) => ({
-	// State
-	activeTerminalId: {},
+  // State
+  activeTerminalId: {},
 
-	// Actions
-	setActiveTerminalId: (worktreeId, terminalId) =>
-		set((state) => ({
-			activeTerminalId: {
-				...state.activeTerminalId,
-				[worktreeId]: terminalId,
-			},
-		})),
+  // Actions
+  setActiveTerminalId: (worktreeId, terminalId) =>
+    set((state) => ({
+      activeTerminalId: {
+        ...state.activeTerminalId,
+        [worktreeId]: terminalId,
+      },
+    })),
 });

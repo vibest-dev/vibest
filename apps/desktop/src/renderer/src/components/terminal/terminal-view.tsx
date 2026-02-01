@@ -1,5 +1,4 @@
 import "@xterm/xterm/css/xterm.css";
-
 import { consumeEventIterator } from "@orpc/client";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -91,9 +90,11 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 		requestAnimationFrame(() => {
 			fitAddon.fit();
 			// Manually trigger resize to sync initial size to PTY
-			client.terminal.resize({ terminalId, cols: terminal.cols, rows: terminal.rows }).catch((err) => {
-				console.error("[Terminal] Initial resize failed:", err);
-			});
+			client.terminal
+				.resize({ terminalId, cols: terminal.cols, rows: terminal.rows })
+				.catch((err) => {
+					console.error("[Terminal] Initial resize failed:", err);
+				});
 			// Focus terminal if visible on mount (use ref to get current value)
 			// Double rAF ensures React state updates are flushed and DOM is painted
 			requestAnimationFrame(() => {

@@ -31,12 +31,14 @@ export const openTerminal = os.openTerminal.handler(async ({ input }) => {
 ```
 
 **Exploit examples:**
+
 - macOS: `path = '"; rm -rf / #'`
 - Windows: `path = '& del /s /q C:\\ &'`
 
 ## Proposed Solutions
 
 ### Option A: Use execFile with argument arrays (Recommended)
+
 - **Pros:** Eliminates injection entirely, arguments are never shell-interpreted
 - **Cons:** Requires restructuring the command
 - **Effort:** Small
@@ -51,12 +53,14 @@ if (process.platform === "darwin") {
 ```
 
 ### Option B: Validate path against allowlist
+
 - **Pros:** Defense in depth
 - **Cons:** Still uses exec, requires maintaining allowlist
 - **Effort:** Medium
 - **Risk:** Medium (allowlist could miss cases)
 
 ### Option C: Use spawn instead of exec
+
 - **Pros:** Similar to execFile, arguments passed as array
 - **Cons:** Slightly more complex API
 - **Effort:** Small
@@ -64,11 +68,12 @@ if (process.platform === "darwin") {
 
 ## Recommended Action
 
-*(To be filled during triage)*
+_(To be filled during triage)_
 
 ## Technical Details
 
 **Affected files:**
+
 - `apps/desktop/src/main/ipc/router/fs.ts`
 
 **Database changes:** None
@@ -82,10 +87,10 @@ if (process.platform === "darwin") {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Command injection via exec() is a common vulnerability |
-| 2026-02-01 | Fixed: replaced exec() with execFile()/spawn() | Arguments passed as array are never shell-interpreted |
+| Date       | Action                                         | Learnings                                              |
+| ---------- | ---------------------------------------------- | ------------------------------------------------------ |
+| 2026-02-01 | Identified via code review                     | Command injection via exec() is a common vulnerability |
+| 2026-02-01 | Fixed: replaced exec() with execFile()/spawn() | Arguments passed as array are never shell-interpreted  |
 
 ## Resources
 

@@ -9,8 +9,8 @@ import type { DiffFileInfo, Worktree } from "../../types";
 
 import { useDiffStats } from "../../hooks/use-diff-stats";
 import { buildFileTree } from "../../utils/build-file-tree";
-import { SingleFileDiff } from "./single-file-diff";
 import { DiffFileTree } from "./diff-file-tree";
+import { SingleFileDiff } from "./single-file-diff";
 
 interface WorktreeDiffViewProps {
   worktree: Worktree;
@@ -59,8 +59,7 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
             <h2 className="text-sm font-semibold">{worktree.branch}</h2>
             {diffStats && (
               <p className="text-muted-foreground text-xs">
-                <span className="text-success">+{diffStats.totalInsertions}</span>
-                {" "}
+                <span className="text-success">+{diffStats.totalInsertions}</span>{" "}
                 <span className="text-destructive">-{diffStats.totalDeletions}</span>
                 {" · "}
                 {diffStats.files.length} files
@@ -112,10 +111,7 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
             {/* Single File Diff (right side) */}
             <div className="min-w-0 flex-1">
               {selectedFile ? (
-                <SingleFileDiff
-                  repoPath={worktree.path}
-                  file={selectedFile}
-                />
+                <SingleFileDiff repoPath={worktree.path} file={selectedFile} />
               ) : (
                 <Empty className="h-full">
                   <EmptyMedia variant="icon">

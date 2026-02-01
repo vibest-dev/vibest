@@ -28,6 +28,7 @@ webPreferences: {
 ## Proposed Solutions
 
 ### Option A: Enable sandbox (Recommended)
+
 - **Pros:** Significantly reduces attack surface
 - **Cons:** May require refactoring preload script to use contextBridge
 - **Effort:** Medium
@@ -43,6 +44,7 @@ webPreferences: {
 ```
 
 ### Option B: Document the exception
+
 - **Pros:** None
 - **Cons:** Leaves security gap, bad practice
 - **Effort:** Small
@@ -50,11 +52,12 @@ webPreferences: {
 
 ## Recommended Action
 
-*(To be filled during triage)*
+_(To be filled during triage)_
 
 ## Technical Details
 
 **Affected files:**
+
 - `apps/desktop/src/main/index.ts`
 - Potentially `apps/desktop/src/preload/` if refactoring needed
 
@@ -67,11 +70,11 @@ webPreferences: {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Electron security best practices require sandbox |
-| 2026-02-01 | Fixed: enabled sandbox: true, contextIsolation: true | Preload already uses contextBridge pattern |
-| 2026-02-01 | Reverted: sandbox breaks @electron-toolkit/preload | Need to rewrite preload without external deps to enable sandbox |
+| Date       | Action                                               | Learnings                                                       |
+| ---------- | ---------------------------------------------------- | --------------------------------------------------------------- |
+| 2026-02-01 | Identified via code review                           | Electron security best practices require sandbox                |
+| 2026-02-01 | Fixed: enabled sandbox: true, contextIsolation: true | Preload already uses contextBridge pattern                      |
+| 2026-02-01 | Reverted: sandbox breaks @electron-toolkit/preload   | Need to rewrite preload without external deps to enable sandbox |
 
 ## Resources
 

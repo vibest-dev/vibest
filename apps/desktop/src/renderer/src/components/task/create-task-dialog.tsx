@@ -27,8 +27,8 @@ import { useEffect, useState } from "react";
 import type { Repository } from "../../types";
 
 import { useBranches } from "../../hooks/use-branches";
-import { cn } from "../../lib/utils";
 import { orpc } from "../../lib/orpc";
+import { cn } from "../../lib/utils";
 
 interface CreateTaskDialogProps {
   isOpen: boolean;

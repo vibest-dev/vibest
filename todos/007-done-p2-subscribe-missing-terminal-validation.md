@@ -28,7 +28,11 @@ export const subscribe = os.subscribe.handler(async function* ({ input, signal, 
 ### Option A: Validate terminal exists (Recommended)
 
 ```typescript
-export const subscribe = os.subscribe.handler(async function* ({ input, signal, context: { app } }) {
+export const subscribe = os.subscribe.handler(async function* ({
+  input,
+  signal,
+  context: { app },
+}) {
   const { terminalId } = input;
   const terminal = app.terminal.get(terminalId);
   if (!terminal) {
@@ -46,7 +50,7 @@ export const subscribe = os.subscribe.handler(async function* ({ input, signal, 
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Validate resources before operations |
-| 2026-02-01 | Fixed: check terminal.get() before subscribing | Throw error if terminal not found |
+| Date       | Action                                         | Learnings                            |
+| ---------- | ---------------------------------------------- | ------------------------------------ |
+| 2026-02-01 | Identified via code review                     | Validate resources before operations |
+| 2026-02-01 | Fixed: check terminal.get() before subscribing | Throw error if terminal not found    |

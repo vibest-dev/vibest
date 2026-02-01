@@ -11,6 +11,7 @@ dependencies: []
 ## Problem Statement
 
 The terminal integration is UI-first. While oRPC APIs exist, AI agents cannot:
+
 1. Execute commands and get output (fire-and-forget only)
 2. Retrieve terminal history
 3. Know which terminals exist
@@ -21,11 +22,13 @@ The Claude Code agent has a separate `Bash` tool that operates invisibly, discon
 ## Findings
 
 **Current capabilities:**
+
 - `terminal.create` - exists but not exposed to agent
 - `terminal.write` - fire-and-forget, no output capture
 - `terminal.subscribe` - streaming only, no history
 
 **Missing capabilities:**
+
 - `terminal.execute({ command, timeout })` - run command, return output
 - `terminal.getHistory({ terminalId, lines })` - get recent output
 - System prompt injection of available terminals
@@ -70,6 +73,6 @@ Add `TerminalExecute`, `TerminalGetHistory`, `TerminalList` tools.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
+| Date       | Action                     | Learnings                                        |
+| ---------- | -------------------------- | ------------------------------------------------ |
 | 2026-02-01 | Identified via code review | Agent-native = agent has same capabilities as UI |

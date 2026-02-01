@@ -32,6 +32,7 @@ useEffect(() => {
 ### Option A: Key component by worktreeId (Recommended)
 
 In `App.tsx`, add key to force remount:
+
 ```tsx
 <TerminalTabs key={worktreeId} worktreeId={worktreeId} ... />
 ```
@@ -56,7 +57,7 @@ useEffect(() => {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Refs need lifecycle management |
+| Date       | Action                                                                                          | Learnings                                 |
+| ---------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| 2026-02-01 | Identified via code review                                                                      | Refs need lifecycle management            |
 | 2026-02-01 | Verified fixed: key={worktree.id} already ensures each worktree has separate component instance | React key prop handles instance isolation |

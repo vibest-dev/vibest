@@ -5,26 +5,22 @@ import { TaskSchema, WorktreeSchema } from "../types";
 
 export const taskContract = {
   // List tasks for a repository
-  list: oc
-    .input(z.object({ repositoryId: z.string() }))
-    .output(
-      z.array(
-        z.object({
-          task: TaskSchema,
-          worktrees: z.array(WorktreeSchema),
-        }),
-      ),
-    ),
-
-  // Get single task with worktrees
-  get: oc
-    .input(z.object({ taskId: z.string() }))
-    .output(
+  list: oc.input(z.object({ repositoryId: z.string() })).output(
+    z.array(
       z.object({
         task: TaskSchema,
         worktrees: z.array(WorktreeSchema),
       }),
     ),
+  ),
+
+  // Get single task with worktrees
+  get: oc.input(z.object({ taskId: z.string() })).output(
+    z.object({
+      task: TaskSchema,
+      worktrees: z.array(WorktreeSchema),
+    }),
+  ),
 
   // Create task (also creates worktree)
   create: oc

@@ -5,12 +5,7 @@ import { basename } from "node:path";
 import type { AppContext } from "../../app";
 
 import { workspaceContract } from "../../../shared/contract/workspace";
-import {
-  DEFAULT_LABELS,
-  pathToId,
-  type Repository,
-  type Worktree,
-} from "../../../shared/types";
+import { DEFAULT_LABELS, pathToId, type Repository, type Worktree } from "../../../shared/types";
 
 const os = implement(workspaceContract).$context<AppContext>();
 

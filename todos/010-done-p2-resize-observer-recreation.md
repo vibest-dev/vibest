@@ -47,7 +47,7 @@ Use `isVisibleRef` (already exists on line 21-22) instead of `isVisible` prop.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Avoid deps that cause frequent effect reruns |
-| 2026-02-01 | Fixed: removed isVisible from deps, use isVisibleRef.current inside callback | ResizeObserver created once on mount |
+| Date       | Action                                                                       | Learnings                                    |
+| ---------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| 2026-02-01 | Identified via code review                                                   | Avoid deps that cause frequent effect reruns |
+| 2026-02-01 | Fixed: removed isVisible from deps, use isVisibleRef.current inside callback | ResizeObserver created once on mount         |

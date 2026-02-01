@@ -11,13 +11,13 @@ import {
 
 // Git change event for subscription
 export const GitChangeEventSchema = z.object({
-	type: z.literal("diff"),
-	path: z.string(),
-	stats: z.object({
-		insertions: z.number(),
-		deletions: z.number(),
-		filesChanged: z.number(),
-	}),
+  type: z.literal("diff"),
+  path: z.string(),
+  stats: z.object({
+    insertions: z.number(),
+    deletions: z.number(),
+    filesChanged: z.number(),
+  }),
 });
 
 export type GitChangeEvent = z.infer<typeof GitChangeEventSchema>;

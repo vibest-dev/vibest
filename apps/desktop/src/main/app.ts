@@ -1,4 +1,8 @@
 import { MemoryPublisher } from "@orpc/experimental-publisher/memory";
+
+import type { GitChangeEvent } from "../shared/contract/git";
+import type { TerminalEvent } from "../shared/contract/terminal";
+
 import {
 	GitService,
 	GitWatcherService,
@@ -7,8 +11,6 @@ import {
 	WorktreeService,
 } from "./services";
 import { TerminalManager } from "./terminal";
-import type { GitChangeEvent } from "../shared/contract/git";
-import type { TerminalEvent } from "../shared/contract/terminal";
 
 export type AppEvents = {
 	[K: `terminal:${string}`]: TerminalEvent;

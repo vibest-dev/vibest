@@ -31,6 +31,7 @@ The pattern `exec(\`command "${variable}"\`)` is vulnerable to quote escaping.
 ## Proposed Solutions
 
 ### Option A: Use execFile (Recommended)
+
 - **Pros:** Arguments are never shell-interpreted
 - **Cons:** None
 - **Effort:** Small
@@ -42,6 +43,7 @@ execFile("code", [worktree.path], (error) => { ... });
 ```
 
 ### Option B: Use VS Code's CLI module directly
+
 - **Pros:** Avoids shell entirely
 - **Cons:** More complex integration
 - **Effort:** Medium
@@ -49,11 +51,12 @@ execFile("code", [worktree.path], (error) => { ... });
 
 ## Recommended Action
 
-*(To be filled during triage)*
+_(To be filled during triage)_
 
 ## Technical Details
 
 **Affected files:**
+
 - `apps/desktop/src/main/ipc/router/workspace.ts`
 
 ## Acceptance Criteria
@@ -64,10 +67,10 @@ execFile("code", [worktree.path], (error) => { ... });
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Even "trusted" data should use safe APIs |
-| 2026-02-01 | Fixed: replaced exec() with execFile() | Path passed as argument array element |
+| Date       | Action                                 | Learnings                                |
+| ---------- | -------------------------------------- | ---------------------------------------- |
+| 2026-02-01 | Identified via code review             | Even "trusted" data should use safe APIs |
+| 2026-02-01 | Fixed: replaced exec() with execFile() | Path passed as argument array element    |
 
 ## Resources
 

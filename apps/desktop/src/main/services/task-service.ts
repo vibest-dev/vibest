@@ -140,9 +140,9 @@ export class TaskService {
       .getWorktreesByRepositoryId(task.repositoryId)
       .filter((w) => w.taskId === taskId);
 
-    const worktrees = this.store.getWorktreesWithExistence(task.repositoryId).filter((w) =>
-      storedWorktrees.some((sw) => sw.id === w.id),
-    );
+    const worktrees = this.store
+      .getWorktreesWithExistence(task.repositoryId)
+      .filter((w) => storedWorktrees.some((sw) => sw.id === w.id));
 
     return { task, worktrees };
   }

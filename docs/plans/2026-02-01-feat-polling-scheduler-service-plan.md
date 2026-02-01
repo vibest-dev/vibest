@@ -15,11 +15,13 @@ date: 2026-02-01
 ## Problem Statement / Motivation
 
 当前问题：
+
 1. Worktree 列表的 git diff stats 在首次加载后不会更新
 2. `useGitStatus` hook 的 fetch/pull 成功后只刷新 `git.status`，遗漏了 `git.diff`
 3. 外部变更（VS Code、命令行）不会反映到 UI
 
 未来需求：
+
 - GitHub PR 状态轮询
 - GitHub Actions 状态轮询
 - 其他需要定期检查的后台任务
@@ -50,21 +52,21 @@ date: 2026-02-01
 ```typescript
 // 任务定义
 interface PollTask {
-  id: string;                      // "git:diff:/path/a" 或 "github:pr:123"
+  id: string; // "git:diff:/path/a" 或 "github:pr:123"
   execute: () => Promise<unknown>; // 执行函数
-  interval: number;                // 期望间隔 (ms)
-  nextRun: number;                 // 下次执行时间
-  basePriority: number;            // 基础优先级
-  failCount: number;               // 连续失败次数
+  interval: number; // 期望间隔 (ms)
+  nextRun: number; // 下次执行时间
+  basePriority: number; // 基础优先级
+  failCount: number; // 连续失败次数
 }
 
 // 调度器
 class PollingScheduler {
-  register(task): void;    // 注册任务
-  unregister(id): void;    // 取消任务
-  runNow(id): void;        // 立即执行
-  start(): void;           // 启动调度器
-  stop(): void;            // 停止调度器
+  register(task): void; // 注册任务
+  unregister(id): void; // 取消任务
+  runNow(id): void; // 立即执行
+  start(): void; // 启动调度器
+  stop(): void; // 停止调度器
 }
 ```
 
@@ -90,10 +92,10 @@ Renderer (订阅)
 
 ### 依赖选择
 
-| 库 | 用途 | 说明 |
-|---|---|---|
-| `p-queue` | 并发控制 + 优先级 | 轻量，无外部依赖 |
-| `@orpc/experimental-publisher` | 事件发布 | 项目已在用 |
+| 库                             | 用途              | 说明             |
+| ------------------------------ | ----------------- | ---------------- |
+| `p-queue`                      | 并发控制 + 优先级 | 轻量，无外部依赖 |
+| `@orpc/experimental-publisher` | 事件发布          | 项目已在用       |
 
 ### 并发与防饥饿
 
@@ -130,7 +132,7 @@ Renderer (订阅)
 // src/main/app.ts - 扩展事件类型
 export type AppEvents = {
   [K: `terminal:${string}`]: TerminalEvent;
-  [K: `git:changes:${string}`]: GitChangeEvent;  // 新增
+  [K: `git:changes:${string}`]: GitChangeEvent; // 新增
 };
 
 export type GitChangeEvent = {
@@ -169,7 +171,7 @@ export const gitContract = oc.router({
 ```typescript
 interface PollTask {
   id: string;
-  groupId?: string;  // worktreeId，用于批量 unregister
+  groupId?: string; // worktreeId，用于批量 unregister
   execute: () => Promise<unknown>;
   interval: number;
   nextRun: number;
@@ -196,9 +198,9 @@ class PollingScheduler {
 
 ```typescript
 // src/main/index.ts
-mainWindow.on('focus', () => {
+mainWindow.on("focus", () => {
   // 触发所有 git diff 任务立即执行
-  app.scheduler.runAllByGroup('git');
+  app.scheduler.runAllByGroup("git");
 });
 ```
 
@@ -255,13 +257,13 @@ mainWindow.on('focus', () => {
 
 ### 风险
 
-| 风险 | 影响 | 缓解 |
-|------|------|------|
-| p-queue API 变化 | 中 | 锁定版本 |
-| Git 操作耗时过长 | 中 | 5 秒超时 + 使用 --numstat |
-| 内存泄漏（任务未清理）| 高 | groupId 批量清理 + 应用退出时 stop() |
-| execute 闭包捕获大对象 | 中 | 只捕获 path 标识符，不捕获数据 |
-| 无限重试失败任务 | 低 | maxRetries=10 后停止 |
+| 风险                   | 影响 | 缓解                                 |
+| ---------------------- | ---- | ------------------------------------ |
+| p-queue API 变化       | 中   | 锁定版本                             |
+| Git 操作耗时过长       | 中   | 5 秒超时 + 使用 --numstat            |
+| 内存泄漏（任务未清理） | 高   | groupId 批量清理 + 应用退出时 stop() |
+| execute 闭包捕获大对象 | 中   | 只捕获 path 标识符，不捕获数据       |
+| 无限重试失败任务       | 低   | maxRetries=10 后停止                 |
 
 ## MVP
 
@@ -293,7 +295,7 @@ import PQueue from "p-queue";
 
 export interface PollTask {
   id: string;
-  groupId?: string;  // 用于批量 unregister（如 worktreeId）
+  groupId?: string; // 用于批量 unregister（如 worktreeId）
   execute: () => Promise<unknown>;
   interval: number;
   nextRun: number;
@@ -305,7 +307,7 @@ export interface PollingSchedulerOptions {
   concurrency?: number;
   maxRetries?: number;
   taskTimeout?: number;
-  now?: () => number;  // 便于测试
+  now?: () => number; // 便于测试
 }
 
 export class PollingScheduler {
@@ -414,16 +416,13 @@ export class PollingScheduler {
       await Promise.race([
         task.execute(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Task timeout")), this.taskTimeout)
+          setTimeout(() => reject(new Error("Task timeout")), this.taskTimeout),
         ),
       ]);
       task.failCount = 0;
     } catch (error) {
       task.failCount++;
-      const backoff = Math.min(
-        task.interval * Math.pow(2, task.failCount),
-        this.maxBackoff
-      );
+      const backoff = Math.min(task.interval * Math.pow(2, task.failCount), this.maxBackoff);
       task.nextRun = this.now() + backoff;
       console.warn(`Task ${task.id} failed (${task.failCount}x), retry in ${backoff}ms`);
     }

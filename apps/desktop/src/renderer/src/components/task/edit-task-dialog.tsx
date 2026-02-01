@@ -19,8 +19,8 @@ import { useEffect, useState } from "react";
 
 import type { Repository, Task } from "../../types";
 
-import { cn } from "../../lib/utils";
 import { orpc } from "../../lib/orpc";
+import { cn } from "../../lib/utils";
 
 interface EditTaskDialogProps {
   isOpen: boolean;

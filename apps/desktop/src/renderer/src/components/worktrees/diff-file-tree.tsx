@@ -65,7 +65,13 @@ function TreeNode({ node, level, onFileClick, selectedPath }: TreeNodeProps) {
         </CollapsibleTrigger>
         <CollapsibleContent>
           {node.children.map((child) => (
-            <TreeNode key={child.path} node={child} level={level + 1} onFileClick={onFileClick} selectedPath={selectedPath} />
+            <TreeNode
+              key={child.path}
+              node={child}
+              level={level + 1}
+              onFileClick={onFileClick}
+              selectedPath={selectedPath}
+            />
           ))}
         </CollapsibleContent>
       </Collapsible>
@@ -90,7 +96,14 @@ function TreeNode({ node, level, onFileClick, selectedPath }: TreeNodeProps) {
   );
 }
 
-export function DiffFileTree({ stagedFiles, unstagedFiles, stagedCount, unstagedCount, onFileClick, selectedPath }: DiffFileTreeProps) {
+export function DiffFileTree({
+  stagedFiles,
+  unstagedFiles,
+  stagedCount,
+  unstagedCount,
+  onFileClick,
+  selectedPath,
+}: DiffFileTreeProps) {
   const hasStagedFiles = stagedCount > 0;
   const hasUnstagedFiles = unstagedCount > 0;
 
@@ -105,7 +118,13 @@ export function DiffFileTree({ stagedFiles, unstagedFiles, stagedCount, unstaged
           </CollapsibleTrigger>
           <CollapsibleContent>
             {stagedFiles.map((node) => (
-              <TreeNode key={node.path} node={node} level={1} onFileClick={onFileClick} selectedPath={selectedPath} />
+              <TreeNode
+                key={node.path}
+                node={node}
+                level={1}
+                onFileClick={onFileClick}
+                selectedPath={selectedPath}
+              />
             ))}
           </CollapsibleContent>
         </Collapsible>
@@ -120,7 +139,13 @@ export function DiffFileTree({ stagedFiles, unstagedFiles, stagedCount, unstaged
           </CollapsibleTrigger>
           <CollapsibleContent>
             {unstagedFiles.map((node) => (
-              <TreeNode key={node.path} node={node} level={1} onFileClick={onFileClick} selectedPath={selectedPath} />
+              <TreeNode
+                key={node.path}
+                node={node}
+                level={1}
+                onFileClick={onFileClick}
+                selectedPath={selectedPath}
+              />
             ))}
           </CollapsibleContent>
         </Collapsible>

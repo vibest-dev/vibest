@@ -13,6 +13,7 @@
 ## Task 1: Install Dependencies
 
 **Files:**
+
 - Modify: `apps/desktop/package.json`
 
 **Step 1: Add node-pty and xterm.js packages**
@@ -41,6 +42,7 @@ EOF
 ## Task 2: Create Terminal Contract
 
 **Files:**
+
 - Create: `apps/desktop/src/shared/contract/terminal.ts`
 - Modify: `apps/desktop/src/shared/contract/index.ts`
 
@@ -142,6 +144,7 @@ EOF
 ## Task 3: Create TerminalManager
 
 **Files:**
+
 - Create: `apps/desktop/src/main/terminal/terminal-manager.ts`
 
 **Step 1: Create terminal manager**
@@ -286,6 +289,7 @@ EOF
 ## Task 4: Create Terminal IPC Router
 
 **Files:**
+
 - Create: `apps/desktop/src/main/ipc/router/terminal.ts`
 - Modify: `apps/desktop/src/main/ipc/router/index.ts`
 
@@ -397,6 +401,7 @@ EOF
 ## Task 5: Integrate TerminalManager into App
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/app.ts`
 - Create: `apps/desktop/src/main/terminal/index.ts`
 
@@ -464,6 +469,7 @@ EOF
 ## Task 6: Setup Terminal IPC Events (Main → Renderer)
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/ipc/index.ts`
 - Modify: `apps/desktop/src/preload/index.ts`
 
@@ -595,6 +601,7 @@ EOF
 ## Task 7: Refactor UI Store to App Store with Slices
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/stores/slices/ui-slice.ts`
 - Create: `apps/desktop/src/renderer/src/stores/slices/terminal-slice.ts`
 - Create: `apps/desktop/src/renderer/src/stores/slices/index.ts`
@@ -769,6 +776,7 @@ EOF
 ## Task 8: Create Terminal Query Hooks
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/lib/queries/terminal.ts`
 
 **Step 1: Create terminal query utilities**
@@ -833,6 +841,7 @@ EOF
 ## Task 9: Create TerminalView Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx`
 
 **Step 1: Create xterm.js wrapper component**
@@ -1002,6 +1011,7 @@ EOF
 ## Task 10: Create TerminalTabs Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/terminal/terminal-tabs.tsx`
 
 **Step 1: Create terminal tabs component**
@@ -1123,6 +1133,7 @@ EOF
 ## Task 11: Create TerminalContainer Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/terminal/terminal-container.tsx`
 - Create: `apps/desktop/src/renderer/src/components/terminal/index.ts`
 
@@ -1226,6 +1237,7 @@ EOF
 ## Task 12: Integrate Terminal into App
 
 **Files:**
+
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Modify: `apps/desktop/src/renderer/src/components/layout/sidebar.tsx`
 
@@ -1493,6 +1505,7 @@ export default App;
 Edit `apps/desktop/src/renderer/src/components/layout/sidebar.tsx` - change `onViewChanges` to `onSelectWorktree`:
 
 In the interface:
+
 ```typescript
 interface SidebarProps {
   repositories: Repository[];
@@ -1511,6 +1524,7 @@ interface SidebarProps {
 ```
 
 In the function signature and the worktree button click handler, change `onViewChanges` to `onSelectWorktree`:
+
 ```typescript
 onClick={() => onSelectWorktree(worktree.id)}
 ```
@@ -1535,6 +1549,7 @@ EOF
 ## Task 13: Update MainContent for Terminal Layout
 
 **Files:**
+
 - Modify: `apps/desktop/src/renderer/src/components/layout/main-content.tsx`
 
 **Step 1: Remove padding for terminal fullscreen**
@@ -1609,6 +1624,7 @@ EOF
 ## Task 15: Cleanup Legacy Store
 
 **Files:**
+
 - Delete: `apps/desktop/src/renderer/src/stores/ui-store.ts`
 
 **Step 1: Remove old ui-store file**

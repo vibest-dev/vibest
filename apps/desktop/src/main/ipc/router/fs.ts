@@ -1,6 +1,6 @@
 import { implement } from "@orpc/server";
-import { execFile, spawn } from "node:child_process";
 import { dialog, shell } from "electron";
+import { execFile, spawn } from "node:child_process";
 
 import type { AppContext } from "../../app";
 

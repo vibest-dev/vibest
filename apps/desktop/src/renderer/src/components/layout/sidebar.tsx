@@ -37,8 +37,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import type { Label, Repository, Task, Worktree } from "../../types";
 
-import { cn } from "../../lib/utils";
 import { orpc } from "../../lib/orpc";
+import { cn } from "../../lib/utils";
 import { useAppStore } from "../../stores";
 import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 
@@ -214,7 +214,7 @@ function RepoTabs({
           <span
             key={repo.id}
             data-measure-tab
-            className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-sm font-medium"
+            className="shrink-0 rounded px-1.5 py-0.5 text-sm font-medium whitespace-nowrap"
           >
             {repo.name}
           </span>
@@ -232,7 +232,7 @@ function RepoTabs({
               "shrink-0 truncate rounded px-1.5 py-0.5 text-sm font-medium transition-colors",
               selectedRepositoryId === repo.id
                 ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
             title={repo.path}
           >
@@ -253,10 +253,7 @@ function RepoTabs({
             />
             <MenuPopup side="bottom" align="start">
               {overflowRepos.map((repo) => (
-                <MenuItem
-                  key={repo.id}
-                  onClick={() => onSelectRepository(repo.id)}
-                >
+                <MenuItem key={repo.id} onClick={() => onSelectRepository(repo.id)}>
                   {repo.name}
                 </MenuItem>
               ))}
@@ -380,11 +377,11 @@ export function Sidebar({
   return (
     <SidebarProvider className="h-full min-h-0">
       <SidebarRoot collapsible="none">
-        <SidebarHeader className="app-drag-region relative shrink-0 pb-8 pt-9">
+        <SidebarHeader className="app-drag-region relative shrink-0 pt-9 pb-8">
           {/* Repo Tabs - fixed at top, doesn't scroll */}
           {!isLoading && repositories.length > 0 && (
             <RepoTabs
-              className="app-no-drag absolute bottom-0 left-0 right-0 pb-1"
+              className="app-no-drag absolute right-0 bottom-0 left-0 pb-1"
               repositories={repositories}
               selectedRepositoryId={selectedRepositoryId}
               onSelectRepository={selectRepository}

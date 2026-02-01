@@ -49,7 +49,7 @@ const handleCreateTerminal = useCallback(() => {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | useMutation returns unstable objects |
-| 2026-02-01 | Fixed: removed createTerminal from deps with eslint-disable comment | Mutation refs are not stable |
+| Date       | Action                                                              | Learnings                            |
+| ---------- | ------------------------------------------------------------------- | ------------------------------------ |
+| 2026-02-01 | Identified via code review                                          | useMutation returns unstable objects |
+| 2026-02-01 | Fixed: removed createTerminal from deps with eslint-disable comment | Mutation refs are not stable         |

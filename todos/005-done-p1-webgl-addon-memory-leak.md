@@ -20,7 +20,7 @@ The WebGL addon for xterm.js is created but the reference is lost after initiali
 
 ```typescript
 try {
-  const webglAddon = new WebglAddon();  // Reference lost after this block
+  const webglAddon = new WebglAddon(); // Reference lost after this block
   webglAddon.onContextLoss(() => {
     webglAddon.dispose();
   });
@@ -33,12 +33,14 @@ try {
 The cleanup function (lines 132-141) disposes the terminal but not the WebGL addon specifically.
 
 **Projected impact at scale:**
+
 - 10 terminals → Approaching WebGL context limit
 - 20 terminals → Context creation fails, performance degrades
 
 ## Proposed Solutions
 
 ### Option A: Store webglAddon in ref and dispose (Recommended)
+
 - **Pros:** Explicit cleanup, standard pattern
 - **Cons:** Additional ref to manage
 - **Effort:** Small
@@ -57,6 +59,7 @@ webglAddonRef.current = null;
 ```
 
 ### Option B: Rely on terminal.dispose() to clean up addons
+
 - **Pros:** Simpler
 - **Cons:** May not properly release WebGL context
 - **Effort:** None (current behavior)
@@ -64,11 +67,12 @@ webglAddonRef.current = null;
 
 ## Recommended Action
 
-*(To be filled during triage)*
+_(To be filled during triage)_
 
 ## Technical Details
 
 **Affected files:**
+
 - `apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx`
 
 ## Acceptance Criteria
@@ -80,9 +84,9 @@ webglAddonRef.current = null;
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | WebGL contexts are limited system resources |
+| Date       | Action                                                               | Learnings                                       |
+| ---------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| 2026-02-01 | Identified via code review                                           | WebGL contexts are limited system resources     |
 | 2026-02-01 | Fixed: store webglAddon in ref and dispose before terminal.dispose() | Dispose addon explicitly to release GPU context |
 
 ## Resources

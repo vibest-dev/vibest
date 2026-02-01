@@ -45,7 +45,7 @@ Make terminal colors derive from Tailwind/CSS variables.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Extract magic values |
+| Date       | Action                                                            | Learnings                     |
+| ---------- | ----------------------------------------------------------------- | ----------------------------- |
+| 2026-02-01 | Identified via code review                                        | Extract magic values          |
 | 2026-02-01 | Fixed: created lib/terminal-theme.ts with TERMINAL_THEME constant | Theme now easily configurable |

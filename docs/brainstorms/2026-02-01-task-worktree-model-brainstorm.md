@@ -10,6 +10,7 @@ topic: task-worktree-model
 Redesign Homer's core data model with **Task** as the primary dimension, replacing the current direct Worktree display approach.
 
 Core relationship:
+
 ```
 Repository 1:N Task 1:N Worktree 1:1 Branch
 ```
@@ -19,18 +20,21 @@ Users see a Task list in the UI. Each Task can have multiple Worktrees (for para
 ## Why This Approach
 
 **Problems:**
+
 - Worktrees are created with random branch names (e.g., city names like `tokyo`)
 - Users rename branches to meaningful names after starting work
 - Current UI displays Worktrees directly, lacking task semantics
 - Users may work on multiple projects in parallel, need clear task management view
 
 **Why Task as the primary dimension:**
+
 - Task names are user-defined, stable and meaningful
 - Branch names may change, not suitable as primary identifier
 - Supports future scenario of one Task with multiple Worktrees (parallel experimentation)
 - Better matches user mental model: working on "tasks", not "managing worktrees"
 
 **Why Worktree is stored separately instead of embedded in Task:**
+
 - Smaller impact on existing code
 - Data structure supports 1:N now, UI treats as 1:1 for now
 - No data migration needed for future expansion
@@ -41,11 +45,11 @@ Users see a Task list in the UI. Each Task can have multiple Worktrees (for para
 
 ```typescript
 interface Repository {
-  id: string
-  name: string
-  path: string
-  defaultBranch: string
-  labels: Label[]           // Repository-level label definitions
+  id: string;
+  name: string;
+  path: string;
+  defaultBranch: string;
+  labels: Label[]; // Repository-level label definitions
 }
 ```
 
@@ -53,9 +57,9 @@ interface Repository {
 
 ```typescript
 interface Label {
-  name: string              // Unique identifier, supports any characters (spaces, unicode, emoji)
-  color: string             // Hex color value
-  description?: string
+  name: string; // Unique identifier, supports any characters (spaces, unicode, emoji)
+  color: string; // Hex color value
+  description?: string;
 }
 ```
 
@@ -63,32 +67,33 @@ Default labels created when adding a new Repository:
 
 ```typescript
 const DEFAULT_LABELS: Label[] = [
-  { name: 'todo', color: '#e4e669', description: 'Not started' },
-  { name: 'progress', color: '#0075ca', description: 'In progress' },
-  { name: 'review', color: '#a2eeef', description: 'Pending review' },
-  { name: 'done', color: '#0e8a16', description: 'Completed' },
-  { name: 'cancelled', color: '#6e7681', description: 'Cancelled' },
-  { name: 'bug', color: '#d73a4a', description: 'Bug fix' },
-  { name: 'feature', color: '#a2eeef', description: 'New feature' },
-  { name: 'refactor', color: '#d4c5f9', description: 'Refactoring' },
-]
+  { name: "todo", color: "#e4e669", description: "Not started" },
+  { name: "progress", color: "#0075ca", description: "In progress" },
+  { name: "review", color: "#a2eeef", description: "Pending review" },
+  { name: "done", color: "#0e8a16", description: "Completed" },
+  { name: "cancelled", color: "#6e7681", description: "Cancelled" },
+  { name: "bug", color: "#d73a4a", description: "Bug fix" },
+  { name: "feature", color: "#a2eeef", description: "New feature" },
+  { name: "refactor", color: "#d4c5f9", description: "Refactoring" },
+];
 ```
 
 ### Task
 
 ```typescript
 interface Task {
-  id: string
-  repositoryId: string
-  name: string
-  description?: string
-  labels: string[]          // References Label.name
-  createdAt: number
-  updatedAt: number
+  id: string;
+  repositoryId: string;
+  name: string;
+  description?: string;
+  labels: string[]; // References Label.name
+  createdAt: number;
+  updatedAt: number;
 }
 ```
 
 **Design decisions:**
+
 - Use labels array (strings) referencing Label.name, similar to GitHub Issues
 - No status field, status is represented by labels (e.g., `todo`, `progress`, `done`)
 - Sorting handled at UI layer (by creation time)
@@ -97,15 +102,16 @@ interface Task {
 
 ```typescript
 interface Worktree {
-  id: string
-  repositoryId: string
-  taskId: string            // Associated Task
-  path: string
-  branch: string            // Current branch name
+  id: string;
+  repositoryId: string;
+  taskId: string; // Associated Task
+  path: string;
+  branch: string; // Current branch name
 }
 ```
 
 **Worktree and Branch 1:1 relationship:**
+
 - Git limitation: same branch cannot be checked out in multiple worktrees
 - Therefore each Worktree must correspond to a unique branch
 - Task 1:N Worktree means Task can have multiple branches (parallel experimentation)
@@ -114,15 +120,16 @@ interface Worktree {
 
 ```typescript
 interface WorktreeRuntime extends Worktree {
-  exists: boolean           // Whether worktree path exists
-  currentBranch: string     // git rev-parse --abbrev-ref HEAD
-  hasChanges: boolean       // git status --porcelain
-  ahead: number             // Commits ahead of remote
-  behind: number            // Commits behind remote
+  exists: boolean; // Whether worktree path exists
+  currentBranch: string; // git rev-parse --abbrev-ref HEAD
+  hasChanges: boolean; // git status --porcelain
+  ahead: number; // Commits ahead of remote
+  behind: number; // Commits behind remote
 }
 ```
 
 **Branch sync strategy:**
+
 - `branch` records current branch name
 - Sync reads actual branch name from Git and updates
 - User renaming (`git branch -m`) or switching (`git checkout`) will be reflected
@@ -133,9 +140,9 @@ interface WorktreeRuntime extends Worktree {
 
 ```typescript
 interface StoreSchema {
-  repositories: Repository[]
-  tasks: Task[]
-  worktrees: StoredWorktree[]
+  repositories: Repository[];
+  tasks: Task[];
+  worktrees: StoredWorktree[];
 }
 ```
 
@@ -170,14 +177,14 @@ Centralized storage at `~/Library/Application Support/homer/store.json`
 
 ## Key Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Task vs Worktree as primary dimension | Task | Users care about tasks, not worktree details |
-| Worktree embedded vs separate | Separate storage | Smaller code impact, supports future 1:N |
-| Task status field vs labels | Labels | More flexible, users can customize status workflow |
-| Label reference method | By name | Simple, similar to GitHub Issues |
-| Label scope | Repository level | Each repo can have different label systems |
-| Branch sync strategy | Sync on read | Simple, no edge cases |
+| Decision                              | Choice           | Rationale                                          |
+| ------------------------------------- | ---------------- | -------------------------------------------------- |
+| Task vs Worktree as primary dimension | Task             | Users care about tasks, not worktree details       |
+| Worktree embedded vs separate         | Separate storage | Smaller code impact, supports future 1:N           |
+| Task status field vs labels           | Labels           | More flexible, users can customize status workflow |
+| Label reference method                | By name          | Simple, similar to GitHub Issues                   |
+| Label scope                           | Repository level | Each repo can have different label systems         |
+| Branch sync strategy                  | Sync on read     | Simple, no edge cases                              |
 
 ## Future Features
 

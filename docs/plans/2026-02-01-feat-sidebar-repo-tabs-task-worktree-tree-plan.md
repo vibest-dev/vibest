@@ -9,6 +9,7 @@ date: 2026-02-01
 ## Overview
 
 重构 Sidebar 布局：
+
 1. **顶部 Repo Tabs**: 横向 tag/tab 切换仓库，超出时折叠到下拉菜单
 2. **Task 列表**: 显示当前选中 Repo 的 Tasks
 3. **Task → Worktree 层级**: 单 worktree 直接显示 Task，多 worktree 可展开收起
@@ -29,6 +30,7 @@ date: 2026-02-01
 ## Problem Statement
 
 当前 Sidebar 是 Repository → Task 的两级结构，但：
+
 1. 切换 Repo 需要展开/收起，不够直观
 2. Task 与 Worktree 是 1:1 关系，无法支持一个 Task 多个 Worktree
 3. 没有快速切换 Repo 的方式
@@ -49,10 +51,10 @@ date: 2026-02-01
 
 ### 3. Task/Worktree 层级
 
-| 场景 | 显示 |
-|------|------|
-| Task 有 0 个 worktree | 显示 Task，无展开箭头 |
-| Task 有 1 个 worktree | 显示 Task，无展开箭头，点击直接打开 worktree |
+| 场景                   | 显示                                         |
+| ---------------------- | -------------------------------------------- |
+| Task 有 0 个 worktree  | 显示 Task，无展开箭头                        |
+| Task 有 1 个 worktree  | 显示 Task，无展开箭头，点击直接打开 worktree |
 | Task 有 2+ 个 worktree | 显示 Task + 展开箭头，展开显示 worktree 列表 |
 
 ## Technical Approach
@@ -76,9 +78,9 @@ export interface WorkspaceSlice {
 // stores/slices/task-slice.ts
 export interface TaskSlice {
   selectedTaskId: string | null;
-  expandedTaskIds: string[];  // NEW: 展开的 Task IDs
+  expandedTaskIds: string[]; // NEW: 展开的 Task IDs
   selectTask: (id: string | null) => void;
-  toggleTaskExpanded: (id: string) => void;  // NEW
+  toggleTaskExpanded: (id: string) => void; // NEW
   // ... existing
 }
 ```
@@ -103,15 +105,15 @@ Sidebar
 
 ### 文件改动
 
-| 文件 | 改动 |
-|------|------|
-| `components/layout/sidebar.tsx` | 重构，添加 RepoTabs |
-| `components/layout/repo-tabs.tsx` | **NEW**: Repo 切换 tabs |
-| `components/layout/task-item.tsx` | **NEW**: Task 展开/收起逻辑 |
-| `components/layout/worktree-item.tsx` | **NEW**: Worktree 行 |
-| `stores/slices/workspace-slice.ts` | 添加 `selectedRepositoryId` |
-| `stores/slices/task-slice.ts` | 添加 `expandedTaskIds` |
-| `App.tsx` | 适配新的 Sidebar props |
+| 文件                                  | 改动                        |
+| ------------------------------------- | --------------------------- |
+| `components/layout/sidebar.tsx`       | 重构，添加 RepoTabs         |
+| `components/layout/repo-tabs.tsx`     | **NEW**: Repo 切换 tabs     |
+| `components/layout/task-item.tsx`     | **NEW**: Task 展开/收起逻辑 |
+| `components/layout/worktree-item.tsx` | **NEW**: Worktree 行        |
+| `stores/slices/workspace-slice.ts`    | 添加 `selectedRepositoryId` |
+| `stores/slices/task-slice.ts`         | 添加 `expandedTaskIds`      |
+| `App.tsx`                             | 适配新的 Sidebar props      |
 
 ## Acceptance Criteria
 
@@ -166,7 +168,7 @@ Sidebar
 
 - `packages/ui/src/components/tabs.tsx` - 可复用的 Tabs 组件
 - `packages/ui/src/components/collapsible.tsx` - 展开收起
-- `packages/ui/src/components/sidebar.tsx` - SidebarMenu* 组件
+- `packages/ui/src/components/sidebar.tsx` - SidebarMenu\* 组件
 
 ### 现有代码
 

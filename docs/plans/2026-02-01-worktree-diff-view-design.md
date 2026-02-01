@@ -89,7 +89,7 @@ Two collapsible sections:
 ### File Status Badges
 
 | Badge | Status   | Color        |
-|-------|----------|--------------|
+| ----- | -------- | ------------ |
 | M     | Modified | Yellow/Amber |
 | A     | Added    | Green        |
 | D     | Deleted  | Red          |
@@ -136,11 +136,13 @@ DiffContent   DiffFileTree
 ### Files to Create/Modify
 
 **New files:**
+
 - `apps/desktop/src/renderer/src/components/worktrees/worktree-diff-view.tsx`
 - `apps/desktop/src/renderer/src/components/worktrees/diff-file-tree.tsx`
 - `apps/desktop/src/renderer/src/components/worktrees/diff-content.tsx`
 
 **Modify:**
+
 - `apps/desktop/src/renderer/src/App.tsx` - Render `WorktreeDiffView` in main content when worktree selected
 
 ### Reuse Existing
@@ -156,29 +158,27 @@ Transform flat file list to nested tree:
 ```typescript
 // Input: FileDiff[]
 [
-  { path: 'src/auth.tsx', status: 'modified' },
-  { path: 'src/utils.ts', status: 'modified' },
-  { path: 'tests/auth.test.ts', status: 'modified' },
-]
-
-// Output: TreeNode[]
-[
-  {
-    name: 'src',
-    type: 'folder',
+  { path: "src/auth.tsx", status: "modified" },
+  { path: "src/utils.ts", status: "modified" },
+  { path: "tests/auth.test.ts", status: "modified" },
+][
+  // Output: TreeNode[]
+  ({
+    name: "src",
+    type: "folder",
     children: [
-      { name: 'auth.tsx', type: 'file', status: 'modified', path: 'src/auth.tsx' },
-      { name: 'utils.ts', type: 'file', status: 'modified', path: 'src/utils.ts' },
-    ]
+      { name: "auth.tsx", type: "file", status: "modified", path: "src/auth.tsx" },
+      { name: "utils.ts", type: "file", status: "modified", path: "src/utils.ts" },
+    ],
   },
   {
-    name: 'tests',
-    type: 'folder',
+    name: "tests",
+    type: "folder",
     children: [
-      { name: 'auth.test.ts', type: 'file', status: 'modified', path: 'tests/auth.test.ts' },
-    ]
-  }
-]
+      { name: "auth.test.ts", type: "file", status: "modified", path: "tests/auth.test.ts" },
+    ],
+  })
+];
 ```
 
 ## Dependencies
