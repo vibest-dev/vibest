@@ -35,7 +35,7 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 			cursorStyle: "block",
 			fontSize: 14,
 			fontFamily: '"Geist Mono Variable", Menlo, Monaco, monospace',
-			fontWeight: "normal",
+			fontWeight: "500",
 			lineHeight: 1.2,
 			scrollback: 1000,
 			theme: TERMINAL_THEME_DARK,
