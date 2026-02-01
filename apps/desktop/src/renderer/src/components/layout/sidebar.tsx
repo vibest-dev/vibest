@@ -31,6 +31,8 @@ import {
   Settings,
   Tags,
 } from "lucide-react";
+
+import { ThemeToggle } from "../theme-toggle";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { Label, Repository, Task, Worktree } from "../../types";
@@ -478,7 +480,7 @@ export function Sidebar({
           )}
         </SidebarContent>
 
-        <SidebarFooter className="p-2">
+        <SidebarFooter className="!flex-row items-center justify-between">
           <button
             type="button"
             className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
@@ -486,6 +488,7 @@ export function Sidebar({
           >
             <Settings className="size-4" />
           </button>
+          <ThemeToggle />
         </SidebarFooter>
       </SidebarRoot>
 

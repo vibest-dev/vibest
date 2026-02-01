@@ -64,8 +64,34 @@ export const openFinder = os.openFinder.handler(async ({ input }) => {
   await shell.openPath(path);
 });
 
+export const openInVSCode = os.openInVSCode.handler(async ({ input }) => {
+  const { path } = input;
+
+  if (process.platform === "darwin") {
+    execFile("code", [path]);
+  } else if (process.platform === "win32") {
+    execFile("code", [path], { shell: true });
+  } else {
+    execFile("code", [path]);
+  }
+});
+
+export const openInCursor = os.openInCursor.handler(async ({ input }) => {
+  const { path } = input;
+
+  if (process.platform === "darwin") {
+    execFile("cursor", [path]);
+  } else if (process.platform === "win32") {
+    execFile("cursor", [path], { shell: true });
+  } else {
+    execFile("cursor", [path]);
+  }
+});
+
 export const fsRouter = os.router({
   selectDir,
   openTerminal,
   openFinder,
+  openInVSCode,
+  openInCursor,
 });

@@ -15,4 +15,16 @@ export const fsContract = {
       path: z.string(),
     }),
   ),
+
+  openInVSCode: oc.input(
+    z.object({
+      path: z.string(),
+    }),
+  ),
+
+  openInCursor: oc.input(
+    z.object({
+      path: z.string(),
+    }),
+  ),
 };
