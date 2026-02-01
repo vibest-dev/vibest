@@ -2,14 +2,14 @@ import { Button } from "@vibest/ui/components/button";
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@vibest/ui/components/empty";
 import { ScrollArea } from "@vibest/ui/components/scroll-area";
 import { Spinner } from "@vibest/ui/components/spinner";
-import { ArrowLeft, FileDiff as FileDiffIcon, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
+import { ArrowLeft, FileDiff as FileDiffIcon, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { Worktree } from "../../types";
+import type { DiffFileInfo, Worktree } from "../../types";
 
-import { useDiff } from "../../hooks/use-diff";
+import { useDiffStats } from "../../hooks/use-diff-stats";
 import { buildFileTree } from "../../utils/build-file-tree";
-import { DiffContent } from "./diff-content";
+import { SingleFileDiff } from "./single-file-diff";
 import { DiffFileTree } from "./diff-file-tree";
 
 interface WorktreeDiffViewProps {
@@ -18,55 +18,33 @@ interface WorktreeDiffViewProps {
 }
 
 export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
-  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
-  const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
+  const [selectedFile, setSelectedFile] = useState<DiffFileInfo | null>(null);
 
-  // Fetch both staged and unstaged diffs
-  const { diff: allDiff, isLoading: isLoadingAll, error: errorAll, refresh: refreshAll } = useDiff({
-    path: worktree.path,
-    staged: false,
-  });
+  const { data: diffStats, isLoading, error, refetch } = useDiffStats(worktree.path);
 
-  const { diff: stagedDiff, isLoading: isLoadingStaged, refresh: refreshStaged } = useDiff({
-    path: worktree.path,
-    staged: true,
-  });
+  const allFiles = diffStats?.files ?? [];
 
-  const isLoading = isLoadingAll || isLoadingStaged;
-  const error = errorAll;
-
-  // Build file trees
-  const stagedFiles = useMemo(
-    () => buildFileTree(stagedDiff?.files ?? []),
-    [stagedDiff?.files],
-  );
-
-  const unstagedFiles = useMemo(() => {
-    const allFiles = allDiff?.files ?? [];
-    const stagedPaths = new Set(
-      (stagedDiff?.files ?? []).map(
-        (f) => f.newFile?.filename ?? f.oldFile?.filename,
-      ),
-    );
-    const unstaged = allFiles.filter((f) => {
-      const path = f.newFile?.filename ?? f.oldFile?.filename;
-      return !stagedPaths.has(path);
-    });
-    return buildFileTree(unstaged);
-  }, [allDiff?.files, stagedDiff?.files]);
-
-  const allFiles = allDiff?.files ?? [];
-  const stats = allDiff?.stats;
+  // Build file trees from stats
+  const { stagedFiles, stagedCount, unstagedFiles, unstagedCount } = useMemo(() => {
+    const staged = allFiles.filter((f) => f.staged);
+    const unstaged = allFiles.filter((f) => !f.staged);
+    return {
+      stagedFiles: buildFileTree(staged),
+      stagedCount: staged.length,
+      unstagedFiles: buildFileTree(unstaged),
+      unstagedCount: unstaged.length,
+    };
+  }, [allFiles]);
 
   const handleFileClick = (fileIndex: number) => {
-    setScrollToIndex(fileIndex);
-    // Reset after scroll animation
-    setTimeout(() => setScrollToIndex(null), 500);
+    const file = allFiles[fileIndex];
+    if (file) {
+      setSelectedFile(file);
+    }
   };
 
   const handleRefresh = () => {
-    refreshAll();
-    refreshStaged();
+    refetch();
   };
 
   return (
@@ -79,13 +57,13 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
           </Button>
           <div>
             <h2 className="text-sm font-semibold">{worktree.branch}</h2>
-            {stats && (
+            {diffStats && (
               <p className="text-muted-foreground text-xs">
-                <span className="text-success">+{stats.insertions}</span>
+                <span className="text-success">+{diffStats.totalInsertions}</span>
                 {" "}
-                <span className="text-destructive">-{stats.deletions}</span>
+                <span className="text-destructive">-{diffStats.totalDeletions}</span>
                 {" · "}
-                {stats.filesChanged} files
+                {diffStats.files.length} files
               </p>
             )}
           </div>
@@ -93,13 +71,6 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={isLoading}>
             <RefreshCw className={isLoading ? "animate-spin" : ""} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsTreeCollapsed(!isTreeCollapsed)}
-          >
-            {isTreeCollapsed ? <PanelRightOpen /> : <PanelRightClose />}
           </Button>
         </div>
       </div>
@@ -114,7 +85,7 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
         ) : error ? (
           <Empty className="flex-1">
             <EmptyTitle>Error</EmptyTitle>
-            <EmptyDescription>{error}</EmptyDescription>
+            <EmptyDescription>{error.message}</EmptyDescription>
           </Empty>
         ) : allFiles.length === 0 ? (
           <Empty className="flex-1">
@@ -126,21 +97,35 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
           </Empty>
         ) : (
           <>
-            {/* Diffs (left side) */}
-            <ScrollArea className="flex-1">
-              <DiffContent files={allFiles} scrollToIndex={scrollToIndex} />
+            {/* File Tree (left side) */}
+            <ScrollArea className="border-border w-56 shrink-0 border-r">
+              <DiffFileTree
+                stagedFiles={stagedFiles}
+                unstagedFiles={unstagedFiles}
+                stagedCount={stagedCount}
+                unstagedCount={unstagedCount}
+                onFileClick={handleFileClick}
+                selectedPath={selectedFile?.path}
+              />
             </ScrollArea>
 
-            {/* File Tree (right side, collapsible) */}
-            {!isTreeCollapsed && (
-              <ScrollArea className="border-border w-64 shrink-0 border-l">
-                <DiffFileTree
-                  stagedFiles={stagedFiles}
-                  unstagedFiles={unstagedFiles}
-                  onFileClick={handleFileClick}
+            {/* Single File Diff (right side) */}
+            <div className="min-w-0 flex-1">
+              {selectedFile ? (
+                <SingleFileDiff
+                  repoPath={worktree.path}
+                  file={selectedFile}
                 />
-              </ScrollArea>
-            )}
+              ) : (
+                <Empty className="h-full">
+                  <EmptyMedia variant="icon">
+                    <FileDiffIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>Select a file</EmptyTitle>
+                  <EmptyDescription>Click a file from the tree to view its diff</EmptyDescription>
+                </Empty>
+              )}
+            </div>
           </>
         )}
       </div>

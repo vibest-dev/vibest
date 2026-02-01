@@ -1,19 +1,20 @@
-import type { FileDiff } from "../types";
+import type { DiffFileInfo } from "../types";
 
 export interface FileTreeNode {
   path: string; // "src/components/auth.tsx" or "src/components"
   isDirectory: boolean;
-  status?: FileDiff["status"]; // only for files
+  status?: DiffFileInfo["status"]; // only for files
+  staged?: boolean; // only for files
   fileIndex?: number; // only for files
   children: FileTreeNode[];
 }
 
-export function buildFileTree(files: FileDiff[]): FileTreeNode[] {
+export function buildFileTree(files: DiffFileInfo[]): FileTreeNode[] {
   const root: FileTreeNode[] = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const filename = file.newFile?.filename ?? file.oldFile?.filename;
+    const filename = file.path;
     if (!filename) continue;
 
     const parts = filename.split("/");
@@ -32,7 +33,7 @@ export function buildFileTree(files: FileDiff[]): FileTreeNode[] {
           path: currentPath,
           isDirectory: !isLast,
           children: [],
-          ...(isLast ? { status: file.status, fileIndex: i } : {}),
+          ...(isLast ? { status: file.status, fileIndex: i, staged: file.staged } : {}),
         };
         currentLevel.push(existing);
       }
