@@ -42,7 +42,7 @@ importers:
         specifier: ^2.0.44
         version: 2.0.126(react@19.2.4)(zod@4.3.6)
       '@orpc/client':
-        specifier: ^1.8.6
+        specifier: ^1.9.1
         version: 1.13.4(@opentelemetry/api@1.9.0)
       '@orpc/server':
         specifier: ^1.8.6
@@ -63,8 +63,8 @@ importers:
         specifier: ^5.0.63
         version: 5.0.124(zod@4.3.6)
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       react:
         specifier: ^19.2.0
         version: 19.2.4
@@ -72,7 +72,7 @@ importers:
         specifier: ^19.2.0
         version: 19.2.4(react@19.2.4)
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       tailwindcss:
         specifier: ^4.1.12
@@ -111,6 +111,19 @@ importers:
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@39.4.0)
+      electron-store:
+        specifier: ^10.0.1
+        version: 10.1.0
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      simple-git:
+        specifier: ^3.27.0
+        version: 3.30.0
+    devDependencies:
+      '@electron-toolkit/tsconfig':
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@22.19.7)
       '@fontsource-variable/geist':
         specifier: ^5.2.7
         version: 5.2.8
@@ -130,20 +143,38 @@ importers:
         specifier: ^1.8.6
         version: 1.13.4(@opentelemetry/api@1.9.0)(ws@8.19.0)
       '@orpc/tanstack-query':
-        specifier: ^1.13.4
+        specifier: ^1.8.6
         version: 1.13.4(@opentelemetry/api@1.9.0)(@orpc/client@1.13.4(@opentelemetry/api@1.9.0))(@tanstack/query-core@5.90.20)
       '@pierre/diffs':
         specifier: ^1.0.9
         version: 1.0.10(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@playwright/test':
+        specifier: ^1.50.1
+        version: 1.58.1
+      '@tailwindcss/vite':
+        specifier: ^4.1.12
+        version: 4.1.18(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       '@tanstack/react-query':
         specifier: ^5.90.20
         version: 5.90.20(react@19.2.4)
+      '@types/node':
+        specifier: ^22.16.5
+        version: 22.19.7
+      '@types/react':
+        specifier: ^19.2.2
+        version: 19.2.10
+      '@types/react-dom':
+        specifier: ^19.2.1
+        version: 19.2.3(@types/react@19.2.10)
       '@vibest/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@vibest/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@vitejs/plugin-react':
+        specifier: ^5.0.1
+        version: 5.1.2(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -159,61 +190,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      electron-store:
-        specifier: ^10.0.1
-        version: 10.1.0
-      lucide-react:
-        specifier: ^0.511.0
-        version: 0.511.0(react@19.2.4)
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
-      simple-git:
-        specifier: ^3.27.0
-        version: 3.30.0
-      tailwind-merge:
-        specifier: ^3.3.0
-        version: 3.4.0
-      tw-animate-css:
-        specifier: ^1.3.0
-        version: 1.4.0
-      uuid:
-        specifier: ^11.1.0
-        version: 11.1.0
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-      zustand:
-        specifier: ^5.0.5
-        version: 5.0.10(@types/react@19.2.10)(immer@11.1.3)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
-    devDependencies:
-      '@electron-toolkit/tsconfig':
-        specifier: ^2.0.0
-        version: 2.0.0(@types/node@22.19.7)
-      '@electron/rebuild':
-        specifier: ^4.0.3
-        version: 4.0.3
-      '@playwright/test':
-        specifier: ^1.50.1
-        version: 1.58.1
-      '@tailwindcss/vite':
-        specifier: ^4.1.12
-        version: 4.1.18(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
-      '@types/node':
-        specifier: ^22.16.5
-        version: 22.19.7
-      '@types/react':
-        specifier: ^19.2.2
-        version: 19.2.10
-      '@types/react-dom':
-        specifier: ^19.2.1
-        version: 19.2.3(@types/react@19.2.10)
-      '@types/uuid':
-        specifier: ^10.0.0
-        version: 10.0.0
-      '@vitejs/plugin-react':
-        specifier: ^5.0.1
-        version: 5.1.2(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       electron:
         specifier: ^39.4.0
         version: 39.4.0
@@ -223,12 +199,21 @@ importers:
       electron-vite:
         specifier: ^5.0.0
         version: 5.0.0(@swc/core@1.15.11(@swc/helpers@0.5.18))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      lucide-react:
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
+      p-queue:
+        specifier: ^9.1.0
+        version: 9.1.0
       react:
         specifier: ^19.2.0
         version: 19.2.4
       react-dom:
         specifier: ^19.2.0
         version: 19.2.4(react@19.2.4)
+      tailwind-merge:
+        specifier: ^3.3.0
+        version: 3.4.0
       tailwindcss:
         specifier: ^4.1.12
         version: 4.1.18
@@ -238,6 +223,15 @@ importers:
       vite:
         specifier: ^7.2.6
         version: 7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.7)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+      zustand:
+        specifier: ^5.0.5
+        version: 5.0.10(@types/react@19.2.10)(immer@11.1.3)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
 
   chrome-extension:
     devDependencies:
@@ -362,8 +356,8 @@ importers:
         specifier: ^3.0.5
         version: 3.0.5
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       react:
         specifier: ^19.2.0
         version: 19.2.4
@@ -386,7 +380,7 @@ importers:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       tailwindcss:
         specifier: ^4.1.12
@@ -398,7 +392,7 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
       zustand:
-        specifier: ^5.0.7
+        specifier: ^5.0.5
         version: 5.0.10(@types/react@19.2.10)(immer@11.1.3)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
       '@eslint/js':
@@ -518,7 +512,7 @@ importers:
         version: 13.0.0
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
+        specifier: ^0.1.12
         version: 0.1.77(zod@3.25.76)
       '@vibest/typescript':
         specifier: workspace:*
@@ -539,7 +533,7 @@ importers:
   packages/ai-sdk-agents:
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
+        specifier: ^0.1.12
         version: 0.1.77(zod@3.25.76)
       '@vibest/typescript':
         specifier: workspace:*
@@ -617,8 +611,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       react:
         specifier: ^19.2.0
         version: 19.2.4
@@ -626,7 +620,7 @@ importers:
         specifier: ^19.2.0
         version: 19.2.4(react@19.2.4)
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       tiny-invariant:
         specifier: ^1.3.3
@@ -660,7 +654,7 @@ importers:
   packages/server-rpc:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
+        specifier: ^0.1.12
         version: 0.1.77(zod@3.25.76)
       '@orpc/contract':
         specifier: ^1.9.1
@@ -727,7 +721,7 @@ importers:
   packages/ui:
     dependencies:
       '@fontsource-variable/geist':
-        specifier: ^5.2.8
+        specifier: ^5.2.7
         version: 5.2.8
       '@fontsource-variable/geist-mono':
         specifier: ^5.2.7
@@ -770,8 +764,8 @@ importers:
         specifier: ^2.3.6
         version: 2.3.6
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       react:
         specifier: ^19.2.0
         version: 19.2.4
@@ -785,7 +779,7 @@ importers:
         specifier: 3.12.2
         version: 3.12.2
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       tailwindcss:
         specifier: ^4.1.12
@@ -806,19 +800,19 @@ importers:
         specifier: ^2.0.44
         version: 2.0.126(react@19.2.4)(zod@3.25.76)
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.1.22
+        specifier: ^0.1.12
         version: 0.1.77(zod@3.25.76)
       '@hono/node-server':
         specifier: ^1.19.5
         version: 1.19.9(hono@4.11.7)
       '@orpc/client':
-        specifier: ^1.8.6
+        specifier: ^1.9.1
         version: 1.13.4(@opentelemetry/api@1.9.0)
       '@orpc/openapi':
         specifier: ^1.9.3
         version: 1.13.4(@opentelemetry/api@1.9.0)(ws@8.19.0)
       '@orpc/server':
-        specifier: ^1.9.1
+        specifier: ^1.8.6
         version: 1.13.4(@opentelemetry/api@1.9.0)(ws@8.19.0)
       '@orpc/standard-server-fetch':
         specifier: ^1.9.1
@@ -830,13 +824,13 @@ importers:
         specifier: ^1.1.10
         version: 1.1.11(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-collapsible':
-        specifier: ^1.1.12
+        specifier: ^1.1.11
         version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-dialog':
-        specifier: ^1.1.15
+        specifier: ^1.1.14
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-dropdown-menu':
-        specifier: ^2.1.16
+        specifier: ^2.1.15
         version: 2.1.16(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-label':
         specifier: ^2.1.7
@@ -851,7 +845,7 @@ importers:
         specifier: ^1.2.3
         version: 1.2.4(@types/react@19.2.10)(react@19.2.4)
       '@radix-ui/react-tooltip':
-        specifier: ^1.2.8
+        specifier: ^1.2.7
         version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tailwindcss/vite':
         specifier: ^4.1.12
@@ -899,8 +893,8 @@ importers:
         specifier: ^4.9.12
         version: 4.11.7
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -911,8 +905,8 @@ importers:
         specifier: ^19.2.0
         version: 19.2.4
       react-day-picker:
-        specifier: ^9.11.0
-        version: 9.13.0(react@19.2.4)
+        specifier: 9.7.0
+        version: 9.7.0(react@19.2.4)
       react-dom:
         specifier: ^19.2.0
         version: 19.2.4(react@19.2.4)
@@ -926,7 +920,7 @@ importers:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       tailwindcss:
         specifier: ^4.1.12
@@ -944,7 +938,7 @@ importers:
         specifier: ^8.18.3
         version: 8.19.0
       zod:
-        specifier: ^3.25.61
+        specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
       '@orpc/contract':
@@ -1126,7 +1120,7 @@ importers:
         specifier: ^0.27.16
         version: 0.27.17(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@orpc/client':
-        specifier: ^1.8.6
+        specifier: ^1.9.1
         version: 1.13.4(@opentelemetry/api@1.9.0)
       '@xstate/react':
         specifier: ^6.0.0
@@ -1138,7 +1132,7 @@ importers:
         specifier: ^5.0.63
         version: 5.0.124(zod@3.25.76)
       birpc:
-        specifier: ^2.6.1
+        specifier: ^2.5.0
         version: 2.9.0
       class-variance-authority:
         specifier: ^0.7.1
@@ -1150,8 +1144,8 @@ importers:
         specifier: ^2.3.6
         version: 2.3.6
       lucide-react:
-        specifier: ^0.530.0
-        version: 0.530.0(react@19.2.4)
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.4)
       motion:
         specifier: ^12.23.12
         version: 12.29.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1168,7 +1162,7 @@ importers:
         specifier: 3.12.2
         version: 3.12.2
       tailwind-merge:
-        specifier: ^3.3.1
+        specifier: ^3.3.0
         version: 3.4.0
       use-stick-to-bottom:
         specifier: ^1.1.1
@@ -1655,9 +1649,6 @@ packages:
   '@date-fns/tz@1.2.0':
     resolution: {integrity: sha512-LBrd7MiJZ9McsOgxqWX7AaxrDjcFVjWH/tIKJd7pnR7McaslGYOP1QmmiBXdJH/H/yLCT+rcQ7FaPBUxRGUtrg==}
 
-  '@date-fns/tz@1.4.1':
-    resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
-
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
     engines: {node: '>= 8.9.0'}
@@ -1701,11 +1692,6 @@ packages:
 
   '@electron/rebuild@4.0.1':
     resolution: {integrity: sha512-iMGXb6Ib7H/Q3v+BKZJoETgF9g6KMNZVbsO4b7Dmpgb5qTFqyFTzqW9F3TOSHdybv2vKYKzSS9OiZL+dcJb+1Q==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
-
-  '@electron/rebuild@4.0.3':
-    resolution: {integrity: sha512-u9vpTHRMkOYCs/1FLiSVAFZ7FbjsXK+bQuzviJZa+lG7BHZl1nz52/IcGvwa3sk80/fc3llutBkbCq10Vh8WQA==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -4277,9 +4263,6 @@ packages:
   '@types/use-sync-external-store@0.0.6':
     resolution: {integrity: sha512-zFDAD+tlpf2r4asuHEj0XH6pY6i0g5NeAHPn+15wk3BV6JA69eERFXC1gyGThDkVa1zCyKr5jox1+2LbV/AMLg==}
 
-  '@types/uuid@10.0.0':
-    resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
-
   '@types/verror@1.10.11':
     resolution: {integrity: sha512-RlDm9K7+o5stv0Co8i8ZRGxDbrTxhJtgjqjFyVh/tXQyl/rYtTKlnTvZ88oSTeYREWurwx20Js4kTuKCsFkUtg==}
 
@@ -6696,11 +6679,6 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  lucide-react@0.530.0:
-    resolution: {integrity: sha512-5RkjKHbEMPnkPth9T+BIuVh+E3y4mO6qI2E+4/6GBw2KKKX8taiCPuJVtn/KdtbgBUVqKVJmEqB4ETdU4IjloQ==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -7165,6 +7143,14 @@ packages:
     resolution: {integrity: sha512-tkAQEw8ysMzmkhgw8k+1U/iPhWNhykKnSk4Rd5zLoPJCuJaGRPo6YposrZgaxHKzDHdDWWZvE/Sk7hsL2X/CpQ==}
     engines: {node: '>=18'}
 
+  p-queue@9.1.0:
+    resolution: {integrity: sha512-O/ZPaXuQV29uSLbxWBGGZO1mCQXV2BLIwUr59JUU9SoH76mnYvtms7aafH/isNSNGwuEfP6W/4xD0/TJXxrizw==}
+    engines: {node: '>=20'}
+
+  p-timeout@7.0.1:
+    resolution: {integrity: sha512-AxTM2wDGORHGEkPCt8yqxOTMgpfbEHqF51f/5fJCmwFC3C/zNcGT63SymH2ttOAaiIws2zVg4+izQCjrakcwHg==}
+    engines: {node: '>=20'}
+
   p-try@2.2.0:
     resolution: {integrity: sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==}
     engines: {node: '>=6'}
@@ -7480,12 +7466,6 @@ packages:
   raw-body@3.0.2:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
     engines: {node: '>= 0.10'}
-
-  react-day-picker@9.13.0:
-    resolution: {integrity: sha512-euzj5Hlq+lOHqI53NiuNhCP8HWgsPf/bBAVijR50hNaY1XwjKjShAnIe8jm8RD2W9IJUvihDIZ+KrmqfFzNhFQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      react: '>=16.8.0'
 
   react-day-picker@9.7.0:
     resolution: {integrity: sha512-urlK4C9XJZVpQ81tmVgd2O7lZ0VQldZeHzNejbwLWZSkzHH498KnArT0EHNfKBOWwKc935iMLGZdxXPRISzUxQ==}
@@ -8511,10 +8491,6 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
-  uuid@11.1.0:
-    resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
-    hasBin: true
-
   uuid@13.0.0:
     resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
     hasBin: true
@@ -9466,8 +9442,6 @@ snapshots:
 
   '@date-fns/tz@1.2.0': {}
 
-  '@date-fns/tz@1.4.1': {}
-
   '@develar/schema-utils@2.6.5':
     dependencies:
       ajv: 6.12.6
@@ -9545,24 +9519,6 @@ snapshots:
       read-binary-file-arch: 1.0.6
       semver: 7.7.3
       tar: 6.2.1
-      yargs: 17.7.2
-    transitivePeerDependencies:
-      - supports-color
-
-  '@electron/rebuild@4.0.3':
-    dependencies:
-      '@malept/cross-spawn-promise': 2.0.0
-      debug: 4.4.3
-      detect-libc: 2.1.2
-      got: 11.8.6
-      graceful-fs: 4.2.11
-      node-abi: 4.26.0
-      node-api-version: 0.2.1
-      node-gyp: 11.5.0
-      ora: 5.4.1
-      read-binary-file-arch: 1.0.6
-      semver: 7.7.3
-      tar: 7.5.7
       yargs: 17.7.2
     transitivePeerDependencies:
       - supports-color
@@ -11963,8 +11919,6 @@ snapshots:
   '@types/unist@3.0.3': {}
 
   '@types/use-sync-external-store@0.0.6': {}
-
-  '@types/uuid@10.0.0': {}
 
   '@types/verror@1.10.11':
     optional: true
@@ -14923,10 +14877,6 @@ snapshots:
     dependencies:
       react: 19.2.4
 
-  lucide-react@0.530.0(react@19.2.4):
-    dependencies:
-      react: 19.2.4
-
   lz-string@1.5.0: {}
 
   magic-string@0.30.21:
@@ -15535,6 +15485,13 @@ snapshots:
 
   p-map@7.0.4: {}
 
+  p-queue@9.1.0:
+    dependencies:
+      eventemitter3: 5.0.4
+      p-timeout: 7.0.1
+
+  p-timeout@7.0.1: {}
+
   p-try@2.2.0: {}
 
   package-json-from-dist@1.0.1: {}
@@ -15803,13 +15760,6 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.2
       unpipe: 1.0.0
-
-  react-day-picker@9.13.0(react@19.2.4):
-    dependencies:
-      '@date-fns/tz': 1.4.1
-      date-fns: 4.1.0
-      date-fns-jalali: 4.1.0-0
-      react: 19.2.4
 
   react-day-picker@9.7.0(react@19.2.4):
     dependencies:
@@ -16890,8 +16840,6 @@ snapshots:
   utf8-byte-length@1.0.5: {}
 
   util-deprecate@1.0.2: {}
-
-  uuid@11.1.0: {}
 
   uuid@13.0.0: {}
 
