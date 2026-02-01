@@ -12,7 +12,7 @@ import { TerminalPanel } from "./components/terminal";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
 import { CreateWorktreeDialog } from "./components/worktrees/create-worktree-dialog";
-import { DiffViewer } from "./components/worktrees/diff-viewer";
+import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
 import { queryClient } from "./lib/query-client";
@@ -241,7 +241,7 @@ function App(): React.JSX.Element {
             ))}
           </div>
           {diffWorktree && !selectedWorktree ? (
-            <DiffViewer worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
+            <WorktreeDiffView worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
           ) : openedWorktrees.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center">
               <div className="bg-muted mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
