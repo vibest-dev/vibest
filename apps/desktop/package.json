@@ -14,9 +14,7 @@
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "pnpm run build && electron-builder --dir",
-    "build:win": "pnpm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
     "clean": "git clean -xdf node_modules .turbo dist",
     "e2e": "pnpm run build && playwright test -c e2e/playwright.config.ts",
     "e2e:headed": "pnpm run build && playwright test -c e2e/playwright.config.ts --headed",
@@ -53,7 +51,6 @@
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
-    "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.50.1",
     "@tailwindcss/vite": "^4.1.12",
     "@types/node": "^22.16.5",
