@@ -1,35 +1,28 @@
 import type { StateCreator } from "zustand/vanilla";
 
 export interface WorkspaceSlice {
-  // Worktree selection
-  selectedWorktreeId: string | null;
-  selectWorktree: (id: string | null) => void;
-
-  // Track which worktrees have been opened (for terminal persistence)
-  openedWorktreeIds: string[];
-  markWorktreeOpened: (worktreeId: string) => void;
-  removeWorktreeOpened: (worktreeId: string) => void;
+  // Track which worktrees have terminal sessions (for terminal persistence)
+  worktreeTerminalIds: string[];
+  addWorktreeTerminal: (worktreeId: string) => void;
+  removeWorktreeTerminal: (worktreeId: string) => void;
 }
 
 export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], WorkspaceSlice> = (
   set,
 ) => ({
   // State
-  selectedWorktreeId: null,
-  openedWorktreeIds: [],
+  worktreeTerminalIds: [],
 
   // Actions
-  selectWorktree: (id) => set({ selectedWorktreeId: id }),
-
-  markWorktreeOpened: (worktreeId) =>
+  addWorktreeTerminal: (worktreeId) =>
     set((state) => ({
-      openedWorktreeIds: state.openedWorktreeIds.includes(worktreeId)
-        ? state.openedWorktreeIds
-        : [...state.openedWorktreeIds, worktreeId],
+      worktreeTerminalIds: state.worktreeTerminalIds.includes(worktreeId)
+        ? state.worktreeTerminalIds
+        : [...state.worktreeTerminalIds, worktreeId],
     })),
 
-  removeWorktreeOpened: (worktreeId) =>
+  removeWorktreeTerminal: (worktreeId) =>
     set((state) => ({
-      openedWorktreeIds: state.openedWorktreeIds.filter((id) => id !== worktreeId),
+      worktreeTerminalIds: state.worktreeTerminalIds.filter((id) => id !== worktreeId),
     })),
 });

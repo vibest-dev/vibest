@@ -92,6 +92,16 @@ Data flow in the `vibest` system is orchestrated across several layers:
     - Components from `@vibest/ui` (specifically `ai-elements` and `claude-code/message-parts`) parse and render the AI's output, including markdown text, code blocks, and visual representations of executed tools (e.g., `ClaudeCodeBashTool`, `ClaudeCodeReadTool`).
     - Inspector data is also rendered, allowing the user to see which elements were focused.
 
+## State Management Best Practices
+
+When using TanStack Query (server state) with Zustand (client state):
+
+- **Don't Sync State. Derive It!** - Never use `useEffect` to synchronize state between different sources. Instead, derive values at render time using `useMemo`.
+- **Server state stays in TanStack Query** - Don't duplicate server data in Zustand. TanStack Query handles caching, refetching, and invalidation.
+- **Client state stays in Zustand** - Use Zustand for UI state like selections, form inputs, and local preferences.
+- **Store IDs, not objects** - For selections, store `selectedId` in Zustand and derive `selectedItem` from server data.
+- **Avoid localStorage persistence for ephemeral UI state** - Desktop apps don't need to persist UI selections across restarts; terminal sessions don't survive anyway.
+
 ## Engineering Practices
 
 The `vibest` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
