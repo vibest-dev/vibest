@@ -18,7 +18,9 @@
     "clean": "git clean -xdf node_modules .turbo dist",
     "e2e": "pnpm run build && playwright test -c e2e/playwright.config.ts",
     "e2e:headed": "pnpm run build && playwright test -c e2e/playwright.config.ts --headed",
-    "e2e:report": "playwright show-report e2e/report"
+    "e2e:report": "playwright show-report e2e/report",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -61,6 +63,7 @@
     "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2",
     "vite": "^7.2.6",
+    "vitest": "^3.2.4",
     "zod": "^3.24.1",
     "zustand": "^5.0.5"
   }
