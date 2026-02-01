@@ -108,7 +108,7 @@ export class TerminalManager {
 		// Don't pass cols/rows here - let node-pty use defaults.
 		// The correct size will be set by xterm after mount via resize().
 		// See: https://github.com/vercel/hyper/blob/canary/app/ui/window.ts#L161
-		const ptyProcess = pty.spawn(shell, [], {
+		const ptyProcess = pty.spawn(shell, ["--login"], {
 			name: "xterm-256color",
 			cwd,
 			env: {
