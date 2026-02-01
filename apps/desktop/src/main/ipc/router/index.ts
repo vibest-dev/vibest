@@ -5,6 +5,8 @@ import type { AppContext } from "../../app";
 import { contract } from "../../../shared/contract";
 import { fsRouter } from "./fs";
 import { gitRouter } from "./git";
+import { labelRouter } from "./label";
+import { taskRouter } from "./task";
 import { terminalRouter } from "./terminal";
 import { workspaceRouter } from "./workspace";
 
@@ -15,6 +17,8 @@ export const router = os.router({
 	git: gitRouter,
 	fs: fsRouter,
 	terminal: terminalRouter,
+	task: taskRouter,
+	label: labelRouter,
 });
 
 export type Router = typeof router;

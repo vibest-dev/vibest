@@ -4,9 +4,6 @@ import { join } from "node:path";
 import simpleGit from "simple-git";
 
 import type { GitService } from "./git-service";
-import type { StoreService } from "./store-service";
-
-import { pathToId, type StoredWorktree } from "../../shared/types";
 
 // Place names pool (200+ cities)
 const PLACE_NAMES = [
@@ -244,10 +241,7 @@ function getWorktreeBasePath(): string {
 }
 
 export class WorktreeService {
-  constructor(
-    private store: StoreService,
-    _git: GitService,
-  ) {}
+  constructor(_git: GitService) {}
 
   generateWorktreePath(repoName: string, usedNames: string[]): { path: string; placeName: string } {
     const placeName = getAvailablePlaceName(usedNames);
@@ -365,61 +359,6 @@ export class WorktreeService {
       await this.removeWorktree(repositoryPath, worktreePath, true);
       await gitService.deleteBranch(repositoryPath, branch);
     }
-  }
-
-  async syncWorktreesWithStore(
-    repositoryId: string,
-    repositoryPath: string,
-    _repoName: string,
-  ): Promise<StoredWorktree[]> {
-    // Get actual worktrees from git
-    const gitWorktrees = await this.listWorktrees(repositoryPath);
-
-    // Only include worktrees under our workspace directory
-    const workspaceBase = getWorktreeBasePath();
-    const managedWorktrees = gitWorktrees.filter((wt) => wt.path.startsWith(workspaceBase));
-
-    // Get stored worktrees
-    const storedWorktrees = this.store.getWorktreesByRepositoryId(repositoryId);
-
-    // Create a map of stored worktrees by path
-    const storedMap = new Map(storedWorktrees.map((w) => [w.path, w]));
-
-    // Sync: add any git worktrees not in store
-    const result: StoredWorktree[] = [];
-
-    for (const gitWt of managedWorktrees) {
-      const existing = storedMap.get(gitWt.path);
-      if (existing) {
-        // Update branch if changed
-        if (existing.branch !== gitWt.branch) {
-          const updated = { ...existing, branch: gitWt.branch };
-          this.store.removeWorktree(existing.id);
-          this.store.addWorktree(updated);
-          result.push(updated);
-        } else {
-          result.push(existing);
-        }
-        storedMap.delete(gitWt.path);
-      } else {
-        // New worktree found in git, add to store
-        const newWorktree: StoredWorktree = {
-          id: pathToId(gitWt.path),
-          repositoryId,
-          path: gitWt.path,
-          branch: gitWt.branch,
-        };
-        this.store.addWorktree(newWorktree);
-        result.push(newWorktree);
-      }
-    }
-
-    // Remove any stored worktrees that no longer exist in git
-    for (const [, orphan] of storedMap) {
-      this.store.removeWorktree(orphan.id);
-    }
-
-    return result;
   }
 
   getPlaceNamePool(): string[] {

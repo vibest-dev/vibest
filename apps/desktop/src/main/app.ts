@@ -3,6 +3,7 @@ import {
 	GitService,
 	GitWatcherService,
 	StoreService,
+	TaskService,
 	WorktreeService,
 } from "./services";
 import { TerminalManager } from "./terminal";
@@ -22,13 +23,15 @@ export class App {
 	readonly git: GitService;
 	readonly gitWatcher: GitWatcherService;
 	readonly worktree: WorktreeService;
+	readonly task: TaskService;
 	readonly terminal: TerminalManager;
 
 	constructor() {
 		this.store = new StoreService();
 		this.git = new GitService();
 		this.gitWatcher = new GitWatcherService(this.git, this.publisher);
-		this.worktree = new WorktreeService(this.store, this.git);
+		this.worktree = new WorktreeService(this.git);
+		this.task = new TaskService(this.store, this.worktree, this.git);
 		this.terminal = new TerminalManager(this.publisher);
 	}
 

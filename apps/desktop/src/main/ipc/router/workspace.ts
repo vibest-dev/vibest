@@ -6,9 +6,9 @@ import type { AppContext } from "../../app";
 
 import { workspaceContract } from "../../../shared/contract/workspace";
 import {
+  DEFAULT_LABELS,
   pathToId,
   type Repository,
-  type StoredWorktree,
   type Worktree,
 } from "../../../shared/types";
 
@@ -45,12 +45,13 @@ export const addRepository = os.addRepository.handler(async ({ input, context: {
     name: basename(path),
     path,
     defaultBranch,
+    labels: [...DEFAULT_LABELS],
   };
 
   app.store.addRepository(repository);
-  await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-  return repository;
+  // Return the repository with labels populated
+  return app.store.getRepository(repository.id)!;
 });
 
 export const cloneRepository = os.cloneRepository.handler(async ({ input, context: { app } }) => {
@@ -65,12 +66,13 @@ export const cloneRepository = os.cloneRepository.handler(async ({ input, contex
     name: basename(targetPath),
     path: targetPath,
     defaultBranch: detectedBranch,
+    labels: [...DEFAULT_LABELS],
   };
 
   app.store.addRepository(repository);
-  await app.worktree.syncWorktreesWithStore(repository.id, repository.path, repository.name);
 
-  return repository;
+  // Return the repository with labels populated
+  return app.store.getRepository(repository.id)!;
 });
 
 export const removeRepository = os.removeRepository.handler(async ({ input, context: { app } }) => {
@@ -102,82 +104,7 @@ export const getBranches = os.getBranches.handler(async ({ input, context: { app
   return app.git.getBranches(path);
 });
 
-// Worktree operations
-export const createWorktree = os.createWorktree.handler(async ({ input, context: { app } }) => {
-  const { repositoryId, branch, isNewBranch, baseBranch } = input;
-
-  const repository = app.store.getRepository(repositoryId);
-  if (!repository) {
-    throw new Error("Repository not found");
-  }
-
-  const usedNames = app.store.getUsedPlaceNames(repositoryId);
-  const { path: worktreePath } = app.worktree.generateWorktreePath(repository.name, usedNames);
-
-  await app.worktree.createWorktree(repository.path, worktreePath, branch, isNewBranch, baseBranch);
-
-  const storedWorktree: StoredWorktree = {
-    id: pathToId(worktreePath),
-    repositoryId,
-    path: worktreePath,
-    branch,
-  };
-
-  app.store.addWorktree(storedWorktree);
-
-  return { ...storedWorktree, exists: true };
-});
-
-export const quickCreateWorktree = os.quickCreateWorktree.handler(
-  async ({ input, context: { app } }) => {
-    const { repositoryId } = input;
-
-    const repository = app.store.getRepository(repositoryId);
-    if (!repository) {
-      throw new Error("Repository not found");
-    }
-
-    try {
-      const gitUsername = await app.git.getGitUserName(repository.path);
-      const sanitizedUsername = gitUsername
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "");
-
-      const usedNames = app.store.getUsedPlaceNames(repositoryId);
-      const { path: worktreePath, placeName } = app.worktree.generateWorktreePath(
-        repository.name,
-        usedNames,
-      );
-
-      const branch = `${sanitizedUsername || "user"}/${placeName}`;
-
-      await app.worktree.createWorktree(
-        repository.path,
-        worktreePath,
-        branch,
-        true,
-        repository.defaultBranch,
-      );
-
-      const storedWorktree: StoredWorktree = {
-        id: pathToId(worktreePath),
-        repositoryId,
-        path: worktreePath,
-        branch,
-      };
-
-      app.store.addWorktree(storedWorktree);
-
-      return { ...storedWorktree, exists: true };
-    } catch (error) {
-      console.error("[quickCreateWorktree] Error:", error);
-      throw error;
-    }
-  },
-);
-
+// Worktree operations (legacy - worktrees are now created via task.create)
 export const removeWorktree = os.removeWorktree.handler(async ({ input, context: { app } }) => {
   const { worktreeId, force } = input;
 
@@ -249,8 +176,6 @@ export const workspaceRouter = os.router({
   removeRepository,
   getDefaultBranch,
   getBranches,
-  createWorktree,
-  quickCreateWorktree,
   removeWorktree,
   archiveWorktree,
   openWorktree,

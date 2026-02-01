@@ -5,12 +5,48 @@ export function pathToId(path: string): string {
   return path.replace(/^\//, "").replace(/\//g, "-");
 }
 
+// ID generators using native crypto
+export const generateTaskId = () => `task_${crypto.randomUUID().slice(0, 12)}`;
+export const generateLabelId = () => `label_${crypto.randomUUID().slice(0, 8)}`;
+
+// Label schema - uses id as primary key (enables renaming)
+export const LabelSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(50),
+  color: z.string().regex(/^[0-9A-Fa-f]{6}$/),
+  description: z.string().max(200).optional(),
+});
+
+export type Label = z.infer<typeof LabelSchema>;
+
+// Default labels for new repositories (workflow stages only)
+export const DEFAULT_LABELS: Label[] = [
+  { id: "label_todo", name: "todo", color: "e4e669", description: "Not started" },
+  { id: "label_progress", name: "in-progress", color: "0075ca", description: "In progress" },
+  { id: "label_review", name: "review", color: "a2eeef", description: "Pending review" },
+  { id: "label_done", name: "done", color: "0e8a16", description: "Completed" },
+];
+
+// Task schema
+export const TaskSchema = z.object({
+  id: z.string(),
+  repositoryId: z.string(),
+  name: z.string().min(1).max(100),
+  description: z.string().max(2000).optional(),
+  labels: z.array(z.string()), // References Label.id
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export type Task = z.infer<typeof TaskSchema>;
+
 // Repository
 export const RepositorySchema = z.object({
   id: z.string(), // Derived from path: pathToId(path)
   name: z.string(),
   path: z.string(), // Main repository path
   defaultBranch: z.string(), // Default branch for creating worktrees (e.g., "main", "master")
+  labels: z.array(LabelSchema).default([]), // Repository-level label definitions
 });
 
 export type Repository = z.infer<typeof RepositorySchema>;
@@ -19,6 +55,7 @@ export type Repository = z.infer<typeof RepositorySchema>;
 export const StoredWorktreeSchema = z.object({
   id: z.string(), // Derived from path: pathToId(path)
   repositoryId: z.string(), // Derived from repository path: pathToId(repositoryPath)
+  taskId: z.string(), // Associated Task ID (required - every worktree belongs to a task)
   path: z.string(), // Full path
   branch: z.string(), // Branch name
 });
@@ -57,6 +94,7 @@ export type Branch = z.infer<typeof BranchSchema>;
 // Store Schema
 export interface StoreSchema {
   repositories: Repository[];
+  tasks: Task[];
   worktrees: StoredWorktree[];
 }
 
