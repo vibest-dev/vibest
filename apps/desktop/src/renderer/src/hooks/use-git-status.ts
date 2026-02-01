@@ -1,10 +1,6 @@
 import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 
-import {
-  gitFetchMutationCallbacks,
-  gitPullMutationCallbacks,
-  orpc,
-} from "../lib/queries/workspace";
+import { orpc } from "../lib/orpc";
 import { queryClient } from "../lib/query-client";
 
 /**
@@ -20,12 +16,20 @@ export function useGitStatus(path: string | undefined) {
 
   const fetchMutation = useMutation({
     ...orpc.git.fetch.mutationOptions(),
-    ...gitFetchMutationCallbacks(),
+    onSuccess: (_: unknown, variables: { path: string }) => {
+      queryClient.invalidateQueries({
+        queryKey: orpc.git.status.key({ input: { path: variables.path } }),
+      });
+    },
   });
 
   const pullMutation = useMutation({
     ...orpc.git.pull.mutationOptions(),
-    ...gitPullMutationCallbacks(),
+    onSuccess: (_: unknown, variables: { path: string }) => {
+      queryClient.invalidateQueries({
+        queryKey: orpc.git.status.key({ input: { path: variables.path } }),
+      });
+    },
   });
 
   return {

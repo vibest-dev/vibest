@@ -43,7 +43,7 @@ import { useEffect, useState } from "react";
 
 import type { Repository, Worktree } from "../../types";
 
-import { orpc } from "../../lib/queries/workspace";
+import { orpc } from "../../lib/orpc";
 import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 
 function getBasename(path: string): string {

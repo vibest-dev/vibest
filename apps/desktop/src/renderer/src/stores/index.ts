@@ -1,5 +1,2 @@
-// App store (combined slices with persistence)
+// App store (combined slices)
 export { appStore, useAppStore, type AppStore } from "./app-store";
-
-// Legacy export for gradual migration
-export { appStore as uiStore, useAppStore as useUIStore } from "./app-store";

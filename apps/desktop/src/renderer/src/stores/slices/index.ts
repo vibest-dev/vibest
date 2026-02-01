@@ -1,2 +1,2 @@
 export { createTerminalSlice, type TerminalSlice } from "./terminal-slice";
-export { createUISlice, type UISlice } from "./ui-slice";
+export { createWorkspaceSlice, type WorkspaceSlice } from "./workspace-slice";

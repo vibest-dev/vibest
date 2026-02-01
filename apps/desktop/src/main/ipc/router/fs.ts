@@ -1,5 +1,5 @@
 import { implement } from "@orpc/server";
-import { exec } from "child_process";
+import { execFile, spawn } from "node:child_process";
 import { dialog, shell } from "electron";
 
 import type { AppContext } from "../../app";
@@ -25,17 +25,37 @@ export const openTerminal = os.openTerminal.handler(async ({ input }) => {
 
   // macOS: open Terminal app
   if (process.platform === "darwin") {
-    exec(`open -a Terminal "${path}"`);
+    execFile("open", ["-a", "Terminal", path]);
   }
-  // Windows: open cmd
+  // Windows: open cmd in specified directory
   else if (process.platform === "win32") {
-    exec(`start cmd /K "cd /d ${path}"`);
+    spawn("cmd.exe", ["/K", `cd /d "${path}"`], {
+      shell: false,
+      cwd: path,
+      detached: true,
+      stdio: "ignore",
+    }).unref();
   }
   // Linux: try common terminal emulators
   else {
-    exec(
-      `x-terminal-emulator --working-directory="${path}" || gnome-terminal --working-directory="${path}" || konsole --workdir "${path}"`,
-    );
+    const terminals = [
+      { cmd: "x-terminal-emulator", args: ["--working-directory", path] },
+      { cmd: "gnome-terminal", args: ["--working-directory", path] },
+      { cmd: "konsole", args: ["--workdir", path] },
+    ];
+
+    for (const { cmd, args } of terminals) {
+      try {
+        const child = spawn(cmd, args, {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+        break;
+      } catch {
+        continue;
+      }
+    }
   }
 });
 

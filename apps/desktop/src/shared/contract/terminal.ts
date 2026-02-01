@@ -4,7 +4,6 @@ import { z } from "zod";
 export const TerminalInfoSchema = z.object({
 	id: z.string(),
 	worktreeId: z.string(),
-	title: z.string(),
 });
 
 export type TerminalInfo = z.infer<typeof TerminalInfoSchema>;

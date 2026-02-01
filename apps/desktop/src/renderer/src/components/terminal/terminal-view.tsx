@@ -1,11 +1,13 @@
 import "@xterm/xterm/css/xterm.css";
 
+import { consumeEventIterator } from "@orpc/client";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 
 import { client } from "../../lib/client";
+import { TERMINAL_THEME } from "../../lib/terminal-theme";
 
 interface TerminalViewProps {
 	terminalId: string;
@@ -16,7 +18,10 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<Terminal | null>(null);
 	const fitAddonRef = useRef<FitAddon | null>(null);
-	const abortControllerRef = useRef<AbortController | null>(null);
+	const webglAddonRef = useRef<WebglAddon | null>(null);
+	const cancelSubscriptionRef = useRef<(() => Promise<void>) | null>(null);
+	const isVisibleRef = useRef(isVisible);
+	isVisibleRef.current = isVisible;
 
 	// Initialize terminal once
 	useEffect(() => {
@@ -29,99 +34,103 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 			fontFamily: '"Geist Mono Variable", Menlo, Monaco, monospace',
 			fontWeight: "normal",
 			lineHeight: 1.2,
-			scrollback: 5000,
-			theme: {
-				background: "#0a0a0a",
-				foreground: "#fafafa",
-				cursor: "#fafafa",
-				cursorAccent: "#0a0a0a",
-				selectionBackground: "#3f3f46",
-				black: "#09090b",
-				red: "#ef4444",
-				green: "#22c55e",
-				yellow: "#eab308",
-				blue: "#3b82f6",
-				magenta: "#a855f7",
-				cyan: "#06b6d4",
-				white: "#fafafa",
-				brightBlack: "#71717a",
-				brightRed: "#f87171",
-				brightGreen: "#4ade80",
-				brightYellow: "#facc15",
-				brightBlue: "#60a5fa",
-				brightMagenta: "#c084fc",
-				brightCyan: "#22d3ee",
-				brightWhite: "#ffffff",
-			},
+			scrollback: 1000,
+			theme: TERMINAL_THEME,
 		});
 
 		const fitAddon = new FitAddon();
 		terminal.loadAddon(fitAddon);
 
-		// Try WebGL renderer with fallback
+		// Try WebGL renderer for better performance, fallback to canvas
 		try {
 			const webglAddon = new WebglAddon();
 			webglAddon.onContextLoss(() => {
 				webglAddon.dispose();
+				webglAddonRef.current = null;
 			});
 			terminal.loadAddon(webglAddon);
+			webglAddonRef.current = webglAddon;
 		} catch {
 			console.warn("WebGL addon failed, using canvas renderer");
 		}
 
 		terminal.open(containerRef.current);
-		fitAddon.fit();
 
 		terminalRef.current = terminal;
 		fitAddonRef.current = fitAddon;
 
 		// Handle user input → send to PTY via oRPC
+		// Note: Uses direct client calls (not TanStack Query mutations) for high-frequency
+		// fire-and-forget operations that don't need cache invalidation or loading states
 		const dataDisposable = terminal.onData((data) => {
-			client.terminal.write({ terminalId, data });
+			client.terminal.write({ terminalId, data }).catch((err) => {
+				console.error("[Terminal] Write failed:", err);
+			});
 		});
 
 		// Sync resize to PTY via oRPC
 		const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-			client.terminal.resize({ terminalId, cols, rows });
+			client.terminal.resize({ terminalId, cols, rows }).catch((err) => {
+				console.error("[Terminal] Resize failed:", err);
+			});
 		});
 
-		// Subscribe to terminal output via oRPC streaming
-		const abortController = new AbortController();
-		abortControllerRef.current = abortController;
-
-		(async () => {
-			try {
-				const iterator = await client.terminal.subscribe(
-					{ terminalId },
-					{ signal: abortController.signal },
-				);
-
-				for await (const event of iterator) {
-					if (event.type === "data") {
-						terminal.write(event.data);
-					} else if (event.type === "exit") {
-						terminal.writeln("\r\n[Process exited]");
-						break;
-					}
+		// Fit terminal and sync initial size to PTY
+		// The initial cols/rows are not set when creating PTY, so we must resize here.
+		// See: https://github.com/vercel/hyper/blob/canary/lib/components/term.tsx#L290-291
+		requestAnimationFrame(() => {
+			fitAddon.fit();
+			// Manually trigger resize to sync initial size to PTY
+			client.terminal.resize({ terminalId, cols: terminal.cols, rows: terminal.rows }).catch((err) => {
+				console.error("[Terminal] Initial resize failed:", err);
+			});
+			// Focus terminal if visible on mount (use ref to get current value)
+			// Double rAF ensures React state updates are flushed and DOM is painted
+			requestAnimationFrame(() => {
+				if (isVisibleRef.current) {
+					terminal.focus();
 				}
-			} catch (error) {
-				// Ignore abort errors
+			});
+		});
+
+		// Track if this effect instance is still active (for StrictMode)
+		let isActive = true;
+
+		// Subscribe to terminal output via oRPC streaming using consumeEventIterator
+		const cancel = consumeEventIterator(client.terminal.subscribe({ terminalId }), {
+			onEvent: (event) => {
+				if (!isActive) return;
+				const term = terminalRef.current;
+				if (!term) return;
+				if (event.type === "data") {
+					term.write(event.data);
+				} else if (event.type === "exit") {
+					term.writeln("\r\n[Process exited]");
+				}
+			},
+			onError: (error) => {
+				// Ignore AbortError - expected when component unmounts
 				if (error instanceof Error && error.name === "AbortError") {
 					return;
 				}
-				console.error("Terminal subscription error:", error);
-			}
-		})();
+				console.error("[Terminal] Subscription error:", error);
+			},
+		});
+		cancelSubscriptionRef.current = cancel;
 
 		// Cleanup
 		return () => {
-			abortController.abort();
+			isActive = false;
+			cancelSubscriptionRef.current?.();
 			dataDisposable.dispose();
 			resizeDisposable.dispose();
+			// Dispose WebGL addon before terminal to release GPU resources
+			webglAddonRef.current?.dispose();
+			webglAddonRef.current = null;
 			terminal.dispose();
 			terminalRef.current = null;
 			fitAddonRef.current = null;
-			abortControllerRef.current = null;
+			cancelSubscriptionRef.current = null;
 		};
 	}, [terminalId]);
 
@@ -136,25 +145,48 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 		}
 	}, [isVisible]);
 
-	// Handle container resize
+	// Handle container resize with debounce
+	// Created once on mount - uses isVisibleRef to check current visibility
 	useEffect(() => {
-		if (!containerRef.current || !fitAddonRef.current) return;
+		if (!containerRef.current) return;
 
-		const resizeObserver = new ResizeObserver(() => {
-			if (isVisible) {
-				fitAddonRef.current?.fit();
+		let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+		const resizeObserver = new ResizeObserver((entries) => {
+			// Only process if terminal is initialized and visible (use ref for current value)
+			if (!isVisibleRef.current || !fitAddonRef.current || !terminalRef.current) return;
+
+			const entry = entries[0];
+			if (!entry) return;
+
+			// Check if container has actual dimensions
+			const { width, height } = entry.contentRect;
+			if (width === 0 || height === 0) return;
+
+			// Debounce resize to avoid excessive calls
+			if (resizeTimeout) {
+				clearTimeout(resizeTimeout);
 			}
+			resizeTimeout = setTimeout(() => {
+				fitAddonRef.current?.fit();
+				resizeTimeout = null;
+			}, 16); // ~60fps
 		});
 
 		resizeObserver.observe(containerRef.current);
-		return () => resizeObserver.disconnect();
-	}, [isVisible]);
+		return () => {
+			if (resizeTimeout) {
+				clearTimeout(resizeTimeout);
+			}
+			resizeObserver.disconnect();
+		};
+	}, []);
 
 	return (
 		<div
 			ref={containerRef}
 			className="absolute inset-0"
-			style={{ display: isVisible ? "block" : "none" }}
+			style={{ visibility: isVisible ? "visible" : "hidden" }}
 		/>
 	);
 }

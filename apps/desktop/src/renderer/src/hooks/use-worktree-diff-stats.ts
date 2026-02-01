@@ -1,6 +1,6 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 
-import { orpc } from "../lib/queries/workspace";
+import { orpc } from "../lib/orpc";
 
 /**
  * Hook to fetch git diff stats (insertions/deletions) for a worktree.
