@@ -232,12 +232,12 @@ export function Sidebar({
                                   <button
                                     type="button"
                                     onClick={() => onViewChanges(worktree)}
-                                    className="ring-sidebar-ring flex h-full min-w-0 flex-1 items-center gap-2 px-2 outline-hidden focus-visible:ring-2"
+                                    className="ring-sidebar-ring flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 outline-hidden focus-visible:ring-2"
                                   >
                                     <GitBranch className="size-4 shrink-0" />
-                                    <div className="flex min-w-0 flex-col items-start">
-                                      <span className="truncate">{worktree.branch}</span>
-                                      <span className="text-muted-foreground truncate text-xs font-normal">
+                                    <div className="flex min-w-0 flex-1 flex-col items-start overflow-hidden">
+                                      <span className="w-full truncate text-left">{worktree.branch}</span>
+                                      <span className="text-muted-foreground w-full truncate text-left text-xs font-normal">
                                         {getBasename(worktree.path)}
                                       </span>
                                     </div>
