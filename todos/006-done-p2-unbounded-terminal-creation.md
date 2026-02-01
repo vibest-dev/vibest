@@ -21,6 +21,7 @@ The `create()` method has no guards on terminal count.
 ## Proposed Solutions
 
 ### Option A: Add per-worktree and global limits (Recommended)
+
 - **Effort:** Small
 - **Risk:** Low
 
@@ -48,7 +49,7 @@ create(worktreeId: string, cwd: string): TerminalInstance {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Resource limits prevent DoS |
+| Date       | Action                                                                            | Learnings                          |
+| ---------- | --------------------------------------------------------------------------------- | ---------------------------------- |
+| 2026-02-01 | Identified via code review                                                        | Resource limits prevent DoS        |
 | 2026-02-01 | Fixed: added MAX_TERMINALS_GLOBAL (50) and MAX_TERMINALS_PER_WORKTREE (10) limits | Check before creating new terminal |

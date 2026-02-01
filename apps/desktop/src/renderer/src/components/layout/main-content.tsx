@@ -9,7 +9,7 @@ interface MainContentProps {
 export function MainContent({ children, fullBleed = false }: MainContentProps) {
   return (
     <main
-      className={`bg-background flex-1 overflow-hidden ${fullBleed ? "" : "p-5 overflow-y-auto"}`}
+      className={`bg-background flex-1 overflow-hidden ${fullBleed ? "" : "overflow-y-auto p-5"}`}
     >
       {children}
     </main>

@@ -10,7 +10,12 @@ interface UseFileDiffOptions {
   enabled?: boolean;
 }
 
-export function useFileDiff({ path, filePath, staged = false, enabled = true }: UseFileDiffOptions) {
+export function useFileDiff({
+  path,
+  filePath,
+  staged = false,
+  enabled = true,
+}: UseFileDiffOptions) {
   return useQuery(
     orpc.git.fileDiff.queryOptions({
       input: path && filePath && enabled ? { path, filePath, staged } : skipToken,

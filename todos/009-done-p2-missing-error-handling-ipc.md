@@ -18,11 +18,11 @@ Direct IPC calls for `terminal.write` and `terminal.resize` have no error handli
 
 ```typescript
 const dataDisposable = terminal.onData((data) => {
-  client.terminal.write({ terminalId, data });  // No .catch()
+  client.terminal.write({ terminalId, data }); // No .catch()
 });
 
 const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-  client.terminal.resize({ terminalId, cols, rows });  // No .catch()
+  client.terminal.resize({ terminalId, cols, rows }); // No .catch()
 });
 ```
 
@@ -45,7 +45,7 @@ client.terminal.write({ terminalId, data }).catch((err) => {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Fire-and-forget still needs error handling |
+| Date       | Action                                                                 | Learnings                                                             |
+| ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 2026-02-01 | Identified via code review                                             | Fire-and-forget still needs error handling                            |
 | 2026-02-01 | Fixed: added .catch() handlers with [Terminal] prefix for write/resize | Also added comment explaining direct client vs TanStack Query pattern |

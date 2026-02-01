@@ -17,7 +17,7 @@ The DataBatcher accumulates data using string concatenation (`this.data += chunk
 **Location:** `apps/desktop/src/main/terminal/terminal-manager.ts:48`
 
 ```typescript
-this.data += chunkStr;  // String reallocation on each chunk
+this.data += chunkStr; // String reallocation on each chunk
 ```
 
 ## Proposed Solutions
@@ -49,7 +49,7 @@ flush(): void {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | String concat is O(n) per operation |
+| Date       | Action                                                                   | Learnings                                                                                                                   |
+| ---------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-01 | Identified via code review                                               | String concat is O(n) per operation                                                                                         |
 | 2026-02-01 | Verified Hyper uses identical pattern (string concat with StringDecoder) | This is the standard approach, not a problem. V8 optimizes short string concat, batch size is small (200KB max, 16ms flush) |

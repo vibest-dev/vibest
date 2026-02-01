@@ -29,6 +29,7 @@ create(worktreeId: string, cwd: string): TerminalInstance {
 ```
 
 **Contract has no validation:** `apps/desktop/src/shared/contract/terminal.ts:30-36`
+
 ```typescript
 create: oc.input(z.object({
   worktreeId: z.string(),
@@ -41,6 +42,7 @@ create: oc.input(z.object({
 ## Proposed Solutions
 
 ### Option A: Validate cwd against worktree path (Recommended)
+
 - **Pros:** Terminals can only be created in registered worktree directories
 - **Cons:** Requires lookup of worktree by ID
 - **Effort:** Small
@@ -62,12 +64,14 @@ create(worktreeId: string, cwd: string): TerminalInstance {
 ```
 
 ### Option B: Validate against vibest workspace root
+
 - **Pros:** Allows subdirectories within workspace
 - **Cons:** Less restrictive than Option A
 - **Effort:** Small
 - **Risk:** Low
 
 ### Option C: Add Zod path validation in contract
+
 - **Pros:** Validates at contract level
 - **Cons:** Still needs runtime check
 - **Effort:** Small
@@ -75,11 +79,12 @@ create(worktreeId: string, cwd: string): TerminalInstance {
 
 ## Recommended Action
 
-*(To be filled during triage)*
+_(To be filled during triage)_
 
 ## Technical Details
 
 **Affected files:**
+
 - `apps/desktop/src/main/terminal/terminal-manager.ts`
 - `apps/desktop/src/shared/contract/terminal.ts`
 
@@ -92,9 +97,9 @@ create(worktreeId: string, cwd: string): TerminalInstance {
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | fs.existsSync is not a security check |
+| Date       | Action                                                                           | Learnings                                         |
+| ---------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 2026-02-01 | Identified via code review                                                       | fs.existsSync is not a security check             |
 | 2026-02-01 | Fixed: validate cwd against worktree path with path.resolve and startsWith check | Defense at router layer where store is accessible |
 
 ## Resources

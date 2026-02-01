@@ -1,10 +1,10 @@
 packages:
-- apps/*
-- examples/*
-- packages/*
-- tools/*
-- chrome-extension
+  - apps/*
+  - examples/*
+  - packages/*
+  - tools/*
+  - chrome-extension
 onlyBuiltDependencies:
-- electron
-- esbuild
-- '@swc/core'
+  - electron
+  - esbuild
+  - "@swc/core"

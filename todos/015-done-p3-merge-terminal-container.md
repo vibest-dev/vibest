@@ -17,6 +17,7 @@ dependencies: ["011"]
 **Location:** `apps/desktop/src/renderer/src/components/terminal/terminal-container.tsx` (54 lines)
 
 The component:
+
 - Queries terminals (duplicated in TerminalTabs)
 - Renders TerminalTabs
 - Renders TerminalView for each terminal
@@ -42,7 +43,7 @@ The component:
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Avoid thin wrapper components |
-| 2026-02-01 | Fixed: created TerminalPanel, deleted TerminalContainer and TerminalTabs | Combined with #011 fix |
+| Date       | Action                                                                   | Learnings                     |
+| ---------- | ------------------------------------------------------------------------ | ----------------------------- |
+| 2026-02-01 | Identified via code review                                               | Avoid thin wrapper components |
+| 2026-02-01 | Fixed: created TerminalPanel, deleted TerminalContainer and TerminalTabs | Combined with #011 fix        |

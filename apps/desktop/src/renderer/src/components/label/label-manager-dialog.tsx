@@ -18,8 +18,8 @@ import { useEffect, useState } from "react";
 
 import type { Label as LabelType, Repository } from "../../types";
 
-import { cn } from "../../lib/utils";
 import { orpc } from "../../lib/orpc";
+import { cn } from "../../lib/utils";
 
 // Preset colors for the color picker
 const PRESET_COLORS = [
@@ -218,9 +218,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
   };
 
   const isLoading =
-    createLabelMutation.isPending ||
-    updateLabelMutation.isPending ||
-    deleteLabelMutation.isPending;
+    createLabelMutation.isPending || updateLabelMutation.isPending || deleteLabelMutation.isPending;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -291,11 +289,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                 </div>
               )}
 
-              <Button
-                onClick={handleCreateClick}
-                variant="outline"
-                className="w-full text-[13px]"
-              >
+              <Button onClick={handleCreateClick} variant="outline" className="w-full text-[13px]">
                 <Plus className="size-4" />
                 Create Label
               </Button>
@@ -328,7 +322,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                       className={cn(
                         "size-7 rounded-full border-2 transition-all",
                         color === c
-                          ? "scale-110 border-foreground"
+                          ? "border-foreground scale-110"
                           : "border-transparent hover:scale-105",
                       )}
                       style={{ backgroundColor: `#${c}` }}

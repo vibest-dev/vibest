@@ -84,7 +84,13 @@ export function SingleFileDiff({ repoPath, file }: SingleFileDiffProps) {
 
       {/* Diff content */}
       <ScrollArea className="flex-1">
-        <Suspense fallback={<div className="flex justify-center p-4"><Spinner /></div>}>
+        <Suspense
+          fallback={
+            <div className="flex justify-center p-4">
+              <Spinner />
+            </div>
+          }
+        >
           <LazyMultiFileDiff
             oldFile={{
               name: file.path,

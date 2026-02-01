@@ -5,14 +5,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Task, Worktree } from "./types";
 
+import { LabelManagerDialog } from "./components/label";
 import { Header } from "./components/layout/header";
 import { MainContent } from "./components/layout/main-content";
 import { Sidebar } from "./components/layout/sidebar";
-import { TerminalPanel } from "./components/terminal";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
 import { CreateTaskDialog, EditTaskDialog } from "./components/task";
-import { LabelManagerDialog } from "./components/label";
+import { TerminalPanel } from "./components/terminal";
 import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
@@ -263,7 +263,10 @@ function App(): React.JSX.Element {
               </div>
               {/* Diff View (right side) */}
               <div className="border-border h-full w-1/2 shrink-0 border-l">
-                <WorktreeDiffView worktree={selectedWorktree} onClose={() => selectWorktree(null)} />
+                <WorktreeDiffView
+                  worktree={selectedWorktree}
+                  onClose={() => selectWorktree(null)}
+                />
               </div>
             </div>
           ) : (
@@ -271,9 +274,7 @@ function App(): React.JSX.Element {
               <div className="bg-muted mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
                 <FolderGit2 className="text-muted-foreground h-7 w-7" />
               </div>
-              <h2 className="text-foreground mb-1 text-[15px] font-semibold">
-                No Task Selected
-              </h2>
+              <h2 className="text-foreground mb-1 text-[15px] font-semibold">No Task Selected</h2>
               <p className="text-muted-foreground max-w-xs text-center text-[13px]">
                 Select a task from the sidebar to open a terminal
               </p>

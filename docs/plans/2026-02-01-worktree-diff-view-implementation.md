@@ -13,6 +13,7 @@
 ## Task 1: Create buildFileTree Utility
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/utils/build-file-tree.ts`
 
 **Step 1: Create the utility file with types and function**
@@ -21,10 +22,10 @@
 import type { FileDiff } from "../types";
 
 export interface FileTreeNode {
-  path: string;                   // "src/components/auth.tsx" or "src/components"
+  path: string; // "src/components/auth.tsx" or "src/components"
   isDirectory: boolean;
-  status?: FileDiff["status"];    // only for files
-  fileIndex?: number;             // only for files
+  status?: FileDiff["status"]; // only for files
+  fileIndex?: number; // only for files
   children: FileTreeNode[];
 }
 
@@ -101,6 +102,7 @@ git commit -m "feat(desktop): add buildFileTree utility for diff file tree"
 ## Task 2: Create DiffFileTree Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/worktrees/diff-file-tree.tsx`
 
 **Step 1: Create the file tree component**
@@ -254,6 +256,7 @@ git commit -m "feat(desktop): add DiffFileTree component for staged/unstaged sec
 ## Task 3: Create DiffContent Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/worktrees/diff-content.tsx`
 
 **Step 1: Create the diff content component**
@@ -347,6 +350,7 @@ git commit -m "feat(desktop): add DiffContent component for rendering all diffs"
 ## Task 4: Create WorktreeDiffView Component
 
 **Files:**
+
 - Create: `apps/desktop/src/renderer/src/components/worktrees/worktree-diff-view.tsx`
 
 **Step 1: Create the main worktree diff view component**
@@ -526,16 +530,19 @@ git commit -m "feat(desktop): add WorktreeDiffView component with collapsible fi
 ## Task 5: Update App.tsx to Use New Component
 
 **Files:**
+
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 
 **Step 1: Update the import**
 
 Change line 14 from:
+
 ```typescript
 import { DiffViewer } from "./components/worktrees/diff-viewer";
 ```
 
 To:
+
 ```typescript
 import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 ```
@@ -543,12 +550,14 @@ import { WorktreeDiffView } from "./components/worktrees/worktree-diff-view";
 **Step 2: Update the component usage**
 
 Change lines 172-173 from:
+
 ```typescript
 {diffWorktree ? (
   <DiffViewer worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
 ```
 
 To:
+
 ```typescript
 {diffWorktree ? (
   <WorktreeDiffView worktree={diffWorktree} onClose={() => setDiffWorktree(null)} />
@@ -631,15 +640,15 @@ git commit -m "chore(desktop): final cleanup for worktree diff view"
 
 ## Summary
 
-| Task | Description | Files |
-|------|-------------|-------|
-| 1 | Create buildFileTree utility | `utils/build-file-tree.ts` |
-| 2 | Create DiffFileTree component | `components/worktrees/diff-file-tree.tsx` |
-| 3 | Create DiffContent component | `components/worktrees/diff-content.tsx` |
-| 4 | Create WorktreeDiffView component | `components/worktrees/worktree-diff-view.tsx` |
-| 5 | Update App.tsx | `App.tsx` |
-| 6 | Manual testing | - |
-| 7 | Final cleanup | - |
+| Task | Description                       | Files                                         |
+| ---- | --------------------------------- | --------------------------------------------- |
+| 1    | Create buildFileTree utility      | `utils/build-file-tree.ts`                    |
+| 2    | Create DiffFileTree component     | `components/worktrees/diff-file-tree.tsx`     |
+| 3    | Create DiffContent component      | `components/worktrees/diff-content.tsx`       |
+| 4    | Create WorktreeDiffView component | `components/worktrees/worktree-diff-view.tsx` |
+| 5    | Update App.tsx                    | `App.tsx`                                     |
+| 6    | Manual testing                    | -                                             |
+| 7    | Final cleanup                     | -                                             |
 
 **Total new files:** 4
 **Modified files:** 1

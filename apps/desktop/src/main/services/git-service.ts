@@ -362,7 +362,9 @@ export class GitService {
     ]);
 
     // Parse numstat output: "insertions\tdeletions\tfilename"
-    const parseNumstat = (output: string): Map<string, { insertions: number; deletions: number }> => {
+    const parseNumstat = (
+      output: string,
+    ): Map<string, { insertions: number; deletions: number }> => {
       const map = new Map();
       for (const line of output.split("\n").filter(Boolean)) {
         const [ins, del, file] = line.split("\t");
@@ -478,7 +480,10 @@ export class GitService {
       if (processedFiles.has(file)) continue; // Already processed
       processedFiles.add(file);
       const isStaged = status.staged.includes(file);
-      const stats = (isStaged ? stagedStats : unstagedStats).get(file) ?? { insertions: 0, deletions: 0 };
+      const stats = (isStaged ? stagedStats : unstagedStats).get(file) ?? {
+        insertions: 0,
+        deletions: 0,
+      };
       files.push({
         path: file,
         status: "deleted",
@@ -496,7 +501,10 @@ export class GitService {
       if (processedFiles.has(renamed.to)) continue; // Already processed
       processedFiles.add(renamed.to);
       const isStaged = status.staged.includes(renamed.to);
-      const stats = (isStaged ? stagedStats : unstagedStats).get(renamed.to) ?? { insertions: 0, deletions: 0 };
+      const stats = (isStaged ? stagedStats : unstagedStats).get(renamed.to) ?? {
+        insertions: 0,
+        deletions: 0,
+      };
       const size = await getFileSize(renamed.to);
       files.push({
         path: renamed.to,
@@ -520,11 +528,7 @@ export class GitService {
   /**
    * Get single file diff content. Returns error for files > 1MB.
    */
-  async getFileDiff(
-    repoPath: string,
-    filePath: string,
-    staged = false,
-  ): Promise<FileDiffContent> {
+  async getFileDiff(repoPath: string, filePath: string, staged = false): Promise<FileDiffContent> {
     const git = this.getGit(repoPath);
     const fs = await import("fs/promises");
     const nodePath = await import("path");
@@ -573,8 +577,7 @@ export class GitService {
       }
 
       // Check if binary (contains null bytes)
-      const isBinary = (content: string | null) =>
-        content !== null && content.includes("\0");
+      const isBinary = (content: string | null) => content !== null && content.includes("\0");
 
       if (isBinary(oldContent) || isBinary(newContent)) {
         return {

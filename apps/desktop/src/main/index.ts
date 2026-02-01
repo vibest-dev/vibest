@@ -47,7 +47,9 @@ function createWindow(appInstance: App): void {
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer/index.html"));
+    mainWindow.loadFile(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer/index.html"),
+    );
   }
 }
 

@@ -11,6 +11,7 @@ dependencies: []
 ## Problem Statement
 
 The codebase uses two different patterns for IPC calls:
+
 - Direct `client` calls (terminal-view.tsx for write/resize)
 - TanStack Query mutations via `orpc` (terminal-tabs.tsx for create/close)
 
@@ -19,10 +20,12 @@ This is intentional (fire-and-forget vs. state-changing operations) but not docu
 ## Findings
 
 **Direct client (fire-and-forget):**
+
 - `terminal-view.tsx:82`: `client.terminal.write(...)`
 - `terminal-view.tsx:87`: `client.terminal.resize(...)`
 
 **TanStack Query mutations (state-changing):**
+
 - `terminal-tabs.tsx:36`: `useMutation({ ...orpc.terminal.create.mutationOptions() })`
 
 ## Proposed Solutions
@@ -43,7 +46,7 @@ Add comment explaining the pattern choice.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Document intentional patterns |
+| Date       | Action                                                                                              | Learnings                          |
+| ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| 2026-02-01 | Identified via code review                                                                          | Document intentional patterns      |
 | 2026-02-01 | Fixed: added inline comment explaining direct client vs TanStack Query pattern in terminal-view.tsx | Pattern documented where it's used |

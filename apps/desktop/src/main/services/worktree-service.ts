@@ -241,7 +241,7 @@ function getWorktreeBasePath(): string {
 }
 
 export class WorktreeService {
-  constructor(_git: GitService) {}
+  
 
   generateWorktreePath(repoName: string, usedNames: string[]): { path: string; placeName: string } {
     const placeName = getAvailablePlaceName(usedNames);

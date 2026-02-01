@@ -15,6 +15,7 @@ Both `TerminalContainer` and `TerminalTabs` independently query the same termina
 ## Findings
 
 **Location 1:** `apps/desktop/src/renderer/src/components/terminal/terminal-container.tsx:26-28`
+
 ```typescript
 const { data: terminals = [] } = useQuery(
   orpc.terminal.list.queryOptions({ input: { worktreeId } }),
@@ -22,6 +23,7 @@ const { data: terminals = [] } = useQuery(
 ```
 
 **Location 2:** `apps/desktop/src/renderer/src/components/terminal/terminal-tabs.tsx:31-33`
+
 ```typescript
 const { data: terminals = [], isSuccess } = useQuery(
   orpc.terminal.list.queryOptions({ input: { worktreeId } }),
@@ -50,7 +52,7 @@ Rename `TerminalTabs` to `TerminalPanel`, include view rendering, eliminate `Ter
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Lift queries to avoid duplication |
+| Date       | Action                                                            | Learnings                                 |
+| ---------- | ----------------------------------------------------------------- | ----------------------------------------- |
+| 2026-02-01 | Identified via code review                                        | Lift queries to avoid duplication         |
 | 2026-02-01 | Fixed: merged TerminalContainer + TerminalTabs into TerminalPanel | Single query, simpler component hierarchy |

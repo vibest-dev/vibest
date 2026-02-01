@@ -13,12 +13,12 @@ import { workspaceRouter } from "./workspace";
 const os = implement(contract).$context<AppContext>();
 
 export const router = os.router({
-	workspace: workspaceRouter,
-	git: gitRouter,
-	fs: fsRouter,
-	terminal: terminalRouter,
-	task: taskRouter,
-	label: labelRouter,
+  workspace: workspaceRouter,
+  git: gitRouter,
+  fs: fsRouter,
+  terminal: terminalRouter,
+  task: taskRouter,
+  label: labelRouter,
 });
 
 export type Router = typeof router;

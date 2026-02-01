@@ -135,9 +135,7 @@ export function Header({
   if (!repository) {
     return (
       <header className="border-border bg-background/50 app-drag-region flex h-12 items-center border-b px-5 backdrop-blur-sm">
-        <span className="text-muted-foreground text-[13px]">
-          Select a task to get started
-        </span>
+        <span className="text-muted-foreground text-[13px]">Select a task to get started</span>
       </header>
     );
   }

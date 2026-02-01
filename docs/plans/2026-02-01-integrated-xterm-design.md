@@ -16,43 +16,43 @@
 // apps/desktop/src/main/terminal/terminal-manager.ts
 
 interface TerminalInstance {
-  id: string
-  worktreeId: string
-  pty: IPty
-  title: string
+  id: string;
+  worktreeId: string;
+  pty: IPty;
+  title: string;
 }
 
 class TerminalManager {
-  private terminals: Map<string, TerminalInstance> = new Map()
+  private terminals: Map<string, TerminalInstance> = new Map();
 
-  create(worktreeId: string, cwd: string): string
-  write(terminalId: string, data: string): void
-  resize(terminalId: string, cols: number, rows: number): void
-  close(terminalId: string): void
-  getTerminalsByWorktree(worktreeId: string): TerminalInstance[]
-  dispose(): void
+  create(worktreeId: string, cwd: string): string;
+  write(terminalId: string, data: string): void;
+  resize(terminalId: string, cols: number, rows: number): void;
+  close(terminalId: string): void;
+  getTerminalsByWorktree(worktreeId: string): TerminalInstance[];
+  dispose(): void;
 }
 ```
 
 **PTY 配置 (node-pty):**
 
 ```typescript
-import * as pty from 'node-pty'
-import * as os from 'node:os'
+import * as pty from "node-pty";
+import * as os from "node:os";
 
-const shell = os.platform() === 'win32' ? 'powershell.exe' : process.env.SHELL || 'bash'
+const shell = os.platform() === "win32" ? "powershell.exe" : process.env.SHELL || "bash";
 
 const ptyProcess = pty.spawn(shell, [], {
-  name: 'xterm-256color',
+  name: "xterm-256color",
   cols: 80,
   rows: 24,
   cwd: worktreePath,
   env: {
     ...process.env,
-    TERM: 'xterm-256color',
-    COLORTERM: 'truecolor'
-  }
-})
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+  },
+});
 ```
 
 #### TerminalService
@@ -66,7 +66,7 @@ class TerminalService {
   constructor(private manager: TerminalManager) {}
 
   // 注册 IPC handlers
-  registerHandlers(): void
+  registerHandlers(): void;
 }
 ```
 
@@ -77,41 +77,54 @@ class TerminalService {
 
 export const terminalContract = {
   create: base
-    .input(z.object({
-      worktreeId: z.string(),
-      cwd: z.string()
-    }))
-    .output(z.object({
-      terminalId: z.string()
-    })),
+    .input(
+      z.object({
+        worktreeId: z.string(),
+        cwd: z.string(),
+      }),
+    )
+    .output(
+      z.object({
+        terminalId: z.string(),
+      }),
+    ),
 
-  write: base
-    .input(z.object({
+  write: base.input(
+    z.object({
       terminalId: z.string(),
-      data: z.string()
-    })),
+      data: z.string(),
+    }),
+  ),
 
-  resize: base
-    .input(z.object({
+  resize: base.input(
+    z.object({
       terminalId: z.string(),
       cols: z.number(),
-      rows: z.number()
-    })),
+      rows: z.number(),
+    }),
+  ),
 
-  close: base
-    .input(z.object({
-      terminalId: z.string()
-    })),
+  close: base.input(
+    z.object({
+      terminalId: z.string(),
+    }),
+  ),
 
   list: base
-    .input(z.object({
-      worktreeId: z.string()
-    }))
-    .output(z.array(z.object({
-      id: z.string(),
-      title: z.string()
-    })))
-}
+    .input(
+      z.object({
+        worktreeId: z.string(),
+      }),
+    )
+    .output(
+      z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+        }),
+      ),
+    ),
+};
 
 // Data event: main → renderer (via IPC channel)
 // Channel: 'terminal:data:{terminalId}'
@@ -132,22 +145,22 @@ export const terminalContract = {
 // apps/desktop/src/renderer/stores/app-store.ts
 
 interface WorkspaceSlice {
-  selectedWorktreeId: string | null
-  setSelectedWorktreeId: (id: string | null) => void
+  selectedWorktreeId: string | null;
+  setSelectedWorktreeId: (id: string | null) => void;
 }
 
 interface TerminalSlice {
   // 每个 worktree 的 active terminal id
-  activeTerminalId: Record<string, string | null>
-  setActiveTerminalId: (worktreeId: string, terminalId: string | null) => void
+  activeTerminalId: Record<string, string | null>;
+  setActiveTerminalId: (worktreeId: string, terminalId: string | null) => void;
 }
 
-type AppStore = WorkspaceSlice & TerminalSlice
+type AppStore = WorkspaceSlice & TerminalSlice;
 
 export const useAppStore = create<AppStore>()((...a) => ({
   ...createWorkspaceSlice(...a),
-  ...createTerminalSlice(...a)
-}))
+  ...createTerminalSlice(...a),
+}));
 ```
 
 **Terminal 列表数据** 通过 TanStack Query 从 main 进程获取，保持与现有架构一致。
@@ -164,65 +177,65 @@ src/renderer/components/terminal/
 **TerminalView (xterm.js 配置):**
 
 ```typescript
-import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 
 const terminal = new Terminal({
   cursorBlink: true,
-  cursorStyle: 'block',
+  cursorStyle: "block",
   fontSize: 14,
-  fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-  fontWeight: 'normal',
+  fontFamily: "JetBrains Mono, Menlo, Monaco, monospace",
+  fontWeight: "normal",
   lineHeight: 1.2,
   scrollback: 5000,
   theme: {
-    background: '#1e1e1e',
-    foreground: '#cccccc',
-    cursor: '#ffffff',
-    selectionBackground: '#264f78',
+    background: "#1e1e1e",
+    foreground: "#cccccc",
+    cursor: "#ffffff",
+    selectionBackground: "#264f78",
     // ... full color palette
-  }
-})
+  },
+});
 
 // Addons
-const fitAddon = new FitAddon()
-terminal.loadAddon(fitAddon)
+const fitAddon = new FitAddon();
+terminal.loadAddon(fitAddon);
 
 // WebGL for performance (with fallback)
 try {
-  const webglAddon = new WebglAddon()
-  webglAddon.onContextLoss(() => webglAddon.dispose())
-  terminal.loadAddon(webglAddon)
+  const webglAddon = new WebglAddon();
+  webglAddon.onContextLoss(() => webglAddon.dispose());
+  terminal.loadAddon(webglAddon);
 } catch (e) {
-  console.warn('WebGL addon failed, using canvas renderer')
+  console.warn("WebGL addon failed, using canvas renderer");
 }
 
 // Auto-fit on container resize
 const resizeObserver = new ResizeObserver(() => {
-  fitAddon.fit()
-})
-resizeObserver.observe(container)
+  fitAddon.fit();
+});
+resizeObserver.observe(container);
 
 // Sync resize to PTY
 terminal.onResize(({ cols, rows }) => {
-  ipc.terminal.resize({ terminalId, cols, rows })
-})
+  ipc.terminal.resize({ terminalId, cols, rows });
+});
 
 // Handle user input
 terminal.onData((data) => {
-  ipc.terminal.write({ terminalId, data })
-})
+  ipc.terminal.write({ terminalId, data });
+});
 
 // Receive PTY output
 ipcRenderer.on(`terminal:data:${terminalId}`, (_, data) => {
-  terminal.write(data)
-})
+  terminal.write(data);
+});
 
 // Handle PTY exit
 ipcRenderer.on(`terminal:exit:${terminalId}`, (_, { exitCode }) => {
   // Close tab, trigger "at least one" logic
-})
+});
 ```
 
 **Terminal 实例保持存活：** 切换 worktree 时，通过 CSS `display: none` 隐藏非活动终端，而不是卸载组件，以保留滚动历史和 PTY 连接。
@@ -252,9 +265,11 @@ ipcRenderer.on(`terminal:exit:${terminalId}`, (_, { exitCode }) => {
 ## Dependencies
 
 **Main Process:**
+
 - `node-pty` - PTY management
 
 **Renderer Process:**
+
 - `@xterm/xterm` - Terminal emulator
 - `@xterm/addon-fit` - Auto-resize
 - `@xterm/addon-webgl` - GPU acceleration (optional, with fallback)

@@ -6,14 +6,21 @@ import { terminalContract } from "./terminal";
 import { workspaceContract } from "./workspace";
 
 export const contract = {
-	workspace: workspaceContract,
-	git: gitContract,
-	fs: fsContract,
-	terminal: terminalContract,
-	task: taskContract,
-	label: labelContract,
+  workspace: workspaceContract,
+  git: gitContract,
+  fs: fsContract,
+  terminal: terminalContract,
+  task: taskContract,
+  label: labelContract,
 };
 
 export type Contract = typeof contract;
 
-export { fsContract, gitContract, labelContract, taskContract, terminalContract, workspaceContract };
+export {
+  fsContract,
+  gitContract,
+  labelContract,
+  taskContract,
+  terminalContract,
+  workspaceContract,
+};

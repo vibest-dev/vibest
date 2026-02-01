@@ -15,6 +15,7 @@ Error logging uses raw `console.error` with inconsistent formats across files.
 ## Findings
 
 **Locations:**
+
 - `terminal-manager.ts:153`: `console.error("Resize error:", err);`
 - `terminal-manager.ts:165`: `console.error("Kill error:", err);`
 - `terminal-view.tsx:126`: `console.error("Terminal subscription error:", error);`
@@ -28,7 +29,7 @@ Error logging uses raw `console.error` with inconsistent formats across files.
 export const logger = {
   error: (context: string, error: unknown) => {
     console.error(`[${context}]`, error);
-  }
+  },
 };
 ```
 
@@ -44,7 +45,7 @@ Consider pino or similar for production observability.
 
 ## Work Log
 
-| Date | Action | Learnings |
-|------|--------|-----------|
-| 2026-02-01 | Identified via code review | Consistent logging aids debugging |
+| Date       | Action                                                            | Learnings                                       |
+| ---------- | ----------------------------------------------------------------- | ----------------------------------------------- |
+| 2026-02-01 | Identified via code review                                        | Consistent logging aids debugging               |
 | 2026-02-01 | Fixed: standardized all error logs to use [Context] prefix format | [TerminalManager] and [Terminal] prefixes added |
