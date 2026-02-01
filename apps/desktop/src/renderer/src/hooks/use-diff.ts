@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { DiffResult } from "../types";
 
@@ -20,7 +20,6 @@ export function useDiff({ path, staged = false }: UseDiffOptions): UseDiffReturn
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const refresh = useCallback(async () => {
     if (!path) return;
 
@@ -28,14 +27,19 @@ export function useDiff({ path, staged = false }: UseDiffOptions): UseDiffReturn
     setError(null);
 
     try {
-      const diff = await client.git.diff({ path, staged });
-      setDiff(diff);
+      const result = await client.git.diff({ path, staged });
+      setDiff(result);
     } catch (err) {
       setError(String(err));
     } finally {
       setIsLoading(false);
     }
   }, [path, staged]);
+
+  // Auto-fetch on mount and when path/staged changes
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   return {
     diff,

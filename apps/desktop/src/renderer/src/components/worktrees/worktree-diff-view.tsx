@@ -3,7 +3,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@vibest/ui/comp
 import { ScrollArea } from "@vibest/ui/components/scroll-area";
 import { Spinner } from "@vibest/ui/components/spinner";
 import { ArrowLeft, FileDiff as FileDiffIcon, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { Worktree } from "../../types";
 
@@ -57,12 +57,6 @@ export function WorktreeDiffView({ worktree, onClose }: WorktreeDiffViewProps) {
 
   const allFiles = allDiff?.files ?? [];
   const stats = allDiff?.stats;
-
-  // Refresh on mount
-  useEffect(() => {
-    refreshAll();
-    refreshStaged();
-  }, [refreshAll, refreshStaged]);
 
   const handleFileClick = (fileIndex: number) => {
     setScrollToIndex(fileIndex);
