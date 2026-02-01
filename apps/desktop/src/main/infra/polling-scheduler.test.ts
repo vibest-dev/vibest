@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PollingScheduler } from "../polling-scheduler";
+import { PollingScheduler } from "./polling-scheduler";
 
 describe("PollingScheduler", () => {
 	beforeEach(() => {
