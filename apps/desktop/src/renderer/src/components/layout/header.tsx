@@ -3,6 +3,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "@vibest/u
 import {
   Archive,
   CheckCircle2,
+  Code,
   ExternalLink,
   FolderGit2,
   MoreHorizontal,
@@ -46,6 +47,18 @@ export function Header({
     const handleOpenTerminal = () => {
       if (worktree) {
         client.fs.openTerminal({ path: worktree.path });
+      }
+    };
+
+    const handleOpenInVSCode = () => {
+      if (worktree) {
+        client.fs.openInVSCode({ path: worktree.path });
+      }
+    };
+
+    const handleOpenInCursor = () => {
+      if (worktree) {
+        client.fs.openInCursor({ path: worktree.path });
       }
     };
 
@@ -117,6 +130,14 @@ export function Header({
                     <Terminal className="h-4 w-4" />
                     Open Terminal
                   </MenuItem>
+                  <MenuItem onClick={handleOpenInVSCode}>
+                    <Code className="h-4 w-4" />
+                    Open in VSCode
+                  </MenuItem>
+                  <MenuItem onClick={handleOpenInCursor}>
+                    <Code className="h-4 w-4" />
+                    Open in Cursor
+                  </MenuItem>
                 </>
               )}
               <MenuSeparator />
@@ -148,6 +169,14 @@ export function Header({
 
   const handleOpenTerminal = () => {
     client.fs.openTerminal({ path: repository.path });
+  };
+
+  const handleOpenInVSCode = () => {
+    client.fs.openInVSCode({ path: repository.path });
+  };
+
+  const handleOpenInCursor = () => {
+    client.fs.openInCursor({ path: repository.path });
   };
 
   return (
@@ -208,6 +237,14 @@ export function Header({
             <MenuItem onClick={handleOpenTerminal}>
               <Terminal className="h-4 w-4" />
               Open Terminal
+            </MenuItem>
+            <MenuItem onClick={handleOpenInVSCode}>
+              <Code className="h-4 w-4" />
+              Open in VSCode
+            </MenuItem>
+            <MenuItem onClick={handleOpenInCursor}>
+              <Code className="h-4 w-4" />
+              Open in Cursor
             </MenuItem>
             <MenuSeparator />
             <MenuItem variant="destructive" onClick={() => onRemoveRepository(repository.id)}>
