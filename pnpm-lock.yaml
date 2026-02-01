@@ -190,9 +190,6 @@ importers:
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@22.19.7)
-      '@electron/rebuild':
-        specifier: ^4.0.3
-        version: 4.0.3
       '@playwright/test':
         specifier: ^1.50.1
         version: 1.58.1
@@ -1701,11 +1698,6 @@ packages:
 
   '@electron/rebuild@4.0.1':
     resolution: {integrity: sha512-iMGXb6Ib7H/Q3v+BKZJoETgF9g6KMNZVbsO4b7Dmpgb5qTFqyFTzqW9F3TOSHdybv2vKYKzSS9OiZL+dcJb+1Q==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
-
-  '@electron/rebuild@4.0.3':
-    resolution: {integrity: sha512-u9vpTHRMkOYCs/1FLiSVAFZ7FbjsXK+bQuzviJZa+lG7BHZl1nz52/IcGvwa3sk80/fc3llutBkbCq10Vh8WQA==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -9545,24 +9537,6 @@ snapshots:
       read-binary-file-arch: 1.0.6
       semver: 7.7.3
       tar: 6.2.1
-      yargs: 17.7.2
-    transitivePeerDependencies:
-      - supports-color
-
-  '@electron/rebuild@4.0.3':
-    dependencies:
-      '@malept/cross-spawn-promise': 2.0.0
-      debug: 4.4.3
-      detect-libc: 2.1.2
-      got: 11.8.6
-      graceful-fs: 4.2.11
-      node-abi: 4.26.0
-      node-api-version: 0.2.1
-      node-gyp: 11.5.0
-      ora: 5.4.1
-      read-binary-file-arch: 1.0.6
-      semver: 7.7.3
-      tar: 7.5.7
       yargs: 17.7.2
     transitivePeerDependencies:
       - supports-color
