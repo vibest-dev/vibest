@@ -5,10 +5,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import { useTheme } from "next-themes";
 import { useEffect, useRef } from "react";
 
 import { client } from "../../lib/client";
-import { TERMINAL_THEME } from "../../lib/terminal-theme";
+import { TERMINAL_THEME_DARK, TERMINAL_THEME_LIGHT } from "../../lib/terminal-theme";
 
 interface TerminalViewProps {
 	terminalId: string;
@@ -24,6 +25,8 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 	const isVisibleRef = useRef(isVisible);
 	isVisibleRef.current = isVisible;
 
+	const { resolvedTheme } = useTheme();
+
 	// Initialize terminal once
 	useEffect(() => {
 		if (!containerRef.current || terminalRef.current) return;
@@ -36,7 +39,7 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 			fontWeight: "normal",
 			lineHeight: 1.2,
 			scrollback: 1000,
-			theme: TERMINAL_THEME,
+			theme: TERMINAL_THEME_DARK,
 		});
 
 		const fitAddon = new FitAddon();
@@ -151,6 +154,13 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 			});
 		}
 	}, [isVisible]);
+
+	// Sync terminal theme with next-themes
+	useEffect(() => {
+		if (!terminalRef.current) return;
+		terminalRef.current.options.theme =
+			resolvedTheme === "dark" ? TERMINAL_THEME_DARK : TERMINAL_THEME_LIGHT;
+	}, [resolvedTheme]);
 
 	// Handle container resize with debounce
 	// Created once on mount - uses isVisibleRef to check current visibility
