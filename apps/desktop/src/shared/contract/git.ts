@@ -1,7 +1,20 @@
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
 
 import { BranchSchema, DiffResultSchema, GitStatusSchema } from "../types";
+
+// Git change event for subscription
+export const GitChangeEventSchema = z.object({
+	type: z.literal("diff"),
+	path: z.string(),
+	stats: z.object({
+		insertions: z.number(),
+		deletions: z.number(),
+		filesChanged: z.number(),
+	}),
+});
+
+export type GitChangeEvent = z.infer<typeof GitChangeEventSchema>;
 
 export const gitContract = {
   status: oc
@@ -40,4 +53,13 @@ export const gitContract = {
       }),
     )
     .output(DiffResultSchema),
+
+	// Subscribe to git changes for a worktree path
+	watchChanges: oc
+		.input(
+			z.object({
+				path: z.string(),
+			}),
+		)
+		.output(eventIterator(GitChangeEventSchema)),
 };

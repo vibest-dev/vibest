@@ -1,10 +1,17 @@
 import { MemoryPublisher } from "@orpc/experimental-publisher/memory";
-import { GitService, StoreService, WorktreeService } from "./services";
+import {
+	GitService,
+	GitWatcherService,
+	StoreService,
+	WorktreeService,
+} from "./services";
 import { TerminalManager } from "./terminal";
+import type { GitChangeEvent } from "../shared/contract/git";
 import type { TerminalEvent } from "../shared/contract/terminal";
 
 export type AppEvents = {
 	[K: `terminal:${string}`]: TerminalEvent;
+	[K: `git:changes:${string}`]: GitChangeEvent;
 };
 
 export type AppPublisher = MemoryPublisher<AppEvents>;
@@ -13,12 +20,14 @@ export class App {
 	readonly publisher: AppPublisher = new MemoryPublisher();
 	readonly store: StoreService;
 	readonly git: GitService;
+	readonly gitWatcher: GitWatcherService;
 	readonly worktree: WorktreeService;
 	readonly terminal: TerminalManager;
 
 	constructor() {
 		this.store = new StoreService();
 		this.git = new GitService();
+		this.gitWatcher = new GitWatcherService(this.git, this.publisher);
 		this.worktree = new WorktreeService(this.store, this.git);
 		this.terminal = new TerminalManager(this.publisher);
 	}
@@ -29,6 +38,7 @@ export class App {
 
 	async stop(): Promise<void> {
 		this.terminal.dispose();
+		this.gitWatcher.dispose();
 	}
 }
 

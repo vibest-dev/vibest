@@ -8,7 +8,7 @@ import { setupIPC } from "./ipc";
 
 let mainApp: App | null = null;
 
-function createWindow(): void {
+function createWindow(appInstance: App): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -29,6 +29,11 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();
+  });
+
+  // Refresh git watchers when window gains focus
+  mainWindow.on("focus", () => {
+    appInstance.gitWatcher.refreshByGroup("git");
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -66,12 +71,12 @@ app.whenReady().then(async () => {
   // Setup IPC handlers with App instance
   setupIPC(mainApp);
 
-  createWindow();
+  createWindow(mainApp);
 
   app.on("activate", () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0 && mainApp) createWindow(mainApp);
   });
 });
 

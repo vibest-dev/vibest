@@ -1,3 +1,4 @@
+import { useGitWatcher } from "../../hooks/use-git-watcher";
 import { useWorktreeDiffStats } from "../../hooks/use-worktree-diff-stats";
 
 interface WorktreeDiffStatsProps {
@@ -8,8 +9,12 @@ interface WorktreeDiffStatsProps {
  * Displays git diff stats (insertions/deletions) for a worktree.
  * Shows nothing when the worktree is clean.
  * Hidden on hover (to make room for archive button).
+ * Subscribes to git changes to automatically update.
  */
 export function WorktreeDiffStats({ path }: WorktreeDiffStatsProps) {
+  // Subscribe to git changes for automatic updates
+  useGitWatcher(path);
+
   const stats = useWorktreeDiffStats(path);
 
   // Don't render anything if no changes

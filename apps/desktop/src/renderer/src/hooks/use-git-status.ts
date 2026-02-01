@@ -20,6 +20,9 @@ export function useGitStatus(path: string | undefined) {
       queryClient.invalidateQueries({
         queryKey: orpc.git.status.key({ input: { path: variables.path } }),
       });
+      queryClient.invalidateQueries({
+        queryKey: orpc.git.diff.key({ input: { path: variables.path, staged: false } }),
+      });
     },
   });
 
@@ -28,6 +31,9 @@ export function useGitStatus(path: string | undefined) {
     onSuccess: (_: unknown, variables: { path: string }) => {
       queryClient.invalidateQueries({
         queryKey: orpc.git.status.key({ input: { path: variables.path } }),
+      });
+      queryClient.invalidateQueries({
+        queryKey: orpc.git.diff.key({ input: { path: variables.path, staged: false } }),
       });
     },
   });
