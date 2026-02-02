@@ -107,12 +107,12 @@ Areas likely to show render activity:
 
 ## Success Criteria
 
-- [ ] React-scan toolbar visible in dev mode
-- [ ] Component renders highlighted with colored outlines
-- [ ] Console logs show render activity
-- [ ] Unnecessary renders detected and reported
-- [ ] No performance impact in production builds
-- [ ] Type safety maintained (TypeScript errors = 0)
+- [ ] React-scan toolbar visible in dev mode (requires running app to verify)
+- [ ] Component renders highlighted with colored outlines (requires running app to verify)
+- [ ] Console logs show render activity (requires running app to verify)
+- [ ] Unnecessary renders detected and reported (requires running app to verify)
+- [x] No performance impact in production builds (react-scan only enabled in dev mode)
+- [x] Type safety maintained (TypeScript errors = 0)
 
 ## Notes
 
