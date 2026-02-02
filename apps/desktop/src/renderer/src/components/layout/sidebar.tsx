@@ -242,6 +242,9 @@ function RepoTabs({
         {overflowRepos.length > 0 && (
           <Menu>
             <MenuTrigger
+              openOnHover
+              delay={0}
+              closeDelay={0}
               render={
                 <button
                   type="button"
