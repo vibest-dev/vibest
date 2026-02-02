@@ -7,26 +7,75 @@ import { StringDecoder } from "node:string_decoder";
 
 import type { AppPublisher } from "../app";
 
-/** Batch duration in ms (same as Hyper) */
-const BATCH_DURATION_MS = 16;
+// /** Batch duration in ms (same as Hyper) */
+// const BATCH_DURATION_MS = 16;
+
+// /**
+//  * Max size of a session data batch. Note that this value can be exceeded by ~4k
+//  * (chunk sizes seem to be 4k at the most)
+//  */
+// const BATCH_MAX_SIZE = 200 * 1024;
+
+// /**
+//  * Data coming from the pty is sent to the renderer process for further
+//  * vt parsing and rendering. This class batches data to minimize the number of
+//  * IPC calls. It also reduces GC pressure and CPU cost.
+//  *
+//  * Based on Hyper's DataBatcher implementation.
+//  */
+// class DataBatcher {
+//   private decoder = new StringDecoder("utf8");
+//   private data = "";
+//   private timeout: NodeJS.Timeout | null = null;
+
+//   constructor(
+//     private readonly terminalId: string,
+//     private readonly publisher: AppPublisher,
+//   ) {}
+
+//   write(chunk: Buffer | string): void {
+//     if (this.data.length + chunk.length >= BATCH_MAX_SIZE) {
+//       // We've reached the max batch size. Flush it and start another one
+//       if (this.timeout) {
+//         clearTimeout(this.timeout);
+//         this.timeout = null;
+//       }
+//       this.flush();
+//     }
+
+//     this.data += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
+
+//     if (!this.timeout) {
+//       this.timeout = setTimeout(() => this.flush(), BATCH_DURATION_MS);
+//     }
+//   }
+
+//   flush(): void {
+//     // Reset before publishing to allow for potential reentrancy
+//     const data = this.data;
+//     this.data = "";
+//     this.timeout = null;
+
+//     if (data.length > 0) {
+//       this.publisher.publish(`terminal:${this.terminalId}`, { type: "data", data });
+//     }
+//   }
+
+//   dispose(): void {
+//     if (this.timeout) {
+//       clearTimeout(this.timeout);
+//       this.timeout = null;
+//     }
+//     this.data = "";
+//   }
+// }
 
 /**
- * Max size of a session data batch. Note that this value can be exceeded by ~4k
- * (chunk sizes seem to be 4k at the most)
+ * Direct publisher without batching - for testing MessagePort performance.
+ * MessagePort uses structured clone and may not need batching overhead.
  */
-const BATCH_MAX_SIZE = 200 * 1024;
-
-/**
- * Data coming from the pty is sent to the renderer process for further
- * vt parsing and rendering. This class batches data to minimize the number of
- * IPC calls. It also reduces GC pressure and CPU cost.
- *
- * Based on Hyper's DataBatcher implementation.
- */
-class DataBatcher {
+class DirectPublisher {
   private decoder = new StringDecoder("utf8");
-  private data = "";
-  private timeout: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly terminalId: string,
@@ -34,39 +83,14 @@ class DataBatcher {
   ) {}
 
   write(chunk: Buffer | string): void {
-    if (this.data.length + chunk.length >= BATCH_MAX_SIZE) {
-      // We've reached the max batch size. Flush it and start another one
-      if (this.timeout) {
-        clearTimeout(this.timeout);
-        this.timeout = null;
-      }
-      this.flush();
-    }
-
-    this.data += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-
-    if (!this.timeout) {
-      this.timeout = setTimeout(() => this.flush(), BATCH_DURATION_MS);
-    }
-  }
-
-  flush(): void {
-    // Reset before publishing to allow for potential reentrancy
-    const data = this.data;
-    this.data = "";
-    this.timeout = null;
-
+    const data = typeof chunk === "string" ? chunk : this.decoder.write(chunk);
     if (data.length > 0) {
       this.publisher.publish(`terminal:${this.terminalId}`, { type: "data", data });
     }
   }
 
   dispose(): void {
-    if (this.timeout) {
-      clearTimeout(this.timeout);
-      this.timeout = null;
-    }
-    this.data = "";
+    // Nothing to clean up
   }
 }
 
@@ -74,7 +98,8 @@ export interface TerminalInstance {
   id: string;
   worktreeId: string;
   pty: IPty;
-  batcher: DataBatcher;
+  // batcher: DataBatcher;
+  publisher: DirectPublisher;
   ended: boolean;
 }
 
@@ -120,22 +145,24 @@ export class TerminalManager {
       },
     });
 
-    const batcher = new DataBatcher(id, this.publisher);
+    // const batcher = new DataBatcher(id, this.publisher);
+    const directPublisher = new DirectPublisher(id, this.publisher);
 
     const instance: TerminalInstance = {
       id,
       worktreeId,
       pty: ptyProcess,
-      batcher,
+      // batcher,
+      publisher: directPublisher,
       ended: false,
     };
 
-    // PTY data → batcher → publisher
+    // PTY data → direct publisher (no batching for MessagePort speed test)
     ptyProcess.onData((chunk) => {
       if (instance.ended) {
         return;
       }
-      batcher.write(chunk);
+      directPublisher.write(chunk);
     });
 
     // PTY exit → publish
@@ -172,7 +199,8 @@ export class TerminalManager {
   close(terminalId: string): void {
     const instance = this.terminals.get(terminalId);
     if (instance) {
-      instance.batcher.dispose();
+      // instance.batcher.dispose();
+      instance.publisher.dispose();
       try {
         instance.pty.kill();
       } catch (err) {
@@ -193,7 +221,8 @@ export class TerminalManager {
 
   dispose(): void {
     for (const instance of this.terminals.values()) {
-      instance.batcher.dispose();
+      // instance.batcher.dispose();
+      instance.publisher.dispose();
       try {
         instance.pty.kill();
       } catch (err) {
