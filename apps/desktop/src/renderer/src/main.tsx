@@ -1,4 +1,20 @@
 import "./assets/main.css";
+
+// CRITICAL: react-scan must be imported and configured BEFORE React
+import { scan } from "react-scan";
+
+// Configure react-scan before any React imports
+if (import.meta.env.DEV) {
+	scan({
+		enabled: true,
+		showToolbar: true,
+		animationSpeed: "fast",
+		log: true,
+		trackUnnecessaryRenders: true,
+	});
+}
+
+// NOW import React and other dependencies
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
