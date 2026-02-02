@@ -44,9 +44,12 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 		const fitAddon = new FitAddon();
 		terminal.loadAddon(fitAddon);
 
-		// WebLinksAddon: detect URLs and make them clickable
-		const webLinksAddon = new WebLinksAddon((_event, uri) => {
-			client.shell.openExternal({ url: uri });
+		// WebLinksAddon: detect URLs and make them clickable with cmd+click
+		const webLinksAddon = new WebLinksAddon((event, uri) => {
+			// Only open link if cmd key is pressed
+			if (event.metaKey) {
+				client.shell.openExternal({ url: uri });
+			}
 		});
 		terminal.loadAddon(webLinksAddon);
 
