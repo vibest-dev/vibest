@@ -44,6 +44,7 @@ function App(): React.JSX.Element {
   const openedWorktreeIds = useAppStore((s) => s.openedWorktreeIds);
   const markWorktreeOpened = useAppStore((s) => s.markWorktreeOpened);
   const removeWorktreeOpened = useAppStore((s) => s.removeWorktreeOpened);
+  const clearActiveTerminalId = useAppStore((s) => s.clearActiveTerminalId);
 
   // Local UI state (transient, not persisted)
   const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(null);
@@ -95,16 +96,46 @@ function App(): React.JSX.Element {
       _,
       variables: { taskId: string; deleteWorktree?: boolean; commitFirst?: boolean },
     ) => {
+      // Get worktrees for the archived task BEFORE updating cache
+      const workspaceQueryData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
+      const archivedTaskWorktrees = Object.values(
+        workspaceQueryData?.worktreesByRepository ?? {},
+      )
+        .flat()
+        .filter((w) => w.taskId === variables.taskId);
+
+      // Clear selection if archived task is selected
       if (selectedTaskId === variables.taskId) {
         selectTask(null);
         selectWorktree(null);
       }
-      // Also remove any opened worktrees belonging to this task
-      if (selectedWorktreeId) {
-        removeWorktreeOpened(selectedWorktreeId);
+
+      // Remove all worktrees belonging to the archived task from opened worktrees
+      archivedTaskWorktrees.forEach((worktree) => {
+        removeWorktreeOpened(worktree.id);
+        clearActiveTerminalId(worktree.id);
+      });
+
+      // Use optimistic update instead of invalidating workspace query
+      // This avoids triggering a refetch which would cause terminal rerenders
+      if (workspaceQueryData) {
+        const updatedWorktreesByRepository = { ...workspaceQueryData.worktreesByRepository };
+        
+        // Remove worktrees of the archived task from each repository
+        for (const [repoId, worktrees] of Object.entries(updatedWorktreesByRepository)) {
+          updatedWorktreesByRepository[repoId] = worktrees.filter(
+            (w) => w.taskId !== variables.taskId,
+          );
+        }
+
+        queryClient.setQueryData(orpc.workspace.list.queryKey({}), {
+          ...workspaceQueryData,
+          worktreesByRepository: updatedWorktreesByRepository,
+        });
       }
+
+      // Only invalidate task queries, not workspace
       queryClient.invalidateQueries({ queryKey: orpc.task.key() });
-      queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
     },
     onError: (error) => setMutationError(String(error)),
   });
