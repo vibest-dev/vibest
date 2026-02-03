@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 
 import { ThemeToggle } from "../theme-toggle";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Label, Repository, Task, Worktree } from "../../types";
 
@@ -49,7 +49,7 @@ interface TaskWithWorktrees {
 
 interface SidebarProps {
   repositories: Repository[];
-  selectedTaskId: string | null;
+  currentTaskId: string | null;
   isLoading: boolean;
   onAddRepository: () => void;
   onCloneRepository: () => void;
@@ -137,14 +137,14 @@ function TaskListItem({
 // Repo tabs component with dynamic overflow
 function RepoTabs({
   repositories,
-  selectedRepositoryId,
+  currentRepositoryId,
   onSelectRepository,
   onAddRepository,
   onCloneRepository,
   className,
 }: {
   repositories: Repository[];
-  selectedRepositoryId: string | null;
+  currentRepositoryId: string | null;
   onSelectRepository: (id: string) => void;
   onAddRepository: () => void;
   onCloneRepository: () => void;
@@ -230,7 +230,7 @@ function RepoTabs({
             onClick={() => onSelectRepository(repo.id)}
             className={cn(
               "shrink-0 truncate rounded px-1.5 py-0.5 text-sm font-medium transition-colors",
-              selectedRepositoryId === repo.id
+              currentRepositoryId === repo.id
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
@@ -292,7 +292,7 @@ function RepoTabs({
 
 export function Sidebar({
   repositories,
-  selectedTaskId,
+  currentTaskId,
   isLoading,
   onAddRepository,
   onCloneRepository,
@@ -303,33 +303,31 @@ export function Sidebar({
 }: SidebarProps) {
   const [archiveTaskTarget, setArchiveTaskTarget] = useState<TaskWithWorktrees | null>(null);
 
-  // Get selected repository from store
-  const selectedRepositoryId = useAppStore((s) => s.selectedRepositoryId);
-  const selectRepository = useAppStore((s) => s.selectRepository);
+  // Get current repository from store
+  const storedRepositoryId = useAppStore((s) => s.currentRepositoryId);
+  const setCurrentRepository = useAppStore((s) => s.setCurrentRepository);
 
-  // Auto-select first repository if none selected
-  useEffect(() => {
-    if (repositories.length > 0 && !selectedRepositoryId) {
-      selectRepository(repositories[0].id);
+  // Derive effective repository (fallback to first if stored is invalid)
+  const currentRepository = useMemo(() => {
+    if (repositories.length === 0) return null;
+    if (storedRepositoryId) {
+      const found = repositories.find((r) => r.id === storedRepositoryId);
+      if (found) return found;
     }
-    // Handle stale selection (repo was deleted)
-    if (selectedRepositoryId && !repositories.find((r) => r.id === selectedRepositoryId)) {
-      selectRepository(repositories[0]?.id ?? null);
-    }
-  }, [repositories, selectedRepositoryId, selectRepository]);
+    return repositories[0];
+  }, [storedRepositoryId, repositories]);
 
-  // Get selected repository
-  const selectedRepository = repositories.find((r) => r.id === selectedRepositoryId) ?? null;
+  const currentRepositoryId = currentRepository?.id ?? null;
 
   // Fetch tasks for selected repository
   const { data: tasksData } = useQuery(
     orpc.task.list.queryOptions({
-      input: selectedRepositoryId ? { repositoryId: selectedRepositoryId } : skipToken,
+      input: currentRepositoryId ? { repositoryId: currentRepositoryId } : skipToken,
     }),
   );
 
   const tasksWithWorktrees = tasksData ?? [];
-  const repositoryLabels = selectedRepository?.labels ?? [];
+  const repositoryLabels = currentRepository?.labels ?? [];
 
   // Fetch git status for archive task target
   const { data: archiveTaskTargetStatus } = useQuery(
@@ -386,8 +384,8 @@ export function Sidebar({
             <RepoTabs
               className="app-no-drag absolute right-0 bottom-0 left-0 pb-1"
               repositories={repositories}
-              selectedRepositoryId={selectedRepositoryId}
-              onSelectRepository={selectRepository}
+              currentRepositoryId={currentRepositoryId}
+              onSelectRepository={setCurrentRepository}
               onAddRepository={onAddRepository}
               onCloneRepository={onCloneRepository}
             />
@@ -414,7 +412,7 @@ export function Sidebar({
           )}
 
           {/* Task list for selected repo */}
-          {selectedRepository && (
+          {currentRepository && (
             <SidebarGroup>
               <div className="flex items-center justify-between px-2 pb-1">
                 <span className="text-muted-foreground text-sm font-medium">Tasks</span>
@@ -422,7 +420,7 @@ export function Sidebar({
                   <button
                     type="button"
                     className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors"
-                    onClick={() => onCreateTask(selectedRepository.id)}
+                    onClick={() => onCreateTask(currentRepository.id)}
                     title="Create task"
                   >
                     <Plus className="size-4" />
@@ -439,7 +437,7 @@ export function Sidebar({
                       }
                     />
                     <MenuPopup side="right" align="start">
-                      <MenuItem onClick={() => onManageLabels(selectedRepository.id)}>
+                      <MenuItem onClick={() => onManageLabels(currentRepository.id)}>
                         <Tags />
                         Manage labels
                       </MenuItem>
@@ -457,7 +455,7 @@ export function Sidebar({
                       variant="ghost"
                       size="sm"
                       className="mt-2"
-                      onClick={() => onCreateTask(selectedRepository.id)}
+                      onClick={() => onCreateTask(currentRepository.id)}
                     >
                       <Plus className="size-4" />
                       Create task
@@ -469,7 +467,7 @@ export function Sidebar({
                       key={taskWithWorktrees.task.id}
                       taskWithWorktrees={taskWithWorktrees}
                       repositoryLabels={repositoryLabels}
-                      isSelected={selectedTaskId === taskWithWorktrees.task.id}
+                      isSelected={currentTaskId === taskWithWorktrees.task.id}
                       onSelect={() => {
                         const worktree = taskWithWorktrees.worktrees[0];
                         onSelectTask(taskWithWorktrees.task, worktree ?? null);
