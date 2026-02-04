@@ -6,9 +6,12 @@ if (import.meta.env.DEV) {
 	scan({
 		enabled: true,
 		showToolbar: true,
-		animationSpeed: "fast",
-		log: true,
+		animationSpeed: "slow",
+		log: false,
 		trackUnnecessaryRenders: true,
+		onRender: (fiber, renders) => {
+			console.log("[react-scan] render:", fiber.type?.name || fiber.type, renders.length);
+		},
 	});
 }
 
