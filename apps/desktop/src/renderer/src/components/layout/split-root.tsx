@@ -1,4 +1,9 @@
-import { Splitter, SplitterPanel, SplitterResizeTrigger } from "@vibest/ui/components/splitter";
+import {
+  Splitter,
+  SplitterPanel,
+  SplitterResizeTrigger,
+  SplitterResizeTriggerIndicator,
+} from "@vibest/ui/components/splitter";
 import { Fragment } from "react";
 
 import type { Worktree } from "../../types";
@@ -50,11 +55,22 @@ export function SplitRoot({
     );
   }
 
+  const defaultSize = splitOrder.map(() => 100 / splitOrder.length);
+  const panels = splitOrder.map((splitId) => ({
+    id: splitId,
+    minSize: 20,
+  }));
+
   return (
-    <Splitter key={splitOrder.join("|")} className="h-full" direction="horizontal">
+    <Splitter
+      key={splitOrder.join("|")}
+      className="h-full"
+      defaultSize={defaultSize}
+      panels={panels}
+    >
       {splitOrder.map((splitId, index) => (
         <Fragment key={splitId}>
-          <SplitterPanel id={splitId} minSize={20}>
+          <SplitterPanel id={splitId}>
             <SplitPane
               splitId={splitId}
               isActive={splitId === activeSplitId}
@@ -67,7 +83,11 @@ export function SplitRoot({
               onCloseTab={onCloseTab}
             />
           </SplitterPanel>
-          {index < splitOrder.length - 1 && <SplitterResizeTrigger />}
+          {index < splitOrder.length - 1 && (
+            <SplitterResizeTrigger id={`${splitId}:${splitOrder[index + 1]!}`}>
+              <SplitterResizeTriggerIndicator />
+            </SplitterResizeTrigger>
+          )}
         </Fragment>
       ))}
     </Splitter>

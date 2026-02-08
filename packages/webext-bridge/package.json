@@ -95,7 +95,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm,cjs --dts",
+    "build": "tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format cjs --no-dts --publint false && tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm --dts --clean false",
     "watch": "npm run build -- --watch",
     "release": "bumpp --commit --push --tag && npm run build && npm publish",
     "typecheck": "tsc --noEmit",

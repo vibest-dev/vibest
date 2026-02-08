@@ -47,9 +47,9 @@
     "access": "public"
   },
   "scripts": {
-    "stub": "tsdown",
+    "stub": "pnpm run build",
     "test": "vitest run --typecheck",
-    "build": "tsdown",
+    "build": "tsdown --format cjs --no-dts --publint false && tsdown --format esm --dts --clean false",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules dist .turbo"
   },
