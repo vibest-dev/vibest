@@ -1,6 +1,6 @@
 @import "@vibest/ui/globals.css";
 
-@source "../../../../node_modules/@vibest/ui/src";
+@source "../../../node_modules/@vibest/ui/src";
 
 /* macOS drag region for title bar */
 .app-drag-region {
