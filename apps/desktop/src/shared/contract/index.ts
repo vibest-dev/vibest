@@ -7,15 +7,23 @@ import { terminalContract } from "./terminal";
 import { workspaceContract } from "./workspace";
 
 export const contract = {
-	workspace: workspaceContract,
-	git: gitContract,
-	fs: fsContract,
-	terminal: terminalContract,
-	task: taskContract,
-	label: labelContract,
-	shell: shellContract,
+  workspace: workspaceContract,
+  git: gitContract,
+  fs: fsContract,
+  terminal: terminalContract,
+  task: taskContract,
+  label: labelContract,
+  shell: shellContract,
 };
 
 export type Contract = typeof contract;
 
-export { fsContract, gitContract, labelContract, shellContract, taskContract, terminalContract, workspaceContract };
+export {
+  fsContract,
+  gitContract,
+  labelContract,
+  shellContract,
+  taskContract,
+  terminalContract,
+  workspaceContract,
+};

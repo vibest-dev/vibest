@@ -101,17 +101,11 @@ export function WorktreeCard({ worktree, onOpen, onRemove, onViewChanges }: Work
 
         <Menu>
           <MenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground hover:text-foreground h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                aria-label="Worktree options"
-              >
-                <MoreVertical className="h-3.5 w-3.5" />
-              </Button>
-            }
-          />
+            className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-6 w-6 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 focus:opacity-100"
+            aria-label="Worktree options"
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </MenuTrigger>
           <MenuPopup side="bottom" align="end">
             {!isDeleted && (
               <>

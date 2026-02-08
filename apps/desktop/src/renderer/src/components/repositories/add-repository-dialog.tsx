@@ -1,4 +1,4 @@
-import { Button } from "@vibest/ui/components/button";
+import { Button, buttonVariants } from "@vibest/ui/components/button";
 import {
   Combobox,
   ComboboxEmpty,
@@ -205,7 +205,7 @@ export function AddRepositoryDialog({ isOpen, path, onClose, onAdd }: AddReposit
           </DialogPanel>
 
           <DialogFooter>
-            <DialogClose render={<Button variant="ghost" className="text-[13px]" />}>
+            <DialogClose className={buttonVariants({ variant: "ghost", className: "text-[13px]" })}>
               Cancel
             </DialogClose>
             <Button

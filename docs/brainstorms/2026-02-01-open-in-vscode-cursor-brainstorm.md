@@ -33,11 +33,11 @@ When clicked, the corresponding editor opens with the worktree or repository pat
 
 ## Implementation Touchpoints
 
-| File | Change |
-|------|--------|
-| `apps/desktop/src/shared/contract/fs.ts` | Add `openInVSCode` and `openInCursor` to contract |
-| `apps/desktop/src/main/ipc/router/fs.ts` | Add handlers using `execFile("code", [path])` and `execFile("cursor", [path])` |
-| `apps/desktop/src/renderer/src/components/layout/header.tsx` | Add menu items calling `client.fs.openInVSCode` and `client.fs.openInCursor` |
+| File                                                         | Change                                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `apps/desktop/src/shared/contract/fs.ts`                     | Add `openInVSCode` and `openInCursor` to contract                              |
+| `apps/desktop/src/main/ipc/router/fs.ts`                     | Add handlers using `execFile("code", [path])` and `execFile("cursor", [path])` |
+| `apps/desktop/src/renderer/src/components/layout/header.tsx` | Add menu items calling `client.fs.openInVSCode` and `client.fs.openInCursor`   |
 
 ## Open Questions
 

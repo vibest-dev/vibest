@@ -241,8 +241,6 @@ function getWorktreeBasePath(): string {
 }
 
 export class WorktreeService {
-  
-
   generateWorktreePath(repoName: string, usedNames: string[]): { path: string; placeName: string } {
     const placeName = getAvailablePlaceName(usedNames);
     const path = join(getWorktreeBasePath(), repoName, placeName);

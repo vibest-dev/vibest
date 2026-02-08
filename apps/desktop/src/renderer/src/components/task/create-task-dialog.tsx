@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@vibest/ui/components/button";
+import { Button, buttonVariants } from "@vibest/ui/components/button";
 import {
   Dialog,
   DialogClose,
@@ -324,7 +324,7 @@ export function CreateTaskDialog({ isOpen, repository, onClose }: CreateTaskDial
           </DialogPanel>
 
           <DialogFooter>
-            <DialogClose render={<Button variant="ghost" className="text-[13px]" />}>
+            <DialogClose className={buttonVariants({ variant: "ghost", className: "text-[13px]" })}>
               Cancel
             </DialogClose>
             <Button type="submit" disabled={createTaskMutation.isPending} className="text-[13px]">

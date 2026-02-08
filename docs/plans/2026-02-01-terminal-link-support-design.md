@@ -29,10 +29,10 @@ Terminal Output → XTerm Render → addon-web-links detects URL
 
 ### Link Types
 
-| Type | Handling |
-|------|----------|
-| ANSI hyperlinks (OSC 8) | XTerm v6 native support |
-| Auto-detected URLs | `@xterm/addon-web-links` |
+| Type                    | Handling                 |
+| ----------------------- | ------------------------ |
+| ANSI hyperlinks (OSC 8) | XTerm v6 native support  |
+| Auto-detected URLs      | `@xterm/addon-web-links` |
 
 ## Implementation
 
@@ -103,6 +103,7 @@ WebLinksAddon must load before WebglAddon.
 ### Security
 
 Only allow safe protocols:
+
 - `http:`
 - `https:`
 - `file:`
@@ -118,8 +119,8 @@ Reject dangerous protocols like `javascript:`, `data:`.
 
 ## Decision Log
 
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| URL detection | `@xterm/addon-web-links` | Official addon, minimal code |
-| Click behavior | System default app | Simplest UX |
-| Link styling | Default | YAGNI - add customization later if needed |
+| Decision       | Choice                   | Reason                                    |
+| -------------- | ------------------------ | ----------------------------------------- |
+| URL detection  | `@xterm/addon-web-links` | Official addon, minimal code              |
+| Click behavior | System default app       | Simplest UX                               |
+| Link styling   | Default                  | YAGNI - add customization later if needed |

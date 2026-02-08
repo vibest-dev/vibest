@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@vibest/ui/components/button";
+import { Button, buttonVariants } from "@vibest/ui/components/button";
 import {
   Dialog,
   DialogClose,
@@ -387,7 +387,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
 
         <DialogFooter>
           {mode === "list" ? (
-            <DialogClose render={<Button variant="ghost" className="text-[13px]" />}>
+            <DialogClose className={buttonVariants({ variant: "ghost", className: "text-[13px]" })}>
               Close
             </DialogClose>
           ) : (
