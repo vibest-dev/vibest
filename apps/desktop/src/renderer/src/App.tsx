@@ -37,13 +37,13 @@ function App(): React.JSX.Element {
   );
 
   // UI state - Zustand (task selection and worktree tracking)
-  const selectedTaskId = useAppStore((s) => s.selectedTaskId);
-  const selectTask = useAppStore((s) => s.selectTask);
+  const currentTaskId = useAppStore((s) => s.currentTaskId);
+  const setCurrentTask = useAppStore((s) => s.setCurrentTask);
   const selectedWorktreeId = useAppStore((s) => s.selectedWorktreeId);
   const selectWorktree = useAppStore((s) => s.selectWorktree);
-  const openedWorktreeIds = useAppStore((s) => s.openedWorktreeIds);
-  const markWorktreeOpened = useAppStore((s) => s.markWorktreeOpened);
-  const removeWorktreeOpened = useAppStore((s) => s.removeWorktreeOpened);
+  const worktreeTerminalIds = useAppStore((s) => s.worktreeTerminalIds);
+  const addWorktreeTerminal = useAppStore((s) => s.addWorktreeTerminal);
+  const removeWorktreeTerminal = useAppStore((s) => s.removeWorktreeTerminal);
   const clearActiveTerminalId = useAppStore((s) => s.clearActiveTerminalId);
 
   // Local UI state (transient, not persisted)
@@ -105,14 +105,14 @@ function App(): React.JSX.Element {
         .filter((w) => w.taskId === variables.taskId);
 
       // Clear selection if archived task is selected
-      if (selectedTaskId === variables.taskId) {
-        selectTask(null);
+      if (currentTaskId === variables.taskId) {
+        setCurrentTask(null);
         selectWorktree(null);
       }
 
       // Remove all worktrees belonging to the archived task from opened worktrees
       archivedTaskWorktrees.forEach((worktree) => {
-        removeWorktreeOpened(worktree.id);
+        removeWorktreeTerminal(worktree.id);
         clearActiveTerminalId(worktree.id);
       });
 
@@ -143,9 +143,9 @@ function App(): React.JSX.Element {
   // Mark worktree as opened when selected
   useEffect(() => {
     if (selectedWorktreeId) {
-      markWorktreeOpened(selectedWorktreeId);
+      addWorktreeTerminal(selectedWorktreeId);
     }
-  }, [selectedWorktreeId, markWorktreeOpened]);
+  }, [selectedWorktreeId, addWorktreeTerminal]);
 
   // Find the selected worktree from workspace data
   const selectedWorktree = useMemo(() => {
@@ -160,15 +160,15 @@ function App(): React.JSX.Element {
   // Get all opened worktrees for terminal persistence
   const openedWorktrees = useMemo(() => {
     const allWorktrees = Object.values(worktreesByRepository).flat();
-    return openedWorktreeIds
+    return worktreeTerminalIds
       .map((id) => allWorktrees.find((w) => w.id === id))
       .filter((w): w is Worktree => w !== undefined);
-  }, [openedWorktreeIds, worktreesByRepository]);
+  }, [worktreeTerminalIds, worktreesByRepository]);
 
   // Fetch selected task data
   const { data: selectedTaskData } = useQuery(
     orpc.task.get.queryOptions({
-      input: selectedTaskId ? { taskId: selectedTaskId } : skipToken,
+      input: currentTaskId ? { taskId: currentTaskId } : skipToken,
     }),
   );
 
@@ -225,15 +225,15 @@ function App(): React.JSX.Element {
 
   const handleSelectTask = useCallback(
     (task: Task, worktree: Worktree | null) => {
-      selectTask(task.id);
+      setCurrentTask(task.id);
       if (worktree) {
         selectWorktree(worktree.id);
-        markWorktreeOpened(worktree.id);
+        addWorktreeTerminal(worktree.id);
       } else {
         selectWorktree(null);
       }
     },
-    [selectTask, selectWorktree, markWorktreeOpened],
+    [setCurrentTask, selectWorktree, addWorktreeTerminal],
   );
 
   const handleArchiveTask = useCallback(
@@ -255,7 +255,7 @@ function App(): React.JSX.Element {
       <div className="h-full shrink-0">
         <Sidebar
           repositories={repositories}
-          selectedTaskId={selectedTaskId}
+          currentTaskId={currentTaskId}
           isLoading={isLoadingRepositories}
           onAddRepository={handleAddRepository}
           onCloneRepository={() => setShowCloneDialog(true)}
