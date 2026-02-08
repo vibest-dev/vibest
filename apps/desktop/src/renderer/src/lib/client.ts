@@ -1,7 +1,6 @@
-import type { ContractRouterClient } from "@orpc/contract";
-
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/message-port";
+import type { ContractRouterClient } from "@orpc/contract";
 
 import type { Contract } from "../../../shared/contract";
 

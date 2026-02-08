@@ -6,11 +6,11 @@ import type { App } from "../app";
 import { router } from "./router";
 
 export function setupIPC(app: App): void {
-  const handler = new RPCHandler(router);
+	const handler = new RPCHandler(router);
 
-  ipcMain.on("orpc:connect", (event) => {
-    const [serverPort] = event.ports;
-    handler.upgrade(serverPort, { context: { app } });
-    serverPort.start();
-  });
+	ipcMain.on("orpc:connect", (event) => {
+		const [serverPort] = event.ports;
+		handler.upgrade(serverPort, { context: { app } });
+		serverPort.start();
+	});
 }

@@ -7,19 +7,19 @@ import { orpc } from "../lib/orpc";
  * Returns null when the worktree is clean (no changes).
  */
 export function useWorktreeDiffStats(path: string | undefined) {
-  const { data: diffResult, isLoading } = useQuery(
-    orpc.git.diff.queryOptions({
-      input: path ? { path, staged: false } : skipToken,
-    }),
-  );
+	const { data: diffResult, isLoading } = useQuery(
+		orpc.git.diff.queryOptions({
+			input: path ? { path, staged: false } : skipToken,
+		}),
+	);
 
-  // Return null if loading, no data, or clean (no changes)
-  if (isLoading || !diffResult || diffResult.stats.filesChanged === 0) {
-    return null;
-  }
+	// Return null if loading, no data, or clean (no changes)
+	if (isLoading || !diffResult || diffResult.stats.filesChanged === 0) {
+		return null;
+	}
 
-  return {
-    insertions: diffResult.stats.insertions,
-    deletions: diffResult.stats.deletions,
-  };
+	return {
+		insertions: diffResult.stats.insertions,
+		deletions: diffResult.stats.deletions,
+	};
 }

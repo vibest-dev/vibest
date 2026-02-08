@@ -18,4 +18,12 @@ export const contract = {
 
 export type Contract = typeof contract;
 
-export { fsContract, gitContract, labelContract, shellContract, taskContract, terminalContract, workspaceContract };
+export {
+	fsContract,
+	gitContract,
+	labelContract,
+	shellContract,
+	taskContract,
+	terminalContract,
+	workspaceContract,
+};

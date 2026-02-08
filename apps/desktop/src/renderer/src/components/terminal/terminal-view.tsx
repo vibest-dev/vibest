@@ -5,10 +5,13 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useTheme } from "next-themes";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { client } from "../../lib/client";
-import { TERMINAL_THEME_DARK, TERMINAL_THEME_LIGHT } from "../../lib/terminal-theme";
+import {
+	TERMINAL_THEME_DARK,
+	TERMINAL_THEME_LIGHT,
+} from "../../lib/terminal-theme";
 
 interface TerminalViewProps {
 	terminalId: string;
@@ -24,7 +27,40 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 	const isVisibleRef = useRef(isVisible);
 	isVisibleRef.current = isVisible;
 
+	// Track whether we've done initial state sync (skip on first mount)
+	const hasInitializedRef = useRef(false);
+	// Track pending sync to avoid duplicate calls
+	const isSyncingRef = useRef(false);
+
 	const { resolvedTheme } = useTheme();
+
+	// Sync terminal state from backend snapshot
+	const syncTerminalState = useCallback(async () => {
+		const terminal = terminalRef.current;
+		if (!terminal || isSyncingRef.current) return;
+
+		isSyncingRef.current = true;
+		try {
+			const snapshot = await client.terminal.attach({ terminalId });
+
+			// Clear current buffer and write restored state
+			terminal.reset();
+
+			// First write rehydrate sequences to restore modes
+			if (snapshot.rehydrateSequences) {
+				terminal.write(snapshot.rehydrateSequences);
+			}
+
+			// Then write the serialized screen content
+			if (snapshot.snapshotAnsi) {
+				terminal.write(snapshot.snapshotAnsi);
+			}
+		} catch (err) {
+			console.error("[Terminal] State sync failed:", err);
+		} finally {
+			isSyncingRef.current = false;
+		}
+	}, [terminalId]);
 
 	// Initialize terminal once
 	useEffect(() => {
@@ -37,7 +73,7 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 			fontFamily: '"Geist Mono Variable", Menlo, Monaco, monospace',
 			fontWeight: "normal",
 			lineHeight: 1.2,
-			scrollback: 1000,
+			scrollback: 10000,
 			theme: TERMINAL_THEME_DARK,
 		});
 
@@ -107,26 +143,34 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 		// Track if this effect instance is still active (for StrictMode)
 		let isActive = true;
 
-		// Subscribe to terminal output via oRPC streaming using consumeEventIterator
-		const cancel = consumeEventIterator(client.terminal.subscribe({ terminalId }), {
-			onEvent: (event) => {
-				if (!isActive) return;
-				const term = terminalRef.current;
-				if (!term) return;
-				if (event.type === "data") {
-					term.write(event.data);
-				} else if (event.type === "exit") {
-					term.writeln("\r\n[Process exited]");
-				}
-			},
-			onError: (error) => {
-				// Ignore AbortError - expected when component unmounts
-				if (error instanceof Error && error.name === "AbortError") {
-					return;
-				}
-				console.error("[Terminal] Subscription error:", error);
-			},
+		// Mark as initialized after first render cycle
+		requestAnimationFrame(() => {
+			hasInitializedRef.current = true;
 		});
+
+		// Subscribe to terminal output via oRPC streaming using consumeEventIterator
+		const cancel = consumeEventIterator(
+			client.terminal.subscribe({ terminalId }),
+			{
+				onEvent: (event) => {
+					if (!isActive) return;
+					const term = terminalRef.current;
+					if (!term) return;
+					if (event.type === "data") {
+						term.write(event.data);
+					} else if (event.type === "exit") {
+						term.writeln("\r\n[Process exited]");
+					}
+				},
+				onError: (error) => {
+					// Ignore AbortError - expected when component unmounts
+					if (error instanceof Error && error.name === "AbortError") {
+						return;
+					}
+					console.error("[Terminal] Subscription error:", error);
+				},
+			},
+		);
 		cancelSubscriptionRef.current = cancel;
 
 		// Cleanup
@@ -145,16 +189,21 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 		};
 	}, [terminalId]);
 
-	// Handle visibility changes - fit when becoming visible
+	// Handle visibility changes - sync state and fit when becoming visible
 	useEffect(() => {
 		if (isVisible && fitAddonRef.current && terminalRef.current) {
 			// Small delay to ensure container is rendered
 			requestAnimationFrame(() => {
 				fitAddonRef.current?.fit();
 				terminalRef.current?.focus();
+
+				// Sync state from backend when becoming visible (after initial mount)
+				if (hasInitializedRef.current) {
+					syncTerminalState();
+				}
 			});
 		}
-	}, [isVisible]);
+	}, [isVisible, syncTerminalState]);
 
 	// Sync terminal theme with next-themes
 	useEffect(() => {
@@ -172,7 +221,8 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
 
 		const resizeObserver = new ResizeObserver((entries) => {
 			// Only process if terminal is initialized and visible (use ref for current value)
-			if (!isVisibleRef.current || !fitAddonRef.current || !terminalRef.current) return;
+			if (!isVisibleRef.current || !fitAddonRef.current || !terminalRef.current)
+				return;
 
 			const entry = entries[0];
 			if (!entry) return;

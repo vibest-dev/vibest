@@ -1,8 +1,6 @@
 import { implement } from "@orpc/server";
-
-import type { AppContext } from "../../app";
-
 import { contract } from "../../../shared/contract";
+import type { AppContext } from "../../app";
 import { fsRouter } from "./fs";
 import { gitRouter } from "./git";
 import { labelRouter } from "./label";

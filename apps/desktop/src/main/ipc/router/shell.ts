@@ -1,9 +1,7 @@
 import { implement } from "@orpc/server";
 import { shell } from "electron";
-
-import type { AppContext } from "../../app";
-
 import { shellContract } from "../../../shared/contract";
+import type { AppContext } from "../../app";
 
 const os = implement(shellContract).$context<AppContext>();
 

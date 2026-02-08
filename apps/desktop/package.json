@@ -25,7 +25,9 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/headless": "^6.0.0",
     "electron-store": "^10.0.1",
     "node-pty": "^1.1.0",
     "simple-git": "^3.27.0"
