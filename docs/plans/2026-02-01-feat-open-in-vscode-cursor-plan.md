@@ -19,6 +19,7 @@ Users currently have "Open in Finder" and "Open Terminal" actions but no quick w
 Add two new IPC contracts (`openInVSCode` and `openInCursor`) to the fs module, implement handlers using the `code` and `cursor` CLI commands, and add corresponding menu items to the header component.
 
 **Key decisions:**
+
 - Separate menu items for VSCode and Cursor (not a combined dropdown)
 - CLI-based execution using `execFile`
 - Silent failure when CLI is not available (no toast/error)
@@ -28,11 +29,11 @@ Add two new IPC contracts (`openInVSCode` and `openInCursor`) to the fs module, 
 
 ### Files to Modify
 
-| File | Change |
-|------|--------|
-| `apps/desktop/src/shared/contract/fs.ts` | Add `openInVSCode` and `openInCursor` contracts |
-| `apps/desktop/src/main/ipc/router/fs.ts` | Add handlers and update router export |
-| `apps/desktop/src/renderer/src/components/layout/header.tsx` | Add menu items in two locations |
+| File                                                         | Change                                          |
+| ------------------------------------------------------------ | ----------------------------------------------- |
+| `apps/desktop/src/shared/contract/fs.ts`                     | Add `openInVSCode` and `openInCursor` contracts |
+| `apps/desktop/src/main/ipc/router/fs.ts`                     | Add handlers and update router export           |
+| `apps/desktop/src/renderer/src/components/layout/header.tsx` | Add menu items in two locations                 |
 
 ### Implementation Phases
 
@@ -178,6 +179,7 @@ const handleRepoOpenInCursor = () => {
 ## Menu Structure After Implementation
 
 **Task Header Menu:**
+
 1. Edit Task
 2. --- separator ---
 3. Open in Finder
@@ -188,6 +190,7 @@ const handleRepoOpenInCursor = () => {
 8. Archive Task
 
 **Repository Header Menu:**
+
 1. Open in Finder
 2. Open Terminal
 3. **Open in VSCode** ← new
@@ -198,6 +201,7 @@ const handleRepoOpenInCursor = () => {
 ## Testing
 
 Manual testing steps:
+
 1. Select a task with an associated worktree
 2. Click the "More options" (three dots) button
 3. Verify "Open in VSCode" and "Open in Cursor" appear after "Open Terminal"

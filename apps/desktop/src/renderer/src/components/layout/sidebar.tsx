@@ -8,7 +8,7 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
 } from "@vibest/ui/components/alert-dialog";
-import { Button } from "@vibest/ui/components/button";
+import { Button, buttonVariants } from "@vibest/ui/components/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import {
   SidebarContent,
@@ -31,8 +31,6 @@ import {
   Settings,
   Tags,
 } from "lucide-react";
-
-import { ThemeToggle } from "../theme-toggle";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Label, Repository, Task, Worktree } from "../../types";
@@ -40,6 +38,7 @@ import type { Label, Repository, Task, Worktree } from "../../types";
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
 import { useAppStore } from "../../stores";
+import { ThemeToggle } from "../theme-toggle";
 import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 
 interface TaskWithWorktrees {
@@ -47,7 +46,7 @@ interface TaskWithWorktrees {
   worktrees: Worktree[];
 }
 
-interface SidebarProps {
+export interface PrimarySidebarProps {
   repositories: Repository[];
   currentTaskId: string | null;
   isLoading: boolean;
@@ -245,15 +244,10 @@ function RepoTabs({
               openOnHover
               delay={0}
               closeDelay={0}
-              render={
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded px-1.5 py-0.5 text-sm font-medium transition-colors"
-                >
-                  +{overflowRepos.length}
-                </button>
-              }
-            />
+              className="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded px-1.5 py-0.5 text-sm font-medium transition-colors"
+            >
+              +{overflowRepos.length}
+            </MenuTrigger>
             <MenuPopup side="bottom" align="start">
               {overflowRepos.map((repo) => (
                 <MenuItem key={repo.id} onClick={() => onSelectRepository(repo.id)}>
@@ -265,16 +259,9 @@ function RepoTabs({
         )}
       </div>
       <Menu>
-        <MenuTrigger
-          render={
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded transition-colors"
-            >
-              <Plus className="size-3.5" />
-            </button>
-          }
-        />
+        <MenuTrigger className="text-muted-foreground hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded transition-colors">
+          <Plus className="size-3.5" />
+        </MenuTrigger>
         <MenuPopup side="bottom" align="end">
           <MenuItem onClick={onAddRepository}>
             <FolderPlus />
@@ -290,7 +277,7 @@ function RepoTabs({
   );
 }
 
-export function Sidebar({
+export function PrimarySidebar({
   repositories,
   currentTaskId,
   isLoading,
@@ -300,7 +287,7 @@ export function Sidebar({
   onSelectTask,
   onArchiveTask,
   onManageLabels,
-}: SidebarProps) {
+}: PrimarySidebarProps) {
   const [archiveTaskTarget, setArchiveTaskTarget] = useState<TaskWithWorktrees | null>(null);
 
   // Get current repository from store
@@ -376,8 +363,11 @@ export function Sidebar({
   const archiveTaskName = archiveTaskTarget?.task.name ?? "";
 
   return (
-    <SidebarProvider className="h-full min-h-0">
-      <SidebarRoot collapsible="none">
+    <SidebarProvider
+      className="h-full min-h-0 w-full"
+      style={{ "--sidebar-width": "100%" } as React.CSSProperties}
+    >
+      <SidebarRoot collapsible="none" className="w-full">
         <SidebarHeader className="app-drag-region relative shrink-0 pt-9 pb-8">
           {/* Repo Tabs - fixed at top, doesn't scroll */}
           {!isLoading && repositories.length > 0 && (
@@ -426,16 +416,9 @@ export function Sidebar({
                     <Plus className="size-4" />
                   </button>
                   <Menu>
-                    <MenuTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors"
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </button>
-                      }
-                    />
+                    <MenuTrigger className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors">
+                      <MoreHorizontal className="size-4" />
+                    </MenuTrigger>
                     <MenuPopup side="right" align="start">
                       <MenuItem onClick={() => onManageLabels(currentRepository.id)}>
                         <Tags />
@@ -507,7 +490,9 @@ export function Sidebar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose className={buttonVariants({ variant: "outline" })}>
+              Cancel
+            </AlertDialogClose>
             <Button onClick={handleConfirmArchiveTask}>Commit and archive</Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -515,3 +500,5 @@ export function Sidebar({
     </SidebarProvider>
   );
 }
+
+export { PrimarySidebar as Sidebar };

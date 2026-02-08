@@ -11,17 +11,20 @@ deepened: 2026-02-05
 
 **Deepened on:** 2026-02-05
 **Research agents used:**
+
 - best-practices-researcher (Rust async PTY patterns)
 - security-sentinel (Unix socket security, input validation, resource exhaustion)
 - performance-oracle (ring buffer, batching, zero-copy I/O)
 
 ### Key Improvements
+
 1. **Production-ready code patterns** for pty-process + tokio, signal handling, Unix socket server
 2. **Comprehensive security hardening** including symlink attack prevention, peer credential verification, input validation with schema
 3. **Performance-optimized data structures** with line-based ring buffer, dual-threshold batching (16ms/200KB), zero-copy I/O patterns
 4. **Binary protocol design** for hot paths achieving ~5x JSON speedup
 
 ### New Considerations Discovered
+
 - Use `O_NOFOLLOW` and file descriptor operations to prevent TOCTOU races
 - Verify peer credentials (`SO_PEERCRED`) on every connection
 - Binary protocol for output streaming, JSON for control messages
@@ -35,6 +38,7 @@ deepened: 2026-02-05
 构建一个独立的 Rust PTY daemon 进程，作为 Electron 应用的 PTY 持久化层。当 Electron 崩溃或重启时，PTY sessions 保持活跃，用户可以恢复交互式进程（如 vim、htop）。
 
 **核心价值：**
+
 - Electron 崩溃 → PTY 不丢失 → 恢复 vim 编辑状态
 - App 重启 → 重新 attach → 继续工作
 - Tab 切换 → 原始字节透传 → 无转换损耗
@@ -66,14 +70,15 @@ Electron 崩溃 → 所有 PTY 死亡 → vim/htop 状态丢失
 
 ### 为什么用 Rust
 
-| 方案 | 优点 | 缺点 |
-|------|------|------|
-| **Rust daemon** | 高性能、低内存、类型安全 | 开发成本 |
-| Node.js daemon | 熟悉、快速开发 | 内存占用高、GC |
-| 封装 abduco | 零开发 | C 依赖、灵活性低 |
-| Bun daemon | 原生 PTY、简单 | 不支持 Windows |
+| 方案            | 优点                     | 缺点             |
+| --------------- | ------------------------ | ---------------- |
+| **Rust daemon** | 高性能、低内存、类型安全 | 开发成本         |
+| Node.js daemon  | 熟悉、快速开发           | 内存占用高、GC   |
+| 封装 abduco     | 零开发                   | C 依赖、灵活性低 |
+| Bun daemon      | 原生 PTY、简单           | 不支持 Windows   |
 
 选择 Rust 是因为：
+
 1. PTY daemon 需要长期运行，低内存占用重要
 2. 原始字节处理性能关键
 3. 类型安全减少运行时错误
@@ -272,12 +277,14 @@ caps = "0.5"                  # Capability checking
 ### Research Insights: Crate Selection
 
 **Best Practices:**
+
 - `pty-process 0.5+` has native tokio support with `AsyncRead`/`AsyncWrite` on PTY
 - `bytes::Bytes` enables zero-copy data sharing between tasks
 - `tokio-util::sync::CancellationToken` is the recommended pattern for graceful shutdown
 - `validator` crate provides schema validation integrated with serde
 
 **Performance Considerations:**
+
 - Prefer `nix` over raw `libc` for safer syscall wrappers
 - `crossbeam-queue::ArrayQueue` is lock-free and ideal for buffer pooling
 - `tracing-appender` provides non-blocking async log writes
@@ -301,6 +308,7 @@ caps = "0.5"                  # Capability checking
 ### Research Insights: Performance Optimization
 
 **Ring Buffer for Scrollback:**
+
 ```rust
 use bytes::Bytes;
 use std::collections::VecDeque;
@@ -344,6 +352,7 @@ impl ScrollbackBuffer {
 ```
 
 **Dual-Threshold Batching (16ms + 200KB):**
+
 ```rust
 pub struct OutputBatcher {
     buffer: BytesMut,
@@ -378,6 +387,7 @@ impl OutputBatcher {
 ```
 
 **Binary Protocol for Hot Paths:**
+
 ```rust
 /// Binary: 9 bytes header vs JSON: ~50 bytes
 /// Achieves ~5x faster encoding, ~10x smaller for terminal output
@@ -413,6 +423,7 @@ pub fn encode_output(session_id: u32, data: &Bytes) -> Bytes {
 ### Research Insights: Security Hardening
 
 **Socket Security - Symlink Attack Prevention:**
+
 ```rust
 use nix::fcntl::{OFlag};
 use nix::sys::stat::Mode;
@@ -443,6 +454,7 @@ fn create_secure_socket_dir() -> Result<PathBuf, SecurityError> {
 ```
 
 **Peer Credential Verification:**
+
 ```rust
 use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
 
@@ -458,6 +470,7 @@ fn verify_peer_credentials(stream: &UnixStream) -> Result<(), SecurityError> {
 ```
 
 **Input Validation with Schema:**
+
 ```rust
 use validator::{Validate, ValidationError};
 
@@ -485,6 +498,7 @@ fn validate_session_id(id: &str) -> Result<(), ValidationError> {
 ```
 
 **Resource Exhaustion Protection:**
+
 ```rust
 pub struct ResourceLimits {
     max_sessions: usize,           // 100
@@ -501,6 +515,7 @@ pub struct ConnectionThrottler {
 ```
 
 **Shell Allowlist:**
+
 ```rust
 const ALLOWED_SHELLS: &[&str] = &[
     "/bin/bash", "/bin/sh", "/bin/zsh",
@@ -575,6 +590,7 @@ fn validate_shell(shell: &str) -> Result<&'static str, SecurityError> {
 **目标**: 基础 PTY daemon，支持 create/attach/write/close
 
 **文件结构**:
+
 ```
 packages/pty-daemon/
 ├── Cargo.toml
@@ -592,6 +608,7 @@ packages/pty-daemon/
 ```
 
 **任务**:
+
 1. 项目初始化 + Cargo.toml
 2. 消息协议定义 (protocol.rs) - 包含 binary 和 JSON 两种格式
 3. PTY 包装 (pty.rs) - 使用 pty-process 0.5+
@@ -754,6 +771,7 @@ pub fn daemonize_process(config: &DaemonConfig) -> Result<(), Box<dyn std::error
 **目标**: Node.js 客户端库，用于 Electron 集成
 
 **文件结构**:
+
 ```
 packages/pty-daemon-client/
 ├── package.json
@@ -767,6 +785,7 @@ packages/pty-daemon-client/
 ```
 
 **任务**:
+
 1. 项目初始化
 2. Unix Socket 连接
 3. 消息编解码
@@ -778,11 +797,13 @@ packages/pty-daemon-client/
 **目标**: 替换现有 node-pty 实现
 
 **修改文件**:
+
 - `apps/desktop/src/main/terminal/terminal-manager.ts`
 - `apps/desktop/src/main/app.ts`
 - `apps/desktop/package.json`
 
 **任务**:
+
 1. 引入 pty-daemon-client
 2. 重构 TerminalManager
 3. Daemon 启动逻辑
@@ -793,6 +814,7 @@ packages/pty-daemon-client/
 **目标**: 磁盘持久化 + 生产就绪
 
 **任务**:
+
 1. Scrollback 磁盘持久化
 2. Session 元数据持久化
 3. Daemon 崩溃恢复
@@ -801,13 +823,13 @@ packages/pty-daemon-client/
 
 ## Success Metrics
 
-| 指标 | 目标 |
-|------|------|
-| 内存占用 | < 5MB 基础 + 10MB/session |
-| 启动时间 | < 100ms |
-| Attach 延迟 | < 50ms |
-| 数据吞吐 | > 10MB/s |
-| 崩溃恢复 | 100% session 保留 |
+| 指标        | 目标                      |
+| ----------- | ------------------------- |
+| 内存占用    | < 5MB 基础 + 10MB/session |
+| 启动时间    | < 100ms                   |
+| Attach 延迟 | < 50ms                    |
+| 数据吞吐    | > 10MB/s                  |
+| 崩溃恢复    | 100% session 保留         |
 
 ## Critical Design Decisions
 
@@ -816,11 +838,13 @@ packages/pty-daemon-client/
 **选择：移除 HeadlessTerminal，由 Daemon 完全接管状态管理**
 
 原因：
+
 - Daemon 已提供 scrollback，无需重复
 - 减少内存占用和代码复杂度
 - 避免状态不一致
 
 保留的部分：
+
 - 终端模式追踪逻辑可移植到 Daemon（可选）
 - 或由前端 xterm.js 自行处理
 
@@ -932,12 +956,12 @@ Electron 启动
 
 ### 信号处理
 
-| 信号 | 行为 |
-|------|------|
+| 信号    | 行为                                                   |
+| ------- | ------------------------------------------------------ |
 | SIGTERM | 优雅关闭：通知所有 client，等待 pending 写入，清理资源 |
-| SIGINT | 同 SIGTERM |
-| SIGHUP | 忽略（允许 controlling terminal 关闭） |
-| SIGCHLD | 处理子进程（PTY）退出 |
+| SIGINT  | 同 SIGTERM                                             |
+| SIGHUP  | 忽略（允许 controlling terminal 关闭）                 |
+| SIGCHLD | 处理子进程（PTY）退出                                  |
 
 ### Research Insights: Signal Handling Implementation
 
@@ -1056,8 +1080,8 @@ enum ErrorCode {
 // Client 端重试策略
 const RETRY_CONFIG = {
   maxRetries: 3,
-  baseDelay: 100,    // ms
-  maxDelay: 2000,    // ms
+  baseDelay: 100, // ms
+  maxDelay: 2000, // ms
   backoffMultiplier: 2,
 };
 
@@ -1075,14 +1099,14 @@ const RETRY_CONFIG = {
 
 ### 风险
 
-| 风险 | 影响 | 缓解 |
-|------|------|------|
-| Rust 学习曲线 | 中 | 参考 abduco 源码，使用成熟 crates |
-| pty-process 兼容性 | 低 | 该 crate 广泛使用，macOS/Linux 支持良好 |
-| Daemon 稳定性 | 高 | 充分测试，日志完善 |
-| 磁盘 I/O 性能 | 低 | 仅写 scrollback，异步 I/O |
-| Socket 残留 | 中 | 启动时检测 stale socket，自动清理 |
-| 多实例竞争 | 中 | 使用 flock 确保单例 daemon |
+| 风险               | 影响 | 缓解                                    |
+| ------------------ | ---- | --------------------------------------- |
+| Rust 学习曲线      | 中   | 参考 abduco 源码，使用成熟 crates       |
+| pty-process 兼容性 | 低   | 该 crate 广泛使用，macOS/Linux 支持良好 |
+| Daemon 稳定性      | 高   | 充分测试，日志完善                      |
+| 磁盘 I/O 性能      | 低   | 仅写 scrollback，异步 I/O               |
+| Socket 残留        | 中   | 启动时检测 stale socket，自动清理       |
+| 多实例竞争         | 中   | 使用 flock 确保单例 daemon              |
 
 ## References & Research
 
@@ -1096,6 +1120,7 @@ const RETRY_CONFIG = {
 ### External References
 
 **Official Documentation:**
+
 - [pty-process crate docs](https://docs.rs/pty-process/0.5.3/pty_process) - Async PTY with tokio
 - [Tokio signal handling](https://docs.rs/tokio/latest/tokio/signal/index.html)
 - [Tokio UnixListener](https://docs.rs/tokio/latest/tokio/net/struct.UnixListener.html)
@@ -1103,19 +1128,23 @@ const RETRY_CONFIG = {
 - [Tokio Framing Tutorial](https://tokio.rs/tokio/tutorial/framing)
 
 **Daemonization:**
+
 - [daemonize crate](https://docs.rs/daemonize/latest/daemonize/struct.Daemonize.html)
 - [fork crate](https://docs.rs/fork/latest/fork/fn.daemon.html) - macOS compatible
 - [Building a Daemon using Rust](https://tuttlem.github.io/2024/11/16/building-a-daemon-using-rust.html)
 
 **Buffer Management:**
+
 - [bytes::BytesMut](https://rustasync.github.io/runtime/bytes/struct.BytesMut.html)
 - [Zero-Copy Patterns for Rust](https://medium.com/@FAANG/stop-copying-start-teleporting-bytes-rusts-zero-copy-super-power-for-2025-scale-throughput-a6a88b44d7f4)
 
 **Terminal Multiplexer Examples:**
+
 - [Tab Terminal Multiplexer](https://implaustin.hashnode.dev/how-to-write-a-terminal-multiplexer-with-rust-async-and-actors-part-2)
 - [Linux TTY with Async Rust](https://developerlife.com/2024/08/20/tty-linux-async-rust/)
 
 **Architecture References:**
+
 - [tmux 源码](https://github.com/tmux/tmux) - 参考架构
 - [abduco 源码](https://github.com/martanne/abduco) - 简化实现参考
 - [tokio-graceful-shutdown](https://lib.rs/crates/tokio-graceful-shutdown)

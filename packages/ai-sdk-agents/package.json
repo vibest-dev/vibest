@@ -23,8 +23,8 @@
     }
   },
   "scripts": {
-    "stub": "tsdown",
-    "build": "tsdown",
+    "stub": "pnpm run build",
+    "build": "tsdown --format cjs --no-dts --publint false && tsdown --format esm --dts --clean false",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "git clean -xdf node_modules .turbo dist"

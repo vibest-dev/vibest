@@ -1,59 +1,23 @@
 "use client";
 
+import { Splitter as SplitterPrimitive } from "@ark-ui/react/splitter";
 import { cn } from "@vibest/ui/lib/utils";
-import {
-  Group,
-  Panel,
-  Separator,
-  type GroupProps,
-  type PanelProps,
-  type SeparatorProps,
-} from "react-resizable-panels";
 
-interface SplitterPanelConfig {
-  id: string;
-  minSize?: number;
-  maxSize?: number;
-  collapsible?: boolean;
+function Splitter({ className, ...props }: SplitterPrimitive.RootProps) {
+  return <SplitterPrimitive.Root className={cn("flex w-full", className)} {...props} />;
 }
 
-interface SplitterProps extends Omit<GroupProps, "orientation"> {
-  panels?: SplitterPanelConfig[];
-  defaultSize?: number[];
-  direction?: "horizontal" | "vertical";
+const SplitterContext = SplitterPrimitive.Context;
+
+function SplitterPanel(props: SplitterPrimitive.PanelProps) {
+  return <SplitterPrimitive.Panel {...props} />;
 }
 
-function Splitter({
-  panels: _panels,
-  defaultSize: _defaultSize,
-  className,
-  direction = "horizontal",
-  ...props
-}: SplitterProps) {
+const SplitterProvider = SplitterPrimitive.RootProvider;
+
+function SplitterResizeTrigger({ className, ...props }: SplitterPrimitive.ResizeTriggerProps) {
   return (
-    <Group
-      orientation={direction}
-      className={cn("flex", direction === "vertical" ? "flex-col" : "flex-row", className)}
-      {...props}
-    />
-  );
-}
-
-interface SplitterPanelProps extends Omit<PanelProps, "id"> {
-  id?: string;
-}
-
-function SplitterPanel({ className, id, ...props }: SplitterPanelProps) {
-  return <Panel id={id} className={cn("", className)} {...props} />;
-}
-
-interface SplitterResizeTriggerProps extends SeparatorProps {
-  id?: string;
-}
-
-function SplitterResizeTrigger({ className, id: _id, ...props }: SplitterResizeTriggerProps) {
-  return (
-    <Separator
+    <SplitterPrimitive.ResizeTrigger
       className={cn(
         "bg-border relative w-0.5 transition-all duration-200 ease-in-out",
         "hover:bg-accent hover:shadow-accent/50 hover:z-10 hover:scale-x-[3] hover:shadow-lg",
@@ -64,5 +28,16 @@ function SplitterResizeTrigger({ className, id: _id, ...props }: SplitterResizeT
   );
 }
 
-export { Splitter, SplitterPanel, SplitterResizeTrigger };
-export type { SplitterProps, SplitterPanelProps, SplitterResizeTriggerProps };
+function SplitterResizeTriggerIndicator(props: SplitterPrimitive.ResizeTriggerIndicatorProps) {
+  return <SplitterPrimitive.ResizeTriggerIndicator {...props} />;
+}
+
+export { useSplitter, useSplitterContext } from "@ark-ui/react/splitter";
+export {
+  Splitter,
+  SplitterContext,
+  SplitterPanel,
+  SplitterProvider,
+  SplitterResizeTrigger,
+  SplitterResizeTriggerIndicator,
+};

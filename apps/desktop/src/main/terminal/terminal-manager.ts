@@ -6,8 +6,9 @@ import * as fs from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
 import type { AppPublisher } from "../app";
-import { HeadlessTerminal } from "./headless-terminal";
 import type { TerminalSnapshot } from "./types";
+
+import { HeadlessTerminal } from "./headless-terminal";
 
 /**
  * Direct publisher without batching - for testing MessagePort performance.

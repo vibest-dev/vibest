@@ -9,37 +9,23 @@ const screenshotsDir = path.join(__dirname, "../screenshots");
 test.describe("Screenshots", () => {
   test("capture main window on launch", async ({ window }) => {
     // Wait for content to load
-    await window.waitForSelector("text=Workspace");
+    await window.waitForSelector("text=No repositories");
 
     await window.screenshot({
       path: path.join(screenshotsDir, "01-main-window.png"),
     });
   });
 
-  test("capture workspace menu", async ({ window }) => {
-    // Open menu
-    const plusButton = window.locator(
-      'button:has([class*="lucide-plus"]), button:has(svg.lucide-plus)',
-    );
-    await plusButton.first().click();
-
-    // Wait for menu to show
-    await window.waitForSelector("text=Add Local Repository");
+  test("capture repository actions", async ({ window }) => {
+    await window.waitForSelector("text=No repositories");
 
     await window.screenshot({
-      path: path.join(screenshotsDir, "02-workspace-menu.png"),
+      path: path.join(screenshotsDir, "02-repository-actions.png"),
     });
   });
 
   test("capture clone repository dialog", async ({ window }) => {
-    // Open menu
-    const plusButton = window.locator(
-      'button:has([class*="lucide-plus"]), button:has(svg.lucide-plus)',
-    );
-    await plusButton.first().click();
-
-    // Click Clone from URL
-    await window.getByText("Clone from URL").click();
+    await window.getByRole("button", { name: "Clone" }).click();
 
     // Wait for dialog
     await window.waitForSelector("text=Clone Repository");

@@ -69,18 +69,19 @@ Tab Switch:
 
 #### Key Components
 
-| Component | Location | Responsibility |
-|-----------|----------|----------------|
-| `HeadlessTerminal` | `apps/desktop/src/main/terminal/headless-terminal.ts` | Wraps @xterm/headless with mode tracking |
-| `TerminalInstance` | `apps/desktop/src/main/terminal/terminal-manager.ts` | Extended to include HeadlessTerminal |
-| `terminal.attach` | `apps/desktop/src/shared/contract/terminal.ts` | New RPC for state sync |
-| `TerminalView` | `apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx` | Updated to sync on visibility |
+| Component          | Location                                                              | Responsibility                           |
+| ------------------ | --------------------------------------------------------------------- | ---------------------------------------- |
+| `HeadlessTerminal` | `apps/desktop/src/main/terminal/headless-terminal.ts`                 | Wraps @xterm/headless with mode tracking |
+| `TerminalInstance` | `apps/desktop/src/main/terminal/terminal-manager.ts`                  | Extended to include HeadlessTerminal     |
+| `terminal.attach`  | `apps/desktop/src/shared/contract/terminal.ts`                        | New RPC for state sync                   |
+| `TerminalView`     | `apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx` | Updated to sync on visibility            |
 
 ### Implementation Phases
 
 #### Phase 1: Backend Foundation
 
 **Tasks:**
+
 - [ ] Add dependencies: `@xterm/headless`, `@xterm/addon-serialize`
 - [ ] Create `HeadlessTerminal` class with:
   - Mode tracking (DECSET/DECRST parsing)
@@ -92,6 +93,7 @@ Tab Switch:
 - [ ] Wire PTY output to both DataBatcher and HeadlessTerminal
 
 **Files to create/modify:**
+
 ```
 apps/desktop/src/main/terminal/
 ├── headless-terminal.ts     (new)
@@ -100,6 +102,7 @@ apps/desktop/src/main/terminal/
 ```
 
 **Success criteria:**
+
 - HeadlessTerminal receives all PTY output
 - State can be serialized via `getSnapshot()`
 - Terminal modes are tracked correctly
@@ -109,23 +112,24 @@ apps/desktop/src/main/terminal/
 #### Phase 2: RPC Layer
 
 **Tasks:**
+
 - [ ] Define `TerminalSnapshotSchema` in contract
 - [ ] Add `terminal.attach` RPC endpoint:
   ```typescript
-  attach: oc
-    .input(z.object({ terminalId: z.string() }))
-    .output(TerminalSnapshotSchema)
+  attach: oc.input(z.object({ terminalId: z.string() })).output(TerminalSnapshotSchema);
   ```
 - [ ] Implement `attach` handler in terminal router
 - [ ] Add flush mechanism to ensure consistent state during serialization
 
 **Files to create/modify:**
+
 ```
 apps/desktop/src/shared/contract/terminal.ts  (modify)
 apps/desktop/src/main/ipc/router/terminal.ts  (modify)
 ```
 
 **Success criteria:**
+
 - Client can call `terminal.attach` and receive complete state
 - State includes scrollback, modes, cwd, cursor position
 
@@ -134,26 +138,29 @@ apps/desktop/src/main/ipc/router/terminal.ts  (modify)
 #### Phase 3: Frontend Integration
 
 **Tasks:**
+
 - [ ] Update `TerminalView` to sync state on visibility change:
   ```typescript
   useEffect(() => {
     if (isVisible) {
-      const snapshot = await client.terminal.attach({ terminalId })
-      terminal.write(snapshot.rehydrateSequences)
-      terminal.write(snapshot.snapshotAnsi)
+      const snapshot = await client.terminal.attach({ terminalId });
+      terminal.write(snapshot.rehydrateSequences);
+      terminal.write(snapshot.snapshotAnsi);
     }
-  }, [isVisible])
+  }, [isVisible]);
   ```
 - [ ] Update scrollback configuration from 1000 to 10000 lines
 - [ ] Handle state sync errors gracefully
 - [ ] Add loading state during sync
 
 **Files to modify:**
+
 ```
 apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 ```
 
 **Success criteria:**
+
 - Tab switching restores complete terminal state
 - vim/less (alternate screen) restores correctly
 - CWD is displayed correctly after switch
@@ -163,6 +170,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 #### Phase 4: Polish & Edge Cases
 
 **Tasks:**
+
 - [ ] Handle resize during state transfer
 - [ ] Handle process exit while tab is hidden
 - [ ] Add proper disposal sequence (batcher → headless → PTY)
@@ -170,6 +178,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 - [ ] Memory profiling with 20 terminals
 
 **Success criteria:**
+
 - No memory leaks under sustained use
 - No race conditions during rapid switching
 - Graceful handling of all error scenarios
@@ -183,6 +192,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 **Description:** Keep using CSS `visibility: hidden` and continuous streaming.
 
 **Why rejected:**
+
 - No recovery if frontend misses data
 - No mode/CWD tracking
 - Frontend restart loses all state
@@ -192,6 +202,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 **Description:** Store raw PTY output in a string buffer on backend.
 
 **Why rejected:**
+
 - Loses escape sequence parsing
 - Can't extract modes or CWD
 - Would need custom serialization
@@ -201,6 +212,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 **Description:** Copy Superset's complete implementation including cold restore.
 
 **Why rejected:**
+
 - Over-engineered for runtime-only persistence
 - Adds complexity without benefit (no restart persistence needed)
 - Subprocess-based PTY isolation unnecessary for desktop app
@@ -237,20 +249,20 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 
 ## Success Metrics
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| State sync latency | < 100ms | Performance profiling |
-| Memory per terminal | < 2MB | Memory profiling |
-| State restoration accuracy | 100% | E2E test coverage |
+| Metric                     | Target  | Measurement           |
+| -------------------------- | ------- | --------------------- |
+| State sync latency         | < 100ms | Performance profiling |
+| Memory per terminal        | < 2MB   | Memory profiling      |
+| State restoration accuracy | 100%    | E2E test coverage     |
 
 ## Dependencies & Prerequisites
 
 ### Dependencies
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| `@xterm/headless` | ^5.5.0 | Headless terminal emulator |
-| `@xterm/addon-serialize` | ^0.13.0 | State serialization |
+| Dependency               | Version | Purpose                    |
+| ------------------------ | ------- | -------------------------- |
+| `@xterm/headless`        | ^5.5.0  | Headless terminal emulator |
+| `@xterm/addon-serialize` | ^0.13.0 | State serialization        |
 
 ### Prerequisites
 
@@ -260,12 +272,12 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 
 ## Risk Analysis & Mitigation
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Memory pressure with 20 terminals | Medium | High | Monitor memory, implement pruning |
-| State sync race conditions | Medium | Medium | Debounce, cancel pending requests |
-| Mode parsing edge cases | Low | Medium | Extensive testing, reference Superset |
-| OSC-7 shell configuration | Medium | Low | Document setup, show warning |
+| Risk                              | Likelihood | Impact | Mitigation                            |
+| --------------------------------- | ---------- | ------ | ------------------------------------- |
+| Memory pressure with 20 terminals | Medium     | High   | Monitor memory, implement pruning     |
+| State sync race conditions        | Medium     | Medium | Debounce, cancel pending requests     |
+| Mode parsing edge cases           | Low        | Medium | Extensive testing, reference Superset |
+| OSC-7 shell configuration         | Medium     | Low    | Document setup, show warning          |
 
 ## Resource Requirements
 
@@ -304,6 +316,7 @@ apps/desktop/src/renderer/src/components/terminal/terminal-view.tsx
 ### Design Inspiration
 
 Superset's `HeadlessEmulator` class provides the reference implementation:
+
 - Mode tracking via escape sequence parsing
 - OSC-7 parsing for CWD
 - `getSnapshot()` returning serialized state + rehydrate sequences
@@ -313,22 +326,22 @@ Superset's `HeadlessEmulator` class provides the reference implementation:
 
 ## Appendix: Terminal Modes to Track
 
-| Mode | Number | Description |
-|------|--------|-------------|
-| Application Cursor Keys | 1 | Arrow keys send application sequences |
-| Origin Mode | 6 | Cursor addressing relative to scroll region |
-| Auto Wrap | 7 | Automatic line wrapping |
-| X10 Mouse | 9 | Basic mouse click reporting |
-| Cursor Visible | 25 | Show/hide cursor |
-| Alternate Screen | 47/1049 | Full-screen app buffer |
-| Normal Mouse | 1000 | Mouse button press/release |
-| Highlight Mouse | 1001 | Highlight tracking |
-| Button Event Mouse | 1002 | Report button motion |
-| Any Event Mouse | 1003 | Report all motion |
-| Focus Reporting | 1004 | Focus in/out events |
-| UTF8 Mouse | 1005 | UTF-8 mouse encoding |
-| SGR Mouse | 1006 | SGR mouse encoding |
-| Bracketed Paste | 2004 | Paste mode brackets |
+| Mode                    | Number  | Description                                 |
+| ----------------------- | ------- | ------------------------------------------- |
+| Application Cursor Keys | 1       | Arrow keys send application sequences       |
+| Origin Mode             | 6       | Cursor addressing relative to scroll region |
+| Auto Wrap               | 7       | Automatic line wrapping                     |
+| X10 Mouse               | 9       | Basic mouse click reporting                 |
+| Cursor Visible          | 25      | Show/hide cursor                            |
+| Alternate Screen        | 47/1049 | Full-screen app buffer                      |
+| Normal Mouse            | 1000    | Mouse button press/release                  |
+| Highlight Mouse         | 1001    | Highlight tracking                          |
+| Button Event Mouse      | 1002    | Report button motion                        |
+| Any Event Mouse         | 1003    | Report all motion                           |
+| Focus Reporting         | 1004    | Focus in/out events                         |
+| UTF8 Mouse              | 1005    | UTF-8 mouse encoding                        |
+| SGR Mouse               | 1006    | SGR mouse encoding                          |
+| Bracketed Paste         | 2004    | Paste mode brackets                         |
 
 ## Appendix: TerminalSnapshot Schema
 
@@ -374,6 +387,7 @@ interface TerminalSnapshot {
 For CWD tracking to work, the shell must emit OSC-7 sequences. Example configurations:
 
 **Zsh (~/.zshrc):**
+
 ```bash
 # Emit OSC-7 on directory change
 autoload -Uz add-zsh-hook
@@ -385,12 +399,14 @@ osc7_cwd  # Emit on shell start
 ```
 
 **Bash (~/.bashrc):**
+
 ```bash
 # Emit OSC-7 on prompt
 PROMPT_COMMAND='printf "\e]7;file://%s%s\e\\" "${HOSTNAME}" "${PWD}"'
 ```
 
 **Fish (~/.config/fish/config.fish):**
+
 ```fish
 function osc7_cwd --on-variable PWD
   printf '\e]7;file://%s%s\e\\' (hostname) $PWD

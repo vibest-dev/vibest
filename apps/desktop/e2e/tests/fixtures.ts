@@ -16,7 +16,7 @@ export const test = base.extend<{
   electronApp: ElectronApplication;
   window: Page;
 }>({
-  electronApp: async (_deps, use) => {
+  electronApp: async ({}, use) => {
     // Build output path
     const appPath = path.join(__dirname, "../../dist/main/index.js");
 
@@ -41,6 +41,7 @@ export const test = base.extend<{
 
     // Wait for app to be ready
     await window.waitForLoadState("domcontentloaded");
+    await window.setViewportSize({ width: 1440, height: 900 });
 
     await use(window);
   },

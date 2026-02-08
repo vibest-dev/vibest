@@ -17,13 +17,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ark-ui/react": "^5.31.0",
+    "@base-ui/react": "^1.1.0",
     "@fontsource-variable/geist": "^5.2.7",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "ai-sdk-agents": "workspace:*",
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
-    "@base-ui/react": "^1.1.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@types/react-syntax-highlighter": "^15.5.13",

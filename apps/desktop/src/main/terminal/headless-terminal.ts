@@ -9,12 +9,9 @@
  */
 
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { Terminal } from "@xterm/headless";
-import {
-  DEFAULT_MODES,
-  type TerminalModes,
-  type TerminalSnapshot,
-} from "./types";
+import { Terminal } from "@xterm/headless/lib-headless/xterm-headless.mjs";
+
+import { DEFAULT_MODES, type TerminalModes, type TerminalSnapshot } from "./types";
 
 // =============================================================================
 // Mode Tracking Constants
@@ -190,9 +187,7 @@ export class HeadlessTerminal {
     const incompleteSequence = this.findIncompleteTrackedSequence(fullData);
 
     if (incompleteSequence) {
-      if (
-        incompleteSequence.length <= HeadlessTerminal.MAX_ESCAPE_BUFFER_SIZE
-      ) {
+      if (incompleteSequence.length <= HeadlessTerminal.MAX_ESCAPE_BUFFER_SIZE) {
         this.escapeSequenceBuffer = incompleteSequence;
       }
     }
@@ -210,15 +205,11 @@ export class HeadlessTerminal {
     if (afterLastEsc.startsWith(`${ESC}[?`)) {
       const completePattern = new RegExp(`${escEscaped}\\[\\?[0-9;]+[hl]`);
       if (completePattern.test(afterLastEsc)) {
-        const globalPattern = new RegExp(
-          `${escEscaped}\\[\\?[0-9;]+[hl]`,
-          "g",
-        );
+        const globalPattern = new RegExp(`${escEscaped}\\[\\?[0-9;]+[hl]`, "g");
         const matches = afterLastEsc.match(globalPattern);
         if (matches) {
           const lastMatch = matches[matches.length - 1];
-          const lastMatchEnd =
-            afterLastEsc.lastIndexOf(lastMatch) + lastMatch.length;
+          const lastMatchEnd = afterLastEsc.lastIndexOf(lastMatch) + lastMatch.length;
           const remainder = afterLastEsc.slice(lastMatchEnd);
           if (remainder.includes(ESC)) {
             return this.findIncompleteTrackedSequence(remainder);
@@ -249,19 +240,14 @@ export class HeadlessTerminal {
   }
 
   private parseModeChanges(data: string): void {
-    const modeRegex = new RegExp(
-      `${escapeRegex(ESC)}\\[\\?([0-9;]+)([hl])`,
-      "g",
-    );
+    const modeRegex = new RegExp(`${escapeRegex(ESC)}\\[\\?([0-9;]+)([hl])`, "g");
 
     for (const match of data.matchAll(modeRegex)) {
       const modesStr = match[1];
       const action = match[2];
       const enable = action === "h";
 
-      const modeNumbers = modesStr
-        .split(";")
-        .map((s) => Number.parseInt(s, 10));
+      const modeNumbers = modesStr.split(";").map((s) => Number.parseInt(s, 10));
 
       for (const modeNum of modeNumbers) {
         const modeName = MODE_MAP[modeNum];
@@ -293,11 +279,7 @@ export class HeadlessTerminal {
   private generateRehydrateSequences(): string {
     const sequences: string[] = [];
 
-    const addModeSequence = (
-      modeNum: number,
-      enabled: boolean,
-      defaultEnabled: boolean,
-    ) => {
+    const addModeSequence = (modeNum: number, enabled: boolean, defaultEnabled: boolean) => {
       if (enabled !== defaultEnabled) {
         sequences.push(`${ESC}[?${modeNum}${enabled ? "h" : "l"}`);
       }
