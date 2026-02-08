@@ -26,6 +26,35 @@ export const TerminalEventSchema = z.discriminatedUnion("type", [
 
 export type TerminalEvent = z.infer<typeof TerminalEventSchema>;
 
+export const TerminalModesSchema = z.object({
+  applicationCursorKeys: z.boolean(),
+  bracketedPaste: z.boolean(),
+  mouseTrackingX10: z.boolean(),
+  mouseTrackingNormal: z.boolean(),
+  mouseTrackingHighlight: z.boolean(),
+  mouseTrackingButtonEvent: z.boolean(),
+  mouseTrackingAnyEvent: z.boolean(),
+  focusReporting: z.boolean(),
+  mouseUtf8: z.boolean(),
+  mouseSgr: z.boolean(),
+  alternateScreen: z.boolean(),
+  cursorVisible: z.boolean(),
+  originMode: z.boolean(),
+  autoWrap: z.boolean(),
+});
+
+export const TerminalSnapshotSchema = z.object({
+  snapshotAnsi: z.string(),
+  rehydrateSequences: z.string(),
+  cwd: z.string().nullable(),
+  modes: TerminalModesSchema,
+  cols: z.number(),
+  rows: z.number(),
+  scrollbackLines: z.number(),
+});
+
+export type TerminalSnapshot = z.infer<typeof TerminalSnapshotSchema>;
+
 export const terminalContract = {
   create: oc
     .input(
@@ -64,6 +93,14 @@ export const terminalContract = {
       terminalId: z.string(),
     }),
   ),
+
+  snapshot: oc
+    .input(
+      z.object({
+        terminalId: z.string(),
+      }),
+    )
+    .output(TerminalSnapshotSchema.nullable()),
 
   // Subscribe to terminal output stream
   subscribe: oc

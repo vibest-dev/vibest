@@ -55,6 +55,11 @@ export const close = os.close.handler(async ({ input, context: { app } }) => {
   app.terminal.close(terminalId);
 });
 
+export const snapshot = os.snapshot.handler(async ({ input, context: { app } }) => {
+  const { terminalId } = input;
+  return app.terminal.getSnapshot(terminalId);
+});
+
 // Streaming subscription for terminal output using Publisher
 export const subscribe = os.subscribe.handler(async function* ({
   input,
@@ -89,5 +94,6 @@ export const terminalRouter = os.router({
   write,
   resize,
   close,
+  snapshot,
   subscribe,
 });
