@@ -65,6 +65,7 @@
     "p-queue": "^9.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-scan": "^0.4.3",
     "tailwind-merge": "^3.3.0",
     "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2",
