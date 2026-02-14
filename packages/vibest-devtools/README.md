@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/fd57a0ad-eb63-46cf-8166-cc3af18b1967
 
 ### Requirements
 
-- Node 18+
+- Node 24.x
 - Coding agent correctly installed and authorized locally (e.g., Claude Code CLI).
 - A Vite-based web app (Vite 3+).
 - Frameworks: React, Preact, Vue, or JSX/TSX.

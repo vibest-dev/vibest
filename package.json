@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.6",
-    "@types/node": "^22.16.5",
+    "@types/node": "^24.10.13",
     "oxfmt": "^0.27.0",
     "oxlint": "^1.42.0",
     "publint": "^0.3.12",
