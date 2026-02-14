@@ -11,57 +11,33 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DiffFileInfo, Task, Worktree } from "./types";
 
+import { DiffRenderer } from "./components/diff-renderer";
 import { LabelManagerDialog } from "./components/label";
+import { registerViewComponent } from "./components/layout/content-renderer";
 import { PrimarySidebarOverlay } from "./components/layout/primary-sidebar-overlay";
 import { SecondarySidebar } from "./components/layout/secondary-sidebar";
 import { PrimarySidebar } from "./components/layout/sidebar";
 import { SplitRoot } from "./components/layout/split-root";
-import {
-  closeLeafTab,
-  createSplitState,
-  resolveTargetSplitId,
-  setActiveSplit,
-  setActiveTab,
-  toggleSecondarySplit,
-  upsertLeafTab,
-  type PaneLeaf,
-  type SplitTarget,
-} from "./components/layout/split-state";
 import { Topbar } from "./components/layout/topbar";
 import { usePrimarySidebarOverlayMode } from "./components/layout/use-primary-sidebar-overlay-mode";
 import { AddRepositoryDialog } from "./components/repositories/add-repository-dialog";
 import { CloneRepositoryDialog } from "./components/repositories/clone-repository-dialog";
 import { CreateTaskDialog, EditTaskDialog } from "./components/task";
+import { TerminalPart } from "./components/terminal";
 import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
 import { queryClient } from "./lib/query-client";
 import { useAppStore } from "./stores";
+import { initWorkbench } from "./workbench/init";
+import { workbench } from "./workbench/workbench";
 
+const PRIMARY_SPLIT_ID = "split-primary";
 const SECONDARY_SPLIT_ID = "split-secondary";
 
-function getLeafTitle(kind: string): string {
-  if (kind === "terminal") return "Terminal";
-  if (kind === "diff") return "Diff";
-  return kind;
-}
-
-function toDiffFileInfo(value: unknown): DiffFileInfo | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const candidate = value as Partial<DiffFileInfo>;
-  if (
-    typeof candidate.path === "string" &&
-    typeof candidate.staged === "boolean" &&
-    typeof candidate.insertions === "number" &&
-    typeof candidate.deletions === "number"
-  ) {
-    return candidate as DiffFileInfo;
-  }
-
-  return null;
-}
+// One-time initialization
+initWorkbench();
+registerViewComponent("terminal", TerminalPart);
+registerViewComponent("diff", DiffRenderer);
 
 function App(): React.JSX.Element {
   const {
@@ -83,9 +59,9 @@ function App(): React.JSX.Element {
   const setCurrentTask = useAppStore((s) => s.setCurrentTask);
   const selectedWorktreeId = useAppStore((s) => s.selectedWorktreeId);
   const selectWorktree = useAppStore((s) => s.selectWorktree);
-  const addWorktreeTerminal = useAppStore((s) => s.addWorktreeTerminal);
-  const removeWorktreeTerminal = useAppStore((s) => s.removeWorktreeTerminal);
-  const clearActiveTerminalId = useAppStore((s) => s.clearActiveTerminalId);
+
+  // Track active split for visual highlight
+  const [activeSplitId, setActiveSplitId] = useState<string | null>(PRIMARY_SPLIT_ID);
 
   const [addRepositoryPath, setAddRepositoryPath] = useState<string | null>(null);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
@@ -97,9 +73,11 @@ function App(): React.JSX.Element {
   const [showEditTaskDialog, setShowEditTaskDialog] = useState(false);
   const [editTaskTarget, setEditTaskTarget] = useState<Task | null>(null);
   const [isPrimarySidebarOverlayOpen, setIsPrimarySidebarOverlayOpen] = useState(false);
-  const [splitState, setSplitState] = useState(() => createSplitState());
 
   const isPrimarySidebarOverlayMode = usePrimarySidebarOverlayMode();
+
+  // Read splits from workbench store for deriving UI state
+  const splits = useAppStore((s) => s.workbench.splits);
 
   const addRepoMutation = useMutation({
     ...orpc.workspace.addRepository.mutationOptions(),
@@ -134,25 +112,27 @@ function App(): React.JSX.Element {
 
   const archiveTaskMutation = useMutation({
     ...orpc.task.delete.mutationOptions(),
-    onSuccess: (
+    onSuccess: async (
       _,
       variables: { taskId: string; deleteWorktree?: boolean; commitFirst?: boolean },
     ) => {
-      const workspaceQueryData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
-      const archivedTaskWorktrees = Object.values(workspaceQueryData?.worktreesByRepository ?? {})
-        .flat()
-        .filter((w) => w.taskId === variables.taskId);
-
       if (currentTaskId === variables.taskId) {
+        // Find the worktree for this task so we can clean up its splits
+        const workspaceData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
+        if (workspaceData) {
+          for (const worktrees of Object.values(workspaceData.worktreesByRepository)) {
+            const wt = worktrees.find((w) => w.taskId === variables.taskId);
+            if (wt) {
+              await workbench.closeWorktree(wt.id);
+              break;
+            }
+          }
+        }
         setCurrentTask(null);
         selectWorktree(null);
       }
 
-      archivedTaskWorktrees.forEach((worktree) => {
-        removeWorktreeTerminal(worktree.id);
-        clearActiveTerminalId(worktree.id);
-      });
-
+      const workspaceQueryData = queryClient.getQueryData(orpc.workspace.list.queryKey({}));
       if (workspaceQueryData) {
         const updatedWorktreesByRepository = { ...workspaceQueryData.worktreesByRepository };
         for (const [repoId, worktrees] of Object.entries(updatedWorktreesByRepository)) {
@@ -171,12 +151,6 @@ function App(): React.JSX.Element {
     },
     onError: (error) => setMutationError(String(error)),
   });
-
-  useEffect(() => {
-    if (selectedWorktreeId) {
-      addWorktreeTerminal(selectedWorktreeId);
-    }
-  }, [selectedWorktreeId, addWorktreeTerminal]);
 
   useEffect(() => {
     if (!isPrimarySidebarOverlayMode) {
@@ -212,44 +186,55 @@ function App(): React.JSX.Element {
     return null;
   }, [selectedTask, selectedWorktree, repositories]);
 
-  const buildPaneLeaf = useCallback((splitId: string, kind: string, state?: unknown): PaneLeaf => {
-    return {
-      id: `${splitId}:${kind}`,
-      kind,
-      title: getLeafTitle(kind),
-      state,
-    };
-  }, []);
-
+  // Switch workbench context when worktree changes (tabs persist per worktree)
   useEffect(() => {
-    if (!selectedWorktreeId) {
-      setSplitState(createSplitState());
-      return;
+    workbench.switchWorktree(selectedWorktreeId);
+    // Ensure at least a primary split exists so the user can create tabs
+    if (selectedWorktreeId) {
+      workbench.createSplit(PRIMARY_SPLIT_ID);
     }
+    setActiveSplitId(PRIMARY_SPLIT_ID);
+  }, [selectedWorktreeId]);
 
-    let seeded = createSplitState();
-    const primarySplitId = seeded.primarySplitId;
-    seeded = upsertLeafTab(seeded, "primary", buildPaneLeaf(primarySplitId, "terminal"));
-    seeded = upsertLeafTab(seeded, "primary", buildPaneLeaf(primarySplitId, "diff"));
-    seeded = setActiveTab(seeded, primarySplitId, `${primarySplitId}:terminal`);
-    setSplitState(seeded);
-  }, [buildPaneLeaf, selectedWorktreeId]);
+  // Handle "new tab" requests from TabBar
+  const handleNewTab = useCallback(
+    async (splitId: string, viewType: string) => {
+      const split = workbench.getSplit(splitId);
+      if (!split || !selectedWorktree) return;
 
-  const activeLeaf = useMemo(() => {
-    const splitId = splitState.activeSplitId;
-    const tabs = splitState.tabsBySplitId[splitId] ?? [];
-    const activeTabId = splitState.activeTabBySplitId[splitId] ?? null;
-    return tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
-  }, [splitState.activeSplitId, splitState.activeTabBySplitId, splitState.tabsBySplitId]);
+      if (viewType === "terminal") {
+        await split.setViewState({
+          type: "terminal",
+          state: { worktreeId: selectedWorktree.id, worktreePath: selectedWorktree.path },
+        });
+      } else if (viewType === "diff") {
+        const existingDiff = split.findView({ type: "diff" });
+        if (existingDiff) {
+          split.setActivePart(existingDiff);
+        } else {
+          await split.setViewState({
+            type: "diff",
+            state: { repoPath: selectedWorktree.path },
+          });
+        }
+      }
+    },
+    [selectedWorktree],
+  );
 
+  // Derive selectedDiffPath from the active split's active part
+  const allParts = useAppStore((s) => s.workbench.parts);
   const selectedDiffPath = useMemo(() => {
-    if (!activeLeaf || activeLeaf.kind !== "diff") {
-      return undefined;
-    }
+    const activeSplit = splits.find((sp) => sp.id === activeSplitId);
+    const activePartId = activeSplit?.activePartId;
+    if (!activePartId) return undefined;
 
-    const diffFile = toDiffFileInfo(activeLeaf.state);
-    return diffFile?.path;
-  }, [activeLeaf]);
+    const activePart = allParts.find((p) => p.id === activePartId);
+    if (!activePart || activePart.viewType !== "diff") return undefined;
+
+    const state = activePart.state as { file?: { path?: string } } | undefined;
+    return state?.file?.path;
+  }, [splits, activeSplitId, allParts]);
 
   const error = queryError ? String(queryError) : mutationError;
 
@@ -291,7 +276,6 @@ function App(): React.JSX.Element {
       setCurrentTask(task.id);
       if (worktree) {
         selectWorktree(worktree.id);
-        addWorktreeTerminal(worktree.id);
       } else {
         selectWorktree(null);
       }
@@ -300,7 +284,7 @@ function App(): React.JSX.Element {
         setIsPrimarySidebarOverlayOpen(false);
       }
     },
-    [addWorktreeTerminal, isPrimarySidebarOverlayMode, selectWorktree, setCurrentTask],
+    [isPrimarySidebarOverlayMode, selectWorktree, setCurrentTask],
   );
 
   const handleArchiveTask = useCallback(
@@ -314,67 +298,43 @@ function App(): React.JSX.Element {
     // Queries are refreshed through invalidation in mutations and hooks.
   };
 
-  const handleToggleSecondarySplit = useCallback(() => {
-    setSplitState((current) => {
-      const next = toggleSecondarySplit(current, () => SECONDARY_SPLIT_ID);
-      const addedSecondary =
-        next.splitOrder.length > current.splitOrder.length && next.splitOrder.length > 1;
-
-      if (!addedSecondary) {
-        return next;
-      }
-
-      const secondarySplitId =
-        next.splitOrder.find((id) => id !== next.primarySplitId) ?? SECONDARY_SPLIT_ID;
-      let seeded = upsertLeafTab(
-        next,
-        { splitId: secondarySplitId },
-        buildPaneLeaf(secondarySplitId, "terminal"),
-      );
-      seeded = upsertLeafTab(
-        seeded,
-        { splitId: secondarySplitId },
-        buildPaneLeaf(secondarySplitId, "diff"),
-      );
-      seeded = setActiveTab(seeded, secondarySplitId, `${secondarySplitId}:terminal`);
-      return seeded;
-    });
-  }, [buildPaneLeaf]);
+  const handleToggleSecondarySplit = useCallback(async () => {
+    if (splits.length > 1) {
+      await workbench.closeSplit(SECONDARY_SPLIT_ID);
+      setActiveSplitId(PRIMARY_SPLIT_ID);
+    } else if (selectedWorktreeId) {
+      workbench.createSplit(SECONDARY_SPLIT_ID);
+      setActiveSplitId(SECONDARY_SPLIT_ID);
+    }
+  }, [splits.length, selectedWorktreeId]);
 
   const handleActivateSplit = useCallback((splitId: string) => {
-    setSplitState((current) => setActiveSplit(current, splitId));
-  }, []);
-
-  const handleActivateTab = useCallback((splitId: string, tabId: string) => {
-    setSplitState((current) => setActiveTab(current, splitId, tabId));
-  }, []);
-
-  const handleOpenLeaf = useCallback(
-    (splitId: string, kind: string) => {
-      setSplitState((current) => {
-        return upsertLeafTab(current, { splitId }, buildPaneLeaf(splitId, kind));
-      });
-    },
-    [buildPaneLeaf],
-  );
-
-  const handleCloseTab = useCallback((splitId: string, tabId: string) => {
-    setSplitState((current) => closeLeafTab(current, splitId, tabId));
+    setActiveSplitId(splitId);
   }, []);
 
   const handleSelectDiffFile = useCallback(
-    (file: DiffFileInfo) => {
-      setSplitState((current) => {
-        const target: SplitTarget = "active";
-        const targetSplitId = resolveTargetSplitId(current, target);
-        return upsertLeafTab(
-          current,
-          { splitId: targetSplitId },
-          buildPaneLeaf(targetSplitId, "diff", file),
-        );
-      });
+    async (file: DiffFileInfo) => {
+      if (!selectedWorktree) return;
+      const targetSplitId = activeSplitId ?? PRIMARY_SPLIT_ID;
+      const split = workbench.getSplit(targetSplitId);
+      if (!split) return;
+
+      // Find existing diff part and update it
+      const existingDiff = split.findView({ type: "diff" });
+      if (existingDiff) {
+        await existingDiff.setViewState({
+          type: "diff",
+          state: { file, repoPath: selectedWorktree.path },
+        });
+        split.setActivePart(existingDiff);
+      } else {
+        await split.setViewState({
+          type: "diff",
+          state: { file, repoPath: selectedWorktree.path },
+        });
+      }
     },
-    [buildPaneLeaf],
+    [activeSplitId, selectedWorktree],
   );
 
   const clearError = () => setMutationError(null);
@@ -429,7 +389,7 @@ function App(): React.JSX.Element {
             showSidebarToggle={isPrimarySidebarOverlayMode}
             onTogglePrimarySidebar={() => setIsPrimarySidebarOverlayOpen((open) => !open)}
             canToggleSplit={selectedWorktree !== null}
-            hasSecondarySplit={splitState.splitOrder.length > 1}
+            hasSecondarySplit={splits.length > 1}
             onToggleSecondarySplit={handleToggleSecondarySplit}
           />
           <Splitter
@@ -442,15 +402,9 @@ function App(): React.JSX.Element {
             <SplitterPanel id="app-layout-split-root">
               {selectedWorktree ? (
                 <SplitRoot
-                  splitOrder={splitState.splitOrder}
-                  activeSplitId={splitState.activeSplitId}
-                  tabsBySplitId={splitState.tabsBySplitId}
-                  activeTabBySplitId={splitState.activeTabBySplitId}
-                  selectedWorktree={selectedWorktree}
+                  activeSplitId={activeSplitId}
                   onActivateSplit={handleActivateSplit}
-                  onActivateTab={handleActivateTab}
-                  onOpenLeaf={handleOpenLeaf}
-                  onCloseTab={handleCloseTab}
+                  onNewTab={handleNewTab}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center">

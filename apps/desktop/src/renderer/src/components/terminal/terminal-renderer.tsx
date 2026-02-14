@@ -10,12 +10,12 @@ import { useEffect, useRef } from "react";
 import { client } from "../../lib/client";
 import { TERMINAL_THEME_DARK, TERMINAL_THEME_LIGHT } from "../../lib/terminal-theme";
 
-interface TerminalViewProps {
+interface TerminalRendererProps {
   terminalId: string;
   isVisible: boolean;
 }
 
-export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
+export function TerminalRenderer({ terminalId, isVisible }: TerminalRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);

@@ -1,2 +1,2 @@
-export { TerminalPanel } from "./terminal-panel";
-export { TerminalView } from "./terminal-view";
+export { TerminalPart } from "./terminal-part";
+export { TerminalRenderer } from "./terminal-renderer";

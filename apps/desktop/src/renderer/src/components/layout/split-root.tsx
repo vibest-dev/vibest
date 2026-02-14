@@ -6,34 +6,22 @@ import {
 } from "@vibest/ui/components/splitter";
 import { Fragment } from "react";
 
-import type { Worktree } from "../../types";
-import type { PaneLeaf } from "./split-state";
-
+import { useAppStoreShallow } from "../../stores/app-store";
 import { SplitPane } from "./split-pane";
 
 interface SplitRootProps {
-  splitOrder: string[];
-  activeSplitId: string;
-  tabsBySplitId: Record<string, PaneLeaf[]>;
-  activeTabBySplitId: Record<string, string | null>;
-  selectedWorktree: Worktree | null;
+  activeSplitId: string | null;
   onActivateSplit: (splitId: string) => void;
-  onActivateTab: (splitId: string, tabId: string) => void;
-  onOpenLeaf: (splitId: string, kind: string) => void;
-  onCloseTab: (splitId: string, tabId: string) => void;
+  onNewTab: (splitId: string, viewType: string) => void;
 }
 
 export function SplitRoot({
-  splitOrder,
   activeSplitId,
-  tabsBySplitId,
-  activeTabBySplitId,
-  selectedWorktree,
   onActivateSplit,
-  onActivateTab,
-  onOpenLeaf,
-  onCloseTab,
+  onNewTab,
 }: SplitRootProps) {
+  const splitOrder = useAppStoreShallow((s) => s.workbench.splits.map((sp) => sp.id));
+
   if (splitOrder.length === 0) {
     return null;
   }
@@ -44,13 +32,7 @@ export function SplitRoot({
       <SplitPane
         splitId={splitId}
         isActive={splitId === activeSplitId}
-        tabs={tabsBySplitId[splitId] ?? []}
-        activeTabId={activeTabBySplitId[splitId] ?? null}
-        selectedWorktree={selectedWorktree}
-        onActivateSplit={onActivateSplit}
-        onActivateTab={onActivateTab}
-        onOpenLeaf={onOpenLeaf}
-        onCloseTab={onCloseTab}
+        onNewTab={onNewTab}
       />
     );
   }
@@ -71,17 +53,13 @@ export function SplitRoot({
       {splitOrder.map((splitId, index) => (
         <Fragment key={splitId}>
           <SplitterPanel id={splitId}>
-            <SplitPane
-              splitId={splitId}
-              isActive={splitId === activeSplitId}
-              tabs={tabsBySplitId[splitId] ?? []}
-              activeTabId={activeTabBySplitId[splitId] ?? null}
-              selectedWorktree={selectedWorktree}
-              onActivateSplit={onActivateSplit}
-              onActivateTab={onActivateTab}
-              onOpenLeaf={onOpenLeaf}
-              onCloseTab={onCloseTab}
-            />
+            <div onMouseDown={() => onActivateSplit(splitId)} className="h-full">
+              <SplitPane
+                splitId={splitId}
+                isActive={splitId === activeSplitId}
+                onNewTab={onNewTab}
+              />
+            </div>
           </SplitterPanel>
           {index < splitOrder.length - 1 && (
             <SplitterResizeTrigger id={`${splitId}:${splitOrder[index + 1]!}`}>

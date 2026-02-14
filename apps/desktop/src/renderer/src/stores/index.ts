@@ -1,2 +1,2 @@
 // App store (combined slices)
-export { appStore, useAppStore, type AppStore } from "./app-store";
+export { appStore, useAppStore, useAppStoreShallow, type AppStore } from "./app-store";
