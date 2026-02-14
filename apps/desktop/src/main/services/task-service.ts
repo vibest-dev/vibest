@@ -1,4 +1,4 @@
-import type { GitService } from "./git-service";
+import type { GitService } from "@vibest/services";
 import type { StoreService } from "./store-service";
 import type { WorktreeService } from "./worktree-service";
 

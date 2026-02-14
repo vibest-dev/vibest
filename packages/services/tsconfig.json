@@ -1,0 +1,10 @@
+{
+  "extends": "@vibest/typescript/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "target": "ES2022"
+  },
+  "include": ["src"]
+}
