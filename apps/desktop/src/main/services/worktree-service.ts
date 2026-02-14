@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import simpleGit from "simple-git";
 
-import type { GitService } from "./git-service";
+import type { GitService } from "@vibest/services";
 
 // Place names pool (200+ cities)
 const PLACE_NAMES = [
