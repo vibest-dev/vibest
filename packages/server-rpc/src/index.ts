@@ -1,11 +1,10 @@
-import type { HTTPPath } from "@orpc/server";
 import type { Buffer } from "node:buffer";
 import type * as http from "node:http";
 import type { Socket } from "node:net";
 
 import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
 import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
-import { RPCHandler as WsRPCHandler } from "@orpc/server/ws";
+import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
 import { ClaudeCodeAgent } from "@vibest/agents/claude-code";
 import { type WebSocket, WebSocketServer } from "ws";
 
@@ -18,13 +17,17 @@ const claudeCodeAgent = new ClaudeCodeAgent();
 
 export function createFetchRPCHandler() {
   const rpcHandler = new FetchRPCHandler(router, {
-    eventIteratorKeepAliveComment: "ping",
+    toFetchResponse: {
+      eventStream: {
+        keepAlive: { enabled: true, comment: "ping" },
+      },
+    },
   });
 
   return async function handler(
     request: Request,
     options?: {
-      prefix?: HTTPPath;
+      prefix?: `/${string}`;
     },
   ) {
     return rpcHandler.handle(request, {
@@ -37,14 +40,18 @@ export function createFetchRPCHandler() {
 
 export function createNodeRPCHandler() {
   const rpcHandler = new NodeRPCHandler(router, {
-    eventIteratorKeepAliveComment: "ping",
+    sendStandardResponse: {
+      eventStream: {
+        keepAlive: { enabled: true, comment: "ping" },
+      },
+    },
   });
 
   return async function handler(
     request: http.IncomingMessage,
     response: http.ServerResponse,
     options?: {
-      prefix?: HTTPPath;
+      prefix?: `/${string}`;
     },
   ) {
     return rpcHandler.handle(request, response, {
