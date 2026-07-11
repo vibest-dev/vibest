@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./extension": "./src/extension/index.ts",
-    "./extension/message": "./src/extension/message.ts",
     "./orpc/constants": "./src/orpc/constants.ts",
     "./*": "./*"
   },
