@@ -24,7 +24,7 @@
     "@ai-sdk/react": "^2.0.44",
     "@ark-ui/react": "^5.23.0",
     "@floating-ui/react": "^0.27.16",
-    "@orpc/client": "^1.9.1",
+    "@orpc/client": "^2.0.0-beta.16",
     "@xstate/react": "^6.0.0",
     "@xstate/store": "^3.9.2",
     "ai": "^5.0.63",
@@ -44,7 +44,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@orpc/server": "^1.8.6",
+    "@orpc/server": "^2.0.0-beta.16",
     "@tailwindcss/postcss": "^4.1.12",
     "@tailwindcss/vite": "^4.1.12",
     "@types/react": "^19.2.2",

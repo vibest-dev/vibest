@@ -33,8 +33,8 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.12",
-    "@orpc/contract": "^1.9.1",
-    "@orpc/shared": "^1.9.4",
+    "@orpc/contract": "^2.0.0-beta.16",
+    "@orpc/shared": "^2.0.0-beta.16",
     "@vibest/agents": "workspace:*",
     "ai-sdk-agents": "workspace:*",
     "stream-json": "^1.9.1",
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.61.0",
-    "@orpc/server": "^1.8.6",
+    "@orpc/server": "^2.0.0-beta.16",
     "@trpc/server": "^11.5.0",
     "@types/stream-json": "^1.7.8",
     "@types/ws": "^8.18.1",
@@ -54,7 +54,7 @@
     "zod": "^3.24.1"
   },
   "peerDependencies": {
-    "@orpc/server": "^1.8.6",
+    "@orpc/server": "^2.0.0-beta.16",
     "@trpc/server": "^11.5.0",
     "ai": "^5.0.30",
     "superjson": "^2.2.2",

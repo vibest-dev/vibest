@@ -23,7 +23,11 @@ export default function (): Plugin[] {
 
   const claudeCodeAgent = new ClaudeCodeAgent();
   const nodeRPCHandler = new NodeRPCHandler(router, {
-    eventIteratorKeepAliveComment: "ping",
+    sendStandardResponse: {
+      eventStream: {
+        keepAlive: { enabled: true, comment: "ping" },
+      },
+    },
   });
 
   return [

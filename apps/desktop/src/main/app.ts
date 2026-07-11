@@ -1,4 +1,4 @@
-import { MemoryPublisher } from "@orpc/experimental-publisher/memory";
+import { MemoryPublisher } from "@orpc/publisher/memory";
 import {
   GitService,
   GitWatcherService,
