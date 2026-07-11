@@ -31,7 +31,6 @@ The repository is structured into several key applications (`apps`) and shared p
 - **`packages/cli`**: The local Node.js server that acts as the backend for the entire system.
   - It uses Express.js to serve static files (the built `apps/web` application) and handles RPC requests from clients via `@orpc/server`.
   - It instantiates and manages the `ClaudeCodeAgent` to process AI prompts.
-- **`packages/code-inspector-node`**: The Node.js-side component of the code inspector, likely responsible for processing code on the server or build pipeline to extract metadata for inspection.
 - **`packages/code-inspector-web`**: The client-side component of the code inspector. It provides React components and hooks for DOM inspection, capturing file, line, column, and component information from the running web application. It communicates this inspection data through a dedicated messaging layer.
 - **`packages/server-rpc`**: Defines the RPC routes and types for the backend server. This ensures type-safe communication between clients and the `cli` server, particularly for Claude Code-related operations.
 - **`packages/shared`**: A utility package for common types and constants, especially for inter-extension messaging. This ensures consistent message formats across different parts of the browser extension.
@@ -235,7 +234,6 @@ The files listed below are important for code generation and running terminal co
 │   ├── agents/
 │   ├── ai-sdk-agents/
 │   ├── cli/
-│   ├── code-inspector-node/
 │   ├── code-inspector-web/
 │   ├── server-rpc/
 │   ├── shared/

@@ -9,8 +9,6 @@ import { fileURLToPath } from "node:url";
 import sirv from "sirv";
 import invariant from "tiny-invariant";
 
-import { transformHandler } from "./transform";
-
 const CLIENT_PUBLIC_PATH = "/@vibest/client";
 
 export const DIR_DIST =
@@ -70,20 +68,6 @@ export default function (): Plugin[] {
             "process.env.VIBEST_ROOT_PATH": JSON.stringify(process.cwd()),
           });
         }
-      },
-      transform: {
-        filter: {
-          id: { exclude: [/node_modules/], include: /\.(jsx|tsx|vue)$/ },
-        },
-        async handler(code, id) {
-          const result = transformHandler(id, code, {
-            rootPath: process.cwd(),
-            absolutePath: id.split("?", 2)[0],
-          });
-
-          if (!result) return undefined;
-          return result;
-        },
       },
     },
     {
