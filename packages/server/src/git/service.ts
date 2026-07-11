@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { type BranchSummary, simpleGit, type StatusResult } from "simple-git";
 
-import { GitError } from "../errors.js";
+import { GitError } from "../errors";
 
 /**
  * `git` module — read-only, delegating to the `git` CLI via simple-git. Returns

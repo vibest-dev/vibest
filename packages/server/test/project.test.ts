@@ -1,8 +1,9 @@
+import { Effect, Layer } from "effect";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import {
   layerPaths,
   ProjectRepositoryLayer,
@@ -11,10 +12,7 @@ import {
 } from "../src/index";
 
 const makeLayer = (home: string) =>
-  ProjectServiceLayer.pipe(
-    Layer.provide(ProjectRepositoryLayer),
-    Layer.provide(layerPaths(home)),
-  );
+  ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(layerPaths(home)));
 
 describe("ProjectService", () => {
   let home: string;

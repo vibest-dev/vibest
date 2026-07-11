@@ -1,8 +1,8 @@
 import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
 
-import { InvalidSessionId } from "../errors.js";
-import { type HarnessAgentId, isHarnessAgentId } from "../types/index.js";
+import { InvalidSessionId } from "../errors";
+import { type HarnessAgentId, isHarnessAgentId } from "../types";
 
 /**
  * Session ids are encoded as `${harnessAgentId}:${uuid}`. This lets "cold"

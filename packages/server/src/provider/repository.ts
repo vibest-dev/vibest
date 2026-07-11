@@ -1,10 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { StoreReadError, StoreWriteError } from "../errors.js";
-import type { ProviderConfig, RuntimeConfig } from "../types/index.js";
+import type { StoreReadError, StoreWriteError } from "../errors";
+import type { ProviderConfig, RuntimeConfig } from "../types";
 
-import { Paths } from "../config/paths.js";
-import { readJson, writeJsonAtomic } from "../infra/json-store.js";
+import { Paths } from "../config/paths";
+import { readJson, writeJsonAtomic } from "../infra/json-store";
 
 /**
  * Data access for the `provider` field of `$VIBEST_HOME/config.json`. Reads the

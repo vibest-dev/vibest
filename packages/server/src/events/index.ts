@@ -1,1 +1,1 @@
-export { EventBus, EventBusLayer, type EventEnvelope } from "./event-bus.js";
+export { EventBus, EventBusLayer, type EventEnvelope } from "./event-bus";

@@ -1,9 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { StoreReadError, StoreWriteError } from "../errors.js";
-import type { ModelInfo, ProviderConfig } from "../types/index.js";
+import type { StoreReadError, StoreWriteError } from "../errors";
+import type { ModelInfo, ProviderConfig } from "../types";
 
-import { ProviderRepository } from "./repository.js";
+import { ProviderRepository } from "./repository";
 
 /**
  * `provider` module: configure providers (built-in overrides + custom) and list

@@ -1,23 +1,23 @@
 import { Layer } from "effect";
 
-import { EventBusLayer } from "./events/index.js";
-import { FSServiceLayer } from "./fs/index.js";
-import { GitServiceLayer } from "./git/index.js";
-import { McpRepositoryLayer, McpServiceLayer } from "./mcp/index.js";
-import { ProjectRepositoryLayer, ProjectServiceLayer } from "./project/index.js";
-import { ProviderRepositoryLayer, ProviderServiceLayer } from "./provider/index.js";
+import { EventBusLayer } from "./events";
+import { FSServiceLayer } from "./fs";
+import { GitServiceLayer } from "./git";
+import { McpRepositoryLayer, McpServiceLayer } from "./mcp";
+import { ProjectRepositoryLayer, ProjectServiceLayer } from "./project";
+import { ProviderRepositoryLayer, ProviderServiceLayer } from "./provider";
 
-export * from "./types/index.js";
-export * from "./errors.js";
-export { Paths, PathsLayer, layerPaths } from "./config/paths.js";
-export { readJson, writeJsonAtomic } from "./infra/json-store.js";
-export * from "./project/index.js";
-export * from "./provider/index.js";
-export * from "./mcp/index.js";
-export * from "./events/index.js";
-export * from "./fs/index.js";
-export * from "./git/index.js";
-export * from "./session/index.js";
+export * from "./types";
+export * from "./errors";
+export { Paths, PathsLayer, layerPaths } from "./config/paths";
+export { readJson, writeJsonAtomic } from "./infra/json-store";
+export * from "./project";
+export * from "./provider";
+export * from "./mcp";
+export * from "./events";
+export * from "./fs";
+export * from "./git";
+export * from "./session";
 
 /**
  * The domain services composed into one root layer, with their repositories

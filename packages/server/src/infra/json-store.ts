@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { StoreReadError, StoreWriteError } from "../errors.js";
+import { StoreReadError, StoreWriteError } from "../errors";
 
 const isEnoent = (cause: unknown): boolean =>
   typeof cause === "object" && cause !== null && (cause as NodeJS.ErrnoException).code === "ENOENT";

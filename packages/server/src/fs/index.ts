@@ -1,1 +1,1 @@
-export { FSService, FSServiceLayer, type GrepMatch } from "./service.js";
+export { FSService, FSServiceLayer, type GrepMatch } from "./service";

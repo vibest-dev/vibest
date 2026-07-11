@@ -1,1 +1,1 @@
-export { makeSessionId, parseSessionId, type ParsedSessionId } from "./id.js";
+export { makeSessionId, parseSessionId, type ParsedSessionId } from "./id";

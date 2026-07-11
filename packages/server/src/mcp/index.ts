@@ -1,2 +1,2 @@
-export { McpRepository, McpRepositoryLayer } from "./repository.js";
-export { McpService, McpServiceLayer } from "./service.js";
+export { McpRepository, McpRepositoryLayer } from "./repository";
+export { McpService, McpServiceLayer } from "./service";

@@ -1,9 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { HarnessAgentId, McpServerConfig } from "../types/index.js";
+import type { HarnessAgentId, McpServerConfig } from "../types";
 
-import { McpServerNotFound, type StoreReadError, type StoreWriteError } from "../errors.js";
-import { McpRepository } from "./repository.js";
+import { McpServerNotFound, type StoreReadError, type StoreWriteError } from "../errors";
+import { McpRepository } from "./repository";
 
 /**
  * `mcp` module: register MCP server configs and toggle which harness agents

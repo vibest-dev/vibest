@@ -1,2 +1,2 @@
-export { ProjectRepository, ProjectRepositoryLayer } from "./repository.js";
-export { ProjectService, ProjectServiceLayer } from "./service.js";
+export { ProjectRepository, ProjectRepositoryLayer } from "./repository";
+export { ProjectService, ProjectServiceLayer } from "./service";

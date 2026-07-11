@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-import { FileReadError } from "../errors.js";
+import { FileReadError } from "../errors";
 
 export interface GrepMatch {
   readonly file: string;

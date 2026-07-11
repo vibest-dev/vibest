@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, PubSub, Ref, Stream } from "effect";
 
-import type { SessionEvent } from "../types/index.js";
+import type { SessionEvent } from "../types";
 
 /** An event as delivered to subscribers, tagged with a monotonic sequence. */
 export interface EventEnvelope {
