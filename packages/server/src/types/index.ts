@@ -42,20 +42,6 @@ export interface ModelInfo {
   readonly name?: string;
 }
 
-/** Explicit model choice at session-create time. */
-export interface ModelSelection {
-  readonly providerId: string;
-  readonly modelId: string;
-}
-
-/** Final resolved model config handed to an adapter. */
-export interface ResolvedModelConfig {
-  readonly model: string;
-  readonly provider: string;
-  readonly baseURL?: string;
-  readonly authToken?: string;
-}
-
 /** MCP server config — stdio (spawned) or remote (url). */
 export type McpServerConfig = McpStdioConfig | McpRemoteConfig;
 

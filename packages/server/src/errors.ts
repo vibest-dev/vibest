@@ -10,16 +10,6 @@ export class ProjectProtected extends Data.TaggedError("ProjectProtected")<{
   readonly projectId: string;
 }> {}
 
-export class ProviderNotFound extends Data.TaggedError("ProviderNotFound")<{
-  readonly providerId: string;
-}> {}
-
-export class ModelSelectionUnresolvable extends Data.TaggedError("ModelSelectionUnresolvable")<{
-  readonly providerId: string;
-  readonly modelId: string;
-  readonly reason: string;
-}> {}
-
 export class McpServerNotFound extends Data.TaggedError("McpServerNotFound")<{
   readonly serverId: string;
 }> {}

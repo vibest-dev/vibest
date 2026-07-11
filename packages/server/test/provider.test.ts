@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   layerPaths,
   type ProviderConfig,
+  ProviderRepositoryLayer,
   ProviderService,
   ProviderServiceLayer,
-  ProviderRepositoryLayer,
 } from "../src/index";
 
 const makeLayer = (home: string) =>
@@ -62,46 +62,5 @@ describe("ProviderService", () => {
     );
     expect(result.all).toBe(2);
     expect(result.scoped).toBe(2);
-  });
-
-  it("resolves a ModelSelection to a ResolvedModelConfig", async () => {
-    const resolved = await run(
-      Effect.gen(function* () {
-        const svc = yield* ProviderService;
-        yield* svc.configure({ ...openai, baseURL: "https://api.example.com" });
-        return yield* svc.resolve({ providerId: "openai", modelId: "gpt-5" });
-      }),
-    );
-    expect(resolved).toEqual({
-      model: "gpt-5",
-      provider: "openai",
-      baseURL: "https://api.example.com",
-      authToken: "sk-test",
-    });
-  });
-
-  it("fails resolve with ProviderNotFound for unknown provider", async () => {
-    const err = await run(
-      Effect.flip(
-        Effect.gen(function* () {
-          const svc = yield* ProviderService;
-          return yield* svc.resolve({ providerId: "ghost", modelId: "x" });
-        }),
-      ),
-    );
-    expect(err._tag).toBe("ProviderNotFound");
-  });
-
-  it("fails resolve with ModelSelectionUnresolvable when provider disabled", async () => {
-    const err = await run(
-      Effect.flip(
-        Effect.gen(function* () {
-          const svc = yield* ProviderService;
-          yield* svc.configure({ ...openai, enabled: false });
-          return yield* svc.resolve({ providerId: "openai", modelId: "gpt-5" });
-        }),
-      ),
-    );
-    expect(err._tag).toBe("ModelSelectionUnresolvable");
   });
 });

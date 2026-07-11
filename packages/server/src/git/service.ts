@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { type BranchSummary, simpleGit, type StatusResult } from "simple-git";
+
 import { GitError } from "../errors.js";
 
 /**
@@ -16,19 +17,16 @@ export class GitService extends Context.Service<
   }
 >()("GitService") {}
 
-export const GitServiceLayer: Layer.Layer<GitService> = Layer.sync(
-  GitService,
-  () => ({
-    status: (dir) =>
-      Effect.tryPromise({
-        try: () => simpleGit(dir).status(),
-        catch: (cause) => new GitError({ cause }),
-      }),
+export const GitServiceLayer: Layer.Layer<GitService> = Layer.sync(GitService, () => ({
+  status: (dir) =>
+    Effect.tryPromise({
+      try: () => simpleGit(dir).status(),
+      catch: (cause) => new GitError({ cause }),
+    }),
 
-    branch: (dir) =>
-      Effect.tryPromise({
-        try: () => simpleGit(dir).branch(),
-        catch: (cause) => new GitError({ cause }),
-      }),
-  }),
-);
+  branch: (dir) =>
+    Effect.tryPromise({
+      try: () => simpleGit(dir).branch(),
+      catch: (cause) => new GitError({ cause }),
+    }),
+}));
