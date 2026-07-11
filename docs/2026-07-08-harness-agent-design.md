@@ -4,7 +4,7 @@
 
 > 范围：覆盖 harness agent 运行时的核心能力域——`session`（会话生命周期与交互，核心模块）、`harness`（可用 agent adapter 信息）、`skill`（skills 安装与管理，暂不细化）、`provider`（模型/provider 配置，含自定义 provider）、`mcp`（MCP server 配置，暂不细化）、`fs`（文件读取/检索，只读）、`git`（只读 git 信息）、`project`（项目管理）、`pty`（伪终端会话管理，暂不细化）；不含任务看板、agent 执行器注册表、模型市场（可发现/浏览的第三方 provider 目录，跟"配置已有 provider"是两回事，见 §4.8）、通用应用配置等其他领域——"置顶会话""折叠分组""主题色"这类是纯 UI 本地状态，都不属于这套 headless runtime 该管的范围。
 >
-> 定位：vibest monorepo 内新增的一个 server 子包（`@vibest/server`），承载这套 harness agent 运行时模块，作为 vibest 内部的服务端模块交付，不作为对外发布的 SDK——服务端用开源 Egg.js 手写（不使用 TEGG 装饰器/DI），客户端（vibest 自己的前端）和服务端之间只有一条 WS 连接，用方法调用 + 事件推送的方式通信，不是 REST；鉴权对齐 OpenCode 的模式——默认不鉴权，可选 `Authorization: Basic`。
+> 定位：vibest monorepo 内新增的一个 server 子包（`@vibest/server`），承载这套 harness agent 运行时模块，作为 vibest 内部的服务端模块交付，不作为对外发布的 SDK——服务端实现全部采用 Effect v4（`effect@^4`）：service 用 `Context` Tag + `Layer` 定义与装配、异步与错误用 `Effect<A, E, R>` 的类型化错误（`Data.TaggedError`）、资源生命周期用 `Scope`/finalizer、事件流用 `Stream`；WS 端点用 `@effect/platform` 承载，不引入额外的 Web 框架或 DI 容器。客户端（vibest 自己的前端）和服务端之间只有一条 WS 连接，用方法调用 + 事件推送的方式通信，不是 REST；鉴权对齐 OpenCode 的模式——默认不鉴权，可选 `Authorization: Basic`。
 
 ## 1. 目标与范围
 
@@ -179,9 +179,9 @@ for await (const event of client.session.subscribe()) {
 
 ## 5. Services 抽象（服务端内部）
 
-Controller 只做参数校验和响应组装，业务逻辑全部在 Service 层；具体实现类按 Egg.js 约定放在 `app/service/xxx.ts`，Controller 里通过 `ctx.service.xxx` 访问。下面按角色列出每个抽象/Service 和它们的依赖关系，不逐个方法展开。
+服务端全部用 Effect v4 写：WS 路由 handler 只做参数校验和响应组装（把请求 decode 成参数、`yield*` 对应 service 的方法、把结果或类型化错误编回 §4 的 `{ id, result }` / `{ id, error }` 线格式），业务逻辑全部在 service 里。下面按角色列出每个抽象/service 和它们的依赖关系，不逐个方法展开。
 
-命名约定：凡是会被其他 Service/类型依赖注入的协作对象，都先定义一个 `IXxx` 接口，再有一个去掉 `I` 前缀、同名的实现类（比如 `IProjectRepository` / `ProjectRepository`）——依赖关系一律按接口类型声明，方便以后测试替换成 mock 实现；纯数据形状（DTO，比如 `ModelSelection`）、以及只有一份实现且不被其他地方按接口依赖的内部细节（比如 `SessionLifecycle`），不强制加接口，下表里用"—"标出。
+命名约定（Effect v4）：凡是会被其他 service 按类型依赖注入的协作对象（下表里带 `IXxx` 接口的那批——各 Service、Registry、EventBus、三个 Repository、两个 Manager），都做成一个 Effect service——用一个 `Context` Tag 标识（Tag 的 Shape 就是原来的 `IXxx` 接口，方法返回 `Effect<A, E, R>` 而不是 `Promise`），再配一个 `Layer` 负责构造（命名 `XxxLayer`，对应下表"实现类"列）；消费方在 Effect 里 `yield*` 这个 Tag 拿到实例，依赖关系体现在 Layer 的 `RIn` 上，测试时换个 Layer 就能 mock。按 id 动态选择的多实现对象（`IHarnessAgentAdapter` / `IHarnessAgentSession`，以及每个后端各自的 `ISessionRepository` / `ISkillRepository` / `IMcpConfigWriter`）保持为普通接口（Shape），由对应 adapter 生产、由 Registry 持有，不各自做成 Tag/Layer；纯数据形状（DTO，比如 `ModelSelection`）、以及只有一份实现的 per-session 内部件（比如 `SessionLifecycle`）也是普通类型，下表里用"—"标出。类型化错误统一用 `Data.TaggedError` 定义（错误契约见 §8）。
 
 ### 5.1 核心类型与接口
 
@@ -189,7 +189,7 @@ Controller 只做参数校验和响应组装，业务逻辑全部在 Service 层
 |---|---|---|
 | — | `HarnessAgentId` | `'claude-code' \| 'codex'`，统一标识 agent 后端；纯数据形状，不需要接口 |
 | `IHarnessAgentAdapter` | `ClaudeCodeAdapter`、`CodexAdapter` | 每个后端各自实现的统一驱动接口：可用性检查、（可选）登录、创建/恢复/关闭活跃会话、持有一份 `ISessionRepository`、一份 `ISkillRepository`、一份 `IMcpConfigWriter` |
-| `IHarnessAgentRegistry` | `HarnessAgentRegistry` | 持有构造时传入的 `IHarnessAgentAdapter` 数组，提供 `list()`/`get(id)`/`status()`/`dispose()`（挨个调用每个 adapter 的 `dispose?()`）；是 `harness` 模块的实现，本身不做业务编排，其余 Service 依赖它做 adapter 查询——没有归进 §5.2，因为除了持有构造时传入的数组之外没有别的依赖，更接近一个类型/容器而不是编排型 Service |
+| `IHarnessAgentRegistry` | `HarnessAgentRegistry` | 持有构造时传入的 `IHarnessAgentAdapter` 数组，提供 `list()`/`get(id)`/`status()`；不再有 `dispose()`——常驻子进程（如 `CodexAdapter` 的 app-server）的释放由 `HarnessAgentRegistryLayer` 的 `Layer.scoped` finalizer 负责（见 §6）。是 `harness` 模块的实现，本身不做业务编排，其余 service 依赖它做 adapter 查询——没有归进 §5.2，因为除了持有构造时传入的数组之外没有别的依赖，更接近一个类型/容器而不是编排型 service |
 | `IHarnessAgentSession` | `ClaudeCodeSession`、`CodexSession` | 一个活跃会话的运行时接口（`prompt`/`interrupt`/`close`/`getStatus`/`getSnapshot`/`respondToAgentRequest`），内部持有一个 `SessionLifecycle` |
 | `IHarnessAgentSessionManager` | `HarnessAgentSessionManager` | 持有 `sessionId → IHarnessAgentSession` 的内存索引，提供 `register`/`get`/`remove`；纯内存态、不持久化（见 §5.3），进程重启后这份索引直接清空，客户端需要重新调 `session.resume` 才能拿回活跃实例。和 `HarnessAgentRegistry` 一样只是持有集合、没有业务编排，归进 §5.1 而不是 §5.2；管的是"活跃会话实例"，跟 `HarnessAgentRegistry` 管"HarnessAgent 后端本身的可用性/状态"是两个维度，别搞混 |
 | `ISessionRepository` | 各后端各自实现（未单独命名） | 每个后端自己历史会话的冷存储接口（`list`/`rename`/`delete`/`archive`/`getMessages`），对应 `session` 模块里"冷"的那部分方法；实际存储由 harness agent 后端自己管，我们的 runtime 不设计它的格式，见 §5.3 |
@@ -220,7 +220,7 @@ Controller 只做参数校验和响应组装，业务逻辑全部在 Service 层
 | `IProjectService`             | `ProjectService`             | `project` 模块实现，另有 `findById`/`update` 等内部方法未对外暴露；实际读写落地在 `IProjectRepository`（见 §5.3），自己只做 `playground` 保护、路径去重这类业务规则 | `IProjectRepository`（§5.1）                                                   |
 | `IPtyService`                 | `PtyService`                 | `pty` 模块的实现（细节未设计）；活跃 pty 实例的存取委托给 `IPtyManager`                                                                        | `IPtyManager`（§5.1）、`IEventBus`                                                    |
 
-`HarnessAgentSessionService` 不依赖 `ProjectService`——`workspacePath` 由 Controller 用 `ProjectService.findById` 解析好之后再传进来。活跃会话的 `sessionId → HarnessAgentSession` 索引由 `HarnessAgentSessionManager`（§5.1）维护，调用方一个 `sessionId` 就能定位会话，不用额外带上 `harnessAgentId`。`create` 时 `HarnessAgentSessionService` 先把调用方传入的 `ModelSelection`（可选）丢给 `ModelProviderService` 解析成 `ResolvedModelConfig`，再连同 `workspacePath` 一起交给 `HarnessAgentRegistry` 查到的 adapter 的 `createSession`，拿到返回的 `HarnessAgentSession` 实例后调用 `HarnessAgentSessionManager.register()` 存进索引；`close` 时则是先按 `sessionId` 从 `HarnessAgentSessionManager.get()` 取出实例、调用它的 `close()`，再 `HarnessAgentSessionManager.remove()` 把索引里的条目摘掉。
+`HarnessAgentSessionService` 不依赖 `ProjectService`——`workspacePath` 由 WS 路由 handler 用 `ProjectService.findById` 解析好之后再传进来。活跃会话的 `sessionId → HarnessAgentSession` 索引由 `HarnessAgentSessionManager`（§5.1）维护，调用方一个 `sessionId` 就能定位会话，不用额外带上 `harnessAgentId`。`create` 时 `HarnessAgentSessionService` 先把调用方传入的 `ModelSelection`（可选）丢给 `ModelProviderService` 解析成 `ResolvedModelConfig`，再连同 `workspacePath` 一起交给 `HarnessAgentRegistry` 查到的 adapter 的 `createSession`，拿到返回的 `HarnessAgentSession` 实例后调用 `HarnessAgentSessionManager.register()` 存进索引；`close` 时则是先按 `sessionId` 从 `HarnessAgentSessionManager.get()` 取出实例、调用它的 `close()`，再 `HarnessAgentSessionManager.remove()` 把索引里的条目摘掉。
 
 ### 5.3 数据存储
 
@@ -246,82 +246,104 @@ Controller 只做参数校验和响应组装，业务逻辑全部在 Service 层
 
 §4.2 里每个 `session.*` 方法具体落在哪个类型上，把下面这几个核心接口的方法签名写清楚就不用再猜：
 
-```typescript
-// ---- Registry：管 HarnessAgent 后端本身的可用性/状态，不碰会话 ----
-interface IHarnessAgentRegistry {
-  list(): IHarnessAgentAdapter[];
-  get(id: HarnessAgentId): IHarnessAgentAdapter | undefined; // 冷操作路由要用，见下面
-  status(id: HarnessAgentId): Promise<{ available: boolean; reason?: string }>;
-  dispose(): Promise<void>; // 挨个调用每个 adapter 的 dispose?()
-}
+下面所有方法都返回 `Effect<A, E, R>` 而不是 `Promise`，`subscribe` 返回 `Stream`；错误类型用 `Data.TaggedError`（这里只示意，完整错误契约见 §8）。带 `IXxx` 接口的是 Effect service 的 Shape，配一个 `Context` Tag + `Layer`（示例见 `HarnessAgentSessionService`）；`IHarnessAgentAdapter` / `IHarnessAgentSession` / `ISessionRepository` 是按 id 动态选择的普通 Shape，不做成 Tag/Layer。
 
-// ---- Adapter：每个后端各自实现的统一驱动接口 ----
+```typescript
+import { Context, Effect, Stream, Data } from 'effect';
+
+// 类型化错误统一用 Data.TaggedError（示意）
+class SessionNotFound extends Data.TaggedError('SessionNotFound')<{ sessionId: string }> {}
+class HarnessAgentUnavailable extends Data.TaggedError('HarnessAgentUnavailable')<{ id: HarnessAgentId; reason?: string }> {}
+
+// ---- Registry：管 HarnessAgent 后端本身的可用性/状态，不碰会话（Effect service）----
+interface HarnessAgentRegistryShape {
+  readonly list: () => ReadonlyArray<IHarnessAgentAdapter>;
+  readonly get: (id: HarnessAgentId) => IHarnessAgentAdapter | undefined; // 冷操作路由要用，见下面
+  readonly status: (id: HarnessAgentId) => Effect.Effect<{ available: boolean; reason?: string }>;
+  // 不再有 dispose：常驻子进程（如 CodexAdapter 的 app-server）的释放交给 Registry 的
+  // Layer.scoped + Effect.acquireRelease 注册 finalizer，见 §6
+}
+class HarnessAgentRegistry extends Context.Tag('HarnessAgentRegistry')<
+  HarnessAgentRegistry,
+  HarnessAgentRegistryShape
+>() {}
+
+// ---- Adapter：按 id 动态选择的普通 Shape（不是 Tag/Layer），由具体 adapter 实现 ----
 interface IHarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly sessionRepository: ISessionRepository;
   readonly skillRepository: ISkillRepository;
   readonly mcpConfigWriter: IMcpConfigWriter;
 
-  checkAvailability(): Promise<{ available: boolean; reason?: string }>;
-  login?(): Promise<unknown>; // 机制未定，见 §8
-  createSession(config: { workspacePath: string; model: ResolvedModelConfig }): Promise<IHarnessAgentSession>;
-  resumeSession(sessionId: string): Promise<IHarnessAgentSession>;
-  dispose?(): Promise<void>; // 比如 CodexAdapter 杀掉常驻 app-server 子进程
+  readonly checkAvailability: () => Effect.Effect<{ available: boolean; reason?: string }>;
+  readonly login?: () => Effect.Effect<unknown>; // 机制未定，见 §8
+  readonly createSession: (config: { workspacePath: string; model: ResolvedModelConfig }) => Effect.Effect<IHarnessAgentSession>;
+  readonly resumeSession: (sessionId: string) => Effect.Effect<IHarnessAgentSession, SessionNotFound>;
 }
 
 // ---- McpConfigWriter：每个后端自己把配置翻译成原生格式、写进自己配置文件的实现 ----
 interface IMcpConfigWriter {
-  enable(server: ResolvedMcpServerConfig): Promise<void>;
-  disable(serverId: string): Promise<void>;
+  readonly enable: (server: ResolvedMcpServerConfig) => Effect.Effect<void>;
+  readonly disable: (serverId: string) => Effect.Effect<void>;
 }
 
-// ---- Session：一个活跃会话的运行时接口 ----
+// ---- Session：一个活跃会话的运行时 Shape（多实例，由 Registry/adapter 生产）----
 interface IHarnessAgentSession {
   readonly id: string; // 格式 `${harnessAgentId}:${uuid}`，见下面路由说明
-  prompt(input: { text: string }): Promise<void>;
-  interrupt(): Promise<void>;
-  close(): Promise<void>;
-  getStatus(): Promise<SessionStatus>;
-  getSnapshot(): Promise<SessionSnapshot>; // 消息+状态+元数据，直接读内存，不查 ISessionRepository
-  respondToAgentRequest(requestId: string, response: AgentRequestResponse): Promise<void>;
-  configure(config: { model?: ResolvedModelConfig }): Promise<void>; // 目前只支持切换模型，见 §8
+  readonly prompt: (input: { text: string }) => Effect.Effect<void>;
+  readonly interrupt: () => Effect.Effect<void>;
+  readonly close: () => Effect.Effect<void>;
+  readonly getStatus: () => Effect.Effect<SessionStatus>;
+  readonly getSnapshot: () => Effect.Effect<SessionSnapshot>; // 消息+状态+元数据，直接读内存，不查 ISessionRepository
+  readonly respondToAgentRequest: (requestId: string, response: AgentRequestResponse) => Effect.Effect<void>;
+  readonly configure: (config: { model?: ResolvedModelConfig }) => Effect.Effect<void>; // 目前只支持切换模型，见 §8
 }
 
-// ---- SessionManager：管活跃实例的内存索引，不做业务编排 ----
-interface IHarnessAgentSessionManager {
-  register(session: IHarnessAgentSession): void;
-  get(sessionId: string): IHarnessAgentSession | undefined;
-  remove(sessionId: string): void;
+// ---- SessionManager：管活跃实例的内存索引，不做业务编排（Effect service，内部用 Ref）----
+interface HarnessAgentSessionManagerShape {
+  readonly register: (session: IHarnessAgentSession) => Effect.Effect<void>;
+  readonly get: (sessionId: string) => Effect.Effect<IHarnessAgentSession | undefined>;
+  readonly remove: (sessionId: string) => Effect.Effect<void>;
 }
+class HarnessAgentSessionManager extends Context.Tag('HarnessAgentSessionManager')<
+  HarnessAgentSessionManager,
+  HarnessAgentSessionManagerShape
+>() {}
 
-// ---- SessionRepository：每个后端自己历史会话的冷存储接口 ----
+// ---- SessionRepository：每个后端自己历史会话的冷存储 Shape（按 id 动态选择，不是 Tag/Layer）----
 interface ISessionRepository {
-  list(): Promise<SessionSummary[]>;
-  getMessages(sessionId: string): Promise<Message[]>;
-  rename(sessionId: string, name: string): Promise<void>;
-  archive(sessionId: string): Promise<void>;
-  delete(sessionId: string): Promise<void>;
+  readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>>;
+  readonly getMessages: (sessionId: string) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
+  readonly rename: (sessionId: string, name: string) => Effect.Effect<void, SessionNotFound>;
+  readonly archive: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  readonly delete: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
 }
 
-// ---- SessionService：对外统一门面，session 模块的实现 ----
-interface IHarnessAgentSessionService {
-  list(): Promise<SessionSummary[]>;
-  subscribe(sessionId?: string): AsyncIterable<SessionEvent>;
-  create(input: { projectId: string; harnessAgentId: HarnessAgentId; selection?: ModelSelection }): Promise<{ sessionId: string }>;
-  resume(sessionId: string): Promise<void>;
-  configure(sessionId: string, config: { selection?: ModelSelection }): Promise<void>;
-  prompt(sessionId: string, input: { text: string }): Promise<void>;
-  interrupt(sessionId: string): Promise<void>;
-  respondToAgentRequest(sessionId: string, requestId: string, response: AgentRequestResponse): Promise<void>;
-  getStatus(sessionId: string): Promise<SessionStatus>;
-  getMessages(sessionId: string): Promise<Message[]>;
-  getSnapshot(sessionId: string): Promise<SessionSnapshot>;
-  rename(sessionId: string, name: string): Promise<void>;
-  archive(sessionId: string): Promise<void>;
-  delete(sessionId: string): Promise<void>;
-  close(sessionId: string): Promise<void>;
+// ---- SessionService：对外统一门面，session 模块的实现（Effect service）----
+interface HarnessAgentSessionServiceShape {
+  readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>>;
+  readonly subscribe: (sessionId?: string) => Stream.Stream<SessionEvent>;
+  readonly create: (input: { projectId: string; harnessAgentId: HarnessAgentId; selection?: ModelSelection }) => Effect.Effect<{ sessionId: string }, HarnessAgentUnavailable>;
+  readonly resume: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  readonly configure: (sessionId: string, config: { selection?: ModelSelection }) => Effect.Effect<void, SessionNotFound>;
+  readonly prompt: (sessionId: string, input: { text: string }) => Effect.Effect<void, SessionNotFound>;
+  readonly interrupt: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  readonly respondToAgentRequest: (sessionId: string, requestId: string, response: AgentRequestResponse) => Effect.Effect<void, SessionNotFound>;
+  readonly getStatus: (sessionId: string) => Effect.Effect<SessionStatus, SessionNotFound>;
+  readonly getMessages: (sessionId: string) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
+  readonly getSnapshot: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFound>;
+  readonly rename: (sessionId: string, name: string) => Effect.Effect<void, SessionNotFound>;
+  readonly archive: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  readonly delete: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  readonly close: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
 }
+class HarnessAgentSessionService extends Context.Tag('HarnessAgentSessionService')<
+  HarnessAgentSessionService,
+  HarnessAgentSessionServiceShape
+>() {}
 ```
+
+> Effect v4 的 service 构造器在 beta 期间（`ServiceMap` ↔ `Context`）反复改过名，上面用 `Context.Tag` 的 class 写法只是示意——落地时以最终 release 的确切 API 为准（见 §8）。
 
 `SessionSummary`/`Message`/`SessionStatus`/`SessionSnapshot`/`SessionEvent`/`AgentRequestResponse` 只是占位类型名，具体字段没有展开设计（事件 payload 见 §8）。
 
@@ -331,46 +353,56 @@ mcp server 不在 `createSession` 的参数里——`enable` 时已经把配置�
 
 ## 6. 装配根与依赖图
 
-服务端启动时由一个装配根统一 `new` 出所有 Service 单例，再传给各 Controller/Router；下面代码里 `new` 的都是具体实现类，构造函数参数的类型按 §5.1/§5.2 表里的接口（`IXxx`）声明：
+服务端不再有手写的装配根 `class`——每个 service 一个 `Layer`，启动时把它们 `Layer.mergeAll` 成一个根 Layer、按依赖 `Layer.provide` 连起来，在一个 `Scope` 里运行；`Scope` 关闭时 finalizer 自动逆序跑，不用手写 `dispose()`。下面 `Layer` 的命名对应 §5.1/§5.2 表里的"实现类"列：
 
 ```typescript
-class HarnessAgentServerFeatures {
-  readonly projectRepository = new ProjectRepository();
-  readonly project = new ProjectService({ repository: this.projectRepository });
-  readonly git = new GitService({ warn, debug });
-  readonly events = new EventBus();
-  readonly fs = new FSService();
-  readonly harnessAgentRegistry = new HarnessAgentRegistry([
-    new ClaudeCodeAdapter(),
-    new CodexAdapter(),
-  ]);
-  readonly harnessAgentSessionManager = new HarnessAgentSessionManager();
-  readonly providerRepository = new ProviderRepository();
-  readonly provider = new ModelProviderService({ repository: this.providerRepository });
-  readonly mcpRepository = new McpRepository();
-  readonly mcp = new McpService({ repository: this.mcpRepository, registry: this.harnessAgentRegistry });
-  readonly harnessAgentSession = new HarnessAgentSessionService({
-    registry: this.harnessAgentRegistry,
-    sessionManager: this.harnessAgentSessionManager,
-    events: this.events,
-    provider: this.provider,
-  });
-  readonly harnessAgentSkill = new HarnessAgentSkillService({
-    registry: this.harnessAgentRegistry,
-  });
-  readonly ptyManager = new PtyManager();
-  readonly pty = new PtyService({ manager: this.ptyManager, events: this.events });
+import { Effect, Layer } from 'effect';
 
-  async dispose() {
-    await this.harnessAgentRegistry.dispose();
-    this.events.dispose();
-  }
-}
+// 无外部资源的 service：Layer.effect / Layer.sync 直接构造
+const RepositoriesLayer = Layer.mergeAll(
+  ProjectRepositoryLayer,
+  ProviderRepositoryLayer,
+  McpRepositoryLayer,
+);
+
+// 持有子进程/定时器的 service：Layer.scoped + Effect.acquireRelease 注册 finalizer
+const HarnessAgentRegistryLayer = Layer.scoped(
+  HarnessAgentRegistry,
+  Effect.gen(function* () {
+    const claude = yield* makeClaudeCodeAdapter;
+    const codex = yield* makeCodexAdapter; // 常驻 app-server：acquire 拉起、finalizer 里 kill
+    return makeRegistry([claude, codex]);
+  }),
+);
+const EventBusLayer = Layer.scoped(EventBus, makeEventBus);                          // finalizer 停 ping、清订阅队列
+const HarnessAgentSessionManagerLayer = Layer.sync(HarnessAgentSessionManager, makeSessionManager); // 纯内存 Ref
+const PtyManagerLayer = Layer.scoped(PtyManager, makePtyManager);                    // finalizer 里 kill 所有存活 shell
+
+// 根 Layer：合并所有对外 service，再把它们依赖的基础 service provide 进去
+export const HarnessAgentServerLayer = Layer.mergeAll(
+  ProjectServiceLayer,
+  GitServiceLayer,
+  FSServiceLayer,
+  ModelProviderServiceLayer,
+  McpServiceLayer,
+  HarnessAgentSkillServiceLayer,
+  HarnessAgentSessionServiceLayer,
+  PtyServiceLayer,
+).pipe(
+  Layer.provide(HarnessAgentRegistryLayer),
+  Layer.provide(HarnessAgentSessionManagerLayer),
+  Layer.provide(PtyManagerLayer),
+  Layer.provide(ModelProviderServiceLayer), // SessionService/McpService 也依赖它，memoize 成同一个实例
+  Layer.provide(EventBusLayer),
+  Layer.provide(RepositoriesLayer),
+);
 ```
 
-依赖关系见 §5.2；这里补一点 §5.2 没提到的：`EventBus` 是装配根构造的共享单例，注入给 `HarnessAgentSessionService`，`PtyService` 也依赖它来推送终端输出，但具体怎么复用还没设计（见 §8）。
+跑起来就是把 `HarnessAgentServerLayer` provide 给 `@effect/platform` 的 WS/HTTP server（或用 `Layer.launch`）；进程收到停止信号时关闭根 `Scope`，finalizer 逆序执行（先 kill pty shell、再 kill codex app-server、再停 EventBus ping）。
 
-真正持有需要清理的资源（子进程）的是 `HarnessAgentRegistry`——它的 `dispose()` 会挨个调用每个 adapter 的 `dispose?()`（比如 `CodexAdapter` 需要杀掉常驻的 `codex app-server` 子进程）；`EventBus.dispose()` 负责停掉 ping 定时器、清空订阅队列；`HarnessAgentSessionService` 和它依赖的 `HarnessAgentSessionManager` 自己都不持有任何需要显式释放的资源，不需要 `dispose()`——`HarnessAgentSessionManager` 里存的 `HarnessAgentSession` 实例背后即使包着子进程句柄，那份资源的释放也是靠 `HarnessAgentSessionService.close()` 先调实例的 `close()`，`HarnessAgentSessionManager.remove()` 只是摘除索引引用，不负责释放资源；`ProjectService`/`GitService`/`ModelProviderService`/`FSService`（以及 `ProjectRepository`/`ProviderRepository`）都是无状态的按次文件/进程 I/O，进程退出即释放，同样不需要清理；`PtyManager` 直接持有存活的 shell 子进程句柄（不像 `HarnessAgentSessionManager` 那样只是摘引用），需要自己的 `dispose()` 来清理，但接口方法和装配根里的调用都还没补上（见 §8）。
+依赖关系见 §5.2；这里补一点 §5.2 没提到的：`EventBus` 靠 `Layer` 的 memoization 成为整个根 Layer 里的共享单例（同一个 `EventBusLayer` 被多个 service provide 也只构造一次），注入给 `HarnessAgentSessionService`，`PtyService` 也依赖它来推送终端输出，但具体怎么复用还没设计（见 §8）。
+
+资源清理全部交给 `Scope`/finalizer，不再有手写的 `dispose()`：`HarnessAgentRegistryLayer` 用 `Layer.scoped` 构造，`CodexAdapter` 的常驻 `codex app-server` 子进程在 `Effect.acquireRelease` 的 acquire 里拉起、release 里 kill；`EventBusLayer` 的 finalizer 停掉 ping 定时器、清空订阅队列；`PtyManagerLayer` 的 finalizer 挨个 kill 存活的 shell 子进程。`HarnessAgentSessionService` 和 `HarnessAgentSessionManager` 自己不持有需要释放的资源——`HarnessAgentSessionManager` 里存的 `HarnessAgentSession` 实例背后即使包着子进程句柄，释放也是靠 `HarnessAgentSessionService.close()` 先调实例的 `close()`，`remove()` 只是摘除内存索引引用；`ProjectService`/`GitService`/`ModelProviderService`/`FSService`（以及三个 Repository）都是无状态的按次文件/进程 I/O，用 `Layer.effect`/`Layer.sync` 构造即可，不注册 finalizer。根 `Scope` 关闭时这些 finalizer 逆序执行，顺序和资源依赖相反，避免先关了别人还依赖的东西。
 
 ## 7. 鉴权
 
@@ -381,7 +413,8 @@ class HarnessAgentServerFeatures {
 - `sessionId` 用 `${harnessAgentId}:${uuid}` 前缀编码来解决冷操作路由（见 §5.4）——这是目前给出的具体方案，还没有验证这个格式会不会跟某个后端自己的原生会话 ID 格式冲突，也没考虑要不要对客户端暴露这个内部编码细节（比如要不要在协议层面当它是不透明字符串处理）。
 - `$VIBEST_HOME/config.json` 里的凭证（`provider`/`mcp` 两个字段都可能有）目前跟其余配置存在同一个文件、没有做文件权限收紧（比如 `chmod 600`）——参考实现里同样没做，但这套 runtime 要不要主动补上这个小的安全加固，还没决定。
 - `EventBus` 的背压阈值（相当于"缓冲队列上限"）、ping 间隔、gap 之后客户端具体怎么补状态，这几个数值/流程还没敲定，需要确认。
-- `@vibest/server` 这个 Egg.js 子包作为 monorepo workspace 成员运行是否有兼容性问题（`egg-bin dev`/cluster 机制依赖真实 Node 运行时）需要验证。
+- Effect v4 的 service 构造器 API 在 beta 期间（`ServiceMap` ↔ `Context`）反复改过名，本文档 §5.4/§6 用 `Context.Tag` + `Layer` 只是示意——`@vibest/server` 落地时以最终 release 的确切 service/Layer 构造器为准，需要确认。
+- WS 端点用 `@effect/platform` 的 HTTP/socket server 承载，其在目标运行时（Node，可能还有 Bun）下的 WS 升级/长连接兼容性需要验证。
 - 类型定义手动同步的维护成本——后续要不要收敛成一个共享的轻量 types 包，现在先不做。
 - `git` 模块的写操作（`checkout`/`createBranch`/`switchBranch` 等）Service 层已经实现，但故意没有注册成 API——需要确认是否真的不需要对外开放。
 - `git` 模块目前只保留 `status`/`branch` 两个方法，是临时简化——`isGitRepo`/`currentBranch`/`isGitWorktree`/`getContributors`/`getCommitStats`/`getActivityData`/`getRecentActivity`/`getConfig`/`getProjectGitInfo` 这些先不设计，要不要加回来、加哪些，还没决定；`git.branch` 里"查默认分支"具体传什么参数也还没定。
@@ -394,11 +427,11 @@ class HarnessAgentServerFeatures {
 - RPC 方法调用本身要不要超时/取消语义，还没设计——注意这跟 `interrupt`（取消的是 agent turn）是两回事。
 - §7 鉴权目前只覆盖连接层（Basic Auth），但 `fs`/`git` 能读取宿主机文件系统，信任边界比"连上了就行"更大；这条要跟"fs 没有路径越界保护"那条待办一起考虑，鉴权章节需要明确写清楚这是两层不同的东西。
 - `project.remove` 里提到的 `playground` 项目目前只说了"受保护不可删"，具体是什么（默认占位项目？没接入真实仓库时的兜底项目？）没有解释，需要补一句说明。
-- §3 提到"同一个 session 被多个客户端同时发起热操作时，交给 `SessionLifecycle` 的不变量兜底，具体失败形式属于错误契约"——这个错误契约本身还没设计（后到的调用是直接报错、排队等待、还是覆盖前一个），`IHarnessAgentSession` 各方法要不要抛出特定错误类型也取决于这条，目前还是空的。
+- §3 提到"同一个 session 被多个客户端同时发起热操作时，交给 `SessionLifecycle` 的不变量兜底，具体失败形式属于错误契约"——这个错误契约本身还没设计（后到的调用是直接报错、排队等待、还是覆盖前一个），`IHarnessAgentSession` 各方法要不要抛出特定错误类型也取决于这条，目前还是空的。错误统一走 Effect 的类型化错误（`Data.TaggedError`），但具体有哪些 tagged error、各方法 `Effect<A, E, R>` 的 `E` 通道到底列哪些，等这条契约定了再补（§5.4 里的 `SessionNotFound`/`HarnessAgentUnavailable` 只是示意）。
 - `provider.configure` 目前没有凭证校验（比如新配的自定义 provider 到底能不能连通）——参考实现里这块也没做真正的网络探测，只是"填了 apiKey 就认为 ready"，要不要在这套 runtime 里加一个真正探测的 `testCredential` 方法，还没决定。
 - 去掉全局默认 provider+model 选择之后，`session.create` 不传 `selection` 就完全依赖 adapter 自己的零配置默认值——每个 adapter（claude-code/codex）零配置状态下到底用哪个 model，需不需要一个 fallback 机制，还没设计。
 - `provider.list` 里"按 `harnessAgentId` 过滤协议兼容的 provider"具体怎么判断兼容（比如某个 adapter 只支持特定协议家族）——`HarnessAgentAdapter` 目前没有声明自己支持哪些协议，这条过滤逻辑要不要做、怎么做还没设计。
-- `pty` 模块目前只有方法名占位——`pty.update` 具体覆盖哪些操作（resize、写输入、还是别的）没有设计；pty 的输出流怎么推送给客户端（复用 §4.3 events 通道还是别的机制）没有设计（`PtyManager` 已经确定持有真实的子进程句柄而不是纯索引引用，`IPtyService` 依赖 `IEventBus` 也已经在 §6 装配根里定下来了，这两点不再是待定项，只是具体的推送机制还没设计）；pty 进程的生命周期管理（比如客户端断线后要不要自动清理、有没有超时策略）也没有设计；`PtyManager.dispose()` 该做什么清理、接口方法长什么样还没写出来，§6 装配根示例代码里的 `dispose()` 目前也漏了调用它，需要补上。
+- `pty` 模块目前只有方法名占位——`pty.update` 具体覆盖哪些操作（resize、写输入、还是别的）没有设计；pty 的输出流怎么推送给客户端（复用 §4.3 events 通道还是别的机制）没有设计（`PtyManager` 已经确定持有真实的子进程句柄而不是纯索引引用，`IPtyService` 依赖 `IEventBus` 也已经在 §6 装配根里定下来了，这两点不再是待定项，只是具体的推送机制还没设计）；`PtyManager` 持有的 shell 子进程由 `PtyManagerLayer` 的 `Layer.scoped` finalizer 在根 `Scope` 关闭时统一 kill（见 §6），但客户端断线后的按需清理、超时策略这类 pty 进程生命周期管理还没设计。
 - `mcp` 模块目前只有方法名占位（`mcp.server.create`/`list`/`enable/disable`）——stdio（command/args/env）和 remote（url + 凭证）两种 MCP server 配置形态怎么用一个 schema 统一表达没有设计；`mcp.server.update`/`mcp.server.remove`/列出某个 server 暴露的工具（类似 `provider.listModels`）先不设计。`enable` 把 `ResolvedMcpServerConfig` 翻译成每个后端原生格式（claude-code 的 `.mcp.json`、codex 的 `config.toml`）这份能力已经定为每个 adapter 自己实现（`IMcpConfigWriter`，见 §5.1/§5.4），但每个后端具体怎么翻译还没设计；配置文件是项目级（比如 claude-code 的 `.mcp.json` 通常放在项目根目录）还是用户级，`enable` 要不要传 `workspacePath`，这条待办跟 `skill` 那条"软链接全局建一次还是每个 project 各建一份"是同一类问题，没有一起解决；`enable` 要不要实际连接做健康检查/超时处理也没考虑。
 - `session.configure` 目前只支持切换 `selection` 指定的模型（见 §5.4）——在一次正在进行的 turn 中途调用会发生什么（等当前 turn 结束、还是打断）没有设计；每个 adapter（claude-code/codex）底层到底支不支持运行时切换模型也没有确认；以后要不要扩展 `configure` 去覆盖别的会话级配置（而不是新开更多方法），还没决定。
 
