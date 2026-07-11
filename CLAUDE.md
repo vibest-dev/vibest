@@ -43,10 +43,6 @@ The repository is structured into several key applications (`apps`) and shared p
 - **`packages/vibest-devtools-client`**: The client-side UI for the framework devtools, providing the actual chat panel and inspector that appears within the developer's web app.
 - **`packages/webext-bridge`**: A library for robust cross-context messaging within Web Extensions, used to facilitate communication between content scripts, background scripts, and the side panel.
 
-### Examples (`examples/`)
-
-- **`examples/vite-react`**: A fully-featured example React application that demonstrates the integration and usage of the `vibest-devtools` plugin, showcasing various UI components and features.
-
 ## High-Level Functionality
 
 The repository provides a suite of tools that collectively offer:
@@ -234,9 +230,6 @@ The files listed below are important for code generation and running terminal co
 ├── biome.jsonc
 ├── chrome-extension/
 ├── conductor.json
-├── examples/
-│   ├── vite-react/
-│   └── vite-vue/
 ├── package.json
 ├── packages/
 │   ├── agents/

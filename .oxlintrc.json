@@ -34,7 +34,6 @@
     "**/routeTree.gen.ts",
     ".conductor",
     "packages/webext-bridge/**",
-    "examples/**",
     "**/dist/**",
     "**/node_modules/**"
   ]
