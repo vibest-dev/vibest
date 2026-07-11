@@ -75,8 +75,10 @@ describe("Schema Type Compatibility", () => {
         expectTypeOf<AllowResult["behavior"]>().toEqualTypeOf<"allow">();
       });
 
-      test("updatedInput is Record<string, unknown>", () => {
-        expectTypeOf<AllowResult["updatedInput"]>().toEqualTypeOf<Record<string, unknown>>();
+      test("updatedInput is optional Record<string, unknown>", () => {
+        expectTypeOf<AllowResult["updatedInput"]>().toEqualTypeOf<
+          Record<string, unknown> | undefined
+        >();
       });
 
       test("updatedPermissions is optional array", () => {
@@ -116,7 +118,7 @@ describe("Schema Type Compatibility", () => {
   describe("Enum Values", () => {
     test("PermissionMode has correct values", () => {
       expectTypeOf<PermissionMode>().toEqualTypeOf<
-        "default" | "acceptEdits" | "bypassPermissions" | "plan" | "delegate" | "dontAsk"
+        "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
       >();
     });
 
@@ -126,7 +128,7 @@ describe("Schema Type Compatibility", () => {
 
     test("McpServerStatus status has correct values", () => {
       expectTypeOf<McpServerStatus["status"]>().toEqualTypeOf<
-        "connected" | "failed" | "needs-auth" | "pending"
+        "connected" | "failed" | "needs-auth" | "pending" | "disabled"
       >();
     });
   });
