@@ -4,7 +4,7 @@
 
 > 范围：覆盖 harness agent 运行时的核心能力域——`session`（会话生命周期与交互，核心模块）、`harness`（可用 agent adapter 信息）、`skill`（skills 安装与管理，暂不细化）、`provider`（模型/provider 配置，含自定义 provider）、`mcp`（MCP server 配置，暂不细化）、`fs`（文件读取/检索，只读）、`git`（只读 git 信息）、`project`（项目管理）、`pty`（伪终端会话管理，暂不细化）；不含任务看板、agent 执行器注册表、模型市场（可发现/浏览的第三方 provider 目录，跟"配置已有 provider"是两回事，见 §4.8）、通用应用配置等其他领域——"置顶会话""折叠分组""主题色"这类是纯 UI 本地状态，都不属于这套 headless runtime 该管的范围。
 >
-> 定位：vibest monorepo 内新增的一个 server 子包（`@vibest/server`），承载这套 harness agent 运行时模块，作为 vibest 内部的服务端模块交付，不作为对外发布的 SDK——服务端实现全部采用 Effect v4（`effect@^4`）：service 用 `Context` Tag + `Layer` 定义与装配、异步与错误用 `Effect<A, E, R>` 的类型化错误（`Data.TaggedError`）、资源生命周期用 `Scope`/finalizer、事件流用 `Stream`；WS 端点用 `@effect/platform` 承载，不引入额外的 Web 框架或 DI 容器。客户端（vibest 自己的前端）和服务端之间只有一条 WS 连接，用方法调用 + 事件推送的方式通信，不是 REST；鉴权对齐 OpenCode 的模式——默认不鉴权，可选 `Authorization: Basic`。
+> 定位：vibest monorepo 内新增的一个 server 子包（`@vibest/server`），承载这套 harness agent 运行时模块，作为 vibest 内部的服务端模块交付，不作为对外发布的 SDK——服务端实现全部采用 Effect v4（`effect@^4`）：service 用 `Context` Tag + `Layer` 定义与装配、异步与错误用 `Effect<A, E, R>` 的类型化错误（`Data.TaggedError`）、资源生命周期用 `Scope`/finalizer、事件流用 `Stream`。客户端（vibest 自己的前端）和服务端之间用 **oRPC v2** 通信（不是 REST）：走 oRPC 的 WebSocket 适配器（`@orpc/server/websocket` 的 `RPCHandler`），在单条 WS 连接上多路复用地跑类型安全的 procedure 调用 + event iterator 事件流；oRPC procedure 用官方的 `@orpc/experimental-effect` 集成直接写成 Effect（`.effect(function* …)`），把 §5 的 Effect service 注入进 handler。鉴权对齐 OpenCode 的模式——默认不鉴权，可选 `Authorization: Basic`。
 
 ## 1. 目标与范围
 
@@ -16,8 +16,8 @@
 
 在 vibest monorepo 里新增两个子包承载这套 harness agent 运行时——`packages/server`（`@vibest/server`）放服务端运行时，`packages/client`（`@vibest/client`）放客户端访问层；由 vibest 自己的前端（web / side panel / devtools-client）通过一条 WS 连接消费。两者都是 vibest 内部子包，先不拆成对外发布的 SDK。
 
-- **服务端运行时**：`packages/server`（`@vibest/server`）子包——session 生命周期 + fs/git/project 等能力 + WS 端点，本文档的主要设计对象（§4–§8）。
-- **客户端访问**：`packages/client`（`@vibest/client`）子包——封装 WS 建连、方法调用、事件订阅、断线重连（见 §3）；独立于 `@vibest/server`，不放在服务端子包里，先不单独发布成 SDK。
+- **服务端运行时**：`packages/server`（`@vibest/server`）子包——session 生命周期 + fs/git/project 等能力，实现成一个 oRPC router、经 WS `RPCHandler` 暴露，本文档的主要设计对象（§4–§8）。
+- **客户端访问**：`packages/client`（`@vibest/client`）子包——在 oRPC 客户端（`@orpc/client` + WebSocket link）上薄封装建连、事件订阅、断线重连（见 §3）；类型直接复用 `@vibest/server` 的 oRPC router 类型（`RouterClient`），独立于 `@vibest/server`，不放在服务端子包里，先不单独发布成 SDK。
 - **React 状态层**：作为 vibest 内部模块（见 §9），依赖 `@vibest/client`，先不单独发布成 SDK 包。
 
 ## 3. 使用方式
@@ -46,7 +46,7 @@ const harnessAgents = await client.harness.list();
 const { sessionId } = await client.session.create({ projectId, harnessAgentId: 'claude-code' });
 await client.session.prompt(sessionId, { text: '帮我修一下登录 bug' });
 
-// 订阅事件（异步迭代器；不传 sessionId 订阅所有会话）
+// 订阅事件（oRPC event iterator；不传 sessionId 订阅所有会话）
 for await (const event of client.session.subscribe()) {
   console.log(event.harnessAgentId, event.sessionId, event.type, event.payload);
 }
@@ -54,7 +54,7 @@ for await (const event of client.session.subscribe()) {
 
 ## 4. API 模块
 
-服务端只提供一条 WS 连接；建连后客户端用 JSON-RPC 风格的消息（`{ id, method, params }` → `{ id, result }` / `{ id, error }`）调用下面各模块的方法，服务端也在同一条连接上主动推送事件（§4.3）。共十个模块，按 §4.1–4.10 展开；其中 `harness`/`skill`/`session` 背后分别对应服务端内部的 `HarnessAgentRegistry`（§5.1）、`HarnessAgentSkillService`、`HarnessAgentSessionService`（§5.2）——外部方法命名空间去掉了 `HarnessAgent` 前缀，内部实现类名不跟着改。
+服务端把下面各模块实现成一个 oRPC router，经 oRPC 的 WebSocket 适配器（`@orpc/server/websocket` 的 `RPCHandler`）在单条 WS 连接上暴露；客户端用 `@orpc/client` 的 WS link 直接调用类型安全的 procedure（`client.session.create(...)` 等），事件订阅走 oRPC 的 event iterator（§4.3），都多路复用在这一条连接上。共十个模块（= oRPC router 的十个命名空间），按 §4.1–4.10 展开；其中 `harness`/`skill`/`session` 背后分别对应服务端内部的 `HarnessAgentRegistry`（§5.1）、`HarnessAgentSkillService`、`HarnessAgentSessionService`（§5.2）——oRPC 命名空间去掉了 `HarnessAgent` 前缀，内部实现类名不跟着改。
 
 ### 4.1 harness 模块
 
@@ -92,7 +92,7 @@ for await (const event of client.session.subscribe()) {
 
 ### 4.3 events 模块
 
-不是方法调用，是服务端在 `session.subscribe()` 建立订阅后主动推送的消息，`sessionId` 相关的会话事件都从这里多路复用地推过来（`fs` 是只读模块，不产生变化事件；`pty` 输出流是否也复用这条通道还没设计，见 §8）。完整的订阅、心跳、背压丢帧恢复、断线重连时序见配套架构图（文档开头链接）里的 frame ②「events 订阅时序图」。
+`session.subscribe` 是一个返回 oRPC event iterator（async generator）的 procedure，不是普通请求/响应；客户端 `for await` 消费它，`sessionId` 相关的会话事件都从这里多路复用地推过来（`fs` 是只读模块，不产生变化事件；`pty` 输出流是否也复用这条通道还没设计，见 §8）。服务端侧这个 iterator 由 Effect `Stream` 产出、在 oRPC 边界转成 event iterator（也可用 oRPC 的 Publisher helper 做多订阅扇出，见 §8）。完整的订阅、心跳、背压丢帧恢复、断线重连时序见配套架构图（文档开头链接）里的 frame ②「events 订阅时序图」。
 
 三条不做在文字里重复、直接看图的机制：`seq` 单调递增、`gap` 丢帧合并、断线重连和背压丢帧走同一套"整个重新拉快照"逻辑，不做续传。另外两条图上不方便体现的设计决策：
 
@@ -179,7 +179,7 @@ for await (const event of client.session.subscribe()) {
 
 ## 5. Services 抽象（服务端内部）
 
-服务端全部用 Effect v4 写：WS 路由 handler 只做参数校验和响应组装（把请求 decode 成参数、`yield*` 对应 service 的方法、把结果或类型化错误编回 §4 的 `{ id, result }` / `{ id, error }` 线格式），业务逻辑全部在 service 里。下面按角色列出每个抽象/service 和它们的依赖关系，不逐个方法展开。
+服务端全部用 Effect v4 写，对外经 oRPC v2 的 router 暴露：每个模块方法是一个 oRPC procedure，用官方 `@orpc/experimental-effect` 集成写成 `.effect(function* ({ input, context }) { … })`——procedure 里只做输入校验（可用 Effect Schema）和编排，`yield*` 对应的 Effect service 方法拿结果、把领域错误映射成 oRPC `ORPCError`，业务逻辑全部在 service 里。下面按角色列出每个抽象/service 和它们的依赖关系，不逐个方法展开。
 
 命名约定（Effect v4）：凡是会被其他 service 按类型依赖注入的协作对象（下表里带 `IXxx` 接口的那批——各 Service、Registry、EventBus、三个 Repository、两个 Manager），都做成一个 Effect service——用一个 `Context` Tag 标识（Tag 的 Shape 就是原来的 `IXxx` 接口，方法返回 `Effect<A, E, R>` 而不是 `Promise`），再配一个 `Layer` 负责构造（命名 `XxxLayer`，对应下表"实现类"列）；消费方在 Effect 里 `yield*` 这个 Tag 拿到实例，依赖关系体现在 Layer 的 `RIn` 上，测试时换个 Layer 就能 mock。按 id 动态选择的多实现对象（`IHarnessAgentAdapter` / `IHarnessAgentSession`，以及每个后端各自的 `ISessionRepository` / `ISkillRepository` / `IMcpConfigWriter`）保持为普通接口（Shape），由对应 adapter 生产、由 Registry 持有，不各自做成 Tag/Layer；纯数据形状（DTO，比如 `ModelSelection`）、以及只有一份实现的 per-session 内部件（比如 `SessionLifecycle`）也是普通类型，下表里用"—"标出。类型化错误统一用 `Data.TaggedError` 定义（错误契约见 §8）。
 
@@ -345,6 +345,32 @@ class HarnessAgentSessionService extends Context.Tag('HarnessAgentSessionService
 
 > Effect v4 的 service 构造器在 beta 期间（`ServiceMap` ↔ `Context`）反复改过名，上面用 `Context.Tag` 的 class 写法只是示意——落地时以最终 release 的确切 API 为准（见 §8）。
 
+§4 的每个 oRPC procedure 就是把这些 service 方法包一层。以 `session.create` 为例（`@orpc/experimental-effect` 的 `.effect` 写法）：
+
+```typescript
+import { Schema } from 'effect';
+
+export const sessionRouter = {
+  create: base
+    .input(Schema.Struct({
+      projectId: Schema.String,
+      harnessAgentId: Schema.Literal('claude-code', 'codex'),
+      selection: Schema.optional(ModelSelectionSchema),
+    }))
+    .effect(function* ({ input }) {
+      // Effect service 从 oRPC context（'effect/context'，见 §6）注入
+      const sessions = yield* HarnessAgentSessionService;
+      const projects = yield* ProjectService;
+      const workspacePath = yield* projects.findById(input.projectId);
+      return yield* sessions.create({ ...input, workspacePath });
+      // service 里 Effect.fail 的领域错误（如 HarnessAgentUnavailable）由集成映射成 oRPC ORPCError
+    }),
+  // subscribe：.effect 里 return 一个 Effect Stream，oRPC 边界转成 event iterator（§4.3）
+};
+```
+
+其余 `session.*`、`harness.*`、`fs.*` 等 procedure 都是这个模式：`yield*` 对应 §5.2 的 Effect service，冷操作路由（下面那段）也在 procedure/service 里做。
+
 `SessionSummary`/`Message`/`SessionStatus`/`SessionSnapshot`/`SessionEvent`/`AgentRequestResponse` 只是占位类型名，具体字段没有展开设计（事件 payload 见 §8）。
 
 上一轮追出来的"冷操作怎么路由到具体 adapter"的洞，这里给一个解法并落到接口里：`create`/`resume` 生成的 `sessionId` 格式定为 `${harnessAgentId}:${uuid}`（`IHarnessAgentSession.id` 那行的注释）；`IHarnessAgentSessionService` 的 `getMessages`/`rename`/`archive`/`delete` 这几个冷方法，拿到 `sessionId` 后先切出前缀部分的 `harnessAgentId`，用新加的 `IHarnessAgentRegistry.get(id)` 查到对应 adapter，再调 `adapter.sessionRepository.<method>(sessionId)`——不需要额外的路由表，也不用调用方多传一个 `harnessAgentId` 参数。这是本设计对上一轮那个洞给出的具体方案，如果不想用 ID 编码前缀这个办法，需要另外讨论。
@@ -398,7 +424,7 @@ export const HarnessAgentServerLayer = Layer.mergeAll(
 );
 ```
 
-跑起来就是把 `HarnessAgentServerLayer` provide 给 `@effect/platform` 的 WS/HTTP server（或用 `Layer.launch`）；进程收到停止信号时关闭根 `Scope`，finalizer 逆序执行（先 kill pty shell、再 kill codex app-server、再停 EventBus ping）。
+跑起来就是用这个根 Layer 建一个 `ManagedRuntime`（或直接 `Layer.launch` 进一个常驻 `Scope`），把它接到 oRPC 的 WS `RPCHandler` 上——`@orpc/experimental-effect` 通过 oRPC context（`'effect/context'` / `'effect/wrap'`）把 runtime 提供给每个 `.effect` procedure，于是 procedure 里 `yield*` 的 §5 service 都来自这个根 Layer；进程收到停止信号时关闭根 `Scope`，finalizer 逆序执行（先 kill pty shell、再 kill codex app-server、再停 EventBus ping）。
 
 依赖关系见 §5.2；这里补一点 §5.2 没提到的：`EventBus` 靠 `Layer` 的 memoization 成为整个根 Layer 里的共享单例（同一个 `EventBusLayer` 被多个 service provide 也只构造一次），注入给 `HarnessAgentSessionService`，`PtyService` 也依赖它来推送终端输出，但具体怎么复用还没设计（见 §8）。
 
@@ -414,7 +440,8 @@ export const HarnessAgentServerLayer = Layer.mergeAll(
 - `$VIBEST_HOME/config.json` 里的凭证（`provider`/`mcp` 两个字段都可能有）目前跟其余配置存在同一个文件、没有做文件权限收紧（比如 `chmod 600`）——参考实现里同样没做，但这套 runtime 要不要主动补上这个小的安全加固，还没决定。
 - `EventBus` 的背压阈值（相当于"缓冲队列上限"）、ping 间隔、gap 之后客户端具体怎么补状态，这几个数值/流程还没敲定，需要确认。
 - Effect v4 的 service 构造器 API 在 beta 期间（`ServiceMap` ↔ `Context`）反复改过名，本文档 §5.4/§6 用 `Context.Tag` + `Layer` 只是示意——`@vibest/server` 落地时以最终 release 的确切 service/Layer 构造器为准，需要确认。
-- WS 端点用 `@effect/platform` 的 HTTP/socket server 承载，其在目标运行时（Node，可能还有 Bun）下的 WS 升级/长连接兼容性需要验证。
+- 传输层用 oRPC v2 的 WS `RPCHandler`（`@orpc/server/websocket`）+ `@orpc/client` 的 WS link；官方 Effect 集成 `@orpc/experimental-effect` 目前是 experimental/beta（要配 `effect@beta`），API 可能变、还得跟 §5.4/§6 用的 Effect v4 版本对齐，落地时需要 pin 版本并验证。
+- §4.3 的 `seq`/`gap`/断线重连补快照是我们自己在 event iterator 之上叠的一层语义——需要确认它跟 oRPC event iterator 自带的生命周期（`.return`/signal 取消、重连）怎么配合，以及事件扇出（多订阅广播）要不要直接用 oRPC 的 Publisher helper 而不是自己写 `EventBus`。
 - 类型定义手动同步的维护成本——后续要不要收敛成一个共享的轻量 types 包，现在先不做。
 - `git` 模块的写操作（`checkout`/`createBranch`/`switchBranch` 等）Service 层已经实现，但故意没有注册成 API——需要确认是否真的不需要对外开放。
 - `git` 模块目前只保留 `status`/`branch` 两个方法，是临时简化——`isGitRepo`/`currentBranch`/`isGitWorktree`/`getContributors`/`getCommitStats`/`getActivityData`/`getRecentActivity`/`getConfig`/`getProjectGitInfo` 这些先不设计，要不要加回来、加哪些，还没决定；`git.branch` 里"查默认分支"具体传什么参数也还没定。
@@ -437,7 +464,7 @@ export const HarnessAgentServerLayer = Layer.mergeAll(
 
 ## 9. React 状态管理层（vibest 内部模块）
 
-vibest 前端消费这套运行时的 React 状态层——依赖 §3 的 `@vibest/client` 客户端，不直接碰 WS，先作为 vibest 内部模块存在（具体落在哪个前端包待定），不单独发布成 SDK。目的：把"建连、订阅事件、断线重连补快照"这套 §3 里手写的样板逻辑封装掉，业务代码只用 hook 读状态、调用几个 action，不用自己维护订阅循环和 reducer——即"根据状态渲染 UI"。
+vibest 前端消费这套运行时的 React 状态层——依赖 §3 的 `@vibest/client`（oRPC 客户端的薄封装），不直接碰 WS/oRPC，先作为 vibest 内部模块存在（具体落在哪个前端包待定），不单独发布成 SDK。目的：把"建连、订阅事件、断线重连补快照"这套 §3 里手写的样板逻辑封装掉，业务代码只用 hook 读状态、调用几个 action，不用自己维护订阅循环和 reducer——即"根据状态渲染 UI"。
 
 内部用 [zustand](https://github.com/pmndrs/zustand) 维护一份全局 store（一个 React 应用一份，不是每个组件一份），大致结构：
 
