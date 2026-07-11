@@ -35,7 +35,7 @@ describe("GitService", () => {
       }),
     );
     expect(status.current).toBe("main");
-    expect(status.notAdded).toContain("untracked.txt");
+    expect(status.not_added).toContain("untracked.txt");
   });
 
   it("lists branches", async () => {

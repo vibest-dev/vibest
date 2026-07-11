@@ -1,1 +1,2 @@
-export { GitService, GitServiceLayer, type GitBranchInfo, type GitStatus } from "./service.js";
+export type { BranchSummary, StatusResult } from "simple-git";
+export { GitService, GitServiceLayer } from "./service.js";
