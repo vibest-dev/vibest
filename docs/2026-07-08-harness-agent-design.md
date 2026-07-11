@@ -8,24 +8,24 @@
 
 ## 1. 目标与范围
 
-目标是设计一套通用的 Harness Agent Client-Server 架构：服务端托管 agent harness 的运行时（session 生命周期 + fs/git/project 能力），客户端通过一条 WS 连接远程驱动它。这套运行时最终落在 vibest 新增的 `packages/server`（`@vibest/server`）子包里，作为 vibest 内部的服务端模块交付，不作为对外发布的 SDK。
+目标是设计一套通用的 Harness Agent Client-Server 架构：服务端托管 agent harness 的运行时（session 生命周期 + fs/git/project 能力），客户端通过一条 WS 连接远程驱动它。服务端运行时落在 vibest 新增的 `packages/server`（`@vibest/server`）子包里，客户端访问层落在另一个新增的 `packages/client`（`@vibest/client`）子包里（见 §2）；两者都作为 vibest 内部子包交付，不作为对外发布的 SDK。
 
 - 鉴权默认关闭；设置密码环境变量后要求 `Authorization: Basic <base64(user:pass)>`（在 WS 握手阶段校验）。
 
 ## 2. 子包结构
 
-在 vibest monorepo 里新增一个 `packages/server`（`@vibest/server`）子包承载这套 harness agent 运行时模块——服务端运行时（session 生命周期 + fs/git/project 等能力 + WS 端点）全部在这个子包里，由 vibest 自己的前端（web / side panel / devtools-client）通过一条 WS 连接消费。它是 vibest 内部的服务端子包，先不拆成对外发布的 SDK。
+在 vibest monorepo 里新增两个子包承载这套 harness agent 运行时——`packages/server`（`@vibest/server`）放服务端运行时，`packages/client`（`@vibest/client`）放客户端访问层；由 vibest 自己的前端（web / side panel / devtools-client）通过一条 WS 连接消费。两者都是 vibest 内部子包，先不拆成对外发布的 SDK。
 
-- **服务端运行时**：`@vibest/server` 子包——本文档的主要设计对象（§4–§8）。
-- **客户端访问**：作为 vibest 内部消费方存在（见 §3），先不单独发布成客户端 SDK 包；实现上可以是 `@vibest/server` 的一个 `/client` 子路径导出，也可以直接放在消费它的前端里，位置待定。
-- **React 状态层**：同样作为 vibest 内部模块（见 §9），先不单独发布成 SDK 包。
+- **服务端运行时**：`packages/server`（`@vibest/server`）子包——session 生命周期 + fs/git/project 等能力 + WS 端点，本文档的主要设计对象（§4–§8）。
+- **客户端访问**：`packages/client`（`@vibest/client`）子包——封装 WS 建连、方法调用、事件订阅、断线重连（见 §3）；独立于 `@vibest/server`，不放在服务端子包里，先不单独发布成 SDK。
+- **React 状态层**：作为 vibest 内部模块（见 §9），依赖 `@vibest/client`，先不单独发布成 SDK 包。
 
 ## 3. 使用方式
 
 核心用法——建连、挑一个可用的 harness agent、创建会话、发消息、订阅事件；完整方法列表见 §4。
 
 ```typescript
-import { createHarnessClient } from '@vibest/server/client';
+import { createHarnessClient } from '@vibest/client';
 
 const client = createHarnessClient({
   url: 'ws://127.0.0.1:7001',
@@ -404,7 +404,7 @@ class HarnessAgentServerFeatures {
 
 ## 9. React 状态管理层（vibest 内部模块）
 
-vibest 前端消费这套运行时的 React 状态层——依赖 §3 的客户端访问方式，不直接碰 WS，先作为 vibest 内部模块存在（具体落在哪个前端包待定），不单独发布成 SDK。目的：把"建连、订阅事件、断线重连补快照"这套 §3 里手写的样板逻辑封装掉，业务代码只用 hook 读状态、调用几个 action，不用自己维护订阅循环和 reducer——即"根据状态渲染 UI"。
+vibest 前端消费这套运行时的 React 状态层——依赖 §3 的 `@vibest/client` 客户端，不直接碰 WS，先作为 vibest 内部模块存在（具体落在哪个前端包待定），不单独发布成 SDK。目的：把"建连、订阅事件、断线重连补快照"这套 §3 里手写的样板逻辑封装掉，业务代码只用 hook 读状态、调用几个 action，不用自己维护订阅循环和 reducer——即"根据状态渲染 UI"。
 
 内部用 [zustand](https://github.com/pmndrs/zustand) 维护一份全局 store（一个 React 应用一份，不是每个组件一份），大致结构：
 
