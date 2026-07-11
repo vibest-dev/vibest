@@ -10,7 +10,7 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx src/node/cli.ts",
-    "build": "vite build && tsdown",
+    "build": "vp build && vp pack",
     "start": "node dist/cli.js",
     "typecheck": "tsc -p src/client && tsc -p src/node",
     "clean": "git clean -xdf node_modules .turbo dist"
@@ -82,10 +82,9 @@
     "@vitejs/plugin-react": "^5.0.1",
     "code-inspector-plugin": "latest",
     "jsdom": "^26.0.0",
-    "tsdown": "^0.13.5",
     "tsx": "latest",
     "typescript": "^5.9.2",
-    "vite": "npm:rolldown-vite@latest",
+    "vite": "catalog:",
     "vite-tsconfig-paths": "^5.1.4",
     "web-vitals": "^5.0.3",
     "ws": "^8.18.3"

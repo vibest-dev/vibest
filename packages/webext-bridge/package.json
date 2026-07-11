@@ -95,7 +95,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format cjs --no-dts --publint false && tsdown src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm --dts --clean false",
+    "build": "vp pack src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format cjs --no-dts --publint false && vp pack src/index.ts src/background.ts src/content-script.ts src/devtools.ts src/options.ts src/popup.ts src/window.ts src/sidepanel.ts --format esm --dts --clean false",
     "watch": "npm run build -- --watch",
     "release": "bumpp --commit --push --tag && npm run build && npm publish",
     "typecheck": "tsc --noEmit",
@@ -111,7 +111,6 @@
     "@types/node": "^24.10.13",
     "@types/webextension-polyfill": "^0.8.3",
     "bumpp": "^7.1.1",
-    "tsdown": "^0.13.5",
     "tsup": "^5.11.13",
     "type-fest": "^2.11.1",
     "typescript": "^5.9.2"

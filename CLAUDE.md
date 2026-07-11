@@ -4,7 +4,7 @@ The `vibest` repository is a monorepo dedicated to enhancing the web development
 
 ## Architectural Overview
 
-The codebase employs a monorepo architecture, managed with `pnpm` and `Turborepo`, to efficiently organize and build multiple interconnected applications and packages. The core architecture is client-server based, with a local Node.js server (`packages/cli`) acting as the backend for AI agent interactions, and several frontend applications (web app, Chrome side panel, devtools client) serving as the user interfaces.
+The codebase employs a monorepo architecture, managed with `pnpm` and `Vite+` (the unified `vp` toolchain, which includes Vite Task for build orchestration), to efficiently organize and build multiple interconnected applications and packages. The core architecture is client-server based, with a local Node.js server (`packages/cli`) acting as the backend for AI agent interactions, and several frontend applications (web app, Chrome side panel, devtools client) serving as the user interfaces.
 
 Key architectural patterns include:
 
@@ -102,9 +102,9 @@ When using TanStack Query (server state) with Zustand (client state):
 
 The `vibest` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
 
-- **Monorepo Management:** `pnpm` and `Turborepo` are used for dependency management and build orchestration across multiple packages, enabling faster builds and consistent environments.
+- **Monorepo Management:** `pnpm` and `Vite+` (the `vp` CLI, which bundles Vite Task) are used for dependency management and build orchestration across multiple packages. Common commands: `vp run -r build` (build all packages in dependency order), `vp test`, `vp check` (format + lint + type-aware check), `vp lint`, and `vp fmt`. See `AGENTS.md` and `node_modules/vite-plus/docs` for the full command surface.
 - **TypeScript:** The entire codebase is written in TypeScript, providing static type checking for improved code reliability, readability, and developer experience.
-- **Code Quality & Formatting:** `biome.jsonc` indicates the use of Biome for linting and formatting, enforcing consistent coding styles and identifying potential issues early in the development cycle.
+- **Code Quality & Formatting:** Linting and formatting are handled by `Oxlint` (`.oxlintrc.json`) and `Oxfmt` (`.oxfmtrc.json`) through Vite+ (`vp lint` / `vp fmt` / `vp check`), enforcing consistent coding styles and catching issues early.
 - **Automated Testing:** Unit and integration tests are present (e.g., `vitest.config.ts`, `test` directories), ensuring the correctness of individual modules and their interactions.
 - **CI/CD:** A GitHub Actions workflow (`.github/workflows/quality.yml`) automatically runs `test`, `lint`, and `typecheck` checks on every push and pull request to the `main` branch, maintaining code quality standards.
 - **Version Management:** `@changesets/cli` is used for managing package versions and generating changelogs, streamlining the release process for the monorepo.
@@ -136,9 +136,9 @@ The project integrates with several critical technologies and third-party tools:
   - `webext-bridge`: A specialized library for facilitating secure and efficient message passing between different contexts (content scripts, background scripts, UI pages) within a Web Extension.
 - **Monorepo Tooling:**
   - `pnpm`: A fast, disk space efficient package manager.
-  - `Turborepo`: A high-performance build system for JavaScript and TypeScript monorepos.
-  - `tsdown`: A TypeScript bundler.
-  - `biomejs`: A web frontend toolchain for linting, formatting, and more.
+  - `Vite+` (`vp`): The unified toolchain (Vite, Vitest, Rolldown, tsdown, Oxlint, Oxfmt, and Vite Task) that drives dev, build, test, lint, format, and workspace task orchestration.
+  - `Vite Task`: Dependency-aware, cached workspace task runner (invoked via `vp run`), replacing Turborepo.
+  - `Oxlint` / `Oxfmt`: Rust-based linter and formatter used via `vp lint` / `vp fmt`.
 - **Other Utilities:**
   - `zod`: TypeScript-first schema declaration and validation library, used for data validation.
   - `date-fns`: A modern JavaScript date utility library.
@@ -156,8 +156,8 @@ The files listed below are important for code generation and running terminal co
     "path": "package.json"
   },
   {
-    "description": "Monorepo configuration for Turbo, orchestrating builds, tests, and other tasks across packages and applications.",
-    "path": "turbo.json"
+    "description": "Root Vite+ configuration (defineConfig from vite-plus): Vitest project setup, staged-file checks, and workspace task orchestration via Vite Task.",
+    "path": "vite.config.ts"
   },
   {
     "description": "Defines the workspace structure for pnpm, indicating the packages included in the monorepo.",
@@ -246,6 +246,5 @@ The files listed below are important for code generation and running terminal co
 ├── pnpm-workspace.yaml
 ├── tools/
 │   └── typescript/
-├── turbo.json
-└── vitest.config.ts
+└── vite.config.ts
 ```

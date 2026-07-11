@@ -29,8 +29,8 @@
     "access": "public"
   },
   "scripts": {
-    "stub": "tsdown",
-    "build": "tsdown",
+    "stub": "vp pack",
+    "build": "vp pack",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules dist .turbo"
   },
@@ -65,8 +65,7 @@
     "@vibest/code-inspector-node": "workspace:*",
     "@vibest/server-rpc": "workspace:*",
     "publint": "^0.3.12",
-    "tsdown": "^0.13.5",
-    "vitest": "^3.2.4"
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "vite": ">=3"

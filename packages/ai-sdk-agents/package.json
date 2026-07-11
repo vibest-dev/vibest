@@ -24,17 +24,17 @@
   },
   "scripts": {
     "stub": "pnpm run build",
-    "build": "tsdown --format cjs --no-dts --publint false && tsdown --format esm --dts --clean false",
+    "build": "vp pack --format cjs --no-dts --publint false && vp pack --format esm --dts --clean false",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vp test run",
     "clean": "git clean -xdf node_modules .turbo dist"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.12",
     "@vibest/typescript": "workspace:*",
     "ai": "^5.0.63",
-    "tsdown": "^0.13.5",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.22",

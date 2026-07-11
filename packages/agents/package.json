@@ -14,9 +14,9 @@
     }
   },
   "scripts": {
-    "stub": "tsdown",
-    "build": "tsdown",
-    "test": "vitest run",
+    "stub": "vp pack",
+    "build": "vp pack",
+    "test": "vp test run",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules .turbo"
   },
@@ -28,7 +28,6 @@
     "@vibest/typescript": "workspace:*",
     "ai": "^5.0.63",
     "ai-sdk-agents": "workspace:*",
-    "tsdown": "^0.13.5",
     "zod": "^3.24.1"
   },
   "peerDependencies": {

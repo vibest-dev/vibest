@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite build --mode development",
-    "build": "vite build",
-    "preview": "vite preview",
+    "dev": "vp build --mode development",
+    "build": "vp build",
+    "preview": "vp preview",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules .turbo dist"
   },
@@ -33,6 +33,6 @@
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^5.0.1",
     "typescript": "^5.9.2",
-    "vite": "npm:rolldown-vite@latest"
+    "vite": "catalog:"
   }
 }

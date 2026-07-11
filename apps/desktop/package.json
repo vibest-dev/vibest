@@ -19,8 +19,8 @@
     "e2e": "pnpm run build && playwright test -c e2e/playwright.config.ts",
     "e2e:headed": "pnpm run build && playwright test -c e2e/playwright.config.ts --headed",
     "e2e:report": "playwright show-report e2e/report",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vp test run",
+    "test:watch": "vp test"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -70,8 +70,8 @@
     "tailwind-merge": "^3.3.0",
     "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2",
-    "vite": "^7.2.6",
-    "vitest": "^3.2.4",
+    "vite": "catalog:",
+    "vitest": "catalog:",
     "zod": "^3.24.1",
     "zustand": "^5.0.5"
   }

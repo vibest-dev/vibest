@@ -24,4 +24,11 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run test lint typecheck
+
+      # Build workspace packages first so type-checking and linting resolve the
+      # generated `dist` outputs (Vite Task replaces Turborepo's `^build`).
+      - run: pnpm run build:packages
+
+      - run: pnpm run test
+      - run: pnpm run lint:check
+      - run: pnpm run typecheck

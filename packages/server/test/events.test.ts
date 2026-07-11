@@ -1,5 +1,5 @@
 import { Effect, Fiber, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { EventBus, EventBusLayer, type SessionEvent } from "../src/index";
 

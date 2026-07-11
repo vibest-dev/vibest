@@ -1,7 +1,7 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import type { z } from "zod/v4";
 
-import { describe, expectTypeOf, test } from "vitest";
+import { describe, expectTypeOf, test } from "vite-plus/test";
 
 import type {
   McpServerStatusSchema,
