@@ -1,21 +1,20 @@
-import { Effect, Layer } from "effect";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
 import {
   layerPaths,
-  ProjectRepository,
   ProjectRepositoryLayer,
   ProjectService,
   ProjectServiceLayer,
 } from "../src/index";
 
-const makeLayer = (home: string) => {
-  const repo = ProjectRepositoryLayer.pipe(Layer.provide(layerPaths(home)));
-  return Layer.mergeAll(repo, ProjectServiceLayer.pipe(Layer.provide(repo)));
-};
+const makeLayer = (home: string) =>
+  ProjectServiceLayer.pipe(
+    Layer.provide(ProjectRepositoryLayer),
+    Layer.provide(layerPaths(home)),
+  );
 
 describe("ProjectService", () => {
   let home: string;
@@ -26,7 +25,7 @@ describe("ProjectService", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  const run = <A, E>(program: Effect.Effect<A, E, ProjectService | ProjectRepository>) =>
+  const run = <A, E>(program: Effect.Effect<A, E, ProjectService>) =>
     Effect.runPromise(Effect.provide(program, makeLayer(home)));
 
   it("creates and persists a project, then lists it", async () => {
@@ -81,25 +80,15 @@ describe("ProjectService", () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it("refuses to remove a protected (playground) project", async () => {
+  it("remove fails with ProjectNotFound for an unknown id", async () => {
     const err = await run(
       Effect.flip(
         Effect.gen(function* () {
-          const repo = yield* ProjectRepository;
-          yield* repo.save([
-            {
-              id: "playground",
-              name: "playground",
-              path: "/tmp/pg",
-              createdAt: new Date().toISOString(),
-              protected: true,
-            },
-          ]);
           const svc = yield* ProjectService;
-          return yield* svc.remove("playground");
+          return yield* svc.remove("nope");
         }),
       ),
     );
-    expect(err._tag).toBe("ProjectProtected");
+    expect(err._tag).toBe("ProjectNotFound");
   });
 });

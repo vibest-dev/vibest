@@ -19,8 +19,6 @@ export interface Project {
   readonly name: string;
   readonly path: string;
   readonly createdAt: string;
-  /** The `playground` project is protected and cannot be removed. */
-  readonly protected?: boolean;
 }
 
 /**

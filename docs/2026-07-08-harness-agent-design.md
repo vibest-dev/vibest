@@ -126,7 +126,7 @@ for await (const event of client.session.subscribe()) {
 |---|---|
 | `project.list` | 项目列表 |
 | `project.create` | 新建/按路径去重复用已有项目 |
-| `project.remove` | 删除项目（`playground` 项目受保护，不可删） |
+| `project.remove` | 删除项目 |
 
 会话是否归档是 `session` 模块自己的概念（`session.archive` + `session.list` 返回的摘要里带 `archived` 字段），不需要在 `project` 模块另开一个按项目分组的批量查询接口；"置顶会话""折叠的分组"是纯客户端本地展示状态，不属于 harness agent runtime 的领域模型，这套 runtime 不管。
 
@@ -212,14 +212,14 @@ for await (const event of client.session.subscribe()) {
 | `IEventBus`                   | `EventBus`                   | 事件枢纽：会话事件统一从这里推送，含背压丢帧提示（`gap`）、心跳（`ping`），支持多个并发订阅连接（广播，不按连接过滤）                                                     | 无（共享单例）                                                                     |
 | `IFSService`                  | `FSService`                  | `fs` 模块实现（只读：readFile/tree/grep/search）                                                                              | 无                                                                           |
 | `IGitService`                 | `GitService`                 | `git` 模块实现；Service 层写操作方法齐全，只对外暴露只读子集（见 §8）                                                                          | 无（仅一个日志 sink）                                                               |
-| `IProjectService`             | `ProjectService`             | `project` 模块实现，另有 `findById`/`update` 等内部方法未对外暴露；实际读写落地在 `IProjectRepository`（见 §5.3），自己只做 `playground` 保护、路径去重这类业务规则 | `IProjectRepository`（§5.1）                                                   |
+| `IProjectService`             | `ProjectService`             | `project` 模块实现，另有 `findById`/`update` 等内部方法未对外暴露；实际读写落地在 `IProjectRepository`（见 §5.3），自己只做路径去重这类业务规则 | `IProjectRepository`（§5.1）                                                   |
 | `IPtyService`                 | `PtyService`                 | `pty` 模块的实现（细节未设计）；活跃 pty 实例的存取委托给 `IPtyManager`                                                                        | `IPtyManager`（§5.1）、`IEventBus`                                                    |
 
 `HarnessAgentSessionService` 不依赖 `ProjectService`——`workspacePath` 由 WS 路由 handler 用 `ProjectService.findById` 解析好之后再传进来。活跃会话的 `sessionId → HarnessAgentSession` 索引由 `HarnessAgentSessionManager`（§5.1）维护，调用方一个 `sessionId` 就能定位会话，不用额外带上 `harnessAgentId`。`create` 时 `HarnessAgentSessionService` 把 `workspacePath` 交给 `HarnessAgentRegistry` 查到的 adapter 的 `createSession`，拿到返回的 `HarnessAgentSession` 实例后调用 `HarnessAgentSessionManager.register()` 存进索引；`close` 时则是先按 `sessionId` 从 `HarnessAgentSessionManager.get()` 取出实例、调用它的 `close()`，再 `HarnessAgentSessionManager.remove()` 把索引里的条目摘掉。
 
 ### 5.3 数据存储
 
-存储格式和文件读写只属于 `ProjectRepository`/`ProviderRepository`/`McpRepository`（§5.1）——`ProjectService`/`ModelProviderService`/`McpService` 不直接碰文件，只调用各自 Repository 的存取方法，业务规则（`playground` 保护、凭证解析等）留在 Service 层。`$VIBEST_HOME` 未设置时默认 `~/.vibest`——默认目录名用 vibest 自己的，不复用参考实现的目录，避免两边同时装在一台机器上互相踩到对方的数据。
+存储格式和文件读写只属于 `ProjectRepository`/`ProviderRepository`/`McpRepository`（§5.1）——`ProjectService`/`ModelProviderService`/`McpService` 不直接碰文件，只调用各自 Repository 的存取方法，业务规则（路径去重、凭证解析等）留在 Service 层。`$VIBEST_HOME` 未设置时默认 `~/.vibest`——默认目录名用 vibest 自己的，不复用参考实现的目录，避免两边同时装在一台机器上互相踩到对方的数据。
 
 | 文件 | 归属 Repository | 格式 |
 | --- | --- | --- |
@@ -444,7 +444,6 @@ export const HarnessAgentServerLayer = Layer.mergeAll(
 - 事件信封（envelope）没有给出具体字段结构的示例——§4.3 只定义了 `kind` 的取值，一条 `turn_started` 之类的事件实际长什么样，需要补一个典型 payload 示例。
 - RPC 方法调用本身要不要超时/取消语义，还没设计——注意这跟 `interrupt`（取消的是 agent turn）是两回事。
 - §7 鉴权目前只覆盖连接层（Basic Auth），但 `fs`/`git` 能读取宿主机文件系统，信任边界比"连上了就行"更大；这条要跟"fs 没有路径越界保护"那条待办一起考虑，鉴权章节需要明确写清楚这是两层不同的东西。
-- `project.remove` 里提到的 `playground` 项目目前只说了"受保护不可删"，具体是什么（默认占位项目？没接入真实仓库时的兜底项目？）没有解释，需要补一句说明。
 - §3 提到"同一个 session 被多个客户端同时发起热操作时，交给 `SessionLifecycle` 的不变量兜底，具体失败形式属于错误契约"——这个错误契约本身还没设计（后到的调用是直接报错、排队等待、还是覆盖前一个），`IHarnessAgentSession` 各方法要不要抛出特定错误类型也取决于这条，目前还是空的。错误统一走 Effect 的类型化错误（`Data.TaggedError`），但具体有哪些 tagged error、各方法 `Effect<A, E, R>` 的 `E` 通道到底列哪些，等这条契约定了再补（§5.4 里的 `SessionNotFound`/`HarnessAgentUnavailable` 只是示意）。
 - `provider.configure` 目前没有凭证校验（比如新配的自定义 provider 到底能不能连通）——参考实现里这块也没做真正的网络探测，只是"填了 apiKey 就认为 ready"，要不要在这套 runtime 里加一个真正探测的 `testCredential` 方法，还没决定。
 - `session.create` 不再选 model——一个会话用哪个 model 完全由 adapter 自己的默认值决定；每个 adapter（claude-code/codex）零配置状态下到底用哪个 model、要不要暴露一个改默认 model 的途径，还没设计。
