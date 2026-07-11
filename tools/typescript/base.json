@@ -8,7 +8,6 @@
     "lib": ["es2022", "DOM", "DOM.Iterable"],
 
     // Module resolution
-    "baseUrl": ".",
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "resolveJsonModule": true,

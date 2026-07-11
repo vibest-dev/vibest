@@ -69,7 +69,7 @@
     "react-scan": "^0.4.3",
     "tailwind-merge": "^3.3.0",
     "tailwindcss": "^4.1.12",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vite": "catalog:",
     "vitest": "catalog:",
     "zod": "^3.24.1",

@@ -5,7 +5,6 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "declaration": true,
-    "baseUrl": ".",
     "paths": {
       "@vibest/ui/*": ["./src/*"]
     }

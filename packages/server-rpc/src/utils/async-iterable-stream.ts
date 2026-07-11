@@ -20,9 +20,11 @@ export function createAsyncIterableStream<T>(source: ReadableStream<T>): AsyncIt
    * Implements the async iterator protocol for the stream.
    * Ensures proper cleanup (cancelling and releasing the reader) on completion, early exit, or error.
    */
-  (stream as AsyncIterableStream<T>)[Symbol.asyncIterator] = function (
-    this: ReadableStream<T>,
-  ): AsyncIterator<T> {
+  // Cast the assignment target to the iterator signature we install here. TypeScript's
+  // built-in ReadableStream now types `[Symbol.asyncIterator]` as an overloaded member
+  // (accepting ReadableStreamIteratorOptions), which our simpler override doesn't match.
+  (stream as unknown as { [Symbol.asyncIterator](): AsyncIterator<T> })[Symbol.asyncIterator] =
+    function (this: ReadableStream<T>): AsyncIterator<T> {
     const reader = this.getReader();
 
     let finished = false;

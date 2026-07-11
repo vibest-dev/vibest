@@ -2,7 +2,6 @@
   "extends": "@vibest/typescript/react-library.json",
   "compilerOptions": {
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -22,9 +22,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/node": "^24.10.13",
     "@vibest/typescript": "workspace:*",
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
-    "typescript": "^5.9.2"
+    "typescript": "^7.0.2"
   }
 }

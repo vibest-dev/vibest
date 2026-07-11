@@ -31,7 +31,7 @@
     "@vibest/server-rpc": "workspace:*",
     "@vibest/typescript": "workspace:*",
     "tsx": "latest",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vite": "catalog:"
   },
   "engines": {

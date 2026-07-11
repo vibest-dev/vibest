@@ -29,7 +29,7 @@
     "@types/node": "^24.10.13",
     "publint": "^0.3.12",
     "taze": "^19.5.0",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
