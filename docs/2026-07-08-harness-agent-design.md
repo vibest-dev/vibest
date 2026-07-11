@@ -25,16 +25,16 @@
 核心用法——建连、挑一个可用的 harness agent、创建会话、发消息、订阅事件；完整方法列表见 §4。
 
 ```typescript
-import { createHarnessClient } from '@vibest/client';
+import { createHarnessClient } from "@vibest/client";
 
 const client = createHarnessClient({
-  url: 'ws://127.0.0.1:7001',
+  url: "ws://127.0.0.1:7001",
   // 可选：只有服务端设置了密码才需要传
-  headers: { Authorization: `Basic ${Buffer.from('opencode:xxx').toString('base64')}` },
+  headers: { Authorization: `Basic ${Buffer.from("opencode:xxx").toString("base64")}` },
 });
 
 // 断线重连后没有历史事件回放，客户端只负责告诉你"该去补快照了"
-client.on('reconnected', async () => {
+client.on("reconnected", async () => {
   for (const sessionId of trackedSessionIds) {
     const snapshot = await client.session.getSnapshot(sessionId);
     // ...用 snapshot 覆盖本地状态
@@ -43,8 +43,8 @@ client.on('reconnected', async () => {
 
 // 挑一个可用的 harness agent，创建会话并发消息
 const harnessAgents = await client.harness.list();
-const { sessionId } = await client.session.create({ projectId, harnessAgentId: 'claude-code' });
-await client.session.prompt(sessionId, { text: '帮我修一下登录 bug' });
+const { sessionId } = await client.session.create({ projectId, harnessAgentId: "claude-code" });
+await client.session.prompt(sessionId, { text: "帮我修一下登录 bug" });
 
 // 订阅事件（oRPC event iterator；不传 sessionId 订阅所有会话）
 for await (const event of client.session.subscribe()) {
@@ -58,36 +58,36 @@ for await (const event of client.session.subscribe()) {
 
 ### 4.1 harness 模块
 
-| 方法               | 说明                                                |
-| ---------------- | ------------------------------------------------- |
-| `harness.list`   | 列出已配置的 agent adapter（如 claude-code、codex、pi）      |
-| `harness.status` | 检查某个 adapter 当前是否可用（凭证/环境是否就绪）                    |
+| 方法             | 说明                                                                         |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `harness.list`   | 列出已配置的 agent adapter（如 claude-code、codex、pi）                      |
+| `harness.status` | 检查某个 adapter 当前是否可用（凭证/环境是否就绪）                           |
 | `harness.login`  | 触发某个 harness agent 后端自己的登录流程（跟 §7 连接层鉴权是两回事，见 §8） |
-|                  |                                                   |
-|                  |                                                   |
-|                  |                                                   |
-|                  |                                                   |
+|                  |                                                                              |
+|                  |                                                                              |
+|                  |                                                                              |
+|                  |                                                                              |
 
 ### 4.2 session 模块（核心）
 
 其中 `list`/`rename`/`archive`/`delete`/`getMessages` 是"冷"操作，读写的是每个 adapter 自己的历史存储（§5.1 `SessionRepository`）；`create`/`resume`/`prompt`/`interrupt`/`respondToAgentRequest`/`getStatus`/`getSnapshot`/`close` 是"热"操作，作用于一个活跃的会话运行时（§5.1 `HarnessAgentSession`）；`subscribe` 是另一类——不读写任何一个 adapter，只是建立/管理事件推送订阅，见 §4.3。冷操作由 §5.2 `HarnessAgentSessionService` 委托给对应 adapter 的 `SessionRepository`；热操作由 `HarnessAgentSessionService` 结合 §5.1 `HarnessAgentRegistry` 解析出具体 adapter 后执行。
 
-| 方法                              | 说明                                                  |
-| ------------------------------- | --------------------------------------------------- |
-| `session.list`                  | 列出会话摘要（冷）                                           |
-| `session.subscribe`             | 订阅事件推送；传 `sessionId` 就只订阅这一个会话，不传就是所有会话（见 §4.3）     |
-| `session.create`                | 创建新会话（拉起 agent 进程，热）                                |
-| `session.resume`                | 恢复一个已存在但未在跑的会话（热）                                   |
-| `session.prompt`                | 发送用户消息（热）                                           |
-| `session.interrupt`             | 中断当前 agent 执行（热）                                    |
-| `session.respondToAgentRequest` | 批准/拒绝 agent 的请求（如工具调用审批，热）                          |
-| `session.getStatus`             | 查询当前状态（热）                                           |
-| `session.getMessages`           | 拉取消息历史（冷）                                           |
-| `session.getSnapshot`           | 拉取完整快照（消息 + 状态 + 元数据，热）                             |
-| `session.rename`                | 重命名（冷）                                              |
-| `session.archive`               | 归档（冷）                                               |
-| `session.delete`                | 删除（冷）                                               |
-| `session.close`                 | 主动结束会话（热）                                           |
+| 方法                            | 说明                                                                         |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `session.list`                  | 列出会话摘要（冷）                                                           |
+| `session.subscribe`             | 订阅事件推送；传 `sessionId` 就只订阅这一个会话，不传就是所有会话（见 §4.3） |
+| `session.create`                | 创建新会话（拉起 agent 进程，热）                                            |
+| `session.resume`                | 恢复一个已存在但未在跑的会话（热）                                           |
+| `session.prompt`                | 发送用户消息（热）                                                           |
+| `session.interrupt`             | 中断当前 agent 执行（热）                                                    |
+| `session.respondToAgentRequest` | 批准/拒绝 agent 的请求（如工具调用审批，热）                                 |
+| `session.getStatus`             | 查询当前状态（热）                                                           |
+| `session.getMessages`           | 拉取消息历史（冷）                                                           |
+| `session.getSnapshot`           | 拉取完整快照（消息 + 状态 + 元数据，热）                                     |
+| `session.rename`                | 重命名（冷）                                                                 |
+| `session.archive`               | 归档（冷）                                                                   |
+| `session.delete`                | 删除（冷）                                                                   |
+| `session.close`                 | 主动结束会话（热）                                                           |
 
 ### 4.3 events 模块
 
@@ -102,12 +102,12 @@ for await (const event of client.session.subscribe()) {
 
 ### 4.4 fs 模块
 
-| 方法 | 说明 |
-|---|---|
-| `fs.readFile` | 读文件内容 |
-| `fs.tree` | 获取某个路径下的目录树（递归） |
-| `fs.grep` | 按内容搜索文件（类似 grep/ripgrep，按 pattern 找匹配的文件+行，具体参数见 §8） |
-| `fs.search` | 按文件名/路径搜索（不看内容，具体参数见 §8） |
+| 方法          | 说明                                                                           |
+| ------------- | ------------------------------------------------------------------------------ |
+| `fs.readFile` | 读文件内容                                                                     |
+| `fs.tree`     | 获取某个路径下的目录树（递归）                                                 |
+| `fs.grep`     | 按内容搜索文件（类似 grep/ripgrep，按 pattern 找匹配的文件+行，具体参数见 §8） |
+| `fs.search`   | 按文件名/路径搜索（不看内容，具体参数见 §8）                                   |
 
 只读——不提供写文件/建目录/删除/复制这类写操作，也不提供 `watch`（没有写操作就没有本地变化需要监听，见 §8 若后续要加写能力需要重新评估）。
 
@@ -115,18 +115,18 @@ for await (const event of client.session.subscribe()) {
 
 只读——全部靠 shell 出去跑 `git` 命令，不做写操作（要不要加见 §8 待办）。方法命名尽量对齐 git CLI 子命令本身（`status`、`branch`……），不额外发明概念；方法列表先简化到最小集，其余（`isGitRepo`/`currentBranch`/`isGitWorktree`/`getContributors`/`getCommitStats`/`getActivityData`/`getRecentActivity`/`getConfig`/`getProjectGitInfo` 等）先不设计，见 §8。
 
-| 方法 | 说明 |
-|---|---|
+| 方法         | 说明                                                                |
+| ------------ | ------------------------------------------------------------------- |
 | `git.status` | 工作区状态（对齐 `git status`：当前分支、暂存/未暂存/未跟踪文件等） |
-| `git.branch` | 列出分支（对齐 `git branch`）；查默认分支就传个参数，不单独开方法 |
+| `git.branch` | 列出分支（对齐 `git branch`）；查默认分支就传个参数，不单独开方法   |
 
 ### 4.6 project 模块
 
-| 方法 | 说明 |
-|---|---|
-| `project.list` | 项目列表 |
+| 方法             | 说明                        |
+| ---------------- | --------------------------- |
+| `project.list`   | 项目列表                    |
 | `project.create` | 新建/按路径去重复用已有项目 |
-| `project.remove` | 删除项目 |
+| `project.remove` | 删除项目                    |
 
 会话是否归档是 `session` 模块自己的概念（`session.archive` + `session.list` 返回的摘要里带 `archived` 字段），不需要在 `project` 模块另开一个按项目分组的批量查询接口；"置顶会话""折叠的分组"是纯客户端本地展示状态，不属于 harness agent runtime 的领域模型，这套 runtime 不管。
 
@@ -134,43 +134,43 @@ for await (const event of client.session.subscribe()) {
 
 每个 harness agent 后端都有自己的一套 skills 实现（装什么、怎么装、怎么启动都是后端自己的事），这里先只列出模块和方法名，具体机制不细化（见 §8 待办）。
 
-| 方法                     | 说明                             |
-| ---------------------- | ------------------------------ |
+| 方法                   | 说明                                   |
+| ---------------------- | -------------------------------------- |
 | `skill.list`           | 列出某个 harness agent 已安装的 skills |
-| `skill.install`        | 给某个 harness agent 安装一个 skill   |
-| `skill.enable/disable` | 启动/激活某个 skill                  |
+| `skill.install`        | 给某个 harness agent 安装一个 skill    |
+| `skill.enable/disable` | 启动/激活某个 skill                    |
 
 ### 4.8 provider 模块
 
 `provider` 模块管的是 provider/凭证配置——支持内置 provider（预置好协议/endpoint，用户只需要填凭证）和用户自己配置的自定义 provider（任意 baseURL、任意 OpenAI-compatible 协议端点等），这属于"模型配置"；跟"模型市场"（可发现/浏览的第三方 provider 目录）是两回事，后者本设计不做（见 §1）。一个会话具体用哪个 model 由 adapter 自己决定，不在这层 runtime 的 `session.create` 里选（见 §8）。
 
-| 方法                    | 说明                                                                   |
-| --------------------- | -------------------------------------------------------------------- |
-| `provider.list`       | 列出已配置的 provider（内置 + 自定义），可选按某个 `harnessAgentId` 过滤出协议兼容的            |
-| `provider.listModels` | 列出某个/所有 provider 下的模型                                                |
+| 方法                  | 说明                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `provider.list`       | 列出已配置的 provider（内置 + 自定义），可选按某个 `harnessAgentId` 过滤出协议兼容的                          |
+| `provider.listModels` | 列出某个/所有 provider 下的模型                                                                               |
 | `provider.configure`  | 新增/更新一个 provider（含凭证）；已知的内置 id 只能覆盖凭证和启用状态，未知 id 就是一个全新的自定义 provider |
 
 ### 4.9 pty 模块
 
 管理伪终端（pseudo-terminal）会话，给客户端一个能跑交互式命令行的通道；跟 `fs`/`git` 一样是纯环境能力，不按 `harnessAgentId` 分。这里先只列出方法名占位，具体机制不细化（见 §8 待办）。
 
-| 方法 | 说明 |
-|---|---|
-| `pty.list` | 列出当前活跃的 pty 会话 |
-| `pty.create` | 创建一个新的 pty 会话（拉起一个 shell 进程） |
-| `pty.get` | 查询某个 pty 会话的当前状态 |
+| 方法         | 说明                                                                    |
+| ------------ | ----------------------------------------------------------------------- |
+| `pty.list`   | 列出当前活跃的 pty 会话                                                 |
+| `pty.create` | 创建一个新的 pty 会话（拉起一个 shell 进程）                            |
+| `pty.get`    | 查询某个 pty 会话的当前状态                                             |
 | `pty.update` | 更新一个 pty 会话（具体覆盖 resize、写入输入等哪些操作还没设计，见 §8） |
-| `pty.delete` | 关闭并释放一个 pty 会话 |
+| `pty.delete` | 关闭并释放一个 pty 会话                                                 |
 
 ### 4.10 mcp 模块
 
 跟 `skill`（§4.7）是同一个模式——管理和开启分两步，不是像 `provider` 那样在 `session.create` 时当运行时参数动态传进去。`mcp.server.create`/`list` 只是在我们自己的 `McpRepository`（§5.1）里登记/查询配置；`enable` 才会把这份配置翻译成对应 harness agent 后端原生的 mcp 配置格式，写进它自己的配置文件（比如 claude-code 的 `.mcp.json`、codex 的 `config.toml`）——写完就结束了，不需要运行时再传一次；那个 harness agent 后端下次启动进程时自己读取这个文件，跟 `session` 模块完全没有交互。跟 skill 的共享目录 + 软链接（§5.3）比，机制不同（mcp server 是连接参数不是文件内容，没法软链接），但"管理与分发解耦、目标端自己读取"这个思路是一样的。
 
-| 方法 | 说明 |
-|---|---|
-| `mcp.server.create` | 新增一个 MCP server 配置（stdio：command/args/env；或 remote：url，含凭证），只是登记，不会立刻对任何 harness agent 生效 |
-| `mcp.server.list` | 列出已配置的 MCP server |
-| `mcp.server.enable/disable` | 把某个 MCP server 配置写进/移出指定 harness agent 自己的原生配置文件 |
+| 方法                        | 说明                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mcp.server.create`         | 新增一个 MCP server 配置（stdio：command/args/env；或 remote：url，含凭证），只是登记，不会立刻对任何 harness agent 生效 |
+| `mcp.server.list`           | 列出已配置的 MCP server                                                                                                  |
+| `mcp.server.enable/disable` | 把某个 MCP server 配置写进/移出指定 harness agent 自己的原生配置文件                                                     |
 
 方法列表先简化到最小集，`mcp.server.update`/`mcp.server.remove`/列出某个 server 暴露的工具（类似 `provider.listModels`）这些先不设计；stdio 和 remote 两种配置形态怎么用一个 schema 统一表达、`enable` 具体怎么落到每个后端的原生格式，都还没设计，见 §8。
 
@@ -182,38 +182,38 @@ for await (const event of client.session.subscribe()) {
 
 ### 5.1 核心类型与接口
 
-| 接口 | 实现类 | 角色 |
-|---|---|---|
-| — | `HarnessAgentId` | `'claude-code' \| 'codex'`，统一标识 agent 后端；纯数据形状，不需要接口 |
-| `IHarnessAgentAdapter` | `ClaudeCodeAdapter`、`CodexAdapter` | 每个后端各自实现的统一驱动接口：可用性检查、（可选）登录、创建/恢复/关闭活跃会话、持有一份 `ISessionRepository`、一份 `ISkillRepository`、一份 `IMcpConfigWriter` |
-| `IHarnessAgentRegistry` | `HarnessAgentRegistry` | 持有构造时传入的 `IHarnessAgentAdapter` 数组，提供 `list()`/`get(id)`/`status()`；不再有 `dispose()`——常驻子进程（如 `CodexAdapter` 的 app-server）的释放由 `HarnessAgentRegistryLayer` 的 `Layer.scoped` finalizer 负责（见 §6）。是 `harness` 模块的实现，本身不做业务编排，其余 service 依赖它做 adapter 查询——没有归进 §5.2，因为除了持有构造时传入的数组之外没有别的依赖，更接近一个类型/容器而不是编排型 service |
-| `IHarnessAgentSession` | `ClaudeCodeSession`、`CodexSession` | 一个活跃会话的运行时接口（`prompt`/`interrupt`/`close`/`getStatus`/`getSnapshot`/`respondToAgentRequest`），内部持有一个 `SessionLifecycle` |
-| `IHarnessAgentSessionManager` | `HarnessAgentSessionManager` | 持有 `sessionId → IHarnessAgentSession` 的内存索引，提供 `register`/`get`/`remove`；纯内存态、不持久化（见 §5.3），进程重启后这份索引直接清空，客户端需要重新调 `session.resume` 才能拿回活跃实例。和 `HarnessAgentRegistry` 一样只是持有集合、没有业务编排，归进 §5.1 而不是 §5.2；管的是"活跃会话实例"，跟 `HarnessAgentRegistry` 管"HarnessAgent 后端本身的可用性/状态"是两个维度，别搞混 |
-| `ISessionRepository` | 各后端各自实现（未单独命名） | 每个后端自己历史会话的冷存储接口（`list`/`rename`/`delete`/`archive`/`getMessages`），对应 `session` 模块里"冷"的那部分方法；实际存储由 harness agent 后端自己管，我们的 runtime 不设计它的格式，见 §5.3 |
-| — | `SessionLifecycle` | 每个活跃会话一个实例，保证"一个 turn 有始有终、一个 `agent_request` 恰好被处理一次、结束后不再发事件"这几条不变量；只有一份共用实现、不跨后端多态，不需要接口 |
-| `ISkillRepository` | 各后端各自实现（未单独命名） | 每个后端自己的 skills 安装/启动/列举实现，对应 `skill` 模块；实际内容统一装在 `~/.agents/skills/<name>/` 下，每个后端通过软链接接入自己期望的目录，见 §5.3；安装来源、和 session 的关系还没设计（见 §8） |
-| `IMcpConfigWriter` | 各后端各自实现（未单独命名） | 每个后端自己把 `ResolvedMcpServerConfig` 翻译成原生格式、写进自己配置文件的实现（`enable`/`disable`），对应 `mcp` 模块；跟 `ISessionRepository`/`ISkillRepository` 一样是"每个后端自己懂自己的格式"，`McpService` 不关心具体怎么写，只负责编排，见 §5.3 |
-| `IProjectRepository` | `ProjectRepository` | `$VIBEST_HOME/storage/projects.json` 的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则 |
-| `IProviderRepository` | `ProviderRepository` | `$VIBEST_HOME/config.json` 里 `provider` 字段的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则 |
-| `IMcpRepository` | `McpRepository` | `$VIBEST_HOME/config.json` 里 `mcp` 字段的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则 |
-| — | `ResolvedMcpServerConfig` | 解析后的 MCP server 连接参数（stdio：command/args/env；或 remote：url + 凭证），`enable` 时由 `McpService` 产出，用来生成写进目标 harness agent 原生配置文件的具体内容；纯数据形状，不需要接口 |
-| `IPtyManager` | `PtyManager` | 持有 `ptyId → 具体 pty 进程句柄` 的内存索引，提供 `register`/`get`/`remove`；纯内存态、不持久化（见 §5.3）；跟 `HarnessAgentSessionManager` 同一个模式 |
+| 接口                          | 实现类                              | 角色                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —                             | `HarnessAgentId`                    | `'claude-code' \| 'codex'`，统一标识 agent 后端；纯数据形状，不需要接口                                                                                                                                                                                                                                                                                                                                                |
+| `IHarnessAgentAdapter`        | `ClaudeCodeAdapter`、`CodexAdapter` | 每个后端各自实现的统一驱动接口：可用性检查、（可选）登录、创建/恢复/关闭活跃会话、持有一份 `ISessionRepository`、一份 `ISkillRepository`、一份 `IMcpConfigWriter`                                                                                                                                                                                                                                                      |
+| `IHarnessAgentRegistry`       | `HarnessAgentRegistry`              | 持有构造时传入的 `IHarnessAgentAdapter` 数组，提供 `list()`/`get(id)`/`status()`；不再有 `dispose()`——常驻子进程（如 `CodexAdapter` 的 app-server）的释放由 `HarnessAgentRegistryLayer` 的 `Layer.scoped` finalizer 负责（见 §6）。是 `harness` 模块的实现，本身不做业务编排，其余 service 依赖它做 adapter 查询——没有归进 §5.2，因为除了持有构造时传入的数组之外没有别的依赖，更接近一个类型/容器而不是编排型 service |
+| `IHarnessAgentSession`        | `ClaudeCodeSession`、`CodexSession` | 一个活跃会话的运行时接口（`prompt`/`interrupt`/`close`/`getStatus`/`getSnapshot`/`respondToAgentRequest`），内部持有一个 `SessionLifecycle`                                                                                                                                                                                                                                                                            |
+| `IHarnessAgentSessionManager` | `HarnessAgentSessionManager`        | 持有 `sessionId → IHarnessAgentSession` 的内存索引，提供 `register`/`get`/`remove`；纯内存态、不持久化（见 §5.3），进程重启后这份索引直接清空，客户端需要重新调 `session.resume` 才能拿回活跃实例。和 `HarnessAgentRegistry` 一样只是持有集合、没有业务编排，归进 §5.1 而不是 §5.2；管的是"活跃会话实例"，跟 `HarnessAgentRegistry` 管"HarnessAgent 后端本身的可用性/状态"是两个维度，别搞混                           |
+| `ISessionRepository`          | 各后端各自实现（未单独命名）        | 每个后端自己历史会话的冷存储接口（`list`/`rename`/`delete`/`archive`/`getMessages`），对应 `session` 模块里"冷"的那部分方法；实际存储由 harness agent 后端自己管，我们的 runtime 不设计它的格式，见 §5.3                                                                                                                                                                                                               |
+| —                             | `SessionLifecycle`                  | 每个活跃会话一个实例，保证"一个 turn 有始有终、一个 `agent_request` 恰好被处理一次、结束后不再发事件"这几条不变量；只有一份共用实现、不跨后端多态，不需要接口                                                                                                                                                                                                                                                          |
+| `ISkillRepository`            | 各后端各自实现（未单独命名）        | 每个后端自己的 skills 安装/启动/列举实现，对应 `skill` 模块；实际内容统一装在 `~/.agents/skills/<name>/` 下，每个后端通过软链接接入自己期望的目录，见 §5.3；安装来源、和 session 的关系还没设计（见 §8）                                                                                                                                                                                                               |
+| `IMcpConfigWriter`            | 各后端各自实现（未单独命名）        | 每个后端自己把 `ResolvedMcpServerConfig` 翻译成原生格式、写进自己配置文件的实现（`enable`/`disable`），对应 `mcp` 模块；跟 `ISessionRepository`/`ISkillRepository` 一样是"每个后端自己懂自己的格式"，`McpService` 不关心具体怎么写，只负责编排，见 §5.3                                                                                                                                                                |
+| `IProjectRepository`          | `ProjectRepository`                 | `$VIBEST_HOME/storage/projects.json` 的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则                                                                                                                                                                                                                                                                                                                         |
+| `IProviderRepository`         | `ProviderRepository`                | `$VIBEST_HOME/config.json` 里 `provider` 字段的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则                                                                                                                                                                                                                                                                                                                 |
+| `IMcpRepository`              | `McpRepository`                     | `$VIBEST_HOME/config.json` 里 `mcp` 字段的读写接口（原子写，见 §5.3），只做数据存取，不做业务规则                                                                                                                                                                                                                                                                                                                      |
+| —                             | `ResolvedMcpServerConfig`           | 解析后的 MCP server 连接参数（stdio：command/args/env；或 remote：url + 凭证），`enable` 时由 `McpService` 产出，用来生成写进目标 harness agent 原生配置文件的具体内容；纯数据形状，不需要接口                                                                                                                                                                                                                         |
+| `IPtyManager`                 | `PtyManager`                        | 持有 `ptyId → 具体 pty 进程句柄` 的内存索引，提供 `register`/`get`/`remove`；纯内存态、不持久化（见 §5.3）；跟 `HarnessAgentSessionManager` 同一个模式                                                                                                                                                                                                                                                                 |
 
 工具审批（`respondToAgentRequest`）走的是"session 收到原生请求 → 存一个待处理的 resolver、经 `SessionLifecycle.emit` 推事件通知客户端 → 客户端响应时找到 resolver、翻译回原生协议、触发它、标记为已解决"这条路径；`SessionLifecycle` 负责在会话结束/崩溃时把没处理完的请求兜底标记掉，避免永远挂起。
 
 ### 5.2 Services 与依赖关系
 
-| 接口 | 实现类 | 职责 | 依赖 |
-|---|---|---|---|
-| `IHarnessAgentSkillService`   | `HarnessAgentSkillService`   | skills 安装/启动/列举（细节未设计），`skill` 模块的实现                                                                                 | `IHarnessAgentRegistry`（§5.1）                                                |
-| `IHarnessAgentSessionService` | `HarnessAgentSessionService` | 统一对外服务（`create`/`list`/`resume`/`prompt`/...），`session` 模块核心实现；会话生命周期编排逻辑在这，活跃实例的存取委托给 `IHarnessAgentSessionManager` | `IHarnessAgentRegistry`（§5.1）、`IHarnessAgentSessionManager`（§5.1）、`IEventBus` |
-| `IModelProviderService`       | `ModelProviderService`       | provider 配置的增删改查、凭证管理、列出 provider 下的模型，`provider` 模块的实现                          | `IProviderRepository`（§5.1）                                                  |
-| `IMcpService`                 | `McpService`                 | `mcp` 模块的实现（细节未设计，见 §8）；`enable`/`disable` 时用 `IHarnessAgentRegistry` 查到目标 adapter，调它的 `IMcpConfigWriter.enable/disable`——具体怎么翻译成原生格式、写到哪个文件，是每个 adapter 自己的事，`McpService` 只做编排，跟 `session` 生命周期没有交互 | `IMcpRepository`（§5.1）、`IHarnessAgentRegistry`（§5.1）                        |
-| `IEventBus`                   | `EventBus`                   | 事件枢纽：会话事件统一从这里推送，含背压丢帧提示（`gap`）、心跳（`ping`），支持多个并发订阅连接（广播，不按连接过滤）                                                     | 无（共享单例）                                                                     |
-| `IFSService`                  | `FSService`                  | `fs` 模块实现（只读：readFile/tree/grep/search）                                                                              | 无                                                                           |
-| `IGitService`                 | `GitService`                 | `git` 模块实现；Service 层写操作方法齐全，只对外暴露只读子集（见 §8）                                                                          | 无（仅一个日志 sink）                                                               |
-| `IProjectService`             | `ProjectService`             | `project` 模块实现，另有 `findById`/`update` 等内部方法未对外暴露；实际读写落地在 `IProjectRepository`（见 §5.3），自己只做路径去重这类业务规则 | `IProjectRepository`（§5.1）                                                   |
-| `IPtyService`                 | `PtyService`                 | `pty` 模块的实现（细节未设计）；活跃 pty 实例的存取委托给 `IPtyManager`                                                                        | `IPtyManager`（§5.1）、`IEventBus`                                                    |
+| 接口                          | 实现类                       | 职责                                                                                                                                                                                                                                                                   | 依赖                                                                                |
+| ----------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `IHarnessAgentSkillService`   | `HarnessAgentSkillService`   | skills 安装/启动/列举（细节未设计），`skill` 模块的实现                                                                                                                                                                                                                | `IHarnessAgentRegistry`（§5.1）                                                     |
+| `IHarnessAgentSessionService` | `HarnessAgentSessionService` | 统一对外服务（`create`/`list`/`resume`/`prompt`/...），`session` 模块核心实现；会话生命周期编排逻辑在这，活跃实例的存取委托给 `IHarnessAgentSessionManager`                                                                                                            | `IHarnessAgentRegistry`（§5.1）、`IHarnessAgentSessionManager`（§5.1）、`IEventBus` |
+| `IModelProviderService`       | `ModelProviderService`       | provider 配置的增删改查、凭证管理、列出 provider 下的模型，`provider` 模块的实现                                                                                                                                                                                       | `IProviderRepository`（§5.1）                                                       |
+| `IMcpService`                 | `McpService`                 | `mcp` 模块的实现（细节未设计，见 §8）；`enable`/`disable` 时用 `IHarnessAgentRegistry` 查到目标 adapter，调它的 `IMcpConfigWriter.enable/disable`——具体怎么翻译成原生格式、写到哪个文件，是每个 adapter 自己的事，`McpService` 只做编排，跟 `session` 生命周期没有交互 | `IMcpRepository`（§5.1）、`IHarnessAgentRegistry`（§5.1）                           |
+| `IEventBus`                   | `EventBus`                   | 事件枢纽：会话事件统一从这里推送，含背压丢帧提示（`gap`）、心跳（`ping`），支持多个并发订阅连接（广播，不按连接过滤）                                                                                                                                                  | 无（共享单例）                                                                      |
+| `IFSService`                  | `FSService`                  | `fs` 模块实现（只读：readFile/tree/grep/search）                                                                                                                                                                                                                       | 无                                                                                  |
+| `IGitService`                 | `GitService`                 | `git` 模块实现；Service 层写操作方法齐全，只对外暴露只读子集（见 §8）                                                                                                                                                                                                  | 无（仅一个日志 sink）                                                               |
+| `IProjectService`             | `ProjectService`             | `project` 模块实现，另有 `findById`/`update` 等内部方法未对外暴露；实际读写落地在 `IProjectRepository`（见 §5.3），自己只做路径去重这类业务规则                                                                                                                        | `IProjectRepository`（§5.1）                                                        |
+| `IPtyService`                 | `PtyService`                 | `pty` 模块的实现（细节未设计）；活跃 pty 实例的存取委托给 `IPtyManager`                                                                                                                                                                                                | `IPtyManager`（§5.1）、`IEventBus`                                                  |
 
 `HarnessAgentSessionService` 不依赖 `ProjectService`——`workspacePath` 由 WS 路由 handler 用 `ProjectService.findById` 解析好之后再传进来。活跃会话的 `sessionId → HarnessAgentSession` 索引由 `HarnessAgentSessionManager`（§5.1）维护，调用方一个 `sessionId` 就能定位会话，不用额外带上 `harnessAgentId`。`create` 时 `HarnessAgentSessionService` 把 `workspacePath` 交给 `HarnessAgentRegistry` 查到的 adapter 的 `createSession`，拿到返回的 `HarnessAgentSession` 实例后调用 `HarnessAgentSessionManager.register()` 存进索引；`close` 时则是先按 `sessionId` 从 `HarnessAgentSessionManager.get()` 取出实例、调用它的 `close()`，再 `HarnessAgentSessionManager.remove()` 把索引里的条目摘掉。
 
@@ -221,11 +221,11 @@ for await (const event of client.session.subscribe()) {
 
 存储格式和文件读写只属于 `ProjectRepository`/`ProviderRepository`/`McpRepository`（§5.1）——`ProjectService`/`ModelProviderService`/`McpService` 不直接碰文件，只调用各自 Repository 的存取方法，业务规则（路径去重、凭证解析等）留在 Service 层。`$VIBEST_HOME` 未设置时默认 `~/.vibest`——默认目录名用 vibest 自己的，不复用参考实现的目录，避免两边同时装在一台机器上互相踩到对方的数据。
 
-| 文件 | 归属 Repository | 格式 |
-| --- | --- | --- |
-| `$VIBEST_HOME/storage/projects.json` | `ProjectRepository` | 单文件 JSON，整体读写，只存 `Project[]`——不像参考实现那样把 `archivedSessions`/`pinnedSessions`/`closedProjectAccordions` 等也塞进同一个文件；这些字段要么已经挪到别处（`archived` 归 `session` 模块自己管，见 §4.6），要么本来就不该持久化（`pinned`/折叠分组是纯 UI 本地状态，见 §1） |
-| `$VIBEST_HOME/config.json`（`provider` 字段） | `ProviderRepository` | provider 属于"配置"性质的数据，不单独开一个文件，跟参考实现一样放进一份整体配置文件里的 `provider` 字段——内置 provider 的覆盖项、自定义 provider、凭证（`apiKey` 等）都在这个字段里，不单独拆分（凭证同文件存放，见 §8 关于文件权限的待办） |
-| `$VIBEST_HOME/config.json`（`mcp` 字段） | `McpRepository` | mcp server 配置，跟 `provider` 同理归进这份整体配置文件，不单开文件；remote 类型的凭证也同文件存放，见 §8 关于文件权限的待办 |
+| 文件                                          | 归属 Repository      | 格式                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$VIBEST_HOME/storage/projects.json`          | `ProjectRepository`  | 单文件 JSON，整体读写，只存 `Project[]`——不像参考实现那样把 `archivedSessions`/`pinnedSessions`/`closedProjectAccordions` 等也塞进同一个文件；这些字段要么已经挪到别处（`archived` 归 `session` 模块自己管，见 §4.6），要么本来就不该持久化（`pinned`/折叠分组是纯 UI 本地状态，见 §1） |
+| `$VIBEST_HOME/config.json`（`provider` 字段） | `ProviderRepository` | provider 属于"配置"性质的数据，不单独开一个文件，跟参考实现一样放进一份整体配置文件里的 `provider` 字段——内置 provider 的覆盖项、自定义 provider、凭证（`apiKey` 等）都在这个字段里，不单独拆分（凭证同文件存放，见 §8 关于文件权限的待办）                                             |
+| `$VIBEST_HOME/config.json`（`mcp` 字段）      | `McpRepository`      | mcp server 配置，跟 `provider` 同理归进这份整体配置文件，不单开文件；remote 类型的凭证也同文件存放，见 §8 关于文件权限的待办                                                                                                                                                            |
 
 `projects.json` 在 `storage/` 子目录下，`config.json` 直接放在 `$VIBEST_HOME` 根下，不跟着进 `storage/`——两者语义不同：前者是一份数据集合，后者是单份整体配置，这也是参考实现里 `config.json` 本来的位置。两个文件都采用"写临时文件 + 原子 rename"的更新方式（参考实现同样如此），避免进程崩溃导致文件写到一半、内容损坏。`config.json` 目前只放 `provider`/`mcp` 这两个字段，没有引入其他通用应用配置（见 §1 的范围排除）。
 
@@ -244,11 +244,14 @@ for await (const event of client.session.subscribe()) {
 下面所有方法都返回 `Effect<A, E, R>` 而不是 `Promise`，`subscribe` 返回 `Stream`；错误类型用 `Data.TaggedError`（这里只示意，完整错误契约见 §8）。带 `IXxx` 接口的是 Effect service 的 Shape，配一个 `Context` Tag + `Layer`（示例见 `HarnessAgentSessionService`）；`IHarnessAgentAdapter` / `IHarnessAgentSession` / `ISessionRepository` 是按 id 动态选择的普通 Shape，不做成 Tag/Layer。
 
 ```typescript
-import { Context, Effect, Stream, Data } from 'effect';
+import { Context, Effect, Stream, Data } from "effect";
 
 // 类型化错误统一用 Data.TaggedError（示意）
-class SessionNotFound extends Data.TaggedError('SessionNotFound')<{ sessionId: string }> {}
-class HarnessAgentUnavailable extends Data.TaggedError('HarnessAgentUnavailable')<{ id: HarnessAgentId; reason?: string }> {}
+class SessionNotFound extends Data.TaggedError("SessionNotFound")<{ sessionId: string }> {}
+class HarnessAgentUnavailable extends Data.TaggedError("HarnessAgentUnavailable")<{
+  id: HarnessAgentId;
+  reason?: string;
+}> {}
 
 // ---- Registry：管 HarnessAgent 后端本身的可用性/状态，不碰会话（Effect service）----
 interface HarnessAgentRegistryShape {
@@ -258,7 +261,7 @@ interface HarnessAgentRegistryShape {
   // 不再有 dispose：常驻子进程（如 CodexAdapter 的 app-server）的释放交给 Registry 的
   // Layer.scoped + Effect.acquireRelease 注册 finalizer，见 §6
 }
-class HarnessAgentRegistry extends Context.Tag('HarnessAgentRegistry')<
+class HarnessAgentRegistry extends Context.Tag("HarnessAgentRegistry")<
   HarnessAgentRegistry,
   HarnessAgentRegistryShape
 >() {}
@@ -272,8 +275,12 @@ interface IHarnessAgentAdapter {
 
   readonly checkAvailability: () => Effect.Effect<{ available: boolean; reason?: string }>;
   readonly login?: () => Effect.Effect<unknown>; // 机制未定，见 §8
-  readonly createSession: (config: { workspacePath: string }) => Effect.Effect<IHarnessAgentSession>;
-  readonly resumeSession: (sessionId: string) => Effect.Effect<IHarnessAgentSession, SessionNotFound>;
+  readonly createSession: (config: {
+    workspacePath: string;
+  }) => Effect.Effect<IHarnessAgentSession>;
+  readonly resumeSession: (
+    sessionId: string,
+  ) => Effect.Effect<IHarnessAgentSession, SessionNotFound>;
 }
 
 // ---- McpConfigWriter：每个后端自己把配置翻译成原生格式、写进自己配置文件的实现 ----
@@ -290,7 +297,10 @@ interface IHarnessAgentSession {
   readonly close: () => Effect.Effect<void>;
   readonly getStatus: () => Effect.Effect<SessionStatus>;
   readonly getSnapshot: () => Effect.Effect<SessionSnapshot>; // 消息+状态+元数据，直接读内存，不查 ISessionRepository
-  readonly respondToAgentRequest: (requestId: string, response: AgentRequestResponse) => Effect.Effect<void>;
+  readonly respondToAgentRequest: (
+    requestId: string,
+    response: AgentRequestResponse,
+  ) => Effect.Effect<void>;
 }
 
 // ---- SessionManager：管活跃实例的内存索引，不做业务编排（Effect service，内部用 Ref）----
@@ -299,7 +309,7 @@ interface HarnessAgentSessionManagerShape {
   readonly get: (sessionId: string) => Effect.Effect<IHarnessAgentSession | undefined>;
   readonly remove: (sessionId: string) => Effect.Effect<void>;
 }
-class HarnessAgentSessionManager extends Context.Tag('HarnessAgentSessionManager')<
+class HarnessAgentSessionManager extends Context.Tag("HarnessAgentSessionManager")<
   HarnessAgentSessionManager,
   HarnessAgentSessionManagerShape
 >() {}
@@ -307,7 +317,9 @@ class HarnessAgentSessionManager extends Context.Tag('HarnessAgentSessionManager
 // ---- SessionRepository：每个后端自己历史会话的冷存储 Shape（按 id 动态选择，不是 Tag/Layer）----
 interface ISessionRepository {
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>>;
-  readonly getMessages: (sessionId: string) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
+  readonly getMessages: (
+    sessionId: string,
+  ) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
   readonly rename: (sessionId: string, name: string) => Effect.Effect<void, SessionNotFound>;
   readonly archive: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
   readonly delete: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
@@ -317,20 +329,32 @@ interface ISessionRepository {
 interface HarnessAgentSessionServiceShape {
   readonly list: () => Effect.Effect<ReadonlyArray<SessionSummary>>;
   readonly subscribe: (sessionId?: string) => Stream.Stream<SessionEvent>;
-  readonly create: (input: { projectId: string; harnessAgentId: HarnessAgentId }) => Effect.Effect<{ sessionId: string }, HarnessAgentUnavailable>;
+  readonly create: (input: {
+    projectId: string;
+    harnessAgentId: HarnessAgentId;
+  }) => Effect.Effect<{ sessionId: string }, HarnessAgentUnavailable>;
   readonly resume: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
-  readonly prompt: (sessionId: string, input: { text: string }) => Effect.Effect<void, SessionNotFound>;
+  readonly prompt: (
+    sessionId: string,
+    input: { text: string },
+  ) => Effect.Effect<void, SessionNotFound>;
   readonly interrupt: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
-  readonly respondToAgentRequest: (sessionId: string, requestId: string, response: AgentRequestResponse) => Effect.Effect<void, SessionNotFound>;
+  readonly respondToAgentRequest: (
+    sessionId: string,
+    requestId: string,
+    response: AgentRequestResponse,
+  ) => Effect.Effect<void, SessionNotFound>;
   readonly getStatus: (sessionId: string) => Effect.Effect<SessionStatus, SessionNotFound>;
-  readonly getMessages: (sessionId: string) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
+  readonly getMessages: (
+    sessionId: string,
+  ) => Effect.Effect<ReadonlyArray<Message>, SessionNotFound>;
   readonly getSnapshot: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFound>;
   readonly rename: (sessionId: string, name: string) => Effect.Effect<void, SessionNotFound>;
   readonly archive: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
   readonly delete: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
   readonly close: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
 }
-class HarnessAgentSessionService extends Context.Tag('HarnessAgentSessionService')<
+class HarnessAgentSessionService extends Context.Tag("HarnessAgentSessionService")<
   HarnessAgentSessionService,
   HarnessAgentSessionServiceShape
 >() {}
@@ -341,14 +365,16 @@ class HarnessAgentSessionService extends Context.Tag('HarnessAgentSessionService
 §4 的每个 oRPC procedure 就是把这些 service 方法包一层。以 `session.create` 为例（`@orpc/experimental-effect` 的 `.effect` 写法）：
 
 ```typescript
-import { Schema } from 'effect';
+import { Schema } from "effect";
 
 export const sessionRouter = {
   create: base
-    .input(Schema.Struct({
-      projectId: Schema.String,
-      harnessAgentId: Schema.Literal('claude-code', 'codex'),
-    }))
+    .input(
+      Schema.Struct({
+        projectId: Schema.String,
+        harnessAgentId: Schema.Literal("claude-code", "codex"),
+      }),
+    )
     .effect(function* ({ input }) {
       // Effect service 从 oRPC context（'effect/context'，见 §6）注入
       const sessions = yield* HarnessAgentSessionService;
@@ -374,7 +400,7 @@ mcp server 不在 `createSession` 的参数里——`enable` 时已经把配置�
 服务端不再有手写的装配根 `class`——每个 service 一个 `Layer`，启动时把它们 `Layer.mergeAll` 成一个根 Layer、按依赖 `Layer.provide` 连起来，在一个 `Scope` 里运行；`Scope` 关闭时 finalizer 自动逆序跑，不用手写 `dispose()`。下面 `Layer` 的命名对应 §5.1/§5.2 表里的"实现类"列：
 
 ```typescript
-import { Effect, Layer } from 'effect';
+import { Effect, Layer } from "effect";
 
 // 无外部资源的 service：Layer.effect / Layer.sync 直接构造
 const RepositoriesLayer = Layer.mergeAll(
@@ -392,9 +418,9 @@ const HarnessAgentRegistryLayer = Layer.scoped(
     return makeRegistry([claude, codex]);
   }),
 );
-const EventBusLayer = Layer.scoped(EventBus, makeEventBus);                          // finalizer 停 ping、清订阅队列
+const EventBusLayer = Layer.scoped(EventBus, makeEventBus); // finalizer 停 ping、清订阅队列
 const HarnessAgentSessionManagerLayer = Layer.sync(HarnessAgentSessionManager, makeSessionManager); // 纯内存 Ref
-const PtyManagerLayer = Layer.scoped(PtyManager, makePtyManager);                    // finalizer 里 kill 所有存活 shell
+const PtyManagerLayer = Layer.scoped(PtyManager, makePtyManager); // finalizer 里 kill 所有存活 shell
 
 // 根 Layer：合并所有对外 service，再把它们依赖的基础 service provide 进去
 export const HarnessAgentServerLayer = Layer.mergeAll(
@@ -461,7 +487,7 @@ vibest 前端消费这套运行时的 React 状态层——依赖 §3 的 `@vibe
 interface HarnessAgentStore {
   harnessAgents: HarnessAgentInfo[]; // client.harness.list() 缓存
   sessions: Record<string, SessionState>; // sessionId -> 单个会话的状态
-  connectionStatus: 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+  connectionStatus: "connecting" | "connected" | "reconnecting" | "disconnected";
 }
 
 interface SessionState {
@@ -475,12 +501,12 @@ interface SessionState {
 
 对外只暴露 hook，不暴露 store 本身：
 
-| Hook/方法 | 说明 |
-|---|---|
-| `useHarnessAgents()` | 读 `harnessAgents` 列表，首次调用自动触发 `harness.list()` |
-| `useSession(sessionId)` | 读某个会话的 `SessionState`；组件订阅了这个 hook 会随 store 更新自动重渲染 |
-| `useSessionList(projectId?)` | 读会话摘要列表 |
-| `useCreateSession()` | 返回一个 `create` 方法，内部调 `client.session.create` 并把新会话状态塞进 store |
-| `usePrompt(sessionId)` | 返回一个 `prompt` 方法，包一层 `client.session.prompt` |
+| Hook/方法                    | 说明                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| `useHarnessAgents()`         | 读 `harnessAgents` 列表，首次调用自动触发 `harness.list()`                      |
+| `useSession(sessionId)`      | 读某个会话的 `SessionState`；组件订阅了这个 hook 会随 store 更新自动重渲染      |
+| `useSessionList(projectId?)` | 读会话摘要列表                                                                  |
+| `useCreateSession()`         | 返回一个 `create` 方法，内部调 `client.session.create` 并把新会话状态塞进 store |
+| `usePrompt(sessionId)`       | 返回一个 `prompt` 方法，包一层 `client.session.prompt`                          |
 
 这一层不重新设计 §4 的方法/协议，纯粹是"客户端访问 → 好用的 React hook"的薄封装。具体 reducer 细节（比如收到 `gap` 事件要不要先清空消息缓存再重新拉快照、`pendingAgentRequests` 怎么在 UI 层触发审批弹窗、`useSessionList` 的 `projectId` 过滤要不要等 §8 里 `ISessionRepository` 的项目维度设计定了再做）都还没细化，算是这个包自己的待办，不并入 §8。

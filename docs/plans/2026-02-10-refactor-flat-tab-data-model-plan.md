@@ -47,6 +47,7 @@ The current system has two separate tab management layers:
 2. **Module-level tabs** (`TerminalPanel` + TanStack Query + `TerminalSlice`) — individual terminal instances managed internally with their own tab bar, create/close logic, and active selection
 
 This creates:
+
 - Duplicated tab logic (close, activate, create in two places)
 - Inconsistent state management (React `useState` for splits, Zustand for terminal selection, TanStack Query for terminal list)
 - Impossible flat-mode UI without bridging two systems
@@ -62,19 +63,21 @@ Obsidian-inspired architecture with two core runtime abstractions and a Zustand 
 4. **React component** — pure rendering, receives props from store. Tab bar is a rendering detail of Split, not a first-class API concept.
 
 API flow (mirrors Obsidian's `getLeaf` + `setViewState`):
+
 ```typescript
-const split = workbench.getSplit('primary')
-await split.setViewState({ type: 'terminal', state: { worktreeId } })
+const split = workbench.getSplit("primary");
+await split.setViewState({ type: "terminal", state: { worktreeId } });
 ```
 
 Supporting pieces:
+
 - **Store (WorkbenchState)** — serialized projection of Workbench/Split state in Zustand. React reads from here. Workbench writes to here.
   ```typescript
   interface WorkbenchState {
-    splits: Record<string, SplitData>   // splitId → { viewIds, activeViewId }
-    views: Record<string, ViewData>     // viewId → { type, title?, state? }
-    splitOrder: string[]
-    activeSplitId: string
+    splits: Record<string, SplitData>; // splitId → { viewIds, activeViewId }
+    views: Record<string, ViewData>; // viewId → { type, title?, state? }
+    splitOrder: string[];
+    activeSplitId: string;
   }
   ```
 - **View registration** — `workbench.registerView(type, () => new View())`. Pure factory, no instance tracking.
@@ -83,19 +86,19 @@ Supporting pieces:
 
 These decisions are settled and should not be revisited during implementation:
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Architecture | Workbench → Split → View (Obsidian-inspired) | Clean hierarchy, plugin-friendly, proven model |
-| Store role | Serialized projection of runtime state (`WorkbenchState`) | React reads store; Workbench writes store. Store is never the source of truth for View instances. |
-| View pattern | Per-view factory instance with Obsidian lifecycle | `onOpen()` / `onClose()` / `getState()` / `setState()` |
-| View ↔ Split boundary | View does NOT know its id or which Split it belongs to | Split manages the association externally |
-| `type` ownership | `type` stored in `ViewData` (store) + `view.getViewType()` (instance) | Store needs `type` for React to look up component; View instance is the source of truth |
-| View metadata | On the View class (`getViewType()`, `getDisplayText()`, `getIcon()`, `component`) — Obsidian pattern | Class IS the descriptor |
-| Instance tracking | Split holds its View instances, NOT a global registry, NOT store | Each Split manages its own views |
-| Tab as concept | **Not a first-class API concept** — tab bar is a rendering detail of Split | Simplifies API; Split.views is the model, tab bar is the UI |
-| API pattern | `split.setViewState({type, state})` — mirrors Obsidian's `leaf.setViewState` | Familiar, two-step: get container → set content |
-| `hookable` dependency | **Dropped** — use plain method overrides | Only 2 View impls; plain `onOpen()`/`onClose()` suffice |
-| Mode | Start with Mode A (Grouped), flat view IDs enable Mode B later | Grouped matches current UX; flat is a rendering derivation |
+| Decision              | Choice                                                                                               | Rationale                                                                                         |
+| --------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Architecture          | Workbench → Split → View (Obsidian-inspired)                                                         | Clean hierarchy, plugin-friendly, proven model                                                    |
+| Store role            | Serialized projection of runtime state (`WorkbenchState`)                                            | React reads store; Workbench writes store. Store is never the source of truth for View instances. |
+| View pattern          | Per-view factory instance with Obsidian lifecycle                                                    | `onOpen()` / `onClose()` / `getState()` / `setState()`                                            |
+| View ↔ Split boundary | View does NOT know its id or which Split it belongs to                                               | Split manages the association externally                                                          |
+| `type` ownership      | `type` stored in `ViewData` (store) + `view.getViewType()` (instance)                                | Store needs `type` for React to look up component; View instance is the source of truth           |
+| View metadata         | On the View class (`getViewType()`, `getDisplayText()`, `getIcon()`, `component`) — Obsidian pattern | Class IS the descriptor                                                                           |
+| Instance tracking     | Split holds its View instances, NOT a global registry, NOT store                                     | Each Split manages its own views                                                                  |
+| Tab as concept        | **Not a first-class API concept** — tab bar is a rendering detail of Split                           | Simplifies API; Split.views is the model, tab bar is the UI                                       |
+| API pattern           | `split.setViewState({type, state})` — mirrors Obsidian's `leaf.setViewState`                         | Familiar, two-step: get container → set content                                                   |
+| `hookable` dependency | **Dropped** — use plain method overrides                                                             | Only 2 View impls; plain `onOpen()`/`onClose()` suffice                                           |
+| Mode                  | Start with Mode A (Grouped), flat view IDs enable Mode B later                                       | Grouped matches current UX; flat is a rendering derivation                                        |
 
 ## Design Decisions Needed (resolved here)
 
@@ -151,9 +154,9 @@ async setViewState(viewState: ViewState): Promise<View> {
 ```typescript
 // Caller (App.tsx)
 async function handleSelectDiffFile(file: DiffFileInfo) {
-  let split = workbench.getSplit('secondary')
-  if (!split) split = workbench.createSplit('secondary')
-  await split.setViewState({ type: 'diff', state: { file, repoPath } })
+  let split = workbench.getSplit("secondary");
+  if (!split) split = workbench.createSplit("secondary");
+  await split.setViewState({ type: "diff", state: { file, repoPath } });
 }
 ```
 
@@ -163,8 +166,8 @@ async function handleSelectDiffFile(file: DiffFileInfo) {
 
 ```typescript
 interface DiffViewState {
-  file: DiffFileInfo
-  repoPath: string
+  file: DiffFileInfo;
+  repoPath: string;
 }
 ```
 
@@ -175,9 +178,9 @@ interface DiffViewState {
 ```typescript
 // App.tsx handleSelectTask
 async function handleSelectTask(task: Task) {
-  await workbench.closeAll()
-  const split = workbench.getSplit('primary')
-  await split.setViewState({ type: 'terminal', state: { worktreeId, worktreePath } })
+  await workbench.closeAll();
+  const split = workbench.getSplit("primary");
+  await split.setViewState({ type: "terminal", state: { worktreeId, worktreePath } });
 }
 ```
 
@@ -422,30 +425,30 @@ Wire the new system into the UI.
 
 ## Affected Files
 
-| File | Change |
-|------|--------|
-| **New: `workbench/types.ts`** | ViewData, SplitData, WorkbenchState, ViewState, DiffViewState |
-| **New: `workbench/view.ts`** | View abstract class (Obsidian-inspired lifecycle) |
-| **New: `workbench/split.ts`** | Split class — view management within a pane |
-| **New: `workbench/workbench.ts`** | Workbench class — global singleton, split management, view registration |
-| **New: `workbench/views/terminal-lifecycle.ts`** | TerminalLifecycle class |
-| **New: `workbench/views/diff-view.ts`** | DiffView class |
-| **New: `components/terminal-renderer.tsx`** | Thin wrapper for terminal content |
-| **New: `components/diff-renderer.tsx`** | Thin wrapper for diff content |
-| **New: `stores/slices/workbench-slice.ts`** | WorkbenchSlice — Zustand slice holding WorkbenchState |
-| `components/layout/split-state.ts` | Rewrite to WorkbenchState pure functions |
-| `components/layout/split-state.test.ts` | Tests for new model |
-| `components/layout/pane-tabs.tsx` → `tab-bar.tsx` | Store-connected, Workbench metadata |
-| `components/layout/pane-leaf.tsx` → `content-renderer.tsx` | Generic via view type lookup |
-| `components/layout/split-pane.tsx` | Store-connected, simplified |
-| `components/layout/split-root.tsx` | Store-connected, layout-only |
-| `App.tsx` | Remove ~150 lines, use Workbench/Split API |
-| `stores/app-store.ts` | Add WorkbenchSlice, remove TerminalSlice |
-| `stores/slices/index.ts` | Update re-exports |
-| `stores/slices/workspace-slice.ts` | Remove worktreeTerminalIds |
-| **Delete: `components/terminal/terminal-panel.tsx`** | Replaced by TerminalLifecycle + TerminalRenderer |
-| **Delete: `stores/slices/terminal-slice.ts`** | Replaced by WorkbenchSlice |
-| `apps/desktop/package.json` | No new dependencies |
+| File                                                       | Change                                                                  |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **New: `workbench/types.ts`**                              | ViewData, SplitData, WorkbenchState, ViewState, DiffViewState           |
+| **New: `workbench/view.ts`**                               | View abstract class (Obsidian-inspired lifecycle)                       |
+| **New: `workbench/split.ts`**                              | Split class — view management within a pane                             |
+| **New: `workbench/workbench.ts`**                          | Workbench class — global singleton, split management, view registration |
+| **New: `workbench/views/terminal-lifecycle.ts`**           | TerminalLifecycle class                                                 |
+| **New: `workbench/views/diff-view.ts`**                    | DiffView class                                                          |
+| **New: `components/terminal-renderer.tsx`**                | Thin wrapper for terminal content                                       |
+| **New: `components/diff-renderer.tsx`**                    | Thin wrapper for diff content                                           |
+| **New: `stores/slices/workbench-slice.ts`**                | WorkbenchSlice — Zustand slice holding WorkbenchState                   |
+| `components/layout/split-state.ts`                         | Rewrite to WorkbenchState pure functions                                |
+| `components/layout/split-state.test.ts`                    | Tests for new model                                                     |
+| `components/layout/pane-tabs.tsx` → `tab-bar.tsx`          | Store-connected, Workbench metadata                                     |
+| `components/layout/pane-leaf.tsx` → `content-renderer.tsx` | Generic via view type lookup                                            |
+| `components/layout/split-pane.tsx`                         | Store-connected, simplified                                             |
+| `components/layout/split-root.tsx`                         | Store-connected, layout-only                                            |
+| `App.tsx`                                                  | Remove ~150 lines, use Workbench/Split API                              |
+| `stores/app-store.ts`                                      | Add WorkbenchSlice, remove TerminalSlice                                |
+| `stores/slices/index.ts`                                   | Update re-exports                                                       |
+| `stores/slices/workspace-slice.ts`                         | Remove worktreeTerminalIds                                              |
+| **Delete: `components/terminal/terminal-panel.tsx`**       | Replaced by TerminalLifecycle + TerminalRenderer                        |
+| **Delete: `stores/slices/terminal-slice.ts`**              | Replaced by WorkbenchSlice                                              |
+| `apps/desktop/package.json`                                | No new dependencies                                                     |
 
 ## References
 

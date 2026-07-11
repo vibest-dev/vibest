@@ -11,12 +11,23 @@ catalog:
   vitest: 4.1.10
   vite-plus: 0.2.4
 overrides:
-  vite: 'catalog:'
-  vitest: 'catalog:'
+  vite: "catalog:"
+  vitest: "catalog:"
 peerDependencyRules:
   allowAny:
     - vite
     - vitest
   allowedVersions:
-    vite: '*'
-    vitest: '*'
+    vite: "*"
+    vitest: "*"
+# pnpm 11 defaults minimumReleaseAge to 24h; disable it — the same-day
+# dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked,
+# and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.
+minimumReleaseAge: 0
+allowBuilds:
+  "@swc/core": true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  msgpackr-extract: true
+  node-pty: true

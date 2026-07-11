@@ -5,7 +5,13 @@ export type { GitWatcherServiceOptions } from "./git-watcher-service";
 
 // Terminal
 export { TerminalManager, HeadlessTerminal } from "./terminal";
-export type { TerminalInstance, TerminalEvent, TerminalEvents, TerminalSnapshot, TerminalModes } from "./terminal";
+export type {
+  TerminalInstance,
+  TerminalEvent,
+  TerminalEvents,
+  TerminalSnapshot,
+  TerminalModes,
+} from "./terminal";
 
 // Types
 export type { GitChangeEvent, GitWatcherEvents } from "./git-watcher-types";

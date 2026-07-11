@@ -3,16 +3,16 @@ import { scan } from "react-scan";
 
 // Configure react-scan before any React imports
 if (import.meta.env.DEV) {
-	scan({
-		enabled: true,
-		showToolbar: true,
-		animationSpeed: "slow",
-		log: false,
-		trackUnnecessaryRenders: true,
-		onRender: (fiber, renders) => {
-			console.log("[react-scan] render:", fiber.type?.name || fiber.type, renders.length);
-		},
-	});
+  scan({
+    enabled: true,
+    showToolbar: true,
+    animationSpeed: "slow",
+    log: false,
+    trackUnnecessaryRenders: true,
+    onRender: (fiber, renders) => {
+      console.log("[react-scan] render:", fiber.type?.name || fiber.type, renders.length);
+    },
+  });
 }
 
 // NOW import React and other dependencies

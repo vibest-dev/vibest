@@ -11,10 +11,12 @@ Integrate react-scan into the desktop renderer to provide real-time performance 
 ## Configuration
 
 **Dependency:**
+
 - Add `react-scan` as dev dependency to `apps/desktop`
 - Installation: `pnpm add react-scan -D --filter desktop`
 
 **Settings:**
+
 - `enabled`: Controlled by `import.meta.env.DEV` (development-only)
 - `showToolbar`: `true` (draggable UI for runtime control)
 - `animationSpeed`: `"fast"` (visible but not distracting)
@@ -33,23 +35,23 @@ React-scan must hijack React DevTools hooks before React initializes. This requi
 
 ```typescript
 // CRITICAL: react-scan must be imported FIRST, before React
-import { scan } from 'react-scan'
+import { scan } from "react-scan";
 
 // Configure react-scan before any React imports
 if (import.meta.env.DEV) {
   scan({
     enabled: true,
     showToolbar: true,
-    animationSpeed: 'fast',
+    animationSpeed: "fast",
     log: true,
     trackUnnecessaryRenders: true,
-  })
+  });
 }
 
 // NOW import React and other dependencies
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
 // ... rest of imports and app initialization
 ```
 
@@ -92,6 +94,7 @@ With `log: true`, expect console messages:
 ### Expected Behavior
 
 Areas likely to show render activity:
+
 - **Terminal components:** Active during typing/output
 - **Sidebar navigation:** Highlights on route changes
 - **Dialogs:** Render on open/close

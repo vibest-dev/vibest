@@ -19,7 +19,11 @@ export class GitWatcherService {
   private lastStats = new Map<string, string>(); // path -> JSON stats
   private refCounts = new Map<string, number>(); // path -> subscriber count
 
-  constructor(git: GitService, publisher: Publisher<GitWatcherEvents>, options?: GitWatcherServiceOptions) {
+  constructor(
+    git: GitService,
+    publisher: Publisher<GitWatcherEvents>,
+    options?: GitWatcherServiceOptions,
+  ) {
     this.git = git;
     this.publisher = publisher;
     this.pollInterval = options?.pollInterval ?? 10_000;

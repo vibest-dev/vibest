@@ -21,16 +21,17 @@ Both modes are driven by the **same flat tab ID list** per split. The mode is in
 
 ## Naming Conventions
 
-| Concept | Name | What it is | Where it lives |
-|---------|------|------------|----------------|
-| Content entity (data) | **Tab** (`TabData`) | `{ id, kind, title, state }` — plain object | Zustand store (normalized) |
-| Content handler (lifecycle) | **View** (`View`) | Per-tab class instance — `open()`, `close()`, `component` | ViewRegistry |
-| UI navigation element | **Tab** (React `<Tab>`) | Clickable element in the tab bar | React component |
-| Container | **Split** | Holds a list of tab IDs + active tab | Zustand store |
-| Layout | **SplitLayout** | Renders splits, not a domain concept | React component |
-| Factory + instance manager | **ViewRegistry** | `kind → factory`, `tabId → View instance` | Module singleton |
+| Concept                     | Name                    | What it is                                                | Where it lives             |
+| --------------------------- | ----------------------- | --------------------------------------------------------- | -------------------------- |
+| Content entity (data)       | **Tab** (`TabData`)     | `{ id, kind, title, state }` — plain object               | Zustand store (normalized) |
+| Content handler (lifecycle) | **View** (`View`)       | Per-tab class instance — `open()`, `close()`, `component` | ViewRegistry               |
+| UI navigation element       | **Tab** (React `<Tab>`) | Clickable element in the tab bar                          | React component            |
+| Container                   | **Split**               | Holds a list of tab IDs + active tab                      | Zustand store              |
+| Layout                      | **SplitLayout**         | Renders splits, not a domain concept                      | React component            |
+| Factory + instance manager  | **ViewRegistry**        | `kind → factory`, `tabId → View instance`                 | Module singleton           |
 
 **Why these names:**
+
 - **Tab** is the most natural user-facing term — "open a tab", "close a tab"
 - **View** is the developer-facing registration concept — "register a view" to display content. You register a View type, not a Tab type. Follows Obsidian's naming.
 - **Split** is the container — no ambiguity with other concepts
@@ -38,12 +39,14 @@ Both modes are driven by the **same flat tab ID list** per split. The mode is in
 ## Why This Approach
 
 The current system has two separate tab management layers:
+
 1. Split-level tabs (`PaneLeaf[]` in `split-state.ts`) — Terminal, Diff as categories
 2. Module-level tabs (e.g., TerminalPanel's internal tab list via TanStack Query + Zustand TerminalSlice) — individual terminal instances
 
 This creates duplicated tab logic, inconsistent state management, and makes a flat-mode UI impossible without bridging two systems.
 
 **Unifying into a single flat model:**
+
 - Eliminates the nested tab hierarchy
 - Makes both modes trivial to implement as view-layer derivation
 - Simplifies state transitions (one set of functions for all tab operations)
@@ -55,14 +58,14 @@ This creates duplicated tab logic, inconsistent state management, and makes a fl
 
 Both VS Code and Obsidian separate **data** (tab identity) from **lifecycle** (business logic) from **rendering** (UI):
 
-| Layer | VS Code | Obsidian | Our Design |
-|-------|---------|----------|------------|
-| Data | `EditorInput` (class) | `ViewState` (plain object) | `TabData` (plain object, normalized in store) |
-| Lifecycle | `EditorPane` (per-group instance) | `View` (per-leaf instance) | `View` (per-tab instance, factory pattern) |
-| Registry | `EditorPaneRegistry` (descriptor+pattern) | `registerView(type, factory)` | `ViewRegistry` (kind→factory + tabId→instance) |
-| Rendering | `EditorPane.createEditor()` (imperative DOM) | `View.containerEl` (imperative DOM) | React component (declarative) |
-| State mgmt | Services + DI | Internal | Zustand `SplitSlice` (vanilla store, usable from JS) |
-| Extension model | Dual-track (core registry + Extension API) | Single-track (`registerView`) | Single-track (`viewRegistry.register`) |
+| Layer           | VS Code                                      | Obsidian                            | Our Design                                           |
+| --------------- | -------------------------------------------- | ----------------------------------- | ---------------------------------------------------- |
+| Data            | `EditorInput` (class)                        | `ViewState` (plain object)          | `TabData` (plain object, normalized in store)        |
+| Lifecycle       | `EditorPane` (per-group instance)            | `View` (per-leaf instance)          | `View` (per-tab instance, factory pattern)           |
+| Registry        | `EditorPaneRegistry` (descriptor+pattern)    | `registerView(type, factory)`       | `ViewRegistry` (kind→factory + tabId→instance)       |
+| Rendering       | `EditorPane.createEditor()` (imperative DOM) | `View.containerEl` (imperative DOM) | React component (declarative)                        |
+| State mgmt      | Services + DI                                | Internal                            | Zustand `SplitSlice` (vanilla store, usable from JS) |
+| Extension model | Dual-track (core registry + Extension API)   | Single-track (`registerView`)       | Single-track (`viewRegistry.register`)               |
 
 Key difference from VS Code/Obsidian: they are imperative (View class IS the renderer). We use React (declarative), so rendering is separated from the lifecycle class. This creates two lifecycle layers that must stay in their lanes.
 
@@ -105,26 +108,26 @@ Key difference from VS Code/Obsidian: they are imperative (View class IS the ren
 
 **View does NOT hold Tab data.** Tab management is entirely internal to the framework. View is a pure "content provider" that only knows:
 
-| View knows | View does NOT know |
-|---|---|
-| Its own kind, icon, kindLabel | tabId |
+| View knows                      | View does NOT know |
+| ------------------------------- | ------------------ |
+| Its own kind, icon, kindLabel   | tabId              |
 | How to create/destroy resources | Tab data structure |
-| What React component to use | How store works |
-| Where to open (target split) | Registry binding |
-| Its own runtime state | Tab bar rendering |
+| What React component to use     | How store works    |
+| Where to open (target split)    | Registry binding   |
+| Its own runtime state           | Tab bar rendering  |
 
 The association between View and Tab is managed internally by the framework (ViewRegistry + SplitSlice).
 
 ### Communication Between Layers
 
-| From → To | Mechanism | Timing Issue? |
-|-----------|-----------|---------------|
-| Framework → View | Direct method call (`view.open()`, `view.close()`) | No — synchronous/await |
-| Framework → React | Zustand state update → props change | No — React's natural flow |
-| React → Framework | Zustand actions (`closeTab()`, `activateTab()`) | No — user-triggered |
-| View → React | **Never.** View does not talk to React components. | N/A |
-| React → View | **Never.** React components do not call View methods. | N/A |
-| View → Tab | **Never.** View does not read or write Tab data. | N/A |
+| From → To         | Mechanism                                             | Timing Issue?             |
+| ----------------- | ----------------------------------------------------- | ------------------------- |
+| Framework → View  | Direct method call (`view.open()`, `view.close()`)    | No — synchronous/await    |
+| Framework → React | Zustand state update → props change                   | No — React's natural flow |
+| React → Framework | Zustand actions (`closeTab()`, `activateTab()`)       | No — user-triggered       |
+| View → React      | **Never.** View does not talk to React components.    | N/A                       |
+| React → View      | **Never.** React components do not call View methods. | N/A                       |
+| View → Tab        | **Never.** View does not read or write Tab data.      | N/A                       |
 
 This avoids the event timing problem: React components respond to **props** (state-driven, never missed), not to **events** (fire-and-forget, can be missed if listener isn't mounted yet).
 
@@ -132,12 +135,12 @@ This avoids the event timing problem: React components respond to **props** (sta
 
 Each tab gets its own View instance, following Obsidian's approach.
 
-| | Singleton (rejected) | Factory (chosen) |
-|---|---|---|
-| Instance count | 1 per kind | 1 per tab |
-| Per-tab state | In store only | Instance fields (runtime) + store (serializable) |
-| Method calls | `view.close(tab)` — pass tab every time | `view.close()` — instance has its own state |
-| Isolation | None — all tabs share one object | Full — each tab is independent |
+|                | Singleton (rejected)                    | Factory (chosen)                                 |
+| -------------- | --------------------------------------- | ------------------------------------------------ |
+| Instance count | 1 per kind                              | 1 per tab                                        |
+| Per-tab state  | In store only                           | Instance fields (runtime) + store (serializable) |
+| Method calls   | `view.close(tab)` — pass tab every time | `view.close()` — instance has its own state      |
+| Isolation      | None — all tabs share one object        | Full — each tab is independent                   |
 
 ## Data Model
 
@@ -163,11 +166,11 @@ interface BuiltinTabStateMap {
 
 ```typescript
 interface TabData {
-  id: string;        // Unique tab ID, generated by framework
-  kind: TabKind;     // Used for grouping, renderer dispatch, registry lookup
-  title: string;     // Display name: "Terminal 1", "README.md"
-  state?: unknown;   // Kind-specific data — typed via helpers for builtins
-  pinned?: boolean;  // Reserved for future use
+  id: string; // Unique tab ID, generated by framework
+  kind: TabKind; // Used for grouping, renderer dispatch, registry lookup
+  title: string; // Display name: "Terminal 1", "README.md"
+  state?: unknown; // Kind-specific data — typed via helpers for builtins
+  pinned?: boolean; // Reserved for future use
 }
 ```
 
@@ -176,7 +179,8 @@ interface TabData {
 ```typescript
 // Read: type-safe state access for builtin kinds
 function getBuiltinTabState<K extends BuiltinTabKind>(
-  tab: TabData, kind: K
+  tab: TabData,
+  kind: K,
 ): BuiltinTabStateMap[K] {
   return tab.state as BuiltinTabStateMap[K];
 }
@@ -185,12 +189,12 @@ function getBuiltinTabState<K extends BuiltinTabKind>(
 function createTab<K extends BuiltinTabKind>(
   kind: K,
   state: BuiltinTabStateMap[K],
-  meta: { id: string; title: string; pinned?: boolean }
+  meta: { id: string; title: string; pinned?: boolean },
 ): TabData;
 function createTab(
   kind: string,
   state: unknown,
-  meta: { id: string; title: string; pinned?: boolean }
+  meta: { id: string; title: string; pinned?: boolean },
 ): TabData;
 function createTab(kind: string, state: unknown, meta: any): TabData {
   return { kind, state, ...meta };
@@ -198,7 +202,7 @@ function createTab(kind: string, state: unknown, meta: any): TabData {
 
 // Builtin — compile-time validation
 createTab("terminal", { terminalId: "t1" }, { id: "terminal-t1", title: "Terminal 1" }); // ✓
-createTab("terminal", { wrong: true },      { id: "terminal-t1", title: "Terminal 1" }); // ✗ compile error
+createTab("terminal", { wrong: true }, { id: "terminal-t1", title: "Terminal 1" }); // ✗ compile error
 ```
 
 ### SplitState (Normalized)
@@ -215,11 +219,12 @@ interface SplitState {
   // Split → Tab relationships
   tabIdsBySplitId: Record<string, string[]>;
   activeTabIdBySplitId: Record<string, string | null>;
-  lastActiveTabByKind: Record<string, Record<TabKind, string>>;  // For Mode A group switching
+  lastActiveTabByKind: Record<string, Record<TabKind, string>>; // For Mode A group switching
 }
 ```
 
 Tabs are normalized: `tabs` is a flat `Record<id, TabData>`, splits reference tabs by ID. This means:
+
 - Updating a tab's title doesn't require finding which split it belongs to
 - Moving a tab between splits only changes `tabIdsBySplitId`, not the tab itself
 
@@ -244,9 +249,9 @@ View's `open()` returns `TabInit` — the minimum data needed for the framework 
 
 ```typescript
 interface TabInit {
-  title: string;        // Display name
-  state?: unknown;      // Kind-specific data for serialization/rendering
-  key?: string;         // Optional dedup key → framework generates id: `${kind}-${key}`
+  title: string; // Display name
+  state?: unknown; // Kind-specific data for serialization/rendering
+  key?: string; // Optional dedup key → framework generates id: `${kind}-${key}`
   pinned?: boolean;
 }
 ```
@@ -279,7 +284,9 @@ abstract class View extends Hookable<ViewHooks> {
   // The only thing View decides about placement
   target: SplitTarget = "primary";
 
-  constructor() { super(); }
+  constructor() {
+    super();
+  }
 
   // Prepare resources, return data for Tab creation.
   // Framework handles TabData creation, ID generation, registry binding, store write.
@@ -312,13 +319,15 @@ class TerminalView extends View {
   component = TerminalRenderer;
   target = "primary" as const;
 
-  private terminalId!: string;  // View's own runtime state
+  private terminalId!: string; // View's own runtime state
 
-  constructor(private orpc: typeof orpc) { super(); }
+  constructor(private orpc: typeof orpc) {
+    super();
+  }
 
   async open(worktreeId: string): Promise<TabInit> {
     const term = await this.orpc.terminal.create(worktreeId);
-    this.terminalId = term.id;  // store in own state, not in Tab
+    this.terminalId = term.id; // store in own state, not in Tab
     return {
       title: `Terminal ${n}`,
       state: { terminalId: term.id },
@@ -328,7 +337,7 @@ class TerminalView extends View {
 
   async close(): Promise<void> {
     await this.callHook("beforeClose");
-    await this.orpc.terminal.close(this.terminalId);  // uses own state
+    await this.orpc.terminal.close(this.terminalId); // uses own state
   }
 }
 ```
@@ -341,7 +350,7 @@ class DiffView extends View {
   icon = "file-diff";
   kindLabel = "Diff";
   component = DiffRenderer;
-  target = "secondary" as const;  // Diffs open in secondary split
+  target = "secondary" as const; // Diffs open in secondary split
 
   private file!: DiffFileInfo;
 
@@ -424,7 +433,7 @@ export const viewRegistry = new ViewRegistry();
 ```typescript
 // App init
 viewRegistry.register("terminal", () => new TerminalView(orpc));
-viewRegistry.register("diff",     () => new DiffView());
+viewRegistry.register("diff", () => new DiffView());
 ```
 
 ## Zustand SplitSlice (Framework Orchestration)
@@ -471,7 +480,7 @@ export const createSplitSlice: StateCreator<AppStore, [], [], SplitSlice> = (set
     viewRegistry.bind(tab.id, view);
 
     // Add to store using View's declared target
-    set(s => ({
+    set((s) => ({
       splitState: addTab(s.splitState, tab, view.target),
     }));
   },
@@ -488,7 +497,7 @@ export const createSplitSlice: StateCreator<AppStore, [], [], SplitSlice> = (set
     };
 
     viewRegistry.bind(tab.id, view);
-    set(s => ({
+    set((s) => ({
       splitState: addTab(s.splitState, tab, view.target),
     }));
   },
@@ -499,7 +508,7 @@ export const createSplitSlice: StateCreator<AppStore, [], [], SplitSlice> = (set
     const view = viewRegistry.getInstance(tabId);
     await view?.close();
     viewRegistry.destroy(tabId);
-    set(s => ({
+    set((s) => ({
       splitState: removeTab(s.splitState, splitId, tabId),
     }));
   },
@@ -511,7 +520,7 @@ export const createSplitSlice: StateCreator<AppStore, [], [], SplitSlice> = (set
       viewRegistry.getInstance(prevId)?.onDeactivated();
     }
     viewRegistry.getInstance(tabId)?.onActivated();
-    set(s => ({
+    set((s) => ({
       splitState: setActiveTab(s.splitState, splitId, tabId),
     }));
   },
@@ -519,8 +528,10 @@ export const createSplitSlice: StateCreator<AppStore, [], [], SplitSlice> = (set
   activateGroup: (splitId, kind) => {
     const { splitState } = get();
     const lastId = splitState.lastActiveTabByKind?.[splitId]?.[kind];
-    const tabIds = splitState.tabIdsBySplitId[splitId]?.filter(id => splitState.tabs[id]?.kind === kind);
-    const targetId = (lastId && tabIds?.includes(lastId)) ? lastId : tabIds?.[0];
+    const tabIds = splitState.tabIdsBySplitId[splitId]?.filter(
+      (id) => splitState.tabs[id]?.kind === kind,
+    );
+    const targetId = lastId && tabIds?.includes(lastId) ? lastId : tabIds?.[0];
     if (targetId) get().activateTab(splitId, targetId);
   },
 
@@ -561,8 +572,8 @@ React components receive `{ tab, isVisible }` props from the store. They do **no
 ```tsx
 // content-renderer.tsx — fully generic, no switch statement
 function ContentRenderer({ splitId, tabId }: { splitId: string; tabId: string }) {
-  const tab = useAppStore(s => s.splitState.tabs[tabId]);
-  const activeTabId = useAppStore(s => s.splitState.activeTabIdBySplitId[splitId]);
+  const tab = useAppStore((s) => s.splitState.tabs[tabId]);
+  const activeTabId = useAppStore((s) => s.splitState.activeTabIdBySplitId[splitId]);
   const isVisible = tabId === activeTabId;
 
   const view = viewRegistry.getInstance(tabId);
@@ -596,14 +607,14 @@ function DiffRenderer({ tab, isVisible }: ViewProps) {
 
 ```tsx
 function TabBar({ splitId }: { splitId: string }) {
-  const tabIds = useAppStore(s => s.splitState.tabIdsBySplitId[splitId]);
-  const activeTabId = useAppStore(s => s.splitState.activeTabIdBySplitId[splitId]);
+  const tabIds = useAppStore((s) => s.splitState.tabIdsBySplitId[splitId]);
+  const activeTabId = useAppStore((s) => s.splitState.activeTabIdBySplitId[splitId]);
   const { activateTab, closeTab } = useAppStore();
 
   return (
     <div>
-      {tabIds.map(id => {
-        const tab = useAppStore(s => s.splitState.tabs[id]);
+      {tabIds.map((id) => {
+        const tab = useAppStore((s) => s.splitState.tabs[id]);
         const view = viewRegistry.getInstance(id);
         return (
           <Tab
@@ -688,34 +699,38 @@ User switches worktree
 
 ### Where We Differ (Trade-offs)
 
-| Dimension | VS Code | Obsidian | Ours | Notes |
-|-----------|---------|----------|------|-------|
-| Per-tab state isolation | ✓ EditorInput instance | ✓ View instance | ✓ View instance | All three use per-tab instances |
-| API encapsulation | ✓ Command layer between core/extension | ✗ Direct View access | ✗ Direct View access | VS Code's command layer prevents breakage on refactor. Acceptable for now; add command layer if needed. |
-| Builtin type inference | △ Direct import (core only) | ✗ Manual cast `getViewOfType<T>()` | ✓ Overloaded `createView()` / `getBuiltinTabState()` | Our type inference is the strongest, but relies on manually maintained type maps (3 places to update per builtin kind). |
-| State type safety (write) | ✓ Class fields | ✗ `Record<string, unknown>` | ✓ `createTab()` overload | Our write-time safety is good but shallow — `TabData.state` is `unknown` at the container level. |
-| Lifecycle richness | ✓ dirty/save/revert, confirmSave, preview tab | △ onOpen/onClose, requestSave | ✗ Minimal: open/close/activate/deactivate | We lack dirty state, save/revert, close confirmation, preview tabs. Add when needed. |
-| Serialization/restore | ✓ EditorSerializer (separate concern) | ✓ getState/setState (built-in) | △ Optional serialize/restore (not rigorous) | Needs hardening before workspace persistence. |
-| Split/group model | ✓ EditorGroupModel (MRU, preview, sticky, lock) | ✓ Recursive nested splits | △ Flat SplitState | Simpler, sufficient for current needs. |
+| Dimension                 | VS Code                                         | Obsidian                           | Ours                                                 | Notes                                                                                                                   |
+| ------------------------- | ----------------------------------------------- | ---------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Per-tab state isolation   | ✓ EditorInput instance                          | ✓ View instance                    | ✓ View instance                                      | All three use per-tab instances                                                                                         |
+| API encapsulation         | ✓ Command layer between core/extension          | ✗ Direct View access               | ✗ Direct View access                                 | VS Code's command layer prevents breakage on refactor. Acceptable for now; add command layer if needed.                 |
+| Builtin type inference    | △ Direct import (core only)                     | ✗ Manual cast `getViewOfType<T>()` | ✓ Overloaded `createView()` / `getBuiltinTabState()` | Our type inference is the strongest, but relies on manually maintained type maps (3 places to update per builtin kind). |
+| State type safety (write) | ✓ Class fields                                  | ✗ `Record<string, unknown>`        | ✓ `createTab()` overload                             | Our write-time safety is good but shallow — `TabData.state` is `unknown` at the container level.                        |
+| Lifecycle richness        | ✓ dirty/save/revert, confirmSave, preview tab   | △ onOpen/onClose, requestSave      | ✗ Minimal: open/close/activate/deactivate            | We lack dirty state, save/revert, close confirmation, preview tabs. Add when needed.                                    |
+| Serialization/restore     | ✓ EditorSerializer (separate concern)           | ✓ getState/setState (built-in)     | △ Optional serialize/restore (not rigorous)          | Needs hardening before workspace persistence.                                                                           |
+| Split/group model         | ✓ EditorGroupModel (MRU, preview, sticky, lock) | ✓ Recursive nested splits          | △ Flat SplitState                                    | Simpler, sufficient for current needs.                                                                                  |
 
 ### Honest Assessment
 
 **Strengths over both:**
+
 - Builtin type inference without cast (overloaded `createView()` + `getBuiltinTabState()`)
 - Write-time state validation (`createTab()` overload)
 - Simpler mental model (plain data + factory instances + React)
 - Clean separation: View doesn't know about Tab internals
 
 **Weaker than VS Code:**
+
 - No API encapsulation boundary
 - No dirty/save/revert lifecycle
 - No preview tab, sticky tab, group lock
 
 **Weaker than Obsidian:**
+
 - Less battle-tested serialization/restore
 - No recursive nested split model
 
 **Acceptable trade-offs for current stage:**
+
 - API encapsulation (command layer) — add when needed
 - Dirty/save/revert — add when we have editable content types
 - Preview tabs — add when we have file-based content
@@ -727,6 +742,7 @@ User switches worktree
 Decision: **Tab stays plain data in the normalized store.** View handles all behavior.
 
 Rationale:
+
 - VS Code's `EditorInput` is a class because VS Code doesn't use React/Zustand — it manages its own change notifications. We use Zustand for reactivity, so data must be plain serializable objects.
 - The Zustand store is vanilla (`zustand/vanilla`), usable from JS — so View can read/write the store directly if needed. But View doesn't need Tab data because it manages its own runtime state.
 - `isDirty()` (VS Code's EditorInput method) would belong on View, not Tab — it's runtime state, not persistent data.
@@ -800,25 +816,25 @@ Content:    <TerminalView id="abc123" />
 
 ## Affected Files
 
-| File | Change |
-|------|--------|
-| **New: `views/view.ts`** | View class (extends Hookable), ViewProps, ViewHooks, TabInit |
-| **New: `views/view-registry.ts`** | ViewRegistry class (factories + instances), BuiltinViewMap |
-| **New: `views/terminal-view.ts`** | TerminalView class |
-| **New: `views/diff-view.ts`** | DiffView class |
-| **New: `components/terminal-renderer.tsx`** | React component for terminal content |
-| **New: `components/diff-renderer.tsx`** | React component for diff content |
-| **New: `types/tab.ts`** | TabData, TabKind, BuiltinTabKind, BuiltinTabStateMap, createTab, getBuiltinTabState |
-| **New: `stores/slices/split-slice.ts`** | Zustand SplitSlice with framework orchestration |
-| `split-state.ts` | Normalized SplitState (`tabs` record + `tabIdsBySplitId`), update pure functions |
-| `split-state.test.ts` | Update tests for normalized model |
-| `pane-tabs.tsx` → `tab-bar.tsx` | Read tab IDs from store, look up View for icon/metadata |
-| `pane-leaf.tsx` → `content-renderer.tsx` | Generic renderer via `viewRegistry.getInstance(tabId).component` |
-| `split-pane.tsx` | Simplified — reads from store directly |
-| `App.tsx` | Remove all split/tab handler logic (moved to SplitSlice), remove seeding useEffect |
-| `terminal-panel.tsx` | **Delete** — replaced by TerminalView + TerminalRenderer |
-| `stores/slices/terminal-slice.ts` | **Delete** — replaced by SplitSlice |
-| `stores/slices/workspace-slice.ts` | Remove `worktreeTerminalIds`, `addWorktreeTerminal`, `removeWorktreeTerminal` |
-| `stores/slices/index.ts` | Remove TerminalSlice re-export, add SplitSlice |
-| `stores/app-store.ts` | `AppStore = WorkspaceSlice & TaskSlice & SplitSlice` |
-| `components/terminal/index.ts` | Remove TerminalPanel export, keep TerminalView |
+| File                                        | Change                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **New: `views/view.ts`**                    | View class (extends Hookable), ViewProps, ViewHooks, TabInit                        |
+| **New: `views/view-registry.ts`**           | ViewRegistry class (factories + instances), BuiltinViewMap                          |
+| **New: `views/terminal-view.ts`**           | TerminalView class                                                                  |
+| **New: `views/diff-view.ts`**               | DiffView class                                                                      |
+| **New: `components/terminal-renderer.tsx`** | React component for terminal content                                                |
+| **New: `components/diff-renderer.tsx`**     | React component for diff content                                                    |
+| **New: `types/tab.ts`**                     | TabData, TabKind, BuiltinTabKind, BuiltinTabStateMap, createTab, getBuiltinTabState |
+| **New: `stores/slices/split-slice.ts`**     | Zustand SplitSlice with framework orchestration                                     |
+| `split-state.ts`                            | Normalized SplitState (`tabs` record + `tabIdsBySplitId`), update pure functions    |
+| `split-state.test.ts`                       | Update tests for normalized model                                                   |
+| `pane-tabs.tsx` → `tab-bar.tsx`             | Read tab IDs from store, look up View for icon/metadata                             |
+| `pane-leaf.tsx` → `content-renderer.tsx`    | Generic renderer via `viewRegistry.getInstance(tabId).component`                    |
+| `split-pane.tsx`                            | Simplified — reads from store directly                                              |
+| `App.tsx`                                   | Remove all split/tab handler logic (moved to SplitSlice), remove seeding useEffect  |
+| `terminal-panel.tsx`                        | **Delete** — replaced by TerminalView + TerminalRenderer                            |
+| `stores/slices/terminal-slice.ts`           | **Delete** — replaced by SplitSlice                                                 |
+| `stores/slices/workspace-slice.ts`          | Remove `worktreeTerminalIds`, `addWorktreeTerminal`, `removeWorktreeTerminal`       |
+| `stores/slices/index.ts`                    | Remove TerminalSlice re-export, add SplitSlice                                      |
+| `stores/app-store.ts`                       | `AppStore = WorkspaceSlice & TaskSlice & SplitSlice`                                |
+| `components/terminal/index.ts`              | Remove TerminalPanel export, keep TerminalView                                      |

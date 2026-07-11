@@ -32,9 +32,7 @@ export class App {
     );
     this.worktree = new WorktreeService();
     this.task = new TaskService(this.store, this.worktree, this.git);
-    this.terminal = new TerminalManager(
-      this.publisher as unknown as Publisher<TerminalEvents>,
-    );
+    this.terminal = new TerminalManager(this.publisher as unknown as Publisher<TerminalEvents>);
   }
 
   async start(): Promise<void> {
