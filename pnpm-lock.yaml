@@ -623,40 +623,6 @@ importers:
         specifier: ^5.0.3
         version: 5.1.0
 
-  packages/webext-bridge:
-    dependencies:
-      nanoevents:
-        specifier: ^6.0.2
-        version: 6.0.2
-      serialize-error:
-        specifier: ^9.0.0
-        version: 9.1.1
-      tiny-uid:
-        specifier: ^1.1.1
-        version: 1.1.2
-      webextension-polyfill:
-        specifier: ^0.9.0
-        version: 0.9.0
-    devDependencies:
-      '@types/node':
-        specifier: ^24.10.13
-        version: 24.10.13
-      '@types/webextension-polyfill':
-        specifier: ^0.8.3
-        version: 0.8.3
-      bumpp:
-        specifier: ^7.1.1
-        version: 7.2.0
-      tsup:
-        specifier: ^5.11.13
-        version: 5.12.9(@swc/core@1.15.11(@swc/helpers@0.5.18))(postcss@8.5.6)(typescript@5.9.3)
-      type-fest:
-        specifier: ^2.11.1
-        version: 2.19.0
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-
   tools/typescript: {}
 
 packages:

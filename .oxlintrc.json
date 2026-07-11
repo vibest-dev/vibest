@@ -33,7 +33,6 @@
   "ignorePatterns": [
     "**/routeTree.gen.ts",
     ".conductor",
-    "packages/webext-bridge/**",
     "**/dist/**",
     "**/node_modules/**"
   ]

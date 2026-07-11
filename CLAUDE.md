@@ -35,7 +35,6 @@ The repository is structured into several key applications (`apps`) and shared p
   - **`ai-elements`**: Specialized components for building AI chat interfaces (e.g., `Conversation`, `Message`, `PromptInput`).
   - **`claude-code`**: Components for rendering Claude Code-specific outputs, such as detailed visualizations of AI tool invocations (`ClaudeCodeBashTool`, `ClaudeCodeReadTool`, etc.).
   - **`components`**: General-purpose UI components (e.g., `Avatar`, `Button`, `Collapsible`, `DropdownMenu`) that are reused across all frontend applications.
-- **`packages/webext-bridge`**: A library for robust cross-context messaging within Web Extensions.
 
 ## High-Level Functionality
 
@@ -116,8 +115,6 @@ The project integrates with several critical technologies and third-party tools:
   - `express`: A fast, unopinionated, minimalist web framework for Node.js, used to build the local CLI server.
   - `cors`: Middleware for enabling Cross-Origin Resource Sharing.
   - `ws`: WebSocket library for potential real-time communication.
-- **Browser Extension Development:**
-  - `webext-bridge`: A specialized library for facilitating secure and efficient message passing between different contexts (content scripts, background scripts, UI pages) within a Web Extension.
 - **Monorepo Tooling:**
   - `pnpm`: A fast, disk space efficient package manager.
   - `Vite+` (`vp`): The unified toolchain (Vite, Vitest, Rolldown, tsdown, Oxlint, Oxfmt, and Vite Task) that drives dev, build, test, lint, format, and workspace task orchestration.
@@ -215,8 +212,7 @@ The files listed below are important for code generation and running terminal co
 │   ├── cli/
 │   ├── server-rpc/
 │   ├── shared/
-│   ├── ui/
-│   └── webext-bridge/
+│   └── ui/
 ├── pnpm-workspace.yaml
 ├── tools/
 │   └── typescript/
