@@ -49,3 +49,6 @@ yarn-error.log*
 .nitro/
 **/.nitro/
 .claude/settings.local.json
+# Node.js V8 compile cache
+node-compile-cache/
+**/node-compile-cache/
