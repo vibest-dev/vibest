@@ -3,7 +3,6 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import { fileURLToPath } from "node:url";
-// import vibestDevtools from "vibest-devtools/vite";
 import { defineConfig } from "vite-plus";
 import tsconfigPaths from "vite-tsconfig-paths";
 
@@ -19,7 +18,6 @@ export default defineConfig({
   },
   plugins: [
     codeInspectorPlugin({ bundler: "vite" }),
-    // vibestDevtools(),
     // The TanStack Router plugin must come before JSX transform plugins.
     tanstackRouter({
       target: "react",

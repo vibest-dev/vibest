@@ -6,7 +6,6 @@
     "watch": "vp run -r --parallel dev",
     "stub": "vp run -r --parallel stub",
     "build": "vp run -r build",
-    "build:extension": "vp run --filter ./apps/chrome-side-panel --filter ./chrome-extension build",
     "build:packages": "vp run --filter \"./packages/*\" build",
     "bump": "pnpm taze",
     "test": "vp test",
