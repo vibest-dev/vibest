@@ -1,11 +1,11 @@
-import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
+import type { ClaudeCodeUIMessage } from "@vibest/harness/claude-code";
 
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import { Response } from "@vibest/ui/ai-elements/response";
 import { ClaudeCodeToolUIPart } from "@vibest/ui/claude-code/tools";
-import { isToolUIPart, type UIMessage } from "ai";
+import { isToolUIPart } from "ai";
 
-export type ClaudeCodeUIMessage = UIMessage<undefined, Record<string, never>, ClaudeCodeTools>;
+export type { ClaudeCodeUIMessage } from "@vibest/harness/claude-code";
 
 export function ClaudeCodeMessageParts({ message }: { message: ClaudeCodeUIMessage }) {
   return (

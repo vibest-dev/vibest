@@ -2,15 +2,6 @@ export { ClaudeCodeAgent, Session, type ToolPermissionRequest } from "./agent";
 
 export * from "./tools";
 
-export {
-  McpServerStatusSchema,
-  ModelInfoSchema,
-  PermissionBehaviorSchema,
-  PermissionModeSchema,
-  PermissionResultSchema,
-  SlashCommandSchema,
-} from "./schema";
-
 export { Pushable, pushable } from "./utils/pushable";
 export { toUIMessage } from "./utils/to-ui-message";
 export { createTransform } from "./transform";
