@@ -3,7 +3,7 @@ import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
-import { Pushable } from "./utils/pushable";
+import { Pushable } from "../utils/pushable";
 
 // Emitted while a prompt is running; the client answers via
 // `respondPermission`. The contract re-exports this type for both sides.

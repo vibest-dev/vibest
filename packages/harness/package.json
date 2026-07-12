@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./claude-code": "./src/claude-code/index.ts"
+    "./claude-code": "./src/claude-code/index.ts",
+    "./codex": "./src/codex/index.ts"
   },
   "scripts": {
     "test": "vp test run",
