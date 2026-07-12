@@ -106,6 +106,10 @@ function deriveDecision(response: AgentResponse): "accept" | "decline" {
  * allow/deny.
  */
 export function mapApprovalResponse(response: AgentResponse, source: ApprovalSource): unknown {
+  // v1 limitation: permissions approvals are always answered with an empty
+  // turn-scoped grant, regardless of allow/deny — granting real permissions is
+  // deferred until the richer approval UI lands (it would carry the grant
+  // payload via `native`).
   if (source === "permissions") return { permissions: {}, scope: "turn" };
   const native =
     response.type === "tool" ? (response.native as { decision?: string } | undefined) : undefined;

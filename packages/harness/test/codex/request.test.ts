@@ -36,6 +36,19 @@ describe("codex request mapping", () => {
     expect(declineResult("permissions")).toEqual({ permissions: {}, scope: "turn" });
   });
 
+  it("permissions approvals always answer with an empty turn-scoped grant (v1 limitation)", () => {
+    // Same reply for allow and deny: grants can't flow until the richer
+    // approval UI carries the grant payload via `native`.
+    expect(mapApprovalResponse({ type: "tool", behavior: "allow" }, "permissions")).toEqual({
+      permissions: {},
+      scope: "turn",
+    });
+    expect(mapApprovalResponse({ type: "tool", behavior: "deny" }, "permissions")).toEqual({
+      permissions: {},
+      scope: "turn",
+    });
+  });
+
   it("maps question round-trips", () => {
     const req = buildUserInputRequest({
       method: "item/tool/requestUserInput",
