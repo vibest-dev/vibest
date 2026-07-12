@@ -1,26 +1,32 @@
 "use client";
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
+import { XIcon } from "lucide-react";
+import type React from "react";
+import { cn } from "@vibest/ui/lib/utils";
 import { Button } from "@vibest/ui/components/button";
 import { ScrollArea } from "@vibest/ui/components/scroll-area";
-import { cn } from "@vibest/ui/lib/utils";
-import { XIcon } from "lucide-react";
 
-const DialogCreateHandle = DialogPrimitive.createHandle;
+export const DialogCreateHandle: typeof DialogPrimitive.createHandle = DialogPrimitive.createHandle;
 
-const Dialog = DialogPrimitive.Root;
+export const Dialog: typeof DialogPrimitive.Root = DialogPrimitive.Root;
 
-const DialogPortal = DialogPrimitive.Portal;
+export const DialogPortal: typeof DialogPrimitive.Portal = DialogPrimitive.Portal;
 
-function DialogTrigger(props: DialogPrimitive.Trigger.Props) {
+export function DialogTrigger(props: DialogPrimitive.Trigger.Props): React.ReactElement {
   return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
-function DialogClose(props: DialogPrimitive.Close.Props) {
+export function DialogClose(props: DialogPrimitive.Close.Props): React.ReactElement {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
-function DialogBackdrop({ className, ...props }: DialogPrimitive.Backdrop.Props) {
+export function DialogBackdrop({
+  className,
+  ...props
+}: DialogPrimitive.Backdrop.Props): React.ReactElement {
   return (
     <DialogPrimitive.Backdrop
       className={cn(
@@ -33,7 +39,10 @@ function DialogBackdrop({ className, ...props }: DialogPrimitive.Backdrop.Props)
   );
 }
 
-function DialogViewport({ className, ...props }: DialogPrimitive.Viewport.Props) {
+export function DialogViewport({
+  className,
+  ...props
+}: DialogPrimitive.Viewport.Props): React.ReactElement {
   return (
     <DialogPrimitive.Viewport
       className={cn(
@@ -46,27 +55,31 @@ function DialogViewport({ className, ...props }: DialogPrimitive.Viewport.Props)
   );
 }
 
-function DialogPopup({
+export function DialogPopup({
   className,
   children,
   showCloseButton = true,
   bottomStickOnMobile = true,
+  closeProps,
+  portalProps,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
-}) {
+  closeProps?: DialogPrimitive.Close.Props;
+  portalProps?: DialogPrimitive.Portal.Props;
+}): React.ReactElement {
   return (
-    <DialogPortal>
+    <DialogPortal {...portalProps}>
       <DialogBackdrop />
       <DialogViewport
         className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}
       >
         <DialogPrimitive.Popup
           className={cn(
-            "bg-popover text-popover-foreground relative row-start-2 flex max-h-full min-h-0 w-full max-w-lg min-w-0 -translate-y-[calc(1.25rem*var(--nested-dialogs))] scale-[calc(1-0.1*var(--nested-dialogs))] flex-col rounded-2xl border opacity-[calc(1-0.1*var(--nested-dialogs))] shadow-lg/5 transition-[scale,opacity,translate] duration-200 ease-in-out will-change-transform not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/6%)] data-ending-style:scale-98 data-ending-style:opacity-0 data-nested:data-ending-style:translate-y-8 data-nested-dialog-open:origin-top data-starting-style:scale-98 data-starting-style:opacity-0 data-nested:data-starting-style:translate-y-8 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative row-start-2 flex max-h-full min-h-0 w-full min-w-0 max-w-lg origin-center flex-col rounded-2xl border bg-popover not-dark:bg-clip-padding text-popover-foreground opacity-[calc(1-var(--nested-dialogs))] shadow-lg/5 outline-none transition-[scale,opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:opacity-0 data-starting-style:opacity-0 sm:scale-[calc(1-0.1*var(--nested-dialogs))] sm:data-ending-style:scale-98 sm:data-starting-style:scale-98 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             bottomStickOnMobile &&
-              "max-sm:max-w-none max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:opacity-[calc(1-min(var(--nested-dialogs),1))] max-sm:before:hidden max-sm:before:rounded-none max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4",
+              "max-sm:max-w-none max-sm:origin-bottom max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4 max-sm:before:hidden max-sm:before:rounded-none",
             className,
           )}
           data-slot="dialog-popup"
@@ -78,6 +91,7 @@ function DialogPopup({
               aria-label="Close"
               className="absolute end-2 top-2"
               render={<Button size="icon" variant="ghost" />}
+              {...closeProps}
             >
               <XIcon />
             </DialogPrimitive.Close>
@@ -88,52 +102,69 @@ function DialogPopup({
   );
 }
 
-function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pb-3 max-sm:pb-4",
-        className,
-      )}
-      data-slot="dialog-header"
-      {...props}
-    />
-  );
+export function DialogHeader({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
+  const defaultProps = {
+    className: cn(
+      "flex flex-col gap-2 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pb-3 max-sm:pb-4",
+      className,
+    ),
+    "data-slot": "dialog-header",
+  };
+
+  return useRender({
+    defaultTagName: "div",
+    props: mergeProps<"div">(defaultProps, props),
+    render,
+  });
 }
 
-function DialogFooter({
+export function DialogFooter({
   className,
   variant = "default",
+  render,
   ...props
-}: React.ComponentProps<"div"> & {
+}: useRender.ComponentProps<"div"> & {
   variant?: "default" | "bare";
-}) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
-        variant === "default" && "bg-muted/72 border-t py-4",
-        variant === "bare" &&
-          "pt-4 pb-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pt-3",
-        className,
-      )}
-      data-slot="dialog-footer"
-      {...props}
-    />
-  );
+}): React.ReactElement {
+  const defaultProps = {
+    className: cn(
+      "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
+      variant === "default" && "border-t bg-muted/72 py-4",
+      variant === "bare" &&
+        "in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pt-3 pt-4 pb-6",
+      className,
+    ),
+    "data-slot": "dialog-footer",
+  };
+
+  return useRender({
+    defaultTagName: "div",
+    props: mergeProps<"div">(defaultProps, props),
+    render,
+  });
 }
 
-function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+export function DialogTitle({
+  className,
+  ...props
+}: DialogPrimitive.Title.Props): React.ReactElement {
   return (
     <DialogPrimitive.Title
-      className={cn("font-heading text-xl leading-none font-semibold", className)}
+      className={cn("font-heading font-semibold text-xl leading-none", className)}
       data-slot="dialog-title"
       {...props}
     />
   );
 }
 
-function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
+export function DialogDescription({
+  className,
+  ...props
+}: DialogPrimitive.Description.Props): React.ReactElement {
   return (
     <DialogPrimitive.Description
       className={cn("text-muted-foreground text-sm", className)}
@@ -143,39 +174,31 @@ function DialogDescription({ className, ...props }: DialogPrimitive.Description.
   );
 }
 
-function DialogPanel({
+export function DialogPanel({
   className,
   scrollFade = true,
+  render,
   ...props
-}: React.ComponentProps<"div"> & { scrollFade?: boolean }) {
+}: useRender.ComponentProps<"div"> & {
+  scrollFade?: boolean;
+}): React.ReactElement {
+  const defaultProps = {
+    className: cn(
+      "p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
+      className,
+    ),
+    "data-slot": "dialog-panel",
+  };
+
   return (
     <ScrollArea scrollFade={scrollFade}>
-      <div
-        className={cn(
-          "p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1",
-          className,
-        )}
-        data-slot="dialog-panel"
-        {...props}
-      />
+      {useRender({
+        defaultTagName: "div",
+        props: mergeProps<"div">(defaultProps, props),
+        render,
+      })}
     </ScrollArea>
   );
 }
 
-export {
-  DialogCreateHandle,
-  Dialog,
-  DialogTrigger,
-  DialogPortal,
-  DialogClose,
-  DialogBackdrop,
-  DialogBackdrop as DialogOverlay,
-  DialogPopup,
-  DialogPopup as DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-  DialogPanel,
-  DialogViewport,
-};
+export { DialogPrimitive, DialogBackdrop as DialogOverlay, DialogPopup as DialogContent };
