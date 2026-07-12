@@ -32,7 +32,7 @@
     "no-underscore-dangle": [
       "warn",
       {
-        "allow": ["__dirname", "_tag", "_values"]
+        "allow": ["_tag", "_values"]
       }
     ]
   },

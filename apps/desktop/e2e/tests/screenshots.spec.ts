@@ -1,10 +1,8 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { test } from "./fixtures.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const screenshotsDir = path.join(__dirname, "../screenshots");
+const screenshotsDir = path.join(import.meta.dirname, "../screenshots");
 
 test.describe("Screenshots", () => {
   test("capture main window on launch", async ({ window }) => {
