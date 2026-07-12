@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { defineEvent, TokenUsageSchema, TurnErrorSchema } from "../types/event";
 import { AgentRequestSchema } from "../types/request";
 import { HarnessAgentIdSchema } from "../types/harness-agent-id";

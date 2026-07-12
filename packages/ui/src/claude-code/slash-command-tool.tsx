@@ -1,5 +1,5 @@
 import type { UIDataTypes, UIMessage } from "ai";
-import type { ClaudeCodeTools, SlashCommandUIToolInvocation } from "ai-sdk-agents/claude-code";
+import type { ClaudeCodeTools, SlashCommandUIToolInvocation } from "@vibest/harness/claude-code";
 import type { ReactNode } from "react";
 
 import { Response } from "@vibest/ui/ai-elements/response";

@@ -3,9 +3,18 @@ import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
-import type { ToolPermissionRequest } from "@vibest/contract/claude-code";
-
 import { Pushable } from "./utils/pushable";
+
+// Emitted while a prompt is running; the client answers via
+// `respondPermission`. The contract re-exports this type for both sides.
+export type ToolPermissionRequest = {
+  type: "tool-permission-request";
+  sessionId: string;
+  requestId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  suggestions?: sdk.PermissionUpdate[];
+};
 
 interface SessionState {
   /**

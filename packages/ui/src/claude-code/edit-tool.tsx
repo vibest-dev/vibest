@@ -1,4 +1,4 @@
-import type { EditUIToolInvocation } from "ai-sdk-agents/claude-code";
+import type { EditUIToolInvocation } from "@vibest/harness/claude-code";
 
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";

@@ -25,7 +25,6 @@
     "@orpc/server": "^2.0.0-beta.16",
     "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
-    "ai-sdk-agents": "workspace:*",
     "effect": "4.0.0-beta.97",
     "simple-git": "^3.27.0",
     "uuid": "^13.0.0",

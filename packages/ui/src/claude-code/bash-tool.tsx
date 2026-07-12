@@ -1,4 +1,4 @@
-import type { BashUIToolInvocation } from "ai-sdk-agents/claude-code";
+import type { BashUIToolInvocation } from "@vibest/harness/claude-code";
 
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";

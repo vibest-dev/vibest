@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@orpc/contract": "^2.0.0-beta.16",
-    "ai-sdk-agents": "workspace:*",
+    "@vibest/harness": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -20,7 +20,6 @@
     "@orpc/contract": "^2.0.0-beta.16",
     "@orpc/server": "^2.0.0-beta.16",
     "ai": "^7.0.22",
-    "ai-sdk-agents": "workspace:*",
     "sirv": "^3.0.2",
     "uuid": "^13.0.0",
     "ws": "^8.18.3",

@@ -1,4 +1,4 @@
-import type { ClaudeCodeTools } from "ai-sdk-agents/claude-code";
+import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
 
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import { Response } from "@vibest/ui/ai-elements/response";

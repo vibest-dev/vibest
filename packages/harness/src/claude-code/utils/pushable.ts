@@ -40,3 +40,7 @@ export class Pushable<T> implements AsyncIterable<T> {
     return this;
   }
 }
+
+export function pushable<T>() {
+  return new Pushable<T>();
+}

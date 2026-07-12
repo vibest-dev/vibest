@@ -5,7 +5,7 @@ import type { WithEffectContext } from "@orpc/experimental-effect";
 import { implement } from "@orpc/server";
 import { claudeCodeContract } from "@vibest/contract/claude-code";
 import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
-import { toUIMessage } from "ai-sdk-agents/claude-code";
+import { toUIMessage } from "@vibest/harness/claude-code";
 import { Context, Effect, Layer } from "effect";
 
 /**

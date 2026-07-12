@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 
 /** A control-plane event definition: a dotted `type` + a zod object schema for its properties. */
 export interface EventDef<T extends string = string, S extends z.ZodRawShape = z.ZodRawShape> {
