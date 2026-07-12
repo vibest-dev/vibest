@@ -69,3 +69,7 @@ export {
 
 export { Pushable, pushable } from "./utils/pushable";
 export { toUIMessage } from "./utils/to-ui-message";
+export { transform } from "./transform";
+export { toSessionEvent } from "./to-session-event";
+export { foldToUIMessages } from "./fold";
+export type { ClaudeCodeUIMessage, ClaudeCodeMetadata, ClaudeCodeDataTypes } from "./ui-message";
