@@ -110,9 +110,6 @@ importers:
       '@vibest/services':
         specifier: workspace:*
         version: link:../../packages/services
-      '@vibest/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@vibest/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -467,12 +464,6 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
-
-  packages/shared:
-    devDependencies:
-      '@vibest/typescript':
-        specifier: workspace:*
-        version: link:../../tools/typescript
 
   packages/ui:
     dependencies:

@@ -47,7 +47,6 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@vibest/services": "workspace:*",
-    "@vibest/shared": "workspace:*",
     "@vibest/ui": "workspace:*",
     "@vitejs/plugin-react": "^5.0.1",
     "@xterm/addon-fit": "^0.11.0",
