@@ -8,7 +8,7 @@
   "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
@@ -24,7 +24,7 @@
   },
   "scripts": {
     "stub": "pnpm run build",
-    "build": "vp pack --format cjs --no-dts --publint false && vp pack --format esm --dts --clean false",
+    "build": "vp pack",
     "typecheck": "tsc --noEmit",
     "test": "vp test run",
     "clean": "git clean -xdf node_modules .turbo dist"
