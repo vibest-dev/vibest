@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./claude-code": "./src/claude-code.ts"
+    "./claude-code": "./src/claude-code.ts",
+    "./codex": "./src/codex.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
