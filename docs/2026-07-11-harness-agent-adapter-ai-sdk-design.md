@@ -20,10 +20,10 @@
 
 收敛成**两个包**，依赖单向向下（`server → ai-sdk-harness-agents`），后者**无运行时依赖**——各后端 SDK（`@anthropic-ai/claude-agent-sdk`、codex 协议）只做 `import type`，不进 bundle：
 
-| 包 | 角色 | Effect? | 依赖 | 谁消费 |
-|---|---|---|---|---|
-| `@vibest/ai-sdk-harness-agents` | ai-sdk 抽象：两平面类型定义 + per-backend 转换 + tools + 冷读折叠 | ❌ 纯 TS | `ai`、`zod`、`@anthropic-ai/claude-agent-sdk`（**type-only**：transform/to-session-event 吃 `SDKMessage`）、codex 后端补其 app-server 协议类型 | `server`（归一化）**和前端**（渲染 tool 卡片、类型、`toUIMessage`） |
-| `@vibest/server`（`agent/` 域切片） | harness agent 抽象+实现：adapter/session/repository（Effect）+ SessionLifecycle + registry + session-manager + EventBus + SessionService | ✅ Effect v4 | Effect、`ai-sdk-harness-agents`、各后端 SDK/app-server | 只有 `server` 自己 |
+| 包                                  | 角色                                                                                                                                     | Effect?      | 依赖                                                                                                                                           | 谁消费                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `@vibest/ai-sdk-harness-agents`     | ai-sdk 抽象：两平面类型定义 + per-backend 转换 + tools + 冷读折叠                                                                        | ❌ 纯 TS     | `ai`、`zod`、`@anthropic-ai/claude-agent-sdk`（**type-only**：transform/to-session-event 吃 `SDKMessage`）、codex 后端补其 app-server 协议类型 | `server`（归一化）**和前端**（渲染 tool 卡片、类型、`toUIMessage`） |
+| `@vibest/server`（`agent/` 域切片） | harness agent 抽象+实现：adapter/session/repository（Effect）+ SessionLifecycle + registry + session-manager + EventBus + SessionService | ✅ Effect v4 | Effect、`ai-sdk-harness-agents`、各后端 SDK/app-server                                                                                         | 只有 `server` 自己                                                  |
 
 **为什么是这两个包，而不是三个**（"消费者测试"）：
 
@@ -78,25 +78,29 @@ packages/server/src/agent/                 # Effect;只有 server 消费
 
 ```ts
 import type { InferUIMessageChunk, UIMessage } from "ai";
-import type { ClaudeCodeTools } from "../claude-code";     // 现有 InferUITools
-import type { CodexTools } from "../codex";                // 后续补
+import type { ClaudeCodeTools } from "../claude-code"; // 现有 InferUITools
+import type { CodexTools } from "../codex"; // 后续补
 
 // 每个后端一个 UIMessage 类型（metadata/data-part/tools 各自不同）
-export type ClaudeCodeUIMessage = UIMessage<ClaudeCodeMetadata, ClaudeCodeDataTypes, ClaudeCodeTools>;
-export type CodexUIMessage      = UIMessage<CodexMetadata, CodexDataTypes, CodexTools>;
+export type ClaudeCodeUIMessage = UIMessage<
+  ClaudeCodeMetadata,
+  ClaudeCodeDataTypes,
+  ClaudeCodeTools
+>;
+export type CodexUIMessage = UIMessage<CodexMetadata, CodexDataTypes, CodexTools>;
 export type ClaudeCodeUIMessageChunk = InferUIMessageChunk<ClaudeCodeUIMessage>;
-export type CodexUIMessageChunk      = InferUIMessageChunk<CodexUIMessage>;
+export type CodexUIMessageChunk = InferUIMessageChunk<CodexUIMessage>;
 
 // body = "一个渲染 chunk" 或 "一个 defineEvent 事件"。渲染 chunk 是 UIMessage 的流式片段
 // （text-delta / tool-input-available …，非整条 UIMessage;客户端 readUIMessageStream 折回）。
 // 两者 type 空间不相交（点 vs 连字符），故一个裸联合即可，无 kind：
 type ClaudeCodeEnvelopeBody = ClaudeCodeUIMessageChunk | SessionEvent;
-type CodexEnvelopeBody      = CodexUIMessageChunk | SessionEvent;
+type CodexEnvelopeBody = CodexUIMessageChunk | SessionEvent;
 
 // seq 由 server 的 EventBus 独家盖;adapter 只发 draft（无 seq）。
 export type SessionEnvelope =
   | { harnessAgentId: "claude-code"; sessionId: string; seq: number; body: ClaudeCodeEnvelopeBody }
-  | { harnessAgentId: "codex";       sessionId: string; seq: number; body: CodexEnvelopeBody };
+  | { harnessAgentId: "codex"; sessionId: string; seq: number; body: CodexEnvelopeBody };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type SessionEnvelopeDraft = DistributiveOmit<SessionEnvelope, "seq">;
@@ -125,13 +129,13 @@ export const isSessionEvent = (
 
 **保留动词表（闭集；扩展需评审，别造同义词）**
 
-| 语义 | 动词 |
-|---|---|
-| 生命周期 | `created` / `updated` / `deleted` / `renamed` |
-| 过程边界 | `started` / `ended` |
-| 请求-应答 | `asked` / `replied` / `rejected` |
-| 异常 / 退出 | `crashed` / `failed` / `exited` |
-| 连接 | `connected` / `disconnected` |
+| 语义        | 动词                                          |
+| ----------- | --------------------------------------------- |
+| 生命周期    | `created` / `updated` / `deleted` / `renamed` |
+| 过程边界    | `started` / `ended`                           |
+| 请求-应答   | `asked` / `replied` / `rejected`              |
+| 异常 / 退出 | `crashed` / `failed` / `exited`               |
+| 连接        | `connected` / `disconnected`                  |
 
 **原语（最小面）**
 
@@ -141,7 +145,8 @@ export const isSessionEvent = (
 //   "谁收到"       = 订阅端过滤(§4.4),不在事件上声明 scope;
 //   "可丢否"       = 只有渲染面的 *-delta chunk 可丢(§3.6);事件一律不设 droppable 字段。
 export function defineEvent<T extends string, S extends z.ZodType>(def: {
-  type: T; schema: S;
+  type: T;
+  schema: S;
 }): EventDef<T, S>;
 
 // 就近定义:每个域一个文件,一个 event-manifest.ts 汇成线上判别联合(tag = type)+ client 类型。
@@ -159,25 +164,34 @@ export const SessionTurnEnded = defineEvent({
 
 **v1 事件目录**（全部合规；`aggregate` 决定 seq 归属，见 §4.4）
 
-| 分组 | 事件 | 帧带 `sessionId`? / aggregate |
-|---|---|---|
-| session（会话内，进"单会话流"） | `session.turn.started` / `session.turn.ended` | 是 / `sessionId` |
-| | `session.request.asked` / `session.request.replied` / `session.request.rejected` | 是 / `sessionId` |
-| | `session.crashed` | 是 / `sessionId` |
-| session（集合） | `session.created` / `session.updated` / `session.deleted` / `session.renamed` | 否 / `"global"` |
-| project / pty / … | `project.updated` / `pty.created` / `pty.updated` / `pty.exited` / `provider.updated` / `mcp.updated` / `server.connected` / `server.disconnected` | 否 / `"global"` |
+| 分组                            | 事件                                                                                                                                               | 帧带 `sessionId`? / aggregate |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| session（会话内，进"单会话流"） | `session.turn.started` / `session.turn.ended`                                                                                                      | 是 / `sessionId`              |
+|                                 | `session.request.asked` / `session.request.replied` / `session.request.rejected`                                                                   | 是 / `sessionId`              |
+|                                 | `session.crashed`                                                                                                                                  | 是 / `sessionId`              |
+| session（集合）                 | `session.created` / `session.updated` / `session.deleted` / `session.renamed`                                                                      | 否 / `"global"`               |
+| project / pty / …               | `project.updated` / `pty.created` / `pty.updated` / `pty.exited` / `provider.updated` / `mcp.updated` / `server.connected` / `server.disconnected` | 否 / `"global"`               |
 
 **消息内容不是事件**——它是渲染面的 `UIMessageChunk`（`text-delta` 等,§3.1/§3.6），不在此表内,也没有 `delta` 事件动词（流式增量属渲染面,不属事件目录）。`session.turn.ended` 是 turn 唯一终态，`outcome` 说明怎么结束；后端特有或未建模的信号**不进控制面**——走渲染面（`data-*` part）。
 
 **各事件 `properties` 复用的公共类型**——`schema` 传 zod（`XSchema`），TS 类型即 `z.infer`（`type X = z.infer<typeof XSchema>`），下面按可读性写成等价的 TS 形态：
 
 ```ts
-export type TokenUsage = { inputTokens: number; outputTokens: number;
-  cacheReadTokens?: number; cacheCreationTokens?: number };          // ← TokenUsageSchema
-export type TurnError = { message: string; category: TurnErrorCategory; retryAfterMs?: number };  // ← TurnErrorSchema
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+}; // ← TokenUsageSchema
+export type TurnError = { message: string; category: TurnErrorCategory; retryAfterMs?: number }; // ← TurnErrorSchema
 export type TurnErrorCategory =
-  | "auth_expired" | "rate_limited" | "context_overflow"
-  | "model_unavailable" | "network" | "cancelled" | "unknown";
+  | "auth_expired"
+  | "rate_limited"
+  | "context_overflow"
+  | "model_unavailable"
+  | "network"
+  | "cancelled"
+  | "unknown";
 // session.request.asked.properties = { request: AgentRequest }(见 §3.3)
 ```
 
@@ -187,11 +201,23 @@ export type TurnErrorCategory =
 
 ```ts
 export type AgentRequest =
-  | { type: "tool";     id: string; harnessAgentId: HarnessAgentId; toolName: string;
-      input: Record<string, unknown>; actions: AgentRequestAction[]; native: unknown }
-  | { type: "question"; id: string; harnessAgentId: HarnessAgentId;
-      questions: AgentRequestQuestion[]; native: unknown }
-  | { type: "plan";     id: string; harnessAgentId: HarnessAgentId; plan: string; native: unknown };
+  | {
+      type: "tool";
+      id: string;
+      harnessAgentId: HarnessAgentId;
+      toolName: string;
+      input: Record<string, unknown>;
+      actions: AgentRequestAction[];
+      native: unknown;
+    }
+  | {
+      type: "question";
+      id: string;
+      harnessAgentId: HarnessAgentId;
+      questions: AgentRequestQuestion[];
+      native: unknown;
+    }
+  | { type: "plan"; id: string; harnessAgentId: HarnessAgentId; plan: string; native: unknown };
 
 export type AgentResponse =
   | { type: "tool"; behavior: "allow" | "deny"; message?: string; native?: unknown }
@@ -204,15 +230,27 @@ v1 claude-code 用到 `tool`/`plan`（ExitPlanMode）/`question`（AskUserQuesti
 ### 3.4 会话值类型
 
 ```ts
-export type SessionStatus = { status: "initializing" | "running" | "closed" | "crashed";
-  isBusy: boolean; needsAttention: boolean };
-export type SessionSummary = { sessionId: string; harnessAgentId: HarnessAgentId;
-  title?: string; archived: boolean; createdAt: string; updatedAt: string };
-export type SessionSnapshot = { history: UIMessage[];
-  activeTurn: { chunks: SessionEnvelope[] } | null;             // 活跃 turn 的渲染 chunk 回放
-  pendingRequests: AgentRequest[]; cursor: number };            // cursor = 已见最大 seq
+export type SessionStatus = {
+  status: "initializing" | "running" | "closed" | "crashed";
+  isBusy: boolean;
+  needsAttention: boolean;
+};
+export type SessionSummary = {
+  sessionId: string;
+  harnessAgentId: HarnessAgentId;
+  title?: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type SessionSnapshot = {
+  history: UIMessage[];
+  activeTurn: { chunks: SessionEnvelope[] } | null; // 活跃 turn 的渲染 chunk 回放
+  pendingRequests: AgentRequest[];
+  cursor: number;
+}; // cursor = 已见最大 seq
 export type UserInput = { text: string };
-export type CreateSessionConfig = { workspacePath: string };    // model 由 adapter 自决（父文档 §8）
+export type CreateSessionConfig = { workspacePath: string }; // model 由 adapter 自决（父文档 §8）
 export type AvailabilityResult = { available: boolean; reason?: string };
 ```
 
@@ -265,8 +303,15 @@ adapter/session/repository 都是**按 id 动态选择的普通 Shape**（不做
 import { Effect, Scope } from "effect";
 import type { UIMessage } from "ai";
 import type {
-  HarnessAgentId, SessionEnvelopeDraft, SessionStatus, SessionSummary, SessionSnapshot,
-  AgentResponse, UserInput, CreateSessionConfig, AvailabilityResult,
+  HarnessAgentId,
+  SessionEnvelopeDraft,
+  SessionStatus,
+  SessionSummary,
+  SessionSnapshot,
+  AgentResponse,
+  UserInput,
+  CreateSessionConfig,
+  AvailabilityResult,
 } from "@vibest/ai-sdk-harness-agents";
 import type { SessionNotFound, HarnessAgentUnavailable } from "./errors";
 
@@ -278,28 +323,31 @@ export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly sessionRepository: SessionRepository;
   checkAvailability(): Effect.Effect<AvailabilityResult>;
-  login?(): Effect.Effect<unknown>;                                        // 父文档 §8 待办
+  login?(): Effect.Effect<unknown>; // 父文档 §8 待办
   createSession(
-    config: CreateSessionConfig, publish: EnvelopePublish,
-  ): Effect.Effect<HarnessAgentSession, HarnessAgentUnavailable, Scope>;    // Scope = 会话生命周期
+    config: CreateSessionConfig,
+    publish: EnvelopePublish,
+  ): Effect.Effect<HarnessAgentSession, HarnessAgentUnavailable, Scope>; // Scope = 会话生命周期
   resumeSession?(
-    sessionId: string, publish: EnvelopePublish,
+    sessionId: string,
+    publish: EnvelopePublish,
   ): Effect.Effect<HarnessAgentSession, SessionNotFound, Scope>;
   getSession(sessionId: string): HarnessAgentSession | undefined;
 }
 
 export interface HarnessAgentSession {
-  readonly id: string;                        // `${harnessAgentId}:${uuid}`,冷操作靠前缀路由
+  readonly id: string; // `${harnessAgentId}:${uuid}`,冷操作靠前缀路由
   readonly harnessAgentId: HarnessAgentId;
-  prompt(input: UserInput): Effect.Effect<void>;          // 只提交;结果全从 envelope 流回
+  prompt(input: UserInput): Effect.Effect<void>; // 只提交;结果全从 envelope 流回
   interrupt(): Effect.Effect<void>;
   close(): Effect.Effect<void>;
-  getStatus(): Effect.Effect<SessionStatus>;              // 由 SessionLifecycle 折叠
-  getSnapshot(): Effect.Effect<SessionSnapshot>;          // 读内存:history + 活跃 turn replay + pending
+  getStatus(): Effect.Effect<SessionStatus>; // 由 SessionLifecycle 折叠
+  getSnapshot(): Effect.Effect<SessionSnapshot>; // 读内存:history + 活跃 turn replay + pending
   respondToAgentRequest(requestId: string, response: AgentResponse): Effect.Effect<void>;
 }
 
-export interface SessionRepository {          // 每个后端读自己的原生历史存储
+export interface SessionRepository {
+  // 每个后端读自己的原生历史存储
   readonly agentId: HarnessAgentId;
   list(): Effect.Effect<ReadonlyArray<SessionSummary>>;
   getMessages(sessionId: string): Effect.Effect<ReadonlyArray<UIMessage>, SessionNotFound>;
@@ -317,14 +365,14 @@ export interface SessionRepository {          // 每个后端读自己的原生�
 
 ### 4.3 两后端 session（对称,驱动不同）
 
-| | claude-code | codex |
-|---|---|---|
-| 驱动 | SDK `query()`（`@anthropic-ai/claude-agent-sdk`） | `codex app-server` 的 JSON-RPC over stdio |
-| 子进程 | **每会话一个**（SDK 拉起） | **多会话复用一个 app-server**,会话 = thread |
-| 输入 | `Pushable` 喂 SDK 流式输入;`prompt` 只 push | `turn/start`（新）/ `turn/steer`（中途） |
-| turn | 从消息流 `ensureTurn` 合成 | app-server `turn/started` 通知 |
-| 审批 | `canUseTool` 回调 → `AgentRequest` | server→client 请求 → `AgentRequest` |
-| 冷存储 | `~/.claude/projects/<p>/<sid>.jsonl` | app-server RPC（`thread/list`/`read`,不直接读文件） |
+|        | claude-code                                       | codex                                               |
+| ------ | ------------------------------------------------- | --------------------------------------------------- |
+| 驱动   | SDK `query()`（`@anthropic-ai/claude-agent-sdk`） | `codex app-server` 的 JSON-RPC over stdio           |
+| 子进程 | **每会话一个**（SDK 拉起）                        | **多会话复用一个 app-server**,会话 = thread         |
+| 输入   | `Pushable` 喂 SDK 流式输入;`prompt` 只 push       | `turn/start`（新）/ `turn/steer`（中途）            |
+| turn   | 从消息流 `ensureTurn` 合成                        | app-server `turn/started` 通知                      |
+| 审批   | `canUseTool` 回调 → `AgentRequest`                | server→client 请求 → `AgentRequest`                 |
+| 冷存储 | `~/.claude/projects/<p>/<sid>.jsonl`              | app-server RPC（`thread/list`/`read`,不直接读文件） |
 
 两者内部消费循环都一样：把原生消息 →`transform`（→渲染 chunk）→ publish；→`to-session-event`（→控制事件）→`lifecycle.emit`→ publish。现有 `packages/agents/src/claude-code/agent.ts` 的 `query` 循环 + `canUseTool` 逻辑直接迁进 `adapters/claude-code/session.ts`（Effect 化）。
 
@@ -333,12 +381,12 @@ export interface SessionRepository {          // 每个后端读自己的原生�
 ```ts
 // session 内部（adapters/claude-code/session.ts）吐一条 draft:
 const broadcast = (body: ClaudeCodeEnvelopeBody) =>
-  publish({ harnessAgentId: "claude-code", sessionId: this.id, body });     // SessionEnvelopeDraft
+  publish({ harnessAgentId: "claude-code", sessionId: this.id, body }); // SessionEnvelopeDraft
 
 // 消费循环（forkScoped 的 fiber）:
-for (const chunk of transform(msg)) yield* broadcast(chunk);                // 渲染 chunk 直接进 body
+for (const chunk of transform(msg)) yield * broadcast(chunk); // 渲染 chunk 直接进 body
 const ev = toSessionEvent(msg, lifecycle.view);
-if (ev) yield* lifecycle.emit(ev);              // lifecycle.emit 内部再 broadcast(event)
+if (ev) yield * lifecycle.emit(ev); // lifecycle.emit 内部再 broadcast(event)
 ```
 
 - **一条总线,全模块共用**：整个 server **只有这一个 `EventBus`/`PubSub`/订阅端点**（复用/扩展 `server/src/events/event-bus.ts`）。不只 session——`project`/`pty`/`provider`/`mcp`/`server` 等业务模块的全局事件(§3.2 目录)也都 `publish` 进同一条;客户端**订阅一次**,靠过滤切视图。对齐 OpenCode 的单条 SSE 流(连 `server.connected` 都在流上)。
@@ -351,11 +399,14 @@ if (ev) yield* lifecycle.emit(ev);              // lifecycle.emit 内部再 broa
 ### 4.5 装配根（接父文档 §6）
 
 ```ts
-const HarnessAgentRegistryLayer = Layer.scoped(HarnessAgentRegistry, Effect.gen(function* () {
-  const claude = yield* makeClaudeCodeAdapter;    // 无常驻进程
-  const codex  = yield* makeCodexAdapter;         // acquireRelease:拉起 app-server,release 里 kill
-  return makeRegistry([claude, codex]);
-}));
+const HarnessAgentRegistryLayer = Layer.scoped(
+  HarnessAgentRegistry,
+  Effect.gen(function* () {
+    const claude = yield* makeClaudeCodeAdapter; // 无常驻进程
+    const codex = yield* makeCodexAdapter; // acquireRelease:拉起 app-server,release 里 kill
+    return makeRegistry([claude, codex]);
+  }),
+);
 ```
 
 codex app-server 的常驻子进程生命周期完全交给 `Layer.scoped` + `Effect.acquireRelease`，根 `Scope` 关时 finalizer 逆序 kill——不用手写 `dispose()`（父文档 §6）。`HarnessAgentSessionService`/`HarnessAgentSessionManager`/`SessionRepository` 都沿用父文档 §5.2 的定义，`create` 拿 `EnvelopePublish` 注入、`register` 进 manager，冷方法靠 `sessionId` 前缀切出 `harnessAgentId` 路由到对应 adapter 的 `sessionRepository`。

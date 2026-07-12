@@ -27,11 +27,13 @@
 ### Task 1: Event primitive + shared schemas
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/types/harness-agent-id.ts`
 - Create: `packages/ai-sdk-agents/src/types/event.ts`
 - Test: `packages/ai-sdk-agents/test/types/event.test.ts`
 
 **Interfaces:**
+
 - Produces: `HarnessAgentId` (type) + `HarnessAgentIdSchema` (`z.ZodEnum`); `defineEvent<T, S>({ type, schema }): EventDef<T, S>`; `EventDef<T, S>` (`{ type: T; schema: z.ZodObject<S> }`); `EventValue<D>` (`{ type } & z.infer`); `TokenUsageSchema`/`TokenUsage`; `TurnErrorSchema`/`TurnError`; `TurnErrorCategory`.
 
 - [ ] **Step 1: Write the failing test**
@@ -151,10 +153,12 @@ git commit -m "feat(ai-sdk-agents): add defineEvent primitive and shared event s
 ### Task 2: Agent request/response schemas
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/types/request.ts`
 - Test: `packages/ai-sdk-agents/test/types/request.test.ts`
 
 **Interfaces:**
+
 - Consumes: `HarnessAgentIdSchema` (Task 1).
 - Produces: `AgentRequestSchema`/`AgentRequest` (discriminated union `tool | question | plan`); `AgentResponseSchema`/`AgentResponse`; `AgentRequestActionSchema`, `AgentRequestQuestionSchema`.
 
@@ -254,7 +258,11 @@ export const AgentResponseSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("question"),
     answers: z.array(
-      z.object({ questionId: z.string(), values: z.array(z.string()), other: z.string().optional() }),
+      z.object({
+        questionId: z.string(),
+        values: z.array(z.string()),
+        other: z.string().optional(),
+      }),
     ),
   }),
   z.object({
@@ -283,11 +291,13 @@ git commit -m "feat(ai-sdk-agents): add agent request/response schemas"
 ### Task 3: Session events + central manifest
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/events/session.ts`
 - Create: `packages/ai-sdk-agents/src/event-manifest.ts`
 - Test: `packages/ai-sdk-agents/test/event-manifest.test.ts`
 
 **Interfaces:**
+
 - Consumes: `defineEvent`, `TokenUsageSchema`, `TurnErrorSchema` (Task 1); `AgentRequestSchema` (Task 2); `HarnessAgentIdSchema` (Task 1).
 - Produces: named event defs (`SessionTurnStarted`, `SessionTurnEnded`, `SessionRequestAsked`, `SessionRequestReplied`, `SessionRequestRejected`, `SessionCrashed`, `SessionCreated`, `SessionUpdated`, `SessionDeleted`, `SessionRenamed`, `ProjectUpdated`, `PtyCreated`, `PtyUpdated`, `PtyExited`, `ProviderUpdated`, `McpUpdated`, `ServerConnected`, `ServerDisconnected`); `SessionEventDefs`, `GlobalEventDefs` (readonly arrays); `SessionEvent`, `GlobalEvent` (union value types).
 
@@ -299,9 +309,20 @@ import { describe, expect, it } from "vitest";
 import { GlobalEventDefs, SessionEventDefs } from "../src/event-manifest";
 
 const RESERVED_VERBS = new Set([
-  "created", "updated", "deleted", "renamed", "started", "ended",
-  "asked", "replied", "rejected", "crashed", "failed", "exited",
-  "connected", "disconnected",
+  "created",
+  "updated",
+  "deleted",
+  "renamed",
+  "started",
+  "ended",
+  "asked",
+  "replied",
+  "rejected",
+  "crashed",
+  "failed",
+  "exited",
+  "connected",
+  "disconnected",
 ]);
 
 describe("event manifest naming invariant", () => {
@@ -468,12 +489,14 @@ git commit -m "feat(ai-sdk-agents): add session/global event definitions and man
 ### Task 4: UIMessage types + envelope + `isSessionEvent`
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/claude-code/ui-message.ts`
 - Create: `packages/ai-sdk-agents/src/codex/ui-message.ts`
 - Create: `packages/ai-sdk-agents/src/types/envelope.ts`
 - Test: `packages/ai-sdk-agents/test/types/envelope.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ClaudeCodeTools` (existing `src/claude-code/index.ts`); `SessionEvent` (Task 3); `HarnessAgentId` (Task 1).
 - Produces: `ClaudeCodeUIMessage`/`ClaudeCodeMetadata`/`ClaudeCodeDataTypes`; `CodexUIMessage`/`CodexMetadata`/`CodexDataTypes`/`CodexTools` (placeholders); `ClaudeCodeUIMessageChunk`, `CodexUIMessageChunk`; `SessionEnvelopeBody`, `SessionEnvelope`, `SessionEnvelopeDraft`; `isSessionEvent(body): body is SessionEvent`.
 
@@ -531,7 +554,11 @@ import type { ClaudeCodeTools } from "./index";
 
 export type ClaudeCodeMetadata = unknown;
 export type ClaudeCodeDataTypes = Record<string, never>;
-export type ClaudeCodeUIMessage = UIMessage<ClaudeCodeMetadata, ClaudeCodeDataTypes, ClaudeCodeTools>;
+export type ClaudeCodeUIMessage = UIMessage<
+  ClaudeCodeMetadata,
+  ClaudeCodeDataTypes,
+  ClaudeCodeTools
+>;
 ```
 
 ```ts
@@ -562,8 +589,18 @@ export type SessionEnvelopeBody = ClaudeCodeUIMessageChunk | CodexUIMessageChunk
 
 // seq is stamped by the server EventBus (out of scope here); adapters emit drafts.
 export type SessionEnvelope =
-  | { harnessAgentId: "claude-code"; sessionId: string; seq: number; body: ClaudeCodeUIMessageChunk | SessionEvent }
-  | { harnessAgentId: "codex"; sessionId: string; seq: number; body: CodexUIMessageChunk | SessionEvent };
+  | {
+      harnessAgentId: "claude-code";
+      sessionId: string;
+      seq: number;
+      body: ClaudeCodeUIMessageChunk | SessionEvent;
+    }
+  | {
+      harnessAgentId: "codex";
+      sessionId: string;
+      seq: number;
+      body: CodexUIMessageChunk | SessionEvent;
+    };
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type SessionEnvelopeDraft = DistributiveOmit<SessionEnvelope, "seq">;
@@ -592,10 +629,12 @@ git commit -m "feat(ai-sdk-agents): add UIMessage types, envelope, and isSession
 ### Task 5: Session value types + lifecycle view (type-level)
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/types/session.ts`
 - Test: `packages/ai-sdk-agents/test/types/session.test-d.ts`
 
 **Interfaces:**
+
 - Consumes: `SessionEnvelope` (Task 4); `AgentRequest` (Task 2); `HarnessAgentId` (Task 1).
 - Produces: `SessionStatus`, `SessionSummary`, `SessionSnapshot`, `UserInput`, `CreateSessionConfig`, `AvailabilityResult`, `LifecycleView` (consumed by `toSessionEvent` in Task 7).
 
@@ -604,11 +643,7 @@ git commit -m "feat(ai-sdk-agents): add UIMessage types, envelope, and isSession
 ```ts
 // packages/ai-sdk-agents/test/types/session.test-d.ts
 import { expectTypeOf, test } from "vitest";
-import type {
-  CreateSessionConfig,
-  LifecycleView,
-  SessionSnapshot,
-} from "../../src/types/session";
+import type { CreateSessionConfig, LifecycleView, SessionSnapshot } from "../../src/types/session";
 
 test("SessionSnapshot carries cold history + hot active turn + cursor", () => {
   expectTypeOf<SessionSnapshot>().toHaveProperty("history");
@@ -692,10 +727,12 @@ git commit -m "feat(ai-sdk-agents): add session value types and lifecycle view"
 ### Task 6: claude-code `transform` (SDKMessage → render chunks)
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/claude-code/transform.ts`
 - Test: `packages/ai-sdk-agents/test/claude-code/transform.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ClaudeCodeUIMessageChunk` (Task 4).
 - Produces: `transform(message: SDKMessage): Generator<ClaudeCodeUIMessageChunk>` — the sync, per-message render mapping (the render half of the existing `to-ui-message.ts`, extracted so cold-fold and live-stream share it). `to-ui-message.ts` stays untouched this round.
 
@@ -727,10 +764,17 @@ describe("transform", () => {
     const msg = {
       type: "assistant",
       parent_tool_use_id: null,
-      message: { id: "m1", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] },
+      message: {
+        id: "m1",
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+      },
     } as unknown as SDKMessage;
     const chunks = [...transform(msg)];
-    expect(chunks[0]).toMatchObject({ type: "tool-input-available", toolCallId: "t1", toolName: "Bash" });
+    expect(chunks[0]).toMatchObject({
+      type: "tool-input-available",
+      toolCallId: "t1",
+      toolName: "Bash",
+    });
   });
 
   it("maps result.success to a finish chunk", () => {
@@ -838,10 +882,12 @@ git commit -m "feat(ai-sdk-agents): add per-message claude-code transform"
 ### Task 7: claude-code `toSessionEvent` (SDKMessage → control event)
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/claude-code/to-session-event.ts`
 - Test: `packages/ai-sdk-agents/test/claude-code/to-session-event.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SessionEvent` (Task 3), `LifecycleView` (Task 5).
 - Produces: `toSessionEvent(message: SDKMessage, view: LifecycleView): SessionEvent | undefined` — synthesizes `session.turn.started` on first activity of an idle session and `session.turn.ended` on a result; everything else is `undefined` (render content goes through `transform`).
 
@@ -854,22 +900,40 @@ import { describe, expect, it } from "vitest";
 import { toSessionEvent } from "../../src/claude-code/to-session-event";
 import type { LifecycleView } from "../../src/types/session";
 
-const idle: LifecycleView = { sessionId: "s1", activeTurnId: undefined, nextTurnId: () => "turn-1" };
-const active: LifecycleView = { sessionId: "s1", activeTurnId: "turn-1", nextTurnId: () => "turn-2" };
+const idle: LifecycleView = {
+  sessionId: "s1",
+  activeTurnId: undefined,
+  nextTurnId: () => "turn-1",
+};
+const active: LifecycleView = {
+  sessionId: "s1",
+  activeTurnId: "turn-1",
+  nextTurnId: () => "turn-2",
+};
 
 describe("toSessionEvent", () => {
   it("starts a turn on first assistant activity of an idle session", () => {
-    const ev = toSessionEvent({ type: "assistant", message: { id: "m", content: [] } } as unknown as SDKMessage, idle);
+    const ev = toSessionEvent(
+      { type: "assistant", message: { id: "m", content: [] } } as unknown as SDKMessage,
+      idle,
+    );
     expect(ev).toMatchObject({ type: "session.turn.started", sessionId: "s1", turnId: "turn-1" });
   });
 
   it("does not restart a turn that is already active", () => {
-    const ev = toSessionEvent({ type: "assistant", message: { id: "m", content: [] } } as unknown as SDKMessage, active);
+    const ev = toSessionEvent(
+      { type: "assistant", message: { id: "m", content: [] } } as unknown as SDKMessage,
+      active,
+    );
     expect(ev).toBeUndefined();
   });
 
   it("ends the active turn on a successful result", () => {
-    const msg = { type: "result", subtype: "success", usage: { input_tokens: 3, output_tokens: 7 } } as unknown as SDKMessage;
+    const msg = {
+      type: "result",
+      subtype: "success",
+      usage: { input_tokens: 3, output_tokens: 7 },
+    } as unknown as SDKMessage;
     expect(toSessionEvent(msg, active)).toMatchObject({
       type: "session.turn.ended",
       turnId: "turn-1",
@@ -880,7 +944,10 @@ describe("toSessionEvent", () => {
 
   it("marks a non-success result as failed", () => {
     const msg = { type: "result", subtype: "error_during_execution" } as unknown as SDKMessage;
-    expect(toSessionEvent(msg, active)).toMatchObject({ type: "session.turn.ended", outcome: "failed" });
+    expect(toSessionEvent(msg, active)).toMatchObject({
+      type: "session.turn.ended",
+      outcome: "failed",
+    });
   });
 
   it("returns undefined for a result when no turn is active", () => {
@@ -953,10 +1020,12 @@ git commit -m "feat(ai-sdk-agents): add claude-code toSessionEvent turn synthesi
 ### Task 8: `foldToUIMessages` (cold read = folded transform output)
 
 **Files:**
+
 - Create: `packages/ai-sdk-agents/src/claude-code/fold.ts`
 - Test: `packages/ai-sdk-agents/test/claude-code/fold.test.ts`
 
 **Interfaces:**
+
 - Consumes: `transform` (Task 6), `ClaudeCodeUIMessage` (Task 4), `ClaudeCodeUIMessageChunk` (Task 4).
 - Produces: `foldToUIMessages(messages: Iterable<SDKMessage>): Promise<ClaudeCodeUIMessage[]>` — folds the same `transform` chunks through `readUIMessageStream`, so cold history equals the live stream's static form.
 
@@ -972,7 +1041,11 @@ describe("foldToUIMessages", () => {
   it("folds a single assistant turn into one UIMessage with a text part", async () => {
     const transcript = [
       { type: "system", subtype: "init" },
-      { type: "assistant", parent_tool_use_id: null, message: { id: "m1", content: [{ type: "text", text: "hello" }] } },
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { id: "m1", content: [{ type: "text", text: "hello" }] },
+      },
       { type: "result", subtype: "success" },
     ] as unknown as SDKMessage[];
 
@@ -1040,11 +1113,13 @@ git commit -m "feat(ai-sdk-agents): add foldToUIMessages cold-read fold"
 ### Task 9: Barrel exports + full package gate
 
 **Files:**
+
 - Modify: `packages/ai-sdk-agents/src/index.ts`
 - Modify: `packages/ai-sdk-agents/src/claude-code/index.ts:60-61` (append after the existing `Pushable`/`toUIMessage` exports)
 - Test: `packages/ai-sdk-agents/test/exports.test.ts`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 1–8.
 - Produces: the package's public surface — `ai-sdk-agents` root re-exports the new `types/`, `events/`, `event-manifest`; `ai-sdk-agents/claude-code` additionally re-exports `transform`, `toSessionEvent`, `foldToUIMessages`, and the UIMessage types. Existing exports are untouched.
 
@@ -1099,11 +1174,7 @@ Append to `packages/ai-sdk-agents/src/claude-code/index.ts` (after the existing 
 export { transform } from "./transform";
 export { toSessionEvent } from "./to-session-event";
 export { foldToUIMessages } from "./fold";
-export type {
-  ClaudeCodeUIMessage,
-  ClaudeCodeMetadata,
-  ClaudeCodeDataTypes,
-} from "./ui-message";
+export type { ClaudeCodeUIMessage, ClaudeCodeMetadata, ClaudeCodeDataTypes } from "./ui-message";
 ```
 
 - [ ] **Step 4: Run the full package gate**
