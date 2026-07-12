@@ -40,9 +40,9 @@
     "pre-commit": "npx --no-install lint-staged"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,mts,cts}": [
-      "oxlint --fix",
-      "oxfmt"
+    "*": [
+      "oxlint --fix --no-error-on-unmatched-pattern",
+      "oxfmt --no-error-on-unmatched-pattern"
     ]
   },
   "packageManager": "pnpm@11.12.0"
