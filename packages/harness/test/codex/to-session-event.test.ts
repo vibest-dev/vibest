@@ -12,11 +12,13 @@ const n = (method: string, params: unknown) => ({ method, params }) as ServerNot
 
 describe("codex toSessionEvent", () => {
   it("turn/started → session.turn.started", () => {
-    expect(toSessionEvent(n("turn/started", { threadId: "th", turn: { id: "t1" } }), view)).toEqual({
-      type: "session.turn.started",
-      sessionId: "th",
-      turnId: "t1",
-    });
+    expect(toSessionEvent(n("turn/started", { threadId: "th", turn: { id: "t1" } }), view)).toEqual(
+      {
+        type: "session.turn.started",
+        sessionId: "th",
+        turnId: "t1",
+      },
+    );
   });
 
   it("turn/completed maps status to outcome", () => {

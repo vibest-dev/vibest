@@ -25,7 +25,10 @@ describe("createCodexTransform", () => {
     const t2 = createCodexTransform();
     const whole = [
       ...t2(
-        n("item/completed", { threadId: "th", item: { type: "agentMessage", id: "i2", text: "hi" } }),
+        n("item/completed", {
+          threadId: "th",
+          item: { type: "agentMessage", id: "i2", text: "hi" },
+        }),
       ),
     ];
     expect(types(whole)).toEqual(["text-start", "text-delta", "text-end"]);
@@ -56,16 +59,22 @@ describe("createCodexTransform", () => {
   it("turn/completed → data + finish; terminal error → data + error + finish", () => {
     const t = createCodexTransform();
     expect(
-      types([...t(n("turn/completed", { threadId: "th", turn: { id: "t1", status: "completed" } }))]),
+      types([
+        ...t(n("turn/completed", { threadId: "th", turn: { id: "t1", status: "completed" } })),
+      ]),
     ).toEqual(["data-turn/completed", "finish"]);
     expect(
       types([
-        ...t(n("error", { threadId: "th", turnId: "t1", willRetry: false, error: { message: "x" } })),
+        ...t(
+          n("error", { threadId: "th", turnId: "t1", willRetry: false, error: { message: "x" } }),
+        ),
       ]),
     ).toEqual(["data-turn/error", "error", "finish"]);
     expect(
       types([
-        ...t(n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } })),
+        ...t(
+          n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } }),
+        ),
       ]),
     ).toEqual(["data-turn/error", "error"]);
   });
