@@ -1,11 +1,11 @@
-import type { ContractRouterClient } from "@orpc/contract";
+import type { RouterContractClient } from "@orpc/contract";
 
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/message-port";
 
 import type { Contract } from "../../../shared/contract";
 
-export type Client = ContractRouterClient<Contract>;
+export type Client = RouterContractClient<Contract>;
 
 /**
  * Create the oRPC client with MessagePort connection to main process.
