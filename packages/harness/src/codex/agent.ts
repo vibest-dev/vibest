@@ -223,6 +223,9 @@ export class Session {
       for (const pending of session.pending.values()) pending.resolve(pending.declineValue);
       session.pending.clear();
       session.requests.end();
+      // Tell any mid-turn consumer why the stream is ending — without this, a
+      // crash is indistinguishable from a benign disconnect.
+      session.chunks.push({ type: "error", errorText: "codex app-server exited unexpectedly" });
       session.chunks.end();
     }
     this.store.clear();
