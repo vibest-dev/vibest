@@ -333,7 +333,7 @@ importers:
         version: 4.4.3
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.207
+        specifier: 0.3.207
         version: 0.3.207(@anthropic-ai/sdk@0.111.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
       '@vibest/typescript':
         specifier: workspace:*
@@ -348,7 +348,7 @@ importers:
   packages/harness:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.207
+        specifier: 0.3.207
         version: 0.3.207(@anthropic-ai/sdk@0.111.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
       ai:
         specifier: ^7.0.22
@@ -526,7 +526,7 @@ importers:
   packages/vibest:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.207
+        specifier: 0.3.207
         version: 0.3.207(@anthropic-ai/sdk@0.111.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
       '@orpc/contract':
         specifier: ^2.0.0-beta.16
