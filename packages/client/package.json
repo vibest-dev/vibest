@@ -1,0 +1,23 @@
+{
+  "name": "@vibest/client",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Client access layer for the Vibest server (oRPC links + typed client)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules .turbo"
+  },
+  "dependencies": {
+    "@orpc/client": "^2.0.0-beta.16",
+    "@orpc/contract": "^2.0.0-beta.16",
+    "@vibest/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@vibest/typescript": "workspace:*",
+    "typescript": "^7.0.2"
+  }
+}
