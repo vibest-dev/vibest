@@ -4,10 +4,10 @@ import react from "@vitejs/plugin-react";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   resolve: {
+    tsconfigPaths: true,
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
@@ -26,6 +26,5 @@ export default defineConfig({
     }),
     react(),
     tailwindcss(),
-    tsconfigPaths(),
   ],
 });

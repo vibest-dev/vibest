@@ -48,7 +48,6 @@
     "code-inspector-plugin": "latest",
     "typescript": "^7.0.2",
     "vite": "catalog:",
-    "vite-plus": "catalog:",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-plus": "catalog:"
   }
 }

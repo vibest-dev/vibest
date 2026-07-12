@@ -303,10 +303,6 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 0.2.4(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.10.13)(esbuild@0.28.1)(jiti@2.6.1)(publint@0.3.17)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.6.1)(jsdom@26.1.0)(publint@0.3.17)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)
-      vite-tsconfig-paths:
-        specifier: ^5.1.4
-        version: 5.1.4(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.10.13)(esbuild@0.28.1)(jiti@2.6.1)(publint@0.3.17)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0))(typescript@7.0.2)
-
   packages/ai-sdk-agents:
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
@@ -6153,14 +6149,6 @@ packages:
       '@vitest/browser-playwright':
         optional: true
       '@vitest/browser-webdriverio':
-        optional: true
-
-  vite-tsconfig-paths@5.1.4:
-    resolution: {integrity: sha512-cYj0LRuLV2c2sMqhqhGpaO3LretdtMn/BVX4cPLanIZuwwrkVl+lK84E/miEXkCHWXuq65rhNN4rXsBcOB3S4w==}
-    peerDependencies:
-      vite: '*'
-    peerDependenciesMeta:
-      vite:
         optional: true
 
   vitest@4.1.10:
@@ -12624,17 +12612,6 @@ snapshots:
       - utf-8-validate
       - vite
       - yaml
-
-  vite-tsconfig-paths@5.1.4(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.10.13)(esbuild@0.28.1)(jiti@2.6.1)(publint@0.3.17)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0))(typescript@7.0.2):
-    dependencies:
-      debug: 4.4.3
-      globrex: 0.1.2
-      tsconfck: 3.1.6(typescript@7.0.2)
-    optionalDependencies:
-      vite: '@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.10.13)(esbuild@0.28.1)(jiti@2.6.1)(publint@0.3.17)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)'
-    transitivePeerDependencies:
-      - supports-color
-      - typescript
 
   vitest@4.1.10(@opentelemetry/api@1.9.0)(@types/node@24.10.13)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.4(@types/node@24.10.13)(esbuild@0.28.1)(jiti@2.6.1)(publint@0.3.17)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.9.0))(jsdom@26.1.0):
     dependencies:
