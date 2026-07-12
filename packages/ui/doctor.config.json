@@ -1,0 +1,13 @@
+{
+  "$schema": "https://react.doctor/schema/config.json",
+  "rules": {
+    // Fast Refresh cannot preserve state across a file that exports both a
+    // component and something else. That matters in app code, but this is a
+    // component library: the cva variants (`buttonVariants`, `toggleVariants`, …)
+    // sit beside their component by shadcn/coss registry convention, and
+    // `buttonVariants` is imported across package boundaries. Splitting them out
+    // would churn public export paths and conflict on every registry sync — for a
+    // rule React Doctor itself ranks lowest-priority. Off on purpose.
+    "react-doctor/only-export-components": "off"
+  }
+}

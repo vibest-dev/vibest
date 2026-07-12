@@ -75,8 +75,10 @@ export function CodeBlock({
     });
   }, [code, language, codeToHastOptions]);
 
+  const contextValue = useMemo<CodeBlockContextType>(() => ({ code }), [code]);
+
   return (
-    <CodeBlockContext.Provider value={{ code }}>
+    <CodeBlockContext.Provider value={contextValue}>
       <div
         className={cn(
           "bg-background text-foreground relative w-full overflow-hidden rounded-md border",

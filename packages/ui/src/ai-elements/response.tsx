@@ -341,60 +341,60 @@ const MemoParagraph = memo<ParagraphProps>(
 );
 MemoParagraph.displayName = "MarkdownParagraph";
 
+const isEmptyFootnote = (listItem: ReactNode): boolean => {
+  if (!isValidElement(listItem)) return false;
+
+  const listElement = listItem as ElementWithProps<JSX.IntrinsicElements["li"]>;
+  const itemChildren = Array.isArray(listElement.props.children)
+    ? listElement.props.children
+    : [listElement.props.children];
+  let hasContent = false;
+  let hasBackref = false;
+
+  for (const itemChild of itemChildren) {
+    if (!itemChild) continue;
+
+    if (typeof itemChild === "string") {
+      if (itemChild.trim() !== "") {
+        hasContent = true;
+      }
+    } else if (isValidElement(itemChild)) {
+      const childProps = itemChild.props as ElementProps<Record<string, unknown>>;
+      const childRecord = childProps as Record<string, unknown>;
+      if (childRecord["data-footnote-backref"] !== undefined) {
+        hasBackref = true;
+      } else {
+        const grandChildren = Array.isArray(childProps.children)
+          ? childProps.children
+          : [childProps.children];
+
+        for (const grandChild of grandChildren) {
+          if (typeof grandChild === "string" && grandChild.trim() !== "") {
+            hasContent = true;
+            break;
+          }
+          if (isValidElement(grandChild)) {
+            const grandChildProps = grandChild.props as ElementProps<Record<string, unknown>>;
+            const grandChildRecord = grandChildProps as Record<string, unknown>;
+            if (grandChildRecord["data-footnote-backref"] === undefined) {
+              hasContent = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return hasBackref && !hasContent;
+};
+
 type SectionProps = WithNode<JSX.IntrinsicElements["section"]>;
 const MemoSection = memo<SectionProps>(
   ({ children, className, node: _node, ...props }: SectionProps) => {
     const isFootnotesSection = "data-footnotes" in props;
 
     if (isFootnotesSection) {
-      const isEmptyFootnote = (listItem: ReactNode): boolean => {
-        if (!isValidElement(listItem)) return false;
-
-        const listElement = listItem as ElementWithProps<JSX.IntrinsicElements["li"]>;
-        const itemChildren = Array.isArray(listElement.props.children)
-          ? listElement.props.children
-          : [listElement.props.children];
-        let hasContent = false;
-        let hasBackref = false;
-
-        for (const itemChild of itemChildren) {
-          if (!itemChild) continue;
-
-          if (typeof itemChild === "string") {
-            if (itemChild.trim() !== "") {
-              hasContent = true;
-            }
-          } else if (isValidElement(itemChild)) {
-            const childProps = itemChild.props as ElementProps<Record<string, unknown>>;
-            const childRecord = childProps as Record<string, unknown>;
-            if (childRecord["data-footnote-backref"] !== undefined) {
-              hasBackref = true;
-            } else {
-              const grandChildren = Array.isArray(childProps.children)
-                ? childProps.children
-                : [childProps.children];
-
-              for (const grandChild of grandChildren) {
-                if (typeof grandChild === "string" && grandChild.trim() !== "") {
-                  hasContent = true;
-                  break;
-                }
-                if (isValidElement(grandChild)) {
-                  const grandChildProps = grandChild.props as ElementProps<Record<string, unknown>>;
-                  const grandChildRecord = grandChildProps as Record<string, unknown>;
-                  if (grandChildRecord["data-footnote-backref"] === undefined) {
-                    hasContent = true;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        return hasBackref && !hasContent;
-      };
-
       const processedChildren = Array.isArray(children)
         ? children.map((child) => {
             if (!isValidElement(child)) return child;

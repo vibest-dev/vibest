@@ -18,7 +18,7 @@
   "dependencies": {
     "node-pty": "^1.1.0",
     "p-queue": "^9.1.0",
-    "simple-git": "^3.27.0",
+    "simple-git": "^3.36.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

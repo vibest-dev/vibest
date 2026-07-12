@@ -11,7 +11,7 @@ import { ScrollArea } from "@vibest/ui/components/scroll-area";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronRightIcon, XIcon } from "lucide-react";
 import type React from "react";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 
 type DrawerPosition = "right" | "left" | "top" | "bottom";
 
@@ -37,8 +37,10 @@ export function Drawer({
 }: DrawerPrimitive.Root.Props & {
   position?: DrawerPosition;
 }): React.ReactElement {
+  const contextValue = useMemo(() => ({ position }), [position]);
+
   return (
-    <DrawerContext.Provider value={{ position }}>
+    <DrawerContext.Provider value={contextValue}>
       <DrawerPrimitive.Root swipeDirection={swipeDirection ?? directionMap[position]} {...props} />
     </DrawerContext.Provider>
   );

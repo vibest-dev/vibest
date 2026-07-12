@@ -21,7 +21,9 @@
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
     "prepublish": "turbo build --filter=./packages/*",
-    "prepare": "git config core.hooksPath .githooks && simple-git-hooks"
+    "prepare": "git config core.hooksPath .githooks && simple-git-hooks",
+    "doctor": "react-doctor --yes",
+    "doctor:staged": "for d in apps/desktop apps/web packages/ui; do (cd \"$d\" && npx --no-install react-doctor --staged --blocking error) || exit 1; done"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.6",
@@ -30,6 +32,7 @@
     "oxfmt": "^0.58.0",
     "oxlint": "^1.73.0",
     "publint": "^0.3.12",
+    "react-doctor": "^0.7.6",
     "simple-git-hooks": "^2.13.1",
     "taze": "^19.5.0",
     "turbo": "^2.5.8",
@@ -37,7 +40,7 @@
     "vitest": "catalog:"
   },
   "simple-git-hooks": {
-    "pre-commit": "npx --no-install lint-staged"
+    "pre-commit": "npx --no-install lint-staged && pnpm run doctor:staged"
   },
   "lint-staged": {
     "*": [

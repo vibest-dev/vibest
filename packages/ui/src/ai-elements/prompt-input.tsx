@@ -29,6 +29,27 @@ export type PromptInputTextareaProps = ComponentProps<typeof Textarea> & {
   maxHeight?: number;
 };
 
+const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+  if (e.key === "Enter") {
+    // Don't submit if IME composition is in progress
+    if (e.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (e.shiftKey) {
+      // Allow newline
+      return;
+    }
+
+    // Submit on Enter (without Shift)
+    e.preventDefault();
+    const form = e.currentTarget.form;
+    if (form) {
+      form.requestSubmit();
+    }
+  }
+};
+
 export const PromptInputTextarea = ({
   onChange,
   className,
@@ -37,27 +58,6 @@ export const PromptInputTextarea = ({
   maxHeight: _maxHeight = 164,
   ...props
 }: PromptInputTextareaProps) => {
-  const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.key === "Enter") {
-      // Don't submit if IME composition is in progress
-      if (e.nativeEvent.isComposing) {
-        return;
-      }
-
-      if (e.shiftKey) {
-        // Allow newline
-        return;
-      }
-
-      // Submit on Enter (without Shift)
-      e.preventDefault();
-      const form = e.currentTarget.form;
-      if (form) {
-        form.requestSubmit();
-      }
-    }
-  };
-
   return (
     <Textarea
       className={cn(

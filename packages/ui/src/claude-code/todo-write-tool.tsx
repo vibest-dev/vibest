@@ -23,8 +23,8 @@ export function ClaudeCodeTodoWriteTool({ invocation }: { invocation: TodoWriteU
       <ToolContent>
         {input?.todos && input.todos.length > 0 ? (
           <div className="space-y-2">
-            {input.todos.map((todo, index) => (
-              <div key={`${index}-${todo.content}`} className="flex items-start gap-3">
+            {input.todos.map((todo) => (
+              <div key={todo.content} className="flex items-start gap-3">
                 {todo.status === "completed" && (
                   <SquareCheckIcon className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 )}

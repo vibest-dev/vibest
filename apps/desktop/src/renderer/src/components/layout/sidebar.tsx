@@ -1,4 +1,4 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -59,7 +59,8 @@ export interface PrimarySidebarProps {
 
 // Label color dot component
 function LabelDots({ labels, repositoryLabels }: { labels: string[]; repositoryLabels: Label[] }) {
-  const taskLabels = repositoryLabels.filter((l) => labels.includes(l.id));
+  const labelIds = new Set(labels);
+  const taskLabels = repositoryLabels.filter((l) => labelIds.has(l.id));
   if (taskLabels.length === 0) return null;
 
   return (
@@ -124,6 +125,7 @@ function TaskListItem({
           className="hover:bg-foreground/10 absolute right-1 flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity duration-150 group-hover/task:opacity-100"
           onClick={onArchive}
           title="Archive task"
+          aria-label={`Archive task ${task.name}`}
         >
           <Archive className="size-3.5" />
         </button>
@@ -150,7 +152,8 @@ function RepoTabs({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
-  const [visibleCount, setVisibleCount] = useState(repositories.length);
+  // `null` until the tabs have been measured; before that every repo is shown.
+  const [measuredVisibleCount, setMeasuredVisibleCount] = useState<number | null>(null);
 
   // Calculate how many tabs fit in the container using hidden measurement container
   const calculateVisibleTabs = useCallback(() => {
@@ -180,7 +183,7 @@ function RepoTabs({
       }
     }
 
-    setVisibleCount(Math.max(1, count)); // Show at least 1 tab
+    setMeasuredVisibleCount(Math.max(1, count)); // Show at least 1 tab
   }, [repositories.length]);
 
   // Recalculate on mount and when repositories change
@@ -197,6 +200,7 @@ function RepoTabs({
     return () => observer.disconnect();
   }, [calculateVisibleTabs]);
 
+  const visibleCount = measuredVisibleCount ?? repositories.length;
   const visibleRepos = repositories.slice(0, visibleCount);
   const overflowRepos = repositories.slice(visibleCount);
 
@@ -287,7 +291,9 @@ export function PrimarySidebar({
   onArchiveTask,
   onManageLabels,
 }: PrimarySidebarProps) {
+  // Only set once the worktree is known to be dirty: the dialog is then shown immediately.
   const [archiveTaskTarget, setArchiveTaskTarget] = useState<TaskWithWorktrees | null>(null);
+  const queryClient = useQueryClient();
 
   // Get current repository from store
   const storedRepositoryId = useAppStore((s) => s.currentRepositoryId);
@@ -315,16 +321,10 @@ export function PrimarySidebar({
   const tasksWithWorktrees = tasksData ?? [];
   const repositoryLabels = currentRepository?.labels ?? [];
 
-  // Fetch git status for archive task target
-  const { data: archiveTaskTargetStatus } = useQuery(
-    orpc.git.status.queryOptions({
-      input: archiveTaskTarget?.worktrees[0]
-        ? { path: archiveTaskTarget.worktrees[0].path }
-        : skipToken,
-    }),
-  );
-
-  const handleArchiveTaskClick = (taskWithWorktrees: TaskWithWorktrees, e: React.MouseEvent) => {
+  const handleArchiveTaskClick = async (
+    taskWithWorktrees: TaskWithWorktrees,
+    e: React.MouseEvent,
+  ) => {
     e.stopPropagation();
     const worktree = taskWithWorktrees.worktrees[0];
     // If no worktree or doesn't exist, archive immediately
@@ -332,25 +332,24 @@ export function PrimarySidebar({
       onArchiveTask(taskWithWorktrees.task.id, false);
       return;
     }
-    setArchiveTaskTarget(taskWithWorktrees);
+
+    try {
+      const status = await queryClient.fetchQuery(
+        orpc.git.status.queryOptions({ input: { path: worktree.path } }),
+      );
+      // Clean worktree: nothing to commit, archive right away.
+      if (status.clean) {
+        onArchiveTask(taskWithWorktrees.task.id, false);
+        return;
+      }
+      // Dirty worktree: ask the user whether to commit before archiving.
+      setArchiveTaskTarget(taskWithWorktrees);
+    } catch (err) {
+      console.error("Failed to read git status before archiving task:", err);
+    }
   };
 
-  const showTaskConfirmDialog =
-    archiveTaskTarget !== null &&
-    archiveTaskTargetStatus !== undefined &&
-    !archiveTaskTargetStatus.clean;
-
-  // If status is loaded and clean, archive immediately
-  useEffect(() => {
-    if (
-      archiveTaskTarget !== null &&
-      archiveTaskTargetStatus !== undefined &&
-      archiveTaskTargetStatus.clean
-    ) {
-      onArchiveTask(archiveTaskTarget.task.id, false);
-      setArchiveTaskTarget(null);
-    }
-  }, [archiveTaskTarget, archiveTaskTargetStatus, onArchiveTask]);
+  const showTaskConfirmDialog = archiveTaskTarget !== null;
 
   const handleConfirmArchiveTask = () => {
     if (archiveTaskTarget) {
@@ -411,6 +410,7 @@ export function PrimarySidebar({
                     className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-5 items-center justify-center rounded transition-colors"
                     onClick={() => onCreateTask(currentRepository.id)}
                     title="Create task"
+                    aria-label="Create task"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -454,7 +454,9 @@ export function PrimarySidebar({
                         const worktree = taskWithWorktrees.worktrees[0];
                         onSelectTask(taskWithWorktrees.task, worktree ?? null);
                       }}
-                      onArchive={(e) => handleArchiveTaskClick(taskWithWorktrees, e)}
+                      onArchive={(e) => {
+                        void handleArchiveTaskClick(taskWithWorktrees, e);
+                      }}
                     />
                   ))
                 )}
@@ -468,6 +470,7 @@ export function PrimarySidebar({
             type="button"
             className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-7 items-center justify-center rounded-md transition-colors"
             title="Settings"
+            aria-label="Settings"
           >
             <Settings className="size-4" />
           </button>

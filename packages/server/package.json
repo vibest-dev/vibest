@@ -27,7 +27,7 @@
     "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
     "effect": "4.0.0-beta.97",
-    "simple-git": "^3.27.0",
+    "simple-git": "^3.36.0",
     "uuid": "^13.0.0",
     "ws": "^8.18.3"
   },

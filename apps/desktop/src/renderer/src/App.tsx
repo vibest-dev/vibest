@@ -44,6 +44,10 @@ function getLeafTitle(kind: string): string {
   return kind;
 }
 
+function handleRefresh(): void {
+  // Queries are refreshed through invalidation in mutations and hooks.
+}
+
 function toDiffFileInfo(value: unknown): DiffFileInfo | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -198,7 +202,7 @@ function App(): React.JSX.Element {
     }),
   );
 
-  const selectedTask = selectedTaskData?.task ?? null;
+  const selectedTask = useMemo(() => selectedTaskData?.task ?? null, [selectedTaskData]);
   const selectedTaskWorktree = selectedTaskData?.worktrees[0] ?? null;
 
   const selectedRepository = useMemo(() => {
@@ -308,10 +312,6 @@ function App(): React.JSX.Element {
     },
     [archiveTaskMutation],
   );
-
-  const handleRefresh = () => {
-    // Queries are refreshed through invalidation in mutations and hooks.
-  };
 
   const handleToggleSecondarySplit = useCallback(() => {
     setSplitState((current) => {

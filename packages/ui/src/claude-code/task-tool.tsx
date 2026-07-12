@@ -16,19 +16,14 @@ export function ClaudeCodeTaskTool({
 }) {
   const childrenToolUIParts = useMemo(
     () =>
-      message.parts
-        .filter((part) => {
-          if (!isToolUIPart(part)) return false;
-          return (
-            part.type !== "tool-Task" &&
-            part.state !== "input-streaming" &&
-            part.callProviderMetadata?.claudeCode?.parentToolUseId === invocation.toolCallId // this cause not type safe
-          );
-        })
-        .filter(
-          (part): part is ToolUIPart<ClaudeCodeTools> =>
-            isToolUIPart(part) && part.type !== "dynamic-tool",
-        ),
+      message.parts.filter(
+        (part): part is ToolUIPart<ClaudeCodeTools> =>
+          isToolUIPart(part) &&
+          part.type !== "tool-Task" &&
+          part.type !== "dynamic-tool" &&
+          part.state !== "input-streaming" &&
+          part.callProviderMetadata?.claudeCode?.parentToolUseId === invocation.toolCallId, // this cause not type safe
+      ),
     [message.parts, invocation.toolCallId],
   );
 

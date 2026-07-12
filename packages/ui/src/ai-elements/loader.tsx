@@ -17,54 +17,14 @@ const LoaderIcon = ({ size = 16 }: LoaderIconProps) => (
     <g clipPath="url(#clip0_2393_1490)">
       <path d="M8 0V4" stroke="currentColor" strokeWidth="1.5" />
       <path d="M8 16V12" opacity="0.5" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M3.29773 1.52783L5.64887 4.7639"
-        opacity="0.9"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M12.7023 1.52783L10.3511 4.7639"
-        opacity="0.1"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M12.7023 14.472L10.3511 11.236"
-        opacity="0.4"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M3.29773 14.472L5.64887 11.236"
-        opacity="0.6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M15.6085 5.52783L11.8043 6.7639"
-        opacity="0.2"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M0.391602 10.472L4.19583 9.23598"
-        opacity="0.7"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M15.6085 10.4722L11.8043 9.2361"
-        opacity="0.3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M0.391602 5.52783L4.19583 6.7639"
-        opacity="0.8"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
+      <path d="M3.3 1.53L5.65 4.76" opacity="0.9" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M12.7 1.53L10.35 4.76" opacity="0.1" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M12.7 14.47L10.35 11.24" opacity="0.4" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3.3 14.47L5.65 11.24" opacity="0.6" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M15.61 5.53L11.8 6.76" opacity="0.2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M0.39 10.47L4.2 9.24" opacity="0.7" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M15.61 10.47L11.8 9.24" opacity="0.3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M0.39 5.53L4.2 6.76" opacity="0.8" stroke="currentColor" strokeWidth="1.5" />
     </g>
     <defs>
       <clipPath id="clip0_2393_1490">

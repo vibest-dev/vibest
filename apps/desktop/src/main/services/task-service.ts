@@ -108,10 +108,14 @@ export class TaskService {
       .getWorktreesByRepositoryId(task.repositoryId)
       .filter((w) => w.taskId === taskId);
 
-    // Always delete worktrees when deleting task (1:1 relationship)
+    // Always delete worktrees when deleting task (1:1 relationship).
+    // Must stay serial: safeArchiveWorktree commits and runs `git worktree remove`
+    // against the same repository, so parallelising these would race for the index
+    // and worktree locks.
     for (const worktree of worktrees) {
       if (deleteWorktree) {
         try {
+          // react-doctor-disable-next-line async-await-in-loop
           await this.worktree.safeArchiveWorktree(
             repository.path,
             worktree.path,

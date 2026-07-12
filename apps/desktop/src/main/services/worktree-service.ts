@@ -221,8 +221,10 @@ const PLACE_NAMES = [
 ];
 
 function getAvailablePlaceName(usedNames: string[]): string {
+  const used = new Set(usedNames);
+
   // First try to find an unused name from the pool
-  const available = PLACE_NAMES.filter((n) => !usedNames.includes(n));
+  const available = PLACE_NAMES.filter((n) => !used.has(n));
   if (available.length > 0) {
     return available[Math.floor(Math.random() * available.length)];
   }
@@ -230,7 +232,7 @@ function getAvailablePlaceName(usedNames: string[]): string {
   // If pool is exhausted, use {placeName}-{number} format
   const baseName = PLACE_NAMES[Math.floor(Math.random() * PLACE_NAMES.length)];
   let suffix = 2;
-  while (usedNames.includes(`${baseName}-${suffix}`)) {
+  while (used.has(`${baseName}-${suffix}`)) {
     suffix++;
   }
   return `${baseName}-${suffix}`;

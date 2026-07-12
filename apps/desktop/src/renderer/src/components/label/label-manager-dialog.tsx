@@ -14,7 +14,7 @@ import { Input } from "@vibest/ui/components/input";
 import { Label } from "@vibest/ui/components/label";
 import { Spinner } from "@vibest/ui/components/spinner";
 import { Pencil, Plus, Tags, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
@@ -44,18 +44,69 @@ interface LabelManagerDialogProps {
 
 type EditMode = "list" | "create" | "edit";
 
+/**
+ * The list/create/edit views and the form fields always change together, so a
+ * single reducer describes each transition as one action instead of a burst of
+ * setState calls.
+ */
+interface FormState {
+  mode: EditMode;
+  editingLabelId: string | null;
+  name: string;
+  color: string;
+  description: string;
+  error: string | null;
+}
+
+type FormAction =
+  | { type: "backToList" }
+  | { type: "createClicked" }
+  | { type: "editClicked"; label: LabelType }
+  | { type: "nameChanged"; value: string }
+  | { type: "colorChanged"; value: string }
+  | { type: "descriptionChanged"; value: string }
+  | { type: "failed"; error: string };
+
+const initialFormState: FormState = {
+  mode: "list",
+  editingLabelId: null,
+  name: "",
+  color: "0075ca",
+  description: "",
+  error: null,
+};
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case "backToList":
+      return initialFormState;
+    case "createClicked":
+      return { ...initialFormState, mode: "create" };
+    case "editClicked":
+      return {
+        mode: "edit",
+        editingLabelId: action.label.id,
+        name: action.label.name,
+        color: action.label.color,
+        description: action.label.description ?? "",
+        error: null,
+      };
+    case "nameChanged":
+      return { ...state, name: action.value };
+    case "colorChanged":
+      return { ...state, color: action.value };
+    case "descriptionChanged":
+      return { ...state, description: action.value };
+    case "failed":
+      return { ...state, error: action.error };
+  }
+}
+
 export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManagerDialogProps) {
   const queryClient = useQueryClient();
 
-  // UI state
-  const [mode, setMode] = useState<EditMode>("list");
-  const [editingLabel, setEditingLabel] = useState<LabelType | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Form state
-  const [name, setName] = useState("");
-  const [color, setColor] = useState("0075ca");
-  const [description, setDescription] = useState("");
+  const [form, dispatch] = useReducer(formReducer, initialFormState);
+  const { mode, editingLabelId, name, color, description, error } = form;
 
   // Get labels from repository
   const labels = repository?.labels ?? [];
@@ -73,11 +124,10 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
-      resetForm();
-      setMode("list");
+      dispatch({ type: "backToList" });
     },
     onError: (err) => {
-      setError(String(err));
+      dispatch({ type: "failed", error: String(err) });
     },
   });
 
@@ -95,11 +145,10 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
-      resetForm();
-      setMode("list");
+      dispatch({ type: "backToList" });
     },
     onError: (err) => {
-      setError(String(err));
+      dispatch({ type: "failed", error: String(err) });
     },
   });
 
@@ -113,42 +162,18 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
       queryClient.invalidateQueries({ queryKey: orpc.workspace.key() });
     },
     onError: (err) => {
-      setError(String(err));
+      dispatch({ type: "failed", error: String(err) });
     },
   });
 
-  // Reset form state
-  const resetForm = () => {
-    setName("");
-    setColor("0075ca");
-    setDescription("");
-    setEditingLabel(null);
-    setError(null);
-  };
-
-  // Reset when dialog opens/closes
+  // Start from the list view every time the dialog opens
   useEffect(() => {
     if (isOpen) {
-      resetForm();
-      setMode("list");
+      dispatch({ type: "backToList" });
     }
   }, [isOpen]);
 
   if (!repository) return null;
-
-  const handleCreateClick = () => {
-    resetForm();
-    setMode("create");
-  };
-
-  const handleEditClick = (label: LabelType) => {
-    setEditingLabel(label);
-    setName(label.name);
-    setColor(label.color);
-    setDescription(label.description ?? "");
-    setError(null);
-    setMode("edit");
-  };
 
   const handleDeleteClick = (label: LabelType) => {
     if (
@@ -166,13 +191,13 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
 
   const handleSubmitCreate = () => {
     if (!name.trim()) {
-      setError("Label name is required");
+      dispatch({ type: "failed", error: "Label name is required" });
       return;
     }
 
     // Check for duplicate name
     if (labels.some((l) => l.name.toLowerCase() === name.trim().toLowerCase())) {
-      setError("A label with this name already exists");
+      dispatch({ type: "failed", error: "A label with this name already exists" });
       return;
     }
 
@@ -185,35 +210,30 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
   };
 
   const handleSubmitEdit = () => {
-    if (!editingLabel) return;
+    if (!editingLabelId) return;
 
     if (!name.trim()) {
-      setError("Label name is required");
+      dispatch({ type: "failed", error: "Label name is required" });
       return;
     }
 
     // Check for duplicate name (excluding current label)
     if (
       labels.some(
-        (l) => l.id !== editingLabel.id && l.name.toLowerCase() === name.trim().toLowerCase(),
+        (l) => l.id !== editingLabelId && l.name.toLowerCase() === name.trim().toLowerCase(),
       )
     ) {
-      setError("A label with this name already exists");
+      dispatch({ type: "failed", error: "A label with this name already exists" });
       return;
     }
 
     updateLabelMutation.mutate({
       repositoryId: repository.id,
-      labelId: editingLabel.id,
+      labelId: editingLabelId,
       name: name.trim(),
       color,
       description: description.trim() || undefined,
     });
-  };
-
-  const handleBack = () => {
-    resetForm();
-    setMode("list");
   };
 
   const isLoading =
@@ -267,9 +287,10 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                       <div className="flex shrink-0 gap-1">
                         <button
                           type="button"
-                          onClick={() => handleEditClick(label)}
+                          onClick={() => dispatch({ type: "editClicked", label })}
                           className="hover:bg-foreground/10 flex size-6 items-center justify-center rounded"
                           title="Edit label"
+                          aria-label={`Edit label ${label.name}`}
                         >
                           <Pencil className="size-3.5" />
                         </button>
@@ -279,6 +300,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                           disabled={isLoading}
                           className="hover:bg-destructive/10 text-destructive flex size-6 items-center justify-center rounded"
                           title="Delete label"
+                          aria-label={`Delete label ${label.name}`}
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -288,7 +310,11 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                 </div>
               )}
 
-              <Button onClick={handleCreateClick} variant="outline" className="w-full text-[13px]">
+              <Button
+                onClick={() => dispatch({ type: "createClicked" })}
+                variant="outline"
+                className="w-full text-[13px]"
+              >
                 <Plus className="size-4" />
                 Create Label
               </Button>
@@ -302,7 +328,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                 <Label className="text-[13px]">Name</Label>
                 <Input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => dispatch({ type: "nameChanged", value: e.target.value })}
                   placeholder="bug, feature, enhancement..."
                   className="h-9 text-[13px]"
                   autoFocus
@@ -319,7 +345,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                       type="button"
                       aria-label={`Color #${c}`}
                       aria-pressed={color === c}
-                      onClick={() => setColor(c)}
+                      onClick={() => dispatch({ type: "colorChanged", value: c })}
                       className={cn(
                         "size-7 rounded-full border-2 transition-all",
                         color === c
@@ -337,7 +363,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                     value={color}
                     onChange={(e) => {
                       const value = e.target.value.replace(/[^0-9A-Fa-f]/g, "").slice(0, 6);
-                      setColor(value);
+                      dispatch({ type: "colorChanged", value });
                     }}
                     placeholder="0075ca"
                     className="h-8 w-24 font-mono text-[12px]"
@@ -355,7 +381,7 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                 <Label className="text-[13px]">Description (optional)</Label>
                 <Input
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => dispatch({ type: "descriptionChanged", value: e.target.value })}
                   placeholder="Short description of this label"
                   className="h-9 text-[13px]"
                 />
@@ -393,7 +419,11 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
             </DialogClose>
           ) : (
             <>
-              <Button variant="ghost" onClick={handleBack} className="text-[13px]">
+              <Button
+                variant="ghost"
+                onClick={() => dispatch({ type: "backToList" })}
+                className="text-[13px]"
+              >
                 Back
               </Button>
               <Button

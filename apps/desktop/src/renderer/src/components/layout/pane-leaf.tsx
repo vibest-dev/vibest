@@ -2,7 +2,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@vibest/ui/comp
 import { FileDiff as FileDiffIcon, TerminalSquare } from "lucide-react";
 
 import type { DiffFileInfo, Worktree } from "../../types";
-import { TerminalPanel } from "../terminal";
+import { TerminalPanel } from "../terminal/terminal-panel";
 import { SingleFileDiff } from "../worktrees/single-file-diff";
 import type { PaneLeaf as PaneLeafModel } from "./split-state";
 

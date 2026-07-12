@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type UseControllableStateParams<T> = {
   prop?: T;
@@ -18,12 +18,18 @@ function useControllableState<T>({
   const isControlled = prop !== undefined;
   const value = isControlled ? prop : uncontrolledValue;
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+
+  // Synced after commit rather than during render: `setValue` only ever fires
+  // from events and effects, so it always reads the latest callback.
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
 
   const setValue = useCallback(
     (nextValue: T | ((prev: T | undefined) => T)) => {
+      const currentValue = isControlled ? prop : uncontrolledValue;
       const setter = nextValue as (prev: T | undefined) => T;
-      const newValue = typeof nextValue === "function" ? setter(value) : nextValue;
+      const newValue = typeof nextValue === "function" ? setter(currentValue) : nextValue;
 
       if (!isControlled) {
         setUncontrolledValue(newValue);
@@ -31,7 +37,7 @@ function useControllableState<T>({
 
       onChangeRef.current?.(newValue);
     },
-    [isControlled, value],
+    [isControlled, prop, uncontrolledValue],
   );
 
   return [value, setValue];

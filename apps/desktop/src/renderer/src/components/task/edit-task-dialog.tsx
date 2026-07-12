@@ -15,7 +15,7 @@ import { Label } from "@vibest/ui/components/label";
 import { Spinner } from "@vibest/ui/components/spinner";
 import { Textarea } from "@vibest/ui/components/textarea";
 import { Pencil } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
@@ -29,16 +29,52 @@ interface EditTaskDialogProps {
 }
 
 export function EditTaskDialog({ isOpen, task, repository, onClose }: EditTaskDialogProps) {
+  if (!task || !repository) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      {/* The popup content only mounts while the dialog is open, and `key` remounts
+          it when a different task is edited, so the form always starts from the
+          task's current values — no initialization effect needed. */}
+      <DialogPopup className="sm:max-w-lg">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className="bg-muted flex h-9 w-9 items-center justify-center rounded-lg">
+              <Pencil className="text-muted-foreground h-4.5 w-4.5" />
+            </div>
+            <div>
+              <DialogTitle className="text-[15px]">Edit Task</DialogTitle>
+              <DialogDescription className="text-[13px]">{repository.name}</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <EditTaskForm key={task.id} task={task} repository={repository} onClose={onClose} />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+interface EditTaskFormProps {
+  task: Task;
+  repository: Repository;
+  onClose: () => void;
+}
+
+function EditTaskForm({ task, repository, onClose }: EditTaskFormProps) {
   const queryClient = useQueryClient();
 
-  // Form state
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  // Form state, initialized from the task being edited
+  const [name, setName] = useState(task.name);
+  const [description, setDescription] = useState(task.description ?? "");
+  const [selectedLabels, setSelectedLabels] = useState<string[]>(task.labels ?? []);
   const [error, setError] = useState<string | null>(null);
 
+  // Constant-time membership checks while rendering the label list
+  const selectedLabelIds = useMemo(() => new Set(selectedLabels), [selectedLabels]);
+
   // Get labels from repository
-  const repositoryLabels = repository?.labels ?? [];
+  const repositoryLabels = repository.labels ?? [];
 
   // Update task mutation
   const updateTaskMutation = useMutation({
@@ -53,30 +89,15 @@ export function EditTaskDialog({ isOpen, task, repository, onClose }: EditTaskDi
     },
     onSuccess: () => {
       // Invalidate task list for this repository
-      if (repository) {
-        queryClient.invalidateQueries({
-          queryKey: orpc.task.list.queryOptions({ input: { repositoryId: repository.id } })
-            .queryKey,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: orpc.task.list.queryOptions({ input: { repositoryId: repository.id } }).queryKey,
+      });
       onClose();
     },
     onError: (err) => {
       setError(String(err));
     },
   });
-
-  // Initialize form when dialog opens or task changes
-  useEffect(() => {
-    if (isOpen && task) {
-      setName(task.name);
-      setDescription(task.description ?? "");
-      setSelectedLabels(task.labels ?? []);
-      setError(null);
-    }
-  }, [isOpen, task]);
-
-  if (!task || !repository) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,97 +124,79 @@ export function EditTaskDialog({ isOpen, task, repository, onClose }: EditTaskDi
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogPopup className="sm:max-w-lg">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            <div className="bg-muted flex h-9 w-9 items-center justify-center rounded-lg">
-              <Pencil className="text-muted-foreground h-4.5 w-4.5" />
-            </div>
-            <div>
-              <DialogTitle className="text-[15px]">Edit Task</DialogTitle>
-              <DialogDescription className="text-[13px]">{repository.name}</DialogDescription>
-            </div>
+    <form onSubmit={handleSubmit}>
+      <DialogPanel scrollFade={false} className="py-4">
+        <div className="space-y-4">
+          {/* Task name */}
+          <div className="space-y-2">
+            <Label className="text-[13px]">Name</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Task name"
+              className="h-9 text-[13px]"
+              autoFocus
+            />
           </div>
-        </DialogHeader>
 
-        <form onSubmit={handleSubmit}>
-          <DialogPanel scrollFade={false} className="py-4">
-            <div className="space-y-4">
-              {/* Task name */}
-              <div className="space-y-2">
-                <Label className="text-[13px]">Name</Label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Task name"
-                  className="h-9 text-[13px]"
-                  autoFocus
-                />
+          {/* Description */}
+          <div className="space-y-2">
+            <Label className="text-[13px]">Description (optional)</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Add a description..."
+              className="text-[13px]"
+              size="sm"
+            />
+          </div>
+
+          {/* Labels */}
+          {repositoryLabels.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-[13px]">Labels</Label>
+              <div className="flex flex-wrap gap-2">
+                {repositoryLabels.map((label) => (
+                  <button
+                    key={label.id}
+                    type="button"
+                    onClick={() => toggleLabel(label.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors",
+                      selectedLabelIds.has(label.id)
+                        ? "ring-2 ring-offset-1"
+                        : "opacity-60 hover:opacity-100",
+                    )}
+                    style={{
+                      backgroundColor: `#${label.color}20`,
+                      color: `#${label.color}`,
+                      ...(selectedLabelIds.has(label.id) ? { ringColor: `#${label.color}` } : {}),
+                    }}
+                  >
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: `#${label.color}` }}
+                    />
+                    {label.name}
+                  </button>
+                ))}
               </div>
-
-              {/* Description */}
-              <div className="space-y-2">
-                <Label className="text-[13px]">Description (optional)</Label>
-                <Textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Add a description..."
-                  className="text-[13px]"
-                  size="sm"
-                />
-              </div>
-
-              {/* Labels */}
-              {repositoryLabels.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="text-[13px]">Labels</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {repositoryLabels.map((label) => (
-                      <button
-                        key={label.id}
-                        type="button"
-                        onClick={() => toggleLabel(label.id)}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors",
-                          selectedLabels.includes(label.id)
-                            ? "ring-2 ring-offset-1"
-                            : "opacity-60 hover:opacity-100",
-                        )}
-                        style={{
-                          backgroundColor: `#${label.color}20`,
-                          color: `#${label.color}`,
-                          ...(selectedLabels.includes(label.id)
-                            ? { ringColor: `#${label.color}` }
-                            : {}),
-                        }}
-                      >
-                        <span
-                          className="size-2 rounded-full"
-                          style={{ backgroundColor: `#${label.color}` }}
-                        />
-                        {label.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {error && <p className="text-destructive-foreground text-[12px]">{error}</p>}
             </div>
-          </DialogPanel>
+          )}
 
-          <DialogFooter>
-            <DialogClose className={buttonVariants({ variant: "ghost", className: "text-[13px]" })}>
-              Cancel
-            </DialogClose>
-            <Button type="submit" disabled={updateTaskMutation.isPending} className="text-[13px]">
-              {updateTaskMutation.isPending && <Spinner className="h-3.5 w-3.5" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogPopup>
-    </Dialog>
+          {error && <p className="text-destructive-foreground text-[12px]">{error}</p>}
+        </div>
+      </DialogPanel>
+
+      <DialogFooter>
+        <DialogClose className={buttonVariants({ variant: "ghost", className: "text-[13px]" })}>
+          Cancel
+        </DialogClose>
+        <Button type="submit" disabled={updateTaskMutation.isPending} className="text-[13px]">
+          {updateTaskMutation.isPending && <Spinner className="h-3.5 w-3.5" />}
+          Save Changes
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
