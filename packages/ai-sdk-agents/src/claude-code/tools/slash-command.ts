@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const SlashCommand = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.SlashCommand",
-  name: "SlashCommand",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/slash-commands
   inputSchema: z.object({

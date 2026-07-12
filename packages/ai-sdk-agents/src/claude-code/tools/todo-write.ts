@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const TodoWrite = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.TodoWrite",
-  name: "TodoWrite",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#todowrite
   inputSchema: z.object({

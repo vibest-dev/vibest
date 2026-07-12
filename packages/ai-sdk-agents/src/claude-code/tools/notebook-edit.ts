@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const NotebookEdit = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.NotebookEdit",
-  name: "NotebookEdit",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#notebookedit
   inputSchema: z.object({

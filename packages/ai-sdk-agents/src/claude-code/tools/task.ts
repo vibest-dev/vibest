@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const Task = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.Task",
-  name: "Task",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#task
   inputSchema: z.object({

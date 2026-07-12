@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const Glob = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.Glob",
-  name: "Glob",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#glob
   inputSchema: z.object({

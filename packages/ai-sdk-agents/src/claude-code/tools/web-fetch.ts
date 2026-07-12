@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const WebFetch = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.WebFetch",
-  name: "WebFetch",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#webfetch
   inputSchema: z.object({

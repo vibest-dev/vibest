@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const KillShell = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.KillShell",
-  name: "KillShell",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#killbash
   inputSchema: z.object({

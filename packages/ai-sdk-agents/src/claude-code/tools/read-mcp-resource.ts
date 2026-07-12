@@ -2,9 +2,9 @@ import { tool } from "ai";
 import { z } from "zod/v4";
 
 export const ReadMcpResource = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.ReadMcpResource",
-  name: "ReadMcpResource",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#readmcpresource
   inputSchema: z.object({

@@ -2,9 +2,9 @@ import { tool, type UIToolInvocation } from "ai";
 import { z } from "zod/v4";
 
 export const Write = tool({
-  type: "provider-defined",
+  type: "provider",
   id: "claude-code.Write",
-  name: "Write",
+  isProviderExecuted: true,
   args: {},
   // Docs: https://docs.claude.com/en/docs/claude-code/sdk/sdk-typescript#write
   inputSchema: z.object({
