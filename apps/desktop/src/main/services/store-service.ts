@@ -1,5 +1,6 @@
-import Store from "electron-store";
 import { existsSync } from "node:fs";
+
+import Store from "electron-store";
 
 import {
   DEFAULT_LABELS,

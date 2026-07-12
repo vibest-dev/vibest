@@ -1,9 +1,8 @@
-import type { RouterContractClient } from "@orpc/contract";
-import type { Contract } from "@vibest/contract";
-
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
+import type { RouterContractClient } from "@orpc/contract";
+import type { Contract } from "@vibest/contract";
 
 /** A fully typed client for the Vibest server, derived from the contract. */
 export type VibestClient = RouterContractClient<Contract>;

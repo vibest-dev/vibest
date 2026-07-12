@@ -2,7 +2,6 @@ import { RPCHandler } from "@orpc/server/message-port";
 import { ipcMain } from "electron";
 
 import type { App } from "../app";
-
 import { router } from "./router";
 
 export function setupIPC(app: App): void {

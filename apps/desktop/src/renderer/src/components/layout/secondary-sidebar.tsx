@@ -5,9 +5,8 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { FileDiff as FileDiffIcon, RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 
-import type { DiffFileInfo, Worktree } from "../../types";
-
 import { useDiffStats } from "../../hooks/use-diff-stats";
+import type { DiffFileInfo, Worktree } from "../../types";
 import { buildFileTree } from "../../utils/build-file-tree";
 import { DiffFileTree } from "../worktrees/diff-file-tree";
 

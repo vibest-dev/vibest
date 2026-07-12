@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import {
   Collapsible,
@@ -17,6 +15,7 @@ import {
 } from "@vibest/ui/components/tooltip";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
 import { createContext, forwardRef, useContext, useState } from "react";
 
 export type WebPreviewContextValue = {

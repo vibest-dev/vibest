@@ -1,5 +1,4 @@
 import type { WebFetchUIToolInvocation } from "@vibest/harness/claude-code";
-
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Response } from "@vibest/ui/ai-elements/response";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";

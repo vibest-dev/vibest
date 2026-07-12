@@ -1,6 +1,5 @@
-import type { HTMLAttributes } from "react";
-
 import { cn } from "@vibest/ui/lib/utils";
+import type { HTMLAttributes } from "react";
 
 type LoaderIconProps = {
   size?: number;

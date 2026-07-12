@@ -1,5 +1,4 @@
 import type { EditUIToolInvocation } from "@vibest/harness/claude-code";
-
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { FilePenLine } from "lucide-react";

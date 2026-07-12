@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps, ReactElement } from "react";
-
 import {
   Collapsible,
   CollapsibleContent,
@@ -9,6 +7,7 @@ import {
 } from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon, SearchIcon } from "lucide-react";
+import type { ComponentProps, ReactElement } from "react";
 
 export type TaskItemFileProps = ComponentProps<"div">;
 

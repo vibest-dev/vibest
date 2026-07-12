@@ -1,5 +1,6 @@
-import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
+
+import { Effect } from "effect";
 
 import { InvalidSessionId } from "../errors";
 import { type HarnessAgentId, isHarnessAgentId } from "../types";

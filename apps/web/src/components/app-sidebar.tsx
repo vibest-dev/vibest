@@ -1,7 +1,5 @@
 "use client";
 
-import type * as React from "react";
-
 import {
   AudioWaveform,
   Blocks,
@@ -15,6 +13,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import type * as React from "react";
 
 import { NavMain } from "@/components/nav-main";
 import { NavProjects } from "@/components/nav-projects";

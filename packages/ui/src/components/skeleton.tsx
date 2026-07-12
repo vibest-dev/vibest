@@ -1,5 +1,5 @@
-import type React from "react";
 import { cn } from "@vibest/ui/lib/utils";
+import type React from "react";
 
 export function Skeleton({ className, ...props }: React.ComponentProps<"div">): React.ReactElement {
   return (

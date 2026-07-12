@@ -1,5 +1,4 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-
 import { generateId, type InferUIMessageChunk, type UIMessage } from "ai";
 
 export async function* toUIMessage<T extends UIMessage>(

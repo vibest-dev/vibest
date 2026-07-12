@@ -15,9 +15,8 @@ import { Tabs, TabsList, TabsTab } from "@vibest/ui/components/tabs";
 import { FileDiff as FileDiffIcon, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import type { FileDiff, Worktree } from "../../types";
-
 import { useDiff } from "../../hooks/use-diff";
+import type { FileDiff, Worktree } from "../../types";
 
 const LazyMultiFileDiff = lazy(() =>
   import("@pierre/diffs/react").then((mod) => ({ default: mod.MultiFileDiff })),

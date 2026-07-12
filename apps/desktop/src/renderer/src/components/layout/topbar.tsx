@@ -14,9 +14,8 @@ import {
   Trash2,
 } from "lucide-react";
 
-import type { Repository, Task, Worktree } from "../../types";
-
 import { client } from "../../lib/client";
+import type { Repository, Task, Worktree } from "../../types";
 
 interface TopbarProps {
   repository: Repository | null;

@@ -1,14 +1,13 @@
-import type { IPty } from "node-pty";
-
-import * as pty from "node-pty";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
-import type { AppPublisher } from "../app";
-import type { TerminalSnapshot } from "./types";
+import type { IPty } from "node-pty";
+import * as pty from "node-pty";
 
+import type { AppPublisher } from "../app";
 import { HeadlessTerminal } from "./headless-terminal";
+import type { TerminalSnapshot } from "./types";
 
 /**
  * Direct publisher without batching - for testing MessagePort performance.

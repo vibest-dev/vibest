@@ -5,7 +5,6 @@ import { Plus, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import type { TerminalInfo } from "../../../../shared/contract/terminal";
-
 import { orpc } from "../../lib/orpc";
 import { queryClient } from "../../lib/query-client";
 import { useAppStore } from "../../stores/app-store";

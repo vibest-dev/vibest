@@ -1,5 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
+
 import { toSessionEvent } from "../../src/claude-code/to-session-event";
 import type { LifecycleView } from "../../src/types/session";
 

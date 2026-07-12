@@ -1,7 +1,6 @@
-import type { RpcContext } from "./claude-code";
-
 import { os } from "@orpc/server";
 
+import type { RpcContext } from "./claude-code";
 import { claudeCodeRouter } from "./claude-code";
 
 const orpc = os.$context<RpcContext>();

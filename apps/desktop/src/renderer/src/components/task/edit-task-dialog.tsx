@@ -17,10 +17,9 @@ import { Textarea } from "@vibest/ui/components/textarea";
 import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Repository, Task } from "../../types";
-
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
+import type { Repository, Task } from "../../types";
 
 interface EditTaskDialogProps {
   isOpen: boolean;

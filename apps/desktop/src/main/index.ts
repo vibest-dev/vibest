@@ -1,7 +1,8 @@
-import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { app, BrowserWindow, shell } from "electron";
 
 import icon from "../../resources/icon.png?asset";
 import { App } from "./app";

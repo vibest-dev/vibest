@@ -9,8 +9,6 @@ import {
 import { FolderGit2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { DiffFileInfo, Task, Worktree } from "./types";
-
 import { LabelManagerDialog } from "./components/label";
 import { PrimarySidebarOverlay } from "./components/layout/primary-sidebar-overlay";
 import { SecondarySidebar } from "./components/layout/secondary-sidebar";
@@ -36,6 +34,7 @@ import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
 import { queryClient } from "./lib/query-client";
 import { useAppStore } from "./stores";
+import type { DiffFileInfo, Task, Worktree } from "./types";
 
 const SECONDARY_SPLIT_ID = "split-secondary";
 

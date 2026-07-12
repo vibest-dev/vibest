@@ -1,11 +1,10 @@
-import type { UIDataTypes, UIMessage } from "ai";
 import type { ClaudeCodeTools, SlashCommandUIToolInvocation } from "@vibest/harness/claude-code";
-import type { ReactNode } from "react";
-
 import { Response } from "@vibest/ui/ai-elements/response";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { cn } from "@vibest/ui/lib/utils";
+import type { UIDataTypes, UIMessage } from "ai";
 import { TerminalIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 export function ClaudeCodeSlashCommandTool({
   message: _message,

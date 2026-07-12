@@ -1,5 +1,5 @@
-import type { ToolUIPart, UIDataTypes, UIMessage } from "ai";
 import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
+import type { ToolUIPart, UIDataTypes, UIMessage } from "ai";
 
 import { ClaudeCodeBashOutputTool } from "./bash-output-tool";
 import { ClaudeCodeBashTool } from "./bash-tool";

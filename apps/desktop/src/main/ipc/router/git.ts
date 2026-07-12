@@ -1,8 +1,7 @@
 import { implement } from "@orpc/server";
 
-import type { AppContext } from "../../app";
-
 import { gitContract } from "../../../shared/contract";
+import type { AppContext } from "../../app";
 
 const os = implement(gitContract).$context<AppContext>();
 

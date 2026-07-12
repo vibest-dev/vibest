@@ -1,6 +1,4 @@
 import type { GitService } from "@vibest/services";
-import type { StoreService } from "./store-service";
-import type { WorktreeService } from "./worktree-service";
 
 import {
   generateTaskId,
@@ -9,6 +7,8 @@ import {
   type Task,
   type Worktree,
 } from "../../shared/types";
+import type { StoreService } from "./store-service";
+import type { WorktreeService } from "./worktree-service";
 
 export class TaskService {
   constructor(

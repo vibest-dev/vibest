@@ -1,9 +1,8 @@
 import { implement } from "@orpc/server";
 
-import type { AppContext } from "../../app";
-
 import { labelContract } from "../../../shared/contract/label";
 import { generateLabelId, type Label } from "../../../shared/types";
+import type { AppContext } from "../../app";
 
 const os = implement(labelContract).$context<AppContext>();
 

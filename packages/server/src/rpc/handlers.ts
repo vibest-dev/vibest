@@ -9,7 +9,6 @@ import { ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
 import type { RpcContext } from "./claude-code";
-
 import { ClaudeCodeLayer } from "./claude-code";
 import { router } from "./router";
 

@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps } from "react";
-
 import {
   Collapsible,
   CollapsibleContent,
@@ -10,6 +8,7 @@ import {
 import { useControllableState } from "@vibest/ui/hooks/use-controllable-state";
 import { cn } from "@vibest/ui/lib/utils";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import type { ComponentProps } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 
 import { Response } from "./response";

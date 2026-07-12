@@ -403,12 +403,13 @@ pub fn encode_output(session_id: u32, data: &Bytes) -> Bytes {
 ```
 
 **Performance Budget Analysis:**
-| Component | Memory |
-|-----------|--------|
-| Base daemon | ~3MB |
-| Per-session overhead | ~1MB |
-| Scrollback per session | 10MB |
-| 20 sessions total | ~223MB |
+
+| Component              | Memory |
+| ---------------------- | ------ |
+| Base daemon            | ~3MB   |
+| Per-session overhead   | ~1MB   |
+| Scrollback per session | 10MB   |
+| 20 sessions total      | ~223MB |
 
 ### 安全考量
 
@@ -535,17 +536,18 @@ fn validate_shell(shell: &str) -> Result<&'static str, SecurityError> {
 ```
 
 **Security Checklist:**
-| Category | Risk | Mitigation | Status |
-|----------|------|------------|--------|
-| Socket | Symlink attacks | O_NOFOLLOW, ownership check | Required |
-| Socket | TOCTOU races | File descriptor operations | Required |
-| Socket | Unauthorized access | SO_PEERCRED verification | Required |
-| Input | Oversized messages | 64KB limit | Required |
-| Input | Malformed JSON | validator crate | Required |
-| Resources | Session flooding | Max 100 sessions | Required |
-| Resources | Connection flood | 20/sec rate limit | Required |
-| Privilege | Running as root | Refuse startup | Required |
-| Data | Scrollback on disk | AES-256-GCM encryption | Recommended |
+
+| Category  | Risk                | Mitigation                  | Status      |
+| --------- | ------------------- | --------------------------- | ----------- |
+| Socket    | Symlink attacks     | O_NOFOLLOW, ownership check | Required    |
+| Socket    | TOCTOU races        | File descriptor operations  | Required    |
+| Socket    | Unauthorized access | SO_PEERCRED verification    | Required    |
+| Input     | Oversized messages  | 64KB limit                  | Required    |
+| Input     | Malformed JSON      | validator crate             | Required    |
+| Resources | Session flooding    | Max 100 sessions            | Required    |
+| Resources | Connection flood    | 20/sec rate limit           | Required    |
+| Privilege | Running as root     | Refuse startup              | Required    |
+| Data      | Scrollback on disk  | AES-256-GCM encryption      | Recommended |
 
 ### 错误处理
 

@@ -4,7 +4,6 @@ import { GitBranch, Plus } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
 import type { Worktree } from "../../types";
-
 import { WorktreeCard } from "./worktree-card";
 
 // Lazy load the diff viewer dialog to avoid loading @pierre/diffs on initial render

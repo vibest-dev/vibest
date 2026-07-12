@@ -7,9 +7,8 @@ import {
 import { Fragment } from "react";
 
 import type { Worktree } from "../../types";
-import type { PaneLeaf } from "./split-state";
-
 import { SplitPane } from "./split-pane";
+import type { PaneLeaf } from "./split-state";
 
 interface SplitRootProps {
   splitOrder: string[];

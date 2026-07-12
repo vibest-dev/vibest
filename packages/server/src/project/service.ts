@@ -1,10 +1,10 @@
-import { Context, Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 
-import type { Project } from "../types";
+import { Context, Effect, Layer } from "effect";
 
 import { ProjectNotFound, type StoreReadError, type StoreWriteError } from "../errors";
+import type { Project } from "../types";
 import { ProjectRepository } from "./repository";
 
 /**

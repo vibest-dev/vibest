@@ -1,8 +1,5 @@
 "use client";
 
-import type { ChatStatus } from "ai";
-import type { ComponentProps, HTMLAttributes, KeyboardEventHandler } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import {
   Select,
@@ -13,7 +10,9 @@ import {
 } from "@vibest/ui/components/select";
 import { Textarea } from "@vibest/ui/components/textarea";
 import { cn } from "@vibest/ui/lib/utils";
+import type { ChatStatus } from "ai";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
+import type { ComponentProps, HTMLAttributes, KeyboardEventHandler } from "react";
 import { Children, useMemo } from "react";
 
 export type PromptInputProps = HTMLAttributes<HTMLFormElement>;

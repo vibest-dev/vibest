@@ -1,8 +1,8 @@
 "use client";
 
 import { Meter as MeterPrimitive } from "@base-ui/react/meter";
-import type React from "react";
 import { cn } from "@vibest/ui/lib/utils";
+import type React from "react";
 
 export function Meter({
   className,
@@ -28,7 +28,7 @@ export function MeterLabel({
 }: MeterPrimitive.Label.Props): React.ReactElement {
   return (
     <MeterPrimitive.Label
-      className={cn("font-medium text-foreground text-sm", className)}
+      className={cn("text-foreground text-sm font-medium", className)}
       data-slot="meter-label"
       {...props}
     />
@@ -41,7 +41,7 @@ export function MeterTrack({
 }: MeterPrimitive.Track.Props): React.ReactElement {
   return (
     <MeterPrimitive.Track
-      className={cn("block h-2 w-full overflow-hidden bg-input", className)}
+      className={cn("bg-input block h-2 w-full overflow-hidden", className)}
       data-slot="meter-track"
       {...props}
     />

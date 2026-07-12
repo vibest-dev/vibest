@@ -1,5 +1,3 @@
-import type { InferUIMessageChunk, UIMessage } from "ai";
-
 import { oc, type } from "@orpc/contract";
 import {
   type ClaudeCodeTools,
@@ -9,6 +7,7 @@ import {
   SlashCommandSchema,
   type ToolPermissionRequest,
 } from "@vibest/harness/claude-code";
+import type { InferUIMessageChunk, UIMessage } from "ai";
 import { z } from "zod";
 
 // Emitted by the server while a prompt is running; the client answers via

@@ -1,6 +1,7 @@
-import { Context, Layer } from "effect";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { Context, Layer } from "effect";
 
 /**
  * Resolved filesystem locations the runtime persists to. Injected as a service

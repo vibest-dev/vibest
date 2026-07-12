@@ -33,11 +33,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { Label, Repository, Task, Worktree } from "../../types";
-
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
 import { useAppStore } from "../../stores";
+import type { Label, Repository, Task, Worktree } from "../../types";
 import { ThemeToggle } from "../theme-toggle";
 import { WorktreeDiffStats } from "../worktrees/worktree-diff-stats";
 

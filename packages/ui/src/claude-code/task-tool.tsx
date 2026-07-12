@@ -1,5 +1,4 @@
 import type { ClaudeCodeTools, TaskUIToolInvocation } from "@vibest/harness/claude-code";
-
 import { Response } from "@vibest/ui/ai-elements/response";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { isToolUIPart, type ToolUIPart, type UIDataTypes, type UIMessage } from "ai";

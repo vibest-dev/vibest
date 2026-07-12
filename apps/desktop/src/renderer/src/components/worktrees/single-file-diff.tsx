@@ -3,9 +3,8 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { AlertCircle, FileWarning } from "lucide-react";
 import { lazy, Suspense } from "react";
 
-import type { DiffFileInfo } from "../../types";
-
 import { useFileDiff } from "../../hooks/use-file-diff";
+import type { DiffFileInfo } from "../../types";
 
 const LazyMultiFileDiff = lazy(() =>
   import("@pierre/diffs/react").then((mod) => ({ default: mod.MultiFileDiff })),

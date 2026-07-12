@@ -1,5 +1,4 @@
 import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
-
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import { Response } from "@vibest/ui/ai-elements/response";
 import { ClaudeCodeToolUIPart } from "@vibest/ui/claude-code/tools";

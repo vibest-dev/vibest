@@ -1,5 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { generateId } from "ai";
+
 import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
 
 /** Map ONE native claude-code message to zero or more render chunks. */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { defineEvent, isSessionEvent, SessionEventDefs } from "../src";
 import { foldToUIMessages, toSessionEvent, transform } from "../src/claude-code";
 

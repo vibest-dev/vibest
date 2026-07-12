@@ -24,11 +24,10 @@ import { Textarea } from "@vibest/ui/components/textarea";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Repository } from "../../types";
-
 import { useBranches } from "../../hooks/use-branches";
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
+import type { Repository } from "../../types";
 
 interface CreateTaskDialogProps {
   isOpen: boolean;

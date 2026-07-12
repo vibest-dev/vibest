@@ -22,10 +22,9 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { GitBranch, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Repository } from "../../types";
-
 import { useBranches } from "../../hooks/use-branches";
 import { cn } from "../../lib/utils";
+import type { Repository } from "../../types";
 
 interface CreateWorktreeDialogProps {
   isOpen: boolean;

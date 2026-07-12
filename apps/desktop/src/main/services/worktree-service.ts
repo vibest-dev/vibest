@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import simpleGit from "simple-git";
 
 import type { GitService } from "@vibest/services";
+import simpleGit from "simple-git";
 
 // Place names pool (200+ cities)
 const PLACE_NAMES = [

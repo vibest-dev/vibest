@@ -1,11 +1,10 @@
 "use client";
 
-import type { UIMessage } from "ai";
-import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import { cn } from "@vibest/ui/lib/utils";
+import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 type BranchContextType = {

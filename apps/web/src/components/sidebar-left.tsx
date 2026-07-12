@@ -1,5 +1,3 @@
-import type * as React from "react";
-
 import {
   AudioWaveform,
   Blocks,
@@ -13,6 +11,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import type * as React from "react";
 
 import { NavFavorites } from "@/components/nav-favorites";
 import { NavMain } from "@/components/nav-main";

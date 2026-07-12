@@ -1,6 +1,6 @@
+import { cn } from "@vibest/ui/lib/utils";
 import { Loader2Icon } from "lucide-react";
 import type React from "react";
-import { cn } from "@vibest/ui/lib/utils";
 
 export function Spinner({
   className,
