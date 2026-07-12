@@ -29,7 +29,7 @@
     "@types/react-dom": "^19.2.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vibest/typescript": "workspace:*",
-    "ai": "^5.0.63",
+    "ai": "^7.0.22",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",

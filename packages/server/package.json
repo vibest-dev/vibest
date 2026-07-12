@@ -35,7 +35,7 @@
     "@types/node": "^24.10.13",
     "@types/ws": "^8.18.1",
     "@vibest/typescript": "workspace:*",
-    "ai": "^5.0.63",
+    "ai": "^7.0.22",
     "typescript": "^7.0.2"
   }
 }
