@@ -5,11 +5,11 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "default": "./dist/index.js"
     },
     "./claude-code": {
-      "types": "./dist/claude-code/index.d.ts",
+      "types": "./src/claude-code/index.ts",
       "default": "./dist/claude-code/index.js"
     }
   },

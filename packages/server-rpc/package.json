@@ -13,15 +13,15 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "default": "./dist/index.js"
     },
     "./contract": {
-      "types": "./dist/contract/index.d.ts",
+      "types": "./src/contract/index.ts",
       "default": "./dist/contract/index.js"
     },
     "./routes": {
-      "types": "./dist/routes/index.d.ts",
+      "types": "./src/routes/index.ts",
       "default": "./dist/routes/index.js"
     }
   },

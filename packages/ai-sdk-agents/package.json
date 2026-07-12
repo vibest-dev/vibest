@@ -12,12 +12,12 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
     "./claude-code": {
-      "types": "./dist/claude-code/index.d.ts",
+      "types": "./src/claude-code/index.ts",
       "import": "./dist/claude-code/index.js",
       "require": "./dist/claude-code/index.cjs"
     }
