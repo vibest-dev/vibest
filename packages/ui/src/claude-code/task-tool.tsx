@@ -26,7 +26,10 @@ export function ClaudeCodeTaskTool({
             part.callProviderMetadata?.claudeCode?.parentToolUseId === invocation.toolCallId // this cause not type safe
           );
         })
-        .filter((part) => isToolUIPart(part)),
+        .filter(
+          (part): part is ToolUIPart<ClaudeCodeTools> =>
+            isToolUIPart(part) && part.type !== "dynamic-tool",
+        ),
     [message.parts, invocation.toolCallId],
   );
 

@@ -36,3 +36,6 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: true
   node-pty: true
+  # sharp is a transitive dep of react-scan (desktop devDependency) via next;
+  # it ships prebuilt binaries, so its build script is unnecessary — deny it.
+  sharp: false

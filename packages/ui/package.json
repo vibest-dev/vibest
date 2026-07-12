@@ -18,10 +18,11 @@
   },
   "dependencies": {
     "@ark-ui/react": "^5.31.0",
-    "@base-ui/react": "^1.1.0",
+    "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.7",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "ai-sdk-agents": "workspace:*",
+    "react-day-picker": "9.7.0",
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
@@ -29,7 +30,7 @@
     "@types/react-dom": "^19.2.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vibest/typescript": "workspace:*",
-    "ai": "^5.0.63",
+    "ai": "^7.0.22",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",

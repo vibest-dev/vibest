@@ -30,15 +30,16 @@
     "clean": "git clean -xdf node_modules .turbo dist"
   },
   "devDependencies": {
+    "@ai-sdk/provider-utils": "^5.0.7",
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
     "@vibest/typescript": "workspace:*",
-    "ai": "^5.0.63",
+    "ai": "^7.0.22",
     "vitest": "catalog:",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
-    "ai": "^5.0.63",
+    "ai": "^7.0.22",
     "zod": "^4.4.3"
   }
 }

@@ -11,7 +11,7 @@ export function ClaudeCodeMessageParts({ message }: { message: ClaudeCodeUIMessa
   return (
     <div className="">
       {message.parts.map((part, index) => {
-        if (isToolUIPart(part)) {
+        if (isToolUIPart(part) && part.type !== "dynamic-tool") {
           return <ClaudeCodeToolUIPart key={part.toolCallId} message={message} part={part} />;
         }
 

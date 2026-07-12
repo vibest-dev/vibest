@@ -7,9 +7,7 @@ import { Button } from "@vibest/ui/components/button";
 import {
   Select,
   SelectContent,
-  SelectIcon,
   SelectItem,
-  SelectList,
   SelectTrigger,
   SelectValue,
 } from "@vibest/ui/components/select";
@@ -165,10 +163,6 @@ export const PromptInputModelSelectTrigger = SelectTrigger;
 
 export const PromptInputModelSelectValue = SelectValue;
 
-export const PromptInputModelSelectIcon = SelectIcon;
-
 export const PromptInputModelSelectContent = SelectContent;
-
-export const PromptInputModelSelectList = SelectList;
 
 export const PromptInputModelSelectItem = SelectItem;
