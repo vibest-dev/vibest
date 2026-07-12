@@ -72,7 +72,7 @@
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "zod": "^3.24.1",
+    "zod": "^4.4.3",
     "zustand": "^5.0.5"
   }
 }

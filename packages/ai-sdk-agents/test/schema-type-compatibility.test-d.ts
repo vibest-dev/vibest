@@ -1,5 +1,5 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
-import type { z } from "zod/v4";
+import type { z } from "zod";
 
 import { describe, expectTypeOf, test } from "vite-plus/test";
 

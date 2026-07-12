@@ -1,5 +1,5 @@
 import { tool, type UIToolInvocation } from "ai";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 export const SlashCommand = tool({
   type: "provider-defined",

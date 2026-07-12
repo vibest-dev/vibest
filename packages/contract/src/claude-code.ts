@@ -9,7 +9,7 @@ import {
   PermissionResultSchema,
   SlashCommandSchema,
 } from "ai-sdk-agents/claude-code";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 // Emitted by the server while a prompt is running; the client answers via
 // `respondPermission`. Lives in the contract because both sides speak it.
