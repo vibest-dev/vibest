@@ -184,6 +184,7 @@ export type EditUIToolInvocation = UIToolInvocation<typeof Edit>;
 export type WriteUIToolInvocation = UIToolInvocation<typeof Write>;
 export type GlobUIToolInvocation = UIToolInvocation<typeof Glob>;
 export type GrepUIToolInvocation = UIToolInvocation<typeof Grep>;
+export type AgentUIToolInvocation = UIToolInvocation<typeof Agent>;
 export type TaskUIToolInvocation = UIToolInvocation<typeof Task>;
 export type TaskOutputUIToolInvocation = UIToolInvocation<typeof TaskOutput>;
 export type TaskStopUIToolInvocation = UIToolInvocation<typeof TaskStop>;
