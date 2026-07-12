@@ -1,1 +1,4 @@
-export type { ClaudeCodeUIMessage } from "./components/claude-code-message-parts";
+import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
+import type { UIMessage } from "ai";
+
+export type ClaudeCodeUIMessage = UIMessage<undefined, Record<string, never>, ClaudeCodeTools>;

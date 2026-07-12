@@ -1,4 +1,5 @@
 @import "@vibest/ui/globals.css";
+@import "tw-shimmer";
 
 @source "../node_modules/@vibest/ui";
 

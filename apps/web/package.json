@@ -17,15 +17,18 @@
     "@tanstack/react-query": "^5.85.9",
     "@tanstack/react-router": "^1.131.33",
     "@vibest/client": "workspace:*",
+    "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
     "@vibest/ui": "workspace:*",
     "ai": "^7.0.22",
     "lucide-react": "^0.511.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-error-boundary": "^6.1.2",
     "sonner": "^2.0.7",
     "tailwindcss": "^4.1.12",
-    "tw-animate-css": "^1.3.8"
+    "tw-animate-css": "^1.3.8",
+    "tw-shimmer": "^0.4.11"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.12",

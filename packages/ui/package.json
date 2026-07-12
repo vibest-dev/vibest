@@ -7,7 +7,6 @@
   "exports": {
     "./components/*": "./src/components/*.tsx",
     "./ai-elements/*": "./src/ai-elements/*.tsx",
-    "./claude-code/*": "./src/claude-code/*.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./globals.css": "./src/globals.css"
@@ -19,9 +18,12 @@
   "dependencies": {
     "@ark-ui/react": "^5.31.0",
     "@base-ui/react": "^1.6.0",
+    "@floating-ui/react": "^0.27.16",
     "@fontsource-variable/geist": "^5.2.7",
     "@fontsource-variable/geist-mono": "^5.2.7",
-    "@vibest/harness": "workspace:*",
+    "@tiptap/pm": "^3.22.4",
+    "@tiptap/react": "^3.22.4",
+    "@tiptap/suggestion": "^3.22.4",
     "react-day-picker": "9.7.0",
     "react-markdown": "^10.1.0"
   },
