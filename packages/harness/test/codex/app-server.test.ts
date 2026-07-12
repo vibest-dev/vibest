@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { CodexAppServer } from "../../src/codex/app-server";
 
 const FAKE = `#!/usr/bin/env node
@@ -22,6 +22,10 @@ rl.on("line", (line) => {
   } else if (msg.method === "askMe") {
     send({ id: msg.id, result: null });
     send({ method: "item/commandExecution/requestApproval", id: 999, params: { threadId: "th" } });
+  } else if (msg.id === 999 && "result" in msg) {
+    // The client's reply to the server request above — echo it back as a
+    // notification so the test can observe the reply frame.
+    send({ method: "askMe/replied", params: msg });
   }
 });
 `;
@@ -67,10 +71,19 @@ describe("CodexAppServer", () => {
   });
 
   it("answers server requests via onServerRequest", async () => {
-    const server = await started({ onServerRequest: async () => ({ decision: "decline" }) });
+    const seen: Array<{ method?: string; params?: unknown }> = [];
+    const server = await started({
+      onServerRequest: async () => ({ decision: "decline" }),
+      onNotification: (n: { method?: string; params?: unknown }) => seen.push(n),
+    });
     await server.request("askMe");
-    await new Promise((r) => setTimeout(r, 100));
-    // no assertion beyond "did not crash": the reply frame is consumed by the fake
+    // The fake echoes the client's reply frame back as an `askMe/replied`
+    // notification; wait for it instead of sleeping a fixed interval.
+    await vi.waitFor(() => {
+      expect(seen.some((n) => n.method === "askMe/replied")).toBe(true);
+    });
+    const echoed = seen.find((n) => n.method === "askMe/replied");
+    expect(echoed?.params).toMatchObject({ id: 999, result: { decision: "decline" } });
     await server.close();
   });
 });
