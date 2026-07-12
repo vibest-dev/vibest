@@ -1,4 +1,4 @@
-export type { ClaudeCodeContext } from "./claude-code";
+export { ClaudeCode, ClaudeCodeLayer, type RpcContext } from "./claude-code";
 export {
   createDevWsRPCHandler,
   createFetchRPCHandler,

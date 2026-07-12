@@ -5,15 +5,24 @@ import type { Socket } from "node:net";
 import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
 import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
+import { ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
-import type { ClaudeCodeContext } from "./claude-code";
+import type { RpcContext } from "./claude-code";
 
+import { ClaudeCodeLayer } from "./claude-code";
 import { router } from "./router";
 
 const RPC_PREFIX = "/api/rpc";
-const claudeCodeAgent = new ClaudeCodeAgent();
+
+// One runtime per process, shared by every transport. The layer is fully
+// synchronous today so its context can be extracted eagerly; when scoped
+// services (finalizers, child processes) join the layer, dispose the runtime
+// on server shutdown (design §6).
+const runtime = ManagedRuntime.make(ClaudeCodeLayer);
+const rpcContext: RpcContext = {
+  "effect/context": runtime.runSync(runtime.contextEffect),
+};
 
 export function createFetchRPCHandler() {
   const rpcHandler = new FetchRPCHandler(router, {
@@ -32,7 +41,7 @@ export function createFetchRPCHandler() {
   ) {
     return rpcHandler.handle(request, {
       prefix: "/api/rpc",
-      context: { claudeCodeAgent },
+      context: rpcContext,
       ...options,
     });
   };
@@ -56,22 +65,18 @@ export function createNodeRPCHandler() {
   ) {
     return rpcHandler.handle(request, response, {
       prefix: RPC_PREFIX,
-      context: {
-        claudeCodeAgent,
-      },
+      context: rpcContext,
       ...options,
     });
   };
 }
 
 export function createWsRPCHandler() {
-  const wsHandler = new WsRPCHandler<ClaudeCodeContext>(router);
+  const wsHandler = new WsRPCHandler<RpcContext>(router);
 
   return function upgrade(ws: WebSocket) {
     wsHandler.upgrade(ws, {
-      context: {
-        claudeCodeAgent,
-      },
+      context: rpcContext,
     });
   };
 }

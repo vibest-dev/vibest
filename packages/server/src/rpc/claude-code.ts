@@ -1,46 +1,60 @@
-import type { ClaudeCodeAgent } from "@vibest/harness/claude-code";
+import "@orpc/experimental-effect/extensions/effect";
+
+import type { WithEffectContext } from "@orpc/experimental-effect";
 
 import { implement } from "@orpc/server";
 import { claudeCodeContract } from "@vibest/contract/claude-code";
+import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
 import { toUIMessage } from "ai-sdk-agents/claude-code";
+import { Context, Effect, Layer } from "effect";
 
-export type ClaudeCodeContext = {
-  claudeCodeAgent: ClaudeCodeAgent;
-};
+/**
+ * The claude-code harness adapter as an Effect service. Procedures resolve it
+ * from the oRPC context's `effect/context`; swapping the layer swaps the
+ * agent (e.g. a mock in tests).
+ */
+export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 
-const os = implement(claudeCodeContract);
-const orpc = os.$context<ClaudeCodeContext>();
+export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.sync(
+  ClaudeCode,
+  () => new ClaudeCodeAgent(),
+);
+
+/** Services every RPC procedure may `yield*`. */
+export type RpcContext = WithEffectContext<ClaudeCode>;
+
+const orpc = implement(claudeCodeContract).$context<RpcContext>();
 
 const session = {
-  create: orpc.session.create.handler(async ({ context: { claudeCodeAgent } }) => {
-    return await claudeCodeAgent.session.create();
+  create: orpc.session.create.effect(function* () {
+    const claudeCode = yield* ClaudeCode;
+    return yield* Effect.promise(() => claudeCode.session.create());
   }),
-  abort: orpc.session.abort.handler(async ({ input, context: { claudeCodeAgent } }) => {
-    claudeCodeAgent.session.abort(input.sessionId);
+  abort: orpc.session.abort.effect(function* ({ input }) {
+    const claudeCode = yield* ClaudeCode;
+    claudeCode.session.abort(input.sessionId);
   }),
-  getSupportedCommands: orpc.session.getSupportedCommands.handler(
-    async ({ input, context: { claudeCodeAgent } }) => {
-      return await claudeCodeAgent.session.getSupportedCommands(input.sessionId);
-    },
-  ),
-  getSupportedModels: orpc.session.getSupportedModels.handler(
-    async ({ input, context: { claudeCodeAgent } }) => {
-      return await claudeCodeAgent.session.getSupportedModels(input.sessionId);
-    },
-  ),
-  getMcpServers: orpc.session.getMcpServers.handler(
-    async ({ input, context: { claudeCodeAgent } }) => {
-      return await claudeCodeAgent.session.getMcpServers(input.sessionId);
-    },
-  ),
+  getSupportedCommands: orpc.session.getSupportedCommands.effect(function* ({ input }) {
+    const claudeCode = yield* ClaudeCode;
+    return yield* Effect.promise(() => claudeCode.session.getSupportedCommands(input.sessionId));
+  }),
+  getSupportedModels: orpc.session.getSupportedModels.effect(function* ({ input }) {
+    const claudeCode = yield* ClaudeCode;
+    return yield* Effect.promise(() => claudeCode.session.getSupportedModels(input.sessionId));
+  }),
+  getMcpServers: orpc.session.getMcpServers.effect(function* ({ input }) {
+    const claudeCode = yield* ClaudeCode;
+    return yield* Effect.promise(() => claudeCode.session.getMcpServers(input.sessionId));
+  }),
 };
 
-const prompt = orpc.prompt.handler(async ({ input, context: { claudeCodeAgent } }) => {
+const prompt = orpc.prompt.effect(function* ({ input }) {
+  const claudeCode = yield* ClaudeCode;
   const { model = "sonnet" } = input;
-  const session = claudeCodeAgent.session.get(input.sessionId);
+  const session = claudeCode.session.get(input.sessionId);
 
   // Set model before prompting
-  await session.query.setModel(model);
+  yield* Effect.promise(() => session.query.setModel(model));
 
   const message: { type: "text"; text: string }[] = [];
   for (const part of input.message.parts || []) {
@@ -62,7 +76,7 @@ const prompt = orpc.prompt.handler(async ({ input, context: { claudeCodeAgent } 
   }
   try {
     return toUIMessage(
-      claudeCodeAgent.session.prompt({
+      claudeCode.session.prompt({
         sessionId: input.sessionId,
         message: {
           role: "user",
@@ -76,28 +90,26 @@ const prompt = orpc.prompt.handler(async ({ input, context: { claudeCodeAgent } 
   }
 });
 
-const requestPermission = orpc.requestPermission.handler(async function* ({
-  input,
-  context: { claudeCodeAgent },
-}) {
-  const { sessionId } = input;
-  const session = claudeCodeAgent.session.get(sessionId);
-  for await (const event of session.requestPermission) {
-    yield event;
-  }
+const requestPermission = orpc.requestPermission.effect(function* ({ input }) {
+  const claudeCode = yield* ClaudeCode;
+  const session = claudeCode.session.get(input.sessionId);
+  return (async function* () {
+    for await (const event of session.requestPermission) {
+      yield event;
+    }
+  })();
 });
 
-const respondPermission = orpc.respondPermission.handler(
-  async ({ input, context: { claudeCodeAgent } }) => {
-    const { sessionId, requestId, result } = input;
-    try {
-      return claudeCodeAgent.session.respondPermission(sessionId, requestId, result);
-    } catch (error) {
-      console.error("respondPermission error:", error);
-      throw error;
-    }
-  },
-);
+const respondPermission = orpc.respondPermission.effect(function* ({ input }) {
+  const claudeCode = yield* ClaudeCode;
+  const { sessionId, requestId, result } = input;
+  try {
+    return claudeCode.session.respondPermission(sessionId, requestId, result);
+  } catch (error) {
+    console.error("respondPermission error:", error);
+    throw error;
+  }
+});
 
 export const claudeCodeRouter = orpc.router({
   session,

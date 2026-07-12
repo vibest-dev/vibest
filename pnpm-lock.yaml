@@ -200,9 +200,6 @@ importers:
       '@orpc/client':
         specifier: 2.0.0-beta.16
         version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)
-      '@orpc/contract':
-        specifier: ^2.0.0-beta.16
-        version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)
       '@orpc/tanstack-query':
         specifier: ^2.0.0-beta.16
         version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)(@tanstack/query-core@5.90.20)
@@ -239,9 +236,9 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.131.33
         version: 1.157.17(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@vibest/contract':
+      '@vibest/client':
         specifier: workspace:*
-        version: link:../../packages/contract
+        version: link:../../packages/client
       '@vibest/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -328,6 +325,25 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
+  packages/client:
+    dependencies:
+      '@orpc/client':
+        specifier: 2.0.0-beta.16
+        version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      '@orpc/contract':
+        specifier: ^2.0.0-beta.16
+        version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      '@vibest/contract':
+        specifier: workspace:*
+        version: link:../contract
+    devDependencies:
+      '@vibest/typescript':
+        specifier: workspace:*
+        version: link:../../tools/typescript
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/contract:
     dependencies:
       '@orpc/contract':
@@ -377,6 +393,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@orpc/experimental-effect':
+        specifier: 2.0.0-beta.16
+        version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.97)
       '@orpc/server':
         specifier: ^2.0.0-beta.16
         version: 2.0.0-beta.16(@opentelemetry/api@1.9.0)
@@ -1463,6 +1482,11 @@ packages:
 
   '@orpc/contract@2.0.0-beta.16':
     resolution: {integrity: sha512-yXbY3/3YYP8kjSG6kp0bpgKuoln8FhC4N3mz8YRV4JaPEYJgDKRMmg9u3WJz97gdja+d1TXnrg1kYG0wFqgW0A==}
+
+  '@orpc/experimental-effect@2.0.0-beta.16':
+    resolution: {integrity: sha512-63njL5RcRXVqWXMKbkEkCpKlPvf2TDlSXtQBY9EWKhhkHBar6cnLd4Tt1+dnZQbf2PDZp2YV86Fclycb7MU86Q==}
+    peerDependencies:
+      effect: '>=4.0.0-beta.90'
 
   '@orpc/json-schema@2.0.0-beta.16':
     resolution: {integrity: sha512-5MshIvQfFB8nEE2slrQerYOffO0jF/jD8kdNFzlyW5qWb9GDWGeW+qrZiGmlK3l9kdc3oh7hxzMQzELYkb/kgA==}
@@ -7397,6 +7421,17 @@ snapshots:
       '@standard-schema/spec': 1.1.0
     transitivePeerDependencies:
       - '@opentelemetry/api'
+
+  '@orpc/experimental-effect@2.0.0-beta.16(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.97)':
+    dependencies:
+      '@orpc/contract': 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      '@orpc/json-schema': 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      '@orpc/server': 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      '@orpc/shared': 2.0.0-beta.16(@opentelemetry/api@1.9.0)
+      effect: 4.0.0-beta.97
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - crossws
 
   '@orpc/json-schema@2.0.0-beta.16(@opentelemetry/api@1.9.0)':
     dependencies:

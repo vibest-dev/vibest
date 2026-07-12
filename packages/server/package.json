@@ -21,6 +21,7 @@
     "clean": "git clean -xdf node_modules .turbo"
   },
   "dependencies": {
+    "@orpc/experimental-effect": "2.0.0-beta.16",
     "@orpc/server": "^2.0.0-beta.16",
     "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
