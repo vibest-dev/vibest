@@ -9,7 +9,6 @@
     "build:packages": "vp run --filter \"./packages/*\" build",
     "bump": "pnpm taze",
     "test": "vp test",
-    "pack": "vp run --filter ./apps/vscode pack",
     "clean": "vp run -r clean && git clean -xdf node_modules dist .turbo",
     "sherif": "pnpm dlx sherif --fix",
     "lint": "vp lint --fix",
