@@ -7,14 +7,10 @@ import { defineConfig } from "vite-plus";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  base: "./",
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL("./src/client", import.meta.url)),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
-  },
-  build: {
-    outDir: "./dist/client",
   },
   plugins: [
     codeInspectorPlugin({ bundler: "vite" }),
@@ -23,8 +19,10 @@ export default defineConfig({
       target: "react",
       verboseFileRoutes: false,
       autoCodeSplitting: true,
-      routesDirectory: "./src/client/routes",
-      generatedRouteTree: "./src/client/routeTree.gen.ts",
+      // Absolute paths: tools (oxfmt/oxlint) load this config with cwd at the
+      // repo root, where plugin-relative paths would resolve incorrectly.
+      routesDirectory: fileURLToPath(new URL("./src/routes", import.meta.url)),
+      generatedRouteTree: fileURLToPath(new URL("./src/routeTree.gen.ts", import.meta.url)),
     }),
     react(),
     tailwindcss(),

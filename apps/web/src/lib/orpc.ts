@@ -23,8 +23,10 @@ export const queryClient = new QueryClient({
   }),
 });
 
+// Served same-origin by the CLI server, so the RPC endpoint is a relative
+// path (which is also what @orpc's StandardUrl type expects).
 const rpcLink = new RPCLink({
-  url: `${window.location.origin}/api/rpc`,
+  url: "/api/rpc",
 });
 
 function createWebSocketUrl() {
@@ -33,8 +35,10 @@ function createWebSocketUrl() {
   return url.toString();
 }
 
+// beta.16 takes a lazy `connect` factory (connects on first use) instead of
+// an eagerly created socket instance.
 const webSocketLink = new WebSocketRPCLink({
-  websocket: new WebSocket(createWebSocketUrl(), "vibest"),
+  connect: () => new WebSocket(createWebSocketUrl(), "vibest"),
 });
 export const orpcClient: RouterClient<Router> = createORPCClient(rpcLink);
 export const orpcWsClient: RouterClient<Router> = createORPCClient(webSocketLink);

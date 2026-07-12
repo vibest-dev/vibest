@@ -1,6 +1,6 @@
-@import "@vibe-web/ui/globals.css";
+@import "@vibest/ui/globals.css";
 
-@source "../../node_modules/@vibe-web/ui";
+@source "../node_modules/@vibest/ui";
 
 :root {
   --sidebar: hsl(0 0% 98%);

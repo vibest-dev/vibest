@@ -13,6 +13,11 @@ catalog:
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
+  # ^2.0.0-beta.16 ranges admit the 2.0.0 stable release; @orpc/client floated
+  # to stable while @orpc/contract stayed on beta.16, breaking the runtime
+  # (stable client imports ORPC_HEADER, absent from the beta contract).
+  # Pin the whole family to the beta until the repo migrates to stable.
+  "@orpc/client": "2.0.0-beta.16"
 peerDependencyRules:
   allowAny:
     - vite
