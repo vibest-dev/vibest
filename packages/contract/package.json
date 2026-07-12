@@ -1,0 +1,26 @@
+{
+  "name": "@vibest/contract",
+  "version": "0.0.1",
+  "private": true,
+  "description": "RPC contract for Vibe Coding Devtools",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./claude-code": "./src/claude-code.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules .turbo"
+  },
+  "dependencies": {
+    "@orpc/contract": "^2.0.0-beta.16",
+    "ai-sdk-agents": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.207",
+    "@vibest/typescript": "workspace:*",
+    "ai": "^5.0.63",
+    "typescript": "^7.0.2"
+  }
+}

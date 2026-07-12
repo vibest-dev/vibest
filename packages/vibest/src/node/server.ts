@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { WebSocket } from "ws";
 
-import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server-rpc";
+import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server/rpc";
 import fs from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import path from "node:path";

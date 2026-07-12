@@ -2,7 +2,7 @@
   "name": "@vibest/cli",
   "version": "0.0.1",
   "bin": {
-    "vibest": "./dist/cli.js"
+    "vibest": "./dist/cli.mjs"
   },
   "files": [
     "dist"
@@ -11,14 +11,14 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx src/node/cli.ts",
     "build": "vp pack",
-    "start": "node dist/cli.js",
+    "start": "node dist/cli.mjs",
     "typecheck": "tsc -p src/node",
     "clean": "git clean -xdf node_modules .turbo dist"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
+    "@orpc/contract": "^2.0.0-beta.16",
     "@orpc/server": "^2.0.0-beta.16",
-    "@vibest/agents": "workspace:*",
     "ai": "^5.0.63",
     "ai-sdk-agents": "workspace:*",
     "sirv": "^3.0.2",
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "@vibest/server-rpc": "workspace:*",
+    "@vibest/server": "workspace:*",
     "@vibest/typescript": "workspace:*",
     "tsx": "latest",
     "typescript": "^7.0.2",

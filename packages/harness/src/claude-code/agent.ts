@@ -3,7 +3,7 @@ import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
-import type { ToolPermissionRequest } from "./types";
+import type { ToolPermissionRequest } from "@vibest/contract/claude-code";
 
 import { Pushable } from "./utils/pushable";
 

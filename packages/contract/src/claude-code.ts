@@ -1,4 +1,4 @@
-import type { ToolPermissionRequest } from "@vibest/agents/claude-code";
+import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import type { InferUIMessageChunk, UIMessage } from "ai";
 
 import { oc, type } from "@orpc/contract";
@@ -10,6 +10,17 @@ import {
   SlashCommandSchema,
 } from "ai-sdk-agents/claude-code";
 import { z } from "zod/v4";
+
+// Emitted by the server while a prompt is running; the client answers via
+// `respondPermission`. Lives in the contract because both sides speak it.
+export type ToolPermissionRequest = {
+  type: "tool-permission-request";
+  sessionId: string;
+  requestId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  suggestions?: PermissionUpdate[];
+};
 
 export const claudeCodeContract = {
   session: {

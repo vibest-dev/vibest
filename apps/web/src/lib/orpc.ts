@@ -1,5 +1,5 @@
-import type { RouterClient } from "@orpc/server";
-import type { Router } from "@vibest/server-rpc/routes";
+import type { RouterContractClient } from "@orpc/contract";
+import type { Contract } from "@vibest/contract";
 
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
@@ -40,8 +40,8 @@ function createWebSocketUrl() {
 const webSocketLink = new WebSocketRPCLink({
   connect: () => new WebSocket(createWebSocketUrl(), "vibest"),
 });
-export const orpcClient: RouterClient<Router> = createORPCClient(rpcLink);
-export const orpcWsClient: RouterClient<Router> = createORPCClient(webSocketLink);
+export const orpcClient: RouterContractClient<Contract> = createORPCClient(rpcLink);
+export const orpcWsClient: RouterContractClient<Contract> = createORPCClient(webSocketLink);
 
 export const orpc = createTanstackQueryUtils({
   orpcClient,

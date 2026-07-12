@@ -1,9 +1,8 @@
-import type { ClaudeCodeAgent } from "@vibest/agents/claude-code";
+import type { ClaudeCodeAgent } from "@vibest/harness/claude-code";
 
 import { implement } from "@orpc/server";
+import { claudeCodeContract } from "@vibest/contract/claude-code";
 import { toUIMessage } from "ai-sdk-agents/claude-code";
-
-import { claudeCodeContract } from "../contract/claude-code";
 
 export type ClaudeCodeContext = {
   claudeCodeAgent: ClaudeCodeAgent;

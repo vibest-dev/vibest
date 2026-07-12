@@ -5,12 +5,12 @@ import type { Socket } from "node:net";
 import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
 import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import { ClaudeCodeAgent } from "@vibest/agents/claude-code";
+import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
 import { type WebSocket, WebSocketServer } from "ws";
 
-import type { ClaudeCodeContext } from "./routes/claude-code";
+import type { ClaudeCodeContext } from "./claude-code";
 
-import { router } from "./routes";
+import { router } from "./router";
 
 const RPC_PREFIX = "/api/rpc";
 const claudeCodeAgent = new ClaudeCodeAgent();
