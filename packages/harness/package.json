@@ -9,9 +9,10 @@
     "./claude-code": "./src/claude-code/index.ts"
   },
   "scripts": {
-    "test": "vp test run",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "git clean -xdf node_modules .turbo"
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite-plus/pack";
+import { defineConfig } from "tsdown";
 
 export default defineConfig({
   entry: ["src/**", "!src/globals.css"],

@@ -15,12 +15,7 @@ node_modules
 # Testing
 coverage
 
-# Vite+ / Vite Task
-.vite
-**/.vite-task
-**/node-compile-cache
-
-# Turbo (legacy)
+# Turbo
 .turbo
 
 # Vercel

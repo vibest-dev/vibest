@@ -1,7 +1,5 @@
 import "@orpc/experimental-effect/extensions/effect";
-
 import type { WithEffectContext } from "@orpc/experimental-effect";
-
 import { implement } from "@orpc/server";
 import { claudeCodeContract } from "@vibest/contract/claude-code";
 import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
@@ -51,10 +49,10 @@ const session = {
 const prompt = orpc.prompt.effect(function* ({ input }) {
   const claudeCode = yield* ClaudeCode;
   const { model = "sonnet" } = input;
-  const session = claudeCode.session.get(input.sessionId);
+  const agentSession = claudeCode.session.get(input.sessionId);
 
   // Set model before prompting
-  yield* Effect.promise(() => session.query.setModel(model));
+  yield* Effect.promise(() => agentSession.query.setModel(model));
 
   const message: { type: "text"; text: string }[] = [];
   for (const part of input.message.parts || []) {
@@ -92,9 +90,9 @@ const prompt = orpc.prompt.effect(function* ({ input }) {
 
 const requestPermission = orpc.requestPermission.effect(function* ({ input }) {
   const claudeCode = yield* ClaudeCode;
-  const session = claudeCode.session.get(input.sessionId);
+  const agentSession = claudeCode.session.get(input.sessionId);
   return (async function* () {
-    for await (const event of session.requestPermission) {
+    for await (const event of agentSession.requestPermission) {
       yield event;
     }
   })();

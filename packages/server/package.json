@@ -16,9 +16,10 @@
     "./rpc": "./src/rpc/index.ts"
   },
   "scripts": {
-    "test": "vp test run",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "git clean -xdf node_modules .turbo"
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@orpc/experimental-effect": "2.0.0-beta.16",
@@ -35,6 +36,7 @@
     "@types/ws": "^8.18.1",
     "@vibest/typescript": "workspace:*",
     "ai": "^7.0.22",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "catalog:"
   }
 }

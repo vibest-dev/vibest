@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PollingScheduler } from "./polling-scheduler";
 
@@ -14,7 +14,7 @@ describe("PollingScheduler", () => {
   describe("任务注册", () => {
     it("注册任务后应立即可执行", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",
@@ -31,7 +31,7 @@ describe("PollingScheduler", () => {
 
     it("注销任务后应停止执行", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",
@@ -53,7 +53,7 @@ describe("PollingScheduler", () => {
   describe("定时执行", () => {
     it("应按 interval 间隔执行", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",
@@ -78,7 +78,7 @@ describe("PollingScheduler", () => {
       let running = 0;
       let maxRunning = 0;
 
-      const execute = vi.fn().mockImplementation(async () => {
+      const execute = vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
         running++;
         maxRunning = Math.max(maxRunning, running);
         await new Promise((r) => setTimeout(r, 100));
@@ -107,7 +107,7 @@ describe("PollingScheduler", () => {
   describe("失败退避", () => {
     it("失败后应指数退避", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockRejectedValue(new Error("fail"));
+      const execute = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error("fail"));
 
       scheduler.register({
         id: "test:1",
@@ -130,7 +130,7 @@ describe("PollingScheduler", () => {
 
     it("超过 maxRetries 后应停止重试", async () => {
       const scheduler = new PollingScheduler({ maxRetries: 2 });
-      const execute = vi.fn().mockRejectedValue(new Error("fail"));
+      const execute = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error("fail"));
 
       scheduler.register({
         id: "test:1",
@@ -263,7 +263,7 @@ describe("PollingScheduler", () => {
   describe("runNow", () => {
     it("应立即执行指定任务", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",
@@ -287,7 +287,7 @@ describe("PollingScheduler", () => {
   describe("超时处理", () => {
     it("任务超时后应标记为失败", async () => {
       const scheduler = new PollingScheduler({ taskTimeout: 100 });
-      const execute = vi.fn().mockImplementation(async () => {
+      const execute = vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
         // 模拟一个很慢的任务
         await new Promise((r) => setTimeout(r, 5000));
       });
@@ -312,9 +312,9 @@ describe("PollingScheduler", () => {
   describe("groupId 批量管理", () => {
     it("unregisterByGroup 应移除同组所有任务", async () => {
       const scheduler = new PollingScheduler();
-      const executeA = vi.fn().mockResolvedValue(undefined);
-      const executeB = vi.fn().mockResolvedValue(undefined);
-      const executeC = vi.fn().mockResolvedValue(undefined);
+      const executeA = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
+      const executeB = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
+      const executeC = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "git:1",
@@ -360,8 +360,8 @@ describe("PollingScheduler", () => {
 
     it("runAllByGroup 应立即触发同组所有任务", async () => {
       const scheduler = new PollingScheduler();
-      const executeA = vi.fn().mockResolvedValue(undefined);
-      const executeB = vi.fn().mockResolvedValue(undefined);
+      const executeA = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
+      const executeB = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "git:1",
@@ -397,7 +397,7 @@ describe("PollingScheduler", () => {
   describe("生命周期", () => {
     it("stop 应清空队列并停止定时器", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",
@@ -417,7 +417,7 @@ describe("PollingScheduler", () => {
 
     it("注销所有任务后应自动停止", async () => {
       const scheduler = new PollingScheduler();
-      const execute = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
 
       scheduler.register({
         id: "test:1",

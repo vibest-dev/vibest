@@ -2,35 +2,48 @@
   "name": "vibest",
   "private": true,
   "scripts": {
-    "dev": "vp run -r --parallel dev",
-    "watch": "vp run -r --parallel dev",
-    "stub": "vp run -r --parallel stub",
-    "build": "vp run -r build",
-    "build:packages": "vp run --filter \"./packages/*\" build",
+    "dev": "turbo dev",
+    "watch": "turbo watch dev",
+    "stub": "turbo watch stub",
+    "build": "turbo build",
+    "build:packages": "turbo build --filter=./packages/*",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "lint": "oxlint --fix",
+    "lint:check": "oxlint --deny-warnings",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "check": "pnpm run lint:check && pnpm run format:check && pnpm run typecheck",
+    "clean": "turbo run clean && git clean -xdf node_modules dist .turbo",
     "bump": "pnpm taze",
-    "test": "vp test",
-    "clean": "vp run -r clean && git clean -xdf node_modules dist .turbo",
     "sherif": "pnpm dlx sherif --fix",
-    "lint": "vp lint --fix",
-    "lint:check": "vp lint --check",
-    "format:check": "vp fmt --check",
-    "format": "vp fmt",
-    "check": "vp check",
-    "typecheck": "vp run -r typecheck",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
-    "prepublish": "vp run --filter \"./packages/*\" build",
-    "prepare": "vp config"
+    "prepublish": "turbo build --filter=./packages/*",
+    "prepare": "git config core.hooksPath .githooks && simple-git-hooks"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.6",
     "@types/node": "^24.10.13",
+    "lint-staged": "^17.0.8",
+    "oxfmt": "^0.58.0",
+    "oxlint": "^1.73.0",
     "publint": "^0.3.12",
+    "simple-git-hooks": "^2.13.1",
     "taze": "^19.5.0",
+    "turbo": "^2.5.8",
     "typescript": "^7.0.2",
-    "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vitest": "catalog:"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx --no-install lint-staged"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mts,cts}": [
+      "oxlint --fix",
+      "oxfmt"
+    ]
   },
   "packageManager": "pnpm@11.12.0"
 }

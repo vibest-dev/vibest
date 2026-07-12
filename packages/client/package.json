@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "clean": "git clean -xdf node_modules .turbo"
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@orpc/client": "^2.0.0-beta.16",

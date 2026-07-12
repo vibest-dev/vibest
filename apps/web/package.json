@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp dev",
-    "build": "vp build",
-    "preview": "vp preview",
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "clean": "git clean -xdf node_modules dist"
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.23",
@@ -44,10 +44,9 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@vibest/typescript": "workspace:*",
-    "@vitejs/plugin-react": "^5.0.1",
+    "@vitejs/plugin-react": "^6.0.3",
     "code-inspector-plugin": "latest",
     "typescript": "^7.0.2",
-    "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vite": "catalog:"
   }
 }

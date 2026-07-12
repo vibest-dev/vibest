@@ -1,5 +1,4 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
-
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
@@ -63,7 +62,7 @@ export class Session {
       // Load filesystem settings for project-level configuration
       settingSources: ["user", "project", "local"],
       // canUseTool callback: push permission requests to output stream
-      canUseTool: async (toolName, input, { signal, suggestions }) => {
+      canUseTool: async (toolName, toolInput, { signal, suggestions }) => {
         const requestId = uuid();
         const session = this.get(sessionId);
         const pendingPermissionRequests = session.pendingPermissionRequests;
@@ -100,7 +99,7 @@ export class Session {
           sessionId,
           requestId,
           toolName,
-          input,
+          input: toolInput,
           suggestions,
         });
 

@@ -1,9 +1,10 @@
-import { Effect } from "effect";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { Effect } from "effect";
 import { simpleGit } from "simple-git";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { GitService, GitServiceLayer } from "../src/index";
 

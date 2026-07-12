@@ -12,8 +12,8 @@
     "./infra": "./src/infra/index.ts"
   },
   "scripts": {
-    "clean": "git clean -xdf node_modules dist .turbo",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "node-pty": "^1.1.0",

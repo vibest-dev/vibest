@@ -10,10 +10,10 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx src/node/cli.ts",
-    "build": "vp pack",
+    "build": "tsdown",
     "start": "node dist/cli.mjs",
     "typecheck": "tsc -p src/node",
-    "clean": "git clean -xdf node_modules .turbo dist"
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
@@ -29,6 +29,7 @@
     "@types/ws": "^8.18.1",
     "@vibest/server": "workspace:*",
     "@vibest/typescript": "workspace:*",
+    "tsdown": "^0.22.5",
     "tsx": "latest",
     "typescript": "^7.0.2",
     "vite": "catalog:"

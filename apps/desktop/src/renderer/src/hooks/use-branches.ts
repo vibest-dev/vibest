@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { Branch } from "../types";
-
 import { client } from "../lib/client";
+import type { Branch } from "../types";
 
 export function useBranches(repositoryPath: string | null) {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -19,8 +18,8 @@ export function useBranches(repositoryPath: string | null) {
     setError(null);
 
     try {
-      const branches = await client.git.branches({ path: repositoryPath });
-      setBranches(branches);
+      const nextBranches = await client.git.branches({ path: repositoryPath });
+      setBranches(nextBranches);
     } catch (err) {
       setError(String(err));
     } finally {

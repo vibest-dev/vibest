@@ -4,7 +4,7 @@ The `vibest` repository is a monorepo dedicated to enhancing the web development
 
 ## Architectural Overview
 
-The codebase employs a monorepo architecture, managed with `pnpm` and `Vite+` (the unified `vp` toolchain, which includes Vite Task for build orchestration), to efficiently organize and build multiple interconnected applications and packages. The core architecture is client-server based, with a local Node.js server acting as the backend for AI agent interactions, and a web frontend serving as the user interface.
+The codebase employs a monorepo architecture, managed with `pnpm` and `Turborepo`, to efficiently organize and build multiple interconnected applications and packages. The core architecture is client-server based, with a local Node.js server acting as the backend for AI agent interactions, and a web frontend serving as the user interface.
 
 Key architectural patterns include:
 
@@ -85,9 +85,9 @@ When using TanStack Query (server state) with Zustand (client state):
 
 The `vibest` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
 
-- **Monorepo Management:** `pnpm` and `Vite+` (the `vp` CLI, which bundles Vite Task) are used for dependency management and build orchestration across multiple packages. Common commands: `vp run -r build` (build all packages in dependency order), `vp test`, `vp check` (format + lint + type-aware check), `vp lint`, and `vp fmt`. See `AGENTS.md` and `node_modules/vite-plus/docs` for the full command surface.
+- **Monorepo Management:** `pnpm` handles dependencies and `Turborepo` orchestrates tasks across packages. Common commands: `pnpm build` (`turbo build`, respects the dependency graph), `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format`, and `pnpm check` (lint + format + typecheck). The task graph lives in `turbo.json`.
 - **TypeScript:** The entire codebase is written in TypeScript, providing static type checking for improved code reliability, readability, and developer experience.
-- **Code Quality & Formatting:** Linting and formatting are handled by `Oxlint` (`.oxlintrc.json`) and `Oxfmt` (`.oxfmtrc.json`) through Vite+ (`vp lint` / `vp fmt` / `vp check`), enforcing consistent coding styles and catching issues early.
+- **Code Quality & Formatting:** Linting and formatting are handled by `Oxlint` (`.oxlintrc.json`) and `Oxfmt` (`.oxfmtrc.json`), run from the repo root via `pnpm lint` / `pnpm format`, enforcing consistent coding styles and catching issues early.
 - **Automated Testing:** Unit and integration tests are present (e.g., `vitest.config.ts`, `test` directories), ensuring the correctness of individual modules and their interactions.
 - **CI/CD:** A GitHub Actions workflow (`.github/workflows/quality.yml`) automatically runs `test`, `lint`, and `typecheck` checks on every push and pull request to the `main` branch, maintaining code quality standards.
 - **Version Management:** `@changesets/cli` is used for managing package versions and generating changelogs, streamlining the release process for the monorepo.
@@ -117,9 +117,9 @@ The project integrates with several critical technologies and third-party tools:
   - `ws`: WebSocket library for potential real-time communication.
 - **Monorepo Tooling:**
   - `pnpm`: A fast, disk space efficient package manager.
-  - `Vite+` (`vp`): The unified toolchain (Vite, Vitest, Rolldown, tsdown, Oxlint, Oxfmt, and Vite Task) that drives dev, build, test, lint, format, and workspace task orchestration.
-  - `Vite Task`: Dependency-aware, cached workspace task runner (invoked via `vp run`), replacing Turborepo.
-  - `Oxlint` / `Oxfmt`: Rust-based linter and formatter used via `vp lint` / `vp fmt`.
+  - `Turborepo`: Dependency-aware, cached workspace task runner (`turbo.json`) that orchestrates `build`, `test`, and `typecheck` across packages.
+  - `Vite` / `Vitest` / `tsdown`: Dev server and bundler, test runner, and library packaging, each invoked directly by the package that needs it.
+  - `Oxlint` / `Oxfmt`: Rust-based linter and formatter, run from the repo root.
 - **Other Utilities:**
   - `zod`: TypeScript-first schema declaration and validation library, used for data validation.
   - `date-fns`: A modern JavaScript date utility library.
@@ -137,8 +137,8 @@ The files listed below are important for code generation and running terminal co
     "path": "package.json"
   },
   {
-    "description": "Root Vite+ configuration (defineConfig from vite-plus): Vitest project setup, staged-file checks, and workspace task orchestration via Vite Task.",
-    "path": "vite.config.ts"
+    "description": "Turborepo task graph: declares dependsOn/outputs for build, test, typecheck, and dev across the workspace.",
+    "path": "turbo.json"
   },
   {
     "description": "Defines the workspace structure for pnpm, indicating the packages included in the monorepo.",
@@ -216,5 +216,5 @@ The files listed below are important for code generation and running terminal co
 ├── pnpm-workspace.yaml
 ├── tools/
 │   └── typescript/
-└── vite.config.ts
+└── turbo.json
 ```

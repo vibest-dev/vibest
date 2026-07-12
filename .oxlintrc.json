@@ -28,6 +28,12 @@
         "varsIgnorePattern": "^_",
         "destructuredArrayIgnorePattern": "^_"
       }
+    ],
+    "no-underscore-dangle": [
+      "warn",
+      {
+        "allow": ["__dirname", "_tag", "_values"]
+      }
     ]
   },
   "ignorePatterns": ["**/routeTree.gen.ts", ".conductor", "**/dist/**", "**/node_modules/**"]

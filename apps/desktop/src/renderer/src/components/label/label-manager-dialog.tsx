@@ -16,10 +16,9 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { Label as LabelType, Repository } from "../../types";
-
 import { orpc } from "../../lib/orpc";
 import { cn } from "../../lib/utils";
+import type { Label as LabelType, Repository } from "../../types";
 
 // Preset colors for the color picker
 const PRESET_COLORS = [
@@ -318,6 +317,8 @@ export function LabelManagerDialog({ isOpen, repository, onClose }: LabelManager
                     <button
                       key={c}
                       type="button"
+                      aria-label={`Color #${c}`}
+                      aria-pressed={color === c}
                       onClick={() => setColor(c)}
                       className={cn(
                         "size-7 rounded-full border-2 transition-all",

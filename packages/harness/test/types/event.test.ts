@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+
 import { defineEvent, TokenUsageSchema, TurnErrorSchema } from "../../src/types/event";
 
 describe("defineEvent", () => {
@@ -13,7 +14,7 @@ describe("defineEvent", () => {
       turnId: "t1",
       outcome: "completed",
     });
-    expect(() => Ended.schema.parse({ turnId: 1, outcome: "completed" })).toThrow();
+    expect(() => Ended.schema.parse({ turnId: 1, outcome: "completed" })).toThrow(z.ZodError);
   });
 });
 
@@ -26,6 +27,6 @@ describe("shared schemas", () => {
   });
 
   it("rejects an unknown turn-error category", () => {
-    expect(() => TurnErrorSchema.parse({ message: "x", category: "nope" })).toThrow();
+    expect(() => TurnErrorSchema.parse({ message: "x", category: "nope" })).toThrow(z.ZodError);
   });
 });

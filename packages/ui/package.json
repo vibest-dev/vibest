@@ -13,8 +13,8 @@
     "./globals.css": "./src/globals.css"
   },
   "scripts": {
-    "clean": "git clean -xdf .turbo node_modules dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
     "@ark-ui/react": "^5.31.0",
@@ -42,6 +42,7 @@
     "shiki": "3.12.2",
     "tailwind-merge": "^3.3.0",
     "tailwindcss": "^4.1.12",
+    "tsdown": "^0.22.5",
     "tw-animate-css": "^1.3.8",
     "use-stick-to-bottom": "^1.1.1"
   }

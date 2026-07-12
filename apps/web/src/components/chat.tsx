@@ -15,10 +15,7 @@ import {
 } from "@vibest/ui/ai-elements/prompt-input";
 import {
   Select,
-  SelectIcon,
   SelectItem,
-  SelectItemText,
-  SelectList,
   SelectPopup,
   SelectTrigger,
   SelectValue,
@@ -26,10 +23,9 @@ import {
 import { cn } from "@vibest/ui/lib/utils";
 import { useState } from "react";
 
-import type { ClaudeCodeUIMessage } from "@/types";
-
 import { MessageParts } from "@/components/message-parts";
 import { orpcClient } from "@/lib/orpc";
+import type { ClaudeCodeUIMessage } from "@/types";
 
 const models = [
   { label: "Opus", value: "opus" as const },
@@ -62,8 +58,8 @@ export function Chat({ className, sessionId }: { className?: string; sessionId: 
         throw new Error("Unsupported yet");
       },
     },
-    onFinish: ({ messages }) => {
-      console.log("onFinish", messages);
+    onFinish: ({ messages: finishedMessages }) => {
+      console.log("onFinish", finishedMessages);
     },
   });
 
@@ -108,16 +104,13 @@ export function Chat({ className, sessionId }: { className?: string; sessionId: 
               >
                 <SelectTrigger className="min-h-8 py-0">
                   <SelectValue placeholder="Model" />
-                  <SelectIcon />
                 </SelectTrigger>
                 <SelectPopup>
-                  <SelectList>
-                    {models.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        <SelectItemText>{m.label}</SelectItemText>
-                      </SelectItem>
-                    ))}
-                  </SelectList>
+                  {models.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
                 </SelectPopup>
               </Select>
             </PromptInputTools>
