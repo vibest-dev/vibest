@@ -1,6 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { readUIMessageStream } from "ai";
-import { transform } from "./transform";
+import { createTransform } from "./transform";
 import type { ClaudeCodeUIMessage } from "./ui-message";
 import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
 
@@ -8,6 +8,7 @@ import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
 export async function foldToUIMessages(
   messages: Iterable<SDKMessage>,
 ): Promise<ClaudeCodeUIMessage[]> {
+  const transform = createTransform();
   const stream = new ReadableStream<ClaudeCodeUIMessageChunk>({
     start(controller) {
       for (const message of messages) {
