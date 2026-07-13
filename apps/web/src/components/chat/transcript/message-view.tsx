@@ -1,22 +1,19 @@
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
-import { isToolUIPart } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { ListTreeIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import type { ClaudeCodeUIMessage } from "@/types";
-
 import { AssistantMessage } from "./assistant-message";
-import { plural } from "./compute-batch-trigger";
-import { isChildToolPart } from "./use-tool-batches";
+import { isChildToolPart } from "./tool/bucket";
 import { UserMessage } from "./user-message";
 
-type Part = ClaudeCodeUIMessage["parts"][number];
+type Part = UIMessage["parts"][number];
 
 export function MessageView({
   message,
   isStreaming,
 }: {
-  message: ClaudeCodeUIMessage;
+  message: UIMessage;
   isStreaming: boolean;
 }) {
   if (message.role === "assistant") {
@@ -33,7 +30,7 @@ function CollapsibleAssistantMessage({
   message,
   isStreaming,
 }: {
-  message: ClaudeCodeUIMessage;
+  message: UIMessage;
   isStreaming: boolean;
 }) {
   const summary = useMemo(() => splitSummary(message.parts), [message.parts]);
@@ -56,6 +53,10 @@ function CollapsibleAssistantMessage({
       <AssistantMessage message={message} parts={summary.answerParts} isStreaming={false} />
     </div>
   );
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm;
 }
 
 function splitSummary(

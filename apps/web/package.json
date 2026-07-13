@@ -16,6 +16,14 @@
     "@orpc/tanstack-query": "^2.0.0-beta.16",
     "@tanstack/react-query": "^5.85.9",
     "@tanstack/react-router": "^1.131.33",
+    "@tiptap/extension-document": "^3.22.4",
+    "@tiptap/extension-hard-break": "^3.22.4",
+    "@tiptap/extension-paragraph": "^3.22.4",
+    "@tiptap/extension-placeholder": "^3.22.4",
+    "@tiptap/extension-text": "^3.22.4",
+    "@tiptap/extensions": "^3.22.4",
+    "@tiptap/pm": "^3.22.4",
+    "@tiptap/react": "^3.22.4",
     "@vibest/client": "workspace:*",
     "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
@@ -28,7 +36,8 @@
     "sonner": "^2.0.7",
     "tailwindcss": "^4.1.12",
     "tw-animate-css": "^1.3.8",
-    "tw-shimmer": "^0.4.11"
+    "tw-shimmer": "^0.4.11",
+    "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.12",

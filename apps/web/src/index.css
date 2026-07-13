@@ -65,3 +65,12 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* TipTap Placeholder extension renders via ::before on the empty first paragraph. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  height: 0;
+}

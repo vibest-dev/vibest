@@ -1,17 +1,15 @@
 import { Action, Actions } from "@vibest/ui/ai-elements/actions";
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import { Response } from "@vibest/ui/ai-elements/response";
-import { isToolUIPart } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
-
-import type { ClaudeCodeUIMessage } from "@/types";
 
 import { ToolBatch } from "./tool-batch";
 import { ToolPart } from "./tool-part";
 import { useToolBatches } from "./use-tool-batches";
 
-type Part = ClaudeCodeUIMessage["parts"][number];
+type Part = UIMessage["parts"][number];
 
 // Renders an assistant turn's parts: tool/reasoning runs as collapsible
 // batches, standalone tools (Task) as full cards, text as markdown. The copy
@@ -22,7 +20,7 @@ export function AssistantMessage({
   isStreaming,
   showActions = true,
 }: {
-  message: ClaudeCodeUIMessage;
+  message: UIMessage;
   parts: readonly Part[];
   isStreaming: boolean;
   showActions?: boolean;
@@ -38,7 +36,7 @@ export function AssistantMessage({
         if (item.kind === "tool-batch") {
           return (
             <ToolBatch
-              key={`batch-${item.startIndex}`}
+              key={`batch-${item.parts[0]?.index ?? 0}`}
               message={message}
               parts={item.parts}
               shouldShimmer={isStreaming && item.isTrailing}
@@ -46,7 +44,7 @@ export function AssistantMessage({
           );
         }
         const { part, index } = item;
-        if (isToolUIPart(part) && part.type !== "dynamic-tool") {
+        if (isToolUIPart(part)) {
           return <ToolPart key={part.toolCallId} message={message} part={part} />;
         }
         if (part.type === "text") {

@@ -1,9 +1,8 @@
 import { CollapsibleUserText } from "@vibest/ui/ai-elements/collapsible-user-text";
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
+import type { UIMessage } from "ai";
 
-import type { ClaudeCodeUIMessage } from "@/types";
-
-export function UserMessage({ message }: { message: ClaudeCodeUIMessage }) {
+export function UserMessage({ message }: { message: UIMessage }) {
   return (
     <>
       {message.parts.map((part, index) =>
