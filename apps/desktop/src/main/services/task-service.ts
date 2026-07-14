@@ -1,6 +1,4 @@
 import type { GitService } from "@vibest/services";
-import type { StoreService } from "./store-service";
-import type { WorktreeService } from "./worktree-service";
 
 import {
   generateTaskId,
@@ -9,6 +7,8 @@ import {
   type Task,
   type Worktree,
 } from "../../shared/types";
+import type { StoreService } from "./store-service";
+import type { WorktreeService } from "./worktree-service";
 
 export class TaskService {
   constructor(
@@ -108,10 +108,14 @@ export class TaskService {
       .getWorktreesByRepositoryId(task.repositoryId)
       .filter((w) => w.taskId === taskId);
 
-    // Always delete worktrees when deleting task (1:1 relationship)
+    // Always delete worktrees when deleting task (1:1 relationship).
+    // Must stay serial: safeArchiveWorktree commits and runs `git worktree remove`
+    // against the same repository, so parallelising these would race for the index
+    // and worktree locks.
     for (const worktree of worktrees) {
       if (deleteWorktree) {
         try {
+          // react-doctor-disable-next-line async-await-in-loop
           await this.worktree.safeArchiveWorktree(
             repository.path,
             worktree.path,

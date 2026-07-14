@@ -1,7 +1,9 @@
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { afterAll, describe, expect, it, vi } from "vitest";
+
 import { CodexAppServer } from "../../src/codex/app-server";
 
 const FAKE = `#!/usr/bin/env node

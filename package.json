@@ -2,35 +2,50 @@
   "name": "vibest",
   "private": true,
   "scripts": {
-    "dev": "vp run -r --parallel dev",
-    "watch": "vp run -r --parallel dev",
-    "stub": "vp run -r --parallel stub",
-    "build": "vp run -r build",
-    "build:packages": "vp run --filter \"./packages/*\" build",
+    "dev": "turbo dev",
+    "watch": "turbo watch dev",
+    "stub": "turbo watch stub",
+    "build": "turbo build",
+    "build:packages": "turbo build --filter=./packages/*",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "lint": "oxlint --fix",
+    "lint:check": "oxlint --deny-warnings",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "check": "pnpm run lint:check && pnpm run format:check && pnpm run typecheck",
+    "clean": "turbo run clean && git clean -xdf node_modules dist .turbo",
     "bump": "pnpm taze",
-    "test": "vp test",
-    "clean": "vp run -r clean && git clean -xdf node_modules dist .turbo",
     "sherif": "pnpm dlx sherif --fix",
-    "lint": "vp lint --fix",
-    "lint:check": "vp lint --check",
-    "format:check": "vp fmt --check",
-    "format": "vp fmt",
-    "check": "vp check",
-    "typecheck": "vp run -r typecheck",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
-    "prepublish": "vp run --filter \"./packages/*\" build",
-    "prepare": "vp config"
+    "prepublish": "pnpm run build:packages",
+    "prepare": "git config core.hooksPath .githooks && simple-git-hooks",
+    "doctor": "react-doctor --yes"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.6",
-    "@types/node": "^24.10.13",
-    "publint": "^0.3.12",
-    "taze": "^19.5.0",
+    "@changesets/cli": "^2.31.0",
+    "@types/node": "^24.13.3",
+    "lint-staged": "^17.0.8",
+    "oxfmt": "^0.58.0",
+    "oxlint": "^1.73.0",
+    "publint": "^0.3.21",
+    "react-doctor": "^0.7.6",
+    "simple-git-hooks": "^2.13.1",
+    "taze": "^19.14.1",
+    "turbo": "^2.10.4",
     "typescript": "^7.0.2",
-    "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vitest": "catalog:"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx --no-install lint-staged"
+  },
+  "lint-staged": {
+    "*": [
+      "oxlint --fix --no-error-on-unmatched-pattern",
+      "oxfmt --no-error-on-unmatched-pattern"
+    ]
   },
   "packageManager": "pnpm@11.12.0"
 }

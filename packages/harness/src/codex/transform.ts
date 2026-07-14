@@ -1,6 +1,6 @@
-import type { CodexUIMessageChunk } from "./ui-message";
 import type { ServerNotification } from "./protocol";
 import type { ThreadItem } from "./protocol/v2";
+import type { CodexUIMessageChunk } from "./ui-message";
 
 // app-server notification → UI-chunk transform, the codex analog of the Claude
 // `createTransform`. Same house generator-factory style: call once per session

@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Session } from "../../src/claude-code/agent";
 
-const mockQuery = vi.hoisted(() => vi.fn());
+const mockQuery = vi.hoisted(() => vi.fn<() => unknown>());
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: mockQuery,
@@ -21,7 +21,7 @@ describe("Session", () => {
   beforeEach(() => {
     session = new Session();
     mockQueryInstance = {
-      supportedCommands: vi.fn().mockResolvedValue([
+      supportedCommands: vi.fn<() => Promise<unknown>>().mockResolvedValue([
         {
           name: "read",
           description: "Read file contents",
@@ -43,7 +43,7 @@ describe("Session", () => {
           argumentHint: "<command>",
         },
       ]),
-      supportedModels: vi.fn().mockResolvedValue([
+      supportedModels: vi.fn<() => Promise<unknown>>().mockResolvedValue([
         {
           value: "claude-sonnet-4-5",
           displayName: "Sonnet 4.5",
@@ -55,7 +55,7 @@ describe("Session", () => {
           description: "Most powerful",
         },
       ]),
-      mcpServerStatus: vi.fn().mockResolvedValue([
+      mcpServerStatus: vi.fn<() => Promise<unknown>>().mockResolvedValue([
         {
           name: "filesystem",
           status: "connected",
@@ -67,8 +67,8 @@ describe("Session", () => {
           serverInfo: { name: "git", version: "1.0.0" },
         },
       ]),
-      accountInfo: vi.fn().mockResolvedValue({ plan: "pro" }),
-      interrupt: vi.fn(),
+      accountInfo: vi.fn<() => Promise<unknown>>().mockResolvedValue({ plan: "pro" }),
+      interrupt: vi.fn<() => void>(),
     };
 
     mockQuery.mockReturnValue(mockQueryInstance);

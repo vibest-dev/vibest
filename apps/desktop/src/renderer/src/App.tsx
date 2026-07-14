@@ -9,8 +9,6 @@ import {
 import { FolderGit2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { DiffFileInfo, Task, Worktree } from "./types";
-
 import { LabelManagerDialog } from "./components/label";
 import { PrimarySidebarOverlay } from "./components/layout/primary-sidebar-overlay";
 import { SecondarySidebar } from "./components/layout/secondary-sidebar";
@@ -36,6 +34,7 @@ import { client } from "./lib/client";
 import { orpc } from "./lib/orpc";
 import { queryClient } from "./lib/query-client";
 import { useAppStore } from "./stores";
+import type { DiffFileInfo, Task, Worktree } from "./types";
 
 const SECONDARY_SPLIT_ID = "split-secondary";
 
@@ -43,6 +42,10 @@ function getLeafTitle(kind: string): string {
   if (kind === "terminal") return "Terminal";
   if (kind === "diff") return "Diff";
   return kind;
+}
+
+function handleRefresh(): void {
+  // Queries are refreshed through invalidation in mutations and hooks.
 }
 
 function toDiffFileInfo(value: unknown): DiffFileInfo | null {
@@ -199,7 +202,7 @@ function App(): React.JSX.Element {
     }),
   );
 
-  const selectedTask = selectedTaskData?.task ?? null;
+  const selectedTask = useMemo(() => selectedTaskData?.task ?? null, [selectedTaskData]);
   const selectedTaskWorktree = selectedTaskData?.worktrees[0] ?? null;
 
   const selectedRepository = useMemo(() => {
@@ -309,10 +312,6 @@ function App(): React.JSX.Element {
     },
     [archiveTaskMutation],
   );
-
-  const handleRefresh = () => {
-    // Queries are refreshed through invalidation in mutations and hooks.
-  };
 
   const handleToggleSecondarySplit = useCallback(() => {
     setSplitState((current) => {

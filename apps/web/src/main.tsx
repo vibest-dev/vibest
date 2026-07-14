@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 
 import { queryClient } from "./lib/orpc";
 import { createRouter } from "./router";
+
 import "./index.css";
 
 const router = createRouter();

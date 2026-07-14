@@ -5,7 +5,6 @@ import { Plus, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import type { TerminalInfo } from "../../../../shared/contract/terminal";
-
 import { orpc } from "../../lib/orpc";
 import { queryClient } from "../../lib/query-client";
 import { useAppStore } from "../../stores/app-store";
@@ -116,6 +115,9 @@ export function TerminalPanel({
                   type="button"
                   onClick={(e) => handleCloseTerminal(e, terminal.id)}
                   className="opacity-60 hover:opacity-100"
+                  aria-label={
+                    terminals.length === 1 ? "Close terminal" : `Close terminal ${index + 1}`
+                  }
                 >
                   <X className="h-3 w-3" />
                 </button>

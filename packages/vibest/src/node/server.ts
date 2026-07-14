@@ -1,12 +1,12 @@
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import type { WebSocket } from "ws";
-
-import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server/rpc";
 import fs from "node:fs";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer as createHttpServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server/rpc";
 import sirv from "sirv";
+import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
 const isDev = process.env.NODE_ENV === "development";

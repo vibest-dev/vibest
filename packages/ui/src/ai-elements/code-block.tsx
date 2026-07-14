@@ -1,14 +1,13 @@
 "use client";
 
-import type { ComponentProps, HTMLAttributes, JSX, ReactNode } from "react";
-import type { BundledLanguage, CodeToHastOptions } from "shiki/bundle/web";
-
 import { Button } from "@vibest/ui/components/button";
 import { cn } from "@vibest/ui/lib/utils";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import type { ComponentProps, HTMLAttributes, JSX, ReactNode } from "react";
 import { createContext, Fragment, Suspense, use, useContext, useMemo, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
+import type { BundledLanguage, CodeToHastOptions } from "shiki/bundle/web";
 import { codeToHast } from "shiki/bundle/web";
 
 type CodeBlockContextType = {
@@ -76,8 +75,10 @@ export function CodeBlock({
     });
   }, [code, language, codeToHastOptions]);
 
+  const contextValue = useMemo<CodeBlockContextType>(() => ({ code }), [code]);
+
   return (
-    <CodeBlockContext.Provider value={{ code }}>
+    <CodeBlockContext.Provider value={contextValue}>
       <div
         className={cn(
           "bg-background text-foreground relative w-full overflow-hidden rounded-md border",

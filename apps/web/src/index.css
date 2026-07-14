@@ -1,4 +1,5 @@
 @import "@vibest/ui/globals.css";
+@import "tw-shimmer";
 
 @source "../node_modules/@vibest/ui";
 
@@ -63,4 +64,13 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* TipTap Placeholder extension renders via ::before on the empty first paragraph. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  height: 0;
 }

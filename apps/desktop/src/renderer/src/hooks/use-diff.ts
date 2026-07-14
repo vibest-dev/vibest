@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { DiffResult } from "../types";
-
 import { client } from "../lib/client";
+import type { DiffResult } from "../types";
 
 interface UseDiffOptions {
   path: string;

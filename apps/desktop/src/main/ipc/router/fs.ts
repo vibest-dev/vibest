@@ -1,10 +1,10 @@
-import { implement } from "@orpc/server";
-import { dialog, shell } from "electron";
 import { execFile, spawn } from "node:child_process";
 
-import type { AppContext } from "../../app";
+import { implement } from "@orpc/server";
+import { dialog, shell } from "electron";
 
 import { fsContract } from "../../../shared/contract";
+import type { AppContext } from "../../app";
 
 const os = implement(fsContract).$context<AppContext>();
 

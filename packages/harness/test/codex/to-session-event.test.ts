@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { LifecycleView } from "../../src/types/session";
+
 import type { ServerNotification } from "../../src/codex/protocol";
 import { toSessionEvent } from "../../src/codex/to-session-event";
+import type { LifecycleView } from "../../src/types/session";
 
 const view: LifecycleView = {
   sessionId: "th",

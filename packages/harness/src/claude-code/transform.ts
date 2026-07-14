@@ -1,8 +1,9 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { generateId } from "ai";
+
 import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
-import { claudeCodeTools } from "./tools";
 import { flattenToolResultText, subagentMetadata } from "./render-policy";
+import { claudeCodeTools } from "./tools";
 
 /**
  * Per-session render transform factory. State: each tool call's `dynamic`

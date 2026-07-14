@@ -20,13 +20,21 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webglAddonRef = useRef<WebglAddon | null>(null);
-  const cancelSubscriptionRef = useRef<(() => Promise<void>) | null>(null);
   const isVisibleRef = useRef(isVisible);
-  isVisibleRef.current = isVisible;
 
   const { resolvedTheme } = useTheme();
 
-  // Initialize terminal once
+  // Keep the ref in sync after every render. The consumers below (rAF callbacks
+  // and the ResizeObserver) all run after commit, so they never observe a stale
+  // value. Writing during render would leak from work React can discard.
+  useEffect(() => {
+    isVisibleRef.current = isVisible;
+  });
+
+  // Initialize terminal once.
+  // The oRPC subscription IS cleaned up — `cancel()` runs in the cleanup below —
+  // but the rule cannot follow the handle through `consumeEventIterator`.
+  // react-doctor-disable-next-line effect-needs-cleanup
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return;
 
@@ -130,12 +138,11 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
         console.error("[Terminal] Subscription error:", error);
       },
     });
-    cancelSubscriptionRef.current = cancel;
 
     // Cleanup
     return () => {
       isActive = false;
-      cancelSubscriptionRef.current?.();
+      cancel();
       dataDisposable.dispose();
       resizeDisposable.dispose();
       // Dispose WebGL addon before terminal to release GPU resources
@@ -144,7 +151,6 @@ export function TerminalView({ terminalId, isVisible }: TerminalViewProps) {
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
-      cancelSubscriptionRef.current = null;
     };
   }, [terminalId]);
 

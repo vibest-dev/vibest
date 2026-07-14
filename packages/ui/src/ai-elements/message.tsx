@@ -1,8 +1,7 @@
-import type { UIMessage } from "ai";
-import type { ComponentProps, HTMLAttributes } from "react";
-
 import { Avatar, AvatarFallback, AvatarImage } from "@vibest/ui/components/avatar";
 import { cn } from "@vibest/ui/lib/utils";
+import type { UIMessage } from "ai";
+import type { ComponentProps, HTMLAttributes } from "react";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];

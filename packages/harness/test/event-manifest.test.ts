@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { GlobalEventDefs, SessionEventDefs } from "../src/event-manifest";
 
 const RESERVED_VERBS = new Set([

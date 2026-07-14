@@ -8,10 +8,9 @@ import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
 import { Layer, ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
-import type { RpcContext } from "./context";
-
 import { ClaudeCodeLayer } from "./claude-code";
 import { CodexLayer } from "./codex";
+import type { RpcContext } from "./context";
 import { router } from "./router";
 
 const RPC_PREFIX = "/api/rpc";

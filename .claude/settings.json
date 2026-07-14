@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "devflow@vibest": false,
+    "superpowers@claude-plugins-official": false
+  }
+}

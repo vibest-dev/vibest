@@ -1,9 +1,9 @@
-import { implement } from "@orpc/server";
 import * as path from "node:path";
 
-import type { AppContext } from "../../app";
+import { implement } from "@orpc/server";
 
 import { terminalContract } from "../../../shared/contract/terminal";
+import type { AppContext } from "../../app";
 
 const os = implement(terminalContract).$context<AppContext>();
 

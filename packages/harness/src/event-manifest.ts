@@ -1,5 +1,5 @@
-import type { EventValue } from "./types/event";
 import * as S from "./events/session";
+import type { EventValue } from "./types/event";
 
 /** Session-scoped events (control plane carried on a session envelope). */
 export const SessionEventDefs = [

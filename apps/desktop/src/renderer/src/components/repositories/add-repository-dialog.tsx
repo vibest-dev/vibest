@@ -23,10 +23,9 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { FolderGit2, GitBranch, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Branch } from "../../types";
-
 import { client } from "../../lib/client";
 import { cn } from "../../lib/utils";
+import type { Branch } from "../../types";
 
 interface AddRepositoryDialogProps {
   isOpen: boolean;

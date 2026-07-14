@@ -1,10 +1,10 @@
-import { useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@vibest/ui/components/button";
 import { useState } from "react";
 
 import { orpcClient } from "@/lib/orpc";
 
-export const Route = createFileRoute({
+export const Route = createFileRoute("/")({
   component: Component,
 });
 

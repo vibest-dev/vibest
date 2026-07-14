@@ -14,11 +14,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import type { Worktree } from "../../types";
-
 import { useGitStatus } from "../../hooks/use-git-status";
 import { client } from "../../lib/client";
 import { cn } from "../../lib/utils";
+import type { Worktree } from "../../types";
 import { WorktreeStatus } from "./worktree-status";
 
 interface WorktreeCardProps {

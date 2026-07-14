@@ -1,9 +1,8 @@
-import type { Worktree } from "../../types";
-import type { PaneLeaf as PaneLeafModel } from "./split-state";
-
 import { cn } from "../../lib/utils";
+import type { Worktree } from "../../types";
 import { PaneLeaf } from "./pane-leaf";
 import { PaneTabs } from "./pane-tabs";
+import type { PaneLeaf as PaneLeafModel } from "./split-state";
 
 interface SplitPaneProps {
   splitId: string;
@@ -36,6 +35,9 @@ export function SplitPane({
         "bg-background flex h-full min-h-0 min-w-0 flex-col",
         isActive ? "ring-primary/30 ring-1" : "",
       )}
+      // Layout wrapper: the handler only marks this split active on click; the
+      // pane's own controls stay individually focusable.
+      role="presentation"
       onMouseDown={() => onActivateSplit(splitId)}
     >
       <PaneTabs

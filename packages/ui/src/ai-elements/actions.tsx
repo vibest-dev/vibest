@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import {
   Tooltip,
@@ -10,6 +8,7 @@ import {
   TooltipTrigger,
 } from "@vibest/ui/components/tooltip";
 import { cn } from "@vibest/ui/lib/utils";
+import type { ComponentProps } from "react";
 
 export type ActionsProps = ComponentProps<"div">;
 

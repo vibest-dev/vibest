@@ -1,5 +1,5 @@
-import { Pushable } from "../utils/pushable";
 import type { AgentRequest, AgentResponse } from "../types/request";
+import { Pushable } from "../utils/pushable";
 import { CodexAppServer } from "./app-server";
 import type { ServerNotification, ServerRequest } from "./protocol";
 import type {

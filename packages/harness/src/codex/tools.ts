@@ -1,5 +1,6 @@
 import { tool, type InferUITools, type ToolSet } from "ai";
 import { z } from "zod";
+
 import type { ThreadItem } from "./protocol/v2";
 
 /** Pull one `ThreadItem` arm by its discriminant. */

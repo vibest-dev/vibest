@@ -1,9 +1,7 @@
-import type { Publisher } from "./publisher";
 import type { GitService } from "./git-service";
-
 import type { GitWatcherEvents } from "./git-watcher-types";
-
 import { PollingScheduler } from "./infra/polling-scheduler";
+import type { Publisher } from "./publisher";
 
 export interface GitWatcherServiceOptions {
   pollInterval?: number; // Default: 10 seconds

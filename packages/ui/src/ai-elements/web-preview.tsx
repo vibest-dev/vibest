@@ -1,7 +1,5 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import {
   Collapsible,
@@ -17,6 +15,7 @@ import {
 } from "@vibest/ui/components/tooltip";
 import { cn } from "@vibest/ui/lib/utils";
 import { ChevronDownIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
 import { createContext, forwardRef, useContext, useState } from "react";
 
 export type WebPreviewContextValue = {
@@ -156,9 +155,16 @@ export const WebPreviewBody = forwardRef<HTMLIFrameElement, WebPreviewBodyProps>
 
     return (
       <div className="flex-1">
+        {/*
+          `allow-scripts` + `allow-same-origin` together let the framed page lift its own
+          sandbox, so this is only safe because the preview target is the developer's own
+          dev server. Both are required: scripts to run the app, same-origin so it keeps
+          access to storage/cookies/HMR (an opaque origin breaks most dev servers).
+        */}
         <iframe
           ref={ref}
           className={cn("size-full", className)}
+          // react-doctor-disable-next-line iframe-missing-sandbox
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
           src={(src ?? url) || undefined}
           title="Preview"
@@ -229,6 +235,11 @@ export const WebPreviewConsole = ({
                   log.level === "warn" && "text-yellow-600",
                   log.level === "log" && "text-foreground",
                 )}
+                // An append-only log stream: entries never reorder, never filter, and carry
+                // no per-row state. `logs` is public API with no id field, and timestamp+
+                // message collides on duplicate logs in the same millisecond — index is the
+                // only stable identity available here.
+                // react-doctor-disable-next-line no-array-index-as-key
                 key={`${log.timestamp.getTime()}-${index}`}
               >
                 <span className="text-muted-foreground">{log.timestamp.toLocaleTimeString()}</span>{" "}

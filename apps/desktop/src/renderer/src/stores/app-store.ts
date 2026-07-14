@@ -2,7 +2,6 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import type { TaskSlice, TerminalSlice, WorkspaceSlice } from "./slices";
-
 import { createTaskSlice, createTerminalSlice, createWorkspaceSlice } from "./slices";
 
 export type AppStore = WorkspaceSlice & TerminalSlice & TaskSlice;

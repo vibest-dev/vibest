@@ -1,6 +1,6 @@
+import type * as st from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import { tool, type InferUITools, type ToolSet, type UIToolInvocation } from "ai";
 import { z } from "zod";
-import type * as st from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 
 // Claude Code tool schemas, bound directly to `@anthropic-ai/claude-agent-sdk/sdk-tools`.
 //

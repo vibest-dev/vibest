@@ -1,4 +1,5 @@
 import { expectTypeOf, test } from "vitest";
+
 import type { CreateSessionConfig, LifecycleView, SessionSnapshot } from "../../src/types/session";
 
 test("SessionSnapshot carries cold history + hot active turn + cursor", () => {

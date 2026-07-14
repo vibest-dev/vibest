@@ -7,9 +7,8 @@ onlyBuiltDependencies:
   - esbuild
   - "@swc/core"
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
+  vite: ^8.1.4
   vitest: 4.1.10
-  vite-plus: 0.2.4
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -18,13 +17,6 @@ overrides:
   # (stable client imports ORPC_HEADER, absent from the beta contract).
   # Pin the whole family to the beta until the repo migrates to stable.
   "@orpc/client": "2.0.0-beta.16"
-peerDependencyRules:
-  allowAny:
-    - vite
-    - vitest
-  allowedVersions:
-    vite: "*"
-    vitest: "*"
 # pnpm 11 defaults minimumReleaseAge to 24h; disable it — the same-day
 # dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked,
 # and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.
@@ -39,3 +31,6 @@ allowBuilds:
   # sharp is a transitive dep of react-scan (desktop devDependency) via next;
   # it ships prebuilt binaries, so its build script is unnecessary — deny it.
   sharp: false
+  # The root `prepare` script installs the hooks (and sets core.hooksPath so it
+  # works inside git worktrees); the package's own postinstall would just fail.
+  simple-git-hooks: false

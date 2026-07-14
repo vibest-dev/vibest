@@ -1,10 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { StoreReadError, StoreWriteError } from "../errors";
-import type { Project } from "../types";
-
 import { Paths } from "../config/paths";
+import type { StoreReadError, StoreWriteError } from "../errors";
 import { readJson, writeJsonAtomic } from "../infra/json-store";
+import type { Project } from "../types";
 
 /**
  * Data access for `$VIBEST_HOME/storage/projects.json` — plain read/write of

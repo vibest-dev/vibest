@@ -1,8 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { HarnessAgentId, McpServerConfig } from "../types";
-
 import { McpServerNotFound, type StoreReadError, type StoreWriteError } from "../errors";
+import type { HarnessAgentId, McpServerConfig } from "../types";
 import { McpRepository } from "./repository";
 
 /**

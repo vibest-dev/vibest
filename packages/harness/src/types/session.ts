@@ -1,7 +1,8 @@
 import type { UIMessage } from "ai";
+
 import type { SessionEnvelope } from "./envelope";
-import type { AgentRequest } from "./request";
 import type { HarnessAgentId } from "./harness-agent-id";
+import type { AgentRequest } from "./request";
 
 export type SessionStatus = {
   status: "initializing" | "running" | "closed" | "crashed";

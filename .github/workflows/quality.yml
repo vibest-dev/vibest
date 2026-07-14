@@ -25,10 +25,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Build workspace packages first so type-checking and linting resolve the
-      # generated `dist` outputs (Vite Task replaces Turborepo's `^build`).
-      - run: pnpm run build:packages
+      # All three declare `dependsOn: ["^build"]`, so Turborepo builds the
+      # upstream workspace packages on demand and caches the results.
+      - run: pnpm turbo run build test typecheck
 
-      - run: pnpm run test
+      # Oxlint and Oxfmt scan the whole repo from the root, so they are not
+      # Turborepo tasks — no package defines a `lint` script.
       - run: pnpm run lint:check
-      - run: pnpm run typecheck
+      - run: pnpm run format:check

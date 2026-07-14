@@ -1,10 +1,9 @@
 "use client";
 
-import type { ComponentProps } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import { ScrollArea, ScrollBar } from "@vibest/ui/components/scroll-area";
 import { cn } from "@vibest/ui/lib/utils";
+import type { ComponentProps } from "react";
 
 export type SuggestionsProps = ComponentProps<typeof ScrollArea>;
 

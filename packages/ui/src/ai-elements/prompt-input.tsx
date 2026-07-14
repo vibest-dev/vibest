@@ -1,8 +1,5 @@
 "use client";
 
-import type { ChatStatus } from "ai";
-import type { ComponentProps, HTMLAttributes, KeyboardEventHandler } from "react";
-
 import { Button } from "@vibest/ui/components/button";
 import {
   Select,
@@ -13,7 +10,9 @@ import {
 } from "@vibest/ui/components/select";
 import { Textarea } from "@vibest/ui/components/textarea";
 import { cn } from "@vibest/ui/lib/utils";
+import type { ChatStatus } from "ai";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
+import type { ComponentProps, HTMLAttributes, KeyboardEventHandler } from "react";
 import { Children, useMemo } from "react";
 
 export type PromptInputProps = HTMLAttributes<HTMLFormElement>;
@@ -30,6 +29,27 @@ export type PromptInputTextareaProps = ComponentProps<typeof Textarea> & {
   maxHeight?: number;
 };
 
+const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+  if (e.key === "Enter") {
+    // Don't submit if IME composition is in progress
+    if (e.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (e.shiftKey) {
+      // Allow newline
+      return;
+    }
+
+    // Submit on Enter (without Shift)
+    e.preventDefault();
+    const form = e.currentTarget.form;
+    if (form) {
+      form.requestSubmit();
+    }
+  }
+};
+
 export const PromptInputTextarea = ({
   onChange,
   className,
@@ -38,27 +58,6 @@ export const PromptInputTextarea = ({
   maxHeight: _maxHeight = 164,
   ...props
 }: PromptInputTextareaProps) => {
-  const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.key === "Enter") {
-      // Don't submit if IME composition is in progress
-      if (e.nativeEvent.isComposing) {
-        return;
-      }
-
-      if (e.shiftKey) {
-        // Allow newline
-        return;
-      }
-
-      // Submit on Enter (without Shift)
-      e.preventDefault();
-      const form = e.currentTarget.form;
-      if (form) {
-        form.requestSubmit();
-      }
-    }
-  };
-
   return (
     <Textarea
       className={cn(

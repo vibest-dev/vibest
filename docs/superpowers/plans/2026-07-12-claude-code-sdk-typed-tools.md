@@ -25,11 +25,13 @@
 The SDK's types become the package's public API in this refactor; a caret range would let `pnpm install` silently change the API surface.
 
 **Files:**
+
 - Modify: `packages/harness/package.json`
 - Modify: `packages/contract/package.json`
 - Modify: `packages/vibest/package.json`
 
 **Interfaces:**
+
 - Produces: exact dependency `"@anthropic-ai/claude-agent-sdk": "0.3.207"` in all three packages.
 
 - [ ] **Step 1: Pin the dependency in all three package.json files**
@@ -69,12 +71,14 @@ git commit -m "chore(harness): pin claude-agent-sdk to exact 0.3.207"
 Replace the 18 per-tool files under `packages/harness/src/claude-code/tools/` with a single `tools.ts`: 23 tools typed via `z.custom<SdkType>()` + the 4 legacy hand-written tools moved verbatim. This is the pattern from neo's `packages/contract/src/agent/claude-code/tools.ts` (read it before starting).
 
 **Files:**
+
 - Create: `packages/harness/src/claude-code/tools.ts`
 - Create: `packages/harness/test/claude-code/tools.test-d.ts`
 - Delete: `packages/harness/src/claude-code/tools/` (all 18 files, including the never-registered `list-mcp-resources.ts` / `read-mcp-resource.ts`)
 - Modify: `packages/harness/src/claude-code/index.ts`
 
 **Interfaces:**
+
 - Produces: `claudeCodeTools` (registry object, 27 keys, `satisfies ToolSet`), `ClaudeCodeTools = InferUITools<typeof claudeCodeTools>`, per-tool consts and `<Name>UIToolInvocation` types for every registry entry.
 - Consumers (`packages/ui`, `packages/contract`, `apps/web`) keep importing the same names from `@vibest/harness/claude-code` — no import churn outside harness.
 
@@ -395,9 +399,11 @@ git commit -m "refactor(harness): SDK-typed claude-code tool registry via z.cust
 ### Task 3: Data parts on ClaudeCodeUIMessage
 
 **Files:**
+
 - Modify: `packages/harness/src/claude-code/ui-message.ts`
 
 **Interfaces:**
+
 - Produces: `ClaudeCodeDataTypes` with keys `"system/init"`, `"system/compact_boundary"`, `"result/success"`, `` `result/${SDKResultError["subtype"]}` ``, `"user-prompt"`. Chunk types become `data-system/init` etc. (no `.` in any chunk type — the envelope's `isSessionEvent` dot-routing in `packages/harness/src/types/envelope.ts:33` is unaffected).
 
 - [ ] **Step 1: Replace the file content**
@@ -455,6 +461,7 @@ git commit -m "feat(harness): SDK-message-backed data parts on ClaudeCodeUIMessa
 The transform gains cross-message state (the `dynamic` classification of each tool call must be replayed onto its later tool_result, which carries no tool name), so it becomes a factory. `toUIMessage` currently duplicates the whole mapping (`packages/harness/src/claude-code/utils/to-ui-message.ts`) — it is rewritten to wrap the one transform.
 
 **Files:**
+
 - Create: `packages/harness/src/claude-code/render-policy.ts`
 - Modify: `packages/harness/src/claude-code/transform.ts` (full rewrite)
 - Modify: `packages/harness/src/claude-code/utils/to-ui-message.ts` (full rewrite)
@@ -463,6 +470,7 @@ The transform gains cross-message state (the `dynamic` classification of each to
 - Test: `packages/harness/test/claude-code/transform.test.ts` (rewrite), `packages/harness/test/claude-code/fold.test.ts` (adjust fixtures), `packages/harness/test/exports.test.ts` (rename)
 
 **Interfaces:**
+
 - Produces: `createTransform(): (message: SDKMessage) => Generator<ClaudeCodeUIMessageChunk>`; `subagentMetadata(parent: string | null)`; `flattenToolResultText(content: unknown): string`.
 - Consumes: `claudeCodeTools` (registry keys drive the `dynamic` flag).
 
@@ -790,6 +798,7 @@ git commit -m "feat(harness): tool_use_result outputs, dynamic flag, data-* chun
 ### Task 5: Contract passthrough — delete hand-written domain schemas
 
 **Files:**
+
 - Delete: `packages/harness/src/claude-code/schema/` (whole dir)
 - Delete: `packages/harness/test/schema-type-compatibility.test-d.ts`
 - Modify: `packages/harness/src/claude-code/index.ts` (drop schema re-exports, lines 63–70)
@@ -797,6 +806,7 @@ git commit -m "feat(harness): tool_use_result outputs, dynamic flag, data-* chun
 - Modify: `apps/web/src/components/claude-code-message-parts.tsx`
 
 **Interfaces:**
+
 - Produces: contract outputs typed directly by SDK types via oRPC `type<T>()`; `respondPermission` input carries `z.custom<sdk.PermissionResult>()` (typed pass-through — the local client is trusted).
 - The prompt stream output becomes `InferUIMessageChunk<ClaudeCodeUIMessage>` so data parts flow through typed.
 
@@ -891,6 +901,7 @@ git commit -m "refactor(contract): SDK-typed passthrough outputs, drop hand-writ
 Outputs changed type: `Bash` → `st.BashOutput` (`{stdout, stderr, interrupted, ...}`), `Read` → `st.FileReadOutput` (union on `type: "text" | "image" | ...`), `Glob` → `st.GlobOutput` (`{filenames, numFiles, ...}`), `Grep` → `st.GrepOutput` (`{mode?, content?, filenames, ...}`), `WebFetch` → `st.WebFetchOutput` (`{result, code, url, ...}`), `WebSearch` → `st.WebSearchOutput` (`{query, results: ({content: {title, url}[]} | string)[]}`), `Task` → `st.AgentOutput` (union; completed arm has `content: {type: "text", text}[]`). Input field names are unchanged (`file_path`, `old_string`, `todos`, …), so input-only components (`edit-tool`, `write-tool`, `todo-write-tool`, and the 4 legacy components) compile untouched.
 
 **Files:**
+
 - Modify: `packages/ui/src/claude-code/bash-tool.tsx`
 - Modify: `packages/ui/src/claude-code/read-tool.tsx`
 - Modify: `packages/ui/src/claude-code/glob-tool.tsx`
@@ -927,21 +938,25 @@ const code = output?.type === "text" ? output.file.content : undefined;
 Replace the output render block:
 
 ```tsx
-{output ? (
-  <CodeBlock code={output.filenames.join("\n")} language="text" className="text-sm" />
-) : null}
+{
+  output ? (
+    <CodeBlock code={output.filenames.join("\n")} language="text" className="text-sm" />
+  ) : null;
+}
 ```
 
 - [ ] **Step 4: grep-tool.tsx — render content or filenames**
 
 ```tsx
-{output ? (
-  <CodeBlock
-    code={output.content ?? output.filenames.join("\n")}
-    language="text"
-    className="text-sm"
-  />
-) : null}
+{
+  output ? (
+    <CodeBlock
+      code={output.content ?? output.filenames.join("\n")}
+      language="text"
+      className="text-sm"
+    />
+  ) : null;
+}
 ```
 
 - [ ] **Step 5: web-fetch-tool.tsx — render result**
@@ -977,15 +992,17 @@ Replace `<ToolContent>{output ? <Response>{output}</Response> : null}</ToolConte
 Replace the `Array.isArray(output) ? output.map(...)` block with:
 
 ```tsx
-{output && "content" in output
-  ? output.content.map((part) =>
-      part.type === "text" ? (
-        <div key={part.text}>
-          <Response>{part.text}</Response>
-        </div>
-      ) : null,
-    )
-  : null}
+{
+  output && "content" in output
+    ? output.content.map((part) =>
+        part.type === "text" ? (
+          <div key={part.text}>
+            <Response>{part.text}</Response>
+          </div>
+        ) : null,
+      )
+    : null;
+}
 ```
 
 - [ ] **Step 8: Workspace check + build**

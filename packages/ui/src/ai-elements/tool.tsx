@@ -1,16 +1,15 @@
 "use client";
 
 import type { CollapsibleRootProps } from "@base-ui/react/collapsible";
-import type { LucideIcon } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
+import type { LucideIcon } from "lucide-react";
 import { SquareMinusIcon, SquarePlusIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
 
 export type ToolProps = CollapsibleRootProps;
 

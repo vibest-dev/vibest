@@ -1,8 +1,9 @@
-import { Effect } from "effect";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { Effect } from "effect";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FSService, FSServiceLayer } from "../src/index";
 

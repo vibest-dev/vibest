@@ -22,6 +22,7 @@
 ### Task 1: Generate and vendor the app-server protocol types
 
 **Files:**
+
 - Create: `packages/harness/src/codex/protocol/**` (generated)
 - Create: `packages/harness/src/codex/protocol/README.md`
 - Modify: `.oxlintrc.json`, `.oxfmtrc.json` (ignore the generated dir)
@@ -77,11 +78,13 @@ git commit -m "feat(harness): vendor generated codex app-server protocol types"
 Port neo `packages/contract/src/agent/codex/tools.ts` and `ui-message.ts` into harness, renamed to vibest conventions.
 
 **Files:**
+
 - Create: `packages/harness/src/codex/tools.ts`
 - Modify: `packages/harness/src/codex/ui-message.ts` (replace the placeholder)
 - Create: `packages/harness/test/codex/tools.test-d.ts`
 
 **Interfaces:**
+
 - Produces: `codexTools` registry (`satisfies ToolSet`), `CodexTools = InferUITools<typeof codexTools>`, `CodexDataTypes`, `CodexMetadata = { sessionId: string }`, `CodexUIMessage` — same exported names the envelope already imports (`packages/harness/src/types/envelope.ts:3`).
 
 - [ ] **Step 1: Verify the ThreadItem arms on 0.142.x**
@@ -251,10 +254,12 @@ git commit -m "feat(harness): codex tool registry and UIMessage types from gener
 Port neo `codex/app-server.ts` (a self-contained ~250-line file) nearly verbatim.
 
 **Files:**
+
 - Create: `packages/harness/src/codex/app-server.ts`
 - Test: `packages/harness/test/codex/app-server.test.ts`
 
 **Interfaces:**
+
 - Produces: `class CodexAppServer { constructor(options: CodexAppServerOptions); start(): void; initialize(clientInfo, capabilities?): Promise<InitializeResponse>; request<T>(method, params?): Promise<T>; notify(method, params?): void; close(): Promise<void> }`, `CodexAppServerHandlers { onNotification?, onServerRequest?, onExit? }`, `class CodexRpcError`.
 
 - [ ] **Step 1: Write the fake-server test first**
@@ -389,11 +394,13 @@ git commit -m "feat(harness): codex app-server JSON-RPC client"
 Port neo `codex/transform.ts` (typed to vibest's `CodexUIMessageChunk`) and write vibest's `toSessionEvent` against the dotted `SessionEvent` vocabulary (`packages/harness/src/events/session.ts`), mirroring `claude-code/to-session-event.ts`'s `(message, view: LifecycleView)` signature.
 
 **Files:**
+
 - Create: `packages/harness/src/codex/transform.ts`
 - Create: `packages/harness/src/codex/to-session-event.ts`
 - Test: `packages/harness/test/codex/transform.test.ts`, `packages/harness/test/codex/to-session-event.test.ts`
 
 **Interfaces:**
+
 - Produces: `createCodexTransform(): (notification: ServerNotification) => Generator<CodexUIMessageChunk>`; `isToolThreadItem`, `isDynamicToolThreadItem`, `reasoningText`; `toSessionEvent(notification: ServerNotification, view: LifecycleView): SessionEvent | undefined`.
 - Consumes: `LifecycleView` from `packages/harness/src/types/session.ts` (`{ sessionId, activeTurnId, nextTurnId() }`).
 
@@ -429,7 +436,10 @@ describe("createCodexTransform", () => {
     const t2 = createCodexTransform();
     const whole = [
       ...t2(
-        n("item/completed", { threadId: "th", item: { type: "agentMessage", id: "i2", text: "hi" } }),
+        n("item/completed", {
+          threadId: "th",
+          item: { type: "agentMessage", id: "i2", text: "hi" },
+        }),
       ),
     ];
     expect(types(whole)).toEqual(["text-start", "text-delta", "text-end"]);
@@ -460,16 +470,22 @@ describe("createCodexTransform", () => {
   it("turn/completed → data + finish; terminal error → data + error + finish", () => {
     const t = createCodexTransform();
     expect(
-      types([...t(n("turn/completed", { threadId: "th", turn: { id: "t1", status: "completed" } }))]),
+      types([
+        ...t(n("turn/completed", { threadId: "th", turn: { id: "t1", status: "completed" } })),
+      ]),
     ).toEqual(["data-turn/completed", "finish"]);
     expect(
       types([
-        ...t(n("error", { threadId: "th", turnId: "t1", willRetry: false, error: { message: "x" } })),
+        ...t(
+          n("error", { threadId: "th", turnId: "t1", willRetry: false, error: { message: "x" } }),
+        ),
       ]),
     ).toEqual(["data-turn/error", "error", "finish"]);
     expect(
       types([
-        ...t(n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } })),
+        ...t(
+          n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } }),
+        ),
       ]),
     ).toEqual(["data-turn/error", "error"]);
   });
@@ -497,11 +513,13 @@ const n = (method: string, params: unknown) => ({ method, params }) as ServerNot
 
 describe("codex toSessionEvent", () => {
   it("turn/started → session.turn.started", () => {
-    expect(toSessionEvent(n("turn/started", { threadId: "th", turn: { id: "t1" } }), view)).toEqual({
-      type: "session.turn.started",
-      sessionId: "th",
-      turnId: "t1",
-    });
+    expect(toSessionEvent(n("turn/started", { threadId: "th", turn: { id: "t1" } }), view)).toEqual(
+      {
+        type: "session.turn.started",
+        sessionId: "th",
+        turnId: "t1",
+      },
+    );
   });
 
   it("turn/completed maps status to outcome", () => {
@@ -638,10 +656,12 @@ git commit -m "feat(harness): codex notification transform and session-event map
 Port neo `codex/request.ts` onto vibest's simpler `AgentRequest`/`AgentResponse` (`packages/harness/src/types/request.ts` — actions are `{id, label}` only; tool responses are `{behavior: "allow" | "deny", message?, native?}`).
 
 **Files:**
+
 - Create: `packages/harness/src/codex/request.ts`
 - Test: `packages/harness/test/codex/request.test.ts`
 
 **Interfaces:**
+
 - Produces: `isApprovalRequest`, `isUserInputRequest`, `buildApprovalRequest(req): AgentRequest`, `buildUserInputRequest(req): AgentRequest`, `mapApprovalResponse(res: AgentResponse, source): unknown`, `mapUserInputResponse(res): ToolRequestUserInputResponse`, `declineResult(source)`, `emptyUserInputResponse()`, types `ApprovalServerRequest`, `UserInputServerRequest`, `ApprovalSource`.
 
 - [ ] **Step 1: Write the test first**
@@ -722,7 +742,8 @@ function deriveDecision(response: AgentResponse): "accept" | "decline" {
 
 export function mapApprovalResponse(response: AgentResponse, source: ApprovalSource): unknown {
   if (source === "permissions") return { permissions: {}, scope: "turn" };
-  const native = response.type === "tool" ? (response.native as { decision?: string } | undefined) : undefined;
+  const native =
+    response.type === "tool" ? (response.native as { decision?: string } | undefined) : undefined;
   return { decision: native?.decision ?? deriveDecision(response) };
 }
 ```
@@ -746,6 +767,7 @@ git commit -m "feat(harness): map codex approvals/questions onto AgentRequest"
 The vibest-native piece (no direct neo counterpart — neo splits this across provider.ts/session.ts with an event hub vibest doesn't have). Mirrors `claude-code/agent.ts`'s shape: a `Session` manager with `create/prompt/abort/interrupt/respondPermission`, `Pushable`-backed streams, `AsyncGenerator` prompt.
 
 **Files:**
+
 - Create: `packages/harness/src/codex/agent.ts`
 - Create: `packages/harness/src/codex/index.ts`
 - Modify: `packages/harness/package.json` (add `"./codex": "./src/codex/index.ts"` to exports)
@@ -753,6 +775,7 @@ The vibest-native piece (no direct neo counterpart — neo splits this across pr
 - Test: `packages/harness/test/codex/agent.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
@@ -763,7 +786,7 @@ export class CodexAgent {
 export class Session {
   create(config: { workspacePath: string }): Promise<{ sessionId: string }>;
   prompt(input: { sessionId: string; text: string }): AsyncGenerator<CodexUIMessageChunk>;
-  requestPermission(sessionId: string): Pushable<AgentRequest>;   // the per-session stream
+  requestPermission(sessionId: string): Pushable<AgentRequest>; // the per-session stream
   respondPermission(sessionId: string, requestId: string, response: AgentResponse): boolean;
   interrupt(sessionId: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
@@ -843,11 +866,7 @@ import { Pushable } from "../claude-code/utils/pushable";
 import type { AgentRequest, AgentResponse } from "../types/request";
 import { CodexAppServer } from "./app-server";
 import type { ServerNotification, ServerRequest } from "./protocol"; // ← verified path
-import type {
-  ThreadStartResponse,
-  TurnStartResponse,
-  TurnSteerResponse,
-} from "./protocol/v2"; // ← verified path
+import type { ThreadStartResponse, TurnStartResponse, TurnSteerResponse } from "./protocol/v2"; // ← verified path
 import {
   approvalSourceOf,
   buildApprovalRequest,
@@ -873,7 +892,14 @@ interface SessionState {
   // loop never closes the underlying stream (for-await would call return()).
   reader: AsyncIterator<CodexUIMessageChunk>;
   requests: Pushable<AgentRequest>;
-  pending: Map<string, { resolve: (value: unknown) => void; declineValue: unknown; settle: (r: AgentResponse) => unknown }>;
+  pending: Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      declineValue: unknown;
+      settle: (r: AgentResponse) => unknown;
+    }
+  >;
   transform: ReturnType<typeof createCodexTransform>;
   activeTurnId?: string;
 }
@@ -1114,6 +1140,7 @@ git commit -m "feat(harness): CodexAgent session manager over app-server threads
 Mirror `packages/contract/src/claude-code.ts` and `packages/server/src/rpc/claude-code.ts`.
 
 **Files:**
+
 - Create: `packages/contract/src/codex.ts`
 - Modify: `packages/contract/src/index.ts`
 - Modify: `packages/contract/package.json` (dependency on nothing new — harness is already a dependency; verify)
@@ -1123,6 +1150,7 @@ Mirror `packages/contract/src/claude-code.ts` and `packages/server/src/rpc/claud
 - Test: `packages/server/test/rpc-codex.test.ts` (or the server's existing test layout — read `packages/server/test/` first and follow it)
 
 **Interfaces:**
+
 - Produces: `codexContract`, `codexRouter`, Effect service `Codex` + `CodexLayer`; router shape `router.codex.session.create` / `.prompt` / `.requestPermission` / `.respondPermission`.
 
 - [ ] **Step 1: Write the contract**
@@ -1137,9 +1165,7 @@ import { z } from "zod";
 
 export const codexContract = {
   session: {
-    create: oc
-      .input(z.object({ workspacePath: z.string() }))
-      .output(type<{ sessionId: string }>()),
+    create: oc.input(z.object({ workspacePath: z.string() })).output(type<{ sessionId: string }>()),
     abort: oc.input(z.object({ sessionId: z.string() })),
   },
   prompt: oc
@@ -1270,7 +1296,10 @@ describe.skipIf(process.env.CODEX_SMOKE !== "1")("codex live smoke", () => {
     const agent = new CodexAgent();
     const { sessionId } = await agent.session.create({ workspacePath: process.cwd() });
     const seen: string[] = [];
-    for await (const chunk of agent.session.prompt({ sessionId, text: "Reply with exactly: PONG" })) {
+    for await (const chunk of agent.session.prompt({
+      sessionId,
+      text: "Reply with exactly: PONG",
+    })) {
       seen.push(chunk.type);
     }
     expect(seen).toContain("finish");

@@ -1,5 +1,6 @@
 import type * as st from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import { describe, expectTypeOf, test } from "vitest";
+
 import type { ClaudeCodeTools } from "../../src/claude-code";
 
 type In<K extends keyof ClaudeCodeTools> = ClaudeCodeTools[K]["input"];

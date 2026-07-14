@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest";
+
 import type { ThreadItem } from "../../src/codex/protocol/v2";
 import type { CodexTools } from "../../src/codex/tools";
 

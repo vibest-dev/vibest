@@ -1,13 +1,13 @@
 import { v7 as uuid } from "uuid";
 
-import type { ServerRequest } from "./protocol";
-import type { ToolRequestUserInputResponse } from "./protocol/v2";
 import type {
   AgentRequest,
   AgentRequestAction,
   AgentRequestQuestion,
   AgentResponse,
 } from "../types/request";
+import type { ServerRequest } from "./protocol";
+import type { ToolRequestUserInputResponse } from "./protocol/v2";
 
 // Maps codex server→client requests onto our provider-agnostic
 // AgentRequest/AgentResponse round-trip (the codex analog of claude-code/request.ts).

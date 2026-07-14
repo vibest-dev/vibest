@@ -1,13 +1,11 @@
+import path from "node:path";
+
 import {
   type ElectronApplication,
   type Page,
   _electron as electron,
   test as base,
 } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Extended test fixtures for Electron testing
@@ -16,9 +14,9 @@ export const test = base.extend<{
   electronApp: ElectronApplication;
   window: Page;
 }>({
-  electronApp: async ({}, use) => {
+  electronApp: async (_fixtures, use) => {
     // Build output path
-    const appPath = path.join(__dirname, "../../dist/main/index.js");
+    const appPath = path.join(import.meta.dirname, "../../dist/main/index.js");
 
     // Launch Electron app
     const app = await electron.launch({

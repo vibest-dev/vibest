@@ -1,9 +1,8 @@
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import { FileDiff, Plus, TerminalSquare, X } from "lucide-react";
 
-import type { PaneLeaf } from "./split-state";
-
 import { cn } from "../../lib/utils";
+import type { PaneLeaf } from "./split-state";
 
 interface PaneTabsProps {
   splitId: string;
@@ -37,26 +36,29 @@ export function PaneTabs({
           tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             return (
-              <button
+              <div
                 key={tab.id}
-                type="button"
-                onClick={() => onActivateTab(splitId, tab.id)}
                 className={cn(
                   "hover:bg-accent flex h-7 items-center gap-1 rounded px-2 text-xs",
                   isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground",
                 )}
               >
-                <span className="truncate">{tab.title || getKindLabel(tab.kind)}</span>
-                <span
+                <button
+                  type="button"
+                  onClick={() => onActivateTab(splitId, tab.id)}
+                  className="min-w-0 truncate"
+                >
+                  {tab.title || getKindLabel(tab.kind)}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Close ${tab.title || getKindLabel(tab.kind)}`}
+                  onClick={() => onCloseTab(splitId, tab.id)}
                   className="hover:bg-foreground/10 rounded p-0.5"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTab(splitId, tab.id);
-                  }}
                 >
                   <X className="size-3" />
-                </span>
-              </button>
+                </button>
+              </div>
             );
           })
         )}

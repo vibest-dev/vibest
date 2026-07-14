@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+
 import { AgentRequestSchema, AgentResponseSchema } from "../../src/types/request";
 
 describe("AgentRequest", () => {
@@ -16,13 +18,15 @@ describe("AgentRequest", () => {
   });
 
   it("rejects a request with an unknown discriminant", () => {
-    expect(() => AgentRequestSchema.parse({ type: "mystery", id: "x" })).toThrow();
+    expect(() => AgentRequestSchema.parse({ type: "mystery", id: "x" })).toThrow(z.ZodError);
   });
 });
 
 describe("AgentResponse", () => {
   it("parses a tool allow/deny response", () => {
     expect(AgentResponseSchema.parse({ type: "tool", behavior: "allow" }).type).toBe("tool");
-    expect(() => AgentResponseSchema.parse({ type: "tool", behavior: "maybe" })).toThrow();
+    expect(() => AgentResponseSchema.parse({ type: "tool", behavior: "maybe" })).toThrow(
+      z.ZodError,
+    );
   });
 });

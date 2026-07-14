@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { CodexAgent } from "@vibest/harness/codex";
 import { Layer, ManagedRuntime } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { ClaudeCodeLayer } from "../src/rpc/claude-code";
 import { Codex } from "../src/rpc/codex";

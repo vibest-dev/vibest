@@ -28,6 +28,12 @@
         "varsIgnorePattern": "^_",
         "destructuredArrayIgnorePattern": "^_"
       }
+    ],
+    "no-underscore-dangle": [
+      "warn",
+      {
+        "allow": ["_tag", "_values"]
+      }
     ]
   },
   "ignorePatterns": [

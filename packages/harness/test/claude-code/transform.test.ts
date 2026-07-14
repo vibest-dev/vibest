@@ -1,5 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
+
 import { createTransform } from "../../src/claude-code/transform";
 
 const types = (chunks: unknown[]) => chunks.map((c) => (c as { type: string }).type);
@@ -29,7 +30,7 @@ describe("createTransform", () => {
 
   it("tool output is the structured tool_use_result, not the model-facing content", () => {
     const transform = createTransform();
-    [...transform(toolUse("Read"))];
+    Array.from(transform(toolUse("Read")));
     const chunks = [...transform(toolResult())];
     expect(chunks[0]).toMatchObject({
       type: "tool-output-available",
@@ -40,7 +41,7 @@ describe("createTransform", () => {
 
   it("missing tool_use_result yields undefined output (no content fallback)", () => {
     const transform = createTransform();
-    [...transform(toolUse("Bash"))];
+    Array.from(transform(toolUse("Bash")));
     const chunks = [...transform(toolResult({ tool_use_result: undefined }))];
     expect(chunks[0]).toMatchObject({ type: "tool-output-available", output: undefined });
   });
@@ -59,7 +60,7 @@ describe("createTransform", () => {
 
   it("error results flatten content into errorText", () => {
     const transform = createTransform();
-    [...transform(toolUse("Bash"))];
+    Array.from(transform(toolUse("Bash")));
     const msg = {
       type: "user",
       parent_tool_use_id: null,
