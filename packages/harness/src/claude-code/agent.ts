@@ -2,8 +2,8 @@ import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
+import { Pushable } from "../utils/pushable";
 import { resolveClaudeExecutable } from "./executable";
-import { Pushable } from "./utils/pushable";
 
 /**
  * Thrown when a prompt arrives for a session the server no longer holds in

@@ -10,7 +10,23 @@ export function ClaudeCodeWebSearchTool({ invocation }: { invocation: WebSearchU
   return (
     <Tool>
       <ToolHeader icon={SearchIcon}>WebSearch "{input?.query}"</ToolHeader>
-      <ToolContent>{output ? <Response>{output}</Response> : null}</ToolContent>
+      <ToolContent>
+        {output?.results.map((result, index) =>
+          typeof result === "string" ? (
+            <Response key={index}>{result}</Response>
+          ) : (
+            <ul key={index} className="space-y-1 text-sm">
+              {result.content.map((hit) => (
+                <li key={hit.url}>
+                  <a href={hit.url} target="_blank" rel="noreferrer" className="underline">
+                    {hit.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ),
+        )}
+      </ToolContent>
     </Tool>
   );
 }

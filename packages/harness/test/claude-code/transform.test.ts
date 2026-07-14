@@ -1,42 +1,101 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 
-import { transform } from "../../src/claude-code/transform";
+import { createTransform } from "../../src/claude-code/transform";
 
-const collect = (m: SDKMessage) => [...transform(m)].map((c) => c.type);
+const types = (chunks: unknown[]) => chunks.map((c) => (c as { type: string }).type);
 
-describe("transform", () => {
-  it("maps system.init to a start chunk", () => {
-    expect(collect({ type: "system", subtype: "init" } as SDKMessage)).toEqual(["start"]);
+const toolUse = (name: string, id = "t1"): SDKMessage =>
+  ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { id: "m1", content: [{ type: "tool_use", id, name, input: { command: "ls" } }] },
+  }) as unknown as SDKMessage;
+
+const toolResult = (over: Record<string, unknown> = {}, id = "t1"): SDKMessage =>
+  ({
+    type: "user",
+    parent_tool_use_id: null,
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "1→hi" }] },
+    tool_use_result: { type: "text", file: { filePath: "/a", content: "hi" } },
+    ...over,
+  }) as unknown as SDKMessage;
+
+describe("createTransform", () => {
+  it("emits start + data-system/init for system.init", () => {
+    const transform = createTransform();
+    const chunks = [...transform({ type: "system", subtype: "init" } as SDKMessage)];
+    expect(types(chunks)).toEqual(["start", "data-system/init"]);
   });
 
-  it("maps an assistant text part to text start/delta/end", () => {
-    const msg = {
-      type: "assistant",
-      parent_tool_use_id: null,
-      message: { id: "m1", content: [{ type: "text", text: "hi" }] },
-    } as unknown as SDKMessage;
-    expect(collect(msg)).toEqual(["text-start", "text-delta", "text-end"]);
-  });
-
-  it("maps an assistant tool_use to tool-input-available", () => {
-    const msg = {
-      type: "assistant",
-      parent_tool_use_id: null,
-      message: {
-        id: "m1",
-        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
-      },
-    } as unknown as SDKMessage;
-    const chunks = [...transform(msg)];
+  it("tool output is the structured tool_use_result, not the model-facing content", () => {
+    const transform = createTransform();
+    Array.from(transform(toolUse("Read")));
+    const chunks = [...transform(toolResult())];
     expect(chunks[0]).toMatchObject({
-      type: "tool-input-available",
+      type: "tool-output-available",
       toolCallId: "t1",
-      toolName: "Bash",
+      output: { type: "text", file: { filePath: "/a", content: "hi" } },
     });
   });
 
-  it("maps result.success to a finish chunk", () => {
-    expect(collect({ type: "result", subtype: "success" } as SDKMessage)).toEqual(["finish"]);
+  it("missing tool_use_result yields undefined output (no content fallback)", () => {
+    const transform = createTransform();
+    Array.from(transform(toolUse("Bash")));
+    const chunks = [...transform(toolResult({ tool_use_result: undefined }))];
+    expect(chunks[0]).toMatchObject({ type: "tool-output-available", output: undefined });
+  });
+
+  it("registry tools are dynamic:false, unknown tools dynamic:true — on input AND output", () => {
+    const transform = createTransform();
+    const known = [...transform(toolUse("Bash", "k1"))];
+    const unknown = [...transform(toolUse("mcp__foo__bar", "u1"))];
+    expect(known[0]).toMatchObject({ dynamic: false });
+    expect(unknown[0]).toMatchObject({ dynamic: true });
+    const knownOut = [...transform(toolResult({}, "k1"))];
+    const unknownOut = [...transform(toolResult({}, "u1"))];
+    expect(knownOut[0]).toMatchObject({ dynamic: false });
+    expect(unknownOut[0]).toMatchObject({ dynamic: true });
+  });
+
+  it("error results flatten content into errorText", () => {
+    const transform = createTransform();
+    Array.from(transform(toolUse("Bash")));
+    const msg = {
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            is_error: true,
+            content: [{ type: "text", text: "boom" }],
+          },
+        ],
+      },
+    } as unknown as SDKMessage;
+    const chunks = [...transform(msg)];
+    expect(chunks[0]).toMatchObject({ type: "tool-output-error", errorText: "boom" });
+  });
+
+  it("result.success emits data-result/success + finish", () => {
+    const transform = createTransform();
+    const chunks = [...transform({ type: "result", subtype: "success" } as SDKMessage)];
+    expect(types(chunks)).toEqual(["data-result/success", "finish"]);
+  });
+
+  it("result errors emit error + data-result/<subtype> + finish", () => {
+    const transform = createTransform();
+    const chunks = [
+      ...transform({
+        type: "result",
+        subtype: "error_max_turns",
+        errors: ["too many turns"],
+      } as unknown as SDKMessage),
+    ];
+    expect(types(chunks)).toEqual(["error", "data-result/error_max_turns", "finish"]);
+    expect(chunks[0]).toMatchObject({ errorText: "too many turns" });
   });
 });

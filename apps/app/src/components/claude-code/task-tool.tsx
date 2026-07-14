@@ -41,19 +41,14 @@ export function ClaudeCodeTaskTool({
           </div>
         </div>
         {childrenToolUIParts.map((part) => renderToolPart?.(part))}
-        {Array.isArray(output)
-          ? output.map((part) => {
-              switch (part.type) {
-                case "text":
-                  return (
-                    <div key={part.text}>
-                      <Response>{part.text}</Response>
-                    </div>
-                  );
-                default:
-                  return null;
-              }
-            })
+        {output && "content" in output
+          ? output.content.map((part) =>
+              part.type === "text" ? (
+                <div key={part.text}>
+                  <Response>{part.text}</Response>
+                </div>
+              ) : null,
+            )
           : null}
       </ToolContent>
     </Tool>

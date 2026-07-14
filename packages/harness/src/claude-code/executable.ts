@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 
-const require_ = createRequire(import.meta.url);
+const moduleRequire = createRequire(import.meta.url);
 
 /** Where the native installer and the common package managers put `claude`. */
 function extraInstallDirs(home: string): string[] {
@@ -37,7 +37,7 @@ function isExecutableFile(candidate: string): boolean {
 function sdkBinary(binary: string): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
   try {
-    const resolved = require_.resolve(`${pkg}/${binary}`);
+    const resolved = moduleRequire.resolve(`${pkg}/${binary}`);
     return resolved.includes(`.asar${path.sep}`) ? undefined : resolved;
   } catch {
     return undefined;

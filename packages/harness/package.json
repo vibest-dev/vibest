@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./claude-code": "./src/claude-code/index.ts"
+    "./claude-code": "./src/claude-code/index.ts",
+    "./codex": "./src/codex/index.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -15,7 +16,7 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.207",
+    "@anthropic-ai/claude-agent-sdk": "0.3.207",
     "ai": "^7.0.22",
     "uuid": "^14.0.1",
     "zod": "^4.4.3"
