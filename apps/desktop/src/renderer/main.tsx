@@ -14,6 +14,7 @@ const platform: Platform = {
   host: "desktop",
   os: bridge.os,
   backend: bridge.backend,
+  status: bridge.status,
 };
 
 const rootElement = document.getElementById("root");

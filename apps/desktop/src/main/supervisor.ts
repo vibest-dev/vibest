@@ -13,7 +13,9 @@
  * timing and restart logic can be tested with an injected spawn and clock.
  */
 
-export type BackendStatus = "starting" | "ready" | "reconnecting" | "failed";
+import type { BackendStatus } from "../shared/bridge";
+
+export type { BackendStatus };
 
 /** One spawned server process, abstracted so the supervisor never touches Node's child_process. */
 export type ServerProcess = {

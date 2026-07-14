@@ -9,6 +9,7 @@ import { type Backend, startBackend } from "./backend";
 import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./protocol";
 
 let backend: Backend | undefined;
+let mainWindow: BrowserWindow | undefined;
 
 // Two launches would spawn two backends, each on its own port, each with its
 // own agent — so the second launch focuses the first window instead.
@@ -24,7 +25,7 @@ function rendererRoot(): string {
 }
 
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -44,7 +45,11 @@ function createWindow(): void {
   });
 
   mainWindow.on("ready-to-show", () => {
-    mainWindow.show();
+    mainWindow?.show();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = undefined;
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -96,9 +101,24 @@ app.whenReady().then(async () => {
   // The preload asks for this before the renderer's first module runs.
   ipcMain.on("vibest:bootstrap", (event) => {
     event.returnValue = backend
-      ? { httpBaseUrl: backend.httpBaseUrl, wsBaseUrl: backend.wsBaseUrl, token: backend.token }
+      ? {
+          httpBaseUrl: backend.httpBaseUrl,
+          wsBaseUrl: backend.wsBaseUrl,
+          token: backend.token,
+          status: backend.status(),
+        }
       : null;
   });
+
+  // Push each supervisor transition to the renderer, which reflects it as the
+  // reconnecting overlay (or a terminal failed state).
+  backend.onStatusChange((status) => {
+    mainWindow?.webContents.send("vibest:backend-status", status);
+  });
+
+  // The overlay's controls: "Retry" from the failed state, and "Quit".
+  ipcMain.on("vibest:retry", () => backend?.retry());
+  ipcMain.on("vibest:quit", () => app.quit());
 
   registerAppProtocol(rendererRoot());
 

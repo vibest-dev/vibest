@@ -5,6 +5,7 @@ import { StrictMode, type ReactElement } from "react";
 import { ChatManagerProvider } from "./core/chat/chat-context";
 import { ChatManager } from "./core/chat/chat-manager";
 import { ChatTransport } from "./core/chat/chat-transport";
+import { BackendStatusOverlay } from "./core/desktop/backend-status-overlay";
 import { createAppClients } from "./lib/orpc";
 import type { Platform } from "./platform";
 import { createRouter } from "./router";
@@ -24,6 +25,7 @@ export function createApp(platform: Platform): ReactElement {
       <QueryClientProvider client={clients.queryClient}>
         <ChatManagerProvider manager={chatManager}>
           <RouterProvider router={router} />
+          {platform.host === "desktop" && <BackendStatusOverlay feed={platform.status} />}
         </ChatManagerProvider>
       </QueryClientProvider>
     </StrictMode>
