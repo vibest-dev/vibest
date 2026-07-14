@@ -8,8 +8,6 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import type { CreateFileRoute, FileRoutesByPath } from '@tanstack/react-router'
-
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatIndexRouteImport } from './routes/chat/index'
@@ -85,34 +83,6 @@ declare module '@tanstack/react-router' {
       parentRoute: typeof rootRouteImport
     }
   }
-}
-
-declare module './routes/index' {
-  const createFileRoute: CreateFileRoute<
-    '/',
-    FileRoutesByPath['/']['parentRoute'],
-    FileRoutesByPath['/']['id'],
-    FileRoutesByPath['/']['path'],
-    FileRoutesByPath['/']['fullPath']
-  >
-}
-declare module './routes/chat/$sessionId' {
-  const createFileRoute: CreateFileRoute<
-    '/chat/$sessionId',
-    FileRoutesByPath['/chat/$sessionId']['parentRoute'],
-    FileRoutesByPath['/chat/$sessionId']['id'],
-    FileRoutesByPath['/chat/$sessionId']['path'],
-    FileRoutesByPath['/chat/$sessionId']['fullPath']
-  >
-}
-declare module './routes/chat/index' {
-  const createFileRoute: CreateFileRoute<
-    '/chat/',
-    FileRoutesByPath['/chat/']['parentRoute'],
-    FileRoutesByPath['/chat/']['id'],
-    FileRoutesByPath['/chat/']['path'],
-    FileRoutesByPath['/chat/']['fullPath']
-  >
 }
 
 const rootRouteChildren: RootRouteChildren = {

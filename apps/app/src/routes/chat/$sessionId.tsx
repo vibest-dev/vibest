@@ -1,9 +1,9 @@
-import { useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@vibest/ui/components/button";
 
 import { Chat } from "@/components/chat";
 
-export const Route = createFileRoute({
+export const Route = createFileRoute("/chat/$sessionId")({
   component: Component,
 });
 

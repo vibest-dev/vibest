@@ -1,8 +1,8 @@
-import { useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@vibest/ui/components/button";
 import { useState } from "react";
 
-export const Route = createFileRoute({
+export const Route = createFileRoute("/")({
   component: Component,
 });
 

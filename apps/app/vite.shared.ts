@@ -27,7 +27,9 @@ export function appVitePlugins(): PluginOption[] {
     // The TanStack Router plugin must come before JSX transform plugins.
     tanstackRouter({
       target: "react",
-      verboseFileRoutes: false,
+      // No `verboseFileRoutes: false` — router-plugin 1.168 does not support it
+      // (the option is silently ignored), so routes must spell out their path
+      // and import createFileRoute themselves.
       autoCodeSplitting: true,
       // Absolute paths: consumers (apps/desktop, and tools like oxfmt/oxlint)
       // load this config with a different cwd, where plugin-relative paths
