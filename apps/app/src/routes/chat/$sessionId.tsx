@@ -2,7 +2,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@vibest/ui/components/button";
 
 import { Chat } from "@/components/chat";
-import { orpcClient } from "@/lib/orpc";
 
 export const Route = createFileRoute({
   component: Component,
@@ -10,12 +9,13 @@ export const Route = createFileRoute({
 
 function Component() {
   const { sessionId } = Route.useParams();
+  const { orpc } = Route.useRouteContext();
   const navigate = useNavigate();
 
   const handleNewSession = async () => {
     try {
       // Create new session and navigate
-      const { sessionId: newSessionId } = await orpcClient.claudeCode.session.create();
+      const { sessionId: newSessionId } = await orpc.claudeCode.session.create.call();
       navigate({ to: "/chat/$sessionId", params: { sessionId: newSessionId } });
     } catch (error) {
       console.error("Failed to start a new session", error);

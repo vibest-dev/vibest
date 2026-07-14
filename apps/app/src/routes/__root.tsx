@@ -2,10 +2,10 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, Outlet, useRouterState } from "@tanstack/react-router";
 
 import Loader from "@/components/loader";
-import type { orpc } from "@/lib/orpc";
+import type { AppClients } from "@/lib/orpc";
 
 export interface RouterAppContext {
-  orpc: typeof orpc;
+  orpc: AppClients["orpc"];
   queryClient: QueryClient;
 }
 

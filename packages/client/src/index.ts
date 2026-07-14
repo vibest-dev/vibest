@@ -9,13 +9,21 @@ export type VibestClient = RouterContractClient<Contract>;
 
 type FetchLinkUrl = NonNullable<ConstructorParameters<typeof RPCLink>[0]>["url"];
 
+type FetchLinkOrigin = NonNullable<ConstructorParameters<typeof RPCLink>[0]>["origin"];
+
 export type CreateVibestClientOptions = {
   /**
-   * RPC endpoint. Defaults to the relative `/api/rpc` — clients served
-   * same-origin by the CLI server need no configuration. The desktop renderer
-   * loads from a custom protocol, so it passes the backend's absolute origin.
+   * RPC path. Defaults to `/api/rpc` — clients served same-origin by the CLI
+   * server need no configuration. oRPC types this as a root-relative path, so
+   * a cross-origin caller sets `origin` alongside it, not an absolute `url`.
    */
   url?: FetchLinkUrl;
+  /**
+   * Absolute origin prepended to `url`, e.g. `http://127.0.0.1:41234`. The
+   * desktop renderer loads from a custom protocol, so it must point every call
+   * at the backend it spawned; browser mode is same-origin and omits this.
+   */
+  origin?: FetchLinkOrigin;
   /**
    * Headers sent with every call. The desktop renderer passes the per-launch
    * bearer token here; browser mode is same-origin and needs none.
@@ -27,6 +35,7 @@ export type CreateVibestClientOptions = {
 export function createVibestClient(options: CreateVibestClientOptions = {}): VibestClient {
   const link = new RPCLink({
     url: options.url ?? "/api/rpc",
+    ...(options.origin ? { origin: options.origin } : {}),
     ...(options.headers ? { headers: options.headers } : {}),
   });
   return createORPCClient(link);

@@ -2,7 +2,7 @@ import { consumeEventIterator, eventIteratorToStream } from "@orpc/client";
 import type { ToolPermissionRequest } from "@vibest/contract/claude-code";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
 
-import { orpcClient, orpcWsClient } from "@/lib/orpc";
+import type { AppClients } from "@/lib/orpc";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
 import { isAutoAllowed, toAgentRequest, toPermissionResult } from "./providers/claude-code/request";
@@ -19,13 +19,15 @@ const isAbortError = (error: unknown) =>
 export class ChatTransport implements AiChatTransport<UIMessage> {
   #rawRequests = new Map<string, ToolPermissionRequest>();
 
+  constructor(private readonly clients: Pick<AppClients, "orpcClient" | "orpcWsClient">) {}
+
   async sendMessages(
     options: Parameters<AiChatTransport<UIMessage>["sendMessages"]>[0],
   ): Promise<ReadableStream<UIMessageChunk>> {
     const message = options.messages.at(-1);
     if (!message) throw new Error("message is required");
     const model = (options.body as { model?: ChatModel } | undefined)?.model ?? "sonnet";
-    const event = await orpcClient.claudeCode.prompt(
+    const event = await this.clients.orpcClient.claudeCode.prompt(
       { sessionId: options.chatId, message, model },
       { signal: options.abortSignal },
     );
@@ -45,11 +47,14 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
   ): () => void {
     const abortController = new AbortController();
     const unsubscribe = consumeEventIterator(
-      orpcWsClient.claudeCode.requestPermission({ sessionId }, { signal: abortController.signal }),
+      this.clients.orpcWsClient.claudeCode.requestPermission(
+        { sessionId },
+        { signal: abortController.signal },
+      ),
       {
         onEvent: (event) => {
           if (isAutoAllowed(event)) {
-            void orpcWsClient.claudeCode.respondPermission({
+            void this.clients.orpcWsClient.claudeCode.respondPermission({
               sessionId,
               requestId: event.requestId,
               result: { behavior: "allow", updatedInput: event.input },
@@ -82,7 +87,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
   ): Promise<void> {
     const event = this.#rawRequests.get(requestId);
     if (!event) throw new Error(`Unknown agent request: ${requestId}`);
-    await orpcWsClient.claudeCode.respondPermission({
+    await this.clients.orpcWsClient.claudeCode.respondPermission({
       sessionId,
       requestId,
       result: toPermissionResult(event, response),
