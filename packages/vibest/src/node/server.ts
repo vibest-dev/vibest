@@ -19,15 +19,15 @@ function notFound(res: ServerResponse) {
 }
 
 /**
- * Locate the built web UI (t3code-style): the packaged layout ships it next
- * to the server bundle as `client/`, while running from monorepo source falls
- * back to `apps/web/dist`.
+ * Locate the built web UI: the packaged layout ships it next to the server
+ * bundle as `client/`, while running from monorepo source falls back to
+ * `apps/app/dist`.
  */
 function resolveStaticDir(): string | undefined {
   const candidates = [
     new URL("./client/", import.meta.url), // packaged: dist/client next to dist/cli.js
-    new URL("../../../../apps/web/dist/", import.meta.url), // monorepo, from src/node
-    new URL("../../../apps/web/dist/", import.meta.url), // monorepo, from packages/vibest/dist
+    new URL("../../../../apps/app/dist/", import.meta.url), // monorepo, from src/node
+    new URL("../../../apps/app/dist/", import.meta.url), // monorepo, from packages/vibest/dist
   ];
   for (const candidate of candidates) {
     const dir = path.resolve(fileURLToPath(candidate));
@@ -82,8 +82,8 @@ export async function createServer(): Promise<Server> {
     // (vite is a devDependency and marked external in tsdown.config.ts).
     const { createServer: createViteDevServer } = await import("vite");
     const vite = await createViteDevServer({
-      // Serve the standalone web app package (apps/web) through this server.
-      root: path.resolve(fileURLToPath(new URL("../../../../apps/web/", import.meta.url))),
+      // Serve the standalone web app package (apps/app) through this server.
+      root: path.resolve(fileURLToPath(new URL("../../../../apps/app/", import.meta.url))),
       server: {
         middlewareMode: true,
         hmr: {
@@ -97,7 +97,7 @@ export async function createServer(): Promise<Server> {
     if (!staticDir) {
       serveUI = (_req, res) => {
         res.statusCode = 503;
-        res.end("Web UI not built. Run the @vibest/web build first.");
+        res.end("Web UI not built. Run the @vibest/app build first.");
       };
     } else {
       const assets = sirv(staticDir, {

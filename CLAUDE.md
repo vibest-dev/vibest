@@ -19,7 +19,7 @@ The repository is structured into several key applications (`apps`) and shared p
 
 ### Applications (`apps/`)
 
-- **`apps/web`**: The main web application, built with React and TanStack Router. It serves as a standalone interface for interacting with the Claude Code AI. It consumes shared UI components from `@vibest/ui` and communicates with the local server via `@orpc/client`.
+- **`apps/app`**: The main web application, built with React and TanStack Router. It serves as a standalone interface for interacting with the Claude Code AI. It consumes shared UI components from `@vibest/ui` and communicates with the local server via `@orpc/client`.
 
 ### Packages (`packages/`)
 
@@ -27,7 +27,7 @@ The repository is structured into several key applications (`apps`) and shared p
   - **`claude-code`**: Implements the specific logic for interacting with the Anthropic Claude Code AI, handling session management and prompt processing.
 - **`packages/ai-sdk-agents`**: Defines the tools and types for AI agent SDKs. This package is crucial as it enumerates the capabilities of AI agents, such as `Bash`, `Read`, `Edit`, `Grep`, `Task`, `Web-Fetch`, and `Web-Search`, allowing the AI to interact with the development environment.
 - **`packages/cli`**: The local Node.js server that acts as the backend for the entire system.
-  - It uses Express.js to serve static files (the built `apps/web` application) and handles RPC requests from clients via `@orpc/server`.
+  - It uses Express.js to serve static files (the built `apps/app` application) and handles RPC requests from clients via `@orpc/server`.
   - It instantiates and manages the `ClaudeCodeAgent` to process AI prompts.
 - **`packages/server-rpc`**: Defines the RPC routes and types for the backend server. This ensures type-safe communication between clients and the server, particularly for Claude Code-related operations.
 - **`packages/shared`**: A utility package for common types and constants shared across the monorepo.
@@ -166,15 +166,15 @@ The files listed below are important for code generation and running terminal co
   },
   {
     "description": "Specific metadata, dependencies, and development scripts for the 'web' frontend application.",
-    "path": "apps/web/package.json"
+    "path": "apps/app/package.json"
   },
   {
     "description": "TypeScript compiler configuration for the 'web' application, extending a base configuration for consistent type-checking.",
-    "path": "apps/web/tsconfig.json"
+    "path": "apps/app/tsconfig.json"
   },
   {
     "description": "Vite build and development server configuration for the 'web' application, defining how the project is bundled and served.",
-    "path": "apps/web/vite.config.ts"
+    "path": "apps/app/vite.config.ts"
   },
   {
     "description": "Specific metadata, dependencies, and development scripts for the 'cli' package.",

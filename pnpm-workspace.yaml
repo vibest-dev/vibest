@@ -22,6 +22,9 @@ overrides:
 # and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.
 minimumReleaseAge: 0
 allowBuilds:
+  # Its postinstall only probes node-pty's spawn-helper and logs — it builds
+  # nothing, so there is nothing to gain by running it.
+  "@code-inspector/core": false
   "@swc/core": true
   electron: true
   electron-winstaller: true
