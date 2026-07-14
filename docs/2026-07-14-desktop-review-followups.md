@@ -6,7 +6,22 @@ don't re-litigate them. Not fixed in PR #100 — tracked here for follow-up.
 
 ## High
 
-### 1. The backend is unsupervised after startup
+### 1. The backend is unsupervised after startup — ✅ FIXED (commits 42ce4f6, 27e18d2, cc755a7)
+
+Resolved on branch `feat/desktop-backend-supervision`: a supervisor
+(`apps/desktop/src/main/supervisor.ts`) keeps an exit listener after ready and
+restarts a crashed backend on the _same_ pinned port with exponential backoff,
+giving up in a terminal "failed" state after too many fast failures. The
+supervisor's status is mirrored to the renderer, which shows a full-screen
+reconnecting overlay (and a Retry/Quit failed state). Because the restarted
+process starts with an empty in-memory session store, the harness resumes the
+session from Claude's persisted transcript on the next prompt
+(`Session.ensure`), so an in-flight conversation survives a crash. Verified
+end-to-end against the packaged app: killed the backend mid-chat, watched it
+restart and the overlay clear, then re-prompted and Claude recalled the prior
+turn.
+
+Original finding:
 
 `apps/desktop/src/main/backend.ts` watches the child only during the 30 s startup
 window. Once the ready line parses it calls `child.removeAllListeners("exit")` and
