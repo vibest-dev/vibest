@@ -3,6 +3,12 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app": "./src/app.tsx",
+    "./platform": "./src/platform.ts",
+    "./vite": "./vite.shared.ts",
+    "./index.css": "./src/index.css"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
