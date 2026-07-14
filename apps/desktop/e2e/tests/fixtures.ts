@@ -14,11 +14,12 @@ export const test = base.extend<{
   electronApp: ElectronApplication;
   window: Page;
 }>({
-  electronApp: async (_fixtures, use) => {
-    // Build output path
+  // Playwright requires the first parameter to be an object-destructuring
+  // pattern, even when the fixture uses none of the others.
+  // oxlint-disable-next-line no-empty-pattern -- required by Playwright's fixture API
+  electronApp: async ({}, use) => {
     const appPath = path.join(import.meta.dirname, "../../dist/main/index.js");
 
-    // Launch Electron app
     const app = await electron.launch({
       args: [appPath],
       env: {
@@ -29,15 +30,14 @@ export const test = base.extend<{
 
     await use(app);
 
-    // Cleanup
     await app.close();
   },
 
   window: async ({ electronApp }, use) => {
-    // Wait for the first window to open
-    const window = await electronApp.firstWindow();
+    // The main process spawns and awaits the backend before creating a window,
+    // so the first window can take a few seconds to appear.
+    const window = await electronApp.firstWindow({ timeout: 30_000 });
 
-    // Wait for app to be ready
     await window.waitForLoadState("domcontentloaded");
     await window.setViewportSize({ width: 1440, height: 900 });
 
