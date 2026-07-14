@@ -1,4 +1,4 @@
-import { oc } from "@orpc/contract";
+import { asyncIteratorObject, oc } from "@orpc/contract";
 import { z } from "zod";
 
 export const DESKTOP_RPC_PREFIX = "/api/desktop-rpc";
@@ -33,6 +33,9 @@ export const desktopContract = {
     watch: oc
       .input(z.object({ after: z.number().int().nonnegative() }))
       .output(BackendStatusSnapshotSchema),
+    subscribe: oc
+      .input(z.object({ after: z.number().int().nonnegative() }))
+      .output(asyncIteratorObject(BackendStatusSnapshotSchema)),
   },
   backend: {
     retry: oc.output(z.void()),

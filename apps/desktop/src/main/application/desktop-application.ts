@@ -8,6 +8,7 @@ const STATUS_POLL_TIMEOUT = "20 seconds";
 export interface DesktopApplication {
   readonly bootstrap: Effect.Effect<DesktopBootstrap>;
   readonly waitForBackendStatus: (after: number) => Effect.Effect<BackendStatusSnapshot>;
+  readonly watchBackendStatus: (after: number) => Stream.Stream<BackendStatusSnapshot>;
   readonly retryBackend: Effect.Effect<void>;
   readonly quit: Effect.Effect<void>;
 }
@@ -48,6 +49,11 @@ export function makeDesktopApplication({
         );
         return Option.getOrElse(changed, () => current);
       }),
+    watchBackendStatus: (after) =>
+      Stream.concat(Stream.fromEffect(backend.snapshot), backend.changes).pipe(
+        Stream.filter((snapshot) => snapshot.revision > after),
+        Stream.changesWith((previous, next) => previous.revision === next.revision),
+      ),
     retryBackend: backend.retry,
     quit,
   };
