@@ -11,6 +11,10 @@ files:
   - "!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  # The Claude Agent SDK's platform packages each hold a ~230 MB native `claude`
+  # binary. We do not ship it: the server execs the user's own Claude Code
+  # install instead, so they can update it independently of vibest.
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
 asarUnpack:
   - resources/**
 icon: resources/icon.png
@@ -32,3 +36,4 @@ npmRebuild: false
 publish:
   provider: generic
   url: https://example.com/auto-updates
+afterPack: scripts/ad-hoc-sign.cjs

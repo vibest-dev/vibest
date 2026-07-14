@@ -14,6 +14,19 @@ import { router } from "./router";
 
 const RPC_PREFIX = "/api/rpc";
 
+// Without this, a procedure that throws becomes a bare 500 with no trace of the
+// cause anywhere — the client sees "Internal Server Error" and the server says
+// nothing at all. Generic in the result so it types against every handler's
+// own client-interceptor signature.
+async function logErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
+  try {
+    return await next();
+  } catch (error) {
+    console.error("[rpc]", error);
+    throw error;
+  }
+}
+
 // One runtime per process, shared by every transport. The layer is fully
 // synchronous today so its context can be extracted eagerly; when scoped
 // services (finalizers, child processes) join the layer, dispose the runtime
@@ -25,6 +38,7 @@ const rpcContext: RpcContext = {
 
 export function createFetchRPCHandler() {
   const rpcHandler = new FetchRPCHandler(router, {
+    clientInterceptors: [logErrors],
     toFetchResponse: {
       eventStream: {
         keepAlive: { enabled: true, comment: "ping" },
@@ -48,6 +62,7 @@ export function createFetchRPCHandler() {
 
 export function createNodeRPCHandler() {
   const rpcHandler = new NodeRPCHandler(router, {
+    clientInterceptors: [logErrors],
     sendStandardResponse: {
       eventStream: {
         keepAlive: { enabled: true, comment: "ping" },
@@ -71,7 +86,7 @@ export function createNodeRPCHandler() {
 }
 
 export function createWsRPCHandler() {
-  const wsHandler = new WsRPCHandler<RpcContext>(router);
+  const wsHandler = new WsRPCHandler<RpcContext>(router, { clientInterceptors: [logErrors] });
 
   return function upgrade(ws: WebSocket) {
     wsHandler.upgrade(ws, {

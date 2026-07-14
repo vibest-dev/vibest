@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { parseReadyLine } from "@vibest/cli/handshake";
 import { app } from "electron";
 
+import { loginShellPath } from "./shell-path";
+
 const START_TIMEOUT_MS = 30_000;
 
 export type StartBackendOptions = {
@@ -59,9 +61,15 @@ export async function startBackend(options: StartBackendOptions): Promise<Backen
   const token = randomUUID();
   const entry = resolveServerEntry(app.isPackaged, process.resourcesPath);
 
+  // The server has to exec the user's `claude`, so it needs the PATH the user's
+  // terminal has — not the one launchd hands a GUI app. Only the packaged app
+  // is launched that way; `pnpm dev` already inherits a good PATH.
+  const shellPath = app.isPackaged ? await loginShellPath() : undefined;
+
   const child: ChildProcess = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
+      ...(shellPath ? { PATH: shellPath } : {}),
       ELECTRON_RUN_AS_NODE: "1",
       VIBEST_AUTH_TOKEN: token,
       VIBEST_PORT: "0",

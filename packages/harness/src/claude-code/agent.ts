@@ -2,6 +2,7 @@ import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
+import { resolveClaudeExecutable } from "./executable";
 import { Pushable } from "./utils/pushable";
 
 // Emitted while a prompt is running; the client answers via
@@ -57,6 +58,9 @@ export class Session {
       stderr: (err) => console.error(err),
       // note: although not documented by the types, passing an absolute path
       executable: process.execPath as "node",
+      // Resolved rather than left to the SDK: its own resolution silently
+      // points into app.asar in a packaged build, which cannot be exec'd.
+      pathToClaudeCodeExecutable: resolveClaudeExecutable(),
       // Maintain Claude Code behavior with preset system prompt
       systemPrompt: { type: "preset", preset: "claude_code" },
       // Load filesystem settings for project-level configuration
