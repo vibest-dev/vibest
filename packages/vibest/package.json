@@ -8,6 +8,9 @@
     "dist"
   ],
   "type": "module",
+  "exports": {
+    "./handshake": "./src/node/handshake.ts"
+  },
   "scripts": {
     "dev": "NODE_ENV=development tsx src/node/cli.ts",
     "build": "tsdown",
