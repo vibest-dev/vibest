@@ -25,7 +25,7 @@ export function BackendStatusOverlay({ feed }: { feed: BackendStatusFeed }): Rea
           <div>
             <p className="text-foreground text-sm font-medium">Reconnecting…</p>
             <p className="text-muted-foreground text-sm">
-              The local server restarted. Restoring your session.
+              The local server restarted. Reconnecting to it now.
             </p>
           </div>
         </div>

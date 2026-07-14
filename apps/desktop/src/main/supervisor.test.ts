@@ -1,262 +1,208 @@
+import { Deferred, Effect, Layer, ManagedRuntime, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { type BackendProcessConfig, BackendProcess, type RunningBackendProcess } from "./backend";
+import { BackendExitedBeforeReady } from "./errors";
+import { LoginShellPath } from "./shell-path";
 import {
-  type BackendStatus,
-  type ServerProcess,
-  type SpawnServer,
-  createSupervisor,
+  BackendSupervisor,
+  type BackendSupervisorOptions,
+  makeBackendSupervisorLayer,
+  restartBackoff,
 } from "./supervisor";
 
-type FakeProc = ServerProcess & {
-  port: number;
-  becomeReady: (boundPort?: number) => void;
-  failToStart: (error?: Error) => void;
-  exit: () => void;
+type FakeProcess = {
+  readonly port: number;
+  readonly config: BackendProcessConfig;
+  readonly becomeReady: (port?: number) => void;
+  readonly failBeforeReady: () => void;
+  readonly exit: () => void;
   killed: boolean;
 };
 
-/** A controllable spawn: each call records the requested port and returns a proc you drive by hand. */
-function makeHarness() {
-  const procs: FakeProc[] = [];
-  const delays: number[] = [];
-  let clock = 0;
+function makeHarness(overrides: Partial<BackendSupervisorOptions> = {}) {
+  const processes: FakeProcess[] = [];
 
-  const spawn: SpawnServer = (port) => {
-    let resolveReady!: (p: number) => void;
-    let rejectReady!: (e: Error) => void;
-    const ready = new Promise<number>((res, rej) => {
-      resolveReady = res;
-      rejectReady = rej;
-    });
-    // Swallow the default rejection so an unobserved failToStart doesn't warn.
-    ready.catch(() => {});
+  const processLayer = Layer.succeed(
+    BackendProcess,
+    BackendProcess.of({
+      launch: (config, port): Effect.Effect<RunningBackendProcess, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          const ready = yield* Deferred.make<number, BackendExitedBeforeReady>();
+          const exited = yield* Deferred.make<{ exitCode: number | null }>();
+          const process: FakeProcess = {
+            port,
+            config,
+            killed: false,
+            becomeReady: (boundPort = port || 40_000) => {
+              Effect.runSync(Deferred.succeed(ready, boundPort));
+            },
+            failBeforeReady: () => {
+              Effect.runSync(
+                Deferred.fail(
+                  ready,
+                  new BackendExitedBeforeReady({
+                    exitCode: 1,
+                    message: "exited before ready",
+                  }),
+                ),
+              );
+            },
+            exit: () => {
+              Effect.runSync(Deferred.succeed(exited, { exitCode: 1 }));
+            },
+          };
+          processes.push(process);
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              process.killed = true;
+            }),
+          );
+          return {
+            ready: Deferred.await(ready),
+            awaitExit: Deferred.await(exited),
+          };
+        }),
+    }),
+  );
 
-    const exitListeners: Array<() => void> = [];
-    const proc: FakeProc = {
-      port,
-      killed: false,
-      ready,
-      onExit: (listener) => exitListeners.push(listener),
-      kill: () => {
-        proc.killed = true;
-      },
-      becomeReady: (boundPort = port || 4000) => resolveReady(boundPort),
-      failToStart: (error = new Error("exited before ready")) => {
-        rejectReady(error);
-        for (const l of exitListeners.splice(0)) l();
-      },
-      exit: () => {
-        for (const l of exitListeners.splice(0)) l();
-      },
-    };
-    procs.push(proc);
-    return proc;
-  };
+  const shellLayer = Layer.succeed(
+    LoginShellPath,
+    LoginShellPath.of({ get: Effect.succeed("/login/bin:/usr/bin") }),
+  );
 
-  return {
-    spawn,
-    procs,
-    delays,
-    // delay() resolves immediately but records the requested duration.
-    delay: (ms: number) => {
-      delays.push(ms);
-      return Promise.resolve();
-    },
-    now: () => clock,
-    advance: (ms: number) => {
-      clock += ms;
-    },
-  };
-}
-
-/** Let queued microtasks (ready.then chains, delay.then restarts) run. */
-async function flush() {
-  for (let i = 0; i < 10; i += 1) await Promise.resolve();
-}
-
-function options(h: ReturnType<typeof makeHarness>, statuses: BackendStatus[]) {
-  return {
-    spawn: h.spawn,
-    delay: h.delay,
-    now: h.now,
-    onStatus: (s: BackendStatus) => statuses.push(s),
-    initialRestartDelayMs: 500,
-    maxRestartDelayMs: 10_000,
+  const options: BackendSupervisorOptions = {
+    entry: "/fake/cli.mjs",
+    token: "fixed-token",
+    corsOrigins: ["vibest://app"],
+    useLoginShellPath: true,
+    initialRestartDelayMs: 0,
+    maxRestartDelayMs: 0,
     maxFastFailures: 5,
     stableAfterMs: 10_000,
+    ...overrides,
   };
+
+  const dependencies = Layer.merge(processLayer, shellLayer);
+  const layer = makeBackendSupervisorLayer(options).pipe(Layer.provide(dependencies));
+  const runtime = ManagedRuntime.make(layer);
+
+  return { processes, runtime };
 }
 
-describe("createSupervisor", () => {
-  it("starts on port 0 and resolves with the bound port", async () => {
-    const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
-
-    const startP = sup.start();
-    await flush();
-    expect(h.procs[0]?.port).toBe(0); // first start lets the OS pick
-    h.procs[0]!.becomeReady(56789);
-
-    await expect(startP).resolves.toBe(56789);
-    expect(sup.status()).toBe("ready");
-    // "starting" is the initial state, so only the transition to ready is emitted.
-    expect(statuses).toEqual(["ready"]);
-  });
-
-  it("propagates a first-start failure and never enters the restart loop", async () => {
-    const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
-
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.failToStart();
-
-    await expect(startP).rejects.toThrow("exited before ready");
-    await flush();
-    expect(h.procs).toHaveLength(1); // no restart spawned
-    expect(statuses).not.toContain("reconnecting");
-  });
-
-  it("restarts a crashed server on the SAME pinned port", async () => {
-    const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
-
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
-
-    h.advance(20_000); // ran healthily for a while
-    h.procs[0]!.exit(); // crash
-    await flush();
-
-    expect(sup.status()).toBe("reconnecting");
-    expect(h.procs[1]?.port).toBe(50000); // pinned, not 0
-    h.procs[1]!.becomeReady();
-    await flush();
-    expect(sup.status()).toBe("ready");
-  });
-
-  it("backs off exponentially, capped, across consecutive fast failures", async () => {
-    const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
-
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
-
-    // Each restart fails immediately (no uptime), so the failure count climbs.
-    for (let i = 1; i <= 5; i += 1) {
-      const proc = h.procs[h.procs.length - 1]!;
-      proc.exit();
-      await flush();
+async function eventually(assertion: () => void | Promise<void>): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
+  }
+  throw lastError;
+}
 
-    // 5 backoff waits, doubling from 500 and capped at 10_000.
-    expect(h.delays).toEqual([500, 1000, 2000, 4000, 8000]);
+describe("BackendSupervisor", () => {
+  it("starts on port 0 and exposes the fixed connection after ready", async () => {
+    const h = makeHarness();
+    const supervisorPromise = h.runtime.runPromise(BackendSupervisor);
+
+    await eventually(() => expect(h.processes[0]?.port).toBe(0));
+    h.processes[0]!.becomeReady(56_789);
+    const supervisor = await supervisorPromise;
+
+    expect(supervisor.connection).toEqual({
+      httpBaseUrl: "http://127.0.0.1:56789",
+      wsBaseUrl: "ws://127.0.0.1:56789",
+      token: "fixed-token",
+    });
+    await expect(h.runtime.runPromise(supervisor.status)).resolves.toBe("ready");
+    expect(h.processes[0]!.config.shellPath).toBe("/login/bin:/usr/bin");
+
+    await h.runtime.dispose();
   });
 
-  it("gives up in a terminal failed state after too many fast failures", async () => {
+  it("fails the layer when the first process never becomes ready", async () => {
     const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
+    const supervisorPromise = h.runtime.runPromise(BackendSupervisor);
 
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.failBeforeReady();
 
-    // 6 consecutive fast failures: the 6th exceeds maxFastFailures = 5.
-    for (let i = 0; i < 6; i += 1) {
-      h.procs[h.procs.length - 1]!.exit();
-      await flush();
-    }
-
-    expect(sup.status()).toBe("failed");
-    const spawnCountAtFailure = h.procs.length;
-
-    // No further restarts once failed.
-    await flush();
-    expect(h.procs).toHaveLength(spawnCountAtFailure);
-    expect(statuses.at(-1)).toBe("failed");
+    await expect(supervisorPromise).rejects.toThrow("exited before ready");
+    expect(h.processes).toHaveLength(1);
+    await h.runtime.dispose();
   });
 
-  it("resets the failure count after a run that stays up long enough", async () => {
+  it("restarts on the same pinned port and keeps the token", async () => {
     const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
+    const supervisorPromise = h.runtime.runPromise(BackendSupervisor);
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.becomeReady(50_000);
+    const supervisor = await supervisorPromise;
 
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
+    h.processes[0]!.exit();
+    await eventually(() => expect(h.processes).toHaveLength(2));
+    expect(h.processes[1]!.port).toBe(50_000);
+    expect(h.processes[1]!.config.token).toBe("fixed-token");
+    h.processes[1]!.becomeReady();
+    await eventually(async () => {
+      expect(await h.runtime.runPromise(supervisor.status)).toBe("ready");
+    });
 
-    // Two fast failures → backoff 500, 1000.
-    h.procs[0]!.exit();
-    await flush();
-    h.procs[1]!.becomeReady();
-    await flush();
-    h.procs[1]!.exit();
-    await flush();
-
-    // The next server runs healthily past the stable threshold, then dies.
-    h.procs[2]!.becomeReady();
-    await flush();
-    h.advance(15_000);
-    h.procs[2]!.exit();
-    await flush();
-
-    // Backoff restarted at 500 because the healthy run reset the count.
-    expect(h.delays).toEqual([500, 1000, 500]);
+    await h.runtime.dispose();
   });
 
-  it("retry() clears a failed state and starts again", async () => {
-    const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
+  it("enters failed after repeated crashes and retries only once", async () => {
+    const h = makeHarness({ maxFastFailures: 2 });
+    const supervisorPromise = h.runtime.runPromise(BackendSupervisor);
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.becomeReady(50_000);
+    const supervisor = await supervisorPromise;
 
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
+    h.processes[0]!.exit();
+    await eventually(() => expect(h.processes).toHaveLength(2));
+    h.processes[1]!.failBeforeReady();
+    await eventually(() => expect(h.processes).toHaveLength(3));
+    h.processes[2]!.failBeforeReady();
+    await eventually(async () => {
+      expect(await h.runtime.runPromise(supervisor.status)).toBe("failed");
+    });
 
-    for (let i = 0; i < 6; i += 1) {
-      h.procs[h.procs.length - 1]!.exit();
-      await flush();
-    }
-    expect(sup.status()).toBe("failed");
+    await Promise.all([
+      h.runtime.runPromise(supervisor.retry),
+      h.runtime.runPromise(supervisor.retry),
+      h.runtime.runPromise(supervisor.retry),
+    ]);
+    await eventually(() => expect(h.processes).toHaveLength(4));
+    expect(h.processes[3]!.port).toBe(50_000);
+    h.processes[3]!.becomeReady();
+    await eventually(async () => {
+      expect(await h.runtime.runPromise(supervisor.status)).toBe("ready");
+    });
 
-    sup.retry();
-    await flush();
-    expect(sup.status()).toBe("reconnecting");
-    const retried = h.procs.at(-1)!;
-    expect(retried.port).toBe(50000);
-    retried.becomeReady();
-    await flush();
-    expect(sup.status()).toBe("ready");
+    await h.runtime.dispose();
   });
 
-  it("stop() kills the current server and suppresses restarts", async () => {
+  it("kills the current process when the runtime is disposed", async () => {
     const h = makeHarness();
-    const statuses: BackendStatus[] = [];
-    const sup = createSupervisor(options(h, statuses));
+    const supervisorPromise = h.runtime.runPromise(BackendSupervisor);
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.becomeReady(50_000);
+    await supervisorPromise;
 
-    const startP = sup.start();
-    await flush();
-    h.procs[0]!.becomeReady(50000);
-    await startP;
+    await h.runtime.dispose();
 
-    sup.stop();
-    expect(h.procs[0]!.killed).toBe(true);
+    expect(h.processes[0]!.killed).toBe(true);
+  });
+});
 
-    h.procs[0]!.exit(); // a late exit after stop must not restart
-    await flush();
-    expect(h.procs).toHaveLength(1);
-    expect(sup.status()).not.toBe("reconnecting");
+describe("restartBackoff", () => {
+  it("doubles and caps", () => {
+    expect([1, 2, 3, 4, 5, 6].map((n) => restartBackoff(n, 500, 10_000))).toEqual([
+      500, 1000, 2000, 4000, 8000, 10_000,
+    ]);
   });
 });

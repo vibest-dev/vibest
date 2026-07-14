@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <title>Vibest</title>
-    <!-- The renderer is served from vibest://app but talks to the backend on
-         loopback, so http:/ws: to 127.0.0.1 must be allowed explicitly. -->
+    <!-- The renderer talks to Electron Main through vibest: and to the spawned
+         backend over loopback HTTP/WebSocket. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*"
+      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self' vibest: http://127.0.0.1:* ws://127.0.0.1:*"
     />
   </head>
 

@@ -1,141 +1,98 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { Effect, ManagedRuntime } from "effect";
+import { app, dialog } from "electron";
 
-import icon from "../../resources/icon.png?asset";
-import { type Backend, startBackend } from "./backend";
-import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./protocol";
+import { makeBackendToken, resolveServerEntry } from "./backend";
+import { makeDesktopMainLayer, type DesktopMainServices } from "./main-layer";
+import { APP_ORIGIN, registerAppScheme } from "./protocol";
+import { WindowManager, rendererRoot } from "./window-manager";
 
-let backend: Backend | undefined;
-let mainWindow: BrowserWindow | undefined;
+let runtime: ManagedRuntime.ManagedRuntime<DesktopMainServices, unknown> | undefined;
+let disposing = false;
+let allowQuit = false;
 
-// Two launches would spawn two backends, each on its own port, each with its
-// own agent — so the second launch focuses the first window instead.
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
+function runWindowAction(action: (windows: WindowManager["Service"]) => Effect.Effect<void>): void {
+  runtime?.runFork(
+    Effect.gen(function* () {
+      const windows = yield* WindowManager;
+      yield* action(windows);
+    }),
+  );
 }
 
-// Must precede app.whenReady().
-registerAppScheme();
-
-function rendererRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer");
-}
-
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    show: false,
-    autoHideMenuBar: true,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 16 },
-    ...(process.platform === "linux" ? { icon } : {}),
-    webPreferences: {
-      // .js, not .mjs: a sandboxed preload must be CommonJS.
-      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../preload/index.js"),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
-  });
-
-  mainWindow.on("closed", () => {
-    mainWindow = undefined;
-  });
-
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url);
-    return { action: "deny" };
-  });
-
-  const devUrl = process.env["ELECTRON_RENDERER_URL"];
-  if (is.dev && devUrl) {
-    void mainWindow.loadURL(devUrl);
-  } else {
-    // Load the origin root, not /index.html: the router matches on pathname, and
-    // "/index.html" matches no route (it renders Not Found). The protocol
-    // handler's SPA fallback serves index.html for "/" anyway.
-    void mainWindow.loadURL(`${APP_ORIGIN}/`);
+async function disposeAndQuit(): Promise<void> {
+  if (disposing) return;
+  disposing = true;
+  try {
+    await runtime?.dispose();
+  } finally {
+    runtime = undefined;
+    allowQuit = true;
+    app.quit();
   }
 }
 
-app.on("second-instance", () => {
-  const [existing] = BrowserWindow.getAllWindows();
-  if (!existing) return;
-  if (existing.isMinimized()) existing.restore();
-  existing.focus();
-});
+async function startPrimaryInstance(): Promise<void> {
+  await app.whenReady();
 
-app.whenReady().then(async () => {
   electronApp.setAppUserModelId("com.vibest.desktop");
-
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  // In dev the renderer is served by Vite over http, so that origin must be
-  // allowed too; in production it is only ever the app protocol.
-  const devUrl = process.env["ELECTRON_RENDERER_URL"];
-  const corsOrigins = [APP_ORIGIN, ...(is.dev && devUrl ? [new URL(devUrl).origin] : [])];
+  const devUrl = is.dev ? process.env["ELECTRON_RENDERER_URL"] : undefined;
+  const allowedOrigins = [APP_ORIGIN, ...(devUrl ? [new URL(devUrl).origin] : [])];
+
+  const layer = makeDesktopMainLayer({
+    backend: {
+      entry: resolveServerEntry(app.isPackaged, process.resourcesPath),
+      token: makeBackendToken(),
+      corsOrigins: allowedOrigins,
+      useLoginShellPath: app.isPackaged,
+    },
+    rendererRoot: rendererRoot(),
+    devUrl,
+    allowedOrigins,
+  });
+
+  runtime = ManagedRuntime.make(layer);
 
   try {
-    backend = await startBackend({ corsOrigins });
+    await runtime.runPromise(runtime.contextEffect);
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const windows = yield* WindowManager;
+        yield* windows.ensureOpen;
+      }),
+    );
   } catch (error) {
     dialog.showErrorBox(
       "Vibest could not start",
-      `The local server failed to start.\n\n${(error as Error).message}`,
+      `The local server failed to start.\n\n${error instanceof Error ? error.message : String(error)}`,
     );
-    app.quit();
-    return;
+    await disposeAndQuit();
   }
+}
 
-  // The preload asks for this before the renderer's first module runs.
-  ipcMain.on("vibest:bootstrap", (event) => {
-    event.returnValue = backend
-      ? {
-          httpBaseUrl: backend.httpBaseUrl,
-          wsBaseUrl: backend.wsBaseUrl,
-          token: backend.token,
-          status: backend.status(),
-        }
-      : null;
+if (!app.requestSingleInstanceLock()) {
+  allowQuit = true;
+  app.quit();
+} else {
+  // Electron only accepts privileged scheme registration before ready.
+  registerAppScheme();
+
+  app.on("second-instance", () => runWindowAction((windows) => windows.focus));
+  app.on("activate", () => runWindowAction((windows) => windows.ensureOpen));
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
   });
 
-  // Push each supervisor transition to the renderer, which reflects it as the
-  // reconnecting overlay (or a terminal failed state).
-  backend.onStatusChange((status) => {
-    mainWindow?.webContents.send("vibest:backend-status", status);
+  app.on("before-quit", (event) => {
+    if (allowQuit || !runtime) return;
+    event.preventDefault();
+    void disposeAndQuit();
   });
 
-  // The overlay's controls: "Retry" from the failed state, and "Quit".
-  ipcMain.on("vibest:retry", () => backend?.retry());
-  ipcMain.on("vibest:quit", () => app.quit());
-
-  registerAppProtocol(rendererRoot());
-
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
-
-app.on("before-quit", () => {
-  backend?.stop();
-  backend = undefined;
-});
+  void startPrimaryInstance();
+}

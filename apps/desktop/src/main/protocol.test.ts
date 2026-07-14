@@ -1,8 +1,8 @@
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { resolveAssetPath } from "./protocol";
+import { type DesktopRpcHandler, createAppRequestHandler, resolveAssetPath } from "./protocol";
 
 const ROOT = path.resolve("/app/renderer");
 
@@ -25,5 +25,51 @@ describe("resolveAssetPath", () => {
 
   it("refuses an encoded traversal", () => {
     expect(resolveAssetPath(ROOT, "/%2e%2e/%2e%2e/etc/passwd")).toBeNull();
+  });
+
+  it("returns null for malformed percent encoding", () => {
+    expect(resolveAssetPath(ROOT, "/broken%2")).toBeNull();
+  });
+});
+
+describe("createAppRequestHandler", () => {
+  it("dispatches Desktop RPC before the asset fallback", async () => {
+    const rpc = vi.fn<DesktopRpcHandler>(async (_request) => ({
+      matched: true as const,
+      response: new Response("rpc", { status: 200 }),
+    }));
+    const handler = createAppRequestHandler(ROOT, rpc);
+
+    const response = await handler(
+      new Request("vibest://app/api/desktop-rpc/bootstrap", {
+        method: "POST",
+        body: "request-body",
+      }),
+    );
+
+    expect(await response.text()).toBe("rpc");
+    expect(rpc).toHaveBeenCalledOnce();
+    await expect(rpc.mock.calls[0]![0].text()).resolves.toBe("request-body");
+  });
+
+  it("returns 404 when an RPC path does not match a procedure", async () => {
+    const handler = createAppRequestHandler(ROOT, async () => ({ matched: false as const }));
+
+    const response = await handler(
+      new Request("vibest://app/api/desktop-rpc/not-a-procedure", { method: "POST" }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not found");
+  });
+
+  it("rejects a different custom-protocol host", async () => {
+    const rpc = vi.fn<DesktopRpcHandler>(async () => ({ matched: false as const }));
+    const handler = createAppRequestHandler(ROOT, rpc);
+
+    const response = await handler(new Request("vibest://other/api/desktop-rpc/bootstrap"));
+
+    expect(response.status).toBe(404);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

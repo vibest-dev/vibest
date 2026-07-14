@@ -25,10 +25,13 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
+    "@effect/platform-node": "4.0.0-beta.97",
     "@electron-toolkit/utils": "^4.0.0",
+    "@orpc/experimental-effect": "2.0.0-beta.16",
+    "@orpc/server": "2.0.0-beta.16",
     "@vibest/app": "workspace:*",
-    "@vibest/cli": "workspace:*"
+    "@vibest/cli": "workspace:*",
+    "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
