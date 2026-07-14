@@ -26,27 +26,27 @@ vibest takes opencode's answer to (1), t3code's to (2), and its own to (3).
 
 ## The dimensions
 
-|                    | opencode                                     | t3code                                              | vibest                                       |
-| ------------------ | -------------------------------------------- | --------------------------------------------------- | -------------------------------------------- |
-| **Runtime**        | Electron 42.3.3                              | Electron 41.5.0                                     | Electron 41.10.1                             |
-| **Tooling**        | electron-vite 5 + builder 26                 | electron-builder 26                                 | electron-vite + builder 26                   |
-| **UI**             | SolidJS                                      | React                                               | React + TanStack Router                      |
-| **Window origin**  | `oc://renderer`                              | `t3code://` / `t3code-dev://`                       | `vibest://app`                               |
-| **Handler does**   | serves static files off disk                 | **reverse-proxies** the local server                | serves static files off disk                 |
-| **Routing**        | **MemoryRouter** — no URL paths              | server-side, via the proxy                          | real pathnames → **needs SPA fallback**      |
-| **Server process** | `utilityProcess.fork(sidecar.js)`            | `spawn` + `ELECTRON_RUN_AS_NODE`                    | `spawn` + `ELECTRON_RUN_AS_NODE`             |
-| **Port**           | host grabs a free one, passes it in          | host-side config                                    | **server binds `:0`, reports back**          |
-| **Readiness**      | MessagePort `ready` **+ HTTP health poll**   | ready flag + poll                                   | stdout `vibest:ready {"port":N}`             |
-| **Auth**           | HTTP **Basic**, password = `randomUUID()`    | **bearer** token                                    | **bearer** token                             |
-| **WebSocket auth** | `?auth_token=` / `?ticket=` query param      | ticket (`issueSshWebSocketTicket`)                  | single-use ticket                            |
-| **CORS**           | allowlist `["oc://renderer"]`                | —                                                   | allowlist `vibest://app` + dev origin        |
-| **Preload**        | CJS, sandboxed                               | CJS, sandboxed                                      | CJS, sandboxed                               |
-| **Bridge surface** | large (~35 methods)                          | **very large** (SSH, WSL, preview tabs, automation) | **minimal** (one bootstrap call)             |
-| **Host detection** | **`Platform` union + separate entry points** | `window.desktopBridge` sniffing                     | **`Platform` union + separate entry points** |
-| **PATH repair**    | login-shell `env -0` probe                   | login shell **+ `launchctl getenv PATH`**           | login-shell probe                            |
-| **asarUnpack**     | none — builder's default smart-unpack        | **everything** (`**/node_modules/**`)               | none needed                                  |
-| **Agent binary**   | n/a — the server _is_ the agent              | **user's installed `claude`**                       | **user's installed `claude`**                |
-| **Signing**        | real: hardened runtime + notarized           | real                                                | ad-hoc (no Apple cert yet)                   |
+|                    | opencode                                     | t3code                                               | vibest                                       |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------- | -------------------------------------------- |
+| **Runtime**        | Electron 42.3.3                              | Electron 41.5.0                                      | Electron 41.10.1                             |
+| **Tooling**        | electron-vite 5 + builder 26                 | electron-builder 26                                  | electron-vite + builder 26                   |
+| **UI**             | SolidJS                                      | React                                                | React + TanStack Router                      |
+| **Window origin**  | `oc://renderer`                              | `t3code://` / `t3code-dev://`                        | `vibest://app`                               |
+| **Handler does**   | serves static files off disk                 | **reverse-proxies** the local server                 | serves static files off disk                 |
+| **Routing**        | **MemoryRouter** — no URL paths              | **hash history** in Electron (client-side)           | real pathnames → **needs SPA fallback**      |
+| **Server process** | `utilityProcess.fork(sidecar.js)`            | `spawn` + `ELECTRON_RUN_AS_NODE`                     | `spawn` + `ELECTRON_RUN_AS_NODE`             |
+| **Port**           | host grabs a free one, passes it in          | **host-side sequential port scan** (config override) | **server binds `:0`, reports back**          |
+| **Readiness**      | MessagePort `ready` **+ HTTP health poll**   | ready flag + poll                                    | stdout `vibest:ready {"port":N}`             |
+| **Auth**           | HTTP **Basic**, password = `randomUUID()`    | **bearer** token (+ Clerk for cloud)                 | **bearer** token                             |
+| **WebSocket auth** | `?auth_token=` / `?ticket=` query param      | ticket (`issueWebSocketTicket`)                      | single-use ticket                            |
+| **CORS**           | allowlist `["oc://renderer"]`                | **wildcard `*`** — leans on the token, not origin    | allowlist `vibest://app` + dev origin        |
+| **Preload**        | CJS, sandboxed                               | CJS, sandboxed                                       | CJS, sandboxed                               |
+| **Bridge surface** | large (~35 methods)                          | **very large** (SSH, WSL, preview tabs, automation)  | **minimal** (one bootstrap call)             |
+| **Host detection** | **`Platform` union + separate entry points** | `window.desktopBridge` sniffing                      | **`Platform` union + separate entry points** |
+| **PATH repair**    | login-shell `env -0` probe                   | login shell **+ `launchctl getenv PATH`**            | login-shell probe                            |
+| **asarUnpack**     | none — builder's default smart-unpack        | **everything** (`**/node_modules/**`)                | none needed                                  |
+| **Agent binary**   | n/a — the server _is_ the agent              | **user's installed `claude`**                        | **user's installed `claude`**                |
+| **Signing**        | real: hardened runtime + notarized           | real                                                 | ad-hoc (no Apple cert yet)                   |
 
 ## 1. How the window gets the UI
 
@@ -65,13 +65,13 @@ local server's HTTP origin — `proxyRequest(request, input.targetOrigin, conten
 (0/50/150 ms) for transient failures, injecting a Content-Security-Policy on the way
 through. The window cannot paint until the server is up.
 
-**vibest follows opencode**, and is the only one that needs an **SPA fallback**.
-The reason is worth stating precisely, because it's a routing decision, not a
-protocol one:
+**vibest follows opencode**, and needs an **SPA fallback** where the others sidestep
+the problem. This is a routing decision, not a protocol one, and each project made a
+different one:
 
-- opencode's renderer uses a **MemoryRouter** (`createMemoryHistory`, `src/renderer/index.tsx:20`), so the window only ever loads `index.html` and no navigation ever touches the URL. A 404 for unknown paths is correct.
-- t3code's proxied server already resolves unknown paths.
-- vibest uses TanStack Router on **real pathnames**, so a reload or deep link asks the protocol handler for `/chat/<id>` — which is not a file. Without a fallback the window renders "Not Found," which is exactly what happened on the first packaged launch.
+- opencode's renderer uses a **MemoryRouter** (`createMemoryHistory`, `src/renderer/index.tsx:20`), so the window only ever loads `index.html` and no navigation touches the URL. A 404 for unknown paths is correct.
+- t3code uses the same TanStack Router as vibest, but **switches to hash history in Electron** (`createHashHistory()`, `apps/web/src/main.tsx:22`, with the comment "hash history avoids path resolution issues"), so the path the handler sees is always the document — the route lives after the `#`. Belt-and-braces, its proxied server _also_ serves `index.html` for non-file paths (`apps/server/src/http.ts:283-294`).
+- vibest uses TanStack Router on **real pathnames**, so a reload or deep link asks the protocol handler for `/chat/<id>` — which is not a file. Without a fallback the window renders "Not Found," which is exactly what happened on the first packaged launch. Hash history (t3code's move) would have avoided it too; the SPA fallback is the equivalent fix on the file-serving side.
 
 **Why files beat the proxy:** the UI paints instantly, independent of server health,
 and there's no second HTTP hop per asset. The proxy earns its keep when the server
@@ -105,7 +105,7 @@ browser mode.
 Three genuinely different answers.
 
 - **opencode** picks the port itself _before_ starting anything: open a socket on `:0`, read the assigned port, close it, pass the number to the sidecar (`src/main/index.ts:307-332`). Simple, but there's a window between close and re-bind where another process could take it. `OPENCODE_PORT` overrides.
-- **t3code** carries the port through host-side configuration.
+- **t3code** does a host-side **sequential scan**: start at a default port and probe upward, checking each candidate is free on every bind host (`net.canListenOnHost`) before using it (`apps/desktop/src/app/DesktopApp.ts:66-96`). A configured port is only an override. Deterministic ports, at the cost of a small race like opencode's.
 - **vibest** inverts it: the server binds `:0` and prints `vibest:ready {"port":N}` on stdout; the host parses that line. No race — the port is never released — at the cost of a small stdout protocol.
 
 ## 4. Authentication
@@ -114,15 +114,21 @@ All three authenticate the loopback server, which matters more than it looks: an
 process on the machine can reach `127.0.0.1`.
 
 - **opencode**: HTTP **Basic**, username `opencode`, password `randomUUID()` per launch. The server is started with an exact CORS allowlist, `cors: ["oc://renderer"]`.
-- **t3code**: a **bearer** token (`getLocalEnvironmentBearerToken` on the bridge).
-- **vibest**: a **bearer** token, minted per launch and never written to disk.
+- **t3code**: a **bearer** token for the local server (`getLocalEnvironmentBearerToken` on the bridge). Its CORS, though, is wildcard `*` (`apps/server/src/httpCors.ts:11`) — it deliberately leans on the token, not the origin. It also has a _second_ auth layer the others lack: Clerk (`@clerk/electron`), for cloud/relay accounts. The bearer token secures the loopback server; Clerk secures the hosted side.
+- **vibest**: a **bearer** token, minted per launch and never written to disk, plus an exact CORS allowlist.
+
+Worth pausing on the CORS split, because it's a real disagreement: opencode and
+vibest pin the allowed origin exactly; t3code opens it to `*` and treats the bearer
+token as the whole boundary. Both are defensible on loopback — CORS is a browser
+policy, not a server-side gate, and any native process ignores it — but the exact
+allowlist is one cheap extra layer against a malicious _web page_ in the renderer.
 
 **WebSockets force the same workaround on everyone.** Browsers cannot set headers on
 a WS handshake, so the secret has to ride in the URL. opencode appends
 `?auth_token=…` (and supports a `?ticket=` variant) on its PTY socket; t3code issues
-a ticket (`issueSshWebSocketTicket`); vibest mints a single-use ticket over HTTP and
-passes it as `?ticket=`. Three codebases, one constraint, three near-identical
-answers.
+a single-use ticket (`issueWebSocketTicket`, `apps/server/src/auth/EnvironmentAuth.ts:918`);
+vibest mints a single-use ticket over HTTP and passes it as `?ticket=`. Three
+codebases, one constraint, three near-identical answers.
 
 One thing vibest does that neither peer does: the token reaches the server through
 an env var that the server **deletes from `process.env` after reading**, so a bash
