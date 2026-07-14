@@ -2462,7 +2462,10 @@ function createWindow(): void {
   if (is.dev && devUrl) {
     void mainWindow.loadURL(devUrl);
   } else {
-    void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
+    // The origin ROOT, not /index.html. The router matches on pathname, and
+    // "/index.html" matches no route — the window would render Not Found. The
+    // protocol handler's SPA fallback serves index.html for "/" anyway.
+    void mainWindow.loadURL(`${APP_ORIGIN}/`);
   }
 }
 
