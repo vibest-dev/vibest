@@ -1,13 +1,10 @@
-import { Effect, Option, Stream } from "effect";
+import { Effect, Stream } from "effect";
 
 import type { BackendStatusSnapshot, DesktopBootstrap } from "../../shared/desktop-rpc";
 import type { LocalBackend } from "../backend/local-backend";
 
-const STATUS_POLL_TIMEOUT = "20 seconds";
-
 export interface DesktopApplication {
   readonly bootstrap: Effect.Effect<DesktopBootstrap>;
-  readonly waitForBackendStatus: (after: number) => Effect.Effect<BackendStatusSnapshot>;
   readonly watchBackendStatus: (after: number) => Stream.Stream<BackendStatusSnapshot>;
   readonly retryBackend: Effect.Effect<void>;
   readonly quit: Effect.Effect<void>;
@@ -34,21 +31,6 @@ export function makeDesktopApplication({
         statusRevision: current.revision,
       };
     }),
-    waitForBackendStatus: (after) =>
-      Effect.gen(function* () {
-        const current = yield* backend.snapshot;
-        if (current.revision > after) return current;
-
-        const changed = yield* backend.changes.pipe(
-          Stream.filter((next) => next.revision > after),
-          Stream.runHead,
-          Effect.timeoutOrElse({
-            duration: STATUS_POLL_TIMEOUT,
-            orElse: () => Effect.succeed(Option.none()),
-          }),
-        );
-        return Option.getOrElse(changed, () => current);
-      }),
     watchBackendStatus: (after) =>
       Stream.concat(Stream.fromEffect(backend.snapshot), backend.changes).pipe(
         Stream.filter((snapshot) => snapshot.revision > after),

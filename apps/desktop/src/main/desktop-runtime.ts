@@ -17,7 +17,6 @@ import { makeNodeBackendProcess } from "./backend/node-backend-process";
 import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./electron/app-protocol";
 import { makeMainWindow, rendererRoot } from "./electron/main-window";
 import { makeRendererChannel } from "./electron/renderer-channel";
-import { makeDesktopRpcHandler } from "./rpc/desktop-rpc";
 import { makeDesktopRpcServer } from "./rpc/desktop-rpc-server";
 
 class DesktopRuntime extends Context.Service<
@@ -68,11 +67,10 @@ function makeDesktopRuntimeLayer(devUrl: string | undefined) {
           setTimeout(() => app.quit(), 0);
         }),
       });
-      const requestHandler = makeDesktopRpcHandler(application, allowedOrigins);
       const rpcServer = makeDesktopRpcServer(application);
       const rendererChannel = makeRendererChannel(rpcServer.attach);
 
-      yield* registerAppProtocol(rendererRoot(), requestHandler);
+      yield* registerAppProtocol(rendererRoot());
       const mainWindow = yield* makeMainWindow({
         devUrl,
         connectRenderer: rendererChannel.connect,

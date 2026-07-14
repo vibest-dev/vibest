@@ -5,8 +5,6 @@ import { pathToFileURL } from "node:url";
 import { Data, Effect, Scope } from "effect";
 import { net, protocol } from "electron";
 
-import { DESKTOP_RPC_PREFIX } from "../../shared/desktop-rpc";
-
 export const SCHEME = "vibest";
 export const HOST = "app";
 export const APP_ORIGIN = `${SCHEME}://${HOST}`;
@@ -16,8 +14,6 @@ export class ProtocolRegistrationError extends Data.TaggedError("ProtocolRegistr
   readonly cause?: unknown;
 }> {}
 
-export type AppRequestHandler = (request: Request) => Promise<Response | undefined>;
-
 /** Must run before app.whenReady(). */
 export function registerAppScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -26,8 +22,6 @@ export function registerAppScheme(): void {
       privileges: {
         standard: true,
         secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
       },
     },
   ]);
@@ -48,19 +42,13 @@ export function resolveAssetPath(rendererRoot: string, pathname: string): string
   return file;
 }
 
-function isDesktopRpcPath(pathname: string): boolean {
-  return pathname === DESKTOP_RPC_PREFIX || pathname.startsWith(`${DESKTOP_RPC_PREFIX}/`);
-}
+export type FetchAsset = (url: string) => Promise<Response>;
 
-/** Serve Desktop RPC first, then renderer assets with SPA fallback. */
-export function createAppRequestHandler(rendererRoot: string, requestHandler: AppRequestHandler) {
+/** Serve renderer assets with SPA fallback. */
+export function createAppRequestHandler(rendererRoot: string, fetchAsset: FetchAsset = net.fetch) {
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (url.host !== HOST) return new Response("Not found", { status: 404 });
-
-    if (isDesktopRpcPath(url.pathname)) {
-      return (await requestHandler(request)) ?? new Response("Not found", { status: 404 });
-    }
 
     const file = resolveAssetPath(rendererRoot, url.pathname);
     if (!file) return new Response("Not found", { status: 404 });
@@ -70,17 +58,16 @@ export function createAppRequestHandler(rendererRoot: string, requestHandler: Ap
         ? file
         : path.join(rendererRoot, "index.html");
 
-    return net.fetch(pathToFileURL(target).toString());
+    return fetchAsset(pathToFileURL(target).toString());
   };
 }
 
 export function registerAppProtocol(
   rendererRoot: string,
-  requestHandler: AppRequestHandler,
 ): Effect.Effect<void, ProtocolRegistrationError, Scope.Scope> {
   return Effect.acquireRelease(
     Effect.try({
-      try: () => protocol.handle(SCHEME, createAppRequestHandler(rendererRoot, requestHandler)),
+      try: () => protocol.handle(SCHEME, createAppRequestHandler(rendererRoot)),
       catch: (cause) =>
         new ProtocolRegistrationError({
           message: "Unable to register the vibest protocol",

@@ -58,14 +58,37 @@ async function driveBackendToFailed(parentPid: number): Promise<void> {
   }
 }
 
-test("boots the renderer through Desktop RPC without a preload", async ({ window }) => {
+test("boots the renderer through an oRPC MessagePort", async ({ window }) => {
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
-  await expect(window.locator("body")).not.toContainText("Preload bridge missing");
+  await expect(
+    window.evaluate(() => {
+      const globals = window as Window & {
+        vibest?: unknown;
+        require?: unknown;
+        process?: unknown;
+      };
+      return {
+        vibest: typeof globals.vibest,
+        require: typeof globals.require,
+        process: typeof globals.process,
+      };
+    }),
+  ).resolves.toEqual({ vibest: "undefined", require: "undefined", process: "undefined" });
 });
 
-test("allows the development HTTP origin to call Desktop RPC", async () => {
+test("gives a reloaded renderer document a new MessagePort", async ({ electronApp, window }) => {
+  const pid = backendPid(electronApp.process().pid);
+
+  await window.reload();
+  await expect(window).toHaveTitle("Vibest");
+  await expect(window.locator("#root")).toBeVisible();
+  await expect(window.getByText("Vibest could not start")).toHaveCount(0);
+  expect(backendPid(electronApp.process().pid)).toBe(pid);
+});
+
+test("boots the development HTTP renderer through MessagePort", async () => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
   const server = createServer((request, response) => {
     const requested = path.join(

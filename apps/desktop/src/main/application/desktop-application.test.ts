@@ -1,4 +1,4 @@
-import { Effect, SubscriptionRef } from "effect";
+import { Effect, Option, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { BackendStatusSnapshot } from "../../shared/desktop-rpc";
@@ -61,12 +61,15 @@ describe("DesktopApplication", () => {
     expect(h.quits()).toBe(1);
   });
 
-  it("waits for a backend revision newer than the caller has seen", async () => {
+  it("streams backend revisions newer than the caller has seen", async () => {
     const h = makeHarness();
-    const pending = Effect.runPromise(h.application.waitForBackendStatus(0));
+    const pending = Effect.runPromise(h.application.watchBackendStatus(0).pipe(Stream.runHead));
 
     await h.setStatus({ revision: 1, status: "reconnecting" });
 
-    await expect(pending).resolves.toEqual({ revision: 1, status: "reconnecting" });
+    await expect(pending.then(Option.getOrUndefined)).resolves.toEqual({
+      revision: 1,
+      status: "reconnecting",
+    });
   });
 });

@@ -1,8 +1,6 @@
 import { asyncIteratorObject, oc } from "@orpc/contract";
 import { z } from "zod";
 
-export const DESKTOP_RPC_PREFIX = "/api/desktop-rpc";
-
 export const BackendStatusSchema = z.enum(["starting", "ready", "reconnecting", "failed"]);
 export type BackendStatus = z.infer<typeof BackendStatusSchema>;
 
@@ -30,9 +28,6 @@ export type DesktopBootstrap = z.infer<typeof DesktopBootstrapSchema>;
 export const desktopContract = {
   bootstrap: oc.output(DesktopBootstrapSchema),
   status: {
-    watch: oc
-      .input(z.object({ after: z.number().int().nonnegative() }))
-      .output(BackendStatusSnapshotSchema),
     subscribe: oc
       .input(z.object({ after: z.number().int().nonnegative() }))
       .output(asyncIteratorObject(BackendStatusSnapshotSchema)),

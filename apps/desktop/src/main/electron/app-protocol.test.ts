@@ -1,8 +1,11 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type AppRequestHandler, createAppRequestHandler, resolveAssetPath } from "./app-protocol";
+import { createAppRequestHandler, type FetchAsset, resolveAssetPath } from "./app-protocol";
 
 const ROOT = path.resolve("/app/renderer");
 
@@ -33,40 +36,44 @@ describe("resolveAssetPath", () => {
 });
 
 describe("createAppRequestHandler", () => {
-  it("dispatches Desktop RPC before the asset fallback", async () => {
-    const rpc = vi.fn<AppRequestHandler>(async () => new Response("rpc", { status: 200 }));
-    const handler = createAppRequestHandler(ROOT, rpc);
+  it("serves a renderer asset without an RPC dispatch path", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "vibest-renderer-"));
+    const asset = path.join(root, "asset.js");
+    writeFileSync(asset, "asset");
+    const fetch = vi.fn<FetchAsset>(async () => new Response("asset"));
 
-    const response = await handler(
-      new Request("vibest://app/api/desktop-rpc/bootstrap", {
-        method: "POST",
-        body: "request-body",
-      }),
-    );
+    const response = await createAppRequestHandler(
+      root,
+      fetch,
+    )(new Request("vibest://app/asset.js"));
 
-    expect(await response.text()).toBe("rpc");
-    expect(rpc).toHaveBeenCalledOnce();
-    await expect(rpc.mock.calls[0]![0].text()).resolves.toBe("request-body");
+    expect(await response.text()).toBe("asset");
+    expect(fetch).toHaveBeenCalledWith(pathToFileURL(asset).toString());
   });
 
-  it("returns 404 when an RPC path does not match a procedure", async () => {
-    const handler = createAppRequestHandler(ROOT, async () => undefined);
+  it("falls back to the SPA entry for an unknown renderer path", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "vibest-renderer-"));
+    const entry = path.join(root, "index.html");
+    writeFileSync(entry, "app");
+    const fetch = vi.fn<FetchAsset>(async () => new Response("app"));
 
-    const response = await handler(
-      new Request("vibest://app/api/desktop-rpc/not-a-procedure", { method: "POST" }),
-    );
+    const response = await createAppRequestHandler(
+      root,
+      fetch,
+    )(new Request("vibest://app/chat/session"));
 
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe("Not found");
+    expect(await response.text()).toBe("app");
+    expect(fetch).toHaveBeenCalledWith(pathToFileURL(entry).toString());
   });
 
   it("rejects a different custom-protocol host", async () => {
-    const rpc = vi.fn<AppRequestHandler>(async () => undefined);
-    const handler = createAppRequestHandler(ROOT, rpc);
-
-    const response = await handler(new Request("vibest://other/api/desktop-rpc/bootstrap"));
+    const fetch = vi.fn<FetchAsset>(async () => new Response("asset"));
+    const response = await createAppRequestHandler(
+      ROOT,
+      fetch,
+    )(new Request("vibest://other/asset.js"));
 
     expect(response.status).toBe(404);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

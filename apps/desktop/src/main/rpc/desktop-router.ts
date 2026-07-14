@@ -16,9 +16,6 @@ export function makeDesktopRouter(application: DesktopApplication) {
       return yield* application.bootstrap;
     }),
     status: {
-      watch: orpc.status.watch.effect(function* ({ input }) {
-        return yield* application.waitForBackendStatus(input.after);
-      }),
       subscribe: orpc.status.subscribe.effect(function* ({ input }) {
         return yield* Effect.sync(() =>
           streamToAsyncIteratorObject(
