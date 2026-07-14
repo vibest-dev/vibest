@@ -8,14 +8,18 @@ export default defineConfig({
   main: {
     build: {
       outDir: "dist/main",
-      rollupOptions: {
-        external: ["node-pty"],
-      },
     },
   },
   preload: {
     build: {
       outDir: "dist/preload",
+      rollupOptions: {
+        input: { index: "src/preload/index.ts" },
+        output: {
+          format: "cjs",
+          entryFileNames: "[name].js",
+        },
+      },
     },
   },
   renderer: {
