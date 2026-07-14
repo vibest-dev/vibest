@@ -1369,14 +1369,17 @@ export function createAppClients(platform: Platform): AppClients {
       queryClient,
       orpcClient,
       orpcWsClient,
-      orpc: createTanstackQueryUtils({ orpcClient }),
+      orpc: createTanstackQueryUtils(orpcClient),
     };
   }
 
   const { httpBaseUrl, wsBaseUrl, token } = platform.backend;
   const headers = { authorization: `Bearer ${token}` };
 
-  const orpcClient = createVibestClient({ url: `${httpBaseUrl}/api/rpc`, headers });
+  // oRPC's fetch link takes a ROOT-RELATIVE `url` plus a separate absolute
+  // `origin` — an absolute `url` does not typecheck. `createVibestClient`
+  // exposes `origin` as a passthrough for exactly this.
+  const orpcClient = createVibestClient({ origin: httpBaseUrl, headers });
   const orpcWsClient = createVibestWsClient({
     url: `${wsBaseUrl}/ws/rpc`,
     getTicket: async () => {
@@ -1389,7 +1392,7 @@ export function createAppClients(platform: Platform): AppClients {
     },
   });
 
-  return { queryClient, orpcClient, orpcWsClient, orpc: createTanstackQueryUtils({ orpcClient }) };
+  return { queryClient, orpcClient, orpcWsClient, orpc: createTanstackQueryUtils(orpcClient) };
 }
 ```
 
