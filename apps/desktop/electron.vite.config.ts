@@ -17,6 +17,19 @@ export default defineConfig({
       },
     },
   },
+  preload: {
+    build: {
+      outDir: "dist/preload",
+      rollupOptions: {
+        input: { index: "src/preload/index.ts" },
+        // A sandboxed renderer receives the MessagePort through a CommonJS preload.
+        output: {
+          format: "cjs",
+          entryFileNames: "[name].js",
+        },
+      },
+    },
+  },
   renderer: {
     // The renderer *is* apps/app, compiled from source into the Electron
     // bundle — not a copy of apps/app/dist. Same plugins, same alias.

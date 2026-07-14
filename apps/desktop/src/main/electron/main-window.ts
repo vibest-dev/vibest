@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { is } from "@electron-toolkit/utils";
 import { Effect, Scope } from "effect";
-import { BrowserWindow, shell } from "electron";
+import { BrowserWindow, shell, type WebContents } from "electron";
 
 import icon from "../../../resources/icon.png?asset";
 import { APP_ORIGIN } from "./app-protocol";
@@ -15,6 +15,7 @@ export interface MainWindow {
 
 export type MainWindowOptions = {
   readonly devUrl: string | undefined;
+  readonly connectRenderer: (webContents: WebContents) => () => Promise<void>;
 };
 
 function canOpenExternal(url: string): boolean {
@@ -31,6 +32,13 @@ export function makeMainWindow(
 ): Effect.Effect<MainWindow, never, Scope.Scope> {
   return Effect.gen(function* () {
     let mainWindow: BrowserWindow | undefined;
+    let disconnectRenderer: (() => Promise<void>) | undefined;
+
+    const disconnectCurrentRenderer = (): void => {
+      const disconnect = disconnectRenderer;
+      disconnectRenderer = undefined;
+      if (disconnect) void disconnect();
+    };
 
     const createWindow = (): void => {
       const window = new BrowserWindow({
@@ -44,6 +52,7 @@ export function makeMainWindow(
         trafficLightPosition: { x: 16, y: 16 },
         ...(process.platform === "linux" ? { icon } : {}),
         webPreferences: {
+          preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../preload/index.js"),
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
@@ -52,7 +61,12 @@ export function makeMainWindow(
       mainWindow = window;
 
       window.on("ready-to-show", () => window.show());
+      window.webContents.on("did-finish-load", () => {
+        disconnectCurrentRenderer();
+        disconnectRenderer = options.connectRenderer(window.webContents);
+      });
       window.on("closed", () => {
+        disconnectCurrentRenderer();
         if (mainWindow === window) mainWindow = undefined;
       });
 
@@ -82,6 +96,7 @@ export function makeMainWindow(
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
+        disconnectCurrentRenderer();
         mainWindow?.destroy();
         mainWindow = undefined;
       }),
