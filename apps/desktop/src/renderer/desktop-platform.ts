@@ -1,31 +1,11 @@
+import { consumeEventIterator } from "@orpc/client";
 import type { Platform } from "@vibest/app/platform";
 
 import type { DesktopBootstrap } from "../shared/desktop-rpc";
 import type { DesktopClient } from "./desktop-client";
 
-const INITIAL_RECONNECT_DELAY_MS = 250;
-const MAX_RECONNECT_DELAY_MS = 5_000;
-
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 export function createDesktopPlatform(
@@ -40,34 +20,32 @@ export function createDesktopPlatform(
       initial: bootstrap.status,
       subscribe: (listener) => {
         const controller = new AbortController();
-
-        void (async () => {
-          let revision = bootstrap.statusRevision;
-          let reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
-
-          while (!controller.signal.aborted) {
-            try {
-              const next = await client.status.watch(
-                { after: revision },
-                { signal: controller.signal },
-              );
-              if (next.revision > revision) {
-                revision = next.revision;
-                listener(next.status);
+        let revision = bootstrap.statusRevision;
+        const unsubscribe = consumeEventIterator(
+          client.status.subscribe({ after: revision }, { signal: controller.signal }),
+          {
+            onEvent: (snapshot) => {
+              if (snapshot.revision <= revision) return;
+              revision = snapshot.revision;
+              listener(snapshot.status);
+            },
+            onError: (error) => {
+              if (!controller.signal.aborted && !isAbortError(error)) {
+                console.error("Desktop status stream failed", error);
               }
-              reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
-              continue;
-            } catch (error) {
-              if (controller.signal.aborted || isAbortError(error)) return;
-              console.error("Desktop status poll failed", error);
+            },
+            onFinish: () => {},
+          },
+        );
+
+        return () => {
+          controller.abort();
+          void unsubscribe().catch((error: unknown) => {
+            if (!isAbortError(error)) {
+              console.error("Failed to unsubscribe from desktop status", error);
             }
-
-            await delay(reconnectDelay, controller.signal);
-            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
-          }
-        })();
-
-        return () => controller.abort();
+          });
+        };
       },
       retry: () => {
         void client.backend.retry().catch((error: unknown) => {

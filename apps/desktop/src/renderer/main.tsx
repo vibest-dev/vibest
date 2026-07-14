@@ -5,6 +5,7 @@ import "@vibest/app/index.css";
 
 import { createDesktopClient } from "./desktop-client";
 import { createDesktopPlatform } from "./desktop-platform";
+import { waitForDesktopPort } from "./desktop-port";
 
 const rootElement = document.getElementById("root")!;
 if (!rootElement) throw new Error("Root element not found");
@@ -34,7 +35,8 @@ function showStartupFailure(error: unknown): void {
 }
 
 async function bootstrap(): Promise<void> {
-  const client = createDesktopClient();
+  const port = await waitForDesktopPort();
+  const client = createDesktopClient(port);
   const desktop = await client.bootstrap();
   const platform = createDesktopPlatform(client, desktop);
   createRoot(rootElement).render(createApp(platform));
