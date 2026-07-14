@@ -6,14 +6,16 @@ import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcess
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect, it } from "vitest";
 
-import { BackendProcess, BackendProcessLive, resolveServerEntry } from "./backend";
+import type { BackendProcessConfig } from "./local-backend";
+import { makeNodeBackendProcess } from "./node-backend-process";
 
 function makeRuntime() {
   const nodeBase = Layer.merge(NodeFileSystem.layer, NodePath.layer);
   const spawner = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
-  return ManagedRuntime.make(BackendProcessLive.pipe(Layer.provide(spawner)));
+  return ManagedRuntime.make(spawner);
 }
 
 function makeScript(source: string): string {
@@ -24,36 +26,14 @@ function makeScript(source: string): string {
   return script;
 }
 
-const config = (entry: string) => ({
+const config = (entry: string): BackendProcessConfig => ({
   entry,
   token: "test-token",
   shellPath: undefined,
   corsOrigins: ["vibest://app"],
 });
 
-describe("resolveServerEntry", () => {
-  it("points at the collected server dependency in a packaged app", () => {
-    const entry = resolveServerEntry(true, "/Applications/Vibest.app/Contents/Resources");
-    expect(entry).toBe(
-      path.join(
-        "/Applications/Vibest.app/Contents/Resources",
-        "app.asar",
-        "node_modules",
-        "@vibest",
-        "cli",
-        "dist",
-        "cli.mjs",
-      ),
-    );
-  });
-
-  it("points at the monorepo build when unpackaged", () => {
-    const entry = resolveServerEntry(false, "/unused");
-    expect(entry).toMatch(/packages[/\\]vibest[/\\]dist[/\\]cli\.mjs$/);
-  });
-});
-
-describe("BackendProcess", () => {
+describe("NodeBackendProcess", () => {
   it("reads a ready line split across stdout chunks", async () => {
     const entry = makeScript(`
 process.stdout.write("ordinary log\\n");
@@ -67,8 +47,8 @@ setInterval(() => {}, 1000);
       const port = await runtime.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const backend = yield* BackendProcess;
-            const running = yield* backend.launch(config(entry), 0);
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
             return yield* running.ready;
           }),
         ),
@@ -88,8 +68,8 @@ setInterval(() => {}, 1000);
         runtime.runPromise(
           Effect.scoped(
             Effect.gen(function* () {
-              const backend = yield* BackendProcess;
-              const running = yield* backend.launch(config(entry), 0);
+              const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+              const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
               return yield* running.ready;
             }),
           ),
@@ -118,8 +98,8 @@ setInterval(() => {}, 1000);
       await runtime.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const backend = yield* BackendProcess;
-            const running = yield* backend.launch(config(entry), 0);
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
             yield* running.ready;
           }),
         ),

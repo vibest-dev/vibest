@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
-import { type RunCommand, resolveLoginShellPath } from "./shell-path";
+import { type RunCommand, resolveLoginShellPath } from "./login-shell-path";
 
 const FENCED = (path: string) => `__vibest_path_start__${path}__vibest_path_end__`;
 

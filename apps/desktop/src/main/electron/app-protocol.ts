@@ -2,17 +2,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { Data, Effect, Scope } from "effect";
 import { net, protocol } from "electron";
 
-import { DESKTOP_RPC_PREFIX } from "../shared/desktop-rpc";
+import { DESKTOP_RPC_PREFIX } from "../../shared/desktop-rpc";
 
 export const SCHEME = "vibest";
 export const HOST = "app";
 export const APP_ORIGIN = `${SCHEME}://${HOST}`;
 
-export type DesktopRpcHandler = (
-  request: Request,
-) => Promise<{ matched: true; response: Response } | { matched: false }>;
+export class ProtocolRegistrationError extends Data.TaggedError("ProtocolRegistrationError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+export type AppRequestHandler = (request: Request) => Promise<Response | undefined>;
 
 /** Must run before app.whenReady(). */
 export function registerAppScheme(): void {
@@ -49,14 +53,13 @@ function isDesktopRpcPath(pathname: string): boolean {
 }
 
 /** Serve Desktop RPC first, then renderer assets with SPA fallback. */
-export function createAppRequestHandler(rendererRoot: string, rpc: DesktopRpcHandler) {
+export function createAppRequestHandler(rendererRoot: string, requestHandler: AppRequestHandler) {
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (url.host !== HOST) return new Response("Not found", { status: 404 });
 
     if (isDesktopRpcPath(url.pathname)) {
-      const result = await rpc(request);
-      return result.matched ? result.response : new Response("Not found", { status: 404 });
+      return (await requestHandler(request)) ?? new Response("Not found", { status: 404 });
     }
 
     const file = resolveAssetPath(rendererRoot, url.pathname);
@@ -71,10 +74,26 @@ export function createAppRequestHandler(rendererRoot: string, rpc: DesktopRpcHan
   };
 }
 
-export function registerAppProtocol(rendererRoot: string, rpc: DesktopRpcHandler): void {
-  protocol.handle(SCHEME, createAppRequestHandler(rendererRoot, rpc));
-}
-
-export function unregisterAppProtocol(): void {
-  protocol.unhandle(SCHEME);
+export function registerAppProtocol(
+  rendererRoot: string,
+  requestHandler: AppRequestHandler,
+): Effect.Effect<void, ProtocolRegistrationError, Scope.Scope> {
+  return Effect.acquireRelease(
+    Effect.try({
+      try: () => protocol.handle(SCHEME, createAppRequestHandler(rendererRoot, requestHandler)),
+      catch: (cause) =>
+        new ProtocolRegistrationError({
+          message: "Unable to register the vibest protocol",
+          cause,
+        }),
+    }),
+    () =>
+      Effect.sync(() => {
+        try {
+          protocol.unhandle(SCHEME);
+        } catch {
+          // Electron may already have torn protocol handling down during exit.
+        }
+      }),
+  ).pipe(Effect.asVoid);
 }

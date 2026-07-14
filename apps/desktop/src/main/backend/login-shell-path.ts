@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Effect, Option } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const SHELL_TIMEOUT_MS = 5_000;
@@ -72,25 +72,16 @@ export function resolveLoginShellPath(
   });
 }
 
-export class LoginShellPath extends Context.Service<
-  LoginShellPath,
-  { readonly get: Effect.Effect<string | undefined> }
->()("desktop/LoginShellPath") {}
-
-export const LoginShellPathLive = Layer.effect(
-  LoginShellPath,
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    return LoginShellPath.of({
-      get: resolveLoginShellPath((file, args) =>
-        spawner.string(
-          ChildProcess.make(file, args, {
-            stdin: "ignore",
-            stdout: "pipe",
-            stderr: "ignore",
-          }),
-        ),
-      ),
-    });
-  }),
-);
+export function resolveLoginShellPathWith(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+): Effect.Effect<string | undefined> {
+  return resolveLoginShellPath((file, args) =>
+    spawner.string(
+      ChildProcess.make(file, args, {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+      }),
+    ),
+  );
+}

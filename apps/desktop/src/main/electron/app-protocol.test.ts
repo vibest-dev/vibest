@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type DesktopRpcHandler, createAppRequestHandler, resolveAssetPath } from "./protocol";
+import { type AppRequestHandler, createAppRequestHandler, resolveAssetPath } from "./app-protocol";
 
 const ROOT = path.resolve("/app/renderer");
 
@@ -34,10 +34,7 @@ describe("resolveAssetPath", () => {
 
 describe("createAppRequestHandler", () => {
   it("dispatches Desktop RPC before the asset fallback", async () => {
-    const rpc = vi.fn<DesktopRpcHandler>(async (_request) => ({
-      matched: true as const,
-      response: new Response("rpc", { status: 200 }),
-    }));
+    const rpc = vi.fn<AppRequestHandler>(async () => new Response("rpc", { status: 200 }));
     const handler = createAppRequestHandler(ROOT, rpc);
 
     const response = await handler(
@@ -53,7 +50,7 @@ describe("createAppRequestHandler", () => {
   });
 
   it("returns 404 when an RPC path does not match a procedure", async () => {
-    const handler = createAppRequestHandler(ROOT, async () => ({ matched: false as const }));
+    const handler = createAppRequestHandler(ROOT, async () => undefined);
 
     const response = await handler(
       new Request("vibest://app/api/desktop-rpc/not-a-procedure", { method: "POST" }),
@@ -64,7 +61,7 @@ describe("createAppRequestHandler", () => {
   });
 
   it("rejects a different custom-protocol host", async () => {
-    const rpc = vi.fn<DesktopRpcHandler>(async () => ({ matched: false as const }));
+    const rpc = vi.fn<AppRequestHandler>(async () => undefined);
     const handler = createAppRequestHandler(ROOT, rpc);
 
     const response = await handler(new Request("vibest://other/api/desktop-rpc/bootstrap"));

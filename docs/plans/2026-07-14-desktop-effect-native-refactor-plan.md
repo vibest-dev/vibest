@@ -8,6 +8,8 @@
 > 远端默认分支实际是 `main`，不是 `master`。实现基于 `origin/main@c866383`，位于 `feat/desktop-effect-native`。
 >
 > Phase 0 结果：custom protocol 的 POST、unary oRPC 和 dev CORS 可用；Fetch EventIterator 能传值，但 client cancellation 没有可靠执行 server-side stream finalizer。因此按本方案预定的 fallback，`desktop.status.watch` 最终采用有 revision 的 20 秒 bounded long-polling，没有回退 Electron IPC。
+>
+> 实现完成后，Main 按单向依赖重新组织为 application、backend、RPC 和 Electron adapter 模块。最终目录、模块职责和依赖规则以 `apps/desktop/src/main/README.md` 为准；下文中的旧文件名保留为迁移过程记录。
 
 ## 1. 目标
 
