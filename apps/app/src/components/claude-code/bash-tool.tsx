@@ -8,15 +8,16 @@ export function ClaudeCodeBashTool({ invocation }: { invocation: BashUIToolInvoc
   const { input, output } = invocation;
 
   // Create terminal-like output
+  const outputText = output ? [output.stdout, output.stderr].filter(Boolean).join("\n") : "";
   const terminalOutput = input?.command
-    ? `$ ${input.command}${output ? `\n${output}` : ""}`
-    : output || "";
+    ? `$ ${input.command}${outputText ? `\n${outputText}` : ""}`
+    : outputText;
 
   return (
     <Tool>
       <ToolHeader icon={SquareTerminalIcon}>{input?.description}</ToolHeader>
       <ToolContent>
-        {input?.command || output ? (
+        {input?.command || outputText ? (
           <div className="relative">
             <CodeBlock code={terminalOutput} language="bash" className="text-sm" />
           </div>

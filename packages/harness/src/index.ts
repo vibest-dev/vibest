@@ -1,6 +1,7 @@
 // This package contains AI SDK integrations for various agents.
 // Import from specific agent implementations:
 // - @vibest/harness/claude-code
+// - @vibest/harness/codex
 
 export * from "./types/harness-agent-id";
 export * from "./types/event";

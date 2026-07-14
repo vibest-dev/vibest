@@ -1,12 +1,6 @@
+import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { oc, type } from "@orpc/contract";
-import {
-  type ClaudeCodeTools,
-  McpServerStatusSchema,
-  ModelInfoSchema,
-  PermissionResultSchema,
-  SlashCommandSchema,
-  type ToolPermissionRequest,
-} from "@vibest/harness/claude-code";
+import type { ClaudeCodeUIMessage, ToolPermissionRequest } from "@vibest/harness/claude-code";
 import type { InferUIMessageChunk, UIMessage } from "ai";
 import { z } from "zod";
 
@@ -17,37 +11,17 @@ export type { ToolPermissionRequest };
 
 export const claudeCodeContract = {
   session: {
-    create: oc.output(
-      z.object({
-        sessionId: z.string(),
-      }),
-    ),
-    abort: oc.input(
-      z.object({
-        sessionId: z.string(),
-      }),
-    ),
+    create: oc.output(type<{ sessionId: string }>()),
+    abort: oc.input(z.object({ sessionId: z.string() })),
     getSupportedCommands: oc
-      .input(
-        z.object({
-          sessionId: z.string(),
-        }),
-      )
-      .output(z.array(SlashCommandSchema)),
+      .input(z.object({ sessionId: z.string() }))
+      .output(type<sdk.SlashCommand[]>()),
     getSupportedModels: oc
-      .input(
-        z.object({
-          sessionId: z.string(),
-        }),
-      )
-      .output(z.array(ModelInfoSchema)),
+      .input(z.object({ sessionId: z.string() }))
+      .output(type<sdk.ModelInfo[]>()),
     getMcpServers: oc
-      .input(
-        z.object({
-          sessionId: z.string(),
-        }),
-      )
-      .output(z.array(McpServerStatusSchema)),
+      .input(z.object({ sessionId: z.string() }))
+      .output(type<sdk.McpServerStatus[]>()),
   },
   prompt: oc
     .input(
@@ -57,26 +31,16 @@ export const claudeCodeContract = {
         model?: string;
       }>(),
     )
-    .output(
-      type<
-        AsyncGenerator<
-          InferUIMessageChunk<UIMessage<undefined, Record<string, unknown>, ClaudeCodeTools>>
-        >
-      >(),
-    ),
+    .output(type<AsyncGenerator<InferUIMessageChunk<ClaudeCodeUIMessage>>>()),
   requestPermission: oc
-    .input(
-      z.object({
-        sessionId: z.string(),
-      }),
-    )
+    .input(z.object({ sessionId: z.string() }))
     .output(type<AsyncGenerator<ToolPermissionRequest>>()),
   respondPermission: oc
     .input(
       z.object({
         sessionId: z.string(),
         requestId: z.string(),
-        result: PermissionResultSchema,
+        result: z.custom<sdk.PermissionResult>(),
       }),
     )
     .output(z.boolean()),

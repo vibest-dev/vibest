@@ -14,8 +14,8 @@ export function ClaudeCodeGlobTool({ invocation }: { invocation: GlobUIToolInvoc
         {input?.path ? ` in ${input.path}` : ""}
       </ToolHeader>
       <ToolContent>
-        {typeof output === "string" ? (
-          <CodeBlock code={output} language="text" className="text-sm" />
+        {output ? (
+          <CodeBlock code={output.filenames.join("\n")} language="text" className="text-sm" />
         ) : null}
       </ToolContent>
     </Tool>

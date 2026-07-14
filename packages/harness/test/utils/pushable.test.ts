@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Pushable } from "../../src/claude-code/utils/pushable";
+import { Pushable } from "../../src/utils/pushable";
 
 describe("Pushable", () => {
   it("yields queued values immediately when available", async () => {

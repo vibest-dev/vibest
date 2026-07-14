@@ -7,7 +7,7 @@ export function ClaudeCodeReadTool({ invocation }: { invocation: ReadUIToolInvoc
   if (!invocation || invocation.state === "input-streaming") return null;
   const { input, output } = invocation;
 
-  const code = output?.replace(/^\s*(\d+)→/gm, "");
+  const code = output?.type === "text" ? output.file.content : undefined;
   const language = input?.file_path?.match(/\.(\w+)$/)?.[1] || "text";
 
   return (

@@ -1,10 +1,11 @@
 import "@orpc/experimental-effect/extensions/effect";
-import type { WithEffectContext } from "@orpc/experimental-effect";
 import { implement } from "@orpc/server";
 import { claudeCodeContract } from "@vibest/contract/claude-code";
 import { ClaudeCodeAgent } from "@vibest/harness/claude-code";
 import { toUIMessage } from "@vibest/harness/claude-code";
 import { Context, Effect, Layer } from "effect";
+
+import type { RpcContext } from "./context";
 
 /**
  * The claude-code harness adapter as an Effect service. Procedures resolve it
@@ -17,9 +18,6 @@ export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.sync(
   ClaudeCode,
   () => new ClaudeCodeAgent(),
 );
-
-/** Services every RPC procedure may `yield*`. */
-export type RpcContext = WithEffectContext<ClaudeCode>;
 
 const orpc = implement(claudeCodeContract).$context<RpcContext>();
 

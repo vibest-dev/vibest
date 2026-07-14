@@ -14,8 +14,12 @@ export function ClaudeCodeGrepTool({ invocation }: { invocation: GrepUIToolInvoc
         {input?.path ? ` in ${input.path}` : ""}
       </ToolHeader>
       <ToolContent>
-        {typeof output === "string" ? (
-          <CodeBlock code={output} language="json" className="text-sm" />
+        {output ? (
+          <CodeBlock
+            code={output.content ?? output.filenames.join("\n")}
+            language="text"
+            className="text-sm"
+          />
         ) : null}
       </ToolContent>
     </Tool>

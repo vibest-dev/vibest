@@ -33,7 +33,7 @@ export function ClaudeCodeWebFetchTool({ invocation }: { invocation: WebFetchUIT
             <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               Result
             </h4>
-            <Response>{output}</Response>
+            <Response>{output.result}</Response>
           </div>
         ) : null}
       </ToolContent>

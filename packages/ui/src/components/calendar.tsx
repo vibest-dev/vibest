@@ -8,6 +8,41 @@ import { DayPicker } from "react-day-picker";
 const buttonClassNames =
   "relative flex size-(--cell-size) text-base sm:text-sm items-center justify-center rounded-lg text-foreground not-in-data-selected:hover:bg-accent disabled:pointer-events-none disabled:opacity-64 [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
+function CalendarChevron({
+  className,
+  orientation,
+  ...iconProps
+}: {
+  className?: string;
+  orientation?: "left" | "right" | "up" | "down";
+}): React.ReactElement {
+  if (orientation === "left") {
+    return (
+      <ChevronLeftIcon
+        className={cn(className, "rtl:rotate-180")}
+        {...iconProps}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  if (orientation === "right") {
+    return (
+      <ChevronRightIcon
+        className={cn(className, "rtl:rotate-180")}
+        {...iconProps}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  return <ChevronsUpDownIcon className={className} {...iconProps} aria-hidden="true" />;
+}
+
+const defaultComponents = {
+  Chevron: CalendarChevron,
+};
+
 export function Calendar({
   className,
   classNames,
@@ -56,39 +91,6 @@ export function Calendar({
     },
     { ...defaultClassNames } as typeof defaultClassNames,
   );
-
-  const defaultComponents = {
-    Chevron: ({
-      className,
-      orientation,
-      ...props
-    }: {
-      className?: string;
-      orientation?: "left" | "right" | "up" | "down";
-    }): React.ReactElement => {
-      if (orientation === "left") {
-        return (
-          <ChevronLeftIcon
-            className={cn(className, "rtl:rotate-180")}
-            {...props}
-            aria-hidden="true"
-          />
-        );
-      }
-
-      if (orientation === "right") {
-        return (
-          <ChevronRightIcon
-            className={cn(className, "rtl:rotate-180")}
-            {...props}
-            aria-hidden="true"
-          />
-        );
-      }
-
-      return <ChevronsUpDownIcon className={className} {...props} aria-hidden="true" />;
-    },
-  };
 
   const mergedComponents = {
     ...defaultComponents,

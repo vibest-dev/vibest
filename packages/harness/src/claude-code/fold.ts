@@ -2,13 +2,14 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { readUIMessageStream } from "ai";
 
 import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
-import { transform } from "./transform";
+import { createTransform } from "./transform";
 import type { ClaudeCodeUIMessage } from "./ui-message";
 
 /** Cold-fold a native transcript into UIMessage[] via the same render transform as the live stream. */
 export async function foldToUIMessages(
   messages: Iterable<SDKMessage>,
 ): Promise<ClaudeCodeUIMessage[]> {
+  const transform = createTransform();
   const stream = new ReadableStream<ClaudeCodeUIMessageChunk>({
     start(controller) {
       for (const message of messages) {

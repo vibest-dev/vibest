@@ -13,10 +13,8 @@ describe("createWsConnect", () => {
 
   it("appends the fetched ticket to the socket URL", async () => {
     const opened: string[] = [];
-    class FakeSocket {
-      constructor(url: string | URL) {
-        opened.push(url.toString());
-      }
+    function FakeSocket(url: string | URL) {
+      opened.push(url.toString());
     }
     vi.stubGlobal("WebSocket", FakeSocket);
 
@@ -32,10 +30,8 @@ describe("createWsConnect", () => {
 
   it("mints a fresh ticket on every reconnect, since a ticket is single-use", async () => {
     const opened: string[] = [];
-    class FakeSocket {
-      constructor(url: string | URL) {
-        opened.push(url.toString());
-      }
+    function FakeSocket(url: string | URL) {
+      opened.push(url.toString());
     }
     vi.stubGlobal("WebSocket", FakeSocket);
 
@@ -59,10 +55,8 @@ describe("createWsConnect", () => {
 
   it("opens the bare URL when no ticket is required (browser mode)", async () => {
     const opened: string[] = [];
-    class FakeSocket {
-      constructor(url: string | URL) {
-        opened.push(url.toString());
-      }
+    function FakeSocket(url: string | URL) {
+      opened.push(url.toString());
     }
     vi.stubGlobal("WebSocket", FakeSocket);
 
