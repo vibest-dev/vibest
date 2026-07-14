@@ -1,10 +1,27 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { electronApp, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, shell } from "electron";
+import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import icon from "../../resources/icon.png?asset";
+import { type Backend, startBackend } from "./backend";
+import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./protocol";
+
+let backend: Backend | undefined;
+
+// Two launches would spawn two backends, each on its own port, each with its
+// own agent — so the second launch focuses the first window instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
+// Must precede app.whenReady().
+registerAppScheme();
+
+function rendererRoot(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer");
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -18,12 +35,8 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 16 },
     ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
-      // .js, not .mjs: a sandboxed preload must be CommonJS — Electron does not
-      // support ESM preloads in a sandboxed renderer. Step 5 configures
-      // electron-vite to emit it that way.
+      // .js, not .mjs: a sandboxed preload must be CommonJS.
       preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../preload/index.js"),
-      // Nothing in the renderer needs Node any more — the backend is a separate
-      // process, reached over HTTP.
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -38,14 +51,53 @@ function createWindow(): void {
     shell.openExternal(details.url);
     return { action: "deny" };
   });
+
+  const devUrl = process.env["ELECTRON_RENDERER_URL"];
+  if (is.dev && devUrl) {
+    void mainWindow.loadURL(devUrl);
+  } else {
+    void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
+  }
 }
 
-app.whenReady().then(() => {
+app.on("second-instance", () => {
+  const [existing] = BrowserWindow.getAllWindows();
+  if (!existing) return;
+  if (existing.isMinimized()) existing.restore();
+  existing.focus();
+});
+
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId("com.vibest.desktop");
 
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
+
+  // In dev the renderer is served by Vite over http, so that origin must be
+  // allowed too; in production it is only ever the app protocol.
+  const devUrl = process.env["ELECTRON_RENDERER_URL"];
+  const corsOrigins = [APP_ORIGIN, ...(is.dev && devUrl ? [new URL(devUrl).origin] : [])];
+
+  try {
+    backend = await startBackend({ corsOrigins });
+  } catch (error) {
+    dialog.showErrorBox(
+      "Vibest could not start",
+      `The local server failed to start.\n\n${(error as Error).message}`,
+    );
+    app.quit();
+    return;
+  }
+
+  // The preload asks for this before the renderer's first module runs.
+  ipcMain.on("vibest:bootstrap", (event) => {
+    event.returnValue = backend
+      ? { httpBaseUrl: backend.httpBaseUrl, wsBaseUrl: backend.wsBaseUrl, token: backend.token }
+      : null;
+  });
+
+  registerAppProtocol(rendererRoot());
 
   createWindow();
 
@@ -58,4 +110,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  backend?.stop();
+  backend = undefined;
 });

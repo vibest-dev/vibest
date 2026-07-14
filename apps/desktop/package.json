@@ -6,6 +6,7 @@
   "type": "module",
   "main": "./dist/main/index.js",
   "scripts": {
+    "predev": "pnpm --filter @vibest/cli build",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "build:unpack": "pnpm run build && electron-builder --dir",
@@ -25,6 +26,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@vibest/app": "workspace:*",
     "@vibest/cli": "workspace:*"
   },
   "devDependencies": {

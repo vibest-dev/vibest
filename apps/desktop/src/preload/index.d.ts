@@ -1,7 +1,7 @@
-import { ElectronAPI } from "@electron-toolkit/preload";
+import type { DesktopBridge } from "../shared/bridge";
 
 declare global {
   interface Window {
-    electron: ElectronAPI;
+    vibest: DesktopBridge;
   }
 }

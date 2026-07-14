@@ -3,6 +3,13 @@
   "include": ["src/renderer/**/*", "src/preload/*.d.ts", "src/shared/**/*"],
   "compilerOptions": {
     "composite": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The renderer compiles @vibest/app from source, so this project sees that
+    // source too: it needs the app's own `@` alias, and `vite/client` for the
+    // side-effect CSS import.
+    "types": ["vite/client"],
+    "paths": {
+      "@/*": ["../app/src/*"]
+    }
   }
 }

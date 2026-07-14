@@ -1,17 +1,18 @@
 <!doctype html>
-<html class="dark">
+<html>
   <head>
     <meta charset="UTF-8" />
-    <title>Vibest Desktop</title>
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <title>Vibest</title>
+    <!-- The renderer is served from vibest://app but talks to the backend on
+         loopback, so http:/ws: to 127.0.0.1 must be allowed explicitly. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:"
+      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*"
     />
   </head>
 
-  <body class="bg-sidebar text-foreground overflow-hidden font-sans antialiased">
-    <div id="root" class="isolate h-dvh"></div>
-    <script type="module" src="src/main.tsx"></script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
   </body>
 </html>
