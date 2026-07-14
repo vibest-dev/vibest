@@ -23,13 +23,26 @@ export type Backend = {
 };
 
 /**
- * Where the server bundle lives. Packaged builds ship it as an extraResource
- * (outside the asar, so it is a real file on disk that Node can execute);
- * unpackaged runs use the monorepo's build output.
+ * Where the server bundle lives. `@vibest/cli` is a production dependency of
+ * this app, so electron-builder collects it — and its whole dependency tree,
+ * correctly flattened out of pnpm's store — into the asar. The bundle is not
+ * self-contained (the Claude Agent SDK resolves its own files relative to its
+ * package directory, so it cannot be inlined), which is why the server is
+ * spawned from that collected tree rather than copied out of it. Electron's
+ * Node reads asar paths transparently, including under ELECTRON_RUN_AS_NODE.
+ * Unpackaged runs use the monorepo's build output.
  */
 export function resolveServerEntry(isPackaged: boolean, resourcesPath: string): string {
   if (isPackaged) {
-    return path.join(resourcesPath, "server", "cli.mjs");
+    return path.join(
+      resourcesPath,
+      "app.asar",
+      "node_modules",
+      "@vibest",
+      "cli",
+      "dist",
+      "cli.mjs",
+    );
   }
   return fileURLToPath(new URL("../../../../packages/vibest/dist/cli.mjs", import.meta.url));
 }

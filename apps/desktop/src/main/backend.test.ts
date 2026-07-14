@@ -5,10 +5,18 @@ import { describe, expect, it } from "vitest";
 import { resolveServerEntry } from "./backend";
 
 describe("resolveServerEntry", () => {
-  it("points at the bundled server in a packaged app", () => {
+  it("points at the collected server dependency in a packaged app", () => {
     const entry = resolveServerEntry(true, "/Applications/Vibest.app/Contents/Resources");
     expect(entry).toBe(
-      path.join("/Applications/Vibest.app/Contents/Resources", "server", "cli.mjs"),
+      path.join(
+        "/Applications/Vibest.app/Contents/Resources",
+        "app.asar",
+        "node_modules",
+        "@vibest",
+        "cli",
+        "dist",
+        "cli.mjs",
+      ),
     );
   });
 

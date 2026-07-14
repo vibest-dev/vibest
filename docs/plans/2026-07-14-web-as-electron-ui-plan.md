@@ -2612,24 +2612,26 @@ git commit -m "feat(desktop): render the vibest app against a spawned backend"
 
 **Files:**
 
-- Modify: `apps/desktop/electron-builder.yml`
+- Modify: `apps/desktop/src/main/backend.ts` (+ `backend.test.ts`)
 - Modify: `apps/desktop/package.json` (build scripts)
 
 **Interfaces:**
 
-- Consumes: `resolveServerEntry(isPackaged=true, resourcesPath)` → `<resources>/server/cli.mjs` (Task 10).
+- Consumes: `resolveServerEntry(isPackaged=true, resourcesPath)` (Task 10), now → `<resources>/app.asar/node_modules/@vibest/cli/dist/cli.mjs`.
 
-**Why `extraResources`, not `asarUnpack`:** the server is spawned as a real OS process, so its entry must be a real file on disk. `extraResources` copies it outside the asar archive by construction; `asarUnpack` would work too but is a more roundabout way of saying the same thing.
+**Why not `extraResources`:** copying `packages/vibest/dist` to `<resources>/server` puts `cli.mjs` on disk but leaves its imports (`@orpc/server`, `sirv`, `ws`, `ai`, the Claude Agent SDK) unresolvable — the bundle is not self-contained, and nothing supplies a `node_modules` next to the copy. Bundling those deps in is not an option either: the Claude Agent SDK locates its own manifest and native binary relative to its package directory. `@vibest/cli` is already a production dependency of the desktop app, so electron-builder collects it _with its whole dependency tree_, correctly flattened out of pnpm's store, into the asar. Spawn it from there. Electron's Node reads asar paths transparently, including under `ELECTRON_RUN_AS_NODE`.
 
-- [ ] **Step 1: Ship the server bundle as a resource**
+- [ ] **Step 1: Point the packaged entry at the collected dependency**
 
-In `apps/desktop/electron-builder.yml`, add an `extraResources` block immediately after `asarUnpack`:
+In `apps/desktop/src/main/backend.ts`, the packaged branch of `resolveServerEntry` becomes:
 
-```yaml
-extraResources:
-  - from: ../../packages/vibest/dist
-    to: server
+```ts
+if (isPackaged) {
+  return path.join(resourcesPath, "app.asar", "node_modules", "@vibest", "cli", "dist", "cli.mjs");
+}
 ```
+
+Update the corresponding expectation in `apps/desktop/src/main/backend.test.ts`.
 
 - [ ] **Step 2: Make the desktop build depend on the server build**
 
@@ -2649,8 +2651,8 @@ Expected: PASS.
 
 - [ ] **Step 4: Verify the server landed in the bundle**
 
-Run: `ls apps/desktop/release/mac-arm64/Vibest.app/Contents/Resources/server/cli.mjs`
-Expected: the file exists. (On a non-macOS host, substitute the platform's output directory under `apps/desktop/release/`.)
+Check that `node_modules/@vibest/cli/dist/cli.mjs` is listed inside `apps/desktop/release/mac-arm64/Vibest.app/Contents/Resources/app.asar` (read the asar header, or run the entry directly with `ELECTRON_RUN_AS_NODE=1 VIBEST_PORT=0`, which should print a ready line).
+Expected: present, and it boots. (On a non-macOS host, substitute the platform's output directory under `apps/desktop/release/`.)
 
 - [ ] **Step 5: Launch the packaged app**
 
