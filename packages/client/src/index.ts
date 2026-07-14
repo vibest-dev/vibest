@@ -12,15 +12,22 @@ type FetchLinkUrl = NonNullable<ConstructorParameters<typeof RPCLink>[0]>["url"]
 export type CreateVibestClientOptions = {
   /**
    * RPC endpoint. Defaults to the relative `/api/rpc` — clients served
-   * same-origin by the CLI server need no configuration.
+   * same-origin by the CLI server need no configuration. The desktop renderer
+   * loads from a custom protocol, so it passes the backend's absolute origin.
    */
   url?: FetchLinkUrl;
+  /**
+   * Headers sent with every call. The desktop renderer passes the per-launch
+   * bearer token here; browser mode is same-origin and needs none.
+   */
+  headers?: Record<string, string>;
 };
 
 /** HTTP client (fetch link). One request per call; streams over SSE. */
 export function createVibestClient(options: CreateVibestClientOptions = {}): VibestClient {
   const link = new RPCLink({
     url: options.url ?? "/api/rpc",
+    ...(options.headers ? { headers: options.headers } : {}),
   });
   return createORPCClient(link);
 }
@@ -30,6 +37,14 @@ export type CreateVibestWsClientOptions = {
   url?: string | URL;
   /** WebSocket subprotocol; the CLI server upgrades on "vibest". */
   protocols?: string | string[];
+  /**
+   * Mint a single-use ticket for the handshake. A browser cannot set headers on
+   * a WebSocket upgrade, so the bearer token can't travel with it; the desktop
+   * renderer fetches a ticket over the authenticated HTTP link instead. The
+   * link re-invokes `connect` on every reconnect, so each attempt gets a fresh
+   * ticket. Omitted in browser mode, where the server requires none.
+   */
+  getTicket?: () => Promise<string>;
 };
 
 function defaultWsUrl(): URL {
@@ -39,13 +54,27 @@ function defaultWsUrl(): URL {
 }
 
 /**
- * WebSocket client: every call multiplexed over one connection. The link
- * takes a lazy `connect` factory (oRPC 2.0.0-beta.16), so the socket is only
- * opened on first use.
+ * The link's `connect` factory. Exported so the ticket handshake is testable
+ * without standing up a socket server.
+ */
+export function createWsConnect(options: CreateVibestWsClientOptions): () => Promise<WebSocket> {
+  return async () => {
+    const url = new URL(options.url ?? defaultWsUrl());
+    if (options.getTicket) {
+      url.searchParams.set("ticket", await options.getTicket());
+    }
+    return new WebSocket(url, options.protocols ?? "vibest");
+  };
+}
+
+/**
+ * WebSocket client: every call multiplexed over one connection. The link takes
+ * a lazy `connect` factory (oRPC 2.0.0-beta.16), so the socket is only opened
+ * on first use — and re-opened, with a fresh ticket, on every reconnect.
  */
 export function createVibestWsClient(options: CreateVibestWsClientOptions = {}): VibestClient {
   const link = new WebSocketRPCLink({
-    connect: () => new WebSocket(options.url ?? defaultWsUrl(), options.protocols ?? "vibest"),
+    connect: createWsConnect(options),
   });
   return createORPCClient(link);
 }
