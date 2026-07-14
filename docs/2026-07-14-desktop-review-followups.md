@@ -46,7 +46,11 @@ is never exercised in dev. When it breaks it's an opaque mid-session SDK error, 
 clean "unsupported version." **Fix:** consider a version probe at session start, or
 at least a clearer error.
 
-### 5. `loginShellPath` breaks on fish/nushell and slow rc — packaged only
+### 5. `loginShellPath` breaks on fish/nushell and slow rc — packaged only — ✅ FIXED (commit 4f669e7)
+
+Fixed by reading the exported env via `printenv PATH` instead of interpolating
+`"$PATH"`, plus a `launchctl getenv PATH` fallback on darwin. Original writeup
+kept below for context.
 
 `apps/desktop/src/main/shell-path.ts` runs `$SHELL -ilc 'printf … "$PATH" …'`.
 
