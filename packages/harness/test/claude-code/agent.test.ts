@@ -1,11 +1,14 @@
+import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Session } from "../../src/claude-code/agent";
+import { Session, SessionNotResumableError } from "../../src/claude-code/agent";
 
 const mockQuery = vi.hoisted(() => vi.fn<() => unknown>());
+const mockGetSessionInfo = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: mockQuery,
+  getSessionInfo: mockGetSessionInfo,
 }));
 
 describe("Session", () => {
@@ -229,5 +232,93 @@ describe("Session", () => {
       expect(typeof server.name).toBe("string");
       expect(["connected", "failed", "needs-auth", "pending"]).toContain(server.status);
     });
+  });
+});
+
+describe("Session resume", () => {
+  const MESSAGE = { role: "user", content: "hi" } as sdk.SDKUserMessage["message"];
+
+  /** A query that ends immediately, so prompt() runs its resume path then returns. */
+  function fakeQuery() {
+    const q = {
+      next: vi.fn<() => Promise<{ done: true; value: undefined }>>(async () => ({
+        done: true as const,
+        value: undefined,
+      })),
+      interrupt: vi.fn<() => void>(),
+      [Symbol.asyncIterator]() {
+        return q;
+      },
+    };
+    return q;
+  }
+
+  function lastOptions(): sdk.Options {
+    return (mockQuery.mock.calls.at(-1) as unknown as [{ options: sdk.Options }])[0].options;
+  }
+
+  beforeEach(() => {
+    // resolveClaudeExecutable() would otherwise probe the filesystem for `claude`.
+    process.env["VIBEST_CLAUDE_EXECUTABLE"] = "/fake/claude";
+    mockQuery.mockReset().mockImplementation(() => fakeQuery());
+    mockGetSessionInfo.mockReset();
+  });
+
+  it("pins our id as the SDK session id on create, without resuming", async () => {
+    const { sessionId } = await new Session().create();
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(lastOptions().sessionId).toBe(sessionId);
+    expect(lastOptions().resume).toBeUndefined();
+  });
+
+  it("resumes a missing session from a saved transcript on the next prompt", async () => {
+    mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
+    const sessionId = "019f6013-0000-7000-8000-000000000000";
+
+    const gen = new Session().prompt({ sessionId, message: MESSAGE });
+    await gen.next();
+
+    expect(mockGetSessionInfo).toHaveBeenCalledWith(sessionId);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    // `resume` is passed alone — the SDK rejects it together with `sessionId`.
+    expect(lastOptions().resume).toBe(sessionId);
+    expect(lastOptions().sessionId).toBeUndefined();
+  });
+
+  it("throws SessionNotResumableError when nothing was saved to resume", async () => {
+    mockGetSessionInfo.mockResolvedValue(undefined);
+    const sessionId = "019f6013-0000-7000-8000-000000000001";
+
+    const gen = new Session().prompt({ sessionId, message: MESSAGE });
+
+    await expect(gen.next()).rejects.toBeInstanceOf(SessionNotResumableError);
+    expect(mockQuery).not.toHaveBeenCalled(); // never spun up a blank session
+  });
+
+  it("reuses the in-memory session and never probes disk when it is present", async () => {
+    const session = new Session();
+    const { sessionId } = await session.create();
+    mockQuery.mockClear();
+    mockGetSessionInfo.mockClear();
+
+    const gen = session.prompt({ sessionId, message: MESSAGE });
+    await gen.next();
+
+    expect(mockGetSessionInfo).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled(); // reused the existing live query
+  });
+
+  it("resumes only once when concurrent callers race for a missing session", async () => {
+    mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
+    const session = new Session();
+    const sessionId = "019f6013-0000-7000-8000-000000000002";
+
+    // A prompt and the permission subscription both materialize the session at once.
+    const [a, b] = await Promise.all([session.ensure(sessionId), session.ensure(sessionId)]);
+
+    expect(a).toBe(b); // same SessionState, not two clobbering rebuilds
+    expect(mockGetSessionInfo).toHaveBeenCalledTimes(1);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 });

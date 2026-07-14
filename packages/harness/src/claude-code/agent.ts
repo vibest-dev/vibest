@@ -1,9 +1,28 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import { v7 as uuid } from "uuid";
 
 import { resolveClaudeExecutable } from "./executable";
 import { Pushable } from "./utils/pushable";
+
+/**
+ * Thrown when a prompt arrives for a session the server no longer holds in
+ * memory (it restarted) and Claude has no saved transcript to resume from — the
+ * history was cleared, or nothing was ever persisted. Surfaced to the renderer
+ * so it can tell the user the conversation cannot be restored, rather than
+ * silently starting a blank session under the same id.
+ */
+export class SessionNotResumableError extends Error {
+  readonly code = "SESSION_NOT_RESUMABLE";
+
+  constructor(sessionId: string) {
+    super(
+      `Session ${sessionId} could not be resumed: no saved history was found. ` +
+        `It may have been cleared, or the working directory changed.`,
+    );
+    this.name = "SessionNotResumableError";
+  }
+}
 
 // Emitted while a prompt is running; the client answers via
 // `respondPermission`. The contract re-exports this type for both sides.
@@ -31,6 +50,10 @@ type PendingToolPermission = (result: sdk.PermissionResult) => void;
 
 export class Session {
   private store = new Map<string, SessionState>();
+  // In-flight resumes, keyed by session id, so concurrent callers (a prompt and
+  // the permission subscription racing after a backend restart) share one
+  // resume instead of each spawning a query and clobbering the store.
+  private resuming = new Map<string, Promise<SessionState>>();
 
   get(id: string) {
     const session = this.store.get(id);
@@ -40,6 +63,25 @@ export class Session {
     return session;
   }
 
+  /**
+   * Return the live session for `id`, resuming it from Claude's saved transcript
+   * if the server no longer holds it in memory (it restarted). Throws
+   * {@link SessionNotResumableError} when nothing was saved. This is the entry
+   * point every request that needs a live session should use, so a restarted
+   * backend recovers transparently instead of throwing "session not found".
+   */
+  async ensure(id: string): Promise<SessionState> {
+    const existing = this.store.get(id);
+    if (existing) return existing;
+
+    let inFlight = this.resuming.get(id);
+    if (!inFlight) {
+      inFlight = this.resume(id).finally(() => this.resuming.delete(id));
+      this.resuming.set(id, inFlight);
+    }
+    return inFlight;
+  }
+
   list() {
     return Array.from(this.store.values());
   }
@@ -47,9 +89,21 @@ export class Session {
   async create(): Promise<{
     sessionId: string;
   }> {
+    const sessionId = uuid();
+    // Pin our id as Claude's session id (a valid UUID), so the transcript
+    // persists under it and can be resumed after a backend restart.
+    this.buildSession(sessionId, { sessionId });
+    return { sessionId };
+  }
+
+  /**
+   * Spin up a live query for `sessionId` and store it. `extra` carries the
+   * session-identity options: `{ sessionId }` for a fresh session, or
+   * `{ resume }` to reload one from disk.
+   */
+  private buildSession(sessionId: string, extra: Partial<sdk.Options>): SessionState {
     const input = new Pushable<sdk.SDKUserMessage>();
     const requestPermission = new Pushable<ToolPermissionRequest>();
-    const sessionId = uuid();
 
     const options: sdk.Options = {
       mcpServers: {},
@@ -109,23 +163,32 @@ export class Session {
 
         return promise;
       },
+      ...extra,
     };
 
-    const q = query({
-      prompt: input,
-      options,
-    });
-
-    this.store.set(sessionId, {
+    const q = query({ prompt: input, options });
+    const state: SessionState = {
       query: q,
       input,
       requestPermission,
       pendingPermissionRequests: new Map(),
-    });
-
-    return {
-      sessionId,
     };
+    this.store.set(sessionId, state);
+    return state;
+  }
+
+  /**
+   * Rebuild a session the server no longer holds in memory (it restarted) by
+   * resuming Claude's persisted transcript. Throws {@link SessionNotResumableError}
+   * when nothing was saved, so a lost history never masquerades as a live blank
+   * session. `resume` is passed alone — the SDK rejects `sessionId` alongside it.
+   */
+  private async resume(sessionId: string): Promise<SessionState> {
+    const info = await getSessionInfo(sessionId);
+    if (!info) {
+      throw new SessionNotResumableError(sessionId);
+    }
+    return this.buildSession(sessionId, { resume: sessionId });
   }
 
   async getSupportedCommands(sessionId: string): Promise<sdk.SlashCommand[]> {
@@ -171,10 +234,10 @@ export class Session {
     sessionId: string;
     message: sdk.SDKUserMessage["message"];
   }): AsyncGenerator<sdk.SDKMessage, void, unknown> {
-    const session = this.get(input.sessionId);
-    if (!session) {
-      throw new Error(`Session ${input.sessionId} not found`);
-    }
+    // A missing session means the backend restarted since it was created; ensure
+    // resumes it from Claude's saved transcript rather than failing (or, if
+    // nothing was saved, throws SessionNotResumableError for the renderer).
+    const session = await this.ensure(input.sessionId);
     session.input.push({
       type: "user",
       message: input.message,

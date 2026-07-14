@@ -49,7 +49,9 @@ const session = {
 const prompt = orpc.prompt.effect(function* ({ input }) {
   const claudeCode = yield* ClaudeCode;
   const { model = "sonnet" } = input;
-  const agentSession = claudeCode.session.get(input.sessionId);
+  // ensure, not get: after a backend restart the session is gone from memory
+  // and must be resumed from disk before we can set its model and prompt it.
+  const agentSession = yield* Effect.promise(() => claudeCode.session.ensure(input.sessionId));
 
   // Set model before prompting
   yield* Effect.promise(() => agentSession.query.setModel(model));
@@ -90,7 +92,9 @@ const prompt = orpc.prompt.effect(function* ({ input }) {
 
 const requestPermission = orpc.requestPermission.effect(function* ({ input }) {
   const claudeCode = yield* ClaudeCode;
-  const agentSession = claudeCode.session.get(input.sessionId);
+  // ensure so the permission stream binds to the resumed session after a
+  // restart, rather than throwing "session not found" and breaking tool prompts.
+  const agentSession = yield* Effect.promise(() => claudeCode.session.ensure(input.sessionId));
   return (async function* () {
     for await (const event of agentSession.requestPermission) {
       yield event;
