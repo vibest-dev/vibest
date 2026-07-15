@@ -91,6 +91,19 @@ describe("ClaudeCodeAgent", () => {
     mockGetSessionInfo.mockReset();
   });
 
+  it.effect("passes the server environment to the Claude Code process", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeClaudeCodeAgent({
+        ...process.env,
+        HTTPS_PROXY: "http://desktop-proxy.test:8443",
+      });
+      const { sessionId } = yield* agent.session.create;
+
+      NodeAssert.equal(lastOptions().env?.["HTTPS_PROXY"], "http://desktop-proxy.test:8443");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
   it.effect("creates a scoped session and exposes SDK capabilities as Effects", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent();

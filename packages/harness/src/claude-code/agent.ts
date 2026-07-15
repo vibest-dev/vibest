@@ -117,7 +117,9 @@ export interface ClaudeCodeAgent {
 
 const sdkError = (operation: string, cause: unknown) => new ClaudeSdkError({ operation, cause });
 
-export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Scope.Scope> =>
+export const makeClaudeCodeAgent = (
+  env: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<ClaudeCodeAgent, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const sessions = yield* Ref.make(new Map<string, SessionState>());
@@ -243,7 +245,8 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
             permissionMode: "default",
             stderr: (error) => console.error(error),
             executable: process.execPath as "node",
-            pathToClaudeCodeExecutable: resolveClaudeExecutable(),
+            pathToClaudeCodeExecutable: resolveClaudeExecutable({ env }),
+            env: { ...env },
             systemPrompt: { type: "preset", preset: "claude_code" },
             settingSources: ["user", "project", "local"],
             canUseTool,

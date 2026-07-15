@@ -27,7 +27,7 @@ export default defineConfig({
       outDir: "dist/preload",
       rollupOptions: {
         input: { index: "src/preload/index.ts" },
-        // CommonJS: a sandboxed renderer cannot load an ESM preload.
+        // A sandboxed renderer receives the MessagePort through a CommonJS preload.
         output: {
           format: "cjs",
           entryFileNames: "[name].js",

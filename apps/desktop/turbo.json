@@ -1,4 +1,5 @@
 {
+  "$schema": "https://turborepo.com/schema.v2.json",
   "extends": ["//"],
   "tasks": {
     "dev": {
@@ -13,9 +14,11 @@
         "CLOUD_ML_*",
         "HTTP_PROXY",
         "HTTPS_PROXY",
+        "ALL_PROXY",
         "NO_PROXY",
         "http_proxy",
         "https_proxy",
+        "all_proxy",
         "no_proxy",
         "NODE_EXTRA_CA_CERTS",
         "SSL_CERT_FILE",
