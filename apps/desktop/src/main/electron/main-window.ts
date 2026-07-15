@@ -2,16 +2,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { is } from "@electron-toolkit/utils";
-import { Effect, Scope } from "effect";
+import { Context, Effect, Layer, Scope } from "effect";
 import { BrowserWindow, shell, type WebContents } from "electron";
 
 import icon from "../../../resources/icon.png?asset";
-import { APP_ORIGIN } from "./app-protocol";
+import { DesktopConfig } from "../desktop-config";
+import { APP_ORIGIN, registerAppProtocol } from "./app-protocol";
+import { RendererChannel } from "./renderer-channel";
 
-export interface MainWindow {
-  readonly ensureOpen: Effect.Effect<void>;
-  readonly focus: Effect.Effect<void>;
-}
+export class MainWindow extends Context.Service<
+  MainWindow,
+  {
+    readonly ensureOpen: Effect.Effect<void>;
+    readonly focus: Effect.Effect<void>;
+  }
+>()("desktop/MainWindow") {}
 
 export type MainWindowOptions = {
   readonly devUrl: string | undefined;
@@ -29,7 +34,7 @@ function canOpenExternal(url: string): boolean {
 
 export function makeMainWindow(
   options: MainWindowOptions,
-): Effect.Effect<MainWindow, never, Scope.Scope> {
+): Effect.Effect<MainWindow["Service"], never, Scope.Scope> {
   return Effect.gen(function* () {
     let mainWindow: BrowserWindow | undefined;
     let disconnectRenderer: (() => Promise<void>) | undefined;
@@ -120,10 +125,23 @@ export function makeMainWindow(
         if (window.isMinimized()) window.restore();
         window.focus();
       }),
-    } satisfies MainWindow;
+    } satisfies MainWindow["Service"];
   });
 }
 
 export function rendererRoot(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "../renderer");
 }
+
+export const MainWindowLive = Layer.effect(
+  MainWindow,
+  Effect.gen(function* () {
+    const config = yield* DesktopConfig;
+    const channel = yield* RendererChannel;
+    yield* registerAppProtocol(rendererRoot());
+    return yield* makeMainWindow({
+      devUrl: config.devUrl,
+      connectRenderer: channel.connect,
+    });
+  }),
+);

@@ -17,7 +17,9 @@ import { makeDesktopRpcServer } from "./desktop-rpc-server";
 
 type DesktopClient = RouterContractClient<DesktopContract>;
 
-function makeHarness(override?: (application: DesktopApplication) => DesktopApplication) {
+function makeHarness(
+  override?: (application: DesktopApplication["Service"]) => DesktopApplication["Service"],
+) {
   const statusRef = Effect.runSync(
     SubscriptionRef.make<BackendStatusSnapshot>({ revision: 0, status: "ready" }),
   );
@@ -40,7 +42,7 @@ function makeHarness(override?: (application: DesktopApplication) => DesktopAppl
     ),
   ) as Context.Context<never>;
 
-  const backend: LocalBackend = {
+  const backend: LocalBackend["Service"] = {
     connection: {
       httpBaseUrl: "http://127.0.0.1:43123",
       wsBaseUrl: "ws://127.0.0.1:43123",

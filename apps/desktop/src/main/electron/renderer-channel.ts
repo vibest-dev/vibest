@@ -1,14 +1,18 @@
+import { Context } from "effect";
 import { MessageChannelMain, type MessagePortMain, type WebContents } from "electron";
 
 import { DESKTOP_PORT_CHANNEL } from "../../shared/desktop-channel";
 
 export type AttachMessagePort = (port: MessagePortMain) => () => Promise<void>;
 
-export interface RendererChannel {
-  readonly connect: (webContents: WebContents) => () => Promise<void>;
-}
+export class RendererChannel extends Context.Service<
+  RendererChannel,
+  {
+    readonly connect: (webContents: WebContents) => () => Promise<void>;
+  }
+>()("desktop/RendererChannel") {}
 
-export function makeRendererChannel(attachPort: AttachMessagePort): RendererChannel {
+export function makeRendererChannel(attachPort: AttachMessagePort): RendererChannel["Service"] {
   return {
     connect: (webContents) => {
       const { port1, port2 } = new MessageChannelMain();

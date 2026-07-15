@@ -1,99 +1,38 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { Context, Effect, Layer, ManagedRuntime, Result } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { Effect, Layer, ManagedRuntime, Result } from "effect";
 import { app, dialog } from "electron";
 
-import { makeDesktopApplication } from "./application/desktop-application";
-import { makeLocalBackend } from "./backend/local-backend";
-import { resolveLoginShellEnvironmentWith } from "./backend/login-shell-environment";
-import { makeNodeBackendProcess } from "./backend/node-backend-process";
-import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./electron/app-protocol";
-import { makeMainWindow, rendererRoot } from "./electron/main-window";
-import { makeRendererChannel } from "./electron/renderer-channel";
-import { makeDesktopRpcServer } from "./rpc/desktop-rpc-server";
+import { LocalBackendLive } from "./backend/local-backend-live";
+import { makeDesktopConfigLive } from "./desktop-config";
+import { DesktopApplicationLive, RendererChannelLive } from "./desktop-runtime-glue";
+import { registerAppScheme } from "./electron/app-protocol";
+import { MainWindow, MainWindowLive } from "./electron/main-window";
 import { formatStartupFailure } from "./startup-failure";
-
-class DesktopRuntime extends Context.Service<
-  DesktopRuntime,
-  {
-    readonly ensureWindow: Effect.Effect<void>;
-    readonly focusWindow: Effect.Effect<void>;
-  }
->()("desktop/DesktopRuntime") {}
-
-function resolveServerEntry(isPackaged: boolean, resourcesPath: string): string {
-  if (isPackaged) {
-    return path.join(
-      resourcesPath,
-      "app.asar",
-      "node_modules",
-      "@vibest",
-      "cli",
-      "dist",
-      "cli.mjs",
-    );
-  }
-  return fileURLToPath(new URL("../../../../packages/vibest/dist/cli.mjs", import.meta.url));
-}
-
-function makeDesktopRuntimeLayer(devUrl: string | undefined) {
-  return Layer.effect(
-    DesktopRuntime,
-    Effect.gen(function* () {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const allowedOrigins = [APP_ORIGIN, ...(devUrl ? [new URL(devUrl).origin] : [])];
-      const environment = app.isPackaged
-        ? yield* resolveLoginShellEnvironmentWith(spawner)
-        : { ...process.env };
-
-      const backend = yield* makeLocalBackend(
-        {
-          entry: resolveServerEntry(app.isPackaged, process.resourcesPath),
-          token: randomUUID(),
-          environment,
-          corsOrigins: allowedOrigins,
-        },
-        makeNodeBackendProcess(spawner),
-      );
-
-      const application = makeDesktopApplication({
-        backend,
-        os: process.platform,
-        quit: Effect.sync(() => {
-          setTimeout(() => app.quit(), 0);
-        }),
-      });
-      // Hand the composition root's full ServiceMap (including logger and
-      // other references) to the detached oRPC handler fibers.
-      const rpcContext = yield* Effect.context<never>();
-      const rpcServer = makeDesktopRpcServer(application, rpcContext);
-      const rendererChannel = makeRendererChannel(rpcServer.attach);
-
-      yield* registerAppProtocol(rendererRoot());
-      const mainWindow = yield* makeMainWindow({
-        devUrl,
-        connectRenderer: rendererChannel.connect,
-      });
-
-      return DesktopRuntime.of({
-        ensureWindow: mainWindow.ensureOpen,
-        focusWindow: mainWindow.focus,
-      });
-    }),
-  );
-}
 
 function makeRuntime(devUrl: string | undefined) {
   const nodeBase = Layer.merge(NodeFileSystem.layer, NodePath.layer);
-  const childProcess = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
-  return ManagedRuntime.make(makeDesktopRuntimeLayer(devUrl).pipe(Layer.provide(childProcess)));
+  const childProcessLive = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
+  const desktopConfigLive = makeDesktopConfigLive({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    devUrl,
+    token: randomUUID(),
+  });
+
+  return ManagedRuntime.make(
+    MainWindowLive.pipe(
+      Layer.provide(RendererChannelLive),
+      Layer.provide(DesktopApplicationLive),
+      Layer.provide(LocalBackendLive),
+      Layer.provide(desktopConfigLive),
+      Layer.provide(childProcessLive),
+    ),
+  );
 }
 
 export function startDesktopRuntime(): void {
@@ -102,12 +41,12 @@ export function startDesktopRuntime(): void {
   let allowQuit = false;
 
   const runWindowAction = (
-    action: (desktop: DesktopRuntime["Service"]) => Effect.Effect<void>,
+    action: (window: MainWindow["Service"]) => Effect.Effect<void>,
   ): void => {
     runtime?.runFork(
       Effect.gen(function* () {
-        const desktop = yield* DesktopRuntime;
-        yield* action(desktop);
+        const window = yield* MainWindow;
+        yield* action(window);
       }),
     );
   };
@@ -144,8 +83,8 @@ export function startDesktopRuntime(): void {
       }
       await runtime.runPromise(
         Effect.gen(function* () {
-          const desktop = yield* DesktopRuntime;
-          yield* desktop.ensureWindow;
+          const window = yield* MainWindow;
+          yield* window.ensureOpen;
         }),
       );
     } catch (error) {
@@ -167,8 +106,8 @@ export function startDesktopRuntime(): void {
   // Electron only accepts privileged scheme registration before ready.
   registerAppScheme();
 
-  app.on("second-instance", () => runWindowAction((desktop) => desktop.focusWindow));
-  app.on("activate", () => runWindowAction((desktop) => desktop.ensureWindow));
+  app.on("second-instance", () => runWindowAction((window) => window.focus));
+  app.on("activate", () => runWindowAction((window) => window.ensureOpen));
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();

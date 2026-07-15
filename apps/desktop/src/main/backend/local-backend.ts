@@ -1,5 +1,6 @@
 import {
   Clock,
+  Context,
   Data,
   Deferred,
   Effect,
@@ -68,12 +69,15 @@ export type LocalBackendConfig = BackendProcessConfig & {
   readonly stableAfterMs?: number;
 };
 
-export interface LocalBackend {
-  readonly connection: BackendConnection;
-  readonly snapshot: Effect.Effect<BackendStatusSnapshot>;
-  readonly changes: Stream.Stream<BackendStatusSnapshot>;
-  readonly retry: Effect.Effect<void>;
-}
+export class LocalBackend extends Context.Service<
+  LocalBackend,
+  {
+    readonly connection: BackendConnection;
+    readonly snapshot: Effect.Effect<BackendStatusSnapshot>;
+    readonly changes: Stream.Stream<BackendStatusSnapshot>;
+    readonly retry: Effect.Effect<void>;
+  }
+>()("desktop/LocalBackend") {}
 
 export function restartBackoff(
   failureCount: number,
@@ -104,7 +108,7 @@ function setStatus(
 export function makeLocalBackend(
   config: LocalBackendConfig,
   spawnBackend: SpawnBackend,
-): Effect.Effect<LocalBackend, BackendStartError, Scope.Scope> {
+): Effect.Effect<LocalBackend["Service"], BackendStartError, Scope.Scope> {
   return Effect.gen(function* () {
     const statusRef = yield* SubscriptionRef.make<BackendStatusSnapshot>({
       revision: 0,
@@ -191,6 +195,6 @@ export function makeLocalBackend(
         const current = yield* snapshot;
         if (current.status === "failed") yield* Queue.offer(retryQueue, undefined);
       }),
-    } satisfies LocalBackend;
+    } satisfies LocalBackend["Service"];
   });
 }

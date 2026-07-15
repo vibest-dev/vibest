@@ -25,7 +25,7 @@ function makeWrapDesktopRpcEffect(rpcContext: Context.Context<never>) {
 }
 
 export function makeDesktopRpcServer(
-  application: DesktopApplication,
+  application: DesktopApplication["Service"],
   rpcContext: Context.Context<never>,
 ): DesktopRpcServer {
   const handler = new RPCHandler(makeDesktopRouter(application));

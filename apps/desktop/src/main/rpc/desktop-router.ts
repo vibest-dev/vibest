@@ -8,7 +8,7 @@ import type { DesktopApplication } from "../application/desktop-application";
 
 export type DesktopRpcContext = WithEffectContext<never>;
 
-export function makeDesktopRouter(application: DesktopApplication) {
+export function makeDesktopRouter(application: DesktopApplication["Service"]) {
   const orpc = implement(desktopContract).$context<DesktopRpcContext>();
 
   return orpc.router({

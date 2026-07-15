@@ -11,7 +11,7 @@ function makeHarness() {
   );
   let retries = 0;
   let quits = 0;
-  const backend: LocalBackend = {
+  const backend: LocalBackend["Service"] = {
     connection: {
       httpBaseUrl: "http://127.0.0.1:43123",
       wsBaseUrl: "ws://127.0.0.1:43123",
