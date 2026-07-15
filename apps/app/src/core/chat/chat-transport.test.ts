@@ -42,17 +42,13 @@ describe("ChatTransport agent requests", () => {
     let snapshotCalls = 0;
     let snapshotSawSubscription = false;
     const clients = {
-      orpcClient: {
+      rpcClient: {
         session: {
           snapshot: async () => {
             snapshotCalls += 1;
             snapshotSawSubscription = subscriptionCalls === 1;
             return snapshot;
           },
-        },
-      },
-      orpcWsClient: {
-        session: {
           events: async () => {
             subscriptionCalls += 1;
             return {
@@ -100,7 +96,7 @@ describe("ChatTransport agent requests", () => {
           },
         },
       },
-    } as unknown as Pick<AppClients, "orpcClient" | "orpcWsClient">;
+    } as unknown as Pick<AppClients, "rpcClient">;
     let deliveries = 0;
     const received: AgentRequest[] = [];
     const transport = new ChatTransport(clients);
@@ -136,16 +132,12 @@ describe("ChatTransport agent requests", () => {
       rejectAutomaticResponse = reject;
     });
     const clients = {
-      orpcClient: {
+      rpcClient: {
         session: {
           snapshot: async (): Promise<SessionSnapshot> => ({
             ...snapshot,
             pendingRequests: [emptyPlanRequest],
           }),
-        },
-      },
-      orpcWsClient: {
-        session: {
           respondToAgentRequest: async () => automaticResponse,
           events: async () => ({
             [Symbol.asyncIterator]() {
@@ -191,7 +183,7 @@ describe("ChatTransport agent requests", () => {
           }),
         },
       },
-    } as unknown as Pick<AppClients, "orpcClient" | "orpcWsClient">;
+    } as unknown as Pick<AppClients, "rpcClient">;
     const received: AgentRequest[] = [];
     const transport = new ChatTransport(clients);
 
