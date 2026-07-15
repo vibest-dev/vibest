@@ -12,7 +12,7 @@ import { app, dialog } from "electron";
 
 import { makeDesktopApplication } from "./application/desktop-application";
 import { makeLocalBackend } from "./backend/local-backend";
-import { resolveLoginShellPathWith } from "./backend/login-shell-path";
+import { resolveLoginShellEnvironmentWith } from "./backend/login-shell-environment";
 import { makeNodeBackendProcess } from "./backend/node-backend-process";
 import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./electron/app-protocol";
 import { makeMainWindow, rendererRoot } from "./electron/main-window";
@@ -48,13 +48,15 @@ function makeDesktopRuntimeLayer(devUrl: string | undefined) {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const allowedOrigins = [APP_ORIGIN, ...(devUrl ? [new URL(devUrl).origin] : [])];
-      const shellPath = app.isPackaged ? yield* resolveLoginShellPathWith(spawner) : undefined;
+      const environment = app.isPackaged
+        ? yield* resolveLoginShellEnvironmentWith(spawner)
+        : { ...process.env };
 
       const backend = yield* makeLocalBackend(
         {
           entry: resolveServerEntry(app.isPackaged, process.resourcesPath),
           token: randomUUID(),
-          shellPath,
+          environment,
           corsOrigins: allowedOrigins,
         },
         makeNodeBackendProcess(spawner),

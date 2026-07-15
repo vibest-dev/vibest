@@ -43,7 +43,7 @@ export type BackendStartError = BackendSpawnError | BackendReadyTimeout | Backen
 export type BackendProcessConfig = {
   readonly entry: string;
   readonly token: string;
-  readonly shellPath: string | undefined;
+  readonly environment: NodeJS.ProcessEnv;
   readonly corsOrigins: readonly string[];
 };
 

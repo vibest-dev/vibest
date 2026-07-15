@@ -10,6 +10,8 @@
 > Phase 0 曾验证 custom-protocol Fetch 可用于 unary oRPC，但 Fetch EventIterator cancellation 不能可靠执行 server finalizer，因此中间实现使用过 bounded long-polling。最终实现改用 oRPC 原生 MessagePort adapter；stream cancellation gate 已通过，backend 状态使用 AsyncIterator，custom protocol 只负责 Renderer 静态资源。
 >
 > 实现完成后，Main 按单向依赖重新组织为 application、backend、RPC 和 Electron adapter 模块。最终目录介绍见 `apps/desktop/src/main/README.md`，依赖规则和实现原则见 `apps/desktop/AGENTS.md`；下文中的旧文件名保留为迁移过程记录。
+>
+> 打包应用启动时会读取完整的 login-shell 导出环境并传给 backend；Claude Agent SDK `query()` 也显式接收该环境，确保 GUI 启动时代理变量不会丢失。
 
 ## 1. 目标
 

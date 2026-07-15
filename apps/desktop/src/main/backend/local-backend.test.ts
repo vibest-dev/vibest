@@ -65,7 +65,10 @@ function makeHarness(overrides: Partial<LocalBackendConfig> = {}) {
   const config: LocalBackendConfig = {
     entry: "/fake/cli.mjs",
     token: "fixed-token",
-    shellPath: "/login/bin:/usr/bin",
+    environment: {
+      PATH: "/login/bin:/usr/bin",
+      HTTPS_PROXY: "http://proxy.test:8443",
+    },
     corsOrigins: ["vibest://app"],
     initialRestartDelayMs: 0,
     maxRestartDelayMs: 0,
@@ -109,7 +112,10 @@ describe("LocalBackend", () => {
       token: "fixed-token",
     });
     await expect(Effect.runPromise(backend.snapshot)).resolves.toMatchObject({ status: "ready" });
-    expect(h.processes[0]!.config.shellPath).toBe("/login/bin:/usr/bin");
+    expect(h.processes[0]!.config.environment).toMatchObject({
+      PATH: "/login/bin:/usr/bin",
+      HTTPS_PROXY: "http://proxy.test:8443",
+    });
 
     await h.dispose();
   });

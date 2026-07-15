@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -29,7 +29,10 @@ function makeScript(source: string): string {
 const config = (entry: string): BackendProcessConfig => ({
   entry,
   token: "test-token",
-  shellPath: undefined,
+  environment: {
+    ...process.env,
+    HTTPS_PROXY: "http://desktop-proxy.test:8443",
+  },
   corsOrigins: ["vibest://app"],
 });
 
@@ -75,6 +78,34 @@ setInterval(() => {}, 1000);
           ),
         ),
       ).rejects.toMatchObject({ _tag: "BackendExitedBeforeReady", exitCode: 7 });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("passes the configured proxy environment to the backend process", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "vibest-backend-env-"));
+    const marker = path.join(dir, "proxy");
+    const entry = makeScript(`
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(marker)}, process.env.HTTPS_PROXY ?? "missing");
+process.stdout.write('vibest:ready {"port":43125}\\n');
+setInterval(() => {}, 1000);
+`);
+    const runtime = makeRuntime();
+
+    try {
+      await runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
+            yield* running.ready;
+          }),
+        ),
+      );
+
+      expect(readFileSync(marker, "utf8")).toBe("http://desktop-proxy.test:8443");
     } finally {
       await runtime.dispose();
     }

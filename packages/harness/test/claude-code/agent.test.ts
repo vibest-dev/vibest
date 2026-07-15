@@ -264,6 +264,15 @@ describe("Session resume", () => {
     mockGetSessionInfo.mockReset();
   });
 
+  it("passes the server environment to the Claude Code process", async () => {
+    await new Session({
+      ...process.env,
+      HTTPS_PROXY: "http://desktop-proxy.test:8443",
+    }).create();
+
+    expect(lastOptions().env?.["HTTPS_PROXY"]).toBe("http://desktop-proxy.test:8443");
+  });
+
   it("pins our id as the SDK session id on create, without resuming", async () => {
     const { sessionId } = await new Session().create();
 

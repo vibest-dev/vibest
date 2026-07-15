@@ -55,6 +55,8 @@ export class Session {
   // resume instead of each spawning a query and clobbering the store.
   private resuming = new Map<string, Promise<SessionState>>();
 
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+
   get(id: string) {
     const session = this.store.get(id);
     if (!session) {
@@ -114,7 +116,10 @@ export class Session {
       executable: process.execPath as "node",
       // Resolved rather than left to the SDK: its own resolution silently
       // points into app.asar in a packaged build, which cannot be exec'd.
-      pathToClaudeCodeExecutable: resolveClaudeExecutable(),
+      pathToClaudeCodeExecutable: resolveClaudeExecutable({ env: this.env }),
+      // Pass the server environment explicitly so GUI-launched desktop apps
+      // preserve proxy and authentication variables in the Claude subprocess.
+      env: { ...this.env },
       // Maintain Claude Code behavior with preset system prompt
       systemPrompt: { type: "preset", preset: "claude_code" },
       // Load filesystem settings for project-level configuration
