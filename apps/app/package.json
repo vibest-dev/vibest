@@ -12,6 +12,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules dist .turbo"
   },
@@ -53,6 +54,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "code-inspector-plugin": "latest",
     "typescript": "^7.0.2",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

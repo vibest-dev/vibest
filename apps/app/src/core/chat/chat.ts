@@ -36,8 +36,10 @@ export class Chat extends AbstractChat<UIMessage> {
     this.store = state.store;
     this.#state = state;
     this.#transport = transport;
-    this.#unsubscribeRequests = transport.subscribeAgentRequests(sessionId, (request) =>
-      state.addPendingRequest(request),
+    this.#unsubscribeRequests = transport.subscribeAgentRequests(
+      sessionId,
+      (request) => state.addPendingRequest(request),
+      (requestId) => state.removePendingRequest(requestId),
     );
   }
 

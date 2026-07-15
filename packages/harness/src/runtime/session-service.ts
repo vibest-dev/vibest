@@ -234,13 +234,16 @@ export const makeHarnessAgentSessionService = (
     const startManaged = (
       session: HarnessAgentSession,
       sessionScope: Scope.Closeable,
-    ): Effect.Effect<ManagedSession> =>
+    ): Effect.Effect<{
+      readonly managed: ManagedSession;
+      readonly activate: Effect.Effect<void>;
+    }> =>
       Effect.gen(function* () {
         const projection = yield* Ref.make(initialProjection());
         const pumpDone = yield* Deferred.make<void>();
-        const pumpEffect = Stream.runForEach(session.events, (draft) =>
-          publish(projection, draft),
-        ).pipe(
+        const activation = yield* Deferred.make<void>();
+        const pumpEffect = Deferred.await(activation).pipe(
+          Effect.andThen(Stream.runForEach(session.events, (draft) => publish(projection, draft))),
           Effect.catch((error) =>
             publish(projection, {
               harnessAgentId: session.harnessAgentId,
@@ -252,10 +255,25 @@ export const makeHarnessAgentSessionService = (
               },
             }),
           ),
-          Effect.ensuring(Deferred.succeed(pumpDone, undefined)),
+          Effect.ensuring(
+            Deferred.succeed(pumpDone, undefined).pipe(
+              Effect.andThen(
+                Ref.get(projection).pipe(
+                  Effect.flatMap((current) =>
+                    current.status.status === "crashed"
+                      ? Effect.forkIn(close(session.sessionId), ownerScope).pipe(Effect.asVoid)
+                      : Effect.void,
+                  ),
+                ),
+              ),
+            ),
+          ),
         );
         const pump = yield* Effect.forkIn(pumpEffect, sessionScope);
-        return { session, scope: sessionScope, pump, pumpDone, projection };
+        return {
+          managed: { session, scope: sessionScope, pump, pumpDone, projection },
+          activate: Deferred.succeed(activation, undefined).pipe(Effect.asVoid),
+        };
       });
 
     const register = (candidate: ManagedSession) =>
@@ -318,8 +336,10 @@ export const makeHarnessAgentSessionService = (
                   workspacePath: mode.input.workspacePath,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
-          const managed = yield* startManaged(session, sessionScope);
-          return yield* register(managed);
+          const candidate = yield* startManaged(session, sessionScope);
+          const managed = yield* register(candidate.managed);
+          if (managed === candidate.managed) yield* candidate.activate;
+          return managed;
         }).pipe(Effect.onError(() => Scope.close(sessionScope, Exit.void)));
       });
 

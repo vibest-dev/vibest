@@ -2,7 +2,7 @@ import * as NodeAssert from "node:assert/strict";
 
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Stream } from "effect";
+import { Deferred, Effect, Fiber, Stream } from "effect";
 import { beforeEach, describe, vi } from "vitest";
 
 import { makeClaudeCodeAgent } from "../../src/claude-code/agent";
@@ -34,6 +34,7 @@ let queryInstance: FakeQuery;
 const makeFakeQuery = (
   prompt: AsyncIterable<sdk.SDKUserMessage>,
   failAfterInput = false,
+  failWhileIdle?: () => void,
 ): FakeQuery => {
   const input = prompt[Symbol.asyncIterator]();
   let needsInput = true;
@@ -41,6 +42,12 @@ const makeFakeQuery = (
     next: vi.fn<
       () => Promise<{ done: false; value: sdk.SDKMessage } | { done: true; value: undefined }>
     >(async () => {
+      if (failWhileIdle) {
+        const fail = failWhileIdle;
+        failWhileIdle = undefined;
+        fail();
+        throw new Error("idle query failed");
+      }
       if (needsInput) {
         const nextInput = await input.next();
         if (nextInput.done) return { done: true as const, value: undefined };
@@ -129,6 +136,36 @@ describe("ClaudeCodeAgent", () => {
         ["system", "result"],
       );
       NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+    }),
+  );
+
+  it.effect("reports an SDK query crash while the adapter session is idle", () =>
+    Effect.gen(function* () {
+      let reportNativeFailure: () => void = () => undefined;
+      const nativeFailed = new Promise<void>((resolve) => {
+        reportNativeFailure = resolve;
+      });
+      mockQuery.mockImplementation(({ prompt }) => {
+        queryInstance = makeFakeQuery(prompt, false, reportNativeFailure);
+        return queryInstance;
+      });
+      const agent = yield* makeClaudeCodeAgent();
+      const session = yield* makeClaudeCodeAdapter(agent).open({ workspacePath: "/tmp" });
+      const crashSeen = yield* Deferred.make<void>();
+      yield* Stream.runForEach(session.events, (event) =>
+        event.body.type === "session.crashed"
+          ? Deferred.succeed(crashSeen, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      ).pipe(Effect.forkChild);
+
+      yield* Effect.promise(() => nativeFailed);
+      yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
+
+      NodeAssert.equal(
+        yield* Deferred.isDone(crashSeen),
+        true,
+        "idle Claude adapter session did not publish session.crashed",
+      );
     }),
   );
 

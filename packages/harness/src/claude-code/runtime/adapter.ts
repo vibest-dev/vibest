@@ -173,27 +173,34 @@ const makeSession = (
       );
 
     const crash = (cause: unknown) =>
-      Ref.getAndSet(activeTurn, undefined).pipe(
-        Effect.flatMap((turnId) =>
-          emit({ type: "session.crashed", sessionId, reason: String(cause) }).pipe(
-            Effect.andThen(
-              turnId
-                ? emit({
-                    type: "session.turn.ended",
-                    sessionId,
-                    turnId,
-                    outcome: "failed",
-                    error: { message: String(cause), category: "unknown" },
-                  })
-                : Effect.void,
-            ),
-          ),
+      Ref.getAndSet(closed, true).pipe(
+        Effect.flatMap((alreadyClosed) =>
+          alreadyClosed
+            ? Effect.void
+            : Ref.getAndSet(activeTurn, undefined).pipe(
+                Effect.flatMap((turnId) =>
+                  emit({ type: "session.crashed", sessionId, reason: String(cause) }).pipe(
+                    Effect.andThen(
+                      turnId
+                        ? emit({
+                            type: "session.turn.ended",
+                            sessionId,
+                            turnId,
+                            outcome: "failed",
+                            error: { message: String(cause), category: "unknown" },
+                          })
+                        : Effect.void,
+                    ),
+                  ),
+                ),
+                Effect.catch(() => Effect.void),
+                Effect.andThen(
+                  agent.session.abort(sessionId).pipe(Effect.catch(() => Effect.void)),
+                ),
+                Effect.andThen(Queue.end(events)),
+                Effect.asVoid,
+              ),
         ),
-        Effect.catch(() => Effect.void),
-        Effect.andThen(agent.session.abort(sessionId).pipe(Effect.catch(() => Effect.void))),
-        Effect.andThen(Queue.end(events)),
-        Effect.andThen(Ref.set(closed, true)),
-        Effect.asVoid,
       );
 
     const close = Ref.getAndSet(closed, true).pipe(
@@ -220,6 +227,10 @@ const makeSession = (
     );
 
     yield* Scope.addFinalizer(scope, close);
+    yield* agent.session.awaitTermination(sessionId).pipe(
+      Effect.catch((cause) => crash(cause)),
+      Effect.forkIn(scope),
+    );
     yield* Stream.runForEach(agent.session.requestPermission(sessionId), (nativeRequest) =>
       Ref.update(pendingPermissions, (current) =>
         new Map(current).set(nativeRequest.requestId, nativeRequest),

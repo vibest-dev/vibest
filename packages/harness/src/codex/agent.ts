@@ -33,6 +33,7 @@ import {
 import {
   makeCodexTransport,
   makeCodexTransportHolder,
+  type CodexTransport,
   type CodexTransportFailure,
 } from "./runtime";
 import { createCodexTransform } from "./transform";
@@ -75,6 +76,10 @@ type FinishTransition = {
   readonly ended: Deferred.Deferred<void> | undefined;
 };
 
+type InterruptDecision =
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Active"; readonly turnId: string };
+
 type TurnDecision =
   | {
       readonly _tag: "Start";
@@ -85,8 +90,12 @@ type TurnDecision =
   | { readonly _tag: "Wait"; readonly ended: Deferred.Deferred<void> }
   | { readonly _tag: "Busy" };
 
+export type CodexSessionFailure = CodexTransportFailure | AgentOperationError;
+
 type SessionState = {
   readonly threadId: string;
+  readonly generation: number;
+  readonly termination: Deferred.Deferred<never, CodexSessionFailure>;
   readonly chunks: Queue.Queue<CodexUIMessageChunk, Cause.Done | AgentOperationError>;
   readonly requests: Queue.Queue<AgentRequest, Cause.Done>;
   readonly pending: Ref.Ref<ReadonlyMap<string, PendingRequest>>;
@@ -98,6 +107,11 @@ export interface CodexAgentOptions {
   readonly executablePath?: string;
   readonly cwd?: string;
   readonly args?: ReadonlyArray<string>;
+}
+
+export interface CodexAgentDependencies<R> {
+  readonly makeTransport: () => Effect.Effect<CodexTransport, CodexTransportError, R | Scope.Scope>;
+  readonly beforeCrashCleanup?: (failure: CodexTransportFailure) => Effect.Effect<void>;
 }
 
 export interface CodexAgent {
@@ -121,6 +135,9 @@ export interface CodexAgent {
       SessionNotFound | CodexTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
     readonly requestPermission: (sessionId: string) => Stream.Stream<AgentRequest, SessionNotFound>;
+    readonly awaitTermination: (
+      sessionId: string,
+    ) => Effect.Effect<never, SessionNotFound | CodexSessionFailure>;
     readonly respondPermission: (
       sessionId: string,
       requestId: string,
@@ -131,12 +148,15 @@ export interface CodexAgent {
   };
 }
 
-export const makeCodexAgent = (
-  options: CodexAgentOptions = {},
-): Effect.Effect<CodexAgent, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
+/** @internal */
+export const makeCodexAgentWithDependencies = <R>(
+  dependencies: CodexAgentDependencies<R>,
+): Effect.Effect<CodexAgent, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const sessions = yield* Ref.make(new Map<string, SessionState>());
+    const nextTransportGeneration = yield* Ref.make(1);
+    const transportGenerations = new WeakMap<CodexTransport, number>();
 
     const getSession = (sessionId: string): Effect.Effect<SessionState, SessionNotFound> =>
       Ref.get(sessions).pipe(
@@ -182,31 +202,46 @@ export const makeCodexAgent = (
         cause: new Error("Codex session event queue overflowed"),
       });
 
-    const evictOverflowedSession = (session: SessionState) =>
-      Ref.update(sessions, (current) => {
+    const evictOverflowedSession = (session: SessionState) => {
+      const error = overflowError(session);
+      return Ref.update(sessions, (current) => {
         if (current.get(session.threadId) !== session) return current;
         const next = new Map(current);
         next.delete(session.threadId);
         return next;
       }).pipe(
+        Effect.andThen(Deferred.fail(session.termination, error)),
         Effect.andThen(settlePending(session)),
+        Effect.andThen(completeTurn(session)),
         Effect.andThen(Queue.end(session.requests)),
-        Effect.andThen(Queue.fail(session.chunks, overflowError(session))),
+        Effect.andThen(Queue.fail(session.chunks, error)),
         Effect.asVoid,
       );
+    };
 
-    const crashSessions = (reason: string) =>
-      Ref.getAndSet(sessions, new Map()).pipe(
-        Effect.flatMap((current) =>
+    const crashSessions = (generation: number, failure: CodexTransportFailure) =>
+      Ref.modify(sessions, (current) => {
+        const crashed: SessionState[] = [];
+        const active = new Map(current);
+        for (const [sessionId, session] of current) {
+          if (session.generation !== generation) continue;
+          active.delete(sessionId);
+          crashed.push(session);
+        }
+        return [crashed, active] as const;
+      }).pipe(
+        Effect.flatMap((crashed) =>
           Effect.forEach(
-            current.values(),
+            crashed,
             (session) =>
-              settlePending(session).pipe(
+              Deferred.fail(session.termination, failure).pipe(
+                Effect.andThen(settlePending(session)),
+                Effect.andThen(completeTurn(session)),
                 Effect.andThen(Queue.end(session.requests)),
                 Effect.andThen(
                   Queue.offer(session.chunks, {
                     type: "error",
-                    errorText: reason,
+                    errorText: failure.message,
                   }),
                 ),
                 Effect.flatMap((accepted) =>
@@ -220,14 +255,14 @@ export const makeCodexAgent = (
         ),
       );
 
-    const routeNotification = (notification: ServerNotification) =>
+    const routeNotification = (generation: number, notification: ServerNotification) =>
       Effect.gen(function* () {
         const params = notification.params as { readonly threadId?: string } | undefined;
         if (!params?.threadId) return;
         const session = yield* Ref.get(sessions).pipe(
           Effect.map((current) => current.get(params.threadId!)),
         );
-        if (!session) return;
+        if (!session || session.generation !== generation) return;
         for (const chunk of session.transform(notification)) {
           if (chunk.type === "finish") {
             const transition = yield* Ref.modify<CodexTurnState, FinishTransition>(
@@ -291,13 +326,18 @@ export const makeCodexAgent = (
         );
       });
 
-    const handleServerRequest = (request: ServerRequest): Effect.Effect<unknown, Error> => {
+    const handleServerRequest = (
+      generation: number,
+      request: ServerRequest,
+    ): Effect.Effect<unknown, Error> => {
       if (isApprovalRequest(request)) {
         const source = approvalSourceOf(request.method);
         return Ref.get(sessions).pipe(
           Effect.map((current) => current.get(request.params.threadId)),
           Effect.flatMap((session) => {
-            if (!session) return Effect.succeed(declineResult(source));
+            if (!session || session.generation !== generation) {
+              return Effect.succeed(declineResult(source));
+            }
             return awaitAgentResponse(
               session,
               buildApprovalRequest(request),
@@ -311,7 +351,9 @@ export const makeCodexAgent = (
         return Ref.get(sessions).pipe(
           Effect.map((current) => current.get(request.params.threadId)),
           Effect.flatMap((session) => {
-            if (!session) return Effect.succeed(emptyUserInputResponse());
+            if (!session || session.generation !== generation) {
+              return Effect.succeed(emptyUserInputResponse());
+            }
             return awaitAgentResponse(
               session,
               buildUserInputRequest(request),
@@ -324,19 +366,28 @@ export const makeCodexAgent = (
       return Effect.fail(new Error(`Unhandled codex server request: ${request.method}`));
     };
 
-    const reportCrash = (error: CodexTransportFailure) =>
-      Effect.forkIn(crashSessions(error.message), ownerScope).pipe(Effect.asVoid);
+    const reportCrash = (generation: number, error: CodexTransportFailure) =>
+      Effect.forkIn(
+        (dependencies.beforeCrashCleanup?.(error) ?? Effect.void).pipe(
+          Effect.andThen(crashSessions(generation, error)),
+        ),
+        ownerScope,
+      ).pipe(Effect.asVoid);
 
     const makeInitializedTransport = Effect.gen(function* () {
-      const transport = yield* makeCodexTransport(options);
+      const generation = yield* Ref.getAndUpdate(nextTransportGeneration, (current) => current + 1);
+      const transport = yield* dependencies.makeTransport();
+      transportGenerations.set(transport, generation);
 
-      yield* Stream.runForEach(transport.notifications, routeNotification).pipe(
-        Effect.catch(reportCrash),
+      yield* Stream.runForEach(transport.notifications, (notification) =>
+        routeNotification(generation, notification),
+      ).pipe(
+        Effect.catch((error) => reportCrash(generation, error)),
         Effect.forkScoped,
       );
       yield* Stream.runForEach(transport.serverRequests, (request) =>
         Effect.forkScoped(
-          handleServerRequest(request).pipe(
+          handleServerRequest(generation, request).pipe(
             Effect.flatMap((result) => transport.respond(request.id, result ?? null)),
             Effect.catch((error) =>
               transport
@@ -348,8 +399,14 @@ export const makeCodexAgent = (
             ),
           ),
         ).pipe(Effect.asVoid),
-      ).pipe(Effect.catch(reportCrash), Effect.forkScoped);
-      yield* transport.awaitTermination.pipe(Effect.catch(reportCrash), Effect.forkScoped);
+      ).pipe(
+        Effect.catch((error) => reportCrash(generation, error)),
+        Effect.forkScoped,
+      );
+      yield* transport.awaitTermination.pipe(
+        Effect.catch((error) => reportCrash(generation, error)),
+        Effect.forkScoped,
+      );
 
       yield* transport
         .request("initialize", {
@@ -382,17 +439,40 @@ export const makeCodexAgent = (
       makeTransport: () => makeInitializedTransport,
     });
 
+    const getTransportGeneration = (
+      transport: CodexTransport,
+    ): Effect.Effect<number, CodexTransportError> =>
+      Effect.gen(function* () {
+        const generation = transportGenerations.get(transport);
+        if (generation !== undefined) return generation;
+        return yield* new CodexTransportError({
+          operation: "transport-generation",
+          cause: new Error("Codex transport has no generation"),
+        });
+      });
+
     const interrupt = (sessionId: string): Effect.Effect<void, SessionNotFound> =>
       Effect.gen(function* () {
         const session = yield* getSession(sessionId);
-        const turn = yield* Ref.get(session.turnState);
-        if (turn._tag !== "Active") return;
+        const decision = yield* Ref.modify<CodexTurnState, InterruptDecision>(
+          session.turnState,
+          (current) => {
+            if (current._tag === "Starting") {
+              return [{ _tag: "None" }, { ...current, abandoned: true }] as const;
+            }
+            if (current._tag === "Active") {
+              return [{ _tag: "Active", turnId: current.turnId }, current] as const;
+            }
+            return [{ _tag: "None" }, current] as const;
+          },
+        );
+        if (decision._tag === "None") return;
         const transport = yield* holder.current;
-        if (!transport) return;
+        if (!transport || transportGenerations.get(transport) !== session.generation) return;
         yield* transport
           .request("turn/interrupt", {
             threadId: session.threadId,
-            turnId: turn.turnId,
+            turnId: decision.turnId,
           })
           .pipe(Effect.catch(() => Effect.void));
       });
@@ -412,7 +492,7 @@ export const makeCodexAgent = (
             if (turn._tag !== "Idle") yield* Deferred.succeed(turn.ended, undefined);
 
             const transport = yield* holder.current;
-            if (!transport) return;
+            if (!transport || transportGenerations.get(transport) !== session.generation) return;
             if (turn._tag === "Active") {
               yield* transport
                 .request("turn/interrupt", {
@@ -428,10 +508,12 @@ export const makeCodexAgent = (
         ),
       );
 
-    const registerSession = (threadId: string) =>
+    const registerSession = (threadId: string, generation: number) =>
       Effect.gen(function* () {
         const state: SessionState = {
           threadId,
+          generation,
+          termination: yield* Deferred.make<never, CodexSessionFailure>(),
           chunks: yield* Queue.dropping<CodexUIMessageChunk, Cause.Done | AgentOperationError>(
             SESSION_QUEUE_CAPACITY,
           ),
@@ -449,28 +531,38 @@ export const makeCodexAgent = (
         create: (config) =>
           Effect.gen(function* () {
             const transport = yield* holder.ensure;
+            const generation = yield* getTransportGeneration(transport);
             const response = yield* transport.request<ThreadStartResponse>("thread/start", {
               cwd: config.workspacePath,
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });
-            return yield* registerSession(response.thread.id);
+            return yield* registerSession(response.thread.id, generation);
           }),
         resume: (config) =>
           Effect.gen(function* () {
             const transport = yield* holder.ensure;
+            const generation = yield* getTransportGeneration(transport);
             const response = yield* transport.request<ThreadResumeResponse>("thread/resume", {
               threadId: config.sessionId,
               cwd: config.workspacePath,
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });
-            return yield* registerSession(response.thread.id);
+            return yield* registerSession(response.thread.id, generation);
           }),
         prompt: (input) =>
           Effect.gen(function* () {
             const session = yield* getSession(input.sessionId);
             const transport = yield* holder.ensure;
+            const generation = yield* getTransportGeneration(transport);
+            if (generation !== session.generation) {
+              return yield* new AgentOperationError({
+                sessionId: input.sessionId,
+                operation: "transport-generation",
+                cause: new Error("Codex session belongs to a terminated transport generation"),
+              });
+            }
             const turnInput: UserInput[] = [{ type: "text", text: input.text, text_elements: [] }];
 
             const prepareTurn = (): Effect.Effect<
@@ -481,167 +573,179 @@ export const makeCodexAgent = (
               },
               CodexTransportFailure | AgentOperationError | TurnAlreadyRunning
             > =>
-              Effect.gen(function* () {
-                const token: TurnToken = {};
-                const ended = yield* Deferred.make<void>();
-                const decision = yield* Ref.modify<CodexTurnState, TurnDecision>(
-                  session.turnState,
-                  (current) => {
-                    switch (current._tag) {
-                      case "Idle":
-                        return [
-                          { _tag: "Start", token, ended },
-                          { _tag: "Starting", token, ended, abandoned: false },
-                        ];
-                      case "Active":
-                        return [{ _tag: "Steer", turn: current }, current];
-                      case "Starting":
-                        return [{ _tag: "Busy" }, current];
-                      case "Finishing":
-                        return [{ _tag: "Wait", ended: current.ended }, current];
-                    }
-                  },
-                );
-
-                if (decision._tag === "Busy") {
-                  return yield* new TurnAlreadyRunning({ sessionId: input.sessionId });
-                }
-                if (decision._tag === "Wait") {
-                  yield* Deferred.await(decision.ended).pipe(
-                    Effect.timeoutOrElse({
-                      duration: "2 seconds",
-                      orElse: () =>
-                        Effect.fail(
-                          new AgentOperationError({
-                            sessionId: input.sessionId,
-                            operation: "wait-for-finish-consumption",
-                            cause: new Error("Timed out waiting for the previous Codex stream"),
-                          }),
-                        ),
-                    }),
+              Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  const token: TurnToken = {};
+                  const ended = yield* Deferred.make<void>();
+                  const decision = yield* Ref.modify<CodexTurnState, TurnDecision>(
+                    session.turnState,
+                    (current) => {
+                      switch (current._tag) {
+                        case "Idle":
+                          return [
+                            { _tag: "Start", token, ended },
+                            { _tag: "Starting", token, ended, abandoned: false },
+                          ];
+                        case "Active":
+                          return [{ _tag: "Steer", turn: current }, current];
+                        case "Starting":
+                          return [{ _tag: "Busy" }, current];
+                        case "Finishing":
+                          return [{ _tag: "Wait", ended: current.ended }, current];
+                      }
+                    },
                   );
-                  return yield* Effect.suspend(prepareTurn);
-                }
-                if (decision._tag === "Steer") {
-                  const steered = yield* transport
-                    .request<TurnSteerResponse>("turn/steer", {
-                      threadId: session.threadId,
-                      input: turnInput,
-                      expectedTurnId: decision.turn.turnId,
-                    })
-                    .pipe(
+
+                  if (decision._tag === "Busy") {
+                    return yield* new TurnAlreadyRunning({ sessionId: input.sessionId });
+                  }
+                  if (decision._tag === "Wait") {
+                    yield* restore(Deferred.await(decision.ended)).pipe(
+                      Effect.timeoutOrElse({
+                        duration: "2 seconds",
+                        orElse: () =>
+                          Effect.fail(
+                            new AgentOperationError({
+                              sessionId: input.sessionId,
+                              operation: "wait-for-finish-consumption",
+                              cause: new Error("Timed out waiting for the previous Codex stream"),
+                            }),
+                          ),
+                      }),
+                    );
+                    return yield* Effect.suspend(prepareTurn);
+                  }
+                  if (decision._tag === "Steer") {
+                    const steered = yield* restore(
+                      transport.request<TurnSteerResponse>("turn/steer", {
+                        threadId: session.threadId,
+                        input: turnInput,
+                        expectedTurnId: decision.turn.turnId,
+                      }),
+                    ).pipe(
                       Effect.as(true),
                       Effect.catch(() => Effect.succeed(false)),
                     );
-                  if (steered) {
-                    return {
-                      turnId: decision.turn.turnId,
-                      started: false,
-                      output: Stream.empty,
-                    };
+                    if (steered) {
+                      return {
+                        turnId: decision.turn.turnId,
+                        started: false,
+                        output: Stream.empty,
+                      };
+                    }
+                    yield* restore(Deferred.await(decision.turn.ended)).pipe(
+                      Effect.timeoutOrElse({
+                        duration: "2 seconds",
+                        orElse: () =>
+                          Effect.fail(
+                            new AgentOperationError({
+                              sessionId: input.sessionId,
+                              operation: "wait-for-stale-turn",
+                              cause: new Error("Timed out waiting for the previous Codex turn"),
+                            }),
+                          ),
+                      }),
+                    );
+                    return yield* Effect.suspend(prepareTurn);
                   }
-                  yield* Deferred.await(decision.turn.ended).pipe(
-                    Effect.timeoutOrElse({
-                      duration: "2 seconds",
-                      orElse: () =>
-                        Effect.fail(
-                          new AgentOperationError({
-                            sessionId: input.sessionId,
-                            operation: "wait-for-stale-turn",
-                            cause: new Error("Timed out waiting for the previous Codex turn"),
-                          }),
-                        ),
-                    }),
-                  );
-                  return yield* Effect.suspend(prepareTurn);
-                }
 
-                yield* drainQueue(session.chunks);
-                const response = yield* transport
-                  .request<TurnStartResponse>("turn/start", {
-                    threadId: session.threadId,
-                    input: turnInput,
-                  })
-                  .pipe(
-                    Effect.tapError(() =>
-                      Ref.update(session.turnState, (current) =>
-                        (current._tag === "Starting" || current._tag === "Finishing") &&
-                        current.token === decision.token
-                          ? ({ _tag: "Idle" } as const)
-                          : current,
-                      ).pipe(Effect.andThen(Deferred.succeed(decision.ended, undefined))),
+                  yield* drainQueue(session.chunks);
+                  const response = yield* transport
+                    .request<TurnStartResponse>("turn/start", {
+                      threadId: session.threadId,
+                      input: turnInput,
+                    })
+                    .pipe(
+                      Effect.tapError(() =>
+                        Ref.update(session.turnState, (current) =>
+                          (current._tag === "Starting" || current._tag === "Finishing") &&
+                          current.token === decision.token
+                            ? ({ _tag: "Idle" } as const)
+                            : current,
+                        ).pipe(Effect.andThen(Deferred.succeed(decision.ended, undefined))),
+                      ),
+                    );
+                  const shouldInterrupt = yield* Ref.modify(session.turnState, (current) =>
+                    current._tag === "Starting" && current.token === decision.token
+                      ? ([
+                          current.abandoned,
+                          {
+                            _tag: "Active",
+                            token: decision.token,
+                            turnId: response.turn.id,
+                            ended: decision.ended,
+                            abandoned: current.abandoned,
+                          } as const,
+                        ] as const)
+                      : ([true, current] as const),
+                  );
+                  if (shouldInterrupt) {
+                    yield* transport
+                      .request("turn/interrupt", {
+                        threadId: session.threadId,
+                        turnId: response.turn.id,
+                      })
+                      .pipe(Effect.catch(() => Effect.void));
+                  }
+
+                  const finishConsumed = Ref.modify(session.turnState, (current) => {
+                    if (current._tag !== "Idle" && current.token === decision.token) {
+                      return [current.ended, { _tag: "Idle" } as const] as const;
+                    }
+                    return [undefined, current] as const;
+                  }).pipe(
+                    Effect.flatMap((pendingEnd) =>
+                      pendingEnd
+                        ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
+                        : Effect.void,
                     ),
                   );
-                const activated = yield* Ref.modify(session.turnState, (current) =>
-                  current._tag === "Starting" && current.token === decision.token
-                    ? ([
-                        true,
-                        {
-                          _tag: "Active",
-                          token: decision.token,
-                          turnId: response.turn.id,
-                          ended: decision.ended,
-                          abandoned: current.abandoned,
-                        } as const,
-                      ] as const)
-                    : ([false, current] as const),
-                );
-                if (!activated) {
-                  yield* transport
-                    .request("turn/interrupt", {
-                      threadId: session.threadId,
-                      turnId: response.turn.id,
-                    })
-                    .pipe(Effect.catch(() => Effect.void));
-                }
 
-                const finishConsumed = Ref.modify(session.turnState, (current) => {
-                  if (current._tag !== "Idle" && current.token === decision.token) {
-                    return [current.ended, { _tag: "Idle" } as const] as const;
-                  }
-                  return [undefined, current] as const;
-                }).pipe(
-                  Effect.flatMap((pendingEnd) =>
-                    pendingEnd
-                      ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
-                      : Effect.void,
-                  ),
-                );
+                  const abandonTurn = Ref.modify(session.turnState, (current) => {
+                    if (current._tag === "Idle" || current.token !== decision.token) {
+                      return [undefined, current] as const;
+                    }
+                    if (current._tag === "Finishing") {
+                      return [current.ended, { _tag: "Idle" } as const] as const;
+                    }
+                    return [undefined, { ...current, abandoned: true } as const] as const;
+                  }).pipe(
+                    Effect.flatMap((pendingEnd) =>
+                      pendingEnd
+                        ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
+                        : Effect.void,
+                    ),
+                  );
 
-                const abandonTurn = Ref.modify(session.turnState, (current) => {
-                  if (current._tag === "Idle" || current.token !== decision.token) {
-                    return [undefined, current] as const;
-                  }
-                  if (current._tag === "Finishing") {
-                    return [current.ended, { _tag: "Idle" } as const] as const;
-                  }
-                  return [undefined, { ...current, abandoned: true } as const] as const;
-                }).pipe(
-                  Effect.flatMap((pendingEnd) =>
-                    pendingEnd
-                      ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
-                      : Effect.void,
-                  ),
-                );
+                  return {
+                    turnId: response.turn.id,
+                    started: true,
+                    output: streamFromQueueOne(session.chunks).pipe(
+                      Stream.tap((chunk) =>
+                        chunk.type === "finish" ? finishConsumed : Effect.void,
+                      ),
+                      Stream.takeUntil((chunk) => chunk.type === "finish"),
+                      Stream.ensuring(abandonTurn),
+                    ),
+                  };
+                }),
+              );
 
-                return {
-                  turnId: response.turn.id,
-                  started: true,
-                  output: streamFromQueueOne(session.chunks).pipe(
-                    Stream.tap((chunk) => (chunk.type === "finish" ? finishConsumed : Effect.void)),
-                    Stream.takeUntil((chunk) => chunk.type === "finish"),
-                    Stream.ensuring(abandonTurn),
-                  ),
-                };
-              });
-
-            return yield* prepareTurn();
+            return yield* prepareTurn().pipe(
+              Effect.onInterrupt(() =>
+                interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void)),
+              ),
+            );
           }),
         requestPermission: (sessionId) =>
           Stream.unwrap(
             getSession(sessionId).pipe(
               Effect.map((session) => streamFromQueueOne(session.requests)),
             ),
+          ),
+        awaitTermination: (sessionId) =>
+          getSession(sessionId).pipe(
+            Effect.flatMap((session) => Deferred.await(session.termination)),
           ),
         respondPermission: (sessionId, requestId, response) =>
           Effect.gen(function* () {
@@ -664,3 +768,8 @@ export const makeCodexAgent = (
       },
     } satisfies CodexAgent;
   });
+
+export const makeCodexAgent = (
+  options: CodexAgentOptions = {},
+): Effect.Effect<CodexAgent, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
+  makeCodexAgentWithDependencies({ makeTransport: () => makeCodexTransport(options) });

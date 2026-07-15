@@ -199,34 +199,67 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
   subscribeAgentRequests(
     sessionId: string,
     onRequest: (request: AgentRequest) => void,
+    onRequestResolved: (requestId: string) => void = () => undefined,
   ): () => void {
     const abortController = new AbortController();
     let current: EventSubscription | undefined;
+    const deliveredRequestIds = new Set<string>();
+    const resolvedRequestIds = new Set<string>();
+
+    const resolveRequest = (requestId: string) => {
+      resolvedRequestIds.add(requestId);
+      deliveredRequestIds.delete(requestId);
+      onRequestResolved(requestId);
+    };
 
     const handleRequest = async (request: AgentRequest) => {
       if (request.type === "plan" && !request.plan.trim()) {
-        await this.clients.orpcWsClient.session.respondToAgentRequest({
-          sessionId,
-          requestId: request.id,
-          response: { type: "plan", behavior: "allow" },
-        });
+        void this.clients.orpcWsClient.session
+          .respondToAgentRequest({
+            sessionId,
+            requestId: request.id,
+            response: { type: "plan", behavior: "allow" },
+          })
+          .catch((error) => {
+            if (abortController.signal.aborted || resolvedRequestIds.has(request.id)) return;
+            console.error("Failed to auto-approve empty plan request", error);
+            deliveredRequestIds.add(request.id);
+            onRequest(request);
+          });
         return;
       }
+      resolvedRequestIds.delete(request.id);
+      deliveredRequestIds.add(request.id);
       onRequest(request);
     };
 
+    const hydratePendingRequests = async () => {
+      const snapshot = await this.clients.orpcClient.session.snapshot({ sessionId });
+      if (snapshot.degraded) throw new Error("Session snapshot replay is degraded");
+      const pendingRequestIds = new Set(snapshot.pendingRequests.map((request) => request.id));
+      for (const requestId of deliveredRequestIds) {
+        if (!pendingRequestIds.has(requestId)) resolveRequest(requestId);
+      }
+      for (const request of snapshot.pendingRequests) await handleRequest(request);
+      return snapshot.cursor;
+    };
+
     const run = async () => {
-      let cursor = 0;
       current = await this.#openEvents(sessionId, undefined, abortController.signal);
+      let cursor: number;
+      try {
+        cursor = await hydratePendingRequests();
+      } catch (error) {
+        current.close();
+        throw error;
+      }
       while (!abortController.signal.aborted) {
         let restarting = false;
         for await (const item of current.events) {
           if (item.type === "gap") {
             const replacement = await this.#openEvents(sessionId, cursor, abortController.signal);
             try {
-              const snapshot = await this.clients.orpcClient.session.snapshot({ sessionId });
-              for (const request of snapshot.pendingRequests) await handleRequest(request);
-              cursor = snapshot.cursor;
+              cursor = Math.max(cursor, await hydratePendingRequests());
             } catch (error) {
               replacement.close();
               throw error;
@@ -240,7 +273,14 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
           cursor = item.event.seq;
           if (!isSessionEvent(item.event.body)) continue;
           const body = item.event.body;
-          if (body.type === "session.request.asked") await handleRequest(body.request);
+          if (body.type === "session.request.asked") {
+            await handleRequest(body.request);
+          } else if (
+            body.type === "session.request.replied" ||
+            body.type === "session.request.rejected"
+          ) {
+            resolveRequest(body.requestId);
+          }
         }
         if (!restarting) return;
       }

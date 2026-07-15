@@ -1,6 +1,6 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, FiberSet, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import { v7 as uuid } from "uuid";
 
@@ -25,7 +25,7 @@ export type ToolPermissionRequest = {
   readonly suggestions?: sdk.PermissionUpdate[];
 };
 
-type ClaudeAgentFailure = SessionNotFound | SessionNotResumable | ClaudeSdkError;
+export type ClaudeAgentFailure = SessionNotFound | SessionNotResumable | ClaudeSdkError;
 type ClaudeSessionInfo = Awaited<ReturnType<typeof getSessionInfo>>;
 
 type PendingToolPermission = {
@@ -49,6 +49,7 @@ type TurnState =
 type SessionState = {
   readonly sessionId: string;
   readonly query: sdk.Query;
+  readonly termination: Deferred.Deferred<never, ClaudeSdkError>;
   readonly scope: Scope.Closeable;
   readonly input: Queue.Queue<sdk.SDKUserMessage, Cause.Done>;
   readonly output: Queue.Queue<SessionOutput, Cause.Done | ClaudeSdkError>;
@@ -86,6 +87,9 @@ export interface ClaudeCodeAgent {
     readonly requestPermission: (
       sessionId: string,
     ) => Stream.Stream<ToolPermissionRequest, ClaudeAgentFailure>;
+    readonly awaitTermination: (
+      sessionId: string,
+    ) => Effect.Effect<never, SessionNotFound | ClaudeSdkError>;
     readonly respondPermission: (
       sessionId: string,
       requestId: string,
@@ -169,6 +173,12 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
             new Map(),
           );
           const turnState = yield* Ref.make<TurnState>({ _tag: "Idle" });
+          const termination = yield* Deferred.make<never, ClaudeSdkError>();
+          const callbackFibers = yield* FiberSet.make<unknown, never>().pipe(
+            Effect.provideService(Scope.Scope, sessionScope),
+          );
+          const runCallback = yield* FiberSet.runtime(callbackFibers)();
+          const runCallbackPromise = yield* FiberSet.runtimePromise(callbackFibers)();
 
           const canUseTool: NonNullable<sdk.Options["canUseTool"]> = (
             toolName,
@@ -179,7 +189,7 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
             const waitForPermission = Effect.gen(function* () {
               const deferred = yield* Deferred.make<sdk.PermissionResult>();
               const onAbort = () => {
-                Effect.runFork(
+                runCallback(
                   Deferred.succeed(deferred, {
                     behavior: "deny",
                     message: `Tool permission for ${toolName} was aborted`,
@@ -224,7 +234,7 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
                 ),
               );
             });
-            return Effect.runPromise(waitForPermission);
+            return runCallbackPromise(waitForPermission);
           };
 
           const options: sdk.Options = {
@@ -246,6 +256,7 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
           const state: SessionState = {
             sessionId,
             query: queryInstance,
+            termination,
             scope: sessionScope,
             input,
             output,
@@ -266,7 +277,11 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
           );
 
           const failSession = (error: ClaudeSdkError) =>
-            Queue.fail(output, error).pipe(Effect.andThen(closeFromOwner), Effect.asVoid);
+            Deferred.fail(termination, error).pipe(
+              Effect.andThen(Queue.fail(output, error)),
+              Effect.andThen(closeFromOwner),
+              Effect.asVoid,
+            );
 
           const pump: Effect.Effect<void> = Effect.suspend(() =>
             Effect.tryPromise({
@@ -276,8 +291,9 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
               Effect.flatMap(({ done, value }) =>
                 Effect.gen(function* () {
                   if (done || !value) {
-                    yield* Queue.end(output);
-                    yield* closeFromOwner;
+                    yield* failSession(
+                      sdkError("query-ended", new Error("Claude SDK query ended unexpectedly")),
+                    );
                     return;
                   }
 
@@ -478,6 +494,10 @@ export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Sco
             ensure(sessionId).pipe(
               Effect.map((session) => streamFromQueueOne(session.permissionRequests)),
             ),
+          ),
+        awaitTermination: (sessionId) =>
+          getLiveSession(sessionId).pipe(
+            Effect.flatMap((session) => Deferred.await(session.termination)),
           ),
         respondPermission: (sessionId, requestId, result) =>
           Effect.gen(function* () {

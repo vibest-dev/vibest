@@ -26,6 +26,7 @@ const makeFixture = Effect.gen(function* () {
   const closeCalls = yield* Ref.make(0);
   const holdClose = yield* Ref.make(false);
   const closeGate = yield* Deferred.make<void>();
+  const crashGate = yield* Deferred.make<void>();
   const sequence = yield* Ref.make(0);
   const published = yield* Ref.make<ReadonlyArray<SessionEnvelope>>([]);
 
@@ -54,6 +55,17 @@ const makeFixture = Effect.gen(function* () {
         ),
       );
       yield* Scope.addFinalizer(scope, close);
+      yield* Deferred.await(crashGate).pipe(
+        Effect.andThen(
+          emit({
+            type: "session.crashed",
+            sessionId,
+            reason: "native process exited",
+          }),
+        ),
+        Effect.andThen(Queue.end(events)),
+        Effect.forkIn(scope),
+      );
 
       return {
         sessionId,
@@ -110,6 +122,7 @@ const makeFixture = Effect.gen(function* () {
     closeCalls,
     holdClose,
     closeGate,
+    crashGate,
     published,
   };
 });
@@ -139,6 +152,28 @@ it.effect("owns the event pump and projects a reconnect snapshot", () =>
 
     yield* fixture.service.close(created.sessionId);
     NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
+    const missing = yield* fixture.service.getStatus(created.sessionId).pipe(Effect.flip);
+    NodeAssert.equal(missing._tag, "SessionNotFound");
+  }),
+);
+
+it.effect("tears down a session after its event stream reports a crash", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeFixture;
+    const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
+
+    yield* Deferred.succeed(fixture.crashGate, undefined);
+    yield* Effect.eventually(
+      Ref.get(fixture.published).pipe(
+        Effect.filterOrFail(
+          (events) => events.some((event) => event.body.type === "session.crashed"),
+          () => new Error("crash event was not published"),
+        ),
+      ),
+    );
+
+    yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
+    NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1, "crashed session scope was not closed");
     const missing = yield* fixture.service.getStatus(created.sessionId).pipe(Effect.flip);
     NodeAssert.equal(missing._tag, "SessionNotFound");
   }),
