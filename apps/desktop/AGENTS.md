@@ -66,6 +66,7 @@ Keep implementation adapters behind interfaces owned by the module that consumes
 - Keep restart policy, path calculation, and other pure calculations as plain functions.
 - Keep `@effect/platform-node` imports on direct subpaths. Importing its barrel can eagerly load `NodeRedis` and break packaged startup when `ioredis` is absent.
 - Packaged GUI startup must recover the complete exported login-shell environment, not only `PATH`, so proxy and authentication variables reach the backend and agent subprocesses.
+- `apps/desktop/turbo.json` must pass the complete environment through for `desktop#dev`; Turborepo strict mode otherwise removes undeclared proxy, authentication, and tool variables. Keep this exception scoped to Desktop development.
 - Never log, expose through RPC, or snapshot the resolved environment because it may contain credentials.
 
 ## Window and port lifecycle

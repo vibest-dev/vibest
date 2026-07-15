@@ -1,0 +1,9 @@
+{
+  "$schema": "https://turborepo.com/schema.v2.json",
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "passThroughEnv": ["*"]
+    }
+  }
+}
