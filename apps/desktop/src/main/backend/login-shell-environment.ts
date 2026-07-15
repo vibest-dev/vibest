@@ -20,11 +20,9 @@ const LAUNCHCTL_KEYS = [
   "no_proxy",
 ] as const;
 
-export type RunCommand = (
-  file: string,
-  args: readonly string[],
-  timeoutMs: number,
-) => Effect.Effect<string, unknown>;
+// The error stays `unknown` on purpose: every probe failure is swallowed into
+// the base-environment fallback and never crosses this module's boundary.
+export type RunCommand = (file: string, args: readonly string[]) => Effect.Effect<string, unknown>;
 
 export type ShellEnvironmentOptions = {
   readonly platform?: NodeJS.Platform;
@@ -50,7 +48,7 @@ function parseEnvironment(stdout: string): NodeJS.ProcessEnv | undefined {
 }
 
 function runWithTimeout(run: RunCommand, file: string, args: readonly string[], timeoutMs: number) {
-  return run(file, args, timeoutMs).pipe(
+  return run(file, args).pipe(
     Effect.timeoutOption(timeoutMs),
     Effect.map(Option.getOrUndefined),
     Effect.catch(() => Effect.succeed(undefined)),

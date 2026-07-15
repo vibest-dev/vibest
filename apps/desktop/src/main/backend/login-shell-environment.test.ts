@@ -54,11 +54,10 @@ describe("resolveLoginShellEnvironment", () => {
       baseEnv: {},
     });
 
-    expect(command).toHaveBeenCalledWith(
-      "/bin/zsh",
-      ["-ilc", expect.stringContaining("/usr/bin/env -0")],
-      5000,
-    );
+    expect(command).toHaveBeenCalledWith("/bin/zsh", [
+      "-ilc",
+      expect.stringContaining("/usr/bin/env -0"),
+    ]);
   });
 
   it("falls back to launchctl for PATH and proxy variables on darwin", async () => {
