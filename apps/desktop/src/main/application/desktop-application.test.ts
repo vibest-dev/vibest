@@ -72,4 +72,26 @@ describe("DesktopApplication", () => {
       status: "reconnecting",
     });
   });
+
+  it("replays the current snapshot when subscribing after a change", async () => {
+    const h = makeHarness();
+    await h.setStatus({ revision: 1, status: "reconnecting" });
+
+    const head = await Effect.runPromise(h.application.watchBackendStatus(0).pipe(Stream.runHead));
+
+    expect(Option.getOrUndefined(head)).toEqual({ revision: 1, status: "reconnecting" });
+  });
+
+  it("does not replay revisions the caller has already seen", async () => {
+    const h = makeHarness();
+    await h.setStatus({ revision: 1, status: "reconnecting" });
+
+    const pending = Effect.runPromise(h.application.watchBackendStatus(1).pipe(Stream.runHead));
+    await h.setStatus({ revision: 2, status: "ready" });
+
+    await expect(pending.then(Option.getOrUndefined)).resolves.toEqual({
+      revision: 2,
+      status: "ready",
+    });
+  });
 });

@@ -31,11 +31,10 @@ export function makeDesktopApplication({
         statusRevision: current.revision,
       };
     }),
+    // v4 SubscriptionRef.changes replays the latest snapshot on subscribe
+    // (PubSub replay: 1), so the stream always starts from the current status.
     watchBackendStatus: (after) =>
-      Stream.concat(Stream.fromEffect(backend.snapshot), backend.changes).pipe(
-        Stream.filter((snapshot) => snapshot.revision > after),
-        Stream.changesWith((previous, next) => previous.revision === next.revision),
-      ),
+      backend.changes.pipe(Stream.filter((snapshot) => snapshot.revision > after)),
     retryBackend: backend.retry,
     quit,
   };
