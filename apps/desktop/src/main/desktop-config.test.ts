@@ -10,7 +10,6 @@ describe("buildDesktopConfig", () => {
       resourcesPath: "/Applications/Vibest.app/Contents/Resources",
       devUrl: undefined,
       token: "fixed-token",
-      showWindow: true,
     });
 
     expect(config.serverEntry).toBe(
@@ -26,11 +25,9 @@ describe("buildDesktopConfig", () => {
       resourcesPath: "/unused",
       devUrl: undefined,
       token: "fixed-token",
-      showWindow: false,
     });
 
     expect(config.serverEntry).toMatch(/packages\/vibest\/dist\/cli\.mjs$/);
-    expect(config.showWindow).toBe(false);
   });
 
   it("includes the dev renderer origin when a devUrl is set", () => {
@@ -39,7 +36,6 @@ describe("buildDesktopConfig", () => {
       resourcesPath: "/unused",
       devUrl: "http://localhost:5173",
       token: "fixed-token",
-      showWindow: true,
     });
 
     expect(config.allowedOrigins).toEqual([APP_ORIGIN, "http://localhost:5173"]);

@@ -22,7 +22,6 @@ function makeRuntime(devUrl: string | undefined) {
     resourcesPath: process.resourcesPath,
     devUrl,
     token: randomUUID(),
-    showWindow: process.env["VIBEST_E2E"] !== "1",
   });
 
   return ManagedRuntime.make(

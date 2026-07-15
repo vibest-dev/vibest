@@ -20,7 +20,6 @@ export class MainWindow extends Context.Service<
 
 export type MainWindowOptions = {
   readonly devUrl: string | undefined;
-  readonly showWindow: boolean;
   readonly connectRenderer: (webContents: WebContents) => () => Promise<void>;
 };
 
@@ -39,6 +38,7 @@ export function makeMainWindow(
   return Effect.gen(function* () {
     let mainWindow: BrowserWindow | undefined;
     let disconnectRenderer: (() => Promise<void>) | undefined;
+    const isE2E = process.env["VIBEST_E2E"] === "1";
 
     const disconnectCurrentRenderer = (): void => {
       const disconnect = disconnectRenderer;
@@ -64,13 +64,13 @@ export function makeMainWindow(
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
-          backgroundThrottling: options.showWindow,
+          backgroundThrottling: !isE2E,
         },
       });
       mainWindow = window;
 
       window.on("ready-to-show", () => {
-        if (options.showWindow) window.show();
+        if (!isE2E) window.show();
       });
       window.webContents.on("did-finish-load", () => {
         disconnectCurrentRenderer();
@@ -124,7 +124,7 @@ export function makeMainWindow(
         yield* loadRenderer(createWindow());
       }),
       focus: Effect.sync(() => {
-        if (!options.showWindow) return;
+        if (isE2E) return;
         const window = mainWindow;
         if (!window || window.isDestroyed()) return;
         if (window.isMinimized()) window.restore();
@@ -146,7 +146,6 @@ export const MainWindowLive = Layer.effect(
     yield* registerAppProtocol(rendererRoot());
     return yield* makeMainWindow({
       devUrl: config.devUrl,
-      showWindow: config.showWindow,
       connectRenderer: channel.connect,
     });
   }),
