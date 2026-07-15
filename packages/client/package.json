@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@orpc/client": "^2.0.0-beta.16",
-    "@orpc/contract": "^2.0.0-beta.16",
+    "@orpc/contract": "2.0.0-beta.16",
     "@vibest/contract": "workspace:*"
   },
   "devDependencies": {

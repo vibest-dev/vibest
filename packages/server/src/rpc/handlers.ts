@@ -5,13 +5,12 @@ import type { Socket } from "node:net";
 import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
 import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import { Layer, ManagedRuntime } from "effect";
+import { ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
-import { ClaudeCodeLayer } from "./claude-code";
-import { CodexLayer } from "./codex";
 import type { RpcContext } from "./context";
 import { router } from "./router";
+import { AgentRuntimeLayer } from "./runtime";
 
 const RPC_PREFIX = "/api/rpc";
 
@@ -28,16 +27,24 @@ async function logErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
   }
 }
 
-// One runtime per process, shared by every transport. The layer is fully
-// synchronous today so its context can be extracted eagerly; when scoped
-// services (finalizers, child processes) join the layer, dispose the runtime
-// on server shutdown (design §6).
-const runtime = ManagedRuntime.make(Layer.merge(ClaudeCodeLayer, CodexLayer));
-const rpcContext: RpcContext = {
-  "effect/context": runtime.runSync(runtime.contextEffect),
+export type RpcRuntime = {
+  readonly context: RpcContext;
+  readonly dispose: () => Promise<void>;
 };
 
-export function createFetchRPCHandler() {
+export async function createRpcRuntime(): Promise<RpcRuntime> {
+  const runtime = ManagedRuntime.make(AgentRuntimeLayer);
+  const context: RpcContext = {
+    "effect/context": await runtime.runPromise(runtime.contextEffect),
+  };
+  let disposing: Promise<void> | undefined;
+  return {
+    context,
+    dispose: () => (disposing ??= runtime.dispose()),
+  };
+}
+
+export function createFetchRPCHandler(rpcContext: RpcContext) {
   const rpcHandler = new FetchRPCHandler(router, {
     clientInterceptors: [logErrors],
     toFetchResponse: {
@@ -61,7 +68,7 @@ export function createFetchRPCHandler() {
   };
 }
 
-export function createNodeRPCHandler() {
+export function createNodeRPCHandler(rpcContext: RpcContext) {
   const rpcHandler = new NodeRPCHandler(router, {
     clientInterceptors: [logErrors],
     sendStandardResponse: {
@@ -86,7 +93,7 @@ export function createNodeRPCHandler() {
   };
 }
 
-export function createWsRPCHandler() {
+export function createWsRPCHandler(rpcContext: RpcContext) {
   const wsHandler = new WsRPCHandler<RpcContext>(router, { clientInterceptors: [logErrors] });
 
   return function upgrade(ws: WebSocket) {
@@ -108,9 +115,12 @@ export type DevWsRPCHandler = {
   teardown(): void;
 };
 
-export function createDevWsRPCHandler({ path, logger }: DevWsRPCHandlerOptions): DevWsRPCHandler {
+export function createDevWsRPCHandler(
+  { path, logger }: DevWsRPCHandlerOptions,
+  rpcContext: RpcContext,
+): DevWsRPCHandler {
   const webSocketServer = new WebSocketServer({ noServer: true });
-  const upgradeHandler = createWsRPCHandler();
+  const upgradeHandler = createWsRPCHandler(rpcContext);
 
   const connectionListener = (socket: WebSocket) => {
     upgradeHandler(socket);

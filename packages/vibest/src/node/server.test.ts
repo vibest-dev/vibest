@@ -1,14 +1,13 @@
-import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
-import { createServer } from "./server";
+import { createServer, type ManagedServer } from "./server";
 
 const TOKEN = "test-token-0000";
 
-let server: Server | undefined;
+let server: ManagedServer | undefined;
 
 async function start(options: Parameters<typeof createServer>[0]): Promise<string> {
   server = await createServer(options);
@@ -18,10 +17,7 @@ async function start(options: Parameters<typeof createServer>[0]): Promise<strin
 }
 
 afterEach(async () => {
-  await new Promise<void>((resolve) => {
-    if (!server) return resolve();
-    server.close(() => resolve());
-  });
+  await server?.dispose();
   server = undefined;
 });
 

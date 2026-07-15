@@ -7,6 +7,9 @@ onlyBuiltDependencies:
   - esbuild
   - "@swc/core"
 catalog:
+  "@effect/platform-node": 4.0.0-beta.97
+  "@effect/vitest": 4.0.0-beta.97
+  effect: 4.0.0-beta.97
   vite: ^8.1.4
   vitest: 4.1.10
 overrides:
@@ -17,6 +20,9 @@ overrides:
   # (stable client imports ORPC_HEADER, absent from the beta contract).
   # Pin the whole family to the beta until the repo migrates to stable.
   "@orpc/client": "2.0.0-beta.16"
+  "@effect/platform-node": "catalog:"
+  "@effect/vitest": "catalog:"
+  effect: "catalog:"
 # pnpm 11 defaults minimumReleaseAge to 24h; disable it — the same-day
 # dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked,
 # and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.

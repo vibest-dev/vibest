@@ -1,7 +1,7 @@
 import type { WithEffectContext } from "@orpc/experimental-effect";
+import type { HarnessAgentSessionService } from "@vibest/harness/runtime";
 
-import type { ClaudeCode } from "./claude-code";
-import type { Codex } from "./codex";
+import type { EventBus } from "../events";
 
 /** Services every RPC procedure may `yield*`. */
-export type RpcContext = WithEffectContext<ClaudeCode | Codex>;
+export type RpcContext = WithEffectContext<EventBus | HarnessAgentSessionService>;

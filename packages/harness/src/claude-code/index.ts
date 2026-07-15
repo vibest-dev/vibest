@@ -1,8 +1,8 @@
-export { ClaudeCodeAgent, Session, type ToolPermissionRequest } from "./agent";
+export { makeClaudeCodeAgent, type ClaudeCodeAgent, type ToolPermissionRequest } from "./agent";
+export { makeClaudeCodeAdapter } from "./runtime";
 
 export * from "./tools";
 
-export { Pushable, pushable } from "../utils/pushable";
 export { toUIMessage } from "./utils/to-ui-message";
 export { createTransform } from "./transform";
 export { flattenToolResultText, subagentMetadata } from "./render-policy";

@@ -37,12 +37,9 @@ export function approvalSourceOf(method: ApprovalServerRequest["method"]): Appro
   return APPROVAL_METHODS[method];
 }
 
-// vibest actions have no `behavior`/`grant` fields — just the two decisions a
-// vibest client can present; `native` on the request still carries the raw
-// params for a future richer UI (grant-amendment actions, etc.).
 const APPROVAL_ACTIONS: AgentRequestAction[] = [
-  { id: "accept", label: "Allow" },
-  { id: "decline", label: "Deny" },
+  { id: "accept", label: "Allow", behavior: "allow", variant: "primary" },
+  { id: "decline", label: "Deny", behavior: "deny" },
 ];
 
 type CodexToolRequest = Extract<AgentRequest, { type: "tool" }>;
@@ -136,13 +133,18 @@ type CodexQuestionRequest = Extract<AgentRequest, { type: "question" }>;
 
 /** Build a `question` AgentRequest from a codex requestUserInput server-request. */
 export function buildUserInputRequest(request: UserInputServerRequest): CodexQuestionRequest {
-  const questions: AgentRequestQuestion[] = request.params.questions.map((q) => {
-    const question: AgentRequestQuestion = { id: q.id, question: q.question };
-    if (q.options) {
-      question.options = q.options.map((o) => ({ label: o.label, description: o.description }));
-    }
-    return question;
-  });
+  const questions: AgentRequestQuestion[] = request.params.questions.map((q) => ({
+    id: q.id,
+    question: q.question,
+    ...(q.options
+      ? {
+          options: q.options.map((o) => ({
+            label: o.label,
+            description: o.description,
+          })),
+        }
+      : {}),
+  }));
   return {
     harnessAgentId: "codex",
     type: "question",
@@ -158,7 +160,7 @@ export function mapUserInputResponse(response: AgentResponse): ToolRequestUserIn
   return {
     answers: Object.fromEntries(
       response.answers.map((a) => {
-        const values = a.other ? [...a.values, a.other] : a.values;
+        const values = a.other ? [...a.values, a.other] : [...a.values];
         return [a.questionId, { answers: values }];
       }),
     ),

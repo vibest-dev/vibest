@@ -14,7 +14,7 @@ function Component() {
   const handleStartChatting = async () => {
     try {
       setIsCreatingSession(true);
-      const { sessionId } = await orpc.claudeCode.session.create.call();
+      const { sessionId } = await orpc.session.create.call({ harnessAgentId: "claude-code" });
       navigate({ to: "/chat/$sessionId", params: { sessionId } });
     } catch (error) {
       console.error("Failed to create session", error);

@@ -1,11 +1,12 @@
-import { claudeCodeContract } from "./claude-code";
-import { codexContract } from "./codex";
+import { sessionContract } from "./session";
+
+export * from "./domain";
+export * from "./session-events";
 
 export const contract = {
-  claudeCode: claudeCodeContract,
-  codex: codexContract,
+  session: sessionContract,
 };
 export type Contract = typeof contract;
 
-export { claudeCodeContract, codexContract };
-export type { ToolPermissionRequest } from "./claude-code";
+export { sessionContract };
+export type { SessionEventStreamItem } from "./session";

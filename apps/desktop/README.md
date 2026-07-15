@@ -16,19 +16,29 @@ $ pnpm install
 
 ### Development
 
+Run from the repository root so Turborepo builds the CLI before starting Desktop:
+
 ```bash
-$ pnpm dev
+pnpm dev --filter=desktop
 ```
 
 ### Build
 
+Run from the repository root so Turborepo builds all workspace dependencies first:
+
 ```bash
-# For windows
-$ pnpm build:win
+# Build the Electron application
+pnpm build --filter=desktop
 
-# For macOS
-$ pnpm build:mac
+# Create an unpacked application
+pnpm turbo run build:unpack --filter=desktop
 
-# For Linux
-$ pnpm build:linux
+# Create a macOS package
+pnpm turbo run build:mac --filter=desktop
+```
+
+### End-to-end tests
+
+```bash
+pnpm turbo run e2e --filter=desktop
 ```

@@ -5,7 +5,18 @@ export default defineConfig({
   // never end up in the production bundle.
   entry: ["src/node/cli.ts"],
   platform: "node",
-  external: ["vite"],
+  deps: {
+    neverBundle: ["vite"],
+    // The private server/harness/contract packages are compiled into the CLI.
+    // Whitelist their bundled runtime dependencies so additions fail closed.
+    onlyBundle: [
+      "effect",
+      "@effect/platform-node-shared",
+      "@effect/platform-node",
+      "@standardserver/shared",
+      "@orpc/experimental-effect",
+    ],
+  },
   dts: false,
   clean: false,
   env: {

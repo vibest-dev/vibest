@@ -3,6 +3,7 @@
 // - @vibest/harness/claude-code
 // - @vibest/harness/codex
 
+export * from "./schema/standard";
 export * from "./types/harness-agent-id";
 export * from "./types/event";
 export * from "./types/request";

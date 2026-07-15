@@ -1,4 +1,9 @@
-import { appAlias, appVitePlugins } from "@vibest/app/vite";
+import { fileURLToPath } from "node:url";
+
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react from "@vitejs/plugin-react";
+import { codeInspectorPlugin } from "code-inspector-plugin";
 import { defineConfig } from "electron-vite";
 
 export default defineConfig({
@@ -31,18 +36,26 @@ export default defineConfig({
     },
   },
   renderer: {
-    // The renderer *is* apps/app, compiled from source into the Electron
-    // bundle — not a copy of apps/app/dist. Same plugins, same alias.
-    root: "src/renderer",
+    root: fileURLToPath(new URL("./src/renderer/", import.meta.url)),
     resolve: {
-      alias: appAlias(),
+      alias: { "@": fileURLToPath(new URL("../app/src/", import.meta.url)) },
     },
-    plugins: appVitePlugins(),
+    plugins: [
+      codeInspectorPlugin({ bundler: "vite" }),
+      tanstackRouter({
+        target: "react",
+        autoCodeSplitting: true,
+        routesDirectory: fileURLToPath(new URL("../app/src/routes/", import.meta.url)),
+        generatedRouteTree: fileURLToPath(new URL("../app/src/routeTree.gen.ts", import.meta.url)),
+      }),
+      react(),
+      tailwindcss(),
+    ],
     build: {
       outDir: "dist/renderer",
       rollupOptions: {
         input: {
-          index: "src/renderer/index.html",
+          index: fileURLToPath(new URL("./src/renderer/index.html", import.meta.url)),
         },
       },
     },

@@ -1,21 +1,26 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
   "tasks": {
-    "stub": {
-      "outputs": ["dist/**"],
-      "dependsOn": ["^stub"]
-    },
     "dev": {
       "cache": false,
       "persistent": true,
-      "interruptible": true,
-      "dependsOn": ["^stub"]
+      "interruptible": true
+    },
+    "preview": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["build"]
     },
     "build": {
       "outputs": ["dist/**"],
       "dependsOn": ["^build"]
     },
     "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true,
       "dependsOn": ["^build"]
     },
     "typecheck": {

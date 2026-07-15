@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-import type { AddressInfo } from "node:net";
-
 import { formatReadyLine } from "./handshake";
+import { listenServer } from "./listen";
 import { createServer } from "./server";
 
 const DEFAULT_PORT = 4000;
@@ -27,7 +26,7 @@ function readCorsOrigins(): string[] {
 
 function readPort(): number {
   const raw = process.env.VIBEST_PORT;
-  if (raw === undefined) return DEFAULT_PORT;
+  if (raw === undefined) return process.env.NODE_ENV === "development" ? 0 : DEFAULT_PORT;
   const port = Number.parseInt(raw, 10);
   return Number.isInteger(port) && port >= 0 ? port : DEFAULT_PORT;
 }
@@ -35,13 +34,33 @@ function readPort(): number {
 async function main() {
   const authToken = takeAuthToken();
   const server = await createServer({ authToken, corsOrigins: readCorsOrigins() });
+  let port: number;
+  try {
+    port = await listenServer(server, readPort());
+  } catch (error) {
+    await server.dispose();
+    throw error;
+  }
 
-  server.listen(readPort(), "127.0.0.1", () => {
-    const { port } = server.address() as AddressInfo;
-    // Machine-readable first, for the desktop supervisor; human-readable second.
-    console.log(formatReadyLine({ port }));
-    console.log(`vibest listening on http://127.0.0.1:${port}`);
+  // Machine-readable first, for the desktop supervisor; human-readable second.
+  console.log(formatReadyLine({ port }));
+  console.log(`vibest listening on http://127.0.0.1:${port}`);
+
+  let shuttingDown: Promise<void> | undefined;
+  const shutdown = () =>
+    (shuttingDown ??= server.dispose().catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    }));
+  process.once("SIGINT", () => {
+    void shutdown();
+  });
+  process.once("SIGTERM", () => {
+    void shutdown();
   });
 }
 
-main();
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

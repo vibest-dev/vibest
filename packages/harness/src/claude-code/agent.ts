@@ -1,287 +1,527 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
+import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
+import type * as Cause from "effect/Cause";
 import { v7 as uuid } from "uuid";
 
-import { Pushable } from "../utils/pushable";
+import {
+  AgentRequestUnavailable,
+  ClaudeSdkError,
+  SessionNotFound,
+  SessionNotResumable,
+  TurnAlreadyRunning,
+} from "../runtime/errors";
+import { drainQueue, streamFromQueueOne } from "../runtime/queue-stream";
 import { resolveClaudeExecutable } from "./executable";
 
-/**
- * Thrown when a prompt arrives for a session the server no longer holds in
- * memory (it restarted) and Claude has no saved transcript to resume from — the
- * history was cleared, or nothing was ever persisted. Surfaced to the renderer
- * so it can tell the user the conversation cannot be restored, rather than
- * silently starting a blank session under the same id.
- */
-export class SessionNotResumableError extends Error {
-  readonly code = "SESSION_NOT_RESUMABLE";
+const SESSION_QUEUE_CAPACITY = 1024;
 
-  constructor(sessionId: string) {
-    super(
-      `Session ${sessionId} could not be resumed: no saved history was found. ` +
-        `It may have been cleared, or the working directory changed.`,
-    );
-    this.name = "SessionNotResumableError";
-  }
-}
-
-// Emitted while a prompt is running; the client answers via
-// `respondPermission`. The contract re-exports this type for both sides.
 export type ToolPermissionRequest = {
-  type: "tool-permission-request";
-  sessionId: string;
-  requestId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  suggestions?: sdk.PermissionUpdate[];
+  readonly type: "tool-permission-request";
+  readonly sessionId: string;
+  readonly requestId: string;
+  readonly toolName: string;
+  readonly input: Record<string, unknown>;
+  readonly suggestions?: sdk.PermissionUpdate[];
 };
 
-interface SessionState {
-  /**
-   * the claude code session, will set when first system message is received
-   */
-  id?: string;
-  query: sdk.Query;
-  input: Pushable<sdk.SDKUserMessage>;
-  requestPermission: Pushable<ToolPermissionRequest>;
-  pendingPermissionRequests: Map<string, PendingToolPermission>;
-}
+type ClaudeAgentFailure = SessionNotFound | SessionNotResumable | ClaudeSdkError;
+type ClaudeSessionInfo = Awaited<ReturnType<typeof getSessionInfo>>;
 
-type PendingToolPermission = (result: sdk.PermissionResult) => void;
+type PendingToolPermission = {
+  readonly deferred: Deferred.Deferred<sdk.PermissionResult>;
+};
 
-export class Session {
-  private store = new Map<string, SessionState>();
-  // In-flight resumes, keyed by session id, so concurrent callers (a prompt and
-  // the permission subscription racing after a backend restart) share one
-  // resume instead of each spawning a query and clobbering the store.
-  private resuming = new Map<string, Promise<SessionState>>();
+type SessionOutput = {
+  readonly token: object;
+  readonly message: sdk.SDKMessage;
+};
 
-  get(id: string) {
-    const session = this.store.get(id);
-    if (!session) {
-      throw new Error("session not found");
+type TurnState =
+  | { readonly _tag: "Idle" }
+  | {
+      readonly _tag: "Active";
+      readonly token: object;
+      readonly abandoned: boolean;
+      readonly resultEnqueued: boolean;
+    };
+
+type SessionState = {
+  readonly sessionId: string;
+  readonly query: sdk.Query;
+  readonly scope: Scope.Closeable;
+  readonly input: Queue.Queue<sdk.SDKUserMessage, Cause.Done>;
+  readonly output: Queue.Queue<SessionOutput, Cause.Done | ClaudeSdkError>;
+  readonly permissionRequests: Queue.Queue<ToolPermissionRequest, Cause.Done>;
+  readonly pendingPermissions: Ref.Ref<ReadonlyMap<string, PendingToolPermission>>;
+  readonly turnState: Ref.Ref<TurnState>;
+};
+
+type ResumeDecision =
+  | {
+      readonly _tag: "Start";
+      readonly deferred: Deferred.Deferred<SessionState, ClaudeAgentFailure>;
     }
-    return session;
-  }
+  | {
+      readonly _tag: "Wait";
+      readonly deferred: Deferred.Deferred<SessionState, ClaudeAgentFailure>;
+    };
 
-  /**
-   * Return the live session for `id`, resuming it from Claude's saved transcript
-   * if the server no longer holds it in memory (it restarted). Throws
-   * {@link SessionNotResumableError} when nothing was saved. This is the entry
-   * point every request that needs a live session should use, so a restarted
-   * backend recovers transparently instead of throwing "session not found".
-   */
-  async ensure(id: string): Promise<SessionState> {
-    const existing = this.store.get(id);
-    if (existing) return existing;
-
-    let inFlight = this.resuming.get(id);
-    if (!inFlight) {
-      inFlight = this.resume(id).finally(() => this.resuming.delete(id));
-      this.resuming.set(id, inFlight);
-    }
-    return inFlight;
-  }
-
-  list() {
-    return Array.from(this.store.values());
-  }
-
-  async create(): Promise<{
-    sessionId: string;
-  }> {
-    const sessionId = uuid();
-    // Pin our id as Claude's session id (a valid UUID), so the transcript
-    // persists under it and can be resumed after a backend restart.
-    this.buildSession(sessionId, { sessionId });
-    return { sessionId };
-  }
-
-  /**
-   * Spin up a live query for `sessionId` and store it. `extra` carries the
-   * session-identity options: `{ sessionId }` for a fresh session, or
-   * `{ resume }` to reload one from disk.
-   */
-  private buildSession(sessionId: string, extra: Partial<sdk.Options>): SessionState {
-    const input = new Pushable<sdk.SDKUserMessage>();
-    const requestPermission = new Pushable<ToolPermissionRequest>();
-
-    const options: sdk.Options = {
-      mcpServers: {},
-      strictMcpConfig: true,
-      permissionMode: "default",
-      stderr: (err) => console.error(err),
-      // note: although not documented by the types, passing an absolute path
-      executable: process.execPath as "node",
-      // Resolved rather than left to the SDK: its own resolution silently
-      // points into app.asar in a packaged build, which cannot be exec'd.
-      pathToClaudeCodeExecutable: resolveClaudeExecutable(),
-      // Maintain Claude Code behavior with preset system prompt
-      systemPrompt: { type: "preset", preset: "claude_code" },
-      // Load filesystem settings for project-level configuration
-      settingSources: ["user", "project", "local"],
-      // canUseTool callback: push permission requests to output stream
-      canUseTool: async (toolName, toolInput, { signal, suggestions }) => {
-        const requestId = uuid();
-        const session = this.get(sessionId);
-        const pendingPermissionRequests = session.pendingPermissionRequests;
-        let resolve: (result: sdk.PermissionResult) => void;
-        const promise = new Promise<sdk.PermissionResult>((_resolve) => {
-          resolve = _resolve;
-        });
-
-        const pendingPermission: PendingToolPermission = (result: sdk.PermissionResult) => {
-          resolve(result);
-          cleanUp();
-        };
-
-        function cleanUp() {
-          pendingPermissionRequests.delete(requestId);
-          signal.removeEventListener("abort", abortHandler);
-        }
-
-        function abortHandler() {
-          resolve({
-            behavior: "deny",
-            message: `Tool permission for ${toolName} was aborted`,
-            interrupt: true,
-          });
-          cleanUp();
-        }
-
-        signal.addEventListener("abort", abortHandler, { once: true });
-
-        pendingPermissionRequests.set(requestId, pendingPermission);
-        // Push permission request to output stream (only necessary fields)
-        requestPermission.push({
-          type: "tool-permission-request",
-          sessionId,
-          requestId,
-          toolName,
-          input: toolInput,
-          suggestions,
-        });
-
-        return promise;
+export interface ClaudeCodeAgent {
+  readonly session: {
+    readonly create: Effect.Effect<{ readonly sessionId: string }, ClaudeSdkError>;
+    readonly resume: (
+      sessionId: string,
+    ) => Effect.Effect<{ readonly sessionId: string }, ClaudeAgentFailure>;
+    readonly prompt: (input: {
+      readonly sessionId: string;
+      readonly message: sdk.SDKUserMessage["message"];
+    }) => Effect.Effect<
+      {
+        readonly turnId: string;
+        readonly output: Stream.Stream<sdk.SDKMessage, ClaudeAgentFailure>;
       },
-      ...extra,
-    };
+      ClaudeAgentFailure | TurnAlreadyRunning
+    >;
+    readonly requestPermission: (
+      sessionId: string,
+    ) => Stream.Stream<ToolPermissionRequest, ClaudeAgentFailure>;
+    readonly respondPermission: (
+      sessionId: string,
+      requestId: string,
+      result: sdk.PermissionResult,
+    ) => Effect.Effect<boolean, SessionNotFound | AgentRequestUnavailable>;
+    readonly setModel: (
+      sessionId: string,
+      model: string,
+    ) => Effect.Effect<void, ClaudeAgentFailure>;
+    readonly getSupportedCommands: (
+      sessionId: string,
+    ) => Effect.Effect<sdk.SlashCommand[], ClaudeAgentFailure>;
+    readonly getSupportedModels: (
+      sessionId: string,
+    ) => Effect.Effect<sdk.ModelInfo[], ClaudeAgentFailure>;
+    readonly getMcpServers: (
+      sessionId: string,
+    ) => Effect.Effect<sdk.McpServerStatus[], ClaudeAgentFailure>;
+    readonly interrupt: (
+      sessionId: string,
+    ) => Effect.Effect<void, SessionNotFound | ClaudeSdkError>;
+    readonly abort: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+  };
+}
 
-    const q = query({ prompt: input, options });
-    const state: SessionState = {
-      query: q,
-      input,
-      requestPermission,
-      pendingPermissionRequests: new Map(),
-    };
-    this.store.set(sessionId, state);
-    return state;
-  }
+const sdkError = (operation: string, cause: unknown) => new ClaudeSdkError({ operation, cause });
 
-  /**
-   * Rebuild a session the server no longer holds in memory (it restarted) by
-   * resuming Claude's persisted transcript. Throws {@link SessionNotResumableError}
-   * when nothing was saved, so a lost history never masquerades as a live blank
-   * session. `resume` is passed alone — the SDK rejects `sessionId` alongside it.
-   */
-  private async resume(sessionId: string): Promise<SessionState> {
-    const info = await getSessionInfo(sessionId);
-    if (!info) {
-      throw new SessionNotResumableError(sessionId);
-    }
-    return this.buildSession(sessionId, { resume: sessionId });
-  }
+export const makeClaudeCodeAgent = (): Effect.Effect<ClaudeCodeAgent, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const ownerScope = yield* Scope.Scope;
+    const sessions = yield* Ref.make(new Map<string, SessionState>());
+    const resumes = yield* Ref.make(
+      new Map<string, Deferred.Deferred<SessionState, ClaudeAgentFailure>>(),
+    );
 
-  async getSupportedCommands(sessionId: string): Promise<sdk.SlashCommand[]> {
-    const session = this.get(sessionId);
-    return session.query.supportedCommands();
-  }
+    const getLiveSession = (sessionId: string) =>
+      Ref.get(sessions).pipe(
+        Effect.flatMap((current) => {
+          const session = current.get(sessionId);
+          return session
+            ? Effect.succeed(session)
+            : Effect.fail(new SessionNotFound({ sessionId }));
+        }),
+      );
 
-  async getSupportedModels(sessionId: string): Promise<sdk.ModelInfo[]> {
-    const session = this.get(sessionId);
-    return session.query.supportedModels();
-  }
+    const finishPermissions = (session: SessionState, message: string) =>
+      Ref.getAndSet(session.pendingPermissions, new Map()).pipe(
+        Effect.flatMap((pending) =>
+          Effect.forEach(
+            pending.values(),
+            ({ deferred }) =>
+              Deferred.succeed(deferred, {
+                behavior: "deny",
+                message,
+                interrupt: true,
+              }),
+            { discard: true },
+          ),
+        ),
+      );
 
-  async getMcpServers(sessionId: string): Promise<sdk.McpServerStatus[]> {
-    const session = this.get(sessionId);
-    return session.query.mcpServerStatus();
-  }
+    const closeSession = (session: SessionState) => Scope.close(session.scope, Exit.void);
 
-  abort(sessionId: string) {
-    const session = this.get(sessionId);
+    const buildSession = (
+      sessionId: string,
+      identity: Pick<sdk.Options, "sessionId" | "resume">,
+    ): Effect.Effect<SessionState, ClaudeSdkError> =>
+      Effect.gen(function* () {
+        const sessionScope = yield* Scope.fork(ownerScope, "sequential");
+        return yield* Effect.gen(function* () {
+          const input = yield* Queue.bounded<sdk.SDKUserMessage, Cause.Done>(
+            SESSION_QUEUE_CAPACITY,
+          );
+          const output = yield* Queue.bounded<SessionOutput, Cause.Done | ClaudeSdkError>(
+            SESSION_QUEUE_CAPACITY,
+          );
+          const permissionRequests = yield* Queue.dropping<ToolPermissionRequest, Cause.Done>(
+            SESSION_QUEUE_CAPACITY,
+          );
+          const pendingPermissions = yield* Ref.make<ReadonlyMap<string, PendingToolPermission>>(
+            new Map(),
+          );
+          const turnState = yield* Ref.make<TurnState>({ _tag: "Idle" });
 
-    for (const resolve of session.pendingPermissionRequests.values()) {
-      resolve({
-        behavior: "deny",
-        message: "Request aborted due to session termination",
-        interrupt: true,
-      });
-    }
-    session.requestPermission.end();
-    session.pendingPermissionRequests.clear();
+          const canUseTool: NonNullable<sdk.Options["canUseTool"]> = (
+            toolName,
+            toolInput,
+            { signal, suggestions },
+          ) => {
+            const requestId = uuid();
+            const waitForPermission = Effect.gen(function* () {
+              const deferred = yield* Deferred.make<sdk.PermissionResult>();
+              const onAbort = () => {
+                Effect.runFork(
+                  Deferred.succeed(deferred, {
+                    behavior: "deny",
+                    message: `Tool permission for ${toolName} was aborted`,
+                    interrupt: true,
+                  }),
+                );
+              };
+              signal.addEventListener("abort", onAbort, { once: true });
+              yield* Ref.update(pendingPermissions, (current) =>
+                new Map(current).set(requestId, { deferred }),
+              );
+              const accepted = yield* Queue.offer(permissionRequests, {
+                type: "tool-permission-request",
+                sessionId,
+                requestId,
+                toolName,
+                input: toolInput,
+                suggestions,
+              });
+              if (!accepted) {
+                yield* Ref.update(pendingPermissions, (current) => {
+                  const next = new Map(current);
+                  next.delete(requestId);
+                  return next;
+                });
+                signal.removeEventListener("abort", onAbort);
+                return {
+                  behavior: "deny" as const,
+                  message: `Tool permission for ${toolName} was unavailable`,
+                  interrupt: true,
+                };
+              }
+              return yield* Deferred.await(deferred).pipe(
+                Effect.ensuring(
+                  Ref.update(pendingPermissions, (current) => {
+                    const next = new Map(current);
+                    next.delete(requestId);
+                    return next;
+                  }).pipe(
+                    Effect.andThen(Effect.sync(() => signal.removeEventListener("abort", onAbort))),
+                  ),
+                ),
+              );
+            });
+            return Effect.runPromise(waitForPermission);
+          };
 
-    session.input.end();
-    session.query.interrupt();
+          const options: sdk.Options = {
+            mcpServers: {},
+            strictMcpConfig: true,
+            permissionMode: "default",
+            stderr: (error) => console.error(error),
+            executable: process.execPath as "node",
+            pathToClaudeCodeExecutable: resolveClaudeExecutable(),
+            systemPrompt: { type: "preset", preset: "claude_code" },
+            settingSources: ["user", "project", "local"],
+            canUseTool,
+            ...identity,
+          };
+          const queryInstance = yield* Effect.try({
+            try: () => query({ prompt: Stream.toAsyncIterable(Stream.fromQueue(input)), options }),
+            catch: (cause) => sdkError("query", cause),
+          });
+          const state: SessionState = {
+            sessionId,
+            query: queryInstance,
+            scope: sessionScope,
+            input,
+            output,
+            permissionRequests,
+            pendingPermissions,
+            turnState,
+          };
 
-    this.store.delete(sessionId);
-  }
+          const removeAndCloseSession = Ref.update(sessions, (current) => {
+            if (current.get(sessionId) !== state) return current;
+            const next = new Map(current);
+            next.delete(sessionId);
+            return next;
+          }).pipe(Effect.andThen(Scope.close(sessionScope, Exit.void)));
 
-  interrupt(sessionId: string) {
-    const session = this.get(sessionId);
-    session.query.interrupt();
-  }
+          const closeFromOwner = Effect.forkIn(removeAndCloseSession, ownerScope).pipe(
+            Effect.asVoid,
+          );
 
-  async *prompt(input: {
-    sessionId: string;
-    message: sdk.SDKUserMessage["message"];
-  }): AsyncGenerator<sdk.SDKMessage, void, unknown> {
-    // A missing session means the backend restarted since it was created; ensure
-    // resumes it from Claude's saved transcript rather than failing (or, if
-    // nothing was saved, throws SessionNotResumableError for the renderer).
-    const session = await this.ensure(input.sessionId);
-    session.input.push({
-      type: "user",
-      message: input.message,
-      parent_tool_use_id: null,
-      session_id: input.sessionId,
-    });
+          const failSession = (error: ClaudeSdkError) =>
+            Queue.fail(output, error).pipe(Effect.andThen(closeFromOwner), Effect.asVoid);
 
-    while (true) {
-      const { value: message, done } = await session.query.next();
+          const pump: Effect.Effect<void> = Effect.suspend(() =>
+            Effect.tryPromise({
+              try: () => queryInstance.next(),
+              catch: (cause) => sdkError("query-next", cause),
+            }).pipe(
+              Effect.flatMap(({ done, value }) =>
+                Effect.gen(function* () {
+                  if (done || !value) {
+                    yield* Queue.end(output);
+                    yield* closeFromOwner;
+                    return;
+                  }
 
-      if (done || !message) {
-        return;
-      }
-      switch (message.type) {
-        case "system": {
-          if (message.subtype === "init") {
-            session.id = message.session_id;
+                  const token =
+                    value.type === "result"
+                      ? yield* Ref.modify(turnState, (current) => {
+                          if (current._tag !== "Active") return [undefined, current] as const;
+                          return current.abandoned
+                            ? [undefined, { _tag: "Idle" } as const]
+                            : [current.token, { ...current, resultEnqueued: true } as const];
+                        })
+                      : yield* Ref.get(turnState).pipe(
+                          Effect.map((current) =>
+                            current._tag === "Active" ? current.token : undefined,
+                          ),
+                        );
+                  if (!token) return yield* pump;
+
+                  const accepted = yield* Queue.offer(output, { token, message: value });
+                  if (accepted) yield* pump;
+                }),
+              ),
+              Effect.catch(failSession),
+            ),
+          );
+
+          yield* Scope.addFinalizer(
+            sessionScope,
+            finishPermissions(state, "Request aborted due to session termination").pipe(
+              Effect.andThen(Queue.end(permissionRequests)),
+              Effect.andThen(Queue.end(input)),
+              Effect.andThen(Queue.end(output)),
+              Effect.andThen(
+                Effect.tryPromise({
+                  try: () => Promise.resolve(queryInstance.interrupt()),
+                  catch: () => undefined,
+                }).pipe(Effect.catch(() => Effect.void)),
+              ),
+              Effect.asVoid,
+            ),
+          );
+          yield* Effect.forkIn(pump, sessionScope);
+          yield* Ref.update(sessions, (current) => new Map(current).set(sessionId, state));
+          return state;
+        }).pipe(Effect.onError(() => Scope.close(sessionScope, Exit.void)));
+      }).pipe(
+        Effect.onError(() =>
+          Ref.update(sessions, (current) => {
+            const next = new Map(current);
+            next.delete(sessionId);
+            return next;
+          }),
+        ),
+      );
+
+    const resume = (sessionId: string): Effect.Effect<SessionState, ClaudeAgentFailure> =>
+      Effect.tryPromise<ClaudeSessionInfo, ClaudeSdkError>({
+        try: () => getSessionInfo(sessionId),
+        catch: (cause) => sdkError("get-session-info", cause),
+      }).pipe(
+        Effect.flatMap(
+          (info): Effect.Effect<SessionState, SessionNotResumable | ClaudeSdkError> =>
+            info
+              ? buildSession(sessionId, { resume: sessionId })
+              : Effect.fail(new SessionNotResumable({ sessionId })),
+        ),
+      );
+
+    const ensure = (sessionId: string): Effect.Effect<SessionState, ClaudeAgentFailure> =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const existing = yield* Ref.get(sessions).pipe(
+            Effect.map((current) => current.get(sessionId)),
+          );
+          if (existing) return existing;
+
+          const candidate = yield* Deferred.make<SessionState, ClaudeAgentFailure>();
+          const decision = yield* Ref.modify<
+            Map<string, Deferred.Deferred<SessionState, ClaudeAgentFailure>>,
+            ResumeDecision
+          >(resumes, (current) => {
+            const inFlight = current.get(sessionId);
+            if (inFlight) return [{ _tag: "Wait", deferred: inFlight }, current];
+            return [
+              { _tag: "Start", deferred: candidate },
+              new Map(current).set(sessionId, candidate),
+            ];
+          });
+
+          if (decision._tag === "Start") {
+            yield* Effect.forkIn(
+              resume(sessionId).pipe(
+                Effect.exit,
+                Effect.flatMap((exit) => Deferred.done(decision.deferred, exit)),
+                Effect.ensuring(
+                  Ref.update(resumes, (current) => {
+                    if (current.get(sessionId) !== decision.deferred) return current;
+                    const next = new Map(current);
+                    next.delete(sessionId);
+                    return next;
+                  }),
+                ),
+              ),
+              ownerScope,
+            );
           }
-          yield message;
-          break;
-        }
-        case "result": {
-          yield message;
-          return;
-        }
-        default: {
-          yield message;
-          break;
-        }
-      }
-    }
-  }
+          return yield* restore(Deferred.await(decision.deferred));
+        }),
+      );
 
-  respondPermission(sessionId: string, requestId: string, result: sdk.PermissionResult) {
-    const session = this.get(sessionId);
-    const request = session.pendingPermissionRequests.get(requestId);
-    if (!request) {
-      throw new Error(`Pending tool permission request ${requestId} not found`);
-    }
-    request(result);
-    return true;
-  }
-}
+    const callQuery = <A>(
+      sessionId: string,
+      operation: string,
+      run: (query: sdk.Query) => Promise<A>,
+    ): Effect.Effect<A, ClaudeAgentFailure> =>
+      ensure(sessionId).pipe(
+        Effect.flatMap((session) =>
+          Effect.tryPromise({
+            try: () => run(session.query),
+            catch: (cause) => sdkError(operation, cause),
+          }),
+        ),
+      );
 
-export class ClaudeCodeAgent {
-  session = new Session();
-}
+    return {
+      session: {
+        create: Effect.gen(function* () {
+          const sessionId = uuid();
+          yield* buildSession(sessionId, { sessionId });
+          return { sessionId };
+        }),
+        resume: (sessionId) => ensure(sessionId).pipe(Effect.as({ sessionId })),
+        prompt: (input) =>
+          Effect.gen(function* () {
+            const session = yield* ensure(input.sessionId);
+            const token = {};
+            const started = yield* Ref.modify(session.turnState, (current) =>
+              current._tag === "Idle"
+                ? [
+                    true,
+                    {
+                      _tag: "Active",
+                      token,
+                      abandoned: false,
+                      resultEnqueued: false,
+                    } as const,
+                  ]
+                : [false, current],
+            );
+            if (!started) {
+              return yield* new TurnAlreadyRunning({ sessionId: input.sessionId });
+            }
+
+            yield* drainQueue(session.output);
+            const accepted = yield* Queue.offer(session.input, {
+              type: "user",
+              message: input.message,
+              parent_tool_use_id: null,
+              session_id: input.sessionId,
+            });
+            if (!accepted) {
+              yield* Ref.update(session.turnState, (current) =>
+                current._tag === "Active" && current.token === token
+                  ? ({ _tag: "Idle" } as const)
+                  : current,
+              );
+              return yield* sdkError("prompt", new Error("Claude input is closed"));
+            }
+
+            return {
+              turnId: uuid(),
+              output: streamFromQueueOne(session.output).pipe(
+                Stream.filter((output) => output.token === token),
+                Stream.map((output) => output.message),
+                Stream.tap((message) =>
+                  message.type === "result"
+                    ? Ref.update(session.turnState, (current) =>
+                        current._tag === "Active" && current.token === token
+                          ? ({ _tag: "Idle" } as const)
+                          : current,
+                      )
+                    : Effect.void,
+                ),
+                Stream.takeUntil((message) => message.type === "result"),
+                Stream.ensuring(
+                  Ref.update(session.turnState, (current) => {
+                    if (current._tag !== "Active" || current.token !== token) return current;
+                    return current.resultEnqueued
+                      ? ({ _tag: "Idle" } as const)
+                      : ({ ...current, abandoned: true } as const);
+                  }),
+                ),
+              ),
+            };
+          }),
+        requestPermission: (sessionId) =>
+          Stream.unwrap(
+            ensure(sessionId).pipe(
+              Effect.map((session) => streamFromQueueOne(session.permissionRequests)),
+            ),
+          ),
+        respondPermission: (sessionId, requestId, result) =>
+          Effect.gen(function* () {
+            const session = yield* getLiveSession(sessionId);
+            const pending = yield* Ref.modify(session.pendingPermissions, (current) => {
+              const request = current.get(requestId);
+              if (!request) return [undefined, current] as const;
+              const next = new Map(current);
+              next.delete(requestId);
+              return [request, next] as const;
+            });
+            if (!pending) {
+              return yield* new AgentRequestUnavailable({ sessionId, requestId });
+            }
+            yield* Deferred.succeed(pending.deferred, result);
+            return true;
+          }),
+        setModel: (sessionId, model) =>
+          callQuery(sessionId, "set-model", (sdkQuery) => sdkQuery.setModel(model)),
+        getSupportedCommands: (sessionId) =>
+          callQuery(sessionId, "supported-commands", (sdkQuery) => sdkQuery.supportedCommands()),
+        getSupportedModels: (sessionId) =>
+          callQuery(sessionId, "supported-models", (sdkQuery) => sdkQuery.supportedModels()),
+        getMcpServers: (sessionId) =>
+          callQuery(sessionId, "mcp-server-status", (sdkQuery) => sdkQuery.mcpServerStatus()),
+        interrupt: (sessionId) =>
+          getLiveSession(sessionId).pipe(
+            Effect.flatMap((session) =>
+              Effect.tryPromise({
+                try: () => Promise.resolve(session.query.interrupt()),
+                catch: (cause) => sdkError("interrupt", cause),
+              }),
+            ),
+          ),
+        abort: (sessionId) =>
+          Effect.gen(function* () {
+            const session = yield* getLiveSession(sessionId);
+            yield* Ref.update(sessions, (current) => {
+              const next = new Map(current);
+              next.delete(sessionId);
+              return next;
+            });
+            yield* closeSession(session);
+          }),
+      },
+    } satisfies ClaudeCodeAgent;
+  });

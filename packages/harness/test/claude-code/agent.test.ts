@@ -1,9 +1,18 @@
+import * as NodeAssert from "node:assert/strict";
+
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { it } from "@effect/vitest";
+import { Effect, Fiber, Stream } from "effect";
+import { beforeEach, describe, vi } from "vitest";
 
-import { Session, SessionNotResumableError } from "../../src/claude-code/agent";
+import { makeClaudeCodeAgent } from "../../src/claude-code/agent";
+import { makeClaudeCodeAdapter } from "../../src/claude-code/runtime/adapter";
 
-const mockQuery = vi.hoisted(() => vi.fn<() => unknown>());
+const mockQuery = vi.hoisted(() =>
+  vi.fn<
+    (input: { prompt: AsyncIterable<sdk.SDKUserMessage>; options: sdk.Options }) => sdk.Query
+  >(),
+);
 const mockGetSessionInfo = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
@@ -11,314 +20,308 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   getSessionInfo: mockGetSessionInfo,
 }));
 
-describe("Session", () => {
-  let session: Session;
-  let mockQueryInstance: {
-    supportedCommands: ReturnType<typeof vi.fn>;
-    supportedModels: ReturnType<typeof vi.fn>;
-    mcpServerStatus: ReturnType<typeof vi.fn>;
-    accountInfo: ReturnType<typeof vi.fn>;
-    interrupt: ReturnType<typeof vi.fn>;
+type FakeQuery = sdk.Query & {
+  readonly supportedCommands: ReturnType<typeof vi.fn>;
+  readonly supportedModels: ReturnType<typeof vi.fn>;
+  readonly mcpServerStatus: ReturnType<typeof vi.fn>;
+  readonly setModel: ReturnType<typeof vi.fn>;
+  readonly interrupt: ReturnType<typeof vi.fn>;
+};
+
+let messages: sdk.SDKMessage[];
+let queryInstance: FakeQuery;
+
+const makeFakeQuery = (
+  prompt: AsyncIterable<sdk.SDKUserMessage>,
+  failAfterInput = false,
+): FakeQuery => {
+  const input = prompt[Symbol.asyncIterator]();
+  let needsInput = true;
+  const query = {
+    next: vi.fn<
+      () => Promise<{ done: false; value: sdk.SDKMessage } | { done: true; value: undefined }>
+    >(async () => {
+      if (needsInput) {
+        const nextInput = await input.next();
+        if (nextInput.done) return { done: true as const, value: undefined };
+        needsInput = false;
+        if (failAfterInput) throw new Error("query failed");
+      }
+      const value = messages.shift();
+      if (!value) return new Promise(() => undefined);
+      if (value.type === "result") needsInput = true;
+      return { done: false as const, value };
+    }),
+    supportedCommands: vi.fn<() => Promise<unknown[]>>(async () => [
+      { name: "read", description: "Read files", argumentHint: "<file>" },
+    ]),
+    supportedModels: vi.fn<() => Promise<unknown[]>>(async () => [
+      { value: "sonnet", displayName: "Sonnet", description: "Fast" },
+    ]),
+    mcpServerStatus: vi.fn<() => Promise<unknown[]>>(async () => [
+      { name: "filesystem", status: "connected" as const },
+    ]),
+    setModel: vi.fn<(model: string) => Promise<void>>(async () => undefined),
+    interrupt: vi.fn<() => Promise<void>>(async () => undefined),
+    [Symbol.asyncIterator]() {
+      return query;
+    },
   };
+  return query as unknown as FakeQuery;
+};
 
+const lastOptions = (): sdk.Options =>
+  (mockQuery.mock.calls.at(-1) as unknown as [{ options: sdk.Options }])[0].options;
+
+describe("ClaudeCodeAgent", () => {
   beforeEach(() => {
-    session = new Session();
-    mockQueryInstance = {
-      supportedCommands: vi.fn<() => Promise<unknown>>().mockResolvedValue([
-        {
-          name: "read",
-          description: "Read file contents",
-          argumentHint: "<file>",
-        },
-        {
-          name: "write",
-          description: "Write to file",
-          argumentHint: "<file> <content>",
-        },
-        {
-          name: "edit",
-          description: "Edit file",
-          argumentHint: "<file> <search> <replace>",
-        },
-        {
-          name: "bash",
-          description: "Run bash command",
-          argumentHint: "<command>",
-        },
-      ]),
-      supportedModels: vi.fn<() => Promise<unknown>>().mockResolvedValue([
-        {
-          value: "claude-sonnet-4-5",
-          displayName: "Sonnet 4.5",
-          description: "Fast and capable",
-        },
-        {
-          value: "claude-opus-4-5",
-          displayName: "Opus 4.5",
-          description: "Most powerful",
-        },
-      ]),
-      mcpServerStatus: vi.fn<() => Promise<unknown>>().mockResolvedValue([
-        {
-          name: "filesystem",
-          status: "connected",
-          serverInfo: { name: "filesystem", version: "1.0.0" },
-        },
-        {
-          name: "git",
-          status: "connected",
-          serverInfo: { name: "git", version: "1.0.0" },
-        },
-      ]),
-      accountInfo: vi.fn<() => Promise<unknown>>().mockResolvedValue({ plan: "pro" }),
-      interrupt: vi.fn<() => void>(),
-    };
-
-    mockQuery.mockReturnValue(mockQueryInstance);
-  });
-
-  it("should create a session with only sessionId", async () => {
-    const result = await session.create();
-
-    expect(result).toHaveProperty("sessionId");
-    expect(typeof result.sessionId).toBe("string");
-    expect(result.sessionId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    ); // UUID v7 format
-
-    // Verify the session is stored
-    const storedSession = session.get(result.sessionId);
-    expect(storedSession).toBeDefined();
-  });
-
-  it("should fetch supported commands for a session", async () => {
-    const { sessionId } = await session.create();
-
-    const commands = await session.getSupportedCommands(sessionId);
-
-    expect(commands).toEqual([
-      {
-        name: "read",
-        description: "Read file contents",
-        argumentHint: "<file>",
-      },
-      {
-        name: "write",
-        description: "Write to file",
-        argumentHint: "<file> <content>",
-      },
-      {
-        name: "edit",
-        description: "Edit file",
-        argumentHint: "<file> <search> <replace>",
-      },
-      {
-        name: "bash",
-        description: "Run bash command",
-        argumentHint: "<command>",
-      },
-    ]);
-    expect(mockQueryInstance.supportedCommands).toHaveBeenCalledTimes(1);
-  });
-
-  it("should fetch supported models for a session", async () => {
-    const { sessionId } = await session.create();
-
-    const models = await session.getSupportedModels(sessionId);
-
-    expect(models).toEqual([
-      {
-        value: "claude-sonnet-4-5",
-        displayName: "Sonnet 4.5",
-        description: "Fast and capable",
-      },
-      {
-        value: "claude-opus-4-5",
-        displayName: "Opus 4.5",
-        description: "Most powerful",
-      },
-    ]);
-    expect(mockQueryInstance.supportedModels).toHaveBeenCalledTimes(1);
-  });
-
-  it("should fetch MCP servers for a session", async () => {
-    const { sessionId } = await session.create();
-
-    const servers = await session.getMcpServers(sessionId);
-
-    expect(servers).toEqual([
-      {
-        name: "filesystem",
-        status: "connected",
-        serverInfo: { name: "filesystem", version: "1.0.0" },
-      },
-      {
-        name: "git",
-        status: "connected",
-        serverInfo: { name: "git", version: "1.0.0" },
-      },
-    ]);
-    expect(mockQueryInstance.mcpServerStatus).toHaveBeenCalledTimes(1);
-  });
-
-  it("should handle empty results from Query methods", async () => {
-    mockQueryInstance.supportedCommands.mockResolvedValue([]);
-    mockQueryInstance.supportedModels.mockResolvedValue([]);
-    mockQueryInstance.mcpServerStatus.mockResolvedValue([]);
-
-    const { sessionId } = await session.create();
-
-    const commands = await session.getSupportedCommands(sessionId);
-    const models = await session.getSupportedModels(sessionId);
-    const servers = await session.getMcpServers(sessionId);
-
-    expect(commands).toEqual([]);
-    expect(models).toEqual([]);
-    expect(servers).toEqual([]);
-  });
-
-  it("should store session state with Query instance", async () => {
-    const { sessionId } = await session.create();
-
-    const storedSession = session.get(sessionId);
-    expect(storedSession).toBeDefined();
-    expect(storedSession.query).toBe(mockQueryInstance);
-  });
-
-  it("should handle Query method errors gracefully", async () => {
-    mockQueryInstance.supportedCommands.mockRejectedValue(new Error("API Error"));
-
-    const { sessionId } = await session.create();
-
-    await expect(session.getSupportedCommands(sessionId)).rejects.toThrow("API Error");
-  });
-
-  it("should throw error for non-existent session", async () => {
-    await expect(session.getSupportedCommands("non-existent-id")).rejects.toThrow(
-      "session not found",
-    );
-    await expect(session.getSupportedModels("non-existent-id")).rejects.toThrow(
-      "session not found",
-    );
-    await expect(session.getMcpServers("non-existent-id")).rejects.toThrow("session not found");
-  });
-
-  it("should return type-safe data from getter methods", async () => {
-    const { sessionId } = await session.create();
-
-    // Type assertions to ensure the result matches the expected interface
-    expect(typeof sessionId).toBe("string");
-
-    const commands = await session.getSupportedCommands(sessionId);
-    const models = await session.getSupportedModels(sessionId);
-    const servers = await session.getMcpServers(sessionId);
-
-    expect(Array.isArray(commands)).toBe(true);
-    expect(Array.isArray(models)).toBe(true);
-    expect(Array.isArray(servers)).toBe(true);
-
-    // Verify the types of array elements
-    commands.forEach((cmd) => {
-      expect(typeof cmd.name).toBe("string");
-      expect(typeof cmd.description).toBe("string");
-      expect(typeof cmd.argumentHint).toBe("string");
-    });
-    models.forEach((model) => {
-      expect(typeof model.value).toBe("string");
-      expect(typeof model.displayName).toBe("string");
-      expect(typeof model.description).toBe("string");
-    });
-    servers.forEach((server) => {
-      expect(typeof server.name).toBe("string");
-      expect(["connected", "failed", "needs-auth", "pending"]).toContain(server.status);
-    });
-  });
-});
-
-describe("Session resume", () => {
-  const MESSAGE = { role: "user", content: "hi" } as sdk.SDKUserMessage["message"];
-
-  /** A query that ends immediately, so prompt() runs its resume path then returns. */
-  function fakeQuery() {
-    const q = {
-      next: vi.fn<() => Promise<{ done: true; value: undefined }>>(async () => ({
-        done: true as const,
-        value: undefined,
-      })),
-      interrupt: vi.fn<() => void>(),
-      [Symbol.asyncIterator]() {
-        return q;
-      },
-    };
-    return q;
-  }
-
-  function lastOptions(): sdk.Options {
-    return (mockQuery.mock.calls.at(-1) as unknown as [{ options: sdk.Options }])[0].options;
-  }
-
-  beforeEach(() => {
-    // resolveClaudeExecutable() would otherwise probe the filesystem for `claude`.
     process.env["VIBEST_CLAUDE_EXECUTABLE"] = "/fake/claude";
-    mockQuery.mockReset().mockImplementation(() => fakeQuery());
+    messages = [];
+    mockQuery.mockReset().mockImplementation(({ prompt }) => {
+      queryInstance = makeFakeQuery(prompt);
+      return queryInstance;
+    });
     mockGetSessionInfo.mockReset();
   });
 
-  it("pins our id as the SDK session id on create, without resuming", async () => {
-    const { sessionId } = await new Session().create();
+  it.effect("creates a scoped session and exposes SDK capabilities as Effects", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
 
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-    expect(lastOptions().sessionId).toBe(sessionId);
-    expect(lastOptions().resume).toBeUndefined();
-  });
+      NodeAssert.match(
+        sessionId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      NodeAssert.equal(lastOptions().sessionId, sessionId);
+      NodeAssert.deepStrictEqual(yield* agent.session.getSupportedCommands(sessionId), [
+        { name: "read", description: "Read files", argumentHint: "<file>" },
+      ]);
+      NodeAssert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
+        { value: "sonnet", displayName: "Sonnet", description: "Fast" },
+      ]);
+      NodeAssert.deepStrictEqual(yield* agent.session.getMcpServers(sessionId), [
+        { name: "filesystem", status: "connected" },
+      ]);
+      yield* agent.session.abort(sessionId);
+      NodeAssert.equal(queryInstance.interrupt.mock.calls.length, 1);
+    }),
+  );
 
-  it("resumes a missing session from a saved transcript on the next prompt", async () => {
-    mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
-    const sessionId = "019f6013-0000-7000-8000-000000000000";
+  it.effect("streams SDK output and preserves per-turn model selection", () =>
+    Effect.gen(function* () {
+      messages = [
+        { type: "system", subtype: "init", session_id: "sdk-session" } as sdk.SDKMessage,
+        { type: "result", subtype: "success" } as sdk.SDKMessage,
+      ];
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
 
-    const gen = new Session().prompt({ sessionId, message: MESSAGE });
-    await gen.next();
+      yield* agent.session.setModel(sessionId, "opus");
+      const prompt = yield* agent.session.prompt({
+        sessionId,
+        message: { role: "user", content: "hello" },
+      });
+      const output = yield* Stream.runCollect(prompt.output);
 
-    expect(mockGetSessionInfo).toHaveBeenCalledWith(sessionId);
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-    // `resume` is passed alone — the SDK rejects it together with `sessionId`.
-    expect(lastOptions().resume).toBe(sessionId);
-    expect(lastOptions().sessionId).toBeUndefined();
-  });
+      NodeAssert.deepStrictEqual(
+        Array.from(output, (message) => message.type),
+        ["system", "result"],
+      );
+      NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+    }),
+  );
 
-  it("throws SessionNotResumableError when nothing was saved to resume", async () => {
-    mockGetSessionInfo.mockResolvedValue(undefined);
-    const sessionId = "019f6013-0000-7000-8000-000000000001";
+  it.effect("exposes prompt output through the unified adapter event stream", () =>
+    Effect.gen(function* () {
+      messages = [
+        { type: "system", subtype: "init", session_id: "sdk-session" } as sdk.SDKMessage,
+        { type: "result", subtype: "success" } as sdk.SDKMessage,
+      ];
+      const agent = yield* makeClaudeCodeAgent();
+      const session = yield* makeClaudeCodeAdapter(agent).open({ workspacePath: "/tmp" });
+      const collected = yield* Effect.forkChild(
+        Stream.runCollect(
+          session.events.pipe(
+            Stream.takeUntil((event) => event.body.type === "session.turn.ended"),
+          ),
+        ),
+      );
 
-    const gen = new Session().prompt({ sessionId, message: MESSAGE });
+      const receipt = yield* session.prompt({
+        model: "opus",
+        parts: [{ type: "text", text: "hello" }],
+      });
+      const events = yield* Fiber.join(collected);
 
-    await expect(gen.next()).rejects.toBeInstanceOf(SessionNotResumableError);
-    expect(mockQuery).not.toHaveBeenCalled(); // never spun up a blank session
-  });
+      NodeAssert.equal(receipt.cursor, 0);
+      NodeAssert.deepStrictEqual(
+        Array.from(events, (event) => event.body.type),
+        [
+          "session.turn.started",
+          "start",
+          "data-system/init",
+          "data-result/success",
+          "finish",
+          "session.turn.ended",
+        ],
+      );
+      NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+      yield* session.close;
+    }),
+  );
 
-  it("reuses the in-memory session and never probes disk when it is present", async () => {
-    const session = new Session();
-    const { sessionId } = await session.create();
-    mockQuery.mockClear();
-    mockGetSessionInfo.mockClear();
+  it.effect("rejects a concurrent turn while the previous turn is unfinished", () =>
+    Effect.gen(function* () {
+      messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
+      const first = yield* agent.session.prompt({
+        sessionId,
+        message: { role: "user", content: "first" },
+      });
+      yield* Stream.runHead(first.output);
 
-    const gen = session.prompt({ sessionId, message: MESSAGE });
-    await gen.next();
+      const error = yield* agent.session
+        .prompt({
+          sessionId,
+          message: { role: "user", content: "second" },
+        })
+        .pipe(Effect.flip);
+      NodeAssert.equal(error._tag, "TurnAlreadyRunning");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
 
-    expect(mockGetSessionInfo).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled(); // reused the existing live query
-  });
+  it.effect("evicts a session when the SDK output pump fails", () =>
+    Effect.gen(function* () {
+      let build = 0;
+      mockQuery.mockImplementation(({ prompt }) => {
+        build += 1;
+        queryInstance = makeFakeQuery(prompt, build === 1);
+        return queryInstance;
+      });
+      mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
 
-  it("resumes only once when concurrent callers race for a missing session", async () => {
-    mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
-    const session = new Session();
-    const sessionId = "019f6013-0000-7000-8000-000000000002";
+      const first = yield* agent.session.prompt({
+        sessionId,
+        message: { role: "user", content: "fail" },
+      });
+      const firstExit = yield* Stream.runCollect(first.output).pipe(Effect.exit);
+      NodeAssert.equal(firstExit._tag, "Failure");
 
-    // A prompt and the permission subscription both materialize the session at once.
-    const [a, b] = await Promise.all([session.ensure(sessionId), session.ensure(sessionId)]);
+      yield* Effect.eventually(
+        agent.session.getSupportedCommands(sessionId).pipe(
+          Effect.filterOrFail(
+            () => build === 2,
+            () => new Error("session has not resumed yet"),
+          ),
+        ),
+      );
+      NodeAssert.equal(build, 2);
+      NodeAssert.equal(lastOptions().resume, sessionId);
+    }),
+  );
 
-    expect(a).toBe(b); // same SessionState, not two clobbering rebuilds
-    expect(mockGetSessionInfo).toHaveBeenCalledTimes(1);
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-  });
+  it.effect("single-flights concurrent resume and fails when no transcript exists", () =>
+    Effect.gen(function* () {
+      mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
+      const agent = yield* makeClaudeCodeAgent();
+      const sessionId = "019f6013-0000-7000-8000-000000000002";
+
+      yield* Effect.all(
+        [
+          agent.session.getSupportedCommands(sessionId),
+          agent.session.getSupportedModels(sessionId),
+        ],
+        { concurrency: "unbounded" },
+      );
+      NodeAssert.equal(mockGetSessionInfo.mock.calls.length, 1);
+      NodeAssert.equal(mockQuery.mock.calls.length, 1);
+      NodeAssert.equal(lastOptions().resume, sessionId);
+      NodeAssert.equal(lastOptions().sessionId, undefined);
+
+      mockGetSessionInfo.mockResolvedValue(undefined);
+      const missing = yield* makeClaudeCodeAgent();
+      const error = yield* missing.session
+        .getSupportedCommands("019f6013-0000-7000-8000-000000000003")
+        .pipe(Effect.flip);
+      NodeAssert.equal(error._tag, "SessionNotResumable");
+    }),
+  );
+
+  it.effect("denies pending SDK permissions when the session scope closes", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
+      const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
+        Effect.forkChild,
+      );
+      const canUseTool = lastOptions().canUseTool;
+      NodeAssert.ok(canUseTool);
+
+      const permission = canUseTool!(
+        "Bash",
+        { command: "pwd" },
+        {
+          signal: new AbortController().signal,
+          suggestions: [],
+          toolUseID: "tool-1",
+          agentID: undefined,
+          blockedPath: undefined,
+          decisionReason: undefined,
+          requestId: "request-close",
+        },
+      );
+      yield* Fiber.join(requestFiber);
+      yield* agent.session.abort(sessionId);
+
+      NodeAssert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+        behavior: "deny",
+        message: "Request aborted due to session termination",
+        interrupt: true,
+      });
+    }),
+  );
+
+  it.effect("bridges SDK permission promises through Deferred", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeClaudeCodeAgent();
+      const { sessionId } = yield* agent.session.create;
+      const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
+        Effect.forkChild,
+      );
+      const canUseTool = lastOptions().canUseTool;
+      NodeAssert.ok(canUseTool);
+
+      const permission = canUseTool!(
+        "Bash",
+        { command: "pwd" },
+        {
+          signal: new AbortController().signal,
+          suggestions: [],
+          toolUseID: "tool-1",
+          agentID: undefined,
+          blockedPath: undefined,
+          decisionReason: undefined,
+          requestId: "request-1",
+        },
+      );
+      const request = yield* Fiber.join(requestFiber);
+      NodeAssert.equal(request._tag, "Some");
+      if (request._tag === "Some") {
+        yield* agent.session.respondPermission(sessionId, request.value.requestId, {
+          behavior: "allow",
+          updatedInput: { command: "pwd" },
+        });
+      }
+
+      NodeAssert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+        behavior: "allow",
+        updatedInput: { command: "pwd" },
+      });
+    }),
+  );
 });

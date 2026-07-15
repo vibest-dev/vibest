@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createNodeRPCHandler, createWsRPCHandler } from "@vibest/server/rpc";
+import { createNodeRPCHandler, createRpcRuntime, createWsRPCHandler } from "@vibest/server/rpc";
 import sirv from "sirv";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
@@ -15,6 +15,10 @@ import { corsHeaders } from "./cors";
 const isDev = process.env.NODE_ENV === "development";
 
 type UIHandler = (req: IncomingMessage, res: ServerResponse) => void;
+
+export type ManagedServer = Server & {
+  readonly dispose: () => Promise<void>;
+};
 
 export type CreateServerOptions = {
   /**
@@ -52,14 +56,16 @@ function resolveStaticDir(): string | undefined {
   return undefined;
 }
 
-export async function createServer(options: CreateServerOptions = {}): Promise<Server> {
+export async function createServer(options: CreateServerOptions = {}): Promise<ManagedServer> {
   const { authToken, corsOrigins = [] } = options;
 
-  const rpcHandler = createNodeRPCHandler();
-  const wsHandler = createWsRPCHandler();
+  const rpcRuntime = await createRpcRuntime();
+  const rpcHandler = createNodeRPCHandler(rpcRuntime.context);
+  const wsHandler = createWsRPCHandler(rpcRuntime.context);
   const tickets = createTicketStore();
 
   let serveUI: UIHandler;
+  let closeUI = async () => {};
 
   const server = createHttpServer((req, res) => {
     void handleRequest(req, res);
@@ -140,6 +146,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
       },
     });
     serveUI = (req, res) => vite.middlewares(req, res, () => notFound(res));
+    closeUI = () => vite.close();
   } else {
     const staticDir = resolveStaticDir();
     if (!staticDir) {
@@ -187,5 +194,26 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
     });
   });
 
-  return server;
+  let disposing: Promise<void> | undefined;
+  const dispose = () =>
+    (disposing ??= (async () => {
+      const serverClosed = server.listening
+        ? new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+            server.closeAllConnections();
+          })
+        : Promise.resolve();
+
+      for (const client of wss.clients) client.terminate();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await serverClosed;
+      await closeUI();
+      await rpcRuntime.dispose();
+    })());
+
+  server.once("close", () => {
+    void dispose();
+  });
+
+  return Object.assign(server, { dispose });
 }

@@ -2,19 +2,23 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createRouterClient } from "@orpc/server";
-import { CodexAgent } from "@vibest/harness/codex";
-import { Layer, ManagedRuntime } from "effect";
+import { isSessionEvent } from "@vibest/contract";
+import { makeCodexAdapter, makeCodexAgent } from "@vibest/harness/codex";
+import {
+  HarnessAgentRegistry,
+  HarnessAgentSessionServiceLayer,
+  makeHarnessAgentRegistry,
+} from "@vibest/harness/runtime";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { ClaudeCodeLayer } from "../src/rpc/claude-code";
-import { Codex } from "../src/rpc/codex";
+import { EventBusLayer } from "../src/events";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
+import { Codex } from "../src/rpc/runtime";
 
-// Mirrors packages/harness/test/codex/agent.test.ts: a minimal `codex
-// app-server` stand-in over stdio JSONL, exercised through the RPC router
-// instead of the CodexAgent directly.
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
@@ -43,27 +47,60 @@ function makeFake(): string {
   return file;
 }
 
-describe("codex router", () => {
-  it("creates a session and streams a prompt through router.codex", async () => {
-    const testCodexLayer = Layer.sync(Codex, () => new CodexAgent({ executablePath: makeFake() }));
-    const runtime = ManagedRuntime.make(Layer.merge(ClaudeCodeLayer, testCodexLayer));
+describe("session router", () => {
+  it("creates a provider session and streams its unified events", async () => {
+    const testCodexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+    const registryLayer = Layer.effect(
+      HarnessAgentRegistry,
+      Effect.gen(function* () {
+        const codex = yield* Codex;
+        return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
+      }),
+    ).pipe(Layer.provide(testCodexLayer));
+    const sessionLayer = HarnessAgentSessionServiceLayer.pipe(
+      Layer.provide(registryLayer),
+      Layer.provide(EventBusLayer),
+    );
+    const runtime = ManagedRuntime.make(Layer.merge(EventBusLayer, sessionLayer));
     try {
       const context: RpcContext = {
         "effect/context": runtime.runSync(runtime.contextEffect),
       };
       const client = createRouterClient(router, { context });
 
-      const { sessionId } = await client.codex.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = await client.session.create({
+        harnessAgentId: "codex",
+        workspacePath: "/tmp",
+      });
       expect(sessionId).toBe("th_1");
 
+      const events = await client.session.events({ sessionId });
+      const receipt = await client.session.prompt({
+        sessionId,
+        input: { parts: [{ type: "text", text: "ping" }] },
+      });
+      expect(receipt).toMatchObject({ turnId: "turn_1", started: true });
+
       const chunks: { type: string }[] = [];
-      for await (const chunk of await client.codex.prompt({ sessionId, text: "ping" })) {
-        chunks.push(chunk);
+      for await (const item of events) {
+        if (item.type !== "event") continue;
+        if (!isSessionEvent(item.event.body)) chunks.push(item.event.body);
+        if (
+          isSessionEvent(item.event.body) &&
+          item.event.body.type === "session.turn.ended" &&
+          item.event.body.turnId === receipt.turnId
+        ) {
+          break;
+        }
       }
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks.at(-1)?.type).toBe("finish");
 
-      await client.codex.session.abort({ sessionId });
+      const snapshot = await client.session.snapshot({ sessionId });
+      expect(snapshot.cursor).toBeGreaterThan(0);
+      await client.session.close({ sessionId });
     } finally {
       await runtime.dispose();
     }

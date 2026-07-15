@@ -6,7 +6,6 @@
   "exports": {
     "./app": "./src/app.tsx",
     "./platform": "./src/platform.ts",
-    "./vite": "./vite.shared.ts",
     "./index.css": "./src/index.css"
   },
   "scripts": {

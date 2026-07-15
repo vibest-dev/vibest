@@ -6,22 +6,20 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./claude-code": "./src/claude-code.ts",
-    "./codex": "./src/codex.ts"
+    "./session": "./src/session.ts",
+    "./session-events": "./src/session-events.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@orpc/contract": "^2.0.0-beta.16",
-    "@vibest/harness": "workspace:*",
-    "zod": "^4.4.3"
+    "@orpc/contract": "2.0.0-beta.16",
+    "ai": "^7.0.22",
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.207",
     "@vibest/typescript": "workspace:*",
-    "ai": "^7.0.22",
     "typescript": "^7.0.2"
   }
 }

@@ -37,6 +37,7 @@ function QuestionItem({
   }
 
   if (question.multiSelect) {
+    const selected = new Set(value.selected);
     return (
       <div className="space-y-1">
         {options.map((opt) => (
@@ -45,7 +46,7 @@ function QuestionItem({
             className="border-border/70 hover:bg-accent/50 flex cursor-pointer items-start gap-2 rounded-lg border p-2.5"
           >
             <Checkbox
-              checked={value.selected.includes(opt.label)}
+              checked={selected.has(opt.label)}
               onCheckedChange={(checked) => {
                 const next = checked
                   ? [...value.selected, opt.label]
@@ -99,17 +100,18 @@ export function QuestionRequestView({
   request: QuestionRequest;
   onRespond: (requestId: string, response: AgentResponse) => void;
 }) {
-  const [answers, setAnswers] = useState<AnswerDraft[]>(request.questions.map(() => EMPTY_DRAFT));
+  const [answers, setAnswers] = useState<AnswerDraft[]>(() =>
+    request.questions.map(() => EMPTY_DRAFT),
+  );
 
   const handleSubmit = () => {
     const builtAnswers: AgentResponseAnswer[] = request.questions.map((question, index) => {
       const draft = answers[index] ?? EMPTY_DRAFT;
-      const result: AgentResponseAnswer = {
+      return {
         questionId: question.id,
         values: draft.selected.filter((v) => v !== ""),
+        ...(draft.other !== "" ? { other: draft.other } : {}),
       };
-      if (draft.other !== "") result.other = draft.other;
-      return result;
     });
     onRespond(request.id, { type: "question", answers: builtAnswers });
   };
