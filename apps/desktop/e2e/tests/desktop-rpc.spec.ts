@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 
@@ -37,6 +37,16 @@ function processExists(pid: number): boolean {
   }
 }
 
+function frontmostApplicationPid(): number | undefined {
+  if (process.platform !== "darwin") return undefined;
+  const application = execFileSync("/usr/bin/lsappinfo", ["front"], { encoding: "utf8" }).trim();
+  const info = execFileSync("/usr/bin/lsappinfo", ["info", "-only", "pid", application], {
+    encoding: "utf8",
+  });
+  const match = info.match(/"pid"=(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
 async function waitForDifferentBackend(parentPid: number, previousPid: number): Promise<number> {
   await expect
     .poll(
@@ -58,10 +68,26 @@ async function driveBackendToFailed(parentPid: number): Promise<void> {
   }
 }
 
-test("boots the renderer through an oRPC MessagePort", async ({ window }) => {
+test("renders in the background without taking focus and connects to the backend", async ({
+  electronApp,
+  window,
+}) => {
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
+  await expect(
+    electronApp.evaluate(({ BrowserWindow }) => {
+      const browserWindow = BrowserWindow.getAllWindows()[0];
+      return { visible: browserWindow?.isVisible(), focused: browserWindow?.isFocused() };
+    }),
+  ).resolves.toEqual({ visible: false, focused: false });
+  const renderSize = await window.locator("#root").evaluate((root) => {
+    const bounds = root.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
+  expect(renderSize.width).toBeGreaterThan(0);
+  expect(renderSize.height).toBeGreaterThan(0);
+  expect(frontmostApplicationPid()).not.toBe(electronApp.process().pid);
   await expect(
     window.evaluate(() => {
       const globals = window as Window & {
@@ -78,7 +104,7 @@ test("boots the renderer through an oRPC MessagePort", async ({ window }) => {
   ).resolves.toEqual({ vibest: "undefined", require: "undefined", process: "undefined" });
 });
 
-test("gives a reloaded renderer document a new MessagePort", async ({ electronApp, window }) => {
+test("reconnects a reloaded renderer to the same backend", async ({ electronApp, window }) => {
   const pid = backendPid(electronApp.process().pid);
 
   await window.reload();
@@ -88,7 +114,7 @@ test("gives a reloaded renderer document a new MessagePort", async ({ electronAp
   expect(backendPid(electronApp.process().pid)).toBe(pid);
 });
 
-test("boots the development HTTP renderer through MessagePort", async () => {
+test("boots the development HTTP renderer", async () => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
   const server = createServer((request, response) => {
     const requested = path.join(
@@ -120,6 +146,7 @@ test("boots the development HTTP renderer through MessagePort", async () => {
       ...process.env,
       NODE_ENV: "development",
       ELECTRON_RENDERER_URL: origin,
+      VIBEST_E2E: "1",
     },
   });
 
@@ -133,6 +160,26 @@ test("boots the development HTTP renderer through MessagePort", async () => {
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+test("chats through Claude Agent SDK and the fake Claude executable", async ({
+  e2ePaths,
+  window,
+}) => {
+  await window.getByRole("button", { name: "Start Chatting" }).click();
+  await expect(window).toHaveURL(/\/chat\/[0-9a-f-]+$/);
+
+  const input = window.locator("[contenteditable='true']");
+  await input.fill("Desktop SDK E2E");
+  await input.press("Enter");
+
+  await expect(window.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
+  await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      existsSync(e2ePaths.fakeClaudeLog) ? readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
+    )
+    .toContain('"type":"user","text":"Desktop SDK E2E"');
 });
 
 test("reports a backend crash and recovers on the pinned connection", async ({
