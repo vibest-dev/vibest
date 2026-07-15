@@ -57,8 +57,8 @@ ManagedRuntime.make(
     Layer.provide(RendererChannelLive),
     Layer.provide(DesktopApplicationLive),
     Layer.provide(LocalBackendLive),
-    Layer.provide(desktopConfigLive),
-    Layer.provide(childProcessLive),
+    Layer.provide(DesktopConfigLive),
+    Layer.provide(ChildProcessSpawnerLive),
   ),
 );
 ```

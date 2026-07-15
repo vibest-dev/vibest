@@ -16,8 +16,8 @@ import { formatStartupFailure } from "./startup-failure";
 
 function makeRuntime(devUrl: string | undefined) {
   const nodeBase = Layer.merge(NodeFileSystem.layer, NodePath.layer);
-  const childProcessLive = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
-  const desktopConfigLive = makeDesktopConfigLive({
+  const ChildProcessSpawnerLive = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
+  const DesktopConfigLive = makeDesktopConfigLive({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     devUrl,
@@ -29,8 +29,8 @@ function makeRuntime(devUrl: string | undefined) {
       Layer.provide(RendererChannelLive),
       Layer.provide(DesktopApplicationLive),
       Layer.provide(LocalBackendLive),
-      Layer.provide(desktopConfigLive),
-      Layer.provide(childProcessLive),
+      Layer.provide(DesktopConfigLive),
+      Layer.provide(ChildProcessSpawnerLive),
     ),
   );
 }
