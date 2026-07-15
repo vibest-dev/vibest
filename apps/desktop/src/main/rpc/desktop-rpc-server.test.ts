@@ -3,23 +3,42 @@ import { MessageChannel } from "node:worker_threads";
 import { consumeEventIterator, createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/message-port";
 import type { RouterContractClient } from "@orpc/contract";
-import { Effect, Stream, SubscriptionRef } from "effect";
+import { ORPCError } from "@orpc/server";
+import { Context, Effect, Logger, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { BackendStatusSnapshot, DesktopContract } from "../../shared/desktop-rpc";
-import { makeDesktopApplication } from "../application/desktop-application";
+import {
+  type DesktopApplication,
+  makeDesktopApplication,
+} from "../application/desktop-application";
 import type { LocalBackend } from "../backend/local-backend";
 import { makeDesktopRpcServer } from "./desktop-rpc-server";
 
 type DesktopClient = RouterContractClient<DesktopContract>;
 
-function makeHarness() {
+function makeHarness(override?: (application: DesktopApplication) => DesktopApplication) {
   const statusRef = Effect.runSync(
     SubscriptionRef.make<BackendStatusSnapshot>({ revision: 0, status: "ready" }),
   );
   let retries = 0;
   let quits = 0;
   let streamFinalizers = 0;
+
+  // A recording logger inside the injected context proves that handler
+  // bodies and the error-logging wrapper both run against the composition
+  // root's ServiceMap rather than the default one.
+  const logged: unknown[] = [];
+  const rpcContext = Context.empty().pipe(
+    Context.add(
+      Logger.CurrentLoggers,
+      new Set([
+        Logger.make(({ message }) => {
+          logged.push(...(Array.isArray(message) ? message : [message]));
+        }),
+      ]),
+    ),
+  ) as Context.Context<never>;
 
   const backend: LocalBackend = {
     connection: {
@@ -39,14 +58,14 @@ function makeHarness() {
       retries += 1;
     }),
   };
-  const application = makeDesktopApplication({
+  const base = makeDesktopApplication({
     backend,
     os: "darwin",
     quit: Effect.sync(() => {
       quits += 1;
     }),
   });
-  const server = makeDesktopRpcServer(application);
+  const server = makeDesktopRpcServer(override ? override(base) : base, rpcContext);
   const { port1, port2 } = new MessageChannel();
   const detach = server.attach(port1);
   port1.start();
@@ -61,6 +80,7 @@ function makeHarness() {
     retries: () => retries,
     quits: () => quits,
     streamFinalizers: () => streamFinalizers,
+    logged: () => logged,
     close: async () => {
       await detach();
       port1.close();
@@ -129,6 +149,50 @@ describe("Desktop MessagePort RPC", () => {
       controller.abort();
       await unsubscribe();
       await eventually(() => expect(h.streamFinalizers()).toBe(1));
+      // Client cancellation is an interrupt-only cause and must stay silent.
+      expect(h.logged()).not.toContain("desktop rpc failed");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("runs handler bodies against the injected composition-root context", async () => {
+    const h = makeHarness((application) => ({
+      ...application,
+      bootstrap: application.bootstrap.pipe(Effect.tap(() => Effect.log("bootstrap handled"))),
+    }));
+    try {
+      await h.client.bootstrap();
+      expect(h.logged()).toContain("bootstrap handled");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("logs unexpected failures through the injected logger", async () => {
+    const h = makeHarness((application) => ({
+      ...application,
+      quit: Effect.die(new Error("boom")),
+    }));
+    try {
+      // Defects are sanitized before they reach the client.
+      await expect(h.client.app.quit()).rejects.toThrow("Internal Server Error");
+      expect(h.logged()).toContain("desktop rpc failed");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("stays silent for expected ORPCErrors", async () => {
+    const h = makeHarness((application) => ({
+      ...application,
+      // Simulates a handler failing with an expected oRPC error; the
+      // application type does not model it, hence the cast.
+      quit: Effect.fail(new ORPCError("NOT_FOUND")) as unknown as Effect.Effect<void>,
+    }));
+    try {
+      await expect(h.client.app.quit()).rejects.toThrow("Not Found");
+      expect(h.logged()).not.toContain("desktop rpc failed");
     } finally {
       await h.close();
     }

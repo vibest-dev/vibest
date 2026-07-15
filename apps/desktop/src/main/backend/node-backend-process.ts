@@ -56,7 +56,7 @@ export function makeNodeBackendProcess(
         Stream.runForEach((line) => {
           const parsed = parseReadyLine(line);
           if (parsed) return Deferred.succeed(ready, parsed.port).pipe(Effect.asVoid);
-          return Effect.sync(() => console.log(`[vibest-server] ${line}`));
+          return Effect.log(line);
         }),
         Effect.catch((cause) =>
           Deferred.fail(
@@ -64,16 +64,16 @@ export function makeNodeBackendProcess(
             spawnError(`Failed to read backend stdout: ${String(cause)}`, cause),
           ).pipe(Effect.asVoid),
         ),
+        Effect.annotateLogs({ source: "vibest-server", fd: "stdout" }),
         Effect.forkScoped,
       );
 
       yield* handle.stderr.pipe(
         Stream.decodeText(),
         Stream.splitLines,
-        Stream.runForEach((line) => Effect.sync(() => console.error(`[vibest-server] ${line}`))),
-        Effect.catch((cause) =>
-          Effect.sync(() => console.error("[vibest-server] stderr failed", cause)),
-        ),
+        Stream.runForEach((line) => Effect.logError(line)),
+        Effect.catch((cause) => Effect.logError("stderr failed", cause)),
+        Effect.annotateLogs({ source: "vibest-server", fd: "stderr" }),
         Effect.forkScoped,
       );
 

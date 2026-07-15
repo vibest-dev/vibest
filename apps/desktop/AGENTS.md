@@ -62,6 +62,8 @@ Keep implementation adapters behind interfaces owned by the module that consumes
 
 - `desktop-runtime.ts` is the only production Layer composition root and `ManagedRuntime` owner.
 - Use Scope for child processes, MessagePorts, protocol handlers, windows, and subscriptions.
+- RPC handlers run detached from the ManagedRuntime; they inherit the composition root's Context (including logger and other references) through `effect/context` plus the wrapper's outer `Effect.provide`. Handing over the full ServiceMap is intentional — do not pass `Context.empty()` and do not hand-pick reference keys.
+- No bare `console.*` in Main; log through `Effect.log*`. Raw child-process output is relayed via `Effect.log`/`Effect.logError` with a source annotation.
 - Prefer explicit constructor parameters and plain capability values over a `Context.Service` for every file.
 - Keep restart policy, path calculation, and other pure calculations as plain functions.
 - Keep `@effect/platform-node` imports on direct subpaths. Importing its barrel can eagerly load `NodeRedis` and break packaged startup when `ioredis` is absent.

@@ -38,14 +38,3 @@ export function makeDesktopRouter(application: DesktopApplication) {
 }
 
 export type DesktopRouter = ReturnType<typeof makeDesktopRouter>;
-
-export async function logDesktopRpcErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
-  try {
-    return await next();
-  } catch (error) {
-    if (!(error instanceof DOMException && error.name === "AbortError")) {
-      console.error("[desktop-rpc]", error);
-    }
-    throw error;
-  }
-}

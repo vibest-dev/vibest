@@ -40,7 +40,9 @@ export function makeMainWindow(
       if (disconnect) void disconnect();
     };
 
-    const createWindow = (): void => {
+    const target = is.dev && options.devUrl ? options.devUrl : `${APP_ORIGIN}/`;
+
+    const createWindow = (): BrowserWindow => {
       const window = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -88,10 +90,7 @@ export function makeMainWindow(
         event.preventDefault();
       });
 
-      const target = is.dev && options.devUrl ? options.devUrl : `${APP_ORIGIN}/`;
-      void window.loadURL(target).catch((error: unknown) => {
-        console.error("Failed to load the desktop renderer", error);
-      });
+      return window;
     };
 
     yield* Effect.addFinalizer(() =>
@@ -102,9 +101,18 @@ export function makeMainWindow(
       }),
     );
 
+    // Detached so ensureOpen stays fire-and-forget; the load outcome is only
+    // observed for logging.
+    const loadRenderer = (window: BrowserWindow) =>
+      Effect.tryPromise(() => window.loadURL(target)).pipe(
+        Effect.catchCause((cause) => Effect.logError("Failed to load the desktop renderer", cause)),
+        Effect.forkDetach,
+      );
+
     return {
-      ensureOpen: Effect.sync(() => {
-        if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+      ensureOpen: Effect.gen(function* () {
+        if (mainWindow && !mainWindow.isDestroyed()) return;
+        yield* loadRenderer(createWindow());
       }),
       focus: Effect.sync(() => {
         const window = mainWindow;

@@ -70,7 +70,10 @@ function makeDesktopRuntimeLayer(devUrl: string | undefined) {
           setTimeout(() => app.quit(), 0);
         }),
       });
-      const rpcServer = makeDesktopRpcServer(application);
+      // Hand the composition root's full ServiceMap (including logger and
+      // other references) to the detached oRPC handler fibers.
+      const rpcContext = yield* Effect.context<never>();
+      const rpcServer = makeDesktopRpcServer(application, rpcContext);
       const rendererChannel = makeRendererChannel(rpcServer.attach);
 
       yield* registerAppProtocol(rendererRoot());
