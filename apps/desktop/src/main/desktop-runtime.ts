@@ -6,7 +6,7 @@ import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcess
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Result } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { app, dialog } from "electron";
 
@@ -18,6 +18,7 @@ import { APP_ORIGIN, registerAppProtocol, registerAppScheme } from "./electron/a
 import { makeMainWindow, rendererRoot } from "./electron/main-window";
 import { makeRendererChannel } from "./electron/renderer-channel";
 import { makeDesktopRpcServer } from "./rpc/desktop-rpc-server";
+import { formatStartupFailure } from "./startup-failure";
 
 class DesktopRuntime extends Context.Service<
   DesktopRuntime,
@@ -93,7 +94,7 @@ function makeRuntime(devUrl: string | undefined) {
 }
 
 export function startDesktopRuntime(): void {
-  let runtime: ManagedRuntime.ManagedRuntime<DesktopRuntime, unknown> | undefined;
+  let runtime: ReturnType<typeof makeRuntime> | undefined;
   let disposing = false;
   let allowQuit = false;
 
@@ -132,7 +133,12 @@ export function startDesktopRuntime(): void {
     runtime = makeRuntime(devUrl);
 
     try {
-      await runtime.runPromise(runtime.contextEffect);
+      const startup = await runtime.runPromise(Effect.result(runtime.contextEffect));
+      if (Result.isFailure(startup)) {
+        dialog.showErrorBox("Vibest could not start", formatStartupFailure(startup.failure));
+        await disposeAndQuit();
+        return;
+      }
       await runtime.runPromise(
         Effect.gen(function* () {
           const desktop = yield* DesktopRuntime;
@@ -140,9 +146,10 @@ export function startDesktopRuntime(): void {
         }),
       );
     } catch (error) {
+      // Typed startup failures are handled above; this only catches defects.
       dialog.showErrorBox(
         "Vibest could not start",
-        `The local server failed to start.\n\n${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.message : String(error),
       );
       await disposeAndQuit();
     }
