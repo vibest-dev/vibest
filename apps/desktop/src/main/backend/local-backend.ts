@@ -83,6 +83,9 @@ export function restartBackoff(
   return Math.min(initialDelayMs * 2 ** (failureCount - 1), maxDelayMs);
 }
 
+// The supervise fiber is the only writer of statusRef, so get→set is
+// race-free. Not SubscriptionRef.modify: v4's set/modify publish
+// unconditionally, which would replay no-op snapshots to subscribers.
 function setStatus(
   ref: SubscriptionRef.SubscriptionRef<BackendStatusSnapshot>,
   next: BackendStatus,
