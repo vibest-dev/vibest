@@ -1,18 +1,13 @@
-import {
-  AppInterface,
-  ServerStatusOverlay,
-  PlatformProvider,
-  type ServerConnection,
-} from "@vibest/app";
-import { StrictMode, Suspense, use, type ReactElement } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { createDesktopClient } from "./desktop-client";
 import { createDesktopHost } from "./desktop-host";
 import { waitForDesktopPort } from "./desktop-port";
+import { DesktopRoot } from "./desktop-root";
+import { waitForStartupAnimation } from "./startup-animation";
 import { StartupFailure } from "./startup-failure";
-import { StartupScreen } from "./startup-screen";
 
 const rootElement = document.getElementById("root")!;
 if (!rootElement) throw new Error("Root element not found");
@@ -22,29 +17,14 @@ const host = waitForDesktopPort().then(async (port) => {
   const bootstrap = await client.bootstrap();
   return createDesktopHost(client, bootstrap, client.server.connection());
 });
-
-function ReadyApp({ server }: { server: Promise<ServerConnection> }): ReactElement {
-  return <AppInterface server={use(server)} />;
-}
-
-function DesktopRenderer(): ReactElement {
-  const desktop = use(host);
-  return (
-    <PlatformProvider value={desktop.platform}>
-      <ServerStatusOverlay feed={desktop.status} />
-      <Suspense fallback={<StartupScreen />}>
-        <ReadyApp server={desktop.server} />
-      </Suspense>
-    </PlatformProvider>
-  );
-}
+const startupAnimation = waitForStartupAnimation(
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+);
 
 createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary FallbackComponent={StartupFailure}>
-      <Suspense fallback={<StartupScreen />}>
-        <DesktopRenderer />
-      </Suspense>
+      <DesktopRoot host={host} startupAnimation={startupAnimation} />
     </ErrorBoundary>
   </StrictMode>,
 );

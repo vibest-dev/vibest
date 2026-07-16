@@ -1,0 +1,67 @@
+.vibest-startup-logo {
+  position: relative;
+  color: var(--foreground);
+  user-select: none;
+}
+
+.vibest-startup-logo pre {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-weight: 700;
+  line-height: 0.78;
+  letter-spacing: -0.08em;
+  white-space: pre;
+  clip-path: inset(0 100% 0 0);
+  animation: vibest-logo-reveal 760ms steps(12, end) 80ms both;
+}
+
+.vibest-startup-logo::after {
+  position: absolute;
+  inset-block: -0.2em;
+  left: 0;
+  width: 1px;
+  content: "";
+  background: color-mix(in srgb, currentColor 55%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, currentColor 35%, transparent);
+  opacity: 0;
+  animation: vibest-logo-scan 760ms steps(12, end) 80ms both;
+}
+
+@keyframes vibest-logo-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes vibest-logo-scan {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  5% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(100% - 1px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vibest-startup-logo pre {
+    clip-path: none;
+    animation: none;
+  }
+
+  .vibest-startup-logo::after {
+    display: none;
+  }
+}

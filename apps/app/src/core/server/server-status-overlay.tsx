@@ -17,20 +17,19 @@ export function ServerStatusOverlay({ feed }: { feed: ServerStatusFeed }): React
   // `subscribe` returns its own unsubscribe, so this doubles as the cleanup.
   useEffect(() => feed.subscribe(setStatus), [feed]);
 
-  if (status === "starting" || status === "reconnecting") {
-    const starting = status === "starting";
+  // Initial startup is owned by the host's branded sequence. This overlay
+  // only handles reconnecting or terminal failure.
+  if (status === "starting") return null;
+
+  if (status === "reconnecting") {
     return (
       <div className="bg-background/80 fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
         <div className="flex flex-col items-center gap-3 text-center">
           <Spinner className="text-muted-foreground size-6" />
           <div>
-            <p className="text-foreground text-sm font-medium">
-              {starting ? "Starting Vibest…" : "Reconnecting…"}
-            </p>
+            <p className="text-foreground text-sm font-medium">Reconnecting…</p>
             <p className="text-muted-foreground text-sm">
-              {starting
-                ? "The local server is starting."
-                : "The local server restarted. Reconnecting to it now."}
+              The local server restarted. Reconnecting to it now.
             </p>
           </div>
         </div>
