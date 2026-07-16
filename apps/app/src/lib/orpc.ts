@@ -30,10 +30,7 @@ function createQueryClient(): QueryClient {
 }
 
 /** Create the stable oRPC, TanStack Query, and oRPC Query dependencies for a server. */
-export function createAppClients(
-  server?: ServerConnection,
-  fetcher: typeof fetch = globalThis.fetch,
-): AppClients {
+export function createAppClients(server?: ServerConnection): AppClients {
   const queryClient = createQueryClient();
 
   if (!server) {
@@ -49,7 +46,7 @@ export function createAppClients(
   const orpcClient = createVibestClient({
     url: `${wsBaseUrl}/ws/rpc`,
     getTicket: async () => {
-      const response = await fetcher(`${httpBaseUrl}/api/ws-ticket`, {
+      const response = await globalThis.fetch(`${httpBaseUrl}/api/ws-ticket`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       });

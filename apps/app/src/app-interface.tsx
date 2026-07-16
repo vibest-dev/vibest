@@ -14,8 +14,8 @@ import type { ServerConnection } from "./server-connection";
 
 /** Shared application entry. PlatformProvider is the host seam above it. */
 export function AppInterface({ server }: { server?: ServerConnection }): ReactElement {
-  const platform = usePlatform();
-  const [clients] = useState(() => createAppClients(server, platform.fetch));
+  usePlatform();
+  const [clients] = useState(() => createAppClients(server));
   return <AppRuntime {...clients} />;
 }
 
