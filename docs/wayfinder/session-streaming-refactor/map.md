@@ -31,6 +31,7 @@ labels: [wayfinder:map]
 
 - [存储与元数据方案](tickets/02-storage-metadata.md) — 不做 allowedRoots（只 realpath+存在性）；project 挂 create+list；元数据与 projects.json 加 version:1 包裹（含存量迁移）；sessionId 纯 uuid、删 id.ts；server 侧新建 SessionService+SessionMetadataRepository 编排层，harness 保持无盘。
 - [契约类型定稿](tickets/01-contract-types.md) — 破坏性直改 packages/contract（否决 domain-v2 并存）：SessionRef、phase 状态机、DaemonEvent（session 事件带 seq/collection 无序号）、SubscribeStreamItem（无 gap）、SessionRuntimeSnapshot、PromptInput parts、daemonErrors；13 方法契约；contract 独立绿（14 测试），下游 4 包待 impl ticket 迁移。
+- [客户端消费形态](tickets/03-client-consumption-shape.md) — 保留 AbstractChat 当 reducer，常驻订阅做成 transport 级 `SessionStream`（否决新建 Driver：两路都要建 SessionStream，Driver 还得重写已有 reducer）；三条恢复路径落在 AbstractChat 原生 replace-vs-push（依赖 messageId 不变量）；reconnectToStream/resumeStream 是续接钩子。
 
 ## Not yet specified
 
