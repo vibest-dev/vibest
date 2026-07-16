@@ -1,4 +1,4 @@
-export const STARTUP_ANIMATION_MS = 650;
+export const STARTUP_ANIMATION_MS = 1_000;
 
 export function waitForStartupAnimation(reducedMotion: boolean): Promise<void> {
   if (reducedMotion) return Promise.resolve();

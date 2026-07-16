@@ -16,16 +16,16 @@
 .vibest-startup-logo-shimmer {
   position: absolute;
   inset-block: -20%;
-  left: -55%;
-  width: 42%;
+  left: -80%;
+  width: 80%;
   background: linear-gradient(
     90deg,
     transparent,
     color-mix(in srgb, var(--background) 88%, transparent),
     transparent
   );
-  transform: translateX(-180%) skewX(-18deg);
-  animation: vibest-logo-shimmer 1.1s cubic-bezier(0.4, 0, 0.2, 1) 70ms infinite both;
+  transform: translateX(-100%) skewX(-18deg);
+  animation: vibest-logo-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite both;
 }
 
 @keyframes vibest-logo-enter {
@@ -36,9 +36,9 @@
 }
 
 @keyframes vibest-logo-shimmer {
-  45%,
+  62.5%,
   100% {
-    transform: translateX(520%) skewX(-18deg);
+    transform: translateX(225%) skewX(-18deg);
   }
 }
 
