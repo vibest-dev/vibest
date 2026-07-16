@@ -47,7 +47,23 @@ type EventSubscription = {
   readonly close: () => void;
 };
 
-type SessionClient = VibestClient["session"];
+type VibestSessionClient = VibestClient["session"];
+
+type SessionClient = Omit<
+  Pick<
+    VibestSessionClient,
+    "events" | "interrupt" | "prompt" | "respondToAgentRequest" | "snapshot"
+  >,
+  "events"
+> & {
+  events: (
+    ...args: Parameters<VibestSessionClient["events"]>
+  ) => Promise<AsyncIterable<SessionEventStreamItem>>;
+};
+
+export type ChatTransportClient = {
+  readonly session: SessionClient;
+};
 
 type PromptRecovery = {
   readonly subscription: EventSubscription;
@@ -117,7 +133,7 @@ async function* promptChunks(
 }
 
 export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
-  constructor(private readonly session: SessionClient) {}
+  constructor(private readonly client: ChatTransportClient) {}
 
   async #openEvents(
     sessionId: string,
@@ -129,7 +145,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     try {
-      const events = await this.session.events(
+      const events = await this.client.session.events(
         { sessionId, ...(after === undefined ? {} : { after }) },
         { signal: controller.signal },
       );
@@ -154,7 +170,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     const model = (options.body as { model?: ChatModel } | undefined)?.model ?? "sonnet";
     const initial = await this.#openEvents(options.chatId, undefined, options.abortSignal);
     try {
-      const receipt = await this.session.prompt(
+      const receipt = await this.client.session.prompt(
         { sessionId: options.chatId, input: toUserInput(message, model) },
         { signal: options.abortSignal },
       );
@@ -163,7 +179,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
         return emptyChunkStream();
       }
       const interrupt = () => {
-        void this.session.interrupt({ sessionId: options.chatId }).catch((error) => {
+        void this.client.session.interrupt({ sessionId: options.chatId }).catch((error) => {
           if (!isAbortError(error)) console.error("Failed to interrupt session", error);
         });
       };
@@ -171,7 +187,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
       const recover = async (after: number): Promise<PromptRecovery> => {
         const subscription = await this.#openEvents(options.chatId, after, options.abortSignal);
         try {
-          const snapshot = await this.session.snapshot({ sessionId: options.chatId });
+          const snapshot = await this.client.session.snapshot({ sessionId: options.chatId });
           return { subscription, snapshot };
         } catch (error) {
           subscription.close();
@@ -211,7 +227,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
 
     const handleRequest = async (request: AgentRequest) => {
       if (request.type === "plan" && !request.plan.trim()) {
-        void this.session
+        void this.client.session
           .respondToAgentRequest({
             sessionId,
             requestId: request.id,
@@ -231,7 +247,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     };
 
     const hydratePendingRequests = async () => {
-      const snapshot = await this.session.snapshot({ sessionId });
+      const snapshot = await this.client.session.snapshot({ sessionId });
       if (snapshot.degraded) throw new Error("Session snapshot replay is degraded");
       const pendingRequestIds = new Set(snapshot.pendingRequests.map((request) => request.id));
       for (const requestId of deliveredRequestIds) {
@@ -298,7 +314,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     requestId: string,
     response: AgentResponse,
   ): Promise<void> {
-    await this.session.respondToAgentRequest({
+    await this.client.session.respondToAgentRequest({
       sessionId,
       requestId,
       response,

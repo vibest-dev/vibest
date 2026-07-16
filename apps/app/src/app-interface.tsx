@@ -22,9 +22,7 @@ export function AppInterface({ server }: { server?: ServerConnection }): ReactEl
 /** Explicit stable application dependencies, with no host knowledge. */
 function AppRuntime({ orpcClient, queryClient, orpcQueryUtils }: AppClients): ReactElement {
   const [router] = useState(() => createRouter({ queryClient, orpcQueryUtils }));
-  const [chatManager] = useState(
-    () => new ChatManager(new OrpcChatSessionTransport(orpcClient.session)),
-  );
+  const [chatManager] = useState(() => new ChatManager(new OrpcChatSessionTransport(orpcClient)));
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -1,8 +1,7 @@
-import type { VibestClient } from "@vibest/client";
 import type { AgentRequest, SessionSnapshot } from "@vibest/contract";
 import { describe, expect, it } from "vitest";
 
-import { OrpcChatSessionTransport } from "./chat-transport";
+import { OrpcChatSessionTransport, type ChatTransportClient } from "./chat-transport";
 
 const pendingRequest: AgentRequest = {
   type: "tool",
@@ -31,6 +30,10 @@ const emptyPlanRequest: AgentRequest = {
   native: null,
 };
 
+const unexpectedCall = async (): Promise<never> => {
+  throw new Error("Unexpected transport call");
+};
+
 describe("OrpcChatSessionTransport agent requests", () => {
   it("hydrates pending requests from the initial session snapshot", async () => {
     let finishStream: () => void = () => undefined;
@@ -46,6 +49,9 @@ describe("OrpcChatSessionTransport agent requests", () => {
         snapshotSawSubscription = subscriptionCalls === 1;
         return snapshot;
       },
+      prompt: unexpectedCall,
+      interrupt: unexpectedCall,
+      respondToAgentRequest: unexpectedCall,
       events: async () => {
         subscriptionCalls += 1;
         return {
@@ -91,10 +97,11 @@ describe("OrpcChatSessionTransport agent requests", () => {
           },
         };
       },
-    } as unknown as VibestClient["session"];
+    };
+    const client = { session } satisfies ChatTransportClient;
     let deliveries = 0;
     const received: AgentRequest[] = [];
-    const transport = new OrpcChatSessionTransport(session);
+    const transport = new OrpcChatSessionTransport(client);
 
     const unsubscribe = transport.subscribeAgentRequests(
       "session-1",
@@ -131,6 +138,8 @@ describe("OrpcChatSessionTransport agent requests", () => {
         ...snapshot,
         pendingRequests: [emptyPlanRequest],
       }),
+      prompt: unexpectedCall,
+      interrupt: unexpectedCall,
       respondToAgentRequest: async () => automaticResponse,
       events: async () => ({
         [Symbol.asyncIterator]() {
@@ -174,9 +183,10 @@ describe("OrpcChatSessionTransport agent requests", () => {
           };
         },
       }),
-    } as unknown as VibestClient["session"];
+    };
+    const client = { session } satisfies ChatTransportClient;
     const received: AgentRequest[] = [];
-    const transport = new OrpcChatSessionTransport(session);
+    const transport = new OrpcChatSessionTransport(client);
 
     const unsubscribe = transport.subscribeAgentRequests(
       "session-1",
