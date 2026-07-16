@@ -6,9 +6,9 @@
  */
 
 /** Identifies an agent backend adapter. */
-export type HarnessAgentId = "claude-code" | "codex";
+export type HarnessAgentId = "claude-code" | "codex" | "pi";
 
-export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = ["claude-code", "codex"];
+export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = ["claude-code", "codex", "pi"];
 
 export const isHarnessAgentId = (value: string): value is HarnessAgentId =>
   (HARNESS_AGENT_IDS as ReadonlyArray<string>).includes(value);

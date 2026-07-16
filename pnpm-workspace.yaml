@@ -31,12 +31,17 @@ allowBuilds:
   # Its postinstall only probes node-pty's spawn-helper and logs — it builds
   # nothing, so there is nothing to gain by running it.
   "@code-inspector/core": false
+  # Transitive deps of @earendil-works/pi-coding-agent, which the harness
+  # imports type-only (pi runs as a spawned CLI) — their build scripts are dead
+  # weight, so deny them.
+  "@google/genai": false
   "@swc/core": true
   electron: true
   electron-winstaller: true
   esbuild: true
   msgpackr-extract: true
   node-pty: true
+  protobufjs: false
   # sharp is a transitive dep of react-scan (desktop devDependency) via next;
   # it ships prebuilt binaries, so its build script is unnecessary — deny it.
   sharp: false
