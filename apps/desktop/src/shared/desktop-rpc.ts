@@ -1,26 +1,24 @@
 import { asyncIteratorObject, oc } from "@orpc/contract";
 import { z } from "zod";
 
-export const BackendStatusSchema = z.enum(["starting", "ready", "reconnecting", "failed"]);
-export type BackendStatus = z.infer<typeof BackendStatusSchema>;
+export const ServerStatusSchema = z.enum(["starting", "ready", "reconnecting", "failed"]);
+export type ServerStatus = z.infer<typeof ServerStatusSchema>;
 
-export const BackendStatusSnapshotSchema = z.object({
+export const ServerStatusSnapshotSchema = z.object({
   revision: z.number().int().nonnegative(),
-  status: BackendStatusSchema,
+  status: ServerStatusSchema,
 });
-export type BackendStatusSnapshot = z.infer<typeof BackendStatusSnapshotSchema>;
+export type ServerStatusSnapshot = z.infer<typeof ServerStatusSnapshotSchema>;
 
-export const BackendConnectionSchema = z.object({
+export const ServerConnectionSchema = z.object({
   httpBaseUrl: z.string(),
   wsBaseUrl: z.string(),
   token: z.string().min(1),
 });
-export type BackendConnection = z.infer<typeof BackendConnectionSchema>;
+export type ServerConnection = z.infer<typeof ServerConnectionSchema>;
 
 export const DesktopBootstrapSchema = z.object({
-  os: z.string(),
-  backend: BackendConnectionSchema,
-  status: BackendStatusSchema,
+  status: ServerStatusSchema,
   statusRevision: z.number().int().nonnegative(),
 });
 export type DesktopBootstrap = z.infer<typeof DesktopBootstrapSchema>;
@@ -30,9 +28,10 @@ export const desktopContract = {
   status: {
     subscribe: oc
       .input(z.object({ after: z.number().int().nonnegative() }))
-      .output(asyncIteratorObject(BackendStatusSnapshotSchema)),
+      .output(asyncIteratorObject(ServerStatusSnapshotSchema)),
   },
-  backend: {
+  server: {
+    connection: oc.output(ServerConnectionSchema),
     retry: oc.output(z.void()),
   },
   app: {

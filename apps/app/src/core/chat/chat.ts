@@ -3,24 +3,23 @@ import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
 import { ChatState, type ChatStoreState } from "./chat-state";
-import type { ChatModel, ChatTransport } from "./chat-transport";
+import type { ChatModel, OrpcChatSessionTransport } from "./chat-transport";
 
 export type AgentProviderId = "claude-code";
 
 export interface ChatInit {
   sessionId: string;
-  transport: ChatTransport;
+  transport: OrpcChatSessionTransport;
 }
 
-// Provider-agnostic session controller: AbstractChat drives the prompt stream
-// (optimistic user push, chunk reduction, status transitions) against a
-// per-Chat zustand store; the agent-request plane arrives over the transport
-// subscription. Provider detail stays inside ChatTransport.
+// Session controller: AbstractChat drives the prompt stream (optimistic user
+// push, chunk reduction, status transitions) against a per-Chat zustand store;
+// the agent-request plane arrives over the same Vibest session transport.
 export class Chat extends AbstractChat<UIMessage> {
   readonly agentProviderId: AgentProviderId = "claude-code";
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
-  readonly #transport: ChatTransport;
+  readonly #transport: OrpcChatSessionTransport;
   readonly #unsubscribeRequests: () => void;
 
   constructor({ sessionId, transport }: ChatInit) {

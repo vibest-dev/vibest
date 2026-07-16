@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 
@@ -7,7 +7,7 @@ import { _electron as electron } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
-function findBackendPid(parentPid: number): number | undefined {
+function findServerPid(parentPid: number): number | undefined {
   const processes = execFileSync("ps", ["-axo", "pid=,ppid=,command="], {
     encoding: "utf8",
   });
@@ -22,9 +22,9 @@ function findBackendPid(parentPid: number): number | undefined {
   return undefined;
 }
 
-function backendPid(parentPid: number): number {
-  const pid = findBackendPid(parentPid);
-  if (pid === undefined) throw new Error(`Backend child of Electron ${parentPid} was not found`);
+function serverPid(parentPid: number): number {
+  const pid = findServerPid(parentPid);
+  if (pid === undefined) throw new Error(`Server child of Electron ${parentPid} was not found`);
   return pid;
 }
 
@@ -37,31 +37,62 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function waitForDifferentBackend(parentPid: number, previousPid: number): Promise<number> {
+function frontmostApplicationPid(): number | undefined {
+  if (process.platform !== "darwin") return undefined;
+  const application = execFileSync("/usr/bin/lsappinfo", ["front"], { encoding: "utf8" }).trim();
+  const info = execFileSync("/usr/bin/lsappinfo", ["info", "-only", "pid", application], {
+    encoding: "utf8",
+  });
+  const match = info.match(/"pid"=(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
+async function waitForServer(parentPid: number): Promise<number> {
+  await expect.poll(() => findServerPid(parentPid), { timeout: 30_000 }).toBeTruthy();
+  return serverPid(parentPid);
+}
+
+async function waitForDifferentServer(parentPid: number, previousPid: number): Promise<number> {
   await expect
     .poll(
       () => {
-        const pid = findBackendPid(parentPid);
+        const pid = findServerPid(parentPid);
         return pid === undefined || pid === previousPid ? previousPid : pid;
       },
       { timeout: 15_000 },
     )
     .not.toBe(previousPid);
-  return backendPid(parentPid);
+  return serverPid(parentPid);
 }
 
-async function driveBackendToFailed(parentPid: number): Promise<void> {
-  let currentPid = backendPid(parentPid);
+async function driveServerToFailed(parentPid: number): Promise<void> {
+  let currentPid = await waitForServer(parentPid);
   for (let failure = 0; failure < 6; failure += 1) {
     process.kill(currentPid, "SIGKILL");
-    if (failure < 5) currentPid = await waitForDifferentBackend(parentPid, currentPid);
+    if (failure < 5) currentPid = await waitForDifferentServer(parentPid, currentPid);
   }
 }
 
-test("boots the renderer through an oRPC MessagePort", async ({ window }) => {
+test("renders in the background without taking focus and connects to the server", async ({
+  electronApp,
+  window,
+}) => {
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
+  await expect(
+    electronApp.evaluate(({ BrowserWindow }) => {
+      const browserWindow = BrowserWindow.getAllWindows()[0];
+      return { visible: browserWindow?.isVisible(), focused: browserWindow?.isFocused() };
+    }),
+  ).resolves.toEqual({ visible: false, focused: false });
+  const renderSize = await window.locator("#root").evaluate((root) => {
+    const bounds = root.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
+  expect(renderSize.width).toBeGreaterThan(0);
+  expect(renderSize.height).toBeGreaterThan(0);
+  expect(frontmostApplicationPid()).not.toBe(electronApp.process().pid);
   await expect(
     window.evaluate(() => {
       const globals = window as Window & {
@@ -79,13 +110,13 @@ test("boots the renderer through an oRPC MessagePort", async ({ window }) => {
 });
 
 test("gives a reloaded renderer document a new MessagePort", async ({ electronApp, window }) => {
-  const pid = backendPid(electronApp.process().pid);
+  const pid = await waitForServer(electronApp.process().pid);
 
   await window.reload();
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
-  expect(backendPid(electronApp.process().pid)).toBe(pid);
+  expect(serverPid(electronApp.process().pid)).toBe(pid);
 });
 
 test("boots the development HTTP renderer through MessagePort", async () => {
@@ -120,6 +151,7 @@ test("boots the development HTTP renderer through MessagePort", async () => {
       ...process.env,
       NODE_ENV: "development",
       ELECTRON_RENDERER_URL: origin,
+      VIBEST_E2E: "1",
     },
   });
 
@@ -135,39 +167,59 @@ test("boots the development HTTP renderer through MessagePort", async () => {
   }
 });
 
-test("reports a backend crash and recovers on the pinned connection", async ({
+test("chats through Claude Agent SDK and the fake Claude executable", async ({
+  e2ePaths,
+  window,
+}) => {
+  await window.getByRole("button", { name: "Start Chatting" }).click();
+  await expect(window).toHaveURL(/\/chat\/[0-9a-f-]+$/);
+
+  const input = window.locator("[contenteditable='true']");
+  await input.fill("Desktop SDK E2E");
+  await input.press("Enter");
+
+  await expect(window.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
+  await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      existsSync(e2ePaths.fakeClaudeLog) ? readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
+    )
+    .toContain('"type":"user","text":"Desktop SDK E2E"');
+});
+
+test("reports a server crash and recovers on the pinned connection", async ({
   electronApp,
   window,
 }) => {
-  const initialPid = backendPid(electronApp.process().pid);
+  const initialPid = await waitForServer(electronApp.process().pid);
   process.kill(initialPid, "SIGKILL");
 
   const reconnecting = window.getByText("Reconnecting…");
   await expect(reconnecting).toBeVisible({ timeout: 10_000 });
   await expect(reconnecting).toBeHidden({ timeout: 15_000 });
 
-  const restartedPid = backendPid(electronApp.process().pid);
+  const restartedPid = serverPid(electronApp.process().pid);
   expect(restartedPid).not.toBe(initialPid);
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
-test("disposes the backend process during Electron shutdown", async ({ electronApp, window }) => {
+test("disposes the server process during Electron shutdown", async ({ electronApp, window }) => {
   await expect(window).toHaveTitle("Vibest");
-  const pid = backendPid(electronApp.process().pid);
+  const pid = await waitForServer(electronApp.process().pid);
 
   await electronApp.close();
 
   await expect.poll(() => processExists(pid), { timeout: 5_000 }).toBe(false);
 });
 
-test("offers Retry after repeated backend failures", async ({ electronApp, window }) => {
+test("offers Retry after repeated server failures", async ({ electronApp, window }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveBackendToFailed(parentPid);
+  await driveServerToFailed(parentPid);
 
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
   await window.getByRole("button", { name: "Retry" }).click();
-  await expect.poll(() => findBackendPid(parentPid), { timeout: 10_000 }).toBeTruthy();
+  await expect.poll(() => findServerPid(parentPid), { timeout: 10_000 }).toBeTruthy();
   await expect(window.getByText("The local server stopped")).toBeHidden({ timeout: 10_000 });
 });
 
@@ -177,7 +229,7 @@ test("quits through Desktop RPC from the terminal failure state", async ({
 }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveBackendToFailed(parentPid);
+  await driveServerToFailed(parentPid);
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
 
   await window.getByRole("button", { name: "Quit" }).click();

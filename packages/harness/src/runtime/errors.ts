@@ -145,6 +145,27 @@ export class CodexRpcError extends Schema.TaggedErrorClass<CodexRpcError>()("Cod
   }
 }
 
+export class PiTransportError extends Schema.TaggedErrorClass<PiTransportError>()(
+  "PiTransportError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Pi transport operation '${this.operation}' failed.`;
+  }
+}
+
+export class PiRpcError extends Schema.TaggedErrorClass<PiRpcError>()("PiRpcError", {
+  command: Schema.String,
+  errorMessage: Schema.String,
+}) {
+  override get message() {
+    return `Pi RPC command '${this.command}' failed: ${this.errorMessage}`;
+  }
+}
+
 export class AgentProcessExited extends Schema.TaggedErrorClass<AgentProcessExited>()(
   "AgentProcessExited",
   {

@@ -3,22 +3,22 @@ import { Button } from "@vibest/ui/components/button";
 
 import { Chat } from "@/components/chat";
 
-export const Route = createFileRoute("/chat/$sessionId")({
+export const Route = createFileRoute("/session/$sessionId")({
   component: Component,
 });
 
 function Component() {
   const { sessionId } = Route.useParams();
-  const { orpc } = Route.useRouteContext();
+  const { orpcQueryUtils } = Route.useRouteContext();
   const navigate = useNavigate();
 
   const handleNewSession = async () => {
     try {
       // Create new session and navigate
-      const { sessionId: newSessionId } = await orpc.session.create.call({
+      const { sessionId: newSessionId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
       });
-      navigate({ to: "/chat/$sessionId", params: { sessionId: newSessionId } });
+      navigate({ to: "/session/$sessionId", params: { sessionId: newSessionId } });
     } catch (error) {
       console.error("Failed to start a new session", error);
     }

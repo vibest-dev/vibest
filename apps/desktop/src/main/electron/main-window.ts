@@ -38,6 +38,7 @@ export function makeMainWindow(
   return Effect.gen(function* () {
     let mainWindow: BrowserWindow | undefined;
     let disconnectRenderer: (() => Promise<void>) | undefined;
+    const isE2E = process.env["VIBEST_E2E"] === "1";
 
     const disconnectCurrentRenderer = (): void => {
       const disconnect = disconnectRenderer;
@@ -63,11 +64,14 @@ export function makeMainWindow(
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
+          backgroundThrottling: !isE2E,
         },
       });
       mainWindow = window;
 
-      window.on("ready-to-show", () => window.show());
+      window.on("ready-to-show", () => {
+        if (!isE2E) window.show();
+      });
       window.webContents.on("did-finish-load", () => {
         disconnectCurrentRenderer();
         disconnectRenderer = options.connectRenderer(window.webContents);
@@ -120,6 +124,7 @@ export function makeMainWindow(
         yield* loadRenderer(createWindow());
       }),
       focus: Effect.sync(() => {
+        if (isE2E) return;
         const window = mainWindow;
         if (!window || window.isDestroyed()) return;
         if (window.isMinimized()) window.restore();

@@ -1,44 +1,46 @@
 import { Context, Effect, Stream } from "effect";
 
-import type { BackendStatusSnapshot, DesktopBootstrap } from "../../shared/desktop-rpc";
-import type { LocalBackend } from "../backend/local-backend";
+import type {
+  ServerConnection,
+  ServerStatusSnapshot,
+  DesktopBootstrap,
+} from "../../shared/desktop-rpc";
+import type { LocalServer } from "../server/local-server";
 
 export class DesktopApplication extends Context.Service<
   DesktopApplication,
   {
     readonly bootstrap: Effect.Effect<DesktopBootstrap>;
-    readonly watchBackendStatus: (after: number) => Stream.Stream<BackendStatusSnapshot>;
-    readonly retryBackend: Effect.Effect<void>;
+    readonly serverConnection: Effect.Effect<ServerConnection>;
+    readonly watchServerStatus: (after: number) => Stream.Stream<ServerStatusSnapshot>;
+    readonly retryServer: Effect.Effect<void>;
     readonly quit: Effect.Effect<void>;
   }
 >()("desktop/DesktopApplication") {}
 
 export type DesktopApplicationDependencies = {
-  readonly backend: LocalBackend["Service"];
-  readonly os: NodeJS.Platform;
+  readonly server: LocalServer["Service"];
   readonly quit: Effect.Effect<void>;
 };
 
 export function makeDesktopApplication({
-  backend,
-  os,
+  server,
   quit,
 }: DesktopApplicationDependencies): DesktopApplication["Service"] {
   return {
     bootstrap: Effect.gen(function* () {
-      const current = yield* backend.snapshot;
+      const current = yield* server.snapshot;
       return {
-        os,
-        backend: backend.connection,
         status: current.status,
         statusRevision: current.revision,
       };
     }),
+    serverConnection: server.connection,
     // v4 SubscriptionRef.changes replays the latest snapshot on subscribe
     // (PubSub replay: 1), so the stream always starts from the current status.
-    watchBackendStatus: (after) =>
-      backend.changes.pipe(Stream.filter((snapshot) => snapshot.revision > after)),
-    retryBackend: backend.retry,
+    watchServerStatus: (after) =>
+      server.changes.pipe(Stream.filter((snapshot) => snapshot.revision > after)),
+    retryServer: server.retry,
     quit,
   } satisfies DesktopApplication["Service"];
 }

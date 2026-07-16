@@ -1,0 +1,198 @@
+import { describe, expect, it } from "vitest";
+
+import type { AgentSessionEvent } from "../../src/pi/protocol";
+import { createPiTransform } from "../../src/pi/transform";
+
+const e = (event: unknown) => event as AgentSessionEvent;
+const types = (chunks: unknown[]) => chunks.map((c) => (c as { type: string }).type);
+
+const assistant = (over: Record<string, unknown> = {}) => ({
+  role: "assistant",
+  content: [],
+  api: "anthropic-messages",
+  provider: "anthropic",
+  model: "m1",
+  usage: { input: 1, output: 2 },
+  stopReason: "stop",
+  timestamp: 0,
+  ...over,
+});
+
+const update = (assistantMessageEvent: Record<string, unknown>) =>
+  e({ type: "message_update", message: assistant(), assistantMessageEvent });
+
+describe("createPiTransform", () => {
+  it("opens the turn once per run, even across retries", () => {
+    const t = createPiTransform("s1");
+    const first = [...t(e({ type: "agent_start" }))];
+    expect(first[0]).toMatchObject({ type: "start", messageMetadata: { sessionId: "s1" } });
+    expect([...t(e({ type: "agent_start" }))]).toEqual([]);
+    expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
+    // A settle without an open turn stays silent.
+    expect([...t(e({ type: "agent_settled" }))]).toEqual([]);
+  });
+
+  it("streams text and thinking deltas with message-scoped block ids", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    run(update({ type: "start" }));
+    const chunks = [
+      ...t(update({ type: "thinking_start", contentIndex: 0 })),
+      ...t(update({ type: "thinking_delta", contentIndex: 0, delta: "hm" })),
+      ...t(update({ type: "thinking_end", contentIndex: 0, content: "hm" })),
+      ...t(update({ type: "text_start", contentIndex: 1 })),
+      ...t(update({ type: "text_delta", contentIndex: 1, delta: "hi" })),
+      ...t(update({ type: "text_end", contentIndex: 1, content: "hi" })),
+    ];
+    expect(types(chunks)).toEqual([
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-end",
+      "text-start",
+      "text-delta",
+      "text-end",
+    ]);
+    expect(chunks[3]).toMatchObject({ id: "m1.1" });
+
+    // The second assistant message reuses contentIndex 0 under a fresh ordinal.
+    run(update({ type: "start" }));
+    const second = run(update({ type: "text_start", contentIndex: 0 }));
+    expect(second[0]).toMatchObject({ id: "m2.0" });
+  });
+
+  it("recovers whole text when a block ends without streaming deltas", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    run(update({ type: "start" }));
+    run(update({ type: "text_start", contentIndex: 0 }));
+    const end = [...t(update({ type: "text_end", contentIndex: 0, content: "whole" }))];
+    expect(types(end)).toEqual(["text-delta", "text-end"]);
+    expect(end[0]).toMatchObject({ delta: "whole" });
+  });
+
+  it("forwards tool executions as typed tool chunks", () => {
+    const t = createPiTransform("s1");
+    const started = [
+      ...t(
+        e({
+          type: "tool_execution_start",
+          toolCallId: "c1",
+          toolName: "bash",
+          args: { command: "ls" },
+        }),
+      ),
+    ];
+    expect(started[0]).toMatchObject({
+      type: "tool-input-available",
+      toolCallId: "c1",
+      toolName: "bash",
+      input: { command: "ls" },
+      dynamic: false,
+    });
+
+    const result = { content: [{ type: "text", text: "ok" }], details: {} };
+    const done = [
+      ...t(
+        e({
+          type: "tool_execution_end",
+          toolCallId: "c1",
+          toolName: "bash",
+          result,
+          isError: false,
+        }),
+      ),
+    ];
+    expect(done[0]).toMatchObject({ type: "tool-output-available", output: result });
+  });
+
+  it("maps tool failures to tool-output-error and extension tools to dynamic", () => {
+    const t = createPiTransform("s1");
+    const started = [
+      ...t(
+        e({ type: "tool_execution_start", toolCallId: "c2", toolName: "my_ext_tool", args: {} }),
+      ),
+    ];
+    expect(started[0]).toMatchObject({ dynamic: true });
+    const failed = [
+      ...t(
+        e({
+          type: "tool_execution_end",
+          toolCallId: "c2",
+          toolName: "my_ext_tool",
+          result: { content: [{ type: "text", text: "nope" }] },
+          isError: true,
+        }),
+      ),
+    ];
+    expect(failed[0]).toMatchObject({ type: "tool-output-error", errorText: "nope" });
+  });
+
+  it("summarizes assistant messages and surfaces run errors", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    const summary = [...t(e({ type: "message_end", message: assistant() }))];
+    expect(summary[0]).toMatchObject({
+      type: "data-message/end",
+      data: { model: "m1", stopReason: "stop", usage: { input: 1, output: 2 } },
+    });
+
+    const failed = assistant({ stopReason: "error", errorMessage: "boom" });
+    const ended = [...t(e({ type: "agent_end", messages: [failed], willRetry: false }))];
+    expect(ended[0]).toMatchObject({ type: "error", errorText: "boom" });
+    // The terminal finish still comes from agent_settled.
+    expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
+  });
+
+  it("forwards compaction and retry lifecycles as data parts", () => {
+    const t = createPiTransform("s1");
+    expect(types([...t(e({ type: "compaction_start", reason: "threshold" }))])).toEqual([
+      "data-compaction/start",
+    ]);
+    expect(
+      types([
+        ...t(e({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false })),
+      ]),
+    ).toEqual(["data-compaction/end"]);
+    expect(
+      types([
+        ...t(
+          e({
+            type: "auto_retry_start",
+            attempt: 1,
+            maxAttempts: 3,
+            delayMs: 10,
+            errorMessage: "x",
+          }),
+        ),
+      ]),
+    ).toEqual(["data-retry/start"]);
+    expect(types([...t(e({ type: "auto_retry_end", success: true, attempt: 1 }))])).toEqual([
+      "data-retry/end",
+    ]);
+  });
+
+  it("ignores bookkeeping events and user-message echoes", () => {
+    const t = createPiTransform("s1");
+    for (const event of [
+      { type: "turn_start" },
+      { type: "turn_end", message: assistant(), toolResults: [] },
+      { type: "message_start", message: { role: "user", content: "hi", timestamp: 0 } },
+      { type: "message_end", message: { role: "user", content: "hi", timestamp: 0 } },
+      { type: "queue_update", steering: [], followUp: [] },
+      { type: "session_info_changed", name: "n" },
+      { type: "thinking_level_changed", level: "high" },
+      {
+        type: "tool_execution_update",
+        toolCallId: "c1",
+        toolName: "bash",
+        args: {},
+        partialResult: {},
+      },
+    ]) {
+      expect([...t(e(event))]).toEqual([]);
+    }
+  });
+});

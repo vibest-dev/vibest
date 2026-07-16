@@ -5,7 +5,7 @@ import Loader from "@/components/loader";
 import type { AppClients } from "@/lib/orpc";
 
 export interface RouterAppContext {
-  orpc: AppClients["orpc"];
+  orpcQueryUtils: AppClients["orpcQueryUtils"];
   queryClient: QueryClient;
 }
 

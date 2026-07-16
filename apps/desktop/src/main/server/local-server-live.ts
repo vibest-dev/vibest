@@ -2,27 +2,27 @@ import { Effect, Layer } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { DesktopConfig } from "../desktop-config";
-import { LocalBackend, makeLocalBackend } from "./local-backend";
+import { LocalServer, makeLocalServer } from "./local-server";
 import { resolveLoginShellEnvironmentWith } from "./login-shell-environment";
-import { makeNodeBackendProcess } from "./node-backend-process";
+import { makeNodeServerProcess } from "./node-server-process";
 
-export const LocalBackendLive = Layer.effect(
-  LocalBackend,
+export const LocalServerLive = Layer.effect(
+  LocalServer,
   Effect.gen(function* () {
     const config = yield* DesktopConfig;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const environment = config.isPackaged
-      ? yield* resolveLoginShellEnvironmentWith(spawner)
-      : { ...process.env };
+      ? resolveLoginShellEnvironmentWith(spawner)
+      : Effect.sync(() => ({ ...process.env }));
 
-    return yield* makeLocalBackend(
+    return yield* makeLocalServer(
       {
         entry: config.serverEntry,
         token: config.token,
         environment,
         corsOrigins: config.allowedOrigins,
       },
-      makeNodeBackendProcess(spawner),
+      makeNodeServerProcess(spawner),
     );
   }),
 );

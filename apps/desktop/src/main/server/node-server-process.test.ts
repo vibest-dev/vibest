@@ -9,8 +9,8 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect, it } from "vitest";
 
-import type { BackendProcessConfig } from "./local-backend";
-import { makeNodeBackendProcess } from "./node-backend-process";
+import type { ServerProcessConfig } from "./local-server";
+import { makeNodeServerProcess } from "./node-server-process";
 
 function makeRuntime() {
   const nodeBase = Layer.merge(NodeFileSystem.layer, NodePath.layer);
@@ -19,14 +19,14 @@ function makeRuntime() {
 }
 
 function makeScript(source: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "vibest-backend-test-"));
-  const script = path.join(dir, "backend.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "vibest-server-test-"));
+  const script = path.join(dir, "server.mjs");
   writeFileSync(script, source);
   chmodSync(script, 0o755);
   return script;
 }
 
-const config = (entry: string): BackendProcessConfig => ({
+const config = (entry: string): ServerProcessConfig => ({
   entry,
   token: "test-token",
   environment: {
@@ -36,7 +36,7 @@ const config = (entry: string): BackendProcessConfig => ({
   corsOrigins: ["vibest://app"],
 });
 
-describe("NodeBackendProcess", () => {
+describe("NodeServerProcess", () => {
   it("reads a ready line split across stdout chunks", async () => {
     const entry = makeScript(`
 process.stdout.write("ordinary log\\n");
@@ -51,7 +51,7 @@ setInterval(() => {}, 1000);
         Effect.scoped(
           Effect.gen(function* () {
             const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
+            const running = yield* makeNodeServerProcess(spawner)(config(entry), 0);
             return yield* running.ready;
           }),
         ),
@@ -72,19 +72,19 @@ setInterval(() => {}, 1000);
           Effect.scoped(
             Effect.gen(function* () {
               const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-              const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
+              const running = yield* makeNodeServerProcess(spawner)(config(entry), 0);
               return yield* running.ready;
             }),
           ),
         ),
-      ).rejects.toMatchObject({ _tag: "BackendExitedBeforeReady", exitCode: 7 });
+      ).rejects.toMatchObject({ _tag: "ServerExitedBeforeReady", exitCode: 7 });
     } finally {
       await runtime.dispose();
     }
   });
 
-  it("passes the configured proxy environment to the backend process", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "vibest-backend-env-"));
+  it("passes the configured proxy environment to the server process", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "vibest-server-env-"));
     const marker = path.join(dir, "proxy");
     const entry = makeScript(`
 import { writeFileSync } from "node:fs";
@@ -99,7 +99,7 @@ setInterval(() => {}, 1000);
         Effect.scoped(
           Effect.gen(function* () {
             const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
+            const running = yield* makeNodeServerProcess(spawner)(config(entry), 0);
             yield* running.ready;
           }),
         ),
@@ -112,7 +112,7 @@ setInterval(() => {}, 1000);
   });
 
   it("terminates the child when its process scope closes", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "vibest-backend-finalizer-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "vibest-server-finalizer-"));
     const marker = path.join(dir, "terminated");
     const entry = makeScript(`
 import { writeFileSync } from "node:fs";
@@ -130,7 +130,7 @@ setInterval(() => {}, 1000);
         Effect.scoped(
           Effect.gen(function* () {
             const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-            const running = yield* makeNodeBackendProcess(spawner)(config(entry), 0);
+            const running = yield* makeNodeServerProcess(spawner)(config(entry), 0);
             yield* running.ready;
           }),
         ),

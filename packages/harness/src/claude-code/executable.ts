@@ -70,7 +70,10 @@ export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
     platform = process.platform,
   } = deps;
 
-  const override = env["VIBEST_CLAUDE_EXECUTABLE"];
+  const override =
+    env["VIBEST_E2E"] === "1"
+      ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
+      : env["VIBEST_CLAUDE_EXECUTABLE"];
   if (override) return override;
 
   const binary = platform === "win32" ? "claude.exe" : "claude";

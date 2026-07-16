@@ -7,11 +7,11 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { Effect, Layer, ManagedRuntime, Result } from "effect";
 import { app, dialog } from "electron";
 
-import { LocalBackendLive } from "./backend/local-backend-live";
 import { makeDesktopConfigLive } from "./desktop-config";
 import { DesktopApplicationLive, RendererChannelLive } from "./desktop-runtime-glue";
 import { registerAppScheme } from "./electron/app-protocol";
 import { MainWindow, MainWindowLive } from "./electron/main-window";
+import { LocalServerLive } from "./server/local-server-live";
 import { formatStartupFailure } from "./startup-failure";
 
 function makeRuntime(devUrl: string | undefined) {
@@ -28,7 +28,7 @@ function makeRuntime(devUrl: string | undefined) {
     MainWindowLive.pipe(
       Layer.provide(RendererChannelLive),
       Layer.provide(DesktopApplicationLive),
-      Layer.provide(LocalBackendLive),
+      Layer.provide(LocalServerLive),
       Layer.provide(DesktopConfigLive),
       Layer.provide(ChildProcessSpawnerLive),
     ),
@@ -36,6 +36,9 @@ function makeRuntime(devUrl: string | undefined) {
 }
 
 export function startDesktopRuntime(): void {
+  const isE2E = process.env["VIBEST_E2E"] === "1";
+  if (isE2E && process.platform === "darwin") app.setActivationPolicy("accessory");
+
   let runtime: ReturnType<typeof makeRuntime> | undefined;
   let disposing = false;
   let allowQuit = false;

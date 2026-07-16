@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createNodeRPCHandler, createRpcRuntime, createWsRPCHandler } from "@vibest/server/rpc";
+import { createRpcRuntime, createWsRPCHandler } from "@vibest/server/rpc";
 import sirv from "sirv";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
@@ -60,7 +60,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
   const { authToken, corsOrigins = [] } = options;
 
   const rpcRuntime = await createRpcRuntime();
-  const rpcHandler = createNodeRPCHandler(rpcRuntime.context);
   const wsHandler = createWsRPCHandler(rpcRuntime.context);
   const tickets = createTicketStore();
 
@@ -112,13 +111,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
         return;
       }
 
-      if (pathname === "/api/rpc" || pathname.startsWith("/api/rpc/")) {
-        const { matched } = await rpcHandler(req, res, {
-          prefix: "/api/rpc",
-        });
-        if (matched) {
-          return;
-        }
+      if (pathname.startsWith("/api/")) {
+        notFound(res);
+        return;
       }
 
       serveUI(req, res);
@@ -178,10 +173,16 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
       if (protocol && ["vite-ping", "vite-hmr"].includes(protocol)) return;
     }
 
+    const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (requestUrl.pathname !== "/ws/rpc") {
+      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
     if (authToken !== undefined) {
       // A WS handshake carries no Authorization header, so the renderer proves
       // itself with a single-use ticket minted over the authenticated HTTP link.
-      const requestUrl = new URL(req.url ?? "/", "http://localhost");
       if (!tickets.consume(requestUrl.searchParams.get("ticket"))) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();

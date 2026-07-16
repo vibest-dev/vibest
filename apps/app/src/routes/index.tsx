@@ -7,15 +7,17 @@ export const Route = createFileRoute("/")({
 });
 
 function Component() {
-  const { orpc } = Route.useRouteContext();
+  const { orpcQueryUtils } = Route.useRouteContext();
   const navigate = useNavigate();
   const [isCreatingSession, setIsCreatingSession] = useState(false);
 
   const handleStartChatting = async () => {
     try {
       setIsCreatingSession(true);
-      const { sessionId } = await orpc.session.create.call({ harnessAgentId: "claude-code" });
-      navigate({ to: "/chat/$sessionId", params: { sessionId } });
+      const { sessionId } = await orpcQueryUtils.session.create.call({
+        harnessAgentId: "claude-code",
+      });
+      navigate({ to: "/session/$sessionId", params: { sessionId } });
     } catch (error) {
       console.error("Failed to create session", error);
       // TODO: Show error toast to user

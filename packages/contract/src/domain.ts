@@ -4,7 +4,7 @@ import { Schema } from "effect";
 export const toStandardSchema = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) =>
   Schema.toStandardJSONSchemaV1(Schema.toStandardSchemaV1(schema));
 
-export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex"]);
+export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi"]);
 export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
 
 export const AgentGrantSchema = Schema.Struct({ type: Schema.Literal("session") });
