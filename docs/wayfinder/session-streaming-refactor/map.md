@@ -35,6 +35,7 @@ labels: [wayfinder:map]
 - [落地顺序与兼容策略](tickets/06-landing-sequence.md) — CI 全仓门禁 → 单大分支一次性推平合 main（不拆集成分支）；分支内序 07→08→{09,10}→11→12；无适配 shim；getMessages 空数组接缝仅开发期；event-manifest 迁移归 08；受控调度订阅测试随 08。
 - [codex 原生历史与 messageId 调研](tickets/05-codex-history-research.md) — codex 有原生持久化 `Turn.id`，实时 transform 已当 start.messageId 发、`thread/read includeTurns` 可读回同 id，**无需合成**；与 claude-code 共享 fold 架构不共享 id 源；turn.ended 从 `turn/completed` payload 派生。风险：turn.id 跨 resume 稳定性未实测（承重假设，ticket 11 前必验）。
 - [claude-code 原生历史与 messageId 调研](tickets/04-claude-code-history-research.md) — 今天完全没连上（实时 start 无 messageId、fold 出空 id）；原生 `getSessionMessages` 有 wire uuid 且跨 resume 存活，但一 turn 多条 assistant，**须合成**（取 turn 首条 assistant uuid）两侧同分段规则复现；turn.ended 须门控在对 getSessionMessages 的有界轮询后。承重风险：compaction/`retracted_message_uuids` 可改写被选 uuid → 破坏 reconciliation。
+- [实现 create/resume + Project + 元数据](tickets/07-impl-create-resume.md) — **option A 端口边界**：交付服务端编排层（SessionMetadataRepository + HarnessSessionsPort + SessionService，daemon↔native id 翻译、projectId→cwd、元数据原子写），fake port 测（6+9 测试绿）；harness 保持无盘。真实 port→harness 适配、project router、rpc/session.ts 接线因 harness 19 文件依赖旧事件模型（加载不了）**归并进 08**。删 id.ts 复合方案。
 
 ## Not yet specified
 
