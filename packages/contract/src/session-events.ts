@@ -1,4 +1,8 @@
-import type { SessionEnvelopeBody, SessionEvent } from "./domain";
-
-export const isSessionEvent = (body: SessionEnvelopeBody): body is SessionEvent =>
-  body.type.includes(".");
+export { isSessionScopedEvent } from "./domain";
+export type {
+  CollectionEvent,
+  DaemonEvent,
+  SessionMessageChunkEvent,
+  SessionScopedEvent,
+  SessionScopedEventDraft,
+} from "./domain";

@@ -23,12 +23,14 @@ labels: [wayfinder:map]
 6. **create**：入参 `{projectId, harnessAgentId, ...}` → 出参 `SessionRef {projectId, harnessAgentId, sessionId}`；sessionId 由 Daemon 生成，adapter 原生 ID 降级为元数据字段 `harnessSessionId`；元数据文件 `~/.vibest/storage/sessions/<projectId>/<sessionId>.json` 原子写；adapter 只见 cwd 不见 projectId；任一步失败不留半初始化状态。
 7. **恢复三路径**：刷新（无 cursor，全量重建）/ 短暂断线（带 cursor 续传，turn 变更先用历史收敛旧 projection）/ 服务重启（`SESSION_NOT_ACTIVE` → resume → 走刷新路径），客户端收敛为单个 reconcile 入口。
 8. chunk 消费算法：`seq ≤ lastApplied` 幂等忽略；`== +1` 应用并推进；`> +1` 视为缺口重订。
+9. **破坏性直改，不做新旧类型并存**（2026-07-16 用户定案，推翻 ticket 01 原本的 additive 前提）：contract 直接重写，下游 server/harness/client/app 随 impl ticket 一次性迁移，中间不维持双份类型。
 
 ## Decisions so far
 
 <!-- 一行一个已关闭 ticket：gist + 链接 -->
 
 - [存储与元数据方案](tickets/02-storage-metadata.md) — 不做 allowedRoots（只 realpath+存在性）；project 挂 create+list；元数据与 projects.json 加 version:1 包裹（含存量迁移）；sessionId 纯 uuid、删 id.ts；server 侧新建 SessionService+SessionMetadataRepository 编排层，harness 保持无盘。
+- [契约类型定稿](tickets/01-contract-types.md) — 破坏性直改 packages/contract（否决 domain-v2 并存）：SessionRef、phase 状态机、DaemonEvent（session 事件带 seq/collection 无序号）、SubscribeStreamItem（无 gap）、SessionRuntimeSnapshot、PromptInput parts、daemonErrors；13 方法契约；contract 独立绿（14 测试），下游 4 包待 impl ticket 迁移。
 
 ## Not yet specified
 
