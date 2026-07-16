@@ -17,8 +17,21 @@ layer(NodeServices.layer)("pi live smoke", (it) => {
           sessionId,
           text: "Reply with exactly: PONG",
         });
-        const chunks = yield* Stream.runCollect(prompt.output);
-        NodeAssert.ok(Array.from(chunks).some((chunk) => chunk.type === "finish"));
+        const chunks = Array.from(yield* Stream.runCollect(prompt.output));
+        // A failed model call also ends in `finish` (the run settles either
+        // way), so finish alone proves nothing — require a clean turn with
+        // actual assistant text.
+        const errors = chunks.filter((chunk) => chunk.type === "error");
+        NodeAssert.deepStrictEqual(
+          errors.map((chunk) => ("errorText" in chunk ? chunk.errorText : "")),
+          [],
+        );
+        const text = chunks
+          .filter((chunk) => chunk.type === "text-delta")
+          .map((chunk) => ("delta" in chunk ? chunk.delta : ""))
+          .join("");
+        NodeAssert.match(text, /PONG/i);
+        NodeAssert.equal(chunks.at(-1)?.type, "finish");
         yield* agent.session.abort(sessionId);
       }),
     120_000,
