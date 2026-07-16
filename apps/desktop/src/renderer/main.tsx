@@ -6,7 +6,6 @@ import { createDesktopClient } from "./desktop-client";
 import { createDesktopHost } from "./desktop-host";
 import { waitForDesktopPort } from "./desktop-port";
 import { DesktopRoot } from "./desktop-root";
-import { waitForStartupAnimation } from "./startup-animation";
 import { StartupFailure } from "./startup-failure";
 
 const rootElement = document.getElementById("root")!;
@@ -17,14 +16,11 @@ const host = waitForDesktopPort().then(async (port) => {
   const bootstrap = await client.bootstrap();
   return createDesktopHost(client, bootstrap, client.server.connection());
 });
-const startupAnimation = waitForStartupAnimation(
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-);
 
 createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary FallbackComponent={StartupFailure}>
-      <DesktopRoot host={host} startupAnimation={startupAnimation} />
+      <DesktopRoot host={host} />
     </ErrorBoundary>
   </StrictMode>,
 );

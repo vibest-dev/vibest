@@ -1,13 +1,13 @@
 import { AppInterface, type ServerConnection } from "@vibest/app";
 import { use, useEffect, type ReactElement } from "react";
 
+import { startupAnimation } from "./startup-animation";
+
 export function ReadyApp({
   server,
-  startupAnimation,
   onReady,
 }: {
   server: Promise<ServerConnection>;
-  startupAnimation: Promise<void>;
   onReady: () => void;
 }): ReactElement {
   const connection = use(server);

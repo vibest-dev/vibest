@@ -4,13 +4,7 @@ import type { DesktopHost } from "./desktop-host";
 import { DesktopRenderer } from "./desktop-renderer";
 import { StartupScreen } from "./startup-screen";
 
-export function DesktopRoot({
-  host,
-  startupAnimation,
-}: {
-  host: Promise<DesktopHost>;
-  startupAnimation: Promise<void>;
-}): ReactElement {
+export function DesktopRoot({ host }: { host: Promise<DesktopHost> }): ReactElement {
   const [ready, setReady] = useState(false);
   const onReady = useCallback(() => setReady(true), []);
 
@@ -18,7 +12,7 @@ export function DesktopRoot({
     <>
       {ready ? null : <StartupScreen />}
       <Suspense fallback={null}>
-        <DesktopRenderer host={host} startupAnimation={startupAnimation} onReady={onReady} />
+        <DesktopRenderer host={host} onReady={onReady} />
       </Suspense>
     </>
   );

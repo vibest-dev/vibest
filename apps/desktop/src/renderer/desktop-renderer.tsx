@@ -6,11 +6,9 @@ import { ReadyApp } from "./ready-app";
 
 export function DesktopRenderer({
   host,
-  startupAnimation,
   onReady,
 }: {
   host: Promise<DesktopHost>;
-  startupAnimation: Promise<void>;
   onReady: () => void;
 }): ReactElement {
   const desktop = use(host);
@@ -18,7 +16,7 @@ export function DesktopRenderer({
     <PlatformProvider value={desktop.platform}>
       <ServerStatusOverlay feed={desktop.status} />
       <Suspense fallback={null}>
-        <ReadyApp server={desktop.server} startupAnimation={startupAnimation} onReady={onReady} />
+        <ReadyApp server={desktop.server} onReady={onReady} />
       </Suspense>
     </PlatformProvider>
   );

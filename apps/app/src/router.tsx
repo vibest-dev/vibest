@@ -11,7 +11,7 @@ export const createRouter = ({ orpcQueryUtils, queryClient }: RouterDependencies
     routeTree,
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
-    context: { orpc: orpcQueryUtils, queryClient },
+    context: { orpcQueryUtils, queryClient },
     defaultPendingComponent: () => <Loader />,
     defaultNotFoundComponent: () => <div>Not Found</div>,
   });

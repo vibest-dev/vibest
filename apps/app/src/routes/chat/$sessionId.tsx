@@ -9,13 +9,13 @@ export const Route = createFileRoute("/chat/$sessionId")({
 
 function Component() {
   const { sessionId } = Route.useParams();
-  const { orpc } = Route.useRouteContext();
+  const { orpcQueryUtils } = Route.useRouteContext();
   const navigate = useNavigate();
 
   const handleNewSession = async () => {
     try {
       // Create new session and navigate
-      const { sessionId: newSessionId } = await orpc.session.create.call({
+      const { sessionId: newSessionId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
       });
       navigate({ to: "/chat/$sessionId", params: { sessionId: newSessionId } });
