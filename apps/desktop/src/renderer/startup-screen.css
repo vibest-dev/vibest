@@ -2,6 +2,7 @@
   display: flex;
   color: var(--foreground);
   user-select: none;
+  transform: scale(0.96);
 }
 
 .vibest-startup-logo pre {
@@ -9,23 +10,18 @@
   margin: 0;
   overflow: visible;
   font-family: var(--font-mono);
-  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-size: clamp(1.1rem, 2.8vw, 1.75rem);
   font-weight: 700;
   line-height: 0.78;
   white-space: pre;
   opacity: 0;
-  animation: vibest-logo-column-reveal 1ms step-end both;
-}
-
-@keyframes vibest-logo-column-reveal {
-  to {
-    opacity: 1;
-  }
+  transform: translateX(-4px);
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .vibest-startup-logo,
   .vibest-startup-logo pre {
     opacity: 1;
-    animation: none;
+    transform: none;
   }
 }
