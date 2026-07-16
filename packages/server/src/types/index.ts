@@ -66,6 +66,21 @@ export interface RuntimeConfig {
   readonly mcp?: ReadonlyArray<McpServerConfig>;
 }
 
+/**
+ * Daemon-owned recovery record for one session, persisted at
+ * `storage/sessions/<projectId>/<sessionId>.json`. The daemon `sessionId` is
+ * the filename, not a field; `harnessSessionId` is the agent-native id
+ * (claude session uuid / codex thread id) the daemon translates to when
+ * calling the harness.
+ */
+export interface SessionMetadata {
+  readonly version: 1;
+  readonly projectId: string;
+  readonly harnessAgentId: HarnessAgentId;
+  readonly harnessSessionId: string;
+  readonly createdAt: string;
+}
+
 /** Session-related placeholder shapes (fields not fully designed yet). */
 export interface SessionSummary {
   readonly id: string;

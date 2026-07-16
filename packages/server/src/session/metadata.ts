@@ -1,0 +1,119 @@
+import { readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+
+import { Context, Effect, Layer } from "effect";
+
+import { Paths } from "../config/paths";
+import { SessionMetadataNotFound, StoreReadError, StoreWriteError } from "../errors";
+import { readJson, writeJsonAtomic } from "../infra/json-store";
+import type { SessionMetadata } from "../types";
+
+const isEnoent = (cause: unknown): boolean =>
+  typeof cause === "object" && cause !== null && (cause as NodeJS.ErrnoException).code === "ENOENT";
+
+/**
+ * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The daemon
+ * `sessionId` is the filename; the file body holds {@link SessionMetadata}. No
+ * business rules — orchestration (id generation, projectId resolution) lives in
+ * SessionService.
+ */
+export class SessionMetadataRepository extends Context.Service<
+  SessionMetadataRepository,
+  {
+    /** All session metadata under a project; empty if the project dir is absent. */
+    readonly list: (
+      projectId: string,
+    ) => Effect.Effect<
+      ReadonlyArray<{ sessionId: string; metadata: SessionMetadata }>,
+      StoreReadError
+    >;
+    readonly read: (
+      projectId: string,
+      sessionId: string,
+    ) => Effect.Effect<SessionMetadata, StoreReadError | SessionMetadataNotFound>;
+    readonly write: (
+      sessionId: string,
+      metadata: SessionMetadata,
+    ) => Effect.Effect<void, StoreWriteError>;
+    /** Idempotent: removing an absent file succeeds. */
+    readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void, StoreWriteError>;
+  }
+>()("SessionMetadataRepository") {}
+
+const SENTINEL = "__vibest_missing__";
+
+export const SessionMetadataRepositoryLayer: Layer.Layer<SessionMetadataRepository, never, Paths> =
+  Layer.effect(
+    SessionMetadataRepository,
+    Effect.gen(function* () {
+      const paths = yield* Paths;
+      const projectDir = (projectId: string) => join(paths.sessionsDir, projectId);
+      const sessionFile = (projectId: string, sessionId: string) =>
+        join(projectDir(projectId), `${sessionId}.json`);
+
+      const readIds = (projectId: string): Effect.Effect<ReadonlyArray<string>, StoreReadError> =>
+        Effect.tryPromise({
+          try: async () => {
+            try {
+              const entries = await readdir(projectDir(projectId));
+              return entries
+                .filter((name) => name.endsWith(".json"))
+                .map((name) => name.slice(0, -".json".length));
+            } catch (cause) {
+              if (isEnoent(cause)) return [];
+              throw cause;
+            }
+          },
+          catch: (cause) => new StoreReadError({ file: projectDir(projectId), cause }),
+        });
+
+      const read = (
+        projectId: string,
+        sessionId: string,
+      ): Effect.Effect<SessionMetadata, StoreReadError | SessionMetadataNotFound> =>
+        readJson<SessionMetadata | typeof SENTINEL>(
+          sessionFile(projectId, sessionId),
+          SENTINEL,
+        ).pipe(
+          Effect.flatMap((value) =>
+            value === SENTINEL
+              ? Effect.fail(new SessionMetadataNotFound({ projectId, sessionId }))
+              : Effect.succeed(value),
+          ),
+        );
+
+      return {
+        list: (projectId) =>
+          readIds(projectId).pipe(
+            Effect.flatMap((ids) =>
+              Effect.forEach(
+                ids,
+                (sessionId) =>
+                  read(projectId, sessionId).pipe(
+                    Effect.map((metadata) => ({ sessionId, metadata })),
+                    // A file that vanished between listing and reading is skipped,
+                    // not fatal to the whole listing.
+                    Effect.catchTag("SessionMetadataNotFound", () => Effect.succeed(null)),
+                  ),
+                { concurrency: "unbounded" },
+              ),
+            ),
+            Effect.map((entries) => entries.filter((entry) => entry !== null)),
+          ),
+
+        read,
+
+        write: (sessionId, metadata) =>
+          writeJsonAtomic(sessionFile(metadata.projectId, sessionId), metadata),
+
+        remove: (projectId, sessionId) =>
+          Effect.tryPromise({
+            // rm with force:true does not throw on ENOENT; any error is a real
+            // write failure.
+            try: () => rm(sessionFile(projectId, sessionId), { force: true }),
+            catch: (cause) =>
+              new StoreWriteError({ file: sessionFile(projectId, sessionId), cause }),
+          }),
+      };
+    }),
+  );

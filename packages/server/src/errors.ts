@@ -32,3 +32,8 @@ export class GitError extends Data.TaggedError("GitError")<{
 export class InvalidSessionId extends Data.TaggedError("InvalidSessionId")<{
   readonly sessionId: string;
 }> {}
+
+export class SessionMetadataNotFound extends Data.TaggedError("SessionMetadataNotFound")<{
+  readonly projectId: string;
+  readonly sessionId: string;
+}> {}
