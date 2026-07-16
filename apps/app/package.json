@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./app": "./src/app.tsx",
-    "./platform": "./src/platform.ts",
-    "./index.css": "./src/index.css"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "dev": "vite dev",

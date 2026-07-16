@@ -1,9 +1,8 @@
+import type { VibestClient } from "@vibest/client";
 import type { AgentRequest, SessionSnapshot } from "@vibest/contract";
 import { describe, expect, it } from "vitest";
 
-import type { AppClients } from "@/lib/orpc";
-
-import { ChatTransport } from "./chat-transport";
+import { OrpcChatSessionTransport } from "./chat-transport";
 
 const pendingRequest: AgentRequest = {
   type: "tool",
@@ -32,7 +31,7 @@ const emptyPlanRequest: AgentRequest = {
   native: null,
 };
 
-describe("ChatTransport agent requests", () => {
+describe("OrpcChatSessionTransport agent requests", () => {
   it("hydrates pending requests from the initial session snapshot", async () => {
     let finishStream: () => void = () => undefined;
     const streamDone = new Promise<void>((resolve) => {
@@ -41,65 +40,61 @@ describe("ChatTransport agent requests", () => {
     let subscriptionCalls = 0;
     let snapshotCalls = 0;
     let snapshotSawSubscription = false;
-    const clients = {
-      rpcClient: {
-        session: {
-          snapshot: async () => {
-            snapshotCalls += 1;
-            snapshotSawSubscription = subscriptionCalls === 1;
-            return snapshot;
-          },
-          events: async () => {
-            subscriptionCalls += 1;
+    const session = {
+      snapshot: async () => {
+        snapshotCalls += 1;
+        snapshotSawSubscription = subscriptionCalls === 1;
+        return snapshot;
+      },
+      events: async () => {
+        subscriptionCalls += 1;
+        return {
+          [Symbol.asyncIterator]() {
+            let index = 0;
+            const items = [
+              {
+                type: "event" as const,
+                event: {
+                  harnessAgentId: "claude-code" as const,
+                  sessionId: "session-1",
+                  seq: snapshot.cursor,
+                  body: {
+                    type: "session.request.asked" as const,
+                    sessionId: "session-1",
+                    request: pendingRequest,
+                  },
+                },
+              },
+              {
+                type: "event" as const,
+                event: {
+                  harnessAgentId: "claude-code" as const,
+                  sessionId: "session-1",
+                  seq: snapshot.cursor + 1,
+                  body: {
+                    type: "session.request.replied" as const,
+                    sessionId: "session-1",
+                    requestId: pendingRequest.id,
+                  },
+                },
+              },
+            ];
             return {
-              [Symbol.asyncIterator]() {
-                let index = 0;
-                const items = [
-                  {
-                    type: "event" as const,
-                    event: {
-                      harnessAgentId: "claude-code" as const,
-                      sessionId: "session-1",
-                      seq: snapshot.cursor,
-                      body: {
-                        type: "session.request.asked" as const,
-                        sessionId: "session-1",
-                        request: pendingRequest,
-                      },
-                    },
-                  },
-                  {
-                    type: "event" as const,
-                    event: {
-                      harnessAgentId: "claude-code" as const,
-                      sessionId: "session-1",
-                      seq: snapshot.cursor + 1,
-                      body: {
-                        type: "session.request.replied" as const,
-                        sessionId: "session-1",
-                        requestId: pendingRequest.id,
-                      },
-                    },
-                  },
-                ];
-                return {
-                  next: async () => {
-                    const item = items[index];
-                    index += 1;
-                    if (item) return { done: false as const, value: item };
-                    finishStream();
-                    return { done: true as const, value: undefined };
-                  },
-                };
+              next: async () => {
+                const item = items[index];
+                index += 1;
+                if (item) return { done: false as const, value: item };
+                finishStream();
+                return { done: true as const, value: undefined };
               },
             };
           },
-        },
+        };
       },
-    } as unknown as Pick<AppClients, "rpcClient">;
+    } as unknown as VibestClient["session"];
     let deliveries = 0;
     const received: AgentRequest[] = [];
-    const transport = new ChatTransport(clients);
+    const transport = new OrpcChatSessionTransport(session);
 
     const unsubscribe = transport.subscribeAgentRequests(
       "session-1",
@@ -131,61 +126,57 @@ describe("ChatTransport agent requests", () => {
     const automaticResponse = new Promise<never>((_resolve, reject) => {
       rejectAutomaticResponse = reject;
     });
-    const clients = {
-      rpcClient: {
-        session: {
-          snapshot: async (): Promise<SessionSnapshot> => ({
-            ...snapshot,
-            pendingRequests: [emptyPlanRequest],
-          }),
-          respondToAgentRequest: async () => automaticResponse,
-          events: async () => ({
-            [Symbol.asyncIterator]() {
-              let index = 0;
-              const items = [
-                {
-                  type: "event" as const,
-                  event: {
-                    harnessAgentId: "claude-code" as const,
-                    sessionId: "session-1",
-                    seq: snapshot.cursor + 1,
-                    body: {
-                      type: "session.request.replied" as const,
-                      sessionId: "session-1",
-                      requestId: emptyPlanRequest.id,
-                    },
-                  },
+    const session = {
+      snapshot: async (): Promise<SessionSnapshot> => ({
+        ...snapshot,
+        pendingRequests: [emptyPlanRequest],
+      }),
+      respondToAgentRequest: async () => automaticResponse,
+      events: async () => ({
+        [Symbol.asyncIterator]() {
+          let index = 0;
+          const items = [
+            {
+              type: "event" as const,
+              event: {
+                harnessAgentId: "claude-code" as const,
+                sessionId: "session-1",
+                seq: snapshot.cursor + 1,
+                body: {
+                  type: "session.request.replied" as const,
+                  sessionId: "session-1",
+                  requestId: emptyPlanRequest.id,
                 },
-                {
-                  type: "event" as const,
-                  event: {
-                    harnessAgentId: "claude-code" as const,
-                    sessionId: "session-1",
-                    seq: snapshot.cursor + 2,
-                    body: {
-                      type: "session.request.asked" as const,
-                      sessionId: "session-1",
-                      request: pendingRequest,
-                    },
-                  },
-                },
-              ];
-              return {
-                next: async () => {
-                  const item = items[index];
-                  index += 1;
-                  if (item) return { done: false as const, value: item };
-                  finishStream();
-                  return { done: true as const, value: undefined };
-                },
-              };
+              },
             },
-          }),
+            {
+              type: "event" as const,
+              event: {
+                harnessAgentId: "claude-code" as const,
+                sessionId: "session-1",
+                seq: snapshot.cursor + 2,
+                body: {
+                  type: "session.request.asked" as const,
+                  sessionId: "session-1",
+                  request: pendingRequest,
+                },
+              },
+            },
+          ];
+          return {
+            next: async () => {
+              const item = items[index];
+              index += 1;
+              if (item) return { done: false as const, value: item };
+              finishStream();
+              return { done: true as const, value: undefined };
+            },
+          };
         },
-      },
-    } as unknown as Pick<AppClients, "rpcClient">;
+      }),
+    } as unknown as VibestClient["session"];
     const received: AgentRequest[] = [];
-    const transport = new ChatTransport(clients);
+    const transport = new OrpcChatSessionTransport(session);
 
     const unsubscribe = transport.subscribeAgentRequests(
       "session-1",

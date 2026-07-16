@@ -1,6 +1,6 @@
 # Desktop Main
 
-Electron Main starts the local backend, owns the application window, and exposes desktop shell operations to the renderer through oRPC over a transferred MessagePort.
+Electron Main starts the local server, owns the application window, and exposes desktop shell operations to the renderer through oRPC over a transferred MessagePort.
 
 ```text
 index.ts
@@ -8,7 +8,7 @@ index.ts
        -> desktop-runtime-glue.ts
        -> desktop-config.ts
        -> application/desktop-application.ts
-       -> backend/
+       -> server/
        -> rpc/
        -> electron/
 ```
@@ -17,7 +17,7 @@ index.ts
 - `desktop-runtime-glue.ts` holds the Electron-touching `Live` Layers (`DesktopApplicationLive`, `RendererChannelLive`) that can't live next to their Tag; split out so they stay importable from tests without pulling in `electron/main-window.ts`.
 - `desktop-config.ts` resolves host/environment facts (packaged state, dev URL, server entry, token, allowed origins) once and exposes them as a `DesktopConfig` Tag.
 - `application/` contains renderer-facing desktop use cases, exposed as a `DesktopApplication` Tag.
-- `backend/` contains local backend supervision (`LocalBackend` Tag) and the Node child-process adapter.
+- `server/` contains local server supervision (`LocalServer` Tag) and the Node child-process adapter.
 - `rpc/` contains the transport-neutral router and oRPC MessagePort server.
 - `electron/` contains BrowserWindow (`MainWindow` Tag), MessageChannel (`RendererChannel` Tag), and custom asset protocol adapters.
 

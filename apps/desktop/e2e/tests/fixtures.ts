@@ -57,8 +57,8 @@ export const test = base.extend<{
   },
 
   window: async ({ electronApp }, use) => {
-    // The main process spawns and awaits the backend before creating a window,
-    // so the first window can take a few seconds to appear.
+    // The window opens while the server starts; keep a generous timeout for
+    // slower CI machines and Electron process startup itself.
     const window = await electronApp.firstWindow({ timeout: 30_000 });
 
     await window.waitForLoadState("domcontentloaded");

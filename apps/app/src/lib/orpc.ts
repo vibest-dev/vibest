@@ -3,12 +3,12 @@ import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { createVibestClient, type VibestClient } from "@vibest/client";
 import { toast } from "sonner";
 
-import type { Platform } from "@/platform";
+import type { ServerConnection } from "@/server-connection";
 
 export type AppClients = {
+  orpcClient: VibestClient;
   queryClient: QueryClient;
-  rpcClient: VibestClient;
-  orpc: ReturnType<typeof createTanstackQueryUtils<VibestClient>>;
+  orpcQueryUtils: ReturnType<typeof createTanstackQueryUtils<VibestClient>>;
 };
 
 function createQueryClient(): QueryClient {
@@ -29,31 +29,30 @@ function createQueryClient(): QueryClient {
   return queryClient;
 }
 
-/**
- * Build the RPC client for a host. Browser mode is same-origin, so the
- * origin-derived `/ws/rpc` default is correct and no credential is needed. The
- * desktop renderer's origin is `vibest://app` while its backend is on loopback,
- * so it connects with a ticket minted over the authenticated HTTP endpoint.
- */
-export function createAppClients(platform: Platform): AppClients {
+/** Create the stable oRPC, TanStack Query, and oRPC Query dependencies for a server. */
+export function createAppClients(
+  server?: ServerConnection,
+  fetcher: typeof fetch = globalThis.fetch,
+): AppClients {
   const queryClient = createQueryClient();
 
-  if (platform.host === "web") {
-    const rpcClient = createVibestClient();
+  if (!server) {
+    const orpcClient = createVibestClient();
     return {
+      orpcClient,
       queryClient,
-      rpcClient,
-      orpc: createTanstackQueryUtils(rpcClient),
+      orpcQueryUtils: createTanstackQueryUtils(orpcClient),
     };
   }
 
-  const { httpBaseUrl, wsBaseUrl, token } = platform.backend;
-  const headers = { authorization: `Bearer ${token}` };
-
-  const rpcClient = createVibestClient({
+  const { httpBaseUrl, wsBaseUrl, token } = server;
+  const orpcClient = createVibestClient({
     url: `${wsBaseUrl}/ws/rpc`,
     getTicket: async () => {
-      const response = await fetch(`${httpBaseUrl}/api/ws-ticket`, { method: "POST", headers });
+      const response = await fetcher(`${httpBaseUrl}/api/ws-ticket`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
       if (!response.ok) {
         throw new Error(`Failed to obtain a WebSocket ticket: ${response.status}`);
       }
@@ -62,5 +61,9 @@ export function createAppClients(platform: Platform): AppClients {
     },
   });
 
-  return { queryClient, rpcClient, orpc: createTanstackQueryUtils(rpcClient) };
+  return {
+    orpcClient,
+    queryClient,
+    orpcQueryUtils: createTanstackQueryUtils(orpcClient),
+  };
 }

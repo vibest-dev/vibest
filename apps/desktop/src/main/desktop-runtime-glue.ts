@@ -2,9 +2,9 @@ import { Effect, Layer } from "effect";
 import { app } from "electron";
 
 import { DesktopApplication, makeDesktopApplication } from "./application/desktop-application";
-import { LocalBackend } from "./backend/local-backend";
 import { RendererChannel, makeRendererChannel } from "./electron/renderer-channel";
 import { makeDesktopRpcServer } from "./rpc/desktop-rpc-server";
+import { LocalServer } from "./server/local-server";
 
 // These two Live layers need Electron capabilities (app.quit, and the oRPC
 // MessagePort wiring that reaches into application/** and rpc/**) that the
@@ -15,10 +15,9 @@ import { makeDesktopRpcServer } from "./rpc/desktop-rpc-server";
 export const DesktopApplicationLive = Layer.effect(
   DesktopApplication,
   Effect.gen(function* () {
-    const backend = yield* LocalBackend;
+    const server = yield* LocalServer;
     return makeDesktopApplication({
-      backend,
-      os: process.platform,
+      server,
       quit: Effect.sync(() => {
         setTimeout(() => app.quit(), 0);
       }),

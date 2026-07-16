@@ -7,7 +7,7 @@ import { _electron as electron } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
-function findBackendPid(parentPid: number): number | undefined {
+function findServerPid(parentPid: number): number | undefined {
   const processes = execFileSync("ps", ["-axo", "pid=,ppid=,command="], {
     encoding: "utf8",
   });
@@ -22,9 +22,9 @@ function findBackendPid(parentPid: number): number | undefined {
   return undefined;
 }
 
-function backendPid(parentPid: number): number {
-  const pid = findBackendPid(parentPid);
-  if (pid === undefined) throw new Error(`Backend child of Electron ${parentPid} was not found`);
+function serverPid(parentPid: number): number {
+  const pid = findServerPid(parentPid);
+  if (pid === undefined) throw new Error(`Server child of Electron ${parentPid} was not found`);
   return pid;
 }
 
@@ -47,28 +47,33 @@ function frontmostApplicationPid(): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-async function waitForDifferentBackend(parentPid: number, previousPid: number): Promise<number> {
+async function waitForServer(parentPid: number): Promise<number> {
+  await expect.poll(() => findServerPid(parentPid), { timeout: 30_000 }).toBeTruthy();
+  return serverPid(parentPid);
+}
+
+async function waitForDifferentServer(parentPid: number, previousPid: number): Promise<number> {
   await expect
     .poll(
       () => {
-        const pid = findBackendPid(parentPid);
+        const pid = findServerPid(parentPid);
         return pid === undefined || pid === previousPid ? previousPid : pid;
       },
       { timeout: 15_000 },
     )
     .not.toBe(previousPid);
-  return backendPid(parentPid);
+  return serverPid(parentPid);
 }
 
-async function driveBackendToFailed(parentPid: number): Promise<void> {
-  let currentPid = backendPid(parentPid);
+async function driveServerToFailed(parentPid: number): Promise<void> {
+  let currentPid = await waitForServer(parentPid);
   for (let failure = 0; failure < 6; failure += 1) {
     process.kill(currentPid, "SIGKILL");
-    if (failure < 5) currentPid = await waitForDifferentBackend(parentPid, currentPid);
+    if (failure < 5) currentPid = await waitForDifferentServer(parentPid, currentPid);
   }
 }
 
-test("renders in the background without taking focus and connects to the backend", async ({
+test("renders in the background without taking focus and connects to the server", async ({
   electronApp,
   window,
 }) => {
@@ -104,17 +109,17 @@ test("renders in the background without taking focus and connects to the backend
   ).resolves.toEqual({ vibest: "undefined", require: "undefined", process: "undefined" });
 });
 
-test("reconnects a reloaded renderer to the same backend", async ({ electronApp, window }) => {
-  const pid = backendPid(electronApp.process().pid);
+test("gives a reloaded renderer document a new MessagePort", async ({ electronApp, window }) => {
+  const pid = await waitForServer(electronApp.process().pid);
 
   await window.reload();
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
-  expect(backendPid(electronApp.process().pid)).toBe(pid);
+  expect(serverPid(electronApp.process().pid)).toBe(pid);
 });
 
-test("boots the development HTTP renderer", async () => {
+test("boots the development HTTP renderer through MessagePort", async () => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
   const server = createServer((request, response) => {
     const requested = path.join(
@@ -182,39 +187,39 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
     .toContain('"type":"user","text":"Desktop SDK E2E"');
 });
 
-test("reports a backend crash and recovers on the pinned connection", async ({
+test("reports a server crash and recovers on the pinned connection", async ({
   electronApp,
   window,
 }) => {
-  const initialPid = backendPid(electronApp.process().pid);
+  const initialPid = await waitForServer(electronApp.process().pid);
   process.kill(initialPid, "SIGKILL");
 
   const reconnecting = window.getByText("Reconnecting…");
   await expect(reconnecting).toBeVisible({ timeout: 10_000 });
   await expect(reconnecting).toBeHidden({ timeout: 15_000 });
 
-  const restartedPid = backendPid(electronApp.process().pid);
+  const restartedPid = serverPid(electronApp.process().pid);
   expect(restartedPid).not.toBe(initialPid);
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
-test("disposes the backend process during Electron shutdown", async ({ electronApp, window }) => {
+test("disposes the server process during Electron shutdown", async ({ electronApp, window }) => {
   await expect(window).toHaveTitle("Vibest");
-  const pid = backendPid(electronApp.process().pid);
+  const pid = await waitForServer(electronApp.process().pid);
 
   await electronApp.close();
 
   await expect.poll(() => processExists(pid), { timeout: 5_000 }).toBe(false);
 });
 
-test("offers Retry after repeated backend failures", async ({ electronApp, window }) => {
+test("offers Retry after repeated server failures", async ({ electronApp, window }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveBackendToFailed(parentPid);
+  await driveServerToFailed(parentPid);
 
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
   await window.getByRole("button", { name: "Retry" }).click();
-  await expect.poll(() => findBackendPid(parentPid), { timeout: 10_000 }).toBeTruthy();
+  await expect.poll(() => findServerPid(parentPid), { timeout: 10_000 }).toBeTruthy();
   await expect(window.getByText("The local server stopped")).toBeHidden({ timeout: 10_000 });
 });
 
@@ -224,7 +229,7 @@ test("quits through Desktop RPC from the terminal failure state", async ({
 }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveBackendToFailed(parentPid);
+  await driveServerToFailed(parentPid);
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
 
   await window.getByRole("button", { name: "Quit" }).click();
