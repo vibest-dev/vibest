@@ -17,7 +17,7 @@ function Component() {
       const { sessionId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
       });
-      navigate({ to: "/chat/$sessionId", params: { sessionId } });
+      navigate({ to: "/session/$sessionId", params: { sessionId } });
     } catch (error) {
       console.error("Failed to create session", error);
       // TODO: Show error toast to user
