@@ -1,26 +1,19 @@
 .vibest-startup-logo {
-  display: flex;
+  width: clamp(3.5rem, 6vw, 4.75rem);
+  aspect-ratio: 6 / 5;
   color: var(--foreground);
-  user-select: none;
-  transform: scale(0.96);
-}
-
-.vibest-startup-logo pre {
-  width: 0.92ch;
-  margin: 0;
-  overflow: visible;
-  font-family: var(--font-mono);
-  font-size: clamp(1.1rem, 2.8vw, 1.75rem);
-  font-weight: 700;
-  line-height: 0.78;
-  white-space: pre;
-  opacity: 0;
-  transform: translateX(-4px);
+  background: currentColor;
+  clip-path: inset(0 100% 0 0);
+  opacity: 0.25;
+  transform: translateX(-5px) scale(0.96);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vibest-startup-logo,
-  .vibest-startup-logo pre {
+  .vibest-startup-logo {
+    clip-path: none;
     opacity: 1;
     transform: none;
   }

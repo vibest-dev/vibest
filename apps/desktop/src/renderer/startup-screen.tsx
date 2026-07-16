@@ -1,21 +1,9 @@
 import { useAnimate } from "motion/react-mini";
 import { useEffect, type ReactElement } from "react";
 
+import vibestLogoUrl from "../../resources/v.svg?url";
+
 import "./startup-screen.css";
-
-const VIBEST_V_ROWS = [
-  "████    ████",
-  "████    ████",
-  "  ████████",
-  "  ████████",
-  "    ████",
-  "    ████",
-];
-
-const VIBEST_V_COLUMNS = Array.from(
-  { length: Math.max(...VIBEST_V_ROWS.map((row) => row.length)) },
-  (_, columnIndex) => VIBEST_V_ROWS.map((row) => row[columnIndex] ?? " ").join("\n"),
-);
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -26,31 +14,17 @@ export function StartupScreen(): ReactElement {
   useEffect(() => {
     if (reducedMotion) return;
 
-    const animations = [
-      animate(
-        scope.current,
-        { transform: ["scale(0.96)", "scale(1)"] },
-        { duration: 0.32, ease: EASE },
-      ),
-      ...VIBEST_V_COLUMNS.map((_, columnIndex) =>
-        animate(
-          `[data-vibest-column="${columnIndex}"]`,
-          {
-            opacity: [0, 1],
-            transform: ["translateX(-4px)", "translateX(0)"],
-          },
-          {
-            delay: 0.02 + columnIndex * 0.022,
-            duration: 0.18,
-            ease: EASE,
-          },
-        ),
-      ),
-    ];
+    const animation = animate(
+      scope.current,
+      {
+        clipPath: ["inset(0 100% 0 0)", "inset(0 0% 0 0)"],
+        opacity: [0.25, 1],
+        transform: ["translateX(-5px) scale(0.96)", "translateX(0) scale(1)"],
+      },
+      { duration: 0.36, ease: EASE },
+    );
 
-    return () => {
-      for (const animation of animations) animation.cancel();
-    };
+    return () => animation.cancel();
   }, [animate, reducedMotion, scope]);
 
   return (
@@ -58,13 +32,15 @@ export function StartupScreen(): ReactElement {
       className="bg-background fixed inset-0 z-40 grid place-items-center"
       aria-label="Starting Vibest"
     >
-      <div ref={scope} className="vibest-startup-logo" aria-hidden="true">
-        {VIBEST_V_COLUMNS.map((column, columnIndex) => (
-          <pre key={`${columnIndex}-${column}`} data-vibest-column={columnIndex}>
-            {column}
-          </pre>
-        ))}
-      </div>
+      <div
+        ref={scope}
+        className="vibest-startup-logo"
+        style={{
+          WebkitMaskImage: `url("${vibestLogoUrl}")`,
+          maskImage: `url("${vibestLogoUrl}")`,
+        }}
+        aria-hidden="true"
+      />
     </main>
   );
 }
