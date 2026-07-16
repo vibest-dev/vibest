@@ -33,10 +33,15 @@ labels: [wayfinder:map]
 - [契约类型定稿](tickets/01-contract-types.md) — 破坏性直改 packages/contract（否决 domain-v2 并存）：SessionRef、phase 状态机、DaemonEvent（session 事件带 seq/collection 无序号）、SubscribeStreamItem（无 gap）、SessionRuntimeSnapshot、PromptInput parts、daemonErrors；13 方法契约；contract 独立绿（14 测试），下游 4 包待 impl ticket 迁移。
 - [客户端消费形态](tickets/03-client-consumption-shape.md) — 保留 AbstractChat 当 reducer，常驻订阅做成 transport 级 `SessionStream`（否决新建 Driver：两路都要建 SessionStream，Driver 还得重写已有 reducer）；三条恢复路径落在 AbstractChat 原生 replace-vs-push（依赖 messageId 不变量）；reconnectToStream/resumeStream 是续接钩子。
 - [落地顺序与兼容策略](tickets/06-landing-sequence.md) — CI 全仓门禁 → 单大分支一次性推平合 main（不拆集成分支）；分支内序 07→08→{09,10}→11→12；无适配 shim；getMessages 空数组接缝仅开发期；event-manifest 迁移归 08；受控调度订阅测试随 08。
+- [codex 原生历史与 messageId 调研](tickets/05-codex-history-research.md) — codex 有原生持久化 `Turn.id`，实时 transform 已当 start.messageId 发、`thread/read includeTurns` 可读回同 id，**无需合成**；与 claude-code 共享 fold 架构不共享 id 源；turn.ended 从 `turn/completed` payload 派生。风险：turn.id 跨 resume 稳定性未实测（承重假设，ticket 11 前必验）。
+- [claude-code 原生历史与 messageId 调研](tickets/04-claude-code-history-research.md) — 今天完全没连上（实时 start 无 messageId、fold 出空 id）；原生 `getSessionMessages` 有 wire uuid 且跨 resume 存活，但一 turn 多条 assistant，**须合成**（取 turn 首条 assistant uuid）两侧同分段规则复现；turn.ended 须门控在对 getSessionMessages 的有界轮询后。承重风险：compaction/`retracted_message_uuids` 可改写被选 uuid → 破坏 reconciliation。
 
 ## Not yet specified
 
-- `session.turn.ended` 与历史提交边界（设计稿 §7.5）的不变量最终强度——要等 claude-code/codex 历史调研出结果才能定多严格。
+- turn.ended 提交边界已由 04/05 定形（claude-code 有界轮询 getSessionMessages、codex 从 turn/completed payload 派生），具体实现归 ticket 10/11。
+- **claude-code messageId 承重风险**：compaction（`compact_boundary`）/ `retracted_message_uuids` 会改写被选中的 turn-首条-assistant uuid → 破坏 reconciliation。缓解策略（换更稳的 id 锚点？committed 侧重映射？）在 ticket 10 内决，可能需回补一张专项 ticket。
+- **codex turn.id 跨 resume/重启稳定性未实测**：ticket 11 实现前必须对活二进制验证；若不稳，codex 也退回合成规则。
+- 两侧共享的 **turn 分段规则**（历史读缺 result/system 边界帧）需先写对拍测试锁死——ticket 10 起点。
 - pi adapter 在新契约下的能力声明与 `UNSUPPORTED` 策略（历史、恢复等）。
 - 订阅语义的验收测试基建形态（受控调度、无 sleep，对齐设计稿 §10.3）——随订阅重构实现清晰。
 - active-turn buffer 指标落点与后续上限策略（v1 不设上限，先收集数据）。
