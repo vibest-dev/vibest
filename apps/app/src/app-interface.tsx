@@ -20,6 +20,14 @@ if (import.meta.env.DEV) {
   void import("react-grab");
 }
 
+// Dev only: highlights components as they re-render so you can spot wasted
+// renders. Loaded just after React (a tick later than react-scan's ideal
+// "before React" position), so it may miss the very first render but catches
+// everything after. Dead-code-eliminated from production. See https://react-scan.com.
+if (import.meta.env.DEV) {
+  void import("react-scan").then(({ scan }) => scan());
+}
+
 /** Shared application entry. PlatformProvider is the host seam above it. */
 export function AppInterface({ server }: { server?: ServerConnection }): ReactElement {
   usePlatform();

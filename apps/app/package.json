@@ -52,6 +52,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "code-inspector-plugin": "latest",
     "react-grab": "^0.1.48",
+    "react-scan": "^0.5.7",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vitest": "catalog:"
