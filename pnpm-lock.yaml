@@ -158,6 +158,9 @@ importers:
       code-inspector-plugin:
         specifier: latest
         version: 2.0.1
+      react-grab:
+        specifier: ^0.1.48
+        version: 0.1.48(react@19.2.7)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

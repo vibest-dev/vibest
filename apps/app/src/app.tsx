@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode, type ReactElement } from "react";
 
+import "./dev/react-grab";
 import { ChatManagerProvider } from "./core/chat/chat-context";
 import { ChatManager } from "./core/chat/chat-manager";
 import { ChatTransport } from "./core/chat/chat-transport";
