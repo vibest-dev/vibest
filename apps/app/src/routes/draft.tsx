@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEditorState } from "@tiptap/react";
 import {
@@ -20,7 +21,6 @@ import { hasChatContent } from "@/components/chat/input/serialize";
 import { ModelSelect } from "@/components/chat/model-select";
 import { useChatManager } from "@/core/chat/chat-context";
 import type { ChatModel } from "@/core/chat/chat-transport";
-import { useLatestRef } from "@/hooks/use-latest-ref";
 
 // "/draft" is the new-session surface: type a first message, which creates a
 // session, sends it as the opening turn, and navigates into the live session.
@@ -35,29 +35,25 @@ function DraftRoute() {
   const manager = useChatManager();
   const navigate = useNavigate();
   const [model, setModel] = useState<ChatModel>("sonnet");
-  const [isCreating, setIsCreating] = useState(false);
 
-  const modelRef = useLatestRef(model);
-  const creatingRef = useLatestRef(isCreating);
-
-  // Create the session, start the first turn against the manager's persisted
+  // Create the session and start its first turn against the manager's persisted
   // store, then navigate — the session route re-attaches the same Chat with the
   // turn already streaming.
-  const startSession = async (text: string) => {
-    setIsCreating(true);
-    try {
+  const startSession = useMutation({
+    mutationFn: async ({ text }: { text: string }) => {
       const { sessionId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
       });
-      void manager.attach(sessionId).prompt(text, { model: modelRef.current });
+      void manager.attach(sessionId).prompt(text, { model });
+      return sessionId;
+    },
+    onSuccess: (sessionId) => {
       navigate({ to: "/session/$sessionId", params: { sessionId } });
-    } catch (error) {
-      toast.error(
-        `Failed to start session: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      setIsCreating(false);
-    }
-  };
+    },
+    onError: (error) => {
+      toast.error(`Failed to start session: ${error.message}`);
+    },
+  });
 
   const controller = useChatInputController({
     // Order is a hard constraint: base extensions first, submit keymap last —
@@ -69,8 +65,8 @@ function DraftRoute() {
     ],
     onSubmit: (text) => {
       // Create in flight: don't fire a second one.
-      if (creatingRef.current) return false;
-      void startSession(text);
+      if (startSession.isPending) return false;
+      startSession.mutate({ text });
       // Never clear: on success we navigate away (editor unmounts); on failure
       // the text must survive so the user can retry.
       return false;
@@ -97,7 +93,7 @@ function DraftRoute() {
             <PromptInputTools>
               <ModelSelect value={model} onChange={setModel} />
             </PromptInputTools>
-            <PromptInputSubmit disabled={!hasContent || isCreating} />
+            <PromptInputSubmit disabled={!hasContent || startSession.isPending} />
           </PromptInputToolbar>
         </ChatInputProvider>
       </PromptInput>
