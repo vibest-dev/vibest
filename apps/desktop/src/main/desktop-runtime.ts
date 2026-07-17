@@ -45,7 +45,7 @@ export function startDesktopRuntime(): void {
   const remoteDebugPort = process.env["VIBEST_REMOTE_DEBUG_PORT"];
   if (remoteDebugPort) {
     app.commandLine.appendSwitch("remote-debugging-port", remoteDebugPort);
-    app.setPath("userData", vibestTempPath(`debug-${remoteDebugPort}`));
+    app.setPath("userData", vibestTempPath(`remote-debugging-${remoteDebugPort}`));
   }
 
   let runtime: ReturnType<typeof makeRuntime> | undefined;
