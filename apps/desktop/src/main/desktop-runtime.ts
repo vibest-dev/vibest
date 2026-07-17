@@ -39,6 +39,14 @@ export function startDesktopRuntime(): void {
   const isE2E = process.env["VIBEST_E2E"] === "1";
   if (isE2E && process.platform === "darwin") app.setActivationPolicy("accessory");
 
+  // Opt-in remote debugging for CDP tools (agent-browser). Isolates userData so
+  // the single-instance lock doesn't collide with another running build.
+  const remoteDebugPort = process.env["VIBEST_REMOTE_DEBUG_PORT"];
+  if (remoteDebugPort) {
+    app.commandLine.appendSwitch("remote-debugging-port", remoteDebugPort);
+    app.setPath("userData", `${app.getPath("temp")}/vibest-debug-${remoteDebugPort}`);
+  }
+
   let runtime: ReturnType<typeof makeRuntime> | undefined;
   let disposing = false;
   let allowQuit = false;

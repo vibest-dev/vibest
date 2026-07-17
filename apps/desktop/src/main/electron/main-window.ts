@@ -57,7 +57,10 @@ export function makeMainWindow(
         show: false,
         autoHideMenuBar: true,
         titleBarStyle: "hiddenInset",
-        trafficLightPosition: { x: 16, y: 16 },
+        // Vertically center the ~14px traffic lights in the card header (routes/__root.tsx).
+        // header top = inset card m-1.5 (6px) + border (1px) = 7px; header h-10 = 40px.
+        // y = (7 + 40/2) - 14/2 = 27 - 7 = 20  → 13px clearance above and below.
+        trafficLightPosition: { x: 22, y: 20 },
         ...(process.platform === "linux" ? { icon } : {}),
         webPreferences: {
           preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../preload/index.js"),
