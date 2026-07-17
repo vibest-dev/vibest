@@ -1,10 +1,9 @@
 import { eventIteratorToStream } from "@orpc/client";
+import type { VibestClient } from "@vibest/client";
 import type { UserInputPart } from "@vibest/contract";
 import type { SessionEventStreamItem } from "@vibest/contract/session";
 import { isSessionEvent } from "@vibest/contract/session-events";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
-
-import type { AppClients } from "@/lib/orpc";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
 
@@ -48,9 +47,27 @@ type EventSubscription = {
   readonly close: () => void;
 };
 
+type VibestSessionClient = VibestClient["session"];
+
+type SessionClient = Omit<
+  Pick<
+    VibestSessionClient,
+    "events" | "interrupt" | "prompt" | "respondToAgentRequest" | "snapshot"
+  >,
+  "events"
+> & {
+  events: (
+    ...args: Parameters<VibestSessionClient["events"]>
+  ) => Promise<AsyncIterable<SessionEventStreamItem>>;
+};
+
+export type ChatTransportClient = {
+  readonly session: SessionClient;
+};
+
 type PromptRecovery = {
   readonly subscription: EventSubscription;
-  readonly snapshot: Awaited<ReturnType<AppClients["orpcClient"]["session"]["snapshot"]>>;
+  readonly snapshot: Awaited<ReturnType<SessionClient["snapshot"]>>;
 };
 
 async function* promptChunks(
@@ -115,8 +132,8 @@ async function* promptChunks(
   }
 }
 
-export class ChatTransport implements AiChatTransport<UIMessage> {
-  constructor(private readonly clients: Pick<AppClients, "orpcClient" | "orpcWsClient">) {}
+export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
+  constructor(private readonly client: ChatTransportClient) {}
 
   async #openEvents(
     sessionId: string,
@@ -128,7 +145,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     try {
-      const events = await this.clients.orpcWsClient.session.events(
+      const events = await this.client.session.events(
         { sessionId, ...(after === undefined ? {} : { after }) },
         { signal: controller.signal },
       );
@@ -153,7 +170,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
     const model = (options.body as { model?: ChatModel } | undefined)?.model ?? "sonnet";
     const initial = await this.#openEvents(options.chatId, undefined, options.abortSignal);
     try {
-      const receipt = await this.clients.orpcClient.session.prompt(
+      const receipt = await this.client.session.prompt(
         { sessionId: options.chatId, input: toUserInput(message, model) },
         { signal: options.abortSignal },
       );
@@ -162,19 +179,15 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
         return emptyChunkStream();
       }
       const interrupt = () => {
-        void this.clients.orpcClient.session
-          .interrupt({ sessionId: options.chatId })
-          .catch((error) => {
-            if (!isAbortError(error)) console.error("Failed to interrupt session", error);
-          });
+        void this.client.session.interrupt({ sessionId: options.chatId }).catch((error) => {
+          if (!isAbortError(error)) console.error("Failed to interrupt session", error);
+        });
       };
       options.abortSignal?.addEventListener("abort", interrupt, { once: true });
       const recover = async (after: number): Promise<PromptRecovery> => {
         const subscription = await this.#openEvents(options.chatId, after, options.abortSignal);
         try {
-          const snapshot = await this.clients.orpcClient.session.snapshot({
-            sessionId: options.chatId,
-          });
+          const snapshot = await this.client.session.snapshot({ sessionId: options.chatId });
           return { subscription, snapshot };
         } catch (error) {
           subscription.close();
@@ -214,7 +227,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
 
     const handleRequest = async (request: AgentRequest) => {
       if (request.type === "plan" && !request.plan.trim()) {
-        void this.clients.orpcWsClient.session
+        void this.client.session
           .respondToAgentRequest({
             sessionId,
             requestId: request.id,
@@ -234,7 +247,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
     };
 
     const hydratePendingRequests = async () => {
-      const snapshot = await this.clients.orpcClient.session.snapshot({ sessionId });
+      const snapshot = await this.client.session.snapshot({ sessionId });
       if (snapshot.degraded) throw new Error("Session snapshot replay is degraded");
       const pendingRequestIds = new Set(snapshot.pendingRequests.map((request) => request.id));
       for (const requestId of deliveredRequestIds) {
@@ -301,7 +314,7 @@ export class ChatTransport implements AiChatTransport<UIMessage> {
     requestId: string,
     response: AgentResponse,
   ): Promise<void> {
-    await this.clients.orpcWsClient.session.respondToAgentRequest({
+    await this.client.session.respondToAgentRequest({
       sessionId,
       requestId,
       response,

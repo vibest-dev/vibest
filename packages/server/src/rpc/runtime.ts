@@ -7,6 +7,7 @@ import {
   type ClaudeCodeAgent,
 } from "@vibest/harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "@vibest/harness/codex";
+import { makePiAdapter, makePiAgent, type PiAgent } from "@vibest/harness/pi";
 import {
   HarnessAgentRegistry,
   HarnessAgentSessionServiceLayer,
@@ -18,6 +19,7 @@ import { EventBusLayer } from "../events";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
+export class Pi extends Context.Service<Pi, PiAgent>()("Pi") {}
 
 export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
   ClaudeCode,
@@ -32,14 +34,23 @@ export const CodexLayer: Layer.Layer<Codex> = Layer.effect(Codex, makeCodexAgent
   Layer.provide(NodeProcessLayer),
 );
 
-const ProvidersLayer = Layer.merge(ClaudeCodeLayer, CodexLayer);
+export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
+  Layer.provide(NodeProcessLayer),
+);
+
+const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
 
 const RegistryLayer = Layer.effect(
   HarnessAgentRegistry,
   Effect.gen(function* () {
     const claudeCode = yield* ClaudeCode;
     const codex = yield* Codex;
-    return makeHarnessAgentRegistry([makeClaudeCodeAdapter(claudeCode), makeCodexAdapter(codex)]);
+    const pi = yield* Pi;
+    return makeHarnessAgentRegistry([
+      makeClaudeCodeAdapter(claudeCode),
+      makeCodexAdapter(codex),
+      makePiAdapter(pi),
+    ]);
   }),
 ).pipe(Layer.provide(ProvidersLayer));
 

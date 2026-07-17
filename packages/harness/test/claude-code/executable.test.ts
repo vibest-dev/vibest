@@ -27,6 +27,20 @@ describe("resolveClaudeExecutable", () => {
     expect(resolved).toBe("/custom/claude");
   });
 
+  it("uses the E2E executable override only in E2E mode", () => {
+    const resolved = resolveClaudeExecutable(
+      deps({
+        env: {
+          VIBEST_E2E: "1",
+          VIBEST_E2E_CLAUDE_EXECUTABLE: "/test/fake-claude",
+          VIBEST_CLAUDE_EXECUTABLE: "/custom/claude",
+        },
+      }),
+    );
+
+    expect(resolved).toBe("/test/fake-claude");
+  });
+
   it("prefers the SDK's version-matched binary over one on PATH", () => {
     const resolved = resolveClaudeExecutable(
       deps({

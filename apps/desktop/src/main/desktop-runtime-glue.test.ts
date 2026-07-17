@@ -1,49 +1,51 @@
 import { Effect, Layer, ManagedRuntime, SubscriptionRef } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { BackendStatusSnapshot } from "../shared/desktop-rpc";
+import type { ServerStatusSnapshot } from "../shared/desktop-rpc";
 import { DesktopApplication } from "./application/desktop-application";
-import { LocalBackend } from "./backend/local-backend";
 import { DesktopApplicationLive } from "./desktop-runtime-glue";
+import { LocalServer } from "./server/local-server";
 
 describe("DesktopApplicationLive", () => {
-  it("resolves a DesktopApplication built from a LocalBackend provided through the Layer graph", async () => {
+  it("resolves a DesktopApplication built from a LocalServer provided through the Layer graph", async () => {
     const statusRef = Effect.runSync(
-      SubscriptionRef.make<BackendStatusSnapshot>({ revision: 0, status: "ready" }),
+      SubscriptionRef.make<ServerStatusSnapshot>({ revision: 0, status: "ready" }),
     );
 
-    // Only LocalBackend is faked: this test exercises the Layer wiring
-    // introduced by this module (LocalBackend -> DesktopApplication), not
-    // the already-covered supervision logic inside makeLocalBackend itself.
-    const fakeLocalBackendLive = Layer.succeed(LocalBackend, {
-      connection: {
+    // Only LocalServer is faked: this test exercises the Layer wiring
+    // introduced by this module (LocalServer -> DesktopApplication), not
+    // the already-covered supervision logic inside makeLocalServer itself.
+    const fakeLocalServerLive = Layer.succeed(LocalServer, {
+      connection: Effect.succeed({
         httpBaseUrl: "http://127.0.0.1:1",
         wsBaseUrl: "ws://127.0.0.1:1",
         token: "fake-token",
-      },
+      }),
       snapshot: SubscriptionRef.get(statusRef),
       changes: SubscriptionRef.changes(statusRef),
       retry: Effect.void,
     });
 
     const runtime = ManagedRuntime.make(
-      DesktopApplicationLive.pipe(Layer.provide(fakeLocalBackendLive)),
+      DesktopApplicationLive.pipe(Layer.provide(fakeLocalServerLive)),
     );
 
     try {
-      const bootstrap = await runtime.runPromise(
+      const result = await runtime.runPromise(
         Effect.gen(function* () {
           const application = yield* DesktopApplication;
-          return yield* application.bootstrap;
+          return {
+            bootstrap: yield* application.bootstrap,
+            server: yield* application.serverConnection,
+          };
         }),
       );
 
-      expect(bootstrap).toMatchObject({
-        os: process.platform,
-        backend: { token: "fake-token" },
+      expect(result.bootstrap).toMatchObject({
         status: "ready",
         statusRevision: 0,
       });
+      expect(result.server).toMatchObject({ token: "fake-token" });
     } finally {
       await runtime.dispose();
     }

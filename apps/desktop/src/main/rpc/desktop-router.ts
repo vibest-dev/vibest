@@ -19,14 +19,17 @@ export function makeDesktopRouter(application: DesktopApplication["Service"]) {
       subscribe: orpc.status.subscribe.effect(function* ({ input }) {
         return yield* Effect.sync(() =>
           streamToAsyncIteratorObject(
-            Stream.toReadableStream(application.watchBackendStatus(input.after)),
+            Stream.toReadableStream(application.watchServerStatus(input.after)),
           ),
         );
       }),
     },
-    backend: {
-      retry: orpc.backend.retry.effect(function* () {
-        yield* application.retryBackend;
+    server: {
+      connection: orpc.server.connection.effect(function* () {
+        return yield* application.serverConnection;
+      }),
+      retry: orpc.server.retry.effect(function* () {
+        yield* application.retryServer;
       }),
     },
     app: {

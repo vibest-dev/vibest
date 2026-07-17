@@ -1,21 +1,39 @@
 import { consumeEventIterator } from "@orpc/client";
-import type { Platform } from "@vibest/app/platform";
+import type { ServerStatusFeed, Platform } from "@vibest/app";
 
-import type { DesktopBootstrap } from "../shared/desktop-rpc";
+import type { ServerConnection, DesktopBootstrap } from "../shared/desktop-rpc";
 import type { DesktopClient } from "./desktop-client";
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-export function createDesktopPlatform(
+export type DesktopHost = {
+  platform: Platform;
+  server: Promise<ServerConnection>;
+  status: ServerStatusFeed;
+};
+
+export function createDesktopHost(
   client: DesktopClient,
   bootstrap: DesktopBootstrap,
-): Extract<Platform, { host: "desktop" }> {
+  server: Promise<ServerConnection>,
+): DesktopHost {
+  // AppInterface reads this promise only after the desktop shell is mounted.
+  // Keep a rejection handler attached before that first read.
+  void server.catch((error: unknown) => {
+    if (!isAbortError(error)) console.error("Desktop server connection failed", error);
+  });
+
   return {
-    host: "desktop",
-    os: bootstrap.os,
-    backend: bootstrap.backend,
+    platform: {
+      quit: () => {
+        void client.app.quit().catch((error: unknown) => {
+          if (!isAbortError(error)) console.error("Failed to request desktop quit", error);
+        });
+      },
+    },
+    server,
     status: {
       initial: bootstrap.status,
       subscribe: (listener) => {
@@ -48,13 +66,8 @@ export function createDesktopPlatform(
         };
       },
       retry: () => {
-        void client.backend.retry().catch((error: unknown) => {
-          if (!isAbortError(error)) console.error("Failed to retry desktop backend", error);
-        });
-      },
-      quit: () => {
-        void client.app.quit().catch((error: unknown) => {
-          if (!isAbortError(error)) console.error("Failed to request desktop quit", error);
+        void client.server.retry().catch((error: unknown) => {
+          if (!isAbortError(error)) console.error("Failed to retry desktop server", error);
         });
       },
     },

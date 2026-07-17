@@ -2,8 +2,6 @@ import type { Buffer } from "node:buffer";
 import type * as http from "node:http";
 import type { Socket } from "node:net";
 
-import { RPCHandler as FetchRPCHandler } from "@orpc/server/fetch";
-import { RPCHandler as NodeRPCHandler } from "@orpc/server/node";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
 import { ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
@@ -11,8 +9,6 @@ import { type WebSocket, WebSocketServer } from "ws";
 import type { RpcContext } from "./context";
 import { router } from "./router";
 import { AgentRuntimeLayer } from "./runtime";
-
-const RPC_PREFIX = "/api/rpc";
 
 // Without this, a procedure that throws becomes a bare 500 with no trace of the
 // cause anywhere — the client sees "Internal Server Error" and the server says
@@ -41,55 +37,6 @@ export async function createRpcRuntime(): Promise<RpcRuntime> {
   return {
     context,
     dispose: () => (disposing ??= runtime.dispose()),
-  };
-}
-
-export function createFetchRPCHandler(rpcContext: RpcContext) {
-  const rpcHandler = new FetchRPCHandler(router, {
-    clientInterceptors: [logErrors],
-    toFetchResponse: {
-      eventStream: {
-        keepAlive: { enabled: true, comment: "ping" },
-      },
-    },
-  });
-
-  return async function handler(
-    request: Request,
-    options?: {
-      prefix?: `/${string}`;
-    },
-  ) {
-    return rpcHandler.handle(request, {
-      prefix: "/api/rpc",
-      context: rpcContext,
-      ...options,
-    });
-  };
-}
-
-export function createNodeRPCHandler(rpcContext: RpcContext) {
-  const rpcHandler = new NodeRPCHandler(router, {
-    clientInterceptors: [logErrors],
-    sendStandardResponse: {
-      eventStream: {
-        keepAlive: { enabled: true, comment: "ping" },
-      },
-    },
-  });
-
-  return async function handler(
-    request: http.IncomingMessage,
-    response: http.ServerResponse,
-    options?: {
-      prefix?: `/${string}`;
-    },
-  ) {
-    return rpcHandler.handle(request, response, {
-      prefix: RPC_PREFIX,
-      context: rpcContext,
-      ...options,
-    });
   };
 }
 

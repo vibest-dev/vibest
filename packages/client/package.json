@@ -2,7 +2,7 @@
   "name": "@vibest/client",
   "version": "0.0.1",
   "private": true,
-  "description": "Client access layer for the Vibest server (oRPC links + typed client)",
+  "description": "WebSocket RPC client for the Vibest server",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

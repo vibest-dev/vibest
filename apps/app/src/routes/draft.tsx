@@ -31,7 +31,7 @@ export const Route = createFileRoute("/draft")({
 });
 
 function DraftRoute() {
-  const { orpc } = Route.useRouteContext();
+  const { orpcQueryUtils } = Route.useRouteContext();
   const manager = useChatManager();
   const navigate = useNavigate();
   const [model, setModel] = useState<ChatModel>("sonnet");
@@ -46,7 +46,9 @@ function DraftRoute() {
   const startSession = async (text: string) => {
     setIsCreating(true);
     try {
-      const { sessionId } = await orpc.session.create.call({ harnessAgentId: "claude-code" });
+      const { sessionId } = await orpcQueryUtils.session.create.call({
+        harnessAgentId: "claude-code",
+      });
       void manager.attach(sessionId).prompt(text, { model: modelRef.current });
       navigate({ to: "/session/$sessionId", params: { sessionId } });
     } catch (error) {

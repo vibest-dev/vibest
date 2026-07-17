@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as DraftRouteImport } from './routes/draft'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as SessionSessionIdRouteImport } from './routes/session.$sessionId'
+import { Route as SessionSessionIdRouteImport } from './routes/session/$sessionId'
 
 const DraftRoute = DraftRouteImport.update({
   id: '/draft',

@@ -2,31 +2,31 @@ import { Deferred, Effect, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
-  BackendExitedBeforeReady,
-  type BackendProcessConfig,
-  type LocalBackendConfig,
-  type RunningBackendProcess,
-  type SpawnBackend,
-  makeLocalBackend,
+  ServerExitedBeforeReady,
+  type ServerProcessConfig,
+  type LocalServerConfig,
+  type RunningServerProcess,
+  type SpawnServer,
+  makeLocalServer,
   restartBackoff,
-} from "./local-backend";
+} from "./local-server";
 
 type FakeProcess = {
   readonly port: number;
-  readonly config: BackendProcessConfig;
+  readonly config: ServerProcessConfig;
   readonly becomeReady: (port?: number) => void;
   readonly failBeforeReady: () => void;
   readonly exit: () => void;
   killed: boolean;
 };
 
-function makeHarness(overrides: Partial<LocalBackendConfig> = {}) {
+function makeHarness(overrides: Partial<LocalServerConfig> = {}) {
   const processes: FakeProcess[] = [];
   const scope = Effect.runSync(Scope.make());
 
-  const spawnBackend: SpawnBackend = (config, port) =>
+  const spawnServer: SpawnServer = (config, port) =>
     Effect.gen(function* () {
-      const ready = yield* Deferred.make<number, BackendExitedBeforeReady>();
+      const ready = yield* Deferred.make<number, ServerExitedBeforeReady>();
       const exited = yield* Deferred.make<{ exitCode: number | null }>();
       const process: FakeProcess = {
         port,
@@ -39,7 +39,7 @@ function makeHarness(overrides: Partial<LocalBackendConfig> = {}) {
           Effect.runSync(
             Deferred.fail(
               ready,
-              new BackendExitedBeforeReady({
+              new ServerExitedBeforeReady({
                 exitCode: 1,
                 message: "exited before ready",
               }),
@@ -59,16 +59,16 @@ function makeHarness(overrides: Partial<LocalBackendConfig> = {}) {
       return {
         ready: Deferred.await(ready),
         awaitExit: Deferred.await(exited),
-      } satisfies RunningBackendProcess;
+      } satisfies RunningServerProcess;
     });
 
-  const config: LocalBackendConfig = {
+  const config: LocalServerConfig = {
     entry: "/fake/cli.mjs",
     token: "fixed-token",
-    environment: {
+    environment: Effect.succeed({
       PATH: "/login/bin:/usr/bin",
       HTTPS_PROXY: "http://proxy.test:8443",
-    },
+    }),
     corsOrigins: ["vibest://app"],
     initialRestartDelayMs: 0,
     maxRestartDelayMs: 0,
@@ -79,7 +79,7 @@ function makeHarness(overrides: Partial<LocalBackendConfig> = {}) {
 
   return {
     processes,
-    backend: Effect.runPromise(makeLocalBackend(config, spawnBackend).pipe(Scope.provide(scope))),
+    server: Effect.runPromise(makeLocalServer(config, spawnServer).pipe(Scope.provide(scope))),
     dispose: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   };
 }
@@ -98,20 +98,23 @@ async function eventually(assertion: () => void | Promise<void>): Promise<void> 
   throw lastError;
 }
 
-describe("LocalBackend", () => {
-  it("starts on port 0 and exposes the fixed connection after ready", async () => {
+describe("LocalServer", () => {
+  it("returns while starting, then exposes the fixed connection after ready", async () => {
     const h = makeHarness();
+    const server = await h.server;
 
+    await expect(Effect.runPromise(server.snapshot)).resolves.toMatchObject({
+      status: "starting",
+    });
     await eventually(() => expect(h.processes[0]?.port).toBe(0));
     h.processes[0]!.becomeReady(56_789);
-    const backend = await h.backend;
 
-    expect(backend.connection).toEqual({
+    await expect(Effect.runPromise(server.connection)).resolves.toEqual({
       httpBaseUrl: "http://127.0.0.1:56789",
       wsBaseUrl: "ws://127.0.0.1:56789",
       token: "fixed-token",
     });
-    await expect(Effect.runPromise(backend.snapshot)).resolves.toMatchObject({ status: "ready" });
+    await expect(Effect.runPromise(server.snapshot)).resolves.toMatchObject({ status: "ready" });
     expect(h.processes[0]!.config.environment).toMatchObject({
       PATH: "/login/bin:/usr/bin",
       HTTPS_PROXY: "http://proxy.test:8443",
@@ -120,14 +123,41 @@ describe("LocalBackend", () => {
     await h.dispose();
   });
 
-  it("fails when the first process never becomes ready", async () => {
+  it("does not wait for environment resolution before exposing starting state", async () => {
+    const environment = Effect.runSync(Deferred.make<NodeJS.ProcessEnv>());
+    const h = makeHarness({ environment: Deferred.await(environment) });
+    const server = await h.server;
+
+    expect(h.processes).toHaveLength(0);
+    await expect(Effect.runPromise(server.snapshot)).resolves.toMatchObject({
+      status: "starting",
+    });
+
+    Effect.runSync(Deferred.succeed(environment, { PATH: "/usr/bin" }));
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.becomeReady(50_000);
+    await Effect.runPromise(server.connection);
+    await h.dispose();
+  });
+
+  it("surfaces an initial failure and retries without rebuilding the service", async () => {
     const h = makeHarness();
+    const server = await h.server;
 
     await eventually(() => expect(h.processes).toHaveLength(1));
     h.processes[0]!.failBeforeReady();
+    await eventually(async () => {
+      expect((await Effect.runPromise(server.snapshot)).status).toBe("failed");
+    });
 
-    await expect(h.backend).rejects.toThrow("exited before ready");
-    expect(h.processes).toHaveLength(1);
+    await Effect.runPromise(server.retry);
+    await eventually(() => expect(h.processes).toHaveLength(2));
+    expect(h.processes[1]!.port).toBe(0);
+    h.processes[1]!.becomeReady(50_000);
+
+    await expect(Effect.runPromise(server.connection)).resolves.toMatchObject({
+      httpBaseUrl: "http://127.0.0.1:50000",
+    });
     await h.dispose();
   });
 
@@ -135,7 +165,8 @@ describe("LocalBackend", () => {
     const h = makeHarness();
     await eventually(() => expect(h.processes).toHaveLength(1));
     h.processes[0]!.becomeReady(50_000);
-    const backend = await h.backend;
+    const server = await h.server;
+    await Effect.runPromise(server.connection);
 
     h.processes[0]!.exit();
     await eventually(() => expect(h.processes).toHaveLength(2));
@@ -143,7 +174,7 @@ describe("LocalBackend", () => {
     expect(h.processes[1]!.config.token).toBe("fixed-token");
     h.processes[1]!.becomeReady();
     await eventually(async () => {
-      expect((await Effect.runPromise(backend.snapshot)).status).toBe("ready");
+      expect((await Effect.runPromise(server.snapshot)).status).toBe("ready");
     });
 
     await h.dispose();
@@ -153,7 +184,8 @@ describe("LocalBackend", () => {
     const h = makeHarness({ maxFastFailures: 2 });
     await eventually(() => expect(h.processes).toHaveLength(1));
     h.processes[0]!.becomeReady(50_000);
-    const backend = await h.backend;
+    const server = await h.server;
+    await Effect.runPromise(server.connection);
 
     h.processes[0]!.exit();
     await eventually(() => expect(h.processes).toHaveLength(2));
@@ -161,19 +193,19 @@ describe("LocalBackend", () => {
     await eventually(() => expect(h.processes).toHaveLength(3));
     h.processes[2]!.failBeforeReady();
     await eventually(async () => {
-      expect((await Effect.runPromise(backend.snapshot)).status).toBe("failed");
+      expect((await Effect.runPromise(server.snapshot)).status).toBe("failed");
     });
 
     await Promise.all([
-      Effect.runPromise(backend.retry),
-      Effect.runPromise(backend.retry),
-      Effect.runPromise(backend.retry),
+      Effect.runPromise(server.retry),
+      Effect.runPromise(server.retry),
+      Effect.runPromise(server.retry),
     ]);
     await eventually(() => expect(h.processes).toHaveLength(4));
     expect(h.processes[3]!.port).toBe(50_000);
     h.processes[3]!.becomeReady();
     await eventually(async () => {
-      expect((await Effect.runPromise(backend.snapshot)).status).toBe("ready");
+      expect((await Effect.runPromise(server.snapshot)).status).toBe("ready");
     });
 
     await h.dispose();
@@ -183,7 +215,8 @@ describe("LocalBackend", () => {
     const h = makeHarness();
     await eventually(() => expect(h.processes).toHaveLength(1));
     h.processes[0]!.becomeReady(50_000);
-    await h.backend;
+    const server = await h.server;
+    await Effect.runPromise(server.connection);
 
     await h.dispose();
 

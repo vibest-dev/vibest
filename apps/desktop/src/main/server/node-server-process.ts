@@ -3,22 +3,22 @@ import { Deferred, Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
-  BackendExitedBeforeReady,
-  BackendReadyTimeout,
-  BackendSpawnError,
-  type BackendStartError,
-  type SpawnBackend,
-} from "./local-backend";
+  ServerExitedBeforeReady,
+  ServerReadyTimeout,
+  ServerSpawnError,
+  type ServerStartError,
+  type SpawnServer,
+} from "./local-server";
 
 export const START_TIMEOUT_MS = 30_000;
 
-function spawnError(message: string, cause: unknown): BackendSpawnError {
-  return new BackendSpawnError({ message, cause });
+function spawnError(message: string, cause: unknown): ServerSpawnError {
+  return new ServerSpawnError({ message, cause });
 }
 
-export function makeNodeBackendProcess(
+export function makeNodeServerProcess(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-): SpawnBackend {
+): SpawnServer {
   return (config, port) =>
     Effect.gen(function* () {
       const command = ChildProcess.make(process.execPath, [config.entry], {
@@ -40,15 +40,12 @@ export function makeNodeBackendProcess(
         .spawn(command)
         .pipe(
           Effect.mapError((cause) =>
-            spawnError(`Unable to start the backend process: ${String(cause)}`, cause),
+            spawnError(`Unable to start the server process: ${String(cause)}`, cause),
           ),
         );
 
-      const ready = yield* Deferred.make<number, BackendStartError>();
-      const exited = yield* Deferred.make<
-        { readonly exitCode: number | null },
-        BackendSpawnError
-      >();
+      const ready = yield* Deferred.make<number, ServerStartError>();
+      const exited = yield* Deferred.make<{ readonly exitCode: number | null }, ServerSpawnError>();
 
       yield* handle.stdout.pipe(
         Stream.decodeText(),
@@ -61,7 +58,7 @@ export function makeNodeBackendProcess(
         Effect.catch((cause) =>
           Deferred.fail(
             ready,
-            spawnError(`Failed to read backend stdout: ${String(cause)}`, cause),
+            spawnError(`Failed to read server stdout: ${String(cause)}`, cause),
           ).pipe(Effect.asVoid),
         ),
         Effect.annotateLogs({ source: "vibest-server", fd: "stdout" }),
@@ -82,15 +79,15 @@ export function makeNodeBackendProcess(
         Effect.tap((exitCode) =>
           Deferred.fail(
             ready,
-            new BackendExitedBeforeReady({
+            new ServerExitedBeforeReady({
               exitCode,
-              message: `Backend exited during startup with code ${exitCode}`,
+              message: `Server exited during startup with code ${exitCode}`,
             }),
           ),
         ),
         Effect.flatMap((exitCode) => Deferred.succeed(exited, { exitCode })),
         Effect.catch((cause) => {
-          const error = spawnError(`Failed while waiting for the backend: ${String(cause)}`, cause);
+          const error = spawnError(`Failed while waiting for the server: ${String(cause)}`, cause);
           return Deferred.fail(ready, error).pipe(
             Effect.andThen(Deferred.fail(exited, error)),
             Effect.asVoid,
@@ -105,9 +102,9 @@ export function makeNodeBackendProcess(
             duration: START_TIMEOUT_MS,
             orElse: () =>
               Effect.fail(
-                new BackendReadyTimeout({
+                new ServerReadyTimeout({
                   timeoutMs: START_TIMEOUT_MS,
-                  message: `Backend did not report ready within ${START_TIMEOUT_MS}ms`,
+                  message: `Server did not report ready within ${START_TIMEOUT_MS}ms`,
                 }),
               ),
           }),

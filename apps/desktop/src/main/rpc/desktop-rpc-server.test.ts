@@ -7,12 +7,12 @@ import { ORPCError } from "@orpc/server";
 import { Context, Effect, Logger, Stream, SubscriptionRef } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { BackendStatusSnapshot, DesktopContract } from "../../shared/desktop-rpc";
+import type { ServerStatusSnapshot, DesktopContract } from "../../shared/desktop-rpc";
 import {
   type DesktopApplication,
   makeDesktopApplication,
 } from "../application/desktop-application";
-import type { LocalBackend } from "../backend/local-backend";
+import type { LocalServer } from "../server/local-server";
 import { makeDesktopRpcServer } from "./desktop-rpc-server";
 
 type DesktopClient = RouterContractClient<DesktopContract>;
@@ -21,7 +21,7 @@ function makeHarness(
   override?: (application: DesktopApplication["Service"]) => DesktopApplication["Service"],
 ) {
   const statusRef = Effect.runSync(
-    SubscriptionRef.make<BackendStatusSnapshot>({ revision: 0, status: "ready" }),
+    SubscriptionRef.make<ServerStatusSnapshot>({ revision: 0, status: "ready" }),
   );
   let retries = 0;
   let quits = 0;
@@ -42,12 +42,12 @@ function makeHarness(
     ),
   ) as Context.Context<never>;
 
-  const backend: LocalBackend["Service"] = {
-    connection: {
+  const server: LocalServer["Service"] = {
+    connection: Effect.succeed({
       httpBaseUrl: "http://127.0.0.1:43123",
       wsBaseUrl: "ws://127.0.0.1:43123",
       token: "desktop-token",
-    },
+    }),
     snapshot: SubscriptionRef.get(statusRef),
     changes: SubscriptionRef.changes(statusRef).pipe(
       Stream.ensuring(
@@ -61,15 +61,14 @@ function makeHarness(
     }),
   };
   const base = makeDesktopApplication({
-    backend,
-    os: "darwin",
+    server,
     quit: Effect.sync(() => {
       quits += 1;
     }),
   });
-  const server = makeDesktopRpcServer(override ? override(base) : base, rpcContext);
+  const rpcServer = makeDesktopRpcServer(override ? override(base) : base, rpcContext);
   const { port1, port2 } = new MessageChannel();
-  const detach = server.attach(port1);
+  const detach = rpcServer.attach(port1);
   port1.start();
   port2.start();
 
@@ -77,7 +76,7 @@ function makeHarness(
 
   return {
     client,
-    setStatus: (snapshot: BackendStatusSnapshot) =>
+    setStatus: (snapshot: ServerStatusSnapshot) =>
       Effect.runPromise(SubscriptionRef.set(statusRef, snapshot)),
     retries: () => retries,
     quits: () => quits,
@@ -110,17 +109,16 @@ describe("Desktop MessagePort RPC", () => {
     const h = makeHarness();
     try {
       await expect(h.client.bootstrap()).resolves.toEqual({
-        os: "darwin",
-        backend: {
-          httpBaseUrl: "http://127.0.0.1:43123",
-          wsBaseUrl: "ws://127.0.0.1:43123",
-          token: "desktop-token",
-        },
         status: "ready",
         statusRevision: 0,
       });
+      await expect(h.client.server.connection()).resolves.toEqual({
+        httpBaseUrl: "http://127.0.0.1:43123",
+        wsBaseUrl: "ws://127.0.0.1:43123",
+        token: "desktop-token",
+      });
 
-      await h.client.backend.retry();
+      await h.client.server.retry();
       await h.client.app.quit();
       expect(h.retries()).toBe(1);
       expect(h.quits()).toBe(1);
@@ -132,7 +130,7 @@ describe("Desktop MessagePort RPC", () => {
   it("streams status and runs the server finalizer when the client cancels", async () => {
     const h = makeHarness();
     const controller = new AbortController();
-    const received: BackendStatusSnapshot[] = [];
+    const received: ServerStatusSnapshot[] = [];
     const unsubscribe = consumeEventIterator(
       h.client.status.subscribe({ after: 0 }, { signal: controller.signal }),
       {

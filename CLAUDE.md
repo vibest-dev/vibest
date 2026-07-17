@@ -85,7 +85,7 @@ When using TanStack Query (server state) with Zustand (client state):
 
 The `vibest` project adheres to several modern engineering practices to ensure code quality, maintainability, and efficient development:
 
-- **Monorepo Management:** `pnpm` handles dependencies and `Turborepo` orchestrates tasks across packages. Common commands: `pnpm build` (`turbo build`, respects the dependency graph), `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format`, and `pnpm check` (lint + format + typecheck). The task graph lives in `turbo.json`.
+- **Monorepo Management:** `pnpm` installs dependencies; `turbo` runs all workspace tasks and respects the dependency graph — always use `turbo run <task>` (or `turbo run <task> --filter=<package>` to scope), never `pnpm --filter <package> <task>`. The task graph lives in `turbo.json`.
 - **TypeScript:** The entire codebase is written in TypeScript, providing static type checking for improved code reliability, readability, and developer experience.
 - **Code Quality & Formatting:** Linting and formatting are handled by `Oxlint` (`.oxlintrc.json`) and `Oxfmt` (`.oxfmtrc.json`), run from the repo root via `pnpm lint` / `pnpm format`, enforcing consistent coding styles and catching issues early.
 - **Automated Testing:** Unit and integration tests are present (e.g., `vitest.config.ts`, `test` directories), ensuring the correctness of individual modules and their interactions.

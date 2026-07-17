@@ -12,9 +12,9 @@ import {
 } from "effect";
 
 import type {
-  BackendConnection,
-  BackendStatus,
-  BackendStatusSnapshot,
+  ServerConnection,
+  ServerStatus,
+  ServerStatusSnapshot,
 } from "../../shared/desktop-rpc";
 
 const DEFAULTS = {
@@ -24,60 +24,62 @@ const DEFAULTS = {
   stableAfterMs: 10_000,
 };
 
-export class BackendSpawnError extends Data.TaggedError("BackendSpawnError")<{
+export class ServerSpawnError extends Data.TaggedError("ServerSpawnError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-export class BackendReadyTimeout extends Data.TaggedError("BackendReadyTimeout")<{
+export class ServerReadyTimeout extends Data.TaggedError("ServerReadyTimeout")<{
   readonly timeoutMs: number;
   readonly message: string;
 }> {}
 
-export class BackendExitedBeforeReady extends Data.TaggedError("BackendExitedBeforeReady")<{
+export class ServerExitedBeforeReady extends Data.TaggedError("ServerExitedBeforeReady")<{
   readonly exitCode: number | null;
   readonly message: string;
 }> {}
 
-export type BackendStartError = BackendSpawnError | BackendReadyTimeout | BackendExitedBeforeReady;
+export type ServerStartError = ServerSpawnError | ServerReadyTimeout | ServerExitedBeforeReady;
 
-export type BackendProcessConfig = {
+export type ServerProcessConfig = {
   readonly entry: string;
   readonly token: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly corsOrigins: readonly string[];
 };
 
-export type BackendProcessExit = {
+export type ServerProcessExit = {
   readonly exitCode: number | null;
 };
 
-export type RunningBackendProcess = {
-  readonly ready: Effect.Effect<number, BackendStartError>;
-  readonly awaitExit: Effect.Effect<BackendProcessExit, BackendSpawnError>;
+export type RunningServerProcess = {
+  readonly ready: Effect.Effect<number, ServerStartError>;
+  readonly awaitExit: Effect.Effect<ServerProcessExit, ServerSpawnError>;
 };
 
-export type SpawnBackend = (
-  config: BackendProcessConfig,
+export type SpawnServer = (
+  config: ServerProcessConfig,
   port: number,
-) => Effect.Effect<RunningBackendProcess, BackendSpawnError, Scope.Scope>;
+) => Effect.Effect<RunningServerProcess, ServerSpawnError, Scope.Scope>;
 
-export type LocalBackendConfig = BackendProcessConfig & {
+export type LocalServerConfig = Omit<ServerProcessConfig, "environment"> & {
+  /** Resolved inside the supervisor fiber so it never delays window creation. */
+  readonly environment: Effect.Effect<NodeJS.ProcessEnv>;
   readonly initialRestartDelayMs?: number;
   readonly maxRestartDelayMs?: number;
   readonly maxFastFailures?: number;
   readonly stableAfterMs?: number;
 };
 
-export class LocalBackend extends Context.Service<
-  LocalBackend,
+export class LocalServer extends Context.Service<
+  LocalServer,
   {
-    readonly connection: BackendConnection;
-    readonly snapshot: Effect.Effect<BackendStatusSnapshot>;
-    readonly changes: Stream.Stream<BackendStatusSnapshot>;
+    readonly connection: Effect.Effect<ServerConnection>;
+    readonly snapshot: Effect.Effect<ServerStatusSnapshot>;
+    readonly changes: Stream.Stream<ServerStatusSnapshot>;
     readonly retry: Effect.Effect<void>;
   }
->()("desktop/LocalBackend") {}
+>()("desktop/LocalServer") {}
 
 export function restartBackoff(
   failureCount: number,
@@ -90,10 +92,7 @@ export function restartBackoff(
 // The supervise fiber is the only writer of statusRef, so get→set is
 // race-free. Not SubscriptionRef.modify: v4's set/modify publish
 // unconditionally, which would replay no-op snapshots to subscribers.
-function setStatus(
-  ref: SubscriptionRef.SubscriptionRef<BackendStatusSnapshot>,
-  next: BackendStatus,
-) {
+function setStatus(ref: SubscriptionRef.SubscriptionRef<ServerStatusSnapshot>, next: ServerStatus) {
   return Effect.gen(function* () {
     const current = yield* SubscriptionRef.get(ref);
     if (current.status !== next) {
@@ -105,17 +104,17 @@ function setStatus(
   });
 }
 
-export function makeLocalBackend(
-  config: LocalBackendConfig,
-  spawnBackend: SpawnBackend,
-): Effect.Effect<LocalBackend["Service"], BackendStartError, Scope.Scope> {
+export function makeLocalServer(
+  config: LocalServerConfig,
+  spawnServer: SpawnServer,
+): Effect.Effect<LocalServer["Service"], never, Scope.Scope> {
   return Effect.gen(function* () {
-    const statusRef = yield* SubscriptionRef.make<BackendStatusSnapshot>({
+    const statusRef = yield* SubscriptionRef.make<ServerStatusSnapshot>({
       revision: 0,
       status: "starting",
     });
     const retryQueue = yield* Queue.dropping<void>(1);
-    const initial = yield* Deferred.make<BackendConnection, BackendStartError>();
+    const initial = yield* Deferred.make<ServerConnection>();
 
     const initialDelay = config.initialRestartDelayMs ?? DEFAULTS.initialRestartDelayMs;
     const maxDelay = config.maxRestartDelayMs ?? DEFAULTS.maxRestartDelayMs;
@@ -123,6 +122,12 @@ export function makeLocalBackend(
     const stableAfter = config.stableAfterMs ?? DEFAULTS.stableAfterMs;
 
     const supervise = Effect.gen(function* () {
+      const processConfig: ServerProcessConfig = {
+        entry: config.entry,
+        token: config.token,
+        environment: yield* config.environment,
+        corsOrigins: config.corsOrigins,
+      };
       let first = true;
       let pinnedPort = 0;
       let fastFailures = 0;
@@ -132,7 +137,7 @@ export function makeLocalBackend(
 
         const attempt = yield* Effect.scoped(
           Effect.gen(function* () {
-            const running = yield* spawnBackend(config, first ? 0 : pinnedPort);
+            const running = yield* spawnServer(processConfig, first ? 0 : pinnedPort);
             const boundPort = yield* running.ready;
             readyAt = yield* Clock.currentTimeMillis;
 
@@ -154,21 +159,23 @@ export function makeLocalBackend(
           }),
         ).pipe(Effect.result);
 
-        if (first && Result.isFailure(attempt)) {
-          yield* Deferred.fail(initial, attempt.failure);
-          return;
+        if (Result.isFailure(attempt)) {
+          yield* Effect.logWarning("Server process attempt failed").pipe(
+            Effect.annotateLogs({ error: String(attempt.failure) }),
+          );
+        }
+
+        if (first) {
+          yield* setStatus(statusRef, "failed");
+          yield* Queue.take(retryQueue);
+          yield* setStatus(statusRef, "starting");
+          continue;
         }
 
         const now = yield* Clock.currentTimeMillis;
         const uptime = readyAt === undefined ? 0 : now - readyAt;
         if (uptime >= stableAfter) fastFailures = 0;
         fastFailures += 1;
-
-        if (Result.isFailure(attempt)) {
-          yield* Effect.logWarning("Backend process attempt failed").pipe(
-            Effect.annotateLogs({ error: String(attempt.failure) }),
-          );
-        }
 
         if (fastFailures > maxFailures) {
           yield* setStatus(statusRef, "failed");
@@ -184,17 +191,16 @@ export function makeLocalBackend(
     });
 
     yield* supervise.pipe(Effect.forkScoped);
-    const connection = yield* Deferred.await(initial);
     const snapshot = SubscriptionRef.get(statusRef);
 
     return {
-      connection,
+      connection: Deferred.await(initial),
       snapshot,
       changes: SubscriptionRef.changes(statusRef),
       retry: Effect.gen(function* () {
         const current = yield* snapshot;
         if (current.status === "failed") yield* Queue.offer(retryQueue, undefined);
       }),
-    } satisfies LocalBackend["Service"];
+    } satisfies LocalServer["Service"];
   });
 }

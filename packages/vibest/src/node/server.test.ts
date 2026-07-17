@@ -28,10 +28,13 @@ describe("createServer auth", () => {
     expect(response.status).toBe(200);
   });
 
-  it("rejects an unauthenticated /api/rpc call", async () => {
+  it("does not expose an HTTP RPC endpoint", async () => {
     const base = await start({ authToken: TOKEN });
-    const response = await fetch(`${base}/api/rpc/whatever`, { method: "POST" });
-    expect(response.status).toBe(401);
+    const response = await fetch(`${base}/api/rpc`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(response.status).toBe(404);
   });
 
   it("rejects a wrong token", async () => {
@@ -64,7 +67,7 @@ describe("createServer auth", () => {
 describe("createServer CORS", () => {
   it("answers a preflight from an allowlisted origin", async () => {
     const base = await start({ authToken: TOKEN, corsOrigins: ["vibest://app"] });
-    const response = await fetch(`${base}/api/rpc`, {
+    const response = await fetch(`${base}/api/ws-ticket`, {
       method: "OPTIONS",
       headers: { origin: "vibest://app" },
     });
@@ -74,7 +77,7 @@ describe("createServer CORS", () => {
 
   it("refuses a preflight from an unknown origin", async () => {
     const base = await start({ authToken: TOKEN, corsOrigins: ["vibest://app"] });
-    const response = await fetch(`${base}/api/rpc`, {
+    const response = await fetch(`${base}/api/ws-ticket`, {
       method: "OPTIONS",
       headers: { origin: "https://evil.example" },
     });
@@ -83,8 +86,8 @@ describe("createServer CORS", () => {
 });
 
 describe("createServer WebSocket ticket", () => {
-  async function connect(base: string, query: string): Promise<number> {
-    const url = `${base.replace("http://", "ws://")}/ws/rpc${query}`;
+  async function connect(base: string, query: string, path = "/ws/rpc"): Promise<number> {
+    const url = `${base.replace("http://", "ws://")}${path}${query}`;
     const socket = new WebSocket(url, "vibest");
     return await new Promise<number>((resolve) => {
       socket.on("open", () => {
@@ -109,6 +112,17 @@ describe("createServer WebSocket ticket", () => {
   it("rejects an upgrade with no ticket", async () => {
     const base = await start({ authToken: TOKEN });
     expect(await connect(base, "")).toBe(401);
+  });
+
+  it("only upgrades the WebSocket RPC path without consuming the ticket", async () => {
+    const base = await start({ authToken: TOKEN });
+    const ticketResponse = await fetch(`${base}/api/ws-ticket`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const { ticket } = (await ticketResponse.json()) as { ticket: string };
+    expect(await connect(base, `?ticket=${ticket}`, "/wrong-path")).toBe(404);
+    expect(await connect(base, `?ticket=${ticket}`)).toBe(200);
   });
 
   it("rejects a replayed ticket", async () => {

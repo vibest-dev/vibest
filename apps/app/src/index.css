@@ -3,6 +3,10 @@
 
 @source "../node_modules/@vibest/ui";
 
+/* Scan our own src explicitly: the desktop renderer's Vite root is
+ * apps/desktop, so auto-detection alone misses app-only utilities. */
+@source ".";
+
 :root {
   --sidebar: hsl(0 0% 98%);
 
