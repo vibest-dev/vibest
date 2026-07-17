@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
@@ -44,7 +45,7 @@ export function startDesktopRuntime(): void {
   const remoteDebugPort = process.env["VIBEST_REMOTE_DEBUG_PORT"];
   if (remoteDebugPort) {
     app.commandLine.appendSwitch("remote-debugging-port", remoteDebugPort);
-    app.setPath("userData", `${app.getPath("temp")}/vibest-debug-${remoteDebugPort}`);
+    app.setPath("userData", path.join(app.getPath("temp"), `vibest-debug-${remoteDebugPort}`));
   }
 
   let runtime: ReturnType<typeof makeRuntime> | undefined;
