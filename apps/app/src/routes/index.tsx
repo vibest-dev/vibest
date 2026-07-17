@@ -1,82 +1,12 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button } from "@vibest/ui/components/button";
-import { useState } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+// "/" has no UI of its own — it redirects to the new-session (draft) surface,
+// so the root path only decides where to land, not what to render.
+//
+// Keep the "/" path literal — the router plugin requires a string literal here
+// (autoCodeSplitting breaks otherwise).
 export const Route = createFileRoute("/")({
-  component: Component,
+  beforeLoad: () => {
+    throw redirect({ to: "/draft" });
+  },
 });
-
-function Component() {
-  const { orpc } = Route.useRouteContext();
-  const navigate = useNavigate();
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
-
-  const handleStartChatting = async () => {
-    try {
-      setIsCreatingSession(true);
-      const { sessionId } = await orpc.session.create.call({ harnessAgentId: "claude-code" });
-      navigate({ to: "/chat/$sessionId", params: { sessionId } });
-    } catch (error) {
-      console.error("Failed to create session", error);
-      // TODO: Show error toast to user
-    } finally {
-      setIsCreatingSession(false);
-    }
-  };
-
-  return (
-    <div className="flex h-full items-center justify-center">
-      <div className="max-w-2xl space-y-6 text-center">
-        <div className="space-y-4">
-          <h1 className="text-4xl font-bold tracking-tight">Welcome to Claude Code</h1>
-          <p className="text-muted-foreground text-xl">
-            Your AI-powered coding companion. Get help with development tasks, code reviews,
-            debugging, and more.
-          </p>
-        </div>
-
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
-          <div className="space-y-2 rounded-lg border p-6">
-            <h3 className="font-semibold">Code Analysis</h3>
-            <p className="text-muted-foreground text-sm">
-              Get insights into your codebase with intelligent analysis and suggestions.
-            </p>
-          </div>
-          <div className="space-y-2 rounded-lg border p-6">
-            <h3 className="font-semibold">Interactive Chat</h3>
-            <p className="text-muted-foreground text-sm">
-              Ask questions about your code and get instant, contextual responses.
-            </p>
-          </div>
-          <div className="space-y-2 rounded-lg border p-6">
-            <h3 className="font-semibold">Code Generation</h3>
-            <p className="text-muted-foreground text-sm">
-              Generate code snippets, functions, and components with AI assistance.
-            </p>
-          </div>
-          <div className="space-y-2 rounded-lg border p-6">
-            <h3 className="font-semibold">Debugging Help</h3>
-            <p className="text-muted-foreground text-sm">
-              Get help identifying and fixing bugs in your codebase.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-8 flex justify-center gap-4">
-          <Button size="lg" onClick={handleStartChatting} disabled={isCreatingSession}>
-            {isCreatingSession ? "Creating Session..." : "Start Chatting"}
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            render={
-              <a href="https://docs.claude.com" target="_blank" rel="noopener noreferrer">
-                View Documentation
-              </a>
-            }
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
