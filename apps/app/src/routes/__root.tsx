@@ -44,7 +44,11 @@ function RootLayout() {
   };
 
   return (
-    <SidebarProvider>
+    // The background behind the panels is the window drag surface, so the gaps
+    // the inset layout leaves (top margin, around the card) still drag. The
+    // content panels below opt back out with no-drag; -webkit-app-region is an
+    // inert no-op in the browser.
+    <SidebarProvider className="[-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel isFetching={isFetching} />
       {/*
@@ -52,7 +56,8 @@ function RootLayout() {
        * an inside toggle off-screen on collapse, and swapping two copies
        * flickers. top-11/left-22 sits it on the macOS traffic-light row.
        */}
-      <SidebarTrigger className="fixed top-[11px] left-22 z-30" />
+      {/* no-drag carves a clickable hole out of the header drag strip below it. */}
+      <SidebarTrigger className="fixed top-[11px] left-22 z-30 [-webkit-app-region:no-drag]" />
     </SidebarProvider>
   );
 }
@@ -65,13 +70,14 @@ function CardPanel({ isFetching }: { isFetching: boolean }) {
   const collapsedDesktop = !isMobile && state === "collapsed";
 
   return (
-    <SidebarInset className="flex min-h-0 flex-col overflow-hidden border md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5">
+    <SidebarInset className="flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5">
       <header
         className={cn(
           // Divider is a box-shadow (no layout space) so it can't nudge the
           // title off the light line; transition animates the collapse-time
-          // padding shift in sync with the sidebar slide.
-          "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] transition-[padding] duration-200 ease-linear",
+          // padding shift in sync with the sidebar slide. Doubles as a window
+          // drag strip in the desktop shell (inert no-op in the browser).
+          "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] transition-[padding] duration-200 ease-linear [-webkit-app-region:drag]",
           collapsedDesktop && "ps-30",
         )}
       >
