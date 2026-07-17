@@ -24,13 +24,9 @@ const SAMPLE_CHATS = ["Landing page redesign", "Database migration plan", "Onboa
 export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   return (
     <Sidebar variant="inset" collapsible="offcanvas" className="md:p-1.5">
-      {/* Reserves the traffic-light / pinned-toggle row (see __root.tsx).
-          Doubles as a window drag strip in the desktop shell; the
-          -webkit-app-region property is an inert no-op in the browser. */}
+      {/* Reserves the traffic-light / pinned-toggle row (see __root.tsx). */}
       <SidebarHeader className="h-10 [-webkit-app-region:drag]" />
 
-      {/* The nav list is the sidebar's real content, so it opts out of window
-          dragging; the header and any surrounding space stay draggable. */}
       <SidebarContent className="[-webkit-app-region:no-drag]">
         {/* Only New chat is wired; the rest are placeholders. */}
         <SidebarGroup>
