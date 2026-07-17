@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
 import { Paths } from "../config/paths";
-import { SessionMetadataNotFound, StoreReadError, StoreWriteError } from "../errors";
+import {
+  SessionMetadataNotFound,
+  SessionRefNotFound,
+  StoreReadError,
+  StoreWriteError,
+} from "../errors";
 import { readJson, writeJsonAtomic } from "../infra/json-store";
 import type { SessionMetadata } from "../types";
 
@@ -31,6 +36,16 @@ export class SessionMetadataRepository extends Context.Service<
       projectId: string,
       sessionId: string,
     ) => Effect.Effect<SessionMetadata, StoreReadError | SessionMetadataNotFound>;
+    /**
+     * Reverse lookup: find a session by its (globally unique) sessionId alone,
+     * scanning every project directory. Returns the owning projectId too.
+     */
+    readonly findBySessionId: (
+      sessionId: string,
+    ) => Effect.Effect<
+      { projectId: string; metadata: SessionMetadata },
+      StoreReadError | SessionRefNotFound
+    >;
     readonly write: (
       sessionId: string,
       metadata: SessionMetadata,
@@ -82,6 +97,20 @@ export const SessionMetadataRepositoryLayer: Layer.Layer<SessionMetadataReposito
           ),
         );
 
+      const listProjectIds = (): Effect.Effect<ReadonlyArray<string>, StoreReadError> =>
+        Effect.tryPromise({
+          try: async () => {
+            try {
+              const entries = await readdir(paths.sessionsDir, { withFileTypes: true });
+              return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+            } catch (cause) {
+              if (isEnoent(cause)) return [];
+              throw cause;
+            }
+          },
+          catch: (cause) => new StoreReadError({ file: paths.sessionsDir, cause }),
+        });
+
       return {
         list: (projectId) =>
           readIds(projectId).pipe(
@@ -102,6 +131,25 @@ export const SessionMetadataRepositoryLayer: Layer.Layer<SessionMetadataReposito
           ),
 
         read,
+
+        findBySessionId: (sessionId) =>
+          listProjectIds().pipe(
+            Effect.flatMap((projectIds) =>
+              Effect.forEach(
+                projectIds,
+                (projectId) =>
+                  read(projectId, sessionId).pipe(
+                    Effect.map((metadata) => ({ projectId, metadata })),
+                    Effect.catchTag("SessionMetadataNotFound", () => Effect.succeed(null)),
+                  ),
+                { concurrency: "unbounded" },
+              ),
+            ),
+            Effect.map((hits) => hits.find((hit) => hit !== null)),
+            Effect.flatMap((hit) =>
+              hit ? Effect.succeed(hit) : Effect.fail(new SessionRefNotFound({ sessionId })),
+            ),
+          ),
 
         write: (sessionId, metadata) =>
           writeJsonAtomic(sessionFile(metadata.projectId, sessionId), metadata),

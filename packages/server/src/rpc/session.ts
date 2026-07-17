@@ -88,6 +88,10 @@ export const sessionRouter = orpc.router({
     // Native history reads land with a later effort; empty for now.
     return yield* Effect.succeed({ messages: [] });
   }),
+  resolveRef: orpc.resolveRef.effect(function* ({ input }) {
+    const sessions = yield* SessionService;
+    return yield* sessions.resolveRef(input.sessionId);
+  }),
 
   // active instance -----------------------------------------------------------
   prompt: orpc.prompt.effect(function* ({ input }) {

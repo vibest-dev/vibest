@@ -6,7 +6,6 @@ import "./index.css";
 
 import { ChatManagerProvider } from "./core/chat/chat-context";
 import { ChatManager } from "./core/chat/chat-manager";
-import { OrpcChatSessionTransport } from "./core/chat/chat-transport";
 import { createAppClients, type AppClients } from "./lib/orpc";
 import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";
@@ -38,7 +37,7 @@ export function AppInterface({ server }: { server?: ServerConnection }): ReactEl
 /** Explicit stable application dependencies, with no host knowledge. */
 function AppRuntime({ orpcClient, queryClient, orpcQueryUtils }: AppClients): ReactElement {
   const [router] = useState(() => createRouter({ queryClient, orpcQueryUtils }));
-  const [chatManager] = useState(() => new ChatManager(new OrpcChatSessionTransport(orpcClient)));
+  const [chatManager] = useState(() => new ChatManager(orpcClient));
 
   return (
     <QueryClientProvider client={queryClient}>

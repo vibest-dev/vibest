@@ -1,7 +1,13 @@
-import type { AgentRequest, SessionSnapshot } from "@vibest/contract";
+import type { AgentRequest, SessionRuntimeSnapshot, SubscribeStreamEvent } from "@vibest/contract";
 import { describe, expect, it } from "vitest";
 
 import { OrpcChatSessionTransport, type ChatTransportClient } from "./chat-transport";
+
+const ref = {
+  projectId: "project-1",
+  harnessAgentId: "claude-code",
+  sessionId: "session-1",
+} as const;
 
 const pendingRequest: AgentRequest = {
   type: "tool",
@@ -13,13 +19,12 @@ const pendingRequest: AgentRequest = {
   native: null,
 };
 
-const snapshot: SessionSnapshot = {
-  history: [],
+const snapshot: SessionRuntimeSnapshot = {
+  ref,
+  status: { phase: "requires_action" },
   activeTurn: null,
   pendingRequests: [pendingRequest],
   cursor: 7,
-  degraded: false,
-  bootId: "boot-1",
 };
 
 const emptyPlanRequest: AgentRequest = {
@@ -29,6 +34,24 @@ const emptyPlanRequest: AgentRequest = {
   plan: "",
   native: null,
 };
+
+const asyncIterableOf = (
+  items: readonly SubscribeStreamEvent[],
+  onDone: () => void = () => undefined,
+): AsyncIterable<SubscribeStreamEvent> => ({
+  [Symbol.asyncIterator]() {
+    let index = 0;
+    return {
+      next: async () => {
+        const item = items[index];
+        index += 1;
+        if (item) return { done: false as const, value: item };
+        onDone();
+        return { done: true as const, value: undefined };
+      },
+    };
+  },
+});
 
 const unexpectedCall = async (): Promise<never> => {
   throw new Error("Unexpected transport call");
@@ -43,8 +66,18 @@ describe("OrpcChatSessionTransport agent requests", () => {
     let subscriptionCalls = 0;
     let snapshotCalls = 0;
     let snapshotSawSubscription = false;
+    const items: SubscribeStreamEvent[] = [
+      {
+        type: "event",
+        event: { seq: 7, ref, type: "session.request.asked", request: pendingRequest },
+      },
+      {
+        type: "event",
+        event: { seq: 8, ref, type: "session.request.replied", requestId: pendingRequest.id },
+      },
+    ];
     const session = {
-      snapshot: async () => {
+      getSnapshot: async () => {
         snapshotCalls += 1;
         snapshotSawSubscription = subscriptionCalls === 1;
         return snapshot;
@@ -52,59 +85,18 @@ describe("OrpcChatSessionTransport agent requests", () => {
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
-      events: async () => {
+      subscribe: async () => {
         subscriptionCalls += 1;
-        return {
-          [Symbol.asyncIterator]() {
-            let index = 0;
-            const items = [
-              {
-                type: "event" as const,
-                event: {
-                  harnessAgentId: "claude-code" as const,
-                  sessionId: "session-1",
-                  seq: snapshot.cursor,
-                  body: {
-                    type: "session.request.asked" as const,
-                    sessionId: "session-1",
-                    request: pendingRequest,
-                  },
-                },
-              },
-              {
-                type: "event" as const,
-                event: {
-                  harnessAgentId: "claude-code" as const,
-                  sessionId: "session-1",
-                  seq: snapshot.cursor + 1,
-                  body: {
-                    type: "session.request.replied" as const,
-                    sessionId: "session-1",
-                    requestId: pendingRequest.id,
-                  },
-                },
-              },
-            ];
-            return {
-              next: async () => {
-                const item = items[index];
-                index += 1;
-                if (item) return { done: false as const, value: item };
-                finishStream();
-                return { done: true as const, value: undefined };
-              },
-            };
-          },
-        };
+        // Resolve the test once the stream is fully drained.
+        return asyncIterableOf(items, finishStream);
       },
     };
     const client = { session } satisfies ChatTransportClient;
     let deliveries = 0;
     const received: AgentRequest[] = [];
-    const transport = new OrpcChatSessionTransport(client);
+    const transport = new OrpcChatSessionTransport(client, ref);
 
     const unsubscribe = transport.subscribeAgentRequests(
-      "session-1",
       (request) => {
         deliveries += 1;
         received.push(request);
@@ -115,6 +107,8 @@ describe("OrpcChatSessionTransport agent requests", () => {
       },
     );
     await streamDone;
+    // Allow the drained stream's request handling to flush.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     unsubscribe();
 
     expect(subscriptionCalls).toBe(1);
@@ -125,71 +119,39 @@ describe("OrpcChatSessionTransport agent requests", () => {
   });
 
   it("keeps listening when a resolved empty plan rejects its automatic response", async () => {
-    let finishStream: () => void = () => undefined;
-    const streamDone = new Promise<void>((resolve) => {
-      finishStream = resolve;
-    });
     let rejectAutomaticResponse: (error: Error) => void = () => undefined;
     const automaticResponse = new Promise<never>((_resolve, reject) => {
       rejectAutomaticResponse = reject;
     });
+    let finishStream: () => void = () => undefined;
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve;
+    });
+    const items: SubscribeStreamEvent[] = [
+      {
+        type: "event",
+        event: { seq: 8, ref, type: "session.request.replied", requestId: emptyPlanRequest.id },
+      },
+      {
+        type: "event",
+        event: { seq: 9, ref, type: "session.request.asked", request: pendingRequest },
+      },
+    ];
     const session = {
-      snapshot: async (): Promise<SessionSnapshot> => ({
+      getSnapshot: async (): Promise<SessionRuntimeSnapshot> => ({
         ...snapshot,
         pendingRequests: [emptyPlanRequest],
       }),
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
       respondToAgentRequest: async () => automaticResponse,
-      events: async () => ({
-        [Symbol.asyncIterator]() {
-          let index = 0;
-          const items = [
-            {
-              type: "event" as const,
-              event: {
-                harnessAgentId: "claude-code" as const,
-                sessionId: "session-1",
-                seq: snapshot.cursor + 1,
-                body: {
-                  type: "session.request.replied" as const,
-                  sessionId: "session-1",
-                  requestId: emptyPlanRequest.id,
-                },
-              },
-            },
-            {
-              type: "event" as const,
-              event: {
-                harnessAgentId: "claude-code" as const,
-                sessionId: "session-1",
-                seq: snapshot.cursor + 2,
-                body: {
-                  type: "session.request.asked" as const,
-                  sessionId: "session-1",
-                  request: pendingRequest,
-                },
-              },
-            },
-          ];
-          return {
-            next: async () => {
-              const item = items[index];
-              index += 1;
-              if (item) return { done: false as const, value: item };
-              finishStream();
-              return { done: true as const, value: undefined };
-            },
-          };
-        },
-      }),
+      subscribe: async () => asyncIterableOf(items, finishStream),
     };
     const client = { session } satisfies ChatTransportClient;
     const received: AgentRequest[] = [];
-    const transport = new OrpcChatSessionTransport(client);
+    const transport = new OrpcChatSessionTransport(client, ref);
 
     const unsubscribe = transport.subscribeAgentRequests(
-      "session-1",
       (request) => received.push(request),
       (requestId) => {
         const index = received.findIndex((request) => request.id === requestId);
@@ -197,6 +159,7 @@ describe("OrpcChatSessionTransport agent requests", () => {
       },
     );
     await streamDone;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     rejectAutomaticResponse(new Error("request already resolved"));
     await Promise.resolve();
     unsubscribe();

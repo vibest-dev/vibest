@@ -9,6 +9,7 @@ import {
   PromptOutputSchema,
   RefInputSchema,
   RenameSessionInputSchema,
+  ResolveRefInputSchema,
   RespondToAgentRequestInputSchema,
   ResumeSessionInputSchema,
   type SessionMessages,
@@ -43,6 +44,10 @@ export const sessionContract = {
   rename: base.input(toStandardSchema(RenameSessionInputSchema)),
   delete: base.input(toStandardSchema(RefInputSchema)),
   getMessages: base.input(toStandardSchema(RefInputSchema)).output(type<SessionMessages>()),
+  // sessionId (a bookmarked URL) → full SessionRef via server-side reverse lookup.
+  resolveRef: base
+    .input(toStandardSchema(ResolveRefInputSchema))
+    .output(toStandardSchema(SessionRefSchema)),
 
   // active instance
   prompt: base

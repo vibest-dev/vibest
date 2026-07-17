@@ -40,6 +40,11 @@ export class SessionRefMismatch extends Data.TaggedError("SessionRefMismatch")<{
   readonly sessionId: string;
 }> {}
 
+/** No stored session matches a bare sessionId during reverse lookup. */
+export class SessionRefNotFound extends Data.TaggedError("SessionRefNotFound")<{
+  readonly sessionId: string;
+}> {}
+
 /** The requested harness agent backend is not available to open/resume. */
 export class AgentUnavailable extends Data.TaggedError("AgentUnavailable")<{
   readonly harnessAgentId: string;

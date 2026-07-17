@@ -31,8 +31,8 @@ export function ToolPart({ message, part }: { message: UIMessage; part: AnyToolP
 // execute inside the ErrorBoundary's child render stack for a throw to be
 // caught.
 function ToolPartContent({ message, part }: { message: UIMessage; part: AnyToolPart }) {
-  const { agentProviderId } = useTranscriptRender();
-  const rendered = agentProviderId === "claude-code" ? renderClaudeCodeTool(part, message) : null;
+  const { harnessAgentId } = useTranscriptRender();
+  const rendered = harnessAgentId === "claude-code" ? renderClaudeCodeTool(part, message) : null;
   if (rendered) return rendered;
   return <DynamicToolPart part={part} name={claudeCodeDynamicToolName(part)} />;
 }

@@ -1,3 +1,4 @@
+import type { HarnessAgentId, SessionRef } from "@vibest/contract";
 import { AbstractChat, type UIMessage } from "ai";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -5,10 +6,8 @@ import type { AgentResponse } from "./agent-requests";
 import { ChatState, type ChatStoreState } from "./chat-state";
 import type { ChatModel, OrpcChatSessionTransport } from "./chat-transport";
 
-export type AgentProviderId = "claude-code";
-
 export interface ChatInit {
-  sessionId: string;
+  sessionRef: SessionRef;
   transport: OrpcChatSessionTransport;
 }
 
@@ -16,27 +15,27 @@ export interface ChatInit {
 // push, chunk reduction, status transitions) against a per-Chat zustand store;
 // the agent-request plane arrives over the same Vibest session transport.
 export class Chat extends AbstractChat<UIMessage> {
-  readonly agentProviderId: AgentProviderId = "claude-code";
+  readonly harnessAgentId: HarnessAgentId;
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
   readonly #transport: OrpcChatSessionTransport;
   readonly #unsubscribeRequests: () => void;
 
-  constructor({ sessionId, transport }: ChatInit) {
+  constructor({ sessionRef, transport }: ChatInit) {
     const state = new ChatState();
     super({
-      id: sessionId,
+      id: sessionRef.sessionId,
       transport,
       state,
       // Turn ended: unanswered requests are stale — drop them so no ghost card
       // lingers in the transcript.
       onFinish: () => state.clearPendingRequests(),
     });
+    this.harnessAgentId = sessionRef.harnessAgentId;
     this.store = state.store;
     this.#state = state;
     this.#transport = transport;
     this.#unsubscribeRequests = transport.subscribeAgentRequests(
-      sessionId,
       (request) => state.addPendingRequest(request),
       (requestId) => state.removePendingRequest(requestId),
     );
@@ -50,7 +49,7 @@ export class Chat extends AbstractChat<UIMessage> {
     const request = this.store.getState().pendingRequests.find((r) => r.id === requestId);
     this.#state.removePendingRequest(requestId); // optimistic: the card closes immediately
     try {
-      await this.#transport.respondToAgentRequest(this.id, requestId, response);
+      await this.#transport.respondToAgentRequest(requestId, response);
     } catch (respondError) {
       // Failure = the request is still pending server-side: restore the card so
       // the user can answer again (addPendingRequest is idempotent by id).

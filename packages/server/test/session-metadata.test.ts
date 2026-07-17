@@ -105,4 +105,30 @@ describe("SessionMetadataRepository", () => {
     );
     expect(listedAfter).toEqual([]);
   });
+
+  it("findBySessionId reverse-looks-up a session across projects", async () => {
+    const hit = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionMetadataRepository;
+        yield* repo.write("sess-1", meta("proj-a", "u1"));
+        yield* repo.write("sess-2", meta("proj-b", "u2"));
+        return yield* repo.findBySessionId("sess-2");
+      }),
+    );
+    expect(hit.projectId).toBe("proj-b");
+    expect(hit.metadata.harnessSessionId).toBe("u2");
+  });
+
+  it("findBySessionId fails with SessionRefNotFound for an unknown session", async () => {
+    const err = await run(
+      Effect.flip(
+        Effect.gen(function* () {
+          const repo = yield* SessionMetadataRepository;
+          yield* repo.write("sess-1", meta("proj-a", "u1"));
+          return yield* repo.findBySessionId("ghost");
+        }),
+      ),
+    );
+    expect(err._tag).toBe("SessionRefNotFound");
+  });
 });

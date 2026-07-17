@@ -413,6 +413,14 @@ export type RenameSessionInput = typeof RenameSessionInputSchema.Type;
 export const RefInputSchema = Schema.Struct({ ref: SessionRefSchema });
 export type RefInput = typeof RefInputSchema.Type;
 
+// The server sessionId is a globally-unique uuid, so projectId + harnessAgentId
+// are recoverable from it alone. Clients that only hold a sessionId (a
+// bookmarked/reloaded URL) resolve the full SessionRef through this.
+export const ResolveRefInputSchema = Schema.Struct({
+  sessionId: Schema.String.check(Schema.isUUID()),
+});
+export type ResolveRefInput = typeof ResolveRefInputSchema.Type;
+
 export const RespondToAgentRequestInputSchema = Schema.Struct({
   ref: SessionRefSchema,
   requestId: Schema.String,

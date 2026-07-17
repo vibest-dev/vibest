@@ -7,6 +7,7 @@ import {
   type ProjectNotFound,
   SessionMetadataNotFound,
   SessionRefMismatch,
+  type SessionRefNotFound,
   type StoreReadError,
   type StoreWriteError,
 } from "../errors";
@@ -63,6 +64,10 @@ export class SessionService extends Context.Service<
     readonly resolveHarnessSessionId: (
       ref: SessionRef,
     ) => Effect.Effect<string, SessionMetadataNotFound | SessionRefMismatch | StoreReadError>;
+    /** Reverse a bare sessionId back into its full SessionRef. */
+    readonly resolveRef: (
+      sessionId: string,
+    ) => Effect.Effect<SessionRef, StoreReadError | SessionRefNotFound>;
   }
 >()("SessionService") {}
 
@@ -162,6 +167,17 @@ export const SessionServiceLayer: Layer.Layer<
         ),
 
       resolveHarnessSessionId,
+
+      resolveRef: (sessionId) =>
+        repo.findBySessionId(sessionId).pipe(
+          Effect.map(
+            ({ projectId, metadata }): SessionRef => ({
+              projectId,
+              harnessAgentId: metadata.harnessAgentId,
+              sessionId,
+            }),
+          ),
+        ),
     };
   }),
 );
