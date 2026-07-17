@@ -5,11 +5,11 @@ Glossary of project-specific terms. vibest integrates AI coding agents into the 
 ## Session Domain
 
 **Project**:
-A working directory the user has registered with the daemon, identified by a daemon-generated UUID. The single source of the projectId → directory mapping; the directory field is `path`. Sessions always resolve their working directory through a Project, never from a caller-supplied path.
+A working directory the user has registered with the server, identified by a server-generated UUID. The single source of the projectId → directory mapping; the directory field is `path`. Sessions always resolve their working directory through a Project, never from a caller-supplied path.
 _Avoid_: workspace, repo, cwd (for the Project field)
 
 **SessionRef**:
-The composite identity `{ projectId, harnessAgentId, sessionId }` that every session operation addresses. `sessionId` is a daemon-generated opaque UUID, unique within a project.
+The composite identity `{ projectId, harnessAgentId, sessionId }` that every session operation addresses. `sessionId` is a server-generated opaque UUID, unique within a project.
 _Avoid_: bare sessionId as a wire identity
 
 **Harness session id**:
@@ -17,7 +17,7 @@ The agent-native session identity (Claude session UUID, Codex thread ID) held in
 _Avoid_: native id
 
 **Session metadata**:
-The daemon-owned recovery record for a session: which Project, which harness agent, which harness session id. Distinct from conversation history, which stays in the agent's native storage.
+The server-owned recovery record for a session: which Project, which harness agent, which harness session id. Distinct from conversation history, which stays in the agent's native storage.
 
 **Workspace path**:
 The validated absolute directory handed to a harness agent when opening or resuming a session; always derived from `Project.path`, never accepted directly from session API callers.

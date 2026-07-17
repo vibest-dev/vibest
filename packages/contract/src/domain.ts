@@ -14,7 +14,7 @@ export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Daemon-generated, opaque to clients; unique within a project.
+  // Server-generated, opaque to clients; unique within a project.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;
@@ -230,7 +230,7 @@ export type CollectionEvent = { readonly ref: SessionRef } & (
   | { readonly type: "session.renamed"; readonly name: string }
 );
 
-export type DaemonEvent = SessionScopedEvent | CollectionEvent;
+export type ServerEvent = SessionScopedEvent | CollectionEvent;
 
 export type SessionMessageChunkEvent = Extract<
   SessionScopedEvent,
@@ -239,7 +239,7 @@ export type SessionMessageChunkEvent = Extract<
 
 const collectionEventTypes = new Set<string>(CollectionEventTypes);
 
-export const isSessionScopedEvent = (event: DaemonEvent): event is SessionScopedEvent =>
+export const isSessionScopedEvent = (event: ServerEvent): event is SessionScopedEvent =>
   !collectionEventTypes.has(event.type);
 
 // ---------------------------------------------------------------------------
@@ -266,8 +266,8 @@ export const SubscriptionClosedReasonSchema = Schema.Literals([
 ]);
 export type SubscriptionClosedReason = typeof SubscriptionClosedReasonSchema.Type;
 
-export type SubscribeStreamItem =
-  | { readonly type: "event"; readonly event: DaemonEvent }
+export type SubscribeStreamEvent =
+  | { readonly type: "event"; readonly event: ServerEvent }
   | { readonly type: "closed"; readonly reason: SubscriptionClosedReason };
 
 /**
@@ -340,7 +340,7 @@ export type PromptPart = typeof PromptPartSchema.Type;
 export const PromptInputSchema = Schema.Struct({
   ref: SessionRefSchema,
   parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
-  // Per-prompt model selection is a vibest deviation from the daemon design;
+  // Per-prompt model selection is a vibest addition not in the original design;
   // it stays until a setModel/config effort replaces it.
   model: Schema.optionalKey(Schema.String),
 });
@@ -424,11 +424,11 @@ export type RespondToAgentRequestInput = typeof RespondToAgentRequestInputSchema
 // Errors
 //
 // Shared oRPC error map. New-contract procedures attach it with
-// `oc.errors(daemonErrors)`; clients branch on the error code, never on the
+// `oc.errors(serverErrors)`; clients branch on the error code, never on the
 // message.
 // ---------------------------------------------------------------------------
 
-export const DaemonErrorCodes = [
+export const ServerErrorCodes = [
   "INVALID_ARGUMENT",
   "FORBIDDEN",
   "NOT_FOUND",
@@ -438,9 +438,9 @@ export const DaemonErrorCodes = [
   "UNSUPPORTED",
   "INTERNAL",
 ] as const;
-export type DaemonErrorCode = (typeof DaemonErrorCodes)[number];
+export type ServerErrorCode = (typeof ServerErrorCodes)[number];
 
-export const daemonErrors = {
+export const serverErrors = {
   INVALID_ARGUMENT: {},
   FORBIDDEN: {},
   NOT_FOUND: {},

@@ -15,7 +15,15 @@ import {
 } from "@vibest/harness/runtime";
 import { Context, Effect, Layer } from "effect";
 
+import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
+import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
+import {
+  HarnessSessionsPortLayer,
+  SessionMetadataRepositoryLayer,
+  SessionRuntimeRegistryLayer,
+  SessionServiceLayer,
+} from "../session";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -54,9 +62,37 @@ const RegistryLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ProvidersLayer));
 
-const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
+// Harness session lifecycle (agent-native ids only); shared by the port and RPC.
+const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(RegistryLayer),
+);
+
+// Server-owned services. Each shared dependency (EventBus, harness service,
+// ProjectService) is a single Layer reference, so Effect memoizes it to one
+// instance across every consumer below.
+const ProjectServiceProvided = ProjectServiceLayer.pipe(
+  Layer.provide(ProjectRepositoryLayer),
+  Layer.provide(PathsLayer),
+);
+const SessionMetadataRepositoryProvided = SessionMetadataRepositoryLayer.pipe(
+  Layer.provide(PathsLayer),
+);
+const HarnessSessionsPortProvided = HarnessSessionsPortLayer.pipe(
+  Layer.provide(HarnessSessionServiceLayer),
+);
+const SessionServiceProvided = SessionServiceLayer.pipe(
+  Layer.provide(ProjectServiceProvided),
+  Layer.provide(SessionMetadataRepositoryProvided),
+  Layer.provide(HarnessSessionsPortProvided),
+);
+const SessionRuntimeRegistryProvided = SessionRuntimeRegistryLayer.pipe(
   Layer.provide(EventBusLayer),
 );
 
-export const AgentRuntimeLayer = Layer.merge(EventBusLayer, SessionServiceLayer);
+export const AgentRuntimeLayer = Layer.mergeAll(
+  EventBusLayer,
+  HarnessSessionServiceLayer,
+  SessionServiceProvided,
+  ProjectServiceProvided,
+  SessionRuntimeRegistryProvided,
+);

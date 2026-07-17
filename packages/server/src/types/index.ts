@@ -67,10 +67,10 @@ export interface RuntimeConfig {
 }
 
 /**
- * Daemon-owned recovery record for one session, persisted at
- * `storage/sessions/<projectId>/<sessionId>.json`. The daemon `sessionId` is
+ * Server-owned recovery record for one session, persisted at
+ * `storage/sessions/<projectId>/<sessionId>.json`. The server `sessionId` is
  * the filename, not a field; `harnessSessionId` is the agent-native id
- * (claude session uuid / codex thread id) the daemon translates to when
+ * (claude session uuid / codex thread id) the server translates to when
  * calling the harness.
  */
 export interface SessionMetadata {

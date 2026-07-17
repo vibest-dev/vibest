@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CollectionEventTypes,
-  type DaemonEvent,
-  daemonErrors,
-  DaemonErrorCodes,
+  type ServerEvent,
+  serverErrors,
+  ServerErrorCodes,
   isSessionScopedEvent,
   PromptInputSchema,
   SessionRefSchema,
@@ -83,20 +83,20 @@ describe("event partition", () => {
   });
 
   it("isSessionScopedEvent splits the union", () => {
-    const chunk: DaemonEvent = {
+    const chunk: ServerEvent = {
       ref,
       seq: 1,
       type: "session.turn.started",
       turnId: "t1",
     };
-    const created: DaemonEvent = { ref, type: "session.created" };
+    const created: ServerEvent = { ref, type: "session.created" };
     expect(isSessionScopedEvent(chunk)).toBe(true);
     expect(isSessionScopedEvent(created)).toBe(false);
   });
 });
 
-describe("daemon error map", () => {
+describe("server error map", () => {
   it("exposes every stable code as an oRPC error entry", () => {
-    for (const code of DaemonErrorCodes) expect(daemonErrors).toHaveProperty(code);
+    for (const code of ServerErrorCodes) expect(serverErrors).toHaveProperty(code);
   });
 });

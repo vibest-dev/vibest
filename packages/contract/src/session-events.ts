@@ -1,7 +1,7 @@
 export { isSessionScopedEvent } from "./domain";
 export type {
   CollectionEvent,
-  DaemonEvent,
+  ServerEvent,
   SessionMessageChunkEvent,
   SessionScopedEvent,
   SessionScopedEventDraft,

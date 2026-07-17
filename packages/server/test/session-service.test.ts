@@ -90,7 +90,7 @@ describe("SessionService", () => {
     expect(spy.create).toEqual([
       { harnessAgentId: "claude-code", workspacePath: resolvePath("/tmp/vibest-app") },
     ]);
-    // metadata stores the native id, keyed by the daemon sessionId (filename)
+    // metadata stores the native id, keyed by the server sessionId (filename)
     expect(result.stored.harnessSessionId).toBe("native-1");
     expect(result.stored.projectId).toBe(result.project.id);
   });
@@ -201,7 +201,7 @@ describe("SessionService", () => {
     expect(spy.close).toEqual(["native-1"]);
   });
 
-  it("list returns one summary per session, keyed by daemon sessionId", async () => {
+  it("list returns one summary per session, keyed by server sessionId", async () => {
     const { layer } = makeFakePort();
     const result = await run(
       layer,

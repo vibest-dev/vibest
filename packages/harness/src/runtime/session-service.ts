@@ -1,10 +1,8 @@
-import { Context, Deferred, Effect, Exit, Fiber, Layer, Ref, Scope, Stream } from "effect";
-import { v7 as uuid } from "uuid";
+import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect";
 
-import { isSessionEvent, type SessionEnvelope, type SessionEnvelopeDraft } from "../types/envelope";
+import type { SessionEnvelopeDraft } from "../events/framework";
 import type { HarnessAgentId } from "../types/harness-agent-id";
-import type { AgentRequest, AgentResponse } from "../types/request";
-import type { SessionSnapshot, SessionStatus } from "../types/session";
+import type { AgentResponse } from "../types/request";
 import type {
   CreateSessionInput,
   HarnessAgentSession,
@@ -27,30 +25,18 @@ import {
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
-import type { CreateManagedSessionResult, ResumeManagedSessionInput } from "./rpc";
-import { SessionEventPublisher, type SessionEventPublisherShape } from "./session-event-publisher";
+import type { CreateManagedSessionResult, ResumeManagedSessionInput } from "./session-io";
 
-const PUMP_DRAIN_TIMEOUT = "2 seconds";
-const REPLAY_CAPACITY = 2048;
-
-type Projection = {
-  readonly cursor: number;
-  readonly status: SessionStatus;
-  readonly pendingRequests: ReadonlyMap<string, AgentRequest>;
-  readonly activeTurn: {
-    readonly turnId: string;
-    readonly chunks: ReadonlyArray<SessionEnvelope>;
-    readonly complete: boolean;
-  } | null;
-  readonly degraded: boolean;
-};
+/**
+ * Owns agent-native session lifecycle only. The server SessionRuntime owns the
+ * projection, per-session `seq`, snapshot/status, and subscriber fan-out; this
+ * service just opens/resumes/closes native sessions and hands the server the
+ * raw per-session {@link SessionEnvelopeDraft} stream via {@link events}.
+ */
 
 type ManagedSession = {
   readonly session: HarnessAgentSession;
   readonly scope: Scope.Closeable;
-  readonly pump: Fiber.Fiber<void>;
-  readonly pumpDone: Deferred.Deferred<void>;
-  readonly projection: Ref.Ref<Projection>;
 };
 
 type ServiceState = {
@@ -86,7 +72,7 @@ type CloseDecision =
     };
 
 export type CreateSessionResult = CreateManagedSessionResult;
-export type { ResumeManagedSessionInput } from "./rpc";
+export type { ResumeManagedSessionInput } from "./session-io";
 
 export type HarnessAgentSessionServiceShape = {
   readonly create: (
@@ -115,8 +101,13 @@ export type HarnessAgentSessionServiceShape = {
     SessionCapabilities,
     SessionNotFound | CapabilityUnsupported | AgentOperationError
   >;
-  readonly getStatus: (sessionId: string) => Effect.Effect<SessionStatus, SessionNotFound>;
-  readonly getSnapshot: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFound>;
+  /**
+   * The raw per-session event stream, drained by the server SessionRuntime. The
+   * harness never numbers or projects it; drafts are native-`sessionId`-keyed.
+   */
+  readonly events: (
+    sessionId: string,
+  ) => Effect.Effect<Stream.Stream<SessionEnvelopeDraft, AgentOperationError>, SessionNotFound>;
   readonly close: (sessionId: string) => Effect.Effect<void>;
 };
 
@@ -125,91 +116,8 @@ export class HarnessAgentSessionService extends Context.Service<
   HarnessAgentSessionServiceShape
 >()("HarnessAgentSessionService") {}
 
-const initialProjection = (): Projection => ({
-  cursor: 0,
-  status: {
-    status: "running",
-    isBusy: false,
-    needsAttention: false,
-  },
-  pendingRequests: new Map(),
-  activeTurn: null,
-  degraded: false,
-});
-
-const stampEnvelope = (draft: SessionEnvelopeDraft, seq: number): SessionEnvelope =>
-  ({ ...draft, seq }) as SessionEnvelope;
-
-const updateProjection = (current: Projection, envelope: SessionEnvelope): Projection => {
-  const body = envelope.body;
-  if (!isSessionEvent(body)) {
-    if (!current.activeTurn) return { ...current, cursor: envelope.seq };
-    if (current.activeTurn.chunks.length >= REPLAY_CAPACITY) {
-      return { ...current, cursor: envelope.seq, degraded: true };
-    }
-    return {
-      ...current,
-      cursor: envelope.seq,
-      activeTurn: {
-        ...current.activeTurn,
-        chunks: [...current.activeTurn.chunks, envelope],
-      },
-    };
-  }
-
-  switch (body.type) {
-    case "session.turn.started":
-      return {
-        ...current,
-        cursor: envelope.seq,
-        status: { ...current.status, status: "running", isBusy: true },
-        activeTurn: { turnId: body.turnId, chunks: [], complete: false },
-        degraded: false,
-      };
-    case "session.turn.ended":
-      return {
-        ...current,
-        cursor: envelope.seq,
-        status: { ...current.status, isBusy: false },
-        activeTurn:
-          current.activeTurn?.turnId === body.turnId
-            ? { ...current.activeTurn, complete: true }
-            : current.activeTurn,
-      };
-    case "session.request.asked":
-      return {
-        ...current,
-        cursor: envelope.seq,
-        status: { ...current.status, needsAttention: true },
-        pendingRequests: new Map(current.pendingRequests).set(body.request.id, body.request),
-      };
-    case "session.request.replied":
-    case "session.request.rejected": {
-      const pendingRequests = new Map(current.pendingRequests);
-      pendingRequests.delete(body.requestId);
-      return {
-        ...current,
-        cursor: envelope.seq,
-        status: { ...current.status, needsAttention: pendingRequests.size > 0 },
-        pendingRequests,
-      };
-    }
-    case "session.crashed":
-      return {
-        ...current,
-        cursor: envelope.seq,
-        status: { status: "crashed", isBusy: false, needsAttention: false },
-        pendingRequests: new Map(),
-        activeTurn: null,
-      };
-    default:
-      return { ...current, cursor: envelope.seq };
-  }
-};
-
 export const makeHarnessAgentSessionService = (
   registry: HarnessAgentRegistryShape,
-  publisher: SessionEventPublisherShape,
 ): Effect.Effect<HarnessAgentSessionServiceShape, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
@@ -218,63 +126,6 @@ export const makeHarnessAgentSessionService = (
       inFlight: new Map(),
       closing: new Map(),
     });
-    const bootId = uuid();
-
-    const publish = (projection: Ref.Ref<Projection>, draft: SessionEnvelopeDraft) =>
-      publisher
-        .publish(draft)
-        .pipe(
-          Effect.flatMap((seq) =>
-            Ref.update(projection, (current) =>
-              updateProjection(current, stampEnvelope(draft, seq)),
-            ),
-          ),
-        );
-
-    const startManaged = (
-      session: HarnessAgentSession,
-      sessionScope: Scope.Closeable,
-    ): Effect.Effect<{
-      readonly managed: ManagedSession;
-      readonly activate: Effect.Effect<void>;
-    }> =>
-      Effect.gen(function* () {
-        const projection = yield* Ref.make(initialProjection());
-        const pumpDone = yield* Deferred.make<void>();
-        const activation = yield* Deferred.make<void>();
-        const pumpEffect = Deferred.await(activation).pipe(
-          Effect.andThen(Stream.runForEach(session.events, (draft) => publish(projection, draft))),
-          Effect.catch((error) =>
-            publish(projection, {
-              harnessAgentId: session.harnessAgentId,
-              sessionId: session.sessionId,
-              body: {
-                type: "session.crashed",
-                sessionId: session.sessionId,
-                reason: error.message,
-              },
-            }),
-          ),
-          Effect.ensuring(
-            Deferred.succeed(pumpDone, undefined).pipe(
-              Effect.andThen(
-                Ref.get(projection).pipe(
-                  Effect.flatMap((current) =>
-                    current.status.status === "crashed"
-                      ? Effect.forkIn(close(session.sessionId), ownerScope).pipe(Effect.asVoid)
-                      : Effect.void,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-        const pump = yield* Effect.forkIn(pumpEffect, sessionScope);
-        return {
-          managed: { session, scope: sessionScope, pump, pumpDone, projection },
-          activate: Deferred.succeed(activation, undefined).pipe(Effect.asVoid),
-        };
-      });
 
     const register = (candidate: ManagedSession) =>
       Ref.modify(state, (current) => {
@@ -336,10 +187,7 @@ export const makeHarnessAgentSessionService = (
                   workspacePath: mode.input.workspacePath,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
-          const candidate = yield* startManaged(session, sessionScope);
-          const managed = yield* register(candidate.managed);
-          if (managed === candidate.managed) yield* candidate.activate;
-          return managed;
+          return yield* register({ session, scope: sessionScope });
         }).pipe(Effect.onError(() => Scope.close(sessionScope, Exit.void)));
       });
 
@@ -355,14 +203,6 @@ export const makeHarnessAgentSessionService = (
 
     const closeManaged = (managed: ManagedSession) =>
       managed.session.close.pipe(
-        Effect.andThen(
-          Deferred.await(managed.pumpDone).pipe(
-            Effect.timeoutOrElse({
-              duration: PUMP_DRAIN_TIMEOUT,
-              orElse: () => Fiber.interrupt(managed.pump).pipe(Effect.asVoid),
-            }),
-          ),
-        ),
         Effect.ensuring(Scope.close(managed.scope, Exit.void)),
         Effect.asVoid,
       );
@@ -498,14 +338,7 @@ export const makeHarnessAgentSessionService = (
         ),
       resume,
       prompt: (sessionId, input) =>
-        Effect.gen(function* () {
-          const managed = yield* getManaged(sessionId);
-          const cursor = yield* Ref.get(managed.projection).pipe(
-            Effect.map((current) => current.cursor),
-          );
-          const receipt = yield* managed.session.prompt(input);
-          return { turnId: receipt.turnId, cursor, started: receipt.started };
-        }),
+        getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.prompt(input))),
       interrupt: (sessionId) =>
         getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.interrupt)),
       respondToAgentRequest: (sessionId, requestId, response) =>
@@ -514,35 +347,8 @@ export const makeHarnessAgentSessionService = (
         ),
       getCapabilities: (sessionId) =>
         getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.getCapabilities)),
-      getStatus: (sessionId) =>
-        getManaged(sessionId).pipe(
-          Effect.flatMap((managed) =>
-            Ref.get(managed.projection).pipe(Effect.map((projection) => projection.status)),
-          ),
-        ),
-      getSnapshot: (sessionId) =>
-        getManaged(sessionId).pipe(
-          Effect.flatMap((managed) =>
-            Ref.get(managed.projection).pipe(
-              Effect.map(
-                (projection): SessionSnapshot => ({
-                  history: [],
-                  activeTurn: projection.activeTurn
-                    ? {
-                        turnId: projection.activeTurn.turnId,
-                        chunks: [...projection.activeTurn.chunks],
-                        complete: projection.activeTurn.complete,
-                      }
-                    : null,
-                  pendingRequests: Array.from(projection.pendingRequests.values()),
-                  cursor: projection.cursor,
-                  degraded: projection.degraded,
-                  bootId,
-                }),
-              ),
-            ),
-          ),
-        ),
+      events: (sessionId) =>
+        getManaged(sessionId).pipe(Effect.map((managed) => managed.session.events)),
       close,
     } satisfies HarnessAgentSessionServiceShape;
   });
@@ -551,7 +357,6 @@ export const HarnessAgentSessionServiceLayer = Layer.effect(
   HarnessAgentSessionService,
   Effect.gen(function* () {
     const registry = yield* HarnessAgentRegistry;
-    const publisher = yield* SessionEventPublisher;
-    return yield* makeHarnessAgentSessionService(registry, publisher);
+    return yield* makeHarnessAgentSessionService(registry);
   }),
 );

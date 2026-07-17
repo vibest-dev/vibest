@@ -17,8 +17,8 @@ import { type HarnessCreateError, type HarnessResumeError, HarnessSessionsPort }
 
 /**
  * Session orchestration. Owns everything the harness must stay ignorant of:
- * resolving a `projectId` to a workspace path, generating the daemon
- * `sessionId`, persisting {@link SessionMetadata}, and translating a daemon
+ * resolving a `projectId` to a workspace path, generating the server
+ * `sessionId`, persisting {@link SessionMetadata}, and translating a server
  * `SessionRef` to the agent-native `harnessSessionId` before calling the
  * {@link HarnessSessionsPort}. The harness only ever sees a cwd and a native id.
  */
@@ -45,11 +45,18 @@ export class SessionService extends Context.Service<
     readonly close: (
       ref: SessionRef,
     ) => Effect.Effect<void, SessionMetadataNotFound | SessionRefMismatch | StoreReadError>;
+    /** Close the native session and delete its stored metadata. */
+    readonly delete: (
+      ref: SessionRef,
+    ) => Effect.Effect<
+      void,
+      SessionMetadataNotFound | SessionRefMismatch | StoreReadError | StoreWriteError
+    >;
     readonly list: (
       projectId: string,
     ) => Effect.Effect<ReadonlyArray<SessionSummary>, ProjectNotFound | StoreReadError>;
     /**
-     * Daemon `SessionRef` → agent-native `harnessSessionId`, verifying the ref's
+     * Server `SessionRef` → agent-native `harnessSessionId`, verifying the ref's
      * harnessAgentId matches the stored metadata. The seam later methods
      * (prompt, interrupt, subscribe) call before reaching the harness.
      */
@@ -125,6 +132,15 @@ export const SessionServiceLayer: Layer.Layer<
       close: (ref) =>
         resolveHarnessSessionId(ref).pipe(
           Effect.flatMap((harnessSessionId) => harness.close(harnessSessionId)),
+        ),
+
+      delete: (ref) =>
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) =>
+            harness
+              .close(metadata.harnessSessionId)
+              .pipe(Effect.andThen(repo.remove(ref.projectId, ref.sessionId))),
+          ),
         ),
 
       list: (projectId) =>

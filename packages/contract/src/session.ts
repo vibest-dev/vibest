@@ -2,7 +2,7 @@ import { eventIterator, oc, type } from "@orpc/contract";
 
 import {
   CreateSessionInputSchema,
-  daemonErrors,
+  serverErrors,
   ListSessionsInputSchema,
   type ListSessionsOutput,
   PromptInputSchema,
@@ -16,11 +16,11 @@ import {
   type SessionRuntimeSnapshot,
   SessionStatusSchema,
   SubscribeInputSchema,
-  type SubscribeStreamItem,
+  type SubscribeStreamEvent,
   toStandardSchema,
 } from "./domain";
 
-const base = oc.errors(daemonErrors);
+const base = oc.errors(serverErrors);
 
 /**
  * SessionRef-based session contract (docs/wayfinder/session-streaming-refactor).
@@ -58,5 +58,5 @@ export const sessionContract = {
   // events (scope covers both single-session and global firehose)
   subscribe: base
     .input(toStandardSchema(SubscribeInputSchema))
-    .output(eventIterator(type<SubscribeStreamItem>())),
+    .output(eventIterator(type<SubscribeStreamEvent>())),
 };

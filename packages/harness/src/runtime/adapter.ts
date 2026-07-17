@@ -1,15 +1,13 @@
 import type {
-  CreateSessionInput,
-  HarnessAgentId,
-  PromptReceipt,
-  ResumeSessionInput,
-  SessionCapabilities,
-  SessionEnvelopeDraft,
-  UserInput,
   AgentResponse,
+  HarnessAgentId,
+  InspectorTarget,
+  SessionCapabilities,
 } from "@vibest/contract";
+import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
 import type { Effect, Scope, Stream } from "effect";
 
+import type { SessionEnvelopeDraft } from "../events/framework";
 import type {
   AgentOpenError,
   AgentOperationError,
@@ -21,6 +19,18 @@ import type {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "./errors";
+import {
+  CreateSessionInputSchema,
+  PromptReceiptSchema,
+  ResumeSessionInputSchema,
+  UserInputPartSchema,
+  UserInputSchema,
+  type CreateSessionInput,
+  type PromptReceipt,
+  type ResumeSessionInput,
+  type UserInput,
+  type UserInputPart,
+} from "./session-io";
 
 export {
   CreateSessionInputSchema,
@@ -30,14 +40,16 @@ export {
   SessionCapabilitiesSchema,
   UserInputPartSchema,
   UserInputSchema,
-  type CreateSessionInput,
-  type InspectorTarget,
-  type PromptReceipt,
-  type ResumeSessionInput,
-  type SessionCapabilities,
-  type UserInput,
-  type UserInputPart,
-} from "@vibest/contract";
+};
+export type {
+  CreateSessionInput,
+  InspectorTarget,
+  PromptReceipt,
+  ResumeSessionInput,
+  SessionCapabilities,
+  UserInput,
+  UserInputPart,
+};
 
 export type AgentDescriptor = {
   readonly id: HarnessAgentId;

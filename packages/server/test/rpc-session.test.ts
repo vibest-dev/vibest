@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createRouterClient } from "@orpc/server";
-import { isSessionEvent } from "@vibest/contract";
 import { makeCodexAdapter, makeCodexAgent } from "@vibest/harness/codex";
 import {
   HarnessAgentRegistry,
@@ -14,10 +13,18 @@ import {
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { layerPaths } from "../src/config/paths";
 import { EventBusLayer } from "../src/events";
+import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
+import {
+  HarnessSessionsPortLayer,
+  SessionMetadataRepositoryLayer,
+  SessionRuntimeRegistryLayer,
+  SessionServiceLayer,
+} from "../src/session";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -48,8 +55,12 @@ function makeFake(): string {
 }
 
 describe("session router", () => {
-  it("creates a provider session and streams its unified events", async () => {
-    const testCodexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
+  it("creates a session from a project and streams its scoped events", async () => {
+    const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
+    const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
+    const pathsLayer = layerPaths(home);
+
+    const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
       Layer.provide(NodeServices.layer),
     );
     const registryLayer = Layer.effect(
@@ -58,49 +69,64 @@ describe("session router", () => {
         const codex = yield* Codex;
         return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
       }),
-    ).pipe(Layer.provide(testCodexLayer));
-    const sessionLayer = HarnessAgentSessionServiceLayer.pipe(
-      Layer.provide(registryLayer),
-      Layer.provide(EventBusLayer),
+    ).pipe(Layer.provide(codexLayer));
+
+    const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
+    const projectServiceLayer = ProjectServiceLayer.pipe(
+      Layer.provide(ProjectRepositoryLayer),
+      Layer.provide(pathsLayer),
     );
-    const runtime = ManagedRuntime.make(Layer.merge(EventBusLayer, sessionLayer));
+    const metadataLayer = SessionMetadataRepositoryLayer.pipe(Layer.provide(pathsLayer));
+    const portLayer = HarnessSessionsPortLayer.pipe(Layer.provide(harnessSessionLayer));
+    const sessionServiceLayer = SessionServiceLayer.pipe(
+      Layer.provide(projectServiceLayer),
+      Layer.provide(metadataLayer),
+      Layer.provide(portLayer),
+    );
+    const registryRuntimeLayer = SessionRuntimeRegistryLayer.pipe(Layer.provide(EventBusLayer));
+
+    const appLayer = Layer.mergeAll(
+      EventBusLayer,
+      harnessSessionLayer,
+      sessionServiceLayer,
+      projectServiceLayer,
+      registryRuntimeLayer,
+    );
+    const runtime = ManagedRuntime.make(appLayer);
     try {
       const context: RpcContext = {
         "effect/context": runtime.runSync(runtime.contextEffect),
       };
       const client = createRouterClient(router, { context });
 
-      const { sessionId } = await client.session.create({
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({
+        projectId: project.id,
         harnessAgentId: "codex",
-        workspacePath: "/tmp",
       });
-      expect(sessionId).toBe("th_1");
+      expect(ref.projectId).toBe(project.id);
+      expect(ref.harnessAgentId).toBe("codex");
 
-      const events = await client.session.events({ sessionId });
+      const events = await client.session.subscribe({ scope: { kind: "session", ref } });
       const receipt = await client.session.prompt({
-        sessionId,
-        input: { parts: [{ type: "text", text: "ping" }] },
+        ref,
+        parts: [{ type: "text", text: "ping" }],
       });
-      expect(receipt).toMatchObject({ turnId: "turn_1", started: true });
+      expect(receipt).toMatchObject({ turnId: "turn_1" });
 
       const chunks: { type: string }[] = [];
       for await (const item of events) {
         if (item.type !== "event") continue;
-        if (!isSessionEvent(item.event.body)) chunks.push(item.event.body);
-        if (
-          isSessionEvent(item.event.body) &&
-          item.event.body.type === "session.turn.ended" &&
-          item.event.body.turnId === receipt.turnId
-        ) {
-          break;
-        }
+        const event = item.event;
+        if (event.type === "session.message.chunk") chunks.push(event.chunk);
+        if (event.type === "session.turn.ended" && event.turnId === receipt.turnId) break;
       }
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks.at(-1)?.type).toBe("finish");
 
-      const snapshot = await client.session.snapshot({ sessionId });
+      const snapshot = await client.session.getSnapshot({ ref });
       expect(snapshot.cursor).toBeGreaterThan(0);
-      await client.session.close({ sessionId });
+      await client.session.close({ ref });
     } finally {
       await runtime.dispose();
     }

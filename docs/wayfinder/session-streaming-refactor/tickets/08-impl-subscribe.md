@@ -1,7 +1,7 @@
 ---
 title: 实现订阅重构：scope 过滤、会话内 seq、慢消费者终止
 status: open
-assignee:
+assignee: dinq
 labels: [wayfinder:task]
 blocked-by: [01-contract-types.md, 07-impl-create-resume.md]
 ---
@@ -16,7 +16,7 @@ blocked-by: [01-contract-types.md, 07-impl-create-resume.md]
 - 状态机换 `idle/running/requires_action/crashed`（requires_action 由 pendingRequests 驱动）。
 - `subscribe`/`getSnapshot` 新契约上线（snapshot 含 cursor + activeTurn.chunks，供客户端 seq 对齐与重放）。
 
-**harness 事件模型迁移（07 调研暴露，本 ticket 承接）**：harness 19 个文件依赖已删的 `SessionEnvelope`/`SessionEvent`/UIMessageChunk-in-envelope 模型、`runtime/rpc.ts` value 级重导已删契约名 → 整个 `@vibest/harness/runtime` 当前加载不了。本 ticket 把 harness 事件/envelope 模型迁到新 `DaemonEvent`/`SessionScopedEventDraft`，localize harness 自己的 create/resume 输入类型（不再从 contract 取已删名字），并迁移 `event-manifest.ts` → `SessionScopedEventTypes`/`CollectionEventTypes`（同步改写 `test/event-manifest.test.ts`）。
+**harness 事件模型迁移（07 调研暴露，本 ticket 承接）**：harness 19 个文件依赖已删的 `SessionEnvelope`/`SessionEvent`/UIMessageChunk-in-envelope 模型、`runtime/rpc.ts` value 级重导已删契约名 → 整个 `@vibest/harness/runtime` 当前加载不了。本 ticket 把 harness 事件/envelope 模型迁到新 `ServerEvent`/`SessionScopedEventDraft`，localize harness 自己的 create/resume 输入类型（不再从 contract 取已删名字），并迁移 `event-manifest.ts` → `SessionScopedEventTypes`/`CollectionEventTypes`（同步改写 `test/event-manifest.test.ts`）。
 
 **从 ticket 07 归并的 RPC 接线**（07 已交付 port 后的服务端编排层）：
 
@@ -26,3 +26,14 @@ blocked-by: [01-contract-types.md, 07-impl-create-resume.md]
 - create 成功发 `session.created`（collection event）。
 
 产出：实现 + 订阅语义测试（受控调度、无 sleep，对齐设计稿 §10.3 精神）合入。此 ticket 落地后仓库应重新整体 typecheck 绿（合并点门禁）。
+
+## Seam decision（2026-07-17 用户定案：**server owns the runtime**）
+
+harness↔server 事件缝的承重决定：**harness 退化为纯 per-session agent-SDK/codex 服务，只吐原始事件 body 流 + 生命周期操作；SessionRuntime 归 server。**
+
+- **harness**（`HarnessAgentSessionService` + 各 adapter）不再持 projection / seq / `SessionEventPublisher`。`HarnessAgentSession` 暴露一条 per-session `Stream<SessionScopedEventBody>`（chunk 也进流，为 `session.message.chunk`）+ prompt/interrupt/respond/close/capabilities。harness 不再有 getSnapshot/getStatus（归 server runtime）。只认 native sessionId + cwd。
+- **server SessionRuntime**（新建，per active session，按 SessionRef 键）：消费 harness 原始 body 流 → 会话内自增 seq（从 1，仅 session 事件）→ 折叠 projection（phase 机 idle/running/requires_action/crashed、activeTurn{turnId, messageId, chunks}、pendingRequests、cursor）→ 附 ref 得 `SessionScopedEvent` → 有界队列 fan-out（满则 `closed(slow_consumer)`）；服务 getSnapshot/getStatus。messageId 取首个 `session.message.chunk` 的 start id。
+- **EventBus** 退化为纯 scope fan-out（session 按 ref 全等、global firehose），收 `ServerEvent`；collection 事件（created/deleted/renamed）由 `SessionService` 直发。
+- 相对「harness 留 runtime」方案多搬 ~200 行 projection 到 server，但 SessionRuntime 是 server 概念、snapshot 天然带 ref，用户选定此路。
+
+执行分级（见 task list #1–#8）：①harness 瘦身+类型迁移 → ②server SessionRuntime + EventBus 重写 → ③真实 port + project router + rpc/session 重写 + layer 图 → ④app transport → ⑤订阅语义测试 + 全仓绿。单大分支多提交推进。

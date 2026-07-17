@@ -57,3 +57,8 @@ export class SessionResumeFailed extends Data.TaggedError("SessionResumeFailed")
   readonly harnessSessionId: string;
   readonly reason: string;
 }> {}
+
+/** A prompt carried a part type this server cannot yet forward (e.g. `file`). */
+export class UnsupportedPromptPart extends Data.TaggedError("UnsupportedPromptPart")<{
+  readonly kind: string;
+}> {}

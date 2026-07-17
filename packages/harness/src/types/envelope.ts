@@ -6,10 +6,10 @@ import type { CodexUIMessage } from "../codex/ui-message";
 export type ClaudeCodeUIMessageChunk = InferUIMessageChunk<ClaudeCodeUIMessage>;
 export type CodexUIMessageChunk = InferUIMessageChunk<CodexUIMessage>;
 
-export { isSessionEvent } from "@vibest/contract/session-events";
+export type { HarnessAgentId } from "@vibest/contract";
 export {
-  type HarnessAgentId,
+  isSessionEvent,
   type SessionEnvelope,
   type SessionEnvelopeBody,
   type SessionEnvelopeDraft,
-} from "@vibest/contract";
+} from "../events/framework";

@@ -12,7 +12,7 @@ const isEnoent = (cause: unknown): boolean =>
   typeof cause === "object" && cause !== null && (cause as NodeJS.ErrnoException).code === "ENOENT";
 
 /**
- * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The daemon
+ * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The server
  * `sessionId` is the filename; the file body holds {@link SessionMetadata}. No
  * business rules — orchestration (id generation, projectId resolution) lives in
  * SessionService.
