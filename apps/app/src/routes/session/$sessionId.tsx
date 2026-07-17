@@ -9,7 +9,6 @@ export const Route = createFileRoute("/session/$sessionId")({
 function Component() {
   const { sessionId } = Route.useParams();
 
-  // The shell (sidebar + card panel + header) lives in the root route; this
-  // route is just the chat filling the card.
+  // The shell lives in the root route; this is just the chat filling the card.
   return <Chat className="mx-auto w-full max-w-4xl min-w-80" sessionId={sessionId} />;
 }

@@ -11,8 +11,7 @@ import {
 } from "@vibest/ui/components/sidebar";
 import { Blocks, FolderCode, MessageSquare, Pin, Search, SquarePen } from "lucide-react";
 
-// Static placeholder lists — this is a layout shell with sample mock data.
-// Real conversation data needs a `session.list` endpoint that doesn't exist yet.
+// Placeholder mock data — no session.list endpoint yet.
 const PINNED = [
   "Refactor auth module",
   "Fix flaky integration tests",
@@ -25,16 +24,11 @@ const SAMPLE_CHATS = ["Landing page redesign", "Database migration plan", "Onboa
 export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   return (
     <Sidebar variant="inset" collapsible="offcanvas" className="md:p-1.5">
-      {/*
-       * Empty top band, same height as the card header (routes/__root.tsx, h-10).
-       * The pinned collapse toggle (rendered in __root.tsx) floats over its
-       * top-left, beside the macOS traffic lights; this band just reserves the
-       * space. Kept on web too for a consistent top edge across hosts.
-       */}
+      {/* Reserves the traffic-light / pinned-toggle row (see __root.tsx). */}
       <SidebarHeader className="h-10" />
 
       <SidebarContent>
-        {/* Primary nav — only New chat is wired; the rest are placeholders. */}
+        {/* Only New chat is wired; the rest are placeholders. */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -66,7 +60,6 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Pinned — placeholder rows. */}
         <SidebarGroup>
           <SidebarGroupLabel>Pinned</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -83,7 +76,6 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Projects — placeholder groups and rows. */}
         <SidebarGroup>
           <SidebarGroupLabel>Project</SidebarGroupLabel>
           <SidebarGroupContent>

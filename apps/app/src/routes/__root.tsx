@@ -26,8 +26,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
   component: RootLayout,
 });
 
-// The whole app lives inside this shell: a left sidebar and a floating card
-// panel. Every route — landing, session, everything — renders in the card.
+// Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
   const isFetching = useRouterState({ select: (s) => s.isLoading });
   const { orpcQueryUtils } = Route.useRouteContext();
@@ -49,36 +48,29 @@ function RootLayout() {
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel isFetching={isFetching} />
       {/*
-       * One pinned toggle for every state. The sidebar is offcanvas, so a toggle
-       * living inside it would vanish on collapse; swapping between a sidebar
-       * copy and a card-header copy also flickers on toggle. A single fixed
-       * button at the traffic-light row stays put — no mount/unmount, no jump.
-       * top-11 (32px button) centers it on window-Y 27, the traffic-light line;
-       * left-22 clears the macOS traffic lights with a small gap.
+       * Single fixed toggle for every state: the offcanvas sidebar would carry
+       * an inside toggle off-screen on collapse, and swapping two copies
+       * flickers. top-11/left-22 sits it on the macOS traffic-light row.
        */}
       <SidebarTrigger className="fixed top-[11px] left-22 z-30" />
     </SidebarProvider>
   );
 }
 
-// The floating card. Split out so it can read sidebar state via useSidebar()
-// (a hook only usable below SidebarProvider).
+// Split out so it can read sidebar state via useSidebar().
 function CardPanel({ isFetching }: { isFetching: boolean }) {
   const { state, isMobile } = useSidebar();
-  // Collapsed on desktop, the card slides left under the pinned toggle and the
-  // macOS traffic lights — pad the header start so the title clears them.
+  // Collapsed, the card slides under the toggle + traffic lights — pad so the
+  // title clears them.
   const collapsedDesktop = !isMobile && state === "collapsed";
 
   return (
     <SidebarInset className="flex min-h-0 flex-col overflow-hidden border md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5">
       <header
         className={cn(
-          // The bottom divider is an inset box-shadow, not a border: it takes no
-          // layout space, so it can't eat into this flex box and pull the
-          // centered title off the traffic-light line.
-          // transition-[padding] animates the collapse-time shift in sync with
-          // the sidebar slide (matching its duration-200 ease-linear), so the
-          // title glides aside to make room for the lights instead of jumping.
+          // Divider is a box-shadow (no layout space) so it can't nudge the
+          // title off the light line; transition animates the collapse-time
+          // padding shift in sync with the sidebar slide.
           "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] transition-[padding] duration-200 ease-linear",
           collapsedDesktop && "ps-30",
         )}

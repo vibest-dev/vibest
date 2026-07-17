@@ -3,13 +3,8 @@
 
 @source "../node_modules/@vibest/ui";
 
-/*
- * Scan this app's own source. Tailwind's automatic content detection is relative
- * to the Vite root, but the Electron desktop renderer's root is apps/desktop/src/
- * renderer — it never sees apps/app/src. This explicit @source makes the CSS
- * self-sufficient so app-only utilities (e.g. the inset card margin in
- * routes/__root.tsx) are generated for every host, web and desktop alike.
- */
+/* Scan our own src explicitly: the desktop renderer's Vite root is
+ * apps/desktop, so auto-detection alone misses app-only utilities. */
 @source ".";
 
 :root {
