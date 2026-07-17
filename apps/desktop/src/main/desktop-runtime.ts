@@ -46,6 +46,14 @@ export function startDesktopRuntime(): void {
   if (remoteDebugPort) {
     app.commandLine.appendSwitch("remote-debugging-port", remoteDebugPort);
     app.setPath("userData", vibestTempPath(`remote-debugging-${remoteDebugPort}`));
+  } else if (is.dev) {
+    // Dev and the packaged build share one app identity, so they'd share the
+    // single-instance lock (a file under userData). On macOS an installed
+    // Vibest.app keeps running after its window closes (see window-all-closed
+    // below), so it holds that lock — and every `dev` launch would fail the
+    // requestSingleInstanceLock() check below and quit on startup. Give dev its
+    // own userData dir so it gets an independent lock (and separate state).
+    app.setPath("userData", `${app.getPath("userData")}-dev`);
   }
 
   let runtime: ReturnType<typeof makeRuntime> | undefined;
