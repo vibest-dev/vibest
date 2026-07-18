@@ -8,7 +8,7 @@ import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 
 import { FileReadError } from "../errors";
-import { WorkspaceFSService } from "../fs";
+import { FileSystemService } from "../fs";
 import type { RpcContext } from "./context";
 
 const orpc = implement(fsContract).$context<RpcContext>();
@@ -18,12 +18,8 @@ const IGNORED_DIRS = new Set(["node_modules"]);
 
 export const fsRouter = orpc.router({
   readFileString: orpc.readFileString.effect(function* ({ input }) {
-    const fs = yield* WorkspaceFSService;
+    const fs = yield* FileSystemService;
     return yield* fs.readFileString(input.cwd, input.path);
-  }),
-  readDirectory: orpc.readDirectory.effect(function* ({ input }) {
-    const fs = yield* WorkspaceFSService;
-    return yield* fs.readDirectory(input.cwd, input.path);
   }),
   browse: orpc.browse.effect(function* ({ input }) {
     const fs = yield* FileSystem;

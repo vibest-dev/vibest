@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { WorkspaceFSService, WorkspaceFSServiceLayer } from "../src/index";
+import { FileSystemService, FileSystemServiceLayer } from "../src/index";
 
-describe("WorkspaceFSService", () => {
+describe("FileSystemService", () => {
   let cwd: string;
   let outside: string;
   beforeEach(async () => {
@@ -24,13 +24,13 @@ describe("WorkspaceFSService", () => {
     await rm(outside, { recursive: true, force: true });
   });
 
-  const run = <A, E>(program: Effect.Effect<A, E, WorkspaceFSService>) =>
-    Effect.runPromise(Effect.provide(program, WorkspaceFSServiceLayer));
+  const run = <A, E>(program: Effect.Effect<A, E, FileSystemService>) =>
+    Effect.runPromise(Effect.provide(program, FileSystemServiceLayer));
 
   // Run a program expected to fail and surface the error's `_tag` (or a sentinel
   // if it unexpectedly succeeds).
   const errorTag = <A, E extends { readonly _tag: string }>(
-    program: Effect.Effect<A, E, WorkspaceFSService>,
+    program: Effect.Effect<A, E, FileSystemService>,
   ) =>
     run(
       program.pipe(
@@ -43,7 +43,7 @@ describe("WorkspaceFSService", () => {
 
   const readFile = (path: string) =>
     Effect.gen(function* () {
-      const fs = yield* WorkspaceFSService;
+      const fs = yield* FileSystemService;
       return yield* fs.readFileString(cwd, path);
     });
 
@@ -53,16 +53,6 @@ describe("WorkspaceFSService", () => {
 
   it("rejects an absolute path", async () => {
     expect(await errorTag(readFile(join(outside, "secret.txt")))).toBe("WorkspacePathEscape");
-  });
-
-  it("lists a directory", async () => {
-    const entries = await run(
-      Effect.gen(function* () {
-        const fs = yield* WorkspaceFSService;
-        return yield* fs.readDirectory(cwd, ".");
-      }),
-    );
-    expect(new Set(entries)).toEqual(new Set(["a.txt", "sub", "link", "bin"]));
   });
 
   it("rejects a `..` escape", async () => {

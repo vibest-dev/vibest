@@ -35,27 +35,22 @@ type ReadFileError =
   | WorkspaceReadError;
 
 /**
- * `WorkspaceFSService` — read-only file access confined to a caller-supplied
+ * `FileSystemService` — read-only file access confined to a caller-supplied
  * `cwd`. Built on the effect `FileSystem`, but unlike a raw passthrough it
  * enforces a path boundary (lexical + realpath, defeating `..` and symlink
  * escapes) and read guardrails (regular-file-only, size cap, binary rejection).
  * All failures are typed on the effect error channel.
  */
-export class WorkspaceFSService extends Context.Service<
-  WorkspaceFSService,
+export class FileSystemService extends Context.Service<
+  FileSystemService,
   {
     /** Read `path` (relative to `cwd`) as UTF-8 text. */
     readonly readFileString: (cwd: string, path: string) => Effect.Effect<string, ReadFileError>;
-    /** List the entries of the directory `path` (relative to `cwd`). */
-    readonly readDirectory: (
-      cwd: string,
-      path: string,
-    ) => Effect.Effect<ReadonlyArray<string>, WorkspacePathEscape | WorkspaceReadError>;
   }
->()("WorkspaceFSService") {}
+>()("FileSystemService") {}
 
-export const WorkspaceFSServiceLayer: Layer.Layer<WorkspaceFSService> = Layer.effect(
-  WorkspaceFSService,
+export const FileSystemServiceLayer: Layer.Layer<FileSystemService> = Layer.effect(
+  FileSystemService,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
@@ -99,12 +94,6 @@ export const WorkspaceFSServiceLayer: Layer.Layer<WorkspaceFSService> = Layer.ef
             return yield* new WorkspaceBinaryFile({ path });
           }
           return content;
-        }),
-
-      readDirectory: (cwd, path) =>
-        Effect.gen(function* () {
-          const absolute = yield* resolveWithin(cwd, path);
-          return yield* fs.readDirectory(absolute).pipe(Effect.mapError(readErr(path)));
         }),
     };
   }),

@@ -10,14 +10,12 @@ const CwdPathInput = Schema.Struct({
 });
 
 /**
- * File-system access. `readFileString` / `readDirectory` are confined to the
- * caller-supplied `cwd` (backed by `WorkspaceFSService`); `browse` is rootless —
- * a folder picker that may list any directory but returns names only, no
- * contents.
+ * File-system access. `readFileString` is confined to the caller-supplied `cwd`
+ * (backed by `FileSystemService`); `browse` is rootless — a folder picker that
+ * may list any directory but returns names only, no contents.
  */
 export const fsContract = {
   readFileString: oc.input(toStandardSchema(CwdPathInput)).output(type<string>()),
-  readDirectory: oc.input(toStandardSchema(CwdPathInput)).output(type<ReadonlyArray<string>>()),
   /** Browse immediate subdirectories of `path` (default: the home directory). */
   browse: oc
     .input(toStandardSchema(BrowseInputSchema))

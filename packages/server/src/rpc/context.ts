@@ -3,10 +3,10 @@ import type { HarnessAgentSessionService } from "@vibest/harness/runtime";
 import type { FileSystem } from "effect/FileSystem";
 
 import type { EventBus } from "../events";
-import type { WorkspaceFSService } from "../fs";
+import type { FileSystemService } from "../fs";
 import type { ProjectService } from "../project";
 
 /** Services every RPC procedure may `yield*`. */
 export type RpcContext = WithEffectContext<
-  EventBus | FileSystem | HarnessAgentSessionService | ProjectService | WorkspaceFSService
+  EventBus | FileSystem | HarnessAgentSessionService | ProjectService | FileSystemService
 >;
