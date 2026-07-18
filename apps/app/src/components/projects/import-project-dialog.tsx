@@ -94,7 +94,11 @@ export function ImportProjectDialog({ onClose }: { onClose: () => void }) {
               {current?.path}
             </span>
             <Button
-              disabled={current === undefined || importProject.isPending}
+              // While navigating, keepPreviousData shows the prior listing (isPlaceholderData);
+              // block importing until current.path matches the folder actually loaded.
+              disabled={
+                current === undefined || listing.isPlaceholderData || importProject.isPending
+              }
               onClick={() => current && importProject.mutate(current.path)}
               size="sm"
             >
