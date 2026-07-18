@@ -11,7 +11,7 @@ import { makeDesktopConfigLive } from "./desktop-config";
 import { DesktopApplicationLive, RendererChannelLive } from "./desktop-runtime-glue";
 import { registerAppScheme } from "./electron/app-protocol";
 import { MainWindow, MainWindowLive } from "./electron/main-window";
-import { vibestTempPath } from "./lib/utils";
+import { devWorktreeSlug, vibestTempPath } from "./lib/utils";
 import { LocalServerLive } from "./server/local-server-live";
 import { formatStartupFailure } from "./startup-failure";
 
@@ -46,14 +46,17 @@ export function startDesktopRuntime(): void {
   if (remoteDebugPort) {
     app.commandLine.appendSwitch("remote-debugging-port", remoteDebugPort);
     app.setPath("userData", vibestTempPath(`remote-debugging-${remoteDebugPort}`));
-  } else if (is.dev) {
-    // Dev and the packaged build share one app identity, so they'd share the
-    // single-instance lock (a file under userData). On macOS an installed
-    // Vibest.app keeps running after its window closes (see window-all-closed
-    // below), so it holds that lock — and every `dev` launch would fail the
-    // requestSingleInstanceLock() check below and quit on startup. Give dev its
-    // own userData dir so it gets an independent lock (and separate state).
-    app.setPath("userData", `${app.getPath("userData")}-dev`);
+  } else if (is.dev && !isE2E) {
+    // Give dev its own userData so its single-instance lock is independent of an
+    // installed build (which on macOS keeps holding the lock after its window
+    // closes). Suffix with the git worktree name so parallel dev instances from
+    // different worktrees don't collide. E2E is excluded — it passes its own
+    // --user-data-dir.
+    const slug = devWorktreeSlug();
+    const devUserData = slug
+      ? `${app.getPath("userData")}-dev-${slug}`
+      : `${app.getPath("userData")}-dev`;
+    app.setPath("userData", devUserData);
   }
 
   let runtime: ReturnType<typeof makeRuntime> | undefined;

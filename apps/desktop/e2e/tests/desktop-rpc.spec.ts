@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 
@@ -119,7 +119,8 @@ test("gives a reloaded renderer document a new MessagePort", async ({ electronAp
   expect(serverPid(electronApp.process().pid)).toBe(pid);
 });
 
-test("boots the development HTTP renderer through MessagePort", async () => {
+// oxlint-disable-next-line no-empty-pattern -- required by Playwright's fixture API
+test("boots the development HTTP renderer through MessagePort", async ({}, testInfo) => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
   const server = createServer((request, response) => {
     const requested = path.join(
@@ -145,8 +146,15 @@ test("boots the development HTTP renderer through MessagePort", async () => {
   if (!address || typeof address === "string") throw new Error("Development server did not bind");
   const origin = `http://127.0.0.1:${address.port}`;
 
+  // Own userData so its single-instance lock can't collide with a real `dev`.
+  const userData = path.join(testInfo.outputPath(), "user-data");
+  mkdirSync(userData, { recursive: true });
+
   const app = await electron.launch({
-    args: [path.join(import.meta.dirname, "../../dist/main/index.js")],
+    args: [
+      path.join(import.meta.dirname, "../../dist/main/index.js"),
+      `--user-data-dir=${userData}`,
+    ],
     env: {
       ...process.env,
       NODE_ENV: "development",
