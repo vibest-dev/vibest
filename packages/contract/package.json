@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./fs": "./src/fs.ts",
+    "./project": "./src/project.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts"
   },

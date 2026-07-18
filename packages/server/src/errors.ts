@@ -28,6 +28,12 @@ export class InvalidSessionId extends Data.TaggedError("InvalidSessionId")<{
   readonly sessionId: string;
 }> {}
 
+/** A file read failed (used by the project folder browser). */
+export class FileReadError extends Data.TaggedError("FileReadError")<{
+  readonly path: string;
+  readonly cause: unknown;
+}> {}
+
 /** A requested path resolves outside its `cwd` (via `..` or a symlink). */
 export class WorkspacePathEscape extends Data.TaggedError("WorkspacePathEscape")<{
   readonly cwd: string;

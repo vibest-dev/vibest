@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolve as resolvePath } from "node:path";
+import { basename, resolve as resolvePath } from "node:path";
 
 import { Context, Effect, Layer } from "effect";
 
@@ -16,8 +16,9 @@ export class ProjectService extends Context.Service<
   {
     readonly list: () => Effect.Effect<ReadonlyArray<Project>, StoreReadError>;
     readonly findById: (id: string) => Effect.Effect<Project, StoreReadError | ProjectNotFound>;
+    /** `name` defaults to the folder's basename. */
     readonly create: (input: {
-      readonly name: string;
+      readonly name?: string;
       readonly path: string;
     }) => Effect.Effect<Project, StoreReadError | StoreWriteError>;
     readonly remove: (
@@ -55,7 +56,7 @@ export const ProjectServiceLayer: Layer.Layer<ProjectService, never, ProjectRepo
 
             const project: Project = {
               id: randomUUID(),
-              name: input.name,
+              name: input.name ?? basename(normalized),
               path: normalized,
               createdAt: new Date().toISOString(),
             };
