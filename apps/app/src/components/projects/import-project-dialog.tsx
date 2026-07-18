@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { Button } from "@vibest/ui/components/button";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@vibest/ui/components/command";
 import { CornerLeftUpIcon, FolderIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface Entry {
   value: string;
@@ -25,18 +26,11 @@ interface Entry {
  * Command-palette folder browser: drill into a folder, then import it.
  * Mount only while open — browsing state resets by unmounting on close.
  */
-export function ImportProjectDialog({
-  onClose,
-  onImport,
-  importing,
-}: {
-  onClose: () => void;
-  onImport: (path: string) => void;
-  importing: boolean;
-}) {
+export function ImportProjectDialog({ onClose }: { onClose: () => void }) {
   // null = the server's default starting point (the home directory).
   const [path, setPath] = useState<string | null>(null);
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
+  const queryClient = useQueryClient();
 
   const listing = useQuery({
     ...orpcQueryUtils.project.listDirectories.queryOptions({
@@ -44,25 +38,36 @@ export function ImportProjectDialog({
     }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+    select: (data) => ({
+      path: data.path,
+      entries: [
+        ...(data.parent != null ? [{ value: data.parent, label: "..", kind: "up" as const }] : []),
+        ...data.directories.map((d) => ({
+          value: d.path,
+          label: d.name,
+          kind: "dir" as const,
+        })),
+      ] satisfies Entry[],
+    }),
   });
   const current = listing.data;
 
-  const entries: Entry[] = [
-    ...(current?.parent != null
-      ? [{ value: current.parent, label: "..", kind: "up" as const }]
-      : []),
-    ...(current?.directories ?? []).map((d) => ({
-      value: d.path,
-      label: d.name,
-      kind: "dir" as const,
-    })),
-  ];
+  const importProject = useMutation({
+    mutationFn: (target: string) => orpcQueryUtils.project.create.call({ path: target }),
+    onSuccess: () => {
+      onClose();
+      return queryClient.invalidateQueries({ queryKey: orpcQueryUtils.project.list.key() });
+    },
+    onError: (error) => {
+      toast.error(`Failed to import project: ${error.message}`);
+    },
+  });
 
   return (
     <CommandDialog open onOpenChange={(open) => !open && onClose()}>
       <CommandDialogPopup>
         {/* Remount on navigation so the search text and highlight reset. */}
-        <Command items={entries} key={current?.path ?? "loading"}>
+        <Command items={current?.entries ?? []} key={current?.path ?? "loading"}>
           <CommandInput placeholder="Search folders..." />
           <CommandPanel>
             <CommandEmpty>{listing.isPending ? "Loading..." : "No folders found."}</CommandEmpty>
@@ -89,8 +94,8 @@ export function ImportProjectDialog({
               {current?.path}
             </span>
             <Button
-              disabled={current === undefined || importing}
-              onClick={() => current && onImport(current.path)}
+              disabled={current === undefined || importProject.isPending}
+              onClick={() => current && importProject.mutate(current.path)}
               size="sm"
             >
               Import this folder
