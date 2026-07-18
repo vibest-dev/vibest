@@ -52,7 +52,7 @@ export function startDesktopRuntime(): void {
     // closes). Suffix with the git worktree name so parallel dev instances from
     // different worktrees don't collide. E2E is excluded — it passes its own
     // --user-data-dir.
-    const slug = devWorktreeSlug();
+    const slug = Effect.runSync(devWorktreeSlug);
     const devUserData = slug
       ? `${app.getPath("userData")}-dev-${slug}`
       : `${app.getPath("userData")}-dev`;
