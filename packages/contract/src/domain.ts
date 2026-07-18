@@ -344,10 +344,10 @@ export const DirectoryEntrySchema = Schema.Struct({
 });
 export type DirectoryEntry = typeof DirectoryEntrySchema.Type;
 
-export const ListDirectoriesInputSchema = Schema.Struct({
+export const BrowseInputSchema = Schema.Struct({
   path: Schema.optionalKey(Schema.String),
 });
-export const ListDirectoriesResultSchema = Schema.Struct({
+export const BrowseResultSchema = Schema.Struct({
   path: Schema.String,
   parent: Schema.Union([Schema.String, Schema.Null]),
   directories: Schema.Array(DirectoryEntrySchema),

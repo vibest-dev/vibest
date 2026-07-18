@@ -33,7 +33,7 @@ export function ImportProjectDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
 
   const listing = useQuery({
-    ...orpcQueryUtils.project.listDirectories.queryOptions({
+    ...orpcQueryUtils.fs.browse.queryOptions({
       input: path === null ? {} : { path },
     }),
     placeholderData: keepPreviousData,
