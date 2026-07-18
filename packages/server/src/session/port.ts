@@ -1,22 +1,47 @@
+import type { AgentResponse } from "@vibest/contract";
 import { HarnessAgentSessionService } from "@vibest/harness/runtime";
-import type { CreateSessionError, ResumeSessionError } from "@vibest/harness/runtime";
-import { Context, Effect, Layer } from "effect";
+import type {
+  AgentOperationError,
+  AgentRequestUnavailable,
+  CreateSessionError,
+  PromptReceipt,
+  ResumeSessionError,
+  SessionClosed,
+  SessionEnvelopeBody,
+  SessionNotFound as HarnessSessionNotFound,
+  TurnAlreadyRunning,
+  UserInput,
+} from "@vibest/harness/runtime";
+import { Context, Effect, Layer, Stream } from "effect";
 
 import { AgentUnavailable, SessionOpenFailed, SessionResumeFailed } from "../errors";
 import type { HarnessAgentId } from "../types";
 
 export type HarnessCreateError = AgentUnavailable | SessionOpenFailed;
 export type HarnessResumeError = AgentUnavailable | SessionResumeFailed;
+export type HarnessEventsError = HarnessSessionNotFound;
+export type HarnessPromptError =
+  | HarnessSessionNotFound
+  | SessionClosed
+  | TurnAlreadyRunning
+  | AgentOperationError;
+export type HarnessInterruptError = HarnessSessionNotFound | SessionClosed | AgentOperationError;
+export type HarnessRespondError =
+  | HarnessSessionNotFound
+  | AgentRequestUnavailable
+  | AgentOperationError;
 
 /**
- * Narrow lifecycle seam onto the harness runtime. `SessionService` depends on
- * this port, never on `@vibest/harness` directly, so orchestration (projectId
- * resolution, id translation, metadata) can be built and tested against a fake.
- * The port speaks the agent-native session id and a resolved `workspacePath`
- * only — it never sees a projectId or a server sessionId.
+ * The single seam onto the HarnessAgent we depend on. `SessionService` talks
+ * only to this port, never to `@vibest/harness` directly, so the orchestration
+ * (projectId resolution, id translation, metadata, runtime fan-out) can be
+ * built and tested against a fake. The port speaks the agent-native session id
+ * and a resolved `workspacePath` only — it never sees a projectId or a server
+ * sessionId. Create/resume errors are mapped to server errors here; the
+ * active-instance ops pass the HarnessAgent's own errors through.
  */
-export class HarnessSessionsPort extends Context.Service<
-  HarnessSessionsPort,
+export class HarnessAgentSessionPort extends Context.Service<
+  HarnessAgentSessionPort,
   {
     /** Open a fresh native session; returns the agent-native session id. */
     readonly create: (
@@ -31,8 +56,22 @@ export class HarnessSessionsPort extends Context.Service<
     ) => Effect.Effect<void, HarnessResumeError>;
     /** Close a native session; idempotent no-op if it is not active. */
     readonly close: (harnessSessionId: string) => Effect.Effect<void>;
+    /** The raw per-session body stream, drained by a SessionRuntime. */
+    readonly events: (
+      harnessSessionId: string,
+    ) => Effect.Effect<Stream.Stream<SessionEnvelopeBody, AgentOperationError>, HarnessEventsError>;
+    readonly prompt: (
+      harnessSessionId: string,
+      input: UserInput,
+    ) => Effect.Effect<PromptReceipt, HarnessPromptError>;
+    readonly interrupt: (harnessSessionId: string) => Effect.Effect<void, HarnessInterruptError>;
+    readonly respondToAgentRequest: (
+      harnessSessionId: string,
+      requestId: string,
+      response: AgentResponse,
+    ) => Effect.Effect<void, HarnessRespondError>;
   }
->()("HarnessSessionsPort") {}
+>()("HarnessAgentSessionPort") {}
 
 const mapCreateError =
   (harnessAgentId: HarnessAgentId) =>
@@ -49,12 +88,12 @@ const mapResumeError =
       : new SessionResumeFailed({ harnessSessionId, reason: error.message });
 
 /** The real port: adapts {@link HarnessAgentSessionService} and maps its errors. */
-export const HarnessSessionsPortLayer: Layer.Layer<
-  HarnessSessionsPort,
+export const HarnessAgentSessionPortLayer: Layer.Layer<
+  HarnessAgentSessionPort,
   never,
   HarnessAgentSessionService
 > = Layer.effect(
-  HarnessSessionsPort,
+  HarnessAgentSessionPort,
   Effect.gen(function* () {
     const harness = yield* HarnessAgentSessionService;
     return {
@@ -68,6 +107,14 @@ export const HarnessSessionsPortLayer: Layer.Layer<
           .resume({ sessionId: harnessSessionId, harnessAgentId, workspacePath })
           .pipe(Effect.mapError(mapResumeError(harnessAgentId, harnessSessionId))),
       close: (harnessSessionId) => harness.close(harnessSessionId),
+      events: (harnessSessionId) =>
+        harness
+          .events(harnessSessionId)
+          .pipe(Effect.map((stream) => stream.pipe(Stream.map((draft) => draft.body)))),
+      prompt: (harnessSessionId, input) => harness.prompt(harnessSessionId, input),
+      interrupt: (harnessSessionId) => harness.interrupt(harnessSessionId),
+      respondToAgentRequest: (harnessSessionId, requestId, response) =>
+        harness.respondToAgentRequest(harnessSessionId, requestId, response),
     };
   }),
 );

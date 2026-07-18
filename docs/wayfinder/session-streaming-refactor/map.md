@@ -36,6 +36,8 @@ labels: [wayfinder:map]
 - [codex 原生历史与 messageId 调研](tickets/05-codex-history-research.md) — codex 有原生持久化 `Turn.id`，实时 transform 已当 start.messageId 发、`thread/read includeTurns` 可读回同 id，**无需合成**；与 claude-code 共享 fold 架构不共享 id 源；turn.ended 从 `turn/completed` payload 派生。风险：turn.id 跨 resume 稳定性未实测（承重假设，ticket 11 前必验）。
 - [claude-code 原生历史与 messageId 调研](tickets/04-claude-code-history-research.md) — 今天完全没连上（实时 start 无 messageId、fold 出空 id）；原生 `getSessionMessages` 有 wire uuid 且跨 resume 存活，但一 turn 多条 assistant，**须合成**（取 turn 首条 assistant uuid）两侧同分段规则复现；turn.ended 须门控在对 getSessionMessages 的有界轮询后。承重风险：compaction/`retracted_message_uuids` 可改写被选 uuid → 破坏 reconciliation。
 - [实现 create/resume + Project + 元数据](tickets/07-impl-create-resume.md) — **option A 端口边界**：交付服务端编排层（SessionMetadataRepository + HarnessSessionsPort + SessionService，server↔native id 翻译、projectId→cwd、元数据原子写），fake port 测（6+9 测试绿）；harness 保持无盘。真实 port→harness 适配、project router、rpc/session.ts 接线因 harness 19 文件依赖旧事件模型（加载不了）**归并进 08**。删 id.ts 复合方案。
+- [订阅重构 + 服务端 runtime + 全接线](tickets/08-impl-subscribe.md) — **server owns the runtime**：新建 SessionRuntime（会话内 seq / phase 机 / activeTurn / 有界 fan-out 满则 `closed(slow_consumer)`），EventBus 退化为纯 scope fan-out，harness 瘦身为纯 body 流；真实 HarnessSessionsPort + project router + rpc/session 13 方法 + 反查 resolveRef 全接线；app transport 迁到 SessionRef 订阅 + snapshot 重放；无 sleep 订阅测试。合入 PR #118（rebase 到 main、review 通过、全仓 build/test/typecheck 19/19 绿）；`getMessages` 空数组接缝留给 10/11、client reconcile 留给 12。
+- [实现 session.list/rename/delete](tickets/09-impl-list-rename-delete.md) — **范围按用户 2026-07-18 调整**（08 后 harness 无状态、原生标题/历史无接口）：list = 元数据 ⋈ 活跃 runtime status（非活跃不带 status）；delete 关实例 + 删元数据 + 发 `session.deleted`（原生历史删除待 harness 面）；**rename 归 harness 原生能力、本 ticket 不做**（留 broadcast-only stub）。`historyAvailable` 暂恒 true（真实判定归 10/11）。server 41 测绿、全仓 19/19 绿。侧边栏消费真实 list 仍待客户端接线。
 
 ## Not yet specified
 
@@ -44,7 +46,9 @@ labels: [wayfinder:map]
 - **codex turn.id 跨 resume/重启稳定性未实测**：ticket 11 实现前必须对活二进制验证；若不稳，codex 也退回合成规则。
 - 两侧共享的 **turn 分段规则**（历史读缺 result/system 边界帧）需先写对拍测试锁死——ticket 10 起点。
 - pi adapter 在新契约下的能力声明与 `UNSUPPORTED` 策略（历史、恢复等）。
-- 订阅语义的验收测试基建形态（受控调度、无 sleep，对齐设计稿 §10.3）——随订阅重构实现清晰。
+- **harness native-title 面（承载 rename）**：08 后 harness 无 title 读写；把会话重命名落到 agent 原生标题需给 harness + 各 adapter 加 title get/set 面。09 暂留 broadcast-only stub、不持久化——可能回补一张专项 ticket。
+- **delete 的原生历史删除**：delete 现只删 server 元数据 + 关活跃实例；删除 agent 原生历史需 adapter 面（与 10/11 的原生历史读同源），未做则原生历史遗留在 agent 侧。
+- **侧边栏消费真实 session.list**：`app-sidebar.tsx` 仍是 mock；接真实 list（含 status/historyAvailable）归客户端工作，与 12 的 reconcile 同期或独立 UI ticket。
 - active-turn buffer 指标落点与后续上限策略（v1 不设上限，先收集数据）。
 
 ## Out of scope

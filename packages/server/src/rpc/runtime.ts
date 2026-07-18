@@ -19,9 +19,9 @@ import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
 import {
-  HarnessSessionsPortLayer,
+  HarnessAgentSessionPortLayer,
+  SessionManagerLayer,
   SessionRepositoryLayer,
-  SessionRuntimeRegistryLayer,
   SessionServiceLayer,
 } from "../session";
 
@@ -75,22 +75,23 @@ const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(PathsLayer),
 );
 const SessionRepositoryProvided = SessionRepositoryLayer.pipe(Layer.provide(PathsLayer));
-const HarnessSessionsPortProvided = HarnessSessionsPortLayer.pipe(
+const HarnessAgentSessionPortProvided = HarnessAgentSessionPortLayer.pipe(
   Layer.provide(HarnessSessionServiceLayer),
 );
+// The manager and the bus are internal collaborators of SessionService now, so
+// the façade composes them here. EventBusLayer is one reference, so publish
+// (SessionService), fan-out (SessionManager), and subscribe (RPC) share it.
+const SessionManagerProvided = SessionManagerLayer.pipe(Layer.provide(EventBusLayer));
 const SessionServiceProvided = SessionServiceLayer.pipe(
   Layer.provide(ProjectServiceProvided),
   Layer.provide(SessionRepositoryProvided),
-  Layer.provide(HarnessSessionsPortProvided),
-);
-const SessionRuntimeRegistryProvided = SessionRuntimeRegistryLayer.pipe(
+  Layer.provide(HarnessAgentSessionPortProvided),
+  Layer.provide(SessionManagerProvided),
   Layer.provide(EventBusLayer),
 );
 
 export const AgentRuntimeLayer = Layer.mergeAll(
   EventBusLayer,
-  HarnessSessionServiceLayer,
   SessionServiceProvided,
   ProjectServiceProvided,
-  SessionRuntimeRegistryProvided,
 );

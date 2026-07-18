@@ -20,9 +20,9 @@ import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
 import {
-  HarnessSessionsPortLayer,
+  HarnessAgentSessionPortLayer,
+  SessionManagerLayer,
   SessionRepositoryLayer,
-  SessionRuntimeRegistryLayer,
   SessionServiceLayer,
 } from "../src/session";
 
@@ -54,51 +54,51 @@ function makeFake(): string {
   return file;
 }
 
+function setup() {
+  const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
+  const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
+  const pathsLayer = layerPaths(home);
+
+  const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
+    Layer.provide(NodeServices.layer),
+  );
+  const registryLayer = Layer.effect(
+    HarnessAgentRegistry,
+    Effect.gen(function* () {
+      const codex = yield* Codex;
+      return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
+    }),
+  ).pipe(Layer.provide(codexLayer));
+
+  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
+  const projectServiceLayer = ProjectServiceLayer.pipe(
+    Layer.provide(ProjectRepositoryLayer),
+    Layer.provide(pathsLayer),
+  );
+  const metadataLayer = SessionRepositoryLayer.pipe(Layer.provide(pathsLayer));
+  const portLayer = HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer));
+  const managerLayer = SessionManagerLayer.pipe(Layer.provide(EventBusLayer));
+  const sessionServiceLayer = SessionServiceLayer.pipe(
+    Layer.provide(projectServiceLayer),
+    Layer.provide(metadataLayer),
+    Layer.provide(portLayer),
+    Layer.provide(managerLayer),
+    Layer.provide(EventBusLayer),
+  );
+
+  const appLayer = Layer.mergeAll(EventBusLayer, sessionServiceLayer, projectServiceLayer);
+  const runtime = ManagedRuntime.make(appLayer);
+  const context: RpcContext = {
+    "effect/context": runtime.runSync(runtime.contextEffect),
+  };
+  const client = createRouterClient(router, { context });
+  return { client, workspace, dispose: () => runtime.dispose() };
+}
+
 describe("session router", () => {
   it("creates a session from a project and streams its scoped events", async () => {
-    const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
-    const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
-    const pathsLayer = layerPaths(home);
-
-    const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
-      Layer.provide(NodeServices.layer),
-    );
-    const registryLayer = Layer.effect(
-      HarnessAgentRegistry,
-      Effect.gen(function* () {
-        const codex = yield* Codex;
-        return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
-      }),
-    ).pipe(Layer.provide(codexLayer));
-
-    const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
-    const projectServiceLayer = ProjectServiceLayer.pipe(
-      Layer.provide(ProjectRepositoryLayer),
-      Layer.provide(pathsLayer),
-    );
-    const metadataLayer = SessionRepositoryLayer.pipe(Layer.provide(pathsLayer));
-    const portLayer = HarnessSessionsPortLayer.pipe(Layer.provide(harnessSessionLayer));
-    const sessionServiceLayer = SessionServiceLayer.pipe(
-      Layer.provide(projectServiceLayer),
-      Layer.provide(metadataLayer),
-      Layer.provide(portLayer),
-    );
-    const registryRuntimeLayer = SessionRuntimeRegistryLayer.pipe(Layer.provide(EventBusLayer));
-
-    const appLayer = Layer.mergeAll(
-      EventBusLayer,
-      harnessSessionLayer,
-      sessionServiceLayer,
-      projectServiceLayer,
-      registryRuntimeLayer,
-    );
-    const runtime = ManagedRuntime.make(appLayer);
+    const { client, workspace, dispose } = setup();
     try {
-      const context: RpcContext = {
-        "effect/context": runtime.runSync(runtime.contextEffect),
-      };
-      const client = createRouterClient(router, { context });
-
       const project = await client.project.create({ path: workspace });
       const ref = await client.session.create({
         projectId: project.id,
@@ -128,7 +128,34 @@ describe("session router", () => {
       expect(snapshot.cursor).toBeGreaterThan(0);
       await client.session.close({ ref });
     } finally {
-      await runtime.dispose();
+      await dispose();
+    }
+  });
+
+  it("lists sessions with live status and drops them on delete", async () => {
+    const { client, workspace, dispose } = setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+
+      // Active session: list carries the live phase from the running runtime.
+      const active = await client.session.list({ projectId: project.id });
+      expect(active.sessions).toHaveLength(1);
+      expect(active.sessions[0]?.sessionId).toBe(ref.sessionId);
+      expect(active.sessions[0]?.status?.phase).toBeDefined();
+
+      // Closed but not deleted: metadata stays, the runtime is gone → no status.
+      await client.session.close({ ref });
+      const idle = await client.session.list({ projectId: project.id });
+      expect(idle.sessions).toHaveLength(1);
+      expect(idle.sessions[0]?.status).toBeUndefined();
+
+      // Delete: metadata removed → the session leaves the listing entirely.
+      await client.session.delete({ ref });
+      const empty = await client.session.list({ projectId: project.id });
+      expect(empty.sessions).toHaveLength(0);
+    } finally {
+      await dispose();
     }
   });
 });

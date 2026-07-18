@@ -2,14 +2,14 @@ export { SessionRepository, SessionRepositoryLayer } from "./repository";
 export {
   type HarnessCreateError,
   type HarnessResumeError,
-  HarnessSessionsPort,
-  HarnessSessionsPortLayer,
+  HarnessAgentSessionPort,
+  HarnessAgentSessionPortLayer,
 } from "./port";
 export {
-  makeSessionRuntimeRegistry,
+  makeSessionManager,
+  SessionManager,
+  SessionManagerLayer,
+  type SessionManagerShape,
   SessionNotActive,
-  SessionRuntimeRegistry,
-  SessionRuntimeRegistryLayer,
-  type SessionRuntimeRegistryShape,
 } from "./runtime";
 export { SessionService, SessionServiceLayer } from "./service";

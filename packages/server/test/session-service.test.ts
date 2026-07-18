@@ -2,15 +2,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { layerPaths } from "../src/config/paths";
 import { AgentUnavailable } from "../src/errors";
+import { EventBusLayer } from "../src/events";
 import { ProjectRepositoryLayer } from "../src/project/repository";
 import { ProjectService, ProjectServiceLayer } from "../src/project/service";
-import { type HarnessCreateError, HarnessSessionsPort } from "../src/session/port";
+import { type HarnessCreateError, HarnessAgentSessionPort } from "../src/session/port";
 import { SessionRepository, SessionRepositoryLayer } from "../src/session/repository";
+import { SessionManagerLayer } from "../src/session/runtime";
 import { SessionService, SessionServiceLayer } from "../src/session/service";
 
 type PortSpy = {
@@ -21,7 +23,7 @@ type PortSpy = {
 
 const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
   const spy: PortSpy = { create: [], resume: [], close: [] };
-  const layer = Layer.succeed(HarnessSessionsPort, {
+  const layer = Layer.succeed(HarnessAgentSessionPort, {
     create: (harnessAgentId, workspacePath) => {
       spy.create.push({ harnessAgentId, workspacePath });
       return opts.failCreate
@@ -36,6 +38,12 @@ const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
       spy.close.push(harnessSessionId);
       return Effect.void;
     },
+    // A started session drains an empty native stream — enough to exercise the
+    // create/resume → runtime-start path without any active-instance ops.
+    events: () => Effect.succeed(Stream.empty),
+    prompt: () => Effect.die("prompt not exercised"),
+    interrupt: () => Effect.die("interrupt not exercised"),
+    respondToAgentRequest: () => Effect.die("respond not exercised"),
   });
   return { layer, spy };
 };
@@ -51,11 +59,13 @@ describe("SessionService", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  const layers = (port: Layer.Layer<HarnessSessionsPort>) => {
+  const layers = (port: Layer.Layer<HarnessAgentSessionPort>) => {
     const paths = layerPaths(home);
     const base = Layer.mergeAll(
       ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(paths)),
       SessionRepositoryLayer.pipe(Layer.provide(paths)),
+      SessionManagerLayer.pipe(Layer.provide(EventBusLayer)),
+      EventBusLayer,
       port,
     );
     // Expose SessionService plus the base services the programs also read from;
@@ -64,7 +74,7 @@ describe("SessionService", () => {
   };
 
   const run = <A, E>(
-    port: Layer.Layer<HarnessSessionsPort>,
+    port: Layer.Layer<HarnessAgentSessionPort>,
     program: Effect.Effect<A, E, SessionService | ProjectService | SessionRepository>,
   ) => Effect.runPromise(Effect.provide(program, layers(port)));
 
@@ -199,6 +209,23 @@ describe("SessionService", () => {
       }),
     );
     expect(spy.close).toEqual(["native-1"]);
+  });
+
+  it("delete closes the native session and removes its metadata", async () => {
+    const { layer, spy } = makeFakePort();
+    const listed = await run(
+      layer,
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const sessions = yield* SessionService;
+        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
+        const ref = yield* sessions.create(project.id, "claude-code");
+        yield* sessions.delete(ref);
+        return yield* sessions.list(project.id);
+      }),
+    );
+    expect(spy.close).toEqual(["native-1"]);
+    expect(listed).toHaveLength(0);
   });
 
   it("list returns one summary per session, keyed by server sessionId", async () => {

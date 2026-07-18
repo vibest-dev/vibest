@@ -157,13 +157,15 @@ const toStatus = (projection: Projection): SessionStatus => ({
   ...(projection.activeTurn ? { activeTurnId: projection.activeTurn.turnId } : {}),
 });
 
-type Runtime = {
+// One live in-memory session (ours): projection + seq + the fiber draining the
+// HarnessAgent's native event stream. The SessionManager owns a map of these.
+type SessionRuntime = {
   readonly ref: SessionRef;
   readonly projection: Ref.Ref<Projection>;
   readonly fiber: Fiber.Fiber<void>;
 };
 
-export type SessionRuntimeRegistryShape = {
+export type SessionManagerShape = {
   /** Begin draining a session's native draft stream: stamp, fold, and fan out. */
   readonly start: (
     ref: SessionRef,
@@ -174,17 +176,16 @@ export type SessionRuntimeRegistryShape = {
   readonly status: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
 };
 
-export class SessionRuntimeRegistry extends Context.Service<
-  SessionRuntimeRegistry,
-  SessionRuntimeRegistryShape
->()("SessionRuntimeRegistry") {}
+export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
+  "SessionManager",
+) {}
 
-export const makeSessionRuntimeRegistry = (
+export const makeSessionManager = (
   bus: EventBusShape,
-): Effect.Effect<SessionRuntimeRegistryShape, never, Scope.Scope> =>
+): Effect.Effect<SessionManagerShape, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
-    const runtimes = yield* Ref.make<ReadonlyMap<string, Runtime>>(new Map());
+    const runtimes = yield* Ref.make<ReadonlyMap<string, SessionRuntime>>(new Map());
 
     const remove = (sessionId: string) =>
       Ref.update(runtimes, (current) => {
@@ -193,7 +194,7 @@ export const makeSessionRuntimeRegistry = (
         return next;
       });
 
-    const getRuntime = (ref: SessionRef): Effect.Effect<Runtime, SessionNotActive> =>
+    const getRuntime = (ref: SessionRef): Effect.Effect<SessionRuntime, SessionNotActive> =>
       Ref.get(runtimes).pipe(
         Effect.flatMap((current) => {
           const runtime = current.get(ref.sessionId);
@@ -203,7 +204,7 @@ export const makeSessionRuntimeRegistry = (
         }),
       );
 
-    const start: SessionRuntimeRegistryShape["start"] = (ref, events) =>
+    const start: SessionManagerShape["start"] = (ref, events) =>
       Effect.gen(function* () {
         const projection = yield* Ref.make(initialProjection);
 
@@ -232,7 +233,7 @@ export const makeSessionRuntimeRegistry = (
         );
       });
 
-    const stop: SessionRuntimeRegistryShape["stop"] = (ref) =>
+    const stop: SessionManagerShape["stop"] = (ref) =>
       Ref.get(runtimes).pipe(
         Effect.flatMap((current) => {
           const runtime = current.get(ref.sessionId);
@@ -258,11 +259,10 @@ export const makeSessionRuntimeRegistry = (
     };
   });
 
-export const SessionRuntimeRegistryLayer: Layer.Layer<SessionRuntimeRegistry, never, EventBus> =
-  Layer.effect(
-    SessionRuntimeRegistry,
-    Effect.gen(function* () {
-      const bus = yield* EventBus;
-      return yield* makeSessionRuntimeRegistry(bus);
-    }),
-  );
+export const SessionManagerLayer: Layer.Layer<SessionManager, never, EventBus> = Layer.effect(
+  SessionManager,
+  Effect.gen(function* () {
+    const bus = yield* EventBus;
+    return yield* makeSessionManager(bus);
+  }),
+);

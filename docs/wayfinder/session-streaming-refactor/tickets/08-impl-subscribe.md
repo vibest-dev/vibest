@@ -1,6 +1,6 @@
 ---
 title: 实现订阅重构：scope 过滤、会话内 seq、慢消费者终止
-status: open
+status: closed
 assignee: dinq
 labels: [wayfinder:task]
 blocked-by: [01-contract-types.md, 07-impl-create-resume.md]
@@ -37,3 +37,16 @@ harness↔server 事件缝的承重决定：**harness 退化为纯 per-session a
 - 相对「harness 留 runtime」方案多搬 ~200 行 projection 到 server，但 SessionRuntime 是 server 概念、snapshot 天然带 ref，用户选定此路。
 
 执行分级（见 task list #1–#8）：①harness 瘦身+类型迁移 → ②server SessionRuntime + EventBus 重写 → ③真实 port + project router + rpc/session 重写 + layer 图 → ④app transport → ⑤订阅语义测试 + 全仓绿。单大分支多提交推进。
+
+## Resolution
+
+全部 5 级执行落地，合入 PR #118（分支 `session-streaming-refactor`，已 rebase 到当前 `main` 之上，Plannotator review 通过，`turbo run build test typecheck` 全仓 19/19 绿）。
+
+- **①harness 瘦身**：`HarnessAgentSessionService` + adapter 退化为纯 per-session body 流（chunk 走 `session.message.chunk`）+ 生命周期操作，不再持 projection/seq/publisher；event-manifest 迁到 `SessionScopedEventTypes`/`CollectionEventTypes`；harness 147 测试绿。
+- **②server SessionRuntime + EventBus**：新建 `session/runtime.ts`（per-active-session，按 ref 键，会话内自增 seq、折叠 phase 机 idle/running/requires_action/crashed、activeTurn{turnId,messageId,chunks}、pendingRequests、cursor、有界 fan-out 满则 `closed(slow_consumer)`）；`events/event-bus.ts` 退化为纯 scope fan-out（session 按 ref 全等 / global firehose）。
+- **③接线**：真实 `HarnessSessionsPort` 适配层 + layer 图 + `RpcContext`；`project.create/list` router；`rpc/session.ts` 改用 `SessionService` 收 `SessionRef`，13 方法 + 反查 `resolveRef`（sessionId → 全 ref，跨 project 扫元数据）。
+- **④app transport**：`OrpcChatSessionTransport` 绑定 SessionRef、`subscribe({scope})` / `getSnapshot` / ref 键 prompt-interrupt-respond；`closed` 触发 snapshot 重放 + 重订。
+- **⑤测试**：订阅语义测试（`events.test.ts`、`event-bus-overflow.test.ts`、`rpc-session.test.ts`）无 sleep，受控排空；server 39 测试绿。
+- **合并期约定**：`getMessages` 服务端仍返回空数组（接缝，归 ticket 10/11）；client 刷新/重启 reconcile 归 ticket 12。
+
+**从 07 归并的 RPC 接线均已交付**。此 ticket 关闭后解锁 10（getMessages claude-code）与 12（客户端重连/刷新）。
