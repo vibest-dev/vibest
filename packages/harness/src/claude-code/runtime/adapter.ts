@@ -391,6 +391,14 @@ const makeSession = (
 export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapter => ({
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
+  capabilities: Effect.succeed({
+    permissionModes: [
+      { id: "plan", label: "Plan" },
+      { id: "ask", label: "Ask" },
+      { id: "acceptEdits", label: "Accept edits" },
+      { id: "full", label: "Full access" },
+    ],
+  }),
   checkAvailability: Effect.try({
     try: () => {
       resolveClaudeExecutable();

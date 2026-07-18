@@ -1,5 +1,6 @@
 import type {
   CreateSessionInput,
+  HarnessAgentCapabilities,
   HarnessAgentId,
   PermissionMode,
   PromptReceipt,
@@ -25,6 +26,7 @@ import type {
 
 export {
   CreateSessionInputSchema,
+  HarnessAgentCapabilitiesSchema,
   InspectorTargetSchema,
   PermissionModeSchema,
   PromptReceiptSchema,
@@ -33,6 +35,7 @@ export {
   UserInputPartSchema,
   UserInputSchema,
   type CreateSessionInput,
+  type HarnessAgentCapabilities,
   type InspectorTarget,
   type PermissionMode,
   type PromptReceipt,
@@ -100,6 +103,8 @@ export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly descriptor: AgentDescriptor;
   readonly checkAvailability: Effect.Effect<AvailabilityResult>;
+  // Negotiated once when the adapter is constructed; shared by all its sessions.
+  readonly capabilities: Effect.Effect<HarnessAgentCapabilities>;
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<

@@ -63,11 +63,12 @@ v1 只落 permission 的形状层；models/mcp/resume/steering 保持现状，�
 
 ## 4. 决策：对外档位 + 命名映射
 
-对外暴露**望文生义的 id**（native 的怪名字如 `default`/`bypassPermissions`/`on-request` 退回 adapter 内部当私有映射，用户永不可见）：
+对外暴露**望文生义的 id**（native 的怪名字如 `default`/`bypassPermissions`/`on-request` 退回 adapter 内部当私有映射，用户永不可见）。语义真正相同的意图各家共用同一 id（`ask`/`full`）；**语义不同的独有档各用各的 id，不强行对齐**——claude 的 `plan` 会产出计划，codex 的 `read-only` 只是纯只读沙箱、不产计划，是两个不同的东西，不共用一个 id：
 
 | 对外 id | label（用户看） | claude native | codex native |
 | --- | --- | --- | --- |
-| `plan` | 规划（只读，不改） | `plan` | `on-request` + `read-only` |
+| `plan` | 规划（只读 + 产计划） | `plan` | —（codex 无 plan） |
+| `read-only` | 只读（纯只读，不产计划） | —（claude 由 `plan` 涵盖） | `on-request` + `read-only` |
 | `ask` | 每步询问 | `default` | `on-request` + `workspace-write` |
 | `acceptEdits` | 自动改文件、危险再问 | `acceptEdits` | —（不声明） |
 | `full` | 完全放开、不打断 | `bypassPermissions` | `never` + `danger-full-access` |
@@ -75,7 +76,7 @@ v1 只落 permission 的形状层；models/mcp/resume/steering 保持现状，�
 各 harness 声明的子集：
 
 - `claude-code` → `plan` · `ask` · `acceptEdits` · `full`
-- `codex` → `plan` · `ask` · `full`（无 `acceptEdits`）
+- `codex` → `read-only` · `ask` · `full`（无 `plan`/`acceptEdits`）
 - `pi` → 不声明 `permissionModes`（= 无权限协议）
 
 ## 5. 契约形状（最小）

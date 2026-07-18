@@ -279,6 +279,25 @@ export type SessionSnapshot = {
 export const PermissionModeSchema = Schema.Literals(["default", "acceptEdits", "plan", "bypass"]);
 export type PermissionMode = typeof PermissionModeSchema.Type;
 
+// A permission preset the user can pick for a session. `id` is the harness's
+// own outward vocabulary (mapped to its native system inside the adapter, e.g.
+// Claude's `permissionMode` or Codex's approval + sandbox); `label` is the
+// display string the UI renders verbatim.
+export const HarnessAgentPermissionModeSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+});
+export type HarnessAgentPermissionMode = typeof HarnessAgentPermissionModeSchema.Type;
+
+// Capabilities negotiated once per harness, not per session — identical for
+// every session of a given harness (they depend on the agent's type + CLI/SDK
+// version, not on any one session). Absent `permissionModes` means the harness
+// has no permission protocol at all (e.g. Pi).
+export const HarnessAgentCapabilitiesSchema = Schema.Struct({
+  permissionModes: Schema.optionalKey(Schema.Array(HarnessAgentPermissionModeSchema)),
+});
+export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type;
+
 // `model` / `permissionMode` are session-scoped config the user picks at create
 // time and changes mid-session via the dedicated setModel / setPermissionMode
 // calls — never carried on a prompt turn.

@@ -100,6 +100,7 @@ const makeFixture = Effect.gen(function* () {
     id: "claude-code",
     descriptor: { id: "claude-code", name: "Claude Code" },
     checkAvailability: Effect.succeed({ available: true }),
+    capabilities: Effect.succeed({}),
     open: () => makeSession("created-session"),
     resume: ({ sessionId }) =>
       Ref.update(resumeCalls, (current) => current + 1).pipe(

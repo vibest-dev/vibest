@@ -10,6 +10,7 @@ const claude = {
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
   checkAvailability: Effect.succeed({ available: true }),
+  capabilities: Effect.succeed({}),
   open: () => Effect.die("not used"),
   resume: () => Effect.die("not used"),
 } satisfies HarnessAgentAdapter;

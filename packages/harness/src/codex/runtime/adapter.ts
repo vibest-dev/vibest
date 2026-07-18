@@ -253,6 +253,15 @@ const makeSession = (
 export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
+  capabilities: Effect.succeed({
+    permissionModes: [
+      // Codex has no "plan" (it never produces a plan) — its read-only preset
+      // is a pure read-only sandbox, declared under its own id.
+      { id: "read-only", label: "Read only" },
+      { id: "ask", label: "Ask" },
+      { id: "full", label: "Full access" },
+    ],
+  }),
   checkAvailability: Effect.succeed({ available: true }),
   open: (input) =>
     agent.session.create({ workspacePath: input.workspacePath }).pipe(

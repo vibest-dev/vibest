@@ -216,6 +216,8 @@ const makeSession = (
 export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
+  // Pi has no permission protocol — declare no modes at all.
+  capabilities: Effect.succeed({}),
   checkAvailability: Effect.succeed({ available: true }),
   open: (input) =>
     agent.session.create({ workspacePath: input.workspacePath }).pipe(
