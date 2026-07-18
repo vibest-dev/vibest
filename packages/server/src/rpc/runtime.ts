@@ -15,7 +15,9 @@ import {
 } from "@vibest/harness/runtime";
 import { Context, Effect, Layer } from "effect";
 
+import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
+import { ProjectModuleLayer } from "../project";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -59,4 +61,9 @@ const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(EventBusLayer),
 );
 
-export const AgentRuntimeLayer = Layer.merge(EventBusLayer, SessionServiceLayer);
+export const AgentRuntimeLayer = Layer.mergeAll(
+  EventBusLayer,
+  SessionServiceLayer,
+  ProjectModuleLayer.pipe(Layer.provide(PathsLayer)),
+  NodeFileSystem.layer,
+);
