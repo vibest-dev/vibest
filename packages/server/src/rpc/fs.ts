@@ -7,7 +7,6 @@ import { fsContract } from "@vibest/contract/fs";
 import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 
-import { FileReadError } from "../errors";
 import { FileSystemService } from "../fs";
 import type { RpcContext } from "./context";
 
@@ -17,18 +16,32 @@ const orpc = implement(fsContract).$context<RpcContext>();
 const IGNORED_DIRS = new Set(["node_modules"]);
 
 export const fsRouter = orpc.router({
-  readFileString: orpc.readFileString.effect(function* ({ input }) {
+  readFileString: orpc.readFileString.effect(function* ({ input, errors }) {
     const fs = yield* FileSystemService;
-    return yield* fs.readFileString(input.cwd, input.path);
+    // Map the service's typed effect errors onto the contract's declared errors,
+    // so the client gets a code + data instead of a generic 500.
+    return yield* fs.readFileString(input.cwd, input.path).pipe(
+      Effect.catchTags({
+        WorkspacePathEscape: (e) =>
+          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+        WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
+        WorkspaceFileTooLarge: (e) =>
+          Effect.fail(
+            errors.FILE_TOO_LARGE({ data: { path: e.path, size: e.size, limit: e.limit } }),
+          ),
+        WorkspaceBinaryFile: (e) => Effect.fail(errors.BINARY_FILE({ data: { path: e.path } })),
+        WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+      }),
+    );
   }),
-  browse: orpc.browse.effect(function* ({ input }) {
+  browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;
     const path = resolve(input.path ?? homedir());
     // Folder-picker policy (owned here, not a shared fs service): directories
     // only, hide dotfolders and node_modules, sorted by name.
     const names = yield* fs
       .readDirectory(path)
-      .pipe(Effect.mapError((cause) => new FileReadError({ path, cause })));
+      .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path } })));
     const candidates = names.filter((name) => !name.startsWith(".") && !IGNORED_DIRS.has(name));
     // readDirectory yields names only, so stat each to keep just directories. A
     // failing stat (e.g. broken symlink) drops that entry rather than the list.
