@@ -1,6 +1,7 @@
 import type {
   CreateSessionInput,
   HarnessAgentId,
+  PermissionMode,
   PromptReceipt,
   ResumeSessionInput,
   SessionCapabilities,
@@ -8,10 +9,10 @@ import type {
   UserInput,
   AgentResponse,
 } from "@vibest/contract";
-import type { Effect, Scope, Stream } from "effect";
+import { Effect, type Scope, type Stream } from "effect";
 
+import { AgentOpenError } from "./errors";
 import type {
-  AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
   AgentUnavailable,
@@ -25,6 +26,7 @@ import type {
 export {
   CreateSessionInputSchema,
   InspectorTargetSchema,
+  PermissionModeSchema,
   PromptReceiptSchema,
   ResumeSessionInputSchema,
   SessionCapabilitiesSchema,
@@ -32,6 +34,7 @@ export {
   UserInputSchema,
   type CreateSessionInput,
   type InspectorTarget,
+  type PermissionMode,
   type PromptReceipt,
   type ResumeSessionInput,
   type SessionCapabilities,
@@ -56,6 +59,12 @@ export interface HarnessAgentSession {
   readonly prompt: (
     input: UserInput,
   ) => Effect.Effect<PromptReceipt, SessionClosed | TurnAlreadyRunning | AgentOperationError>;
+  // Session-scoped config setters. Harnesses that don't support a knob accept
+  // the call and no-op (e.g. Codex has no runtime model switch).
+  readonly setModel: (model: string) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  readonly setPermissionMode: (
+    mode: PermissionMode,
+  ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly interrupt: Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly respondToAgentRequest: (
     requestId: string,
@@ -67,6 +76,25 @@ export interface HarnessAgentSession {
   >;
   readonly close: Effect.Effect<void>;
 }
+
+// Seed a freshly opened session with the model / permission mode chosen at
+// create time, using the same session setters the UI drives mid-session. Runs
+// before the first prompt, so the config is live by the opening turn.
+export const applyInitialSessionConfig = (
+  session: HarnessAgentSession,
+  input: CreateSessionInput,
+): Effect.Effect<void, AgentOpenError> =>
+  Effect.all(
+    [
+      input.model ? session.setModel(input.model) : Effect.void,
+      input.permissionMode ? session.setPermissionMode(input.permissionMode) : Effect.void,
+    ],
+    { discard: true },
+  ).pipe(
+    Effect.mapError(
+      (cause) => new AgentOpenError({ harnessAgentId: session.harnessAgentId, cause }),
+    ),
+  );
 
 export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;

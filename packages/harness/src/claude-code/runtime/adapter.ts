@@ -3,11 +3,13 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type { SessionEvent } from "../../event-manifest";
-import type {
-  HarnessAgentAdapter,
-  HarnessAgentSession,
-  SessionCapabilities,
-  UserInput,
+import {
+  applyInitialSessionConfig,
+  type HarnessAgentAdapter,
+  type HarnessAgentSession,
+  type PermissionMode,
+  type SessionCapabilities,
+  type UserInput,
 } from "../../runtime/adapter";
 import {
   AgentOpenError,
@@ -29,6 +31,11 @@ const EVENT_QUEUE_CAPACITY = 1024;
 
 const operationError = (sessionId: string, operation: string, cause: unknown) =>
   new AgentOperationError({ sessionId, operation, cause });
+
+// Map the harness-agnostic permission mode onto Claude's native enum. The
+// "default" / "acceptEdits" / "plan" names line up 1:1; only "bypass" differs.
+const toClaudePermissionMode = (mode: PermissionMode): sdk.PermissionMode =>
+  mode === "bypass" ? "bypassPermissions" : mode;
 
 const toClaudeMessage = (input: UserInput): sdk.SDKUserMessage["message"] => ({
   role: "user",
@@ -252,6 +259,24 @@ const makeSession = (
         .pipe(Effect.mapError((cause) => operationError(sessionId, "interrupt", cause)));
     });
 
+    const setModel: HarnessAgentSession["setModel"] = (model) =>
+      Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        yield* agent.session
+          .setModel(sessionId, model)
+          .pipe(Effect.mapError((cause) => operationError(sessionId, "set-model", cause)));
+      });
+
+    const setPermissionMode: HarnessAgentSession["setPermissionMode"] = (mode) =>
+      Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        yield* agent.session
+          .setPermissionMode(sessionId, toClaudePermissionMode(mode))
+          .pipe(
+            Effect.mapError((cause) => operationError(sessionId, "set-permission-mode", cause)),
+          );
+      });
+
     const getCapabilities: HarnessAgentSession["getCapabilities"] = Effect.gen(function* () {
       const [commands, models, mcpServers] = yield* Effect.all(
         [
@@ -282,11 +307,6 @@ const makeSession = (
       prompt: (input) =>
         Effect.gen(function* () {
           if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
-          if (input.model) {
-            yield* agent.session
-              .setModel(sessionId, input.model)
-              .pipe(Effect.mapError((cause) => operationError(sessionId, "set-model", cause)));
-          }
           const prompt = yield* agent.session
             .prompt({ sessionId, message: toClaudeMessage(input) })
             .pipe(
@@ -331,6 +351,8 @@ const makeSession = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      setModel,
+      setPermissionMode,
       interrupt,
       respondToAgentRequest: (requestId, response) =>
         Ref.get(pendingPermissions).pipe(
@@ -383,10 +405,11 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       }),
     ),
   ),
-  open: (_input) =>
+  open: (input) =>
     agent.session.create.pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
     agent.session.resume(input.sessionId).pipe(

@@ -16,6 +16,8 @@ export const sessionRouter = orpc.router({
     const sessions = yield* HarnessAgentSessionService;
     return yield* sessions.create(input.harnessAgentId, {
       workspacePath: input.workspacePath ?? process.cwd(),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
     });
   }),
   resume: orpc.resume.effect(function* ({ input }) {
@@ -29,6 +31,14 @@ export const sessionRouter = orpc.router({
   interrupt: orpc.interrupt.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;
     yield* sessions.interrupt(input.sessionId);
+  }),
+  setModel: orpc.setModel.effect(function* ({ input }) {
+    const sessions = yield* HarnessAgentSessionService;
+    yield* sessions.setModel(input.sessionId, input.model);
+  }),
+  setPermissionMode: orpc.setPermissionMode.effect(function* ({ input }) {
+    const sessions = yield* HarnessAgentSessionService;
+    yield* sessions.setPermissionMode(input.sessionId, input.permissionMode);
   }),
   close: orpc.close.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;

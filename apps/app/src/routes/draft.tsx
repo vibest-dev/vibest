@@ -19,8 +19,9 @@ import { createChatBaseExtensions } from "@/components/chat/input/extensions/cha
 import { createSubmitKeymap } from "@/components/chat/input/extensions/keymaps";
 import { hasChatContent } from "@/components/chat/input/serialize";
 import { ModelSelect } from "@/components/chat/model-select";
+import { PermissionModeSelect } from "@/components/chat/permission-mode-select";
+import type { ChatModel, ChatPermissionMode } from "@/core/chat/chat-config";
 import { useChatManager } from "@/core/chat/chat-context";
-import type { ChatModel } from "@/core/chat/chat-transport";
 
 // "/draft" is the new-session surface: type a first message, which creates a
 // session, sends it as the opening turn, and navigates into the live session.
@@ -35,6 +36,7 @@ function DraftRoute() {
   const manager = useChatManager();
   const navigate = useNavigate();
   const [model, setModel] = useState<ChatModel>("sonnet");
+  const [permissionMode, setPermissionMode] = useState<ChatPermissionMode>("default");
 
   // Create the session and start its first turn against the manager's persisted
   // store, then navigate — the session route re-attaches the same Chat with the
@@ -43,8 +45,10 @@ function DraftRoute() {
     mutationFn: async ({ text }: { text: string }) => {
       const { sessionId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
+        model,
+        permissionMode,
       });
-      void manager.attach(sessionId).prompt(text, { model });
+      void manager.attach(sessionId).prompt(text);
       return sessionId;
     },
     onSuccess: (sessionId) => {
@@ -92,6 +96,7 @@ function DraftRoute() {
           <PromptInputToolbar>
             <PromptInputTools>
               <ModelSelect value={model} onChange={setModel} />
+              <PermissionModeSelect value={permissionMode} onChange={setPermissionMode} />
             </PromptInputTools>
             <PromptInputSubmit disabled={!hasContent || startSession.isPending} />
           </PromptInputToolbar>

@@ -51,6 +51,8 @@ describe("OrpcChatSessionTransport agent requests", () => {
       },
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
+      setModel: unexpectedCall,
+      setPermissionMode: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       events: async () => {
         subscriptionCalls += 1;
@@ -140,6 +142,8 @@ describe("OrpcChatSessionTransport agent requests", () => {
       }),
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
+      setModel: unexpectedCall,
+      setPermissionMode: unexpectedCall,
       respondToAgentRequest: async () => automaticResponse,
       events: async () => ({
         [Symbol.asyncIterator]() {

@@ -83,6 +83,8 @@ const makeFixture = Effect.gen(function* () {
             });
             return { turnId: "turn-1", cursor: 0, started: true };
           }),
+        setModel: () => Effect.void,
+        setPermissionMode: () => Effect.void,
         interrupt: Effect.void,
         respondToAgentRequest: () => Effect.void,
         getCapabilities: Effect.succeed({

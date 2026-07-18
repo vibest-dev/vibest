@@ -2,7 +2,13 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type { SessionEvent } from "../../event-manifest";
-import type { HarnessAgentAdapter, HarnessAgentSession, UserInput } from "../../runtime/adapter";
+import {
+  applyInitialSessionConfig,
+  type HarnessAgentAdapter,
+  type HarnessAgentSession,
+  type PermissionMode,
+  type UserInput,
+} from "../../runtime/adapter";
 import {
   AgentOpenError,
   AgentOperationError,
@@ -14,6 +20,7 @@ import {
 import { streamFromQueueOne } from "../../runtime/queue-stream";
 import type { CodexUIMessageChunk, SessionEnvelopeDraft } from "../../types/envelope";
 import type { CodexAgent } from "../agent";
+import type { AskForApproval, SandboxPolicy } from "../protocol/v2";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 
@@ -31,6 +38,34 @@ const toPromptText = (input: UserInput): string =>
     )
     .join("\n");
 
+// Map the harness-agnostic permission mode onto Codex's approval policy +
+// sandbox. Codex has no native "plan" mode; a read-only sandbox is the closest
+// no-mutations equivalent.
+const toCodexPermission = (
+  mode: PermissionMode,
+): { approvalPolicy: AskForApproval; sandboxPolicy: SandboxPolicy } => {
+  const workspaceWrite: SandboxPolicy = {
+    type: "workspaceWrite",
+    writableRoots: [],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  };
+  switch (mode) {
+    case "default":
+      return { approvalPolicy: "on-request", sandboxPolicy: workspaceWrite };
+    case "acceptEdits":
+      return { approvalPolicy: "on-failure", sandboxPolicy: workspaceWrite };
+    case "plan":
+      return {
+        approvalPolicy: "on-request",
+        sandboxPolicy: { type: "readOnly", networkAccess: false },
+      };
+    case "bypass":
+      return { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } };
+  }
+};
+
 const makeSession = (
   agent: CodexAgent,
   sessionId: string,
@@ -43,6 +78,9 @@ const makeSession = (
     const cursor = yield* Ref.make(0);
     const closed = yield* Ref.make(false);
     const activeTurn = yield* Ref.make<string | undefined>(undefined);
+    // Codex has no session-wide permission call; it takes an approval policy +
+    // sandbox per turn. We hold the current mode here and apply it on each turn.
+    const permissionMode = yield* Ref.make<PermissionMode | undefined>(undefined);
 
     const emit = (body: CodexUIMessageChunk | SessionEvent) =>
       Queue.offer(events, { harnessAgentId: "codex", sessionId, body }).pipe(
@@ -132,8 +170,10 @@ const makeSession = (
       prompt: (input) =>
         Effect.gen(function* () {
           if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          const mode = yield* Ref.get(permissionMode);
+          const permission = mode ? toCodexPermission(mode) : undefined;
           const prompt = yield* agent.session
-            .prompt({ sessionId, text: toPromptText(input) })
+            .prompt({ sessionId, text: toPromptText(input), ...permission })
             .pipe(
               Effect.mapError((cause) =>
                 cause instanceof TurnAlreadyRunning
@@ -187,6 +227,10 @@ const makeSession = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      // Codex fixes its model at thread start; there's no runtime switch, so we
+      // accept the call and no-op rather than fail the caller.
+      setModel: () => Effect.void,
+      setPermissionMode: (mode) => Ref.set(permissionMode, mode),
       interrupt,
       respondToAgentRequest: (requestId, response) =>
         agent.session.respondPermission(sessionId, requestId, response).pipe(
@@ -214,6 +258,7 @@ export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
     agent.session.create({ workspacePath: input.workspacePath }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, workspacePath: input.workspacePath }).pipe(

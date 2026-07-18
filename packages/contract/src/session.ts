@@ -10,6 +10,8 @@ import {
   SessionCapabilitiesSchema,
   SessionEventsInputSchema,
   SessionIdInputSchema,
+  SetSessionModelInputSchema,
+  SetSessionPermissionModeInputSchema,
   toStandardSchema,
   type SessionEnvelope,
   type SessionSnapshot,
@@ -30,6 +32,8 @@ export const sessionContract = {
     .output(toStandardSchema(PromptReceiptSchema)),
   interrupt: oc.input(toStandardSchema(SessionIdInputSchema)),
   close: oc.input(toStandardSchema(SessionIdInputSchema)),
+  setModel: oc.input(toStandardSchema(SetSessionModelInputSchema)),
+  setPermissionMode: oc.input(toStandardSchema(SetSessionPermissionModeInputSchema)),
   events: oc
     .input(toStandardSchema(SessionEventsInputSchema))
     .output(eventIterator(type<SessionEventStreamItem>())),

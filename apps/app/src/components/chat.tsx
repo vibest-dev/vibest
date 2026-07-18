@@ -2,6 +2,7 @@ import { cn } from "@vibest/ui/lib/utils";
 
 import { ChatInputComposer } from "@/components/chat/chat-input-composer";
 import { ChatModelSelect } from "@/components/chat/chat-model-select";
+import { ChatPermissionModeSelect } from "@/components/chat/chat-permission-mode-select";
 import { ChatSessionProvider } from "@/components/chat/chat-session-context";
 import { ChatTranscript } from "@/components/chat/chat-transcript";
 
@@ -14,7 +15,14 @@ export function Chat({ className, sessionId }: { className?: string; sessionId: 
       <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
         <ChatTranscript />
         <div className="flex-shrink-0 p-2">
-          <ChatInputComposer toolbar={<ChatModelSelect />} />
+          <ChatInputComposer
+            toolbar={
+              <>
+                <ChatModelSelect />
+                <ChatPermissionModeSelect />
+              </>
+            }
+          />
         </div>
       </div>
     </ChatSessionProvider>

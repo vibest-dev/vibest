@@ -266,9 +266,27 @@ export type SessionSnapshot = {
   bootId: string;
 };
 
+/**
+ * Harness-agnostic permission level. Each harness adapter maps these to its
+ * own native system (Claude's `permissionMode`, Codex's approval policy +
+ * sandbox, …); harnesses without an approval protocol ignore it.
+ *
+ * - `default` — ask before risky actions
+ * - `acceptEdits` — auto-accept file edits, still ask for the rest
+ * - `plan` — read-only planning, no mutations
+ * - `bypass` — auto-approve everything
+ */
+export const PermissionModeSchema = Schema.Literals(["default", "acceptEdits", "plan", "bypass"]);
+export type PermissionMode = typeof PermissionModeSchema.Type;
+
+// `model` / `permissionMode` are session-scoped config the user picks at create
+// time and changes mid-session via the dedicated setModel / setPermissionMode
+// calls — never carried on a prompt turn.
 export const CreateSessionInputSchema = Schema.Struct({
   workspacePath: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
+  model: Schema.optionalKey(Schema.String),
+  permissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
@@ -296,7 +314,6 @@ export type UserInputPart = typeof UserInputPartSchema.Type;
 
 export const UserInputSchema = Schema.Struct({
   parts: Schema.Array(UserInputPartSchema),
-  model: Schema.optionalKey(Schema.String),
 });
 export type UserInput = typeof UserInputSchema.Type;
 
@@ -328,6 +345,8 @@ export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;
 export const CreateManagedSessionInputSchema = Schema.Struct({
   harnessAgentId: HarnessAgentIdSchema,
   workspacePath: Schema.optionalKey(Schema.String),
+  model: Schema.optionalKey(Schema.String),
+  permissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type CreateManagedSessionInput = typeof CreateManagedSessionInputSchema.Type;
 
@@ -348,6 +367,14 @@ export const SessionIdInputSchema = Schema.Struct({ sessionId: Schema.String });
 export const PromptSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
   input: UserInputSchema,
+});
+export const SetSessionModelInputSchema = Schema.Struct({
+  sessionId: Schema.String,
+  model: Schema.String,
+});
+export const SetSessionPermissionModeInputSchema = Schema.Struct({
+  sessionId: Schema.String,
+  permissionMode: PermissionModeSchema,
 });
 export const RespondToAgentRequestInputSchema = Schema.Struct({
   sessionId: Schema.String,

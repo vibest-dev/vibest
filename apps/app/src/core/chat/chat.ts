@@ -2,8 +2,9 @@ import { AbstractChat, type UIMessage } from "ai";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
+import type { ChatModel, ChatPermissionMode } from "./chat-config";
 import { ChatState, type ChatStoreState } from "./chat-state";
-import type { ChatModel, OrpcChatSessionTransport } from "./chat-transport";
+import type { OrpcChatSessionTransport } from "./chat-transport";
 
 export type AgentProviderId = "claude-code";
 
@@ -42,8 +43,18 @@ export class Chat extends AbstractChat<UIMessage> {
     );
   }
 
-  prompt = async (text: string, options?: { model?: ChatModel }): Promise<void> => {
-    await this.sendMessage({ text }, { body: { model: options?.model } });
+  prompt = async (text: string): Promise<void> => {
+    await this.sendMessage({ text });
+  };
+
+  // Model / permission are session config, changed via their own calls — never
+  // bundled into a prompt turn.
+  setModel = async (model: ChatModel): Promise<void> => {
+    await this.#transport.setModel(this.id, model);
+  };
+
+  setPermissionMode = async (mode: ChatPermissionMode): Promise<void> => {
+    await this.#transport.setPermissionMode(this.id, mode);
   };
 
   respondToAgentRequest = async (requestId: string, response: AgentResponse): Promise<void> => {

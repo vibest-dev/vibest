@@ -13,6 +13,8 @@ import { drainQueue, streamFromQueueOne } from "../runtime/queue-stream";
 import type { AgentRequest, AgentResponse } from "../types/request";
 import type { ServerNotification, ServerRequest } from "./protocol";
 import type {
+  AskForApproval,
+  SandboxPolicy,
   ThreadResumeResponse,
   ThreadStartResponse,
   TurnStartResponse,
@@ -126,6 +128,8 @@ export interface CodexAgent {
     readonly prompt: (input: {
       readonly sessionId: string;
       readonly text: string;
+      readonly approvalPolicy?: AskForApproval;
+      readonly sandboxPolicy?: SandboxPolicy;
     }) => Effect.Effect<
       {
         readonly turnId: string;
@@ -654,6 +658,10 @@ export const makeCodexAgentWithDependencies = <R>(
                     .request<TurnStartResponse>("turn/start", {
                       threadId: session.threadId,
                       input: turnInput,
+                      // Per-turn permission override (applies to this and
+                      // subsequent turns); omitted keys keep the thread default.
+                      ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
+                      ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
                     })
                     .pipe(
                       Effect.tapError(() =>

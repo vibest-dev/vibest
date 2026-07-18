@@ -188,6 +188,10 @@ const makeSession = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      // Pi has neither a model switch nor a permission protocol; accept the
+      // config calls and no-op rather than fail the caller.
+      setModel: () => Effect.void,
+      setPermissionMode: () => Effect.void,
       interrupt,
       respondToAgentRequest: (requestId, response) =>
         agent.session.respondPermission(sessionId, requestId, response).pipe(

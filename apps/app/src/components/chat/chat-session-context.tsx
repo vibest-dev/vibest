@@ -4,11 +4,11 @@ import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "@/core/chat/agent-requests";
 import type { AgentProviderId } from "@/core/chat/chat";
+import type { ChatModel, ChatPermissionMode } from "@/core/chat/chat-config";
 import type { ChatStoreState } from "@/core/chat/chat-state";
-import type { ChatModel } from "@/core/chat/chat-transport";
 import { selectTurnInProgress, useChatHandle } from "@/core/chat/use-chat-handle";
 
-export type { ChatModel };
+export type { ChatModel, ChatPermissionMode };
 
 export interface ChatSessionValue {
   sessionId: string;
@@ -21,6 +21,8 @@ export interface ChatSessionValue {
   turnInProgress: boolean;
   model: ChatModel;
   setModel: (model: ChatModel) => void;
+  permissionMode: ChatPermissionMode;
+  setPermissionMode: (mode: ChatPermissionMode) => void;
 }
 
 const ChatSessionContext = createContext<ChatSessionValue | null>(null);
@@ -43,18 +45,34 @@ export function ChatSessionProvider({
   children: ReactNode;
 }) {
   const chat = useChatHandle(sessionId);
-  const [model, setModel] = useState<ChatModel>("sonnet");
+  const [model, setModelState] = useState<ChatModel>("sonnet");
+  const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("default");
   const turnInProgress = useStore(chat.store, selectTurnInProgress);
+
+  // Config changes are a separate session call, applied optimistically to the
+  // local selection so the control stays responsive.
+  const setModel = (next: ChatModel) => {
+    setModelState(next);
+    void chat.setModel(next).catch((error) => console.error("Failed to set model", error));
+  };
+  const setPermissionMode = (next: ChatPermissionMode) => {
+    setPermissionModeState(next);
+    void chat
+      .setPermissionMode(next)
+      .catch((error) => console.error("Failed to set permission mode", error));
+  };
 
   const value: ChatSessionValue = {
     sessionId,
     agentProviderId: chat.agentProviderId,
     store: chat.store,
-    prompt: (text) => chat.prompt(text, { model }),
+    prompt: (text) => chat.prompt(text),
     respondToRequest: chat.respondToAgentRequest,
     turnInProgress,
     model,
     setModel,
+    permissionMode,
+    setPermissionMode,
   };
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

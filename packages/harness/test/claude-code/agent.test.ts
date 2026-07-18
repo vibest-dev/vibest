@@ -112,7 +112,9 @@ describe("ClaudeCodeAgent", () => {
       const { sessionId } = yield* agent.session.create;
 
       NodeAssert.equal(lastOptions().permissionMode, undefined);
-      NodeAssert.equal(lastOptions().allowDangerouslySkipPermissions, undefined);
+      // The bypass capability is always enabled so a session can be switched to
+      // "bypassPermissions" at runtime; the active mode stays the SDK default.
+      NodeAssert.equal(lastOptions().allowDangerouslySkipPermissions, true);
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -213,7 +215,10 @@ describe("ClaudeCodeAgent", () => {
         { type: "result", subtype: "success" } as sdk.SDKMessage,
       ];
       const agent = yield* makeClaudeCodeAgent();
-      const session = yield* makeClaudeCodeAdapter(agent).open({ workspacePath: "/tmp" });
+      const session = yield* makeClaudeCodeAdapter(agent).open({
+        workspacePath: "/tmp",
+        model: "opus",
+      });
       const collected = yield* Effect.forkChild(
         Stream.runCollect(
           session.events.pipe(
@@ -223,7 +228,6 @@ describe("ClaudeCodeAgent", () => {
       );
 
       const receipt = yield* session.prompt({
-        model: "opus",
         parts: [{ type: "text", text: "hello" }],
       });
       const events = yield* Fiber.join(collected);

@@ -1,13 +1,11 @@
 import { eventIteratorToStream } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
-import type { UserInputPart } from "@vibest/contract";
+import type { PermissionMode, UserInputPart } from "@vibest/contract";
 import type { SessionEventStreamItem } from "@vibest/contract/session";
 import { isSessionEvent } from "@vibest/contract/session-events";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
-
-export type ChatModel = "opus" | "sonnet";
 
 const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
@@ -15,7 +13,7 @@ const isAbortError = (error: unknown) =>
 const emptyChunkStream = (): ReadableStream<UIMessageChunk> =>
   new ReadableStream({ start: (controller) => controller.close() });
 
-const toUserInput = (message: UIMessage, model: ChatModel) => {
+const toUserInput = (message: UIMessage) => {
   const parts: UserInputPart[] = [];
   for (const part of message.parts) {
     if (part.type === "text") {
@@ -39,7 +37,7 @@ const toUserInput = (message: UIMessage, model: ChatModel) => {
       });
     }
   }
-  return { parts, model };
+  return { parts };
 };
 
 type EventSubscription = {
@@ -52,7 +50,13 @@ type VibestSessionClient = VibestClient["session"];
 type SessionClient = Omit<
   Pick<
     VibestSessionClient,
-    "events" | "interrupt" | "prompt" | "respondToAgentRequest" | "snapshot"
+    | "events"
+    | "interrupt"
+    | "prompt"
+    | "respondToAgentRequest"
+    | "setModel"
+    | "setPermissionMode"
+    | "snapshot"
   >,
   "events"
 > & {
@@ -167,11 +171,10 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
   ): Promise<ReadableStream<UIMessageChunk>> {
     const message = options.messages.at(-1);
     if (!message) throw new Error("message is required");
-    const model = (options.body as { model?: ChatModel } | undefined)?.model ?? "sonnet";
     const initial = await this.#openEvents(options.chatId, undefined, options.abortSignal);
     try {
       const receipt = await this.client.session.prompt(
-        { sessionId: options.chatId, input: toUserInput(message, model) },
+        { sessionId: options.chatId, input: toUserInput(message) },
         { signal: options.abortSignal },
       );
       if (!receipt.started) {
@@ -319,5 +322,13 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
       requestId,
       response,
     });
+  }
+
+  async setModel(sessionId: string, model: string): Promise<void> {
+    await this.client.session.setModel({ sessionId, model });
+  }
+
+  async setPermissionMode(sessionId: string, permissionMode: PermissionMode): Promise<void> {
+    await this.client.session.setPermissionMode({ sessionId, permissionMode });
   }
 }

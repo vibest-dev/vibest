@@ -6,7 +6,7 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import type { ChatModel } from "@/core/chat/chat-transport";
+import type { ChatModel } from "@/core/chat/chat-config";
 
 const models = [
   { label: "Opus", value: "opus" as const },
