@@ -285,6 +285,10 @@ export const HarnessAgentCapabilitiesSchema = Schema.Struct({
 });
 export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type;
 
+// Addresses a harness (not a session): the input to harness-level negotiation
+// calls like capabilities lookup.
+export const HarnessAgentIdInputSchema = Schema.Struct({ harnessAgentId: HarnessAgentIdSchema });
+
 // `model` / `permissionMode` are session-scoped config the user picks at create
 // time and changes mid-session via the dedicated setModel / setPermissionMode
 // calls — never carried on a prompt turn.

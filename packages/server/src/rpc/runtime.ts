@@ -59,4 +59,7 @@ const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(EventBusLayer),
 );
 
-export const AgentRuntimeLayer = Layer.merge(EventBusLayer, SessionServiceLayer);
+// RegistryLayer is merged in as well as provided into SessionServiceLayer;
+// Effect memoizes it by reference, so both see the one registry instance while
+// the harness route can resolve capabilities directly off it.
+export const AgentRuntimeLayer = Layer.mergeAll(EventBusLayer, SessionServiceLayer, RegistryLayer);

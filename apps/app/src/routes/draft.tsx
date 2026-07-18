@@ -96,7 +96,11 @@ function DraftRoute() {
           <PromptInputToolbar>
             <PromptInputTools>
               <ModelSelect value={model} onChange={setModel} />
-              <PermissionModeSelect value={permissionMode} onChange={setPermissionMode} />
+              <PermissionModeSelect
+                harnessAgentId="claude-code"
+                value={permissionMode}
+                onChange={setPermissionMode}
+              />
             </PromptInputTools>
             <PromptInputSubmit disabled={!hasContent || startSession.isPending} />
           </PromptInputToolbar>

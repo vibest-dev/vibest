@@ -25,22 +25,22 @@
 
 参照 **Model Context Protocol** 的 capability negotiation：能力在连接建立时（`initialize`）一次性协商，而非每次调用重来。对应到本项目：
 
-| MCP | 本项目 |
-| --- | --- |
-| server / connection | `HarnessAgentAdapter`（harness 级单例） |
-| `initialize` 握手 | adapter 的 `capabilities` / `negotiate`（协商一次，所有 session 共享） |
-| 连接下的 resource/tool | `HarnessAgentSession`（只持运行时状态） |
-| `listChanged` 通知 | session 事件流（内容变了才推） |
+| MCP                    | 本项目                                                                 |
+| ---------------------- | ---------------------------------------------------------------------- |
+| server / connection    | `HarnessAgentAdapter`（harness 级单例）                                |
+| `initialize` 握手      | adapter 的 `capabilities` / `negotiate`（协商一次，所有 session 共享） |
+| 连接下的 resource/tool | `HarnessAgentSession`（只持运行时状态）                                |
+| `listChanged` 通知     | session 事件流（内容变了才推）                                         |
 
 现状问题：能力挂在 `HarnessAgentSession.getCapabilities`，经 `RPC session.getCapabilities(sessionId)` 每开一个 session 重新探测——等于每个 session 重新握手，违背 MCP 的连接级协商。`HarnessAgentAdapter` 已有 `checkAvailability`（harness 级可用性协商）+ `descriptor`，是 `capabilities` 的正确落点。
 
 **形状 vs 内容**的切分（沿用 MCP capability vs list）：
 
-| 字段 | 形状 → harness 级（协商一次） | 内容/状态 → session 级（运行时） |
-| --- | --- | --- |
-| permission | 支持哪些档位 | 当前选了哪档 |
-| model | 是否可切、模型全集 | 当前选哪个 |
-| mcp | 是否支持、支不支持 listChanged | 具体 server 列表 + status |
+| 字段       | 形状 → harness 级（协商一次）  | 内容/状态 → session 级（运行时） |
+| ---------- | ------------------------------ | -------------------------------- |
+| permission | 支持哪些档位                   | 当前选了哪档                     |
+| model      | 是否可切、模型全集             | 当前选哪个                       |
+| mcp        | 是否支持、支不支持 listChanged | 具体 server 列表 + status        |
 
 v1 只落 permission 的形状层；models/mcp/resume/steering 保持现状，不在本轮迁移。
 
@@ -54,24 +54,24 @@ v1 只落 permission 的形状层；models/mcp/resume/steering 保持现状，�
 
 去掉术语后，三家的粗档收敛到一条**信任梯度**：
 
-| 用户意图 | Claude | Codex | OpenCode | 普适 |
-| --- | --- | --- | --- | --- |
-| 只读 / 规划 | `plan` | Read Only | `plan` | ✅ |
-| 改前审批 | `default` | Default | `build` | ✅ |
-| 自动编辑 | `acceptEdits` | —（并进 Default） | —（靠规则） | ⚠️ 仅 Claude 有独立档 |
-| 全放开 | `bypassPermissions` | Full Access | `build`+`--auto` | ✅ |
+| 用户意图    | Claude              | Codex             | OpenCode         | 普适                  |
+| ----------- | ------------------- | ----------------- | ---------------- | --------------------- |
+| 只读 / 规划 | `plan`              | Read Only         | `plan`           | ✅                    |
+| 改前审批    | `default`           | Default           | `build`          | ✅                    |
+| 自动编辑    | `acceptEdits`       | —（并进 Default） | —（靠规则）      | ⚠️ 仅 Claude 有独立档 |
+| 全放开      | `bypassPermissions` | Full Access       | `build`+`--auto` | ✅                    |
 
 ## 4. 决策：对外档位 + 命名映射
 
 对外暴露**望文生义的 id**（native 的怪名字如 `default`/`bypassPermissions`/`on-request` 退回 adapter 内部当私有映射，用户永不可见）。语义真正相同的意图各家共用同一 id（`ask`/`full`）；**语义不同的独有档各用各的 id，不强行对齐**——claude 的 `plan` 会产出计划，codex 的 `read-only` 只是纯只读沙箱、不产计划，是两个不同的东西，不共用一个 id：
 
-| 对外 id | label（用户看） | claude native | codex native |
-| --- | --- | --- | --- |
-| `plan` | 规划（只读 + 产计划） | `plan` | —（codex 无 plan） |
-| `read-only` | 只读（纯只读，不产计划） | —（claude 由 `plan` 涵盖） | `on-request` + `read-only` |
-| `ask` | 每步询问 | `default` | `on-request` + `workspace-write` |
-| `acceptEdits` | 自动改文件、危险再问 | `acceptEdits` | —（不声明） |
-| `full` | 完全放开、不打断 | `bypassPermissions` | `never` + `danger-full-access` |
+| 对外 id       | label（用户看）          | claude native              | codex native                     |
+| ------------- | ------------------------ | -------------------------- | -------------------------------- |
+| `plan`        | 规划（只读 + 产计划）    | `plan`                     | —（codex 无 plan）               |
+| `read-only`   | 只读（纯只读，不产计划） | —（claude 由 `plan` 涵盖） | `on-request` + `read-only`       |
+| `ask`         | 每步询问                 | `default`                  | `on-request` + `workspace-write` |
+| `acceptEdits` | 自动改文件、危险再问     | `acceptEdits`              | —（不声明）                      |
+| `full`        | 完全放开、不打断         | `bypassPermissions`        | `never` + `danger-full-access`   |
 
 各 harness 声明的子集：
 
@@ -84,12 +84,16 @@ v1 只落 permission 的形状层；models/mcp/resume/steering 保持现状，�
 ```ts
 // packages/contract
 export const HarnessAgentCapabilitiesSchema = Schema.Struct({
-  permissionModes: Schema.optionalKey(Schema.Array(Schema.Struct({
-    id: Schema.String,     // 各 harness 命名空间内自由，宽松 string 容演进
-    label: Schema.String,  // harness 自描述，UI 直接渲染（类比 MCP tool 的 name）
-  }))),
-})
-export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type
+  permissionModes: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String, // 各 harness 命名空间内自由，宽松 string 容演进
+        label: Schema.String, // harness 自描述，UI 直接渲染（类比 MCP tool 的 name）
+      }),
+    ),
+  ),
+});
+export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type;
 ```
 
 设计要点：
