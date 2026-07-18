@@ -11,7 +11,7 @@ import { makeDesktopConfigLive } from "./desktop-config";
 import { DesktopApplicationLive, RendererChannelLive } from "./desktop-runtime-glue";
 import { registerAppScheme } from "./electron/app-protocol";
 import { MainWindow, MainWindowLive } from "./electron/main-window";
-import { devWorktreeSlug, vibestTempPath } from "./lib/utils";
+import { devUserDataPath, devWorktreeSlug, vibestTempPath } from "./lib/utils";
 import { LocalServerLive } from "./server/local-server-live";
 import { formatStartupFailure } from "./startup-failure";
 
@@ -49,14 +49,10 @@ export function startDesktopRuntime(): void {
   } else if (is.dev && !isE2E) {
     // Give dev its own userData so its single-instance lock is independent of an
     // installed build (which on macOS keeps holding the lock after its window
-    // closes). Suffix with the git worktree name so parallel dev instances from
+    // closes). Key it on the git worktree so parallel dev instances from
     // different worktrees don't collide. E2E is excluded — it passes its own
     // --user-data-dir.
-    const slug = Effect.runSync(devWorktreeSlug);
-    const devUserData = slug
-      ? `${app.getPath("userData")}-dev-${slug}`
-      : `${app.getPath("userData")}-dev`;
-    app.setPath("userData", devUserData);
+    app.setPath("userData", devUserDataPath(Effect.runSync(devWorktreeSlug)));
   }
 
   let runtime: ReturnType<typeof makeRuntime> | undefined;

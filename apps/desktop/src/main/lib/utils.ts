@@ -10,6 +10,17 @@ export function vibestTempPath(name: string): string {
 }
 
 /**
+ * userData dir for a dev checkout. Lives in `Vibest Dev/<worktree>`, a sibling
+ * of the packaged app's userData dir (`Vibest`) — not the generic `desktop` dir
+ * the dev app name would otherwise produce, and separate from prod so the two
+ * don't share a single-instance lock. `slug` is the git worktree name; outside a
+ * checkout it falls back to a shared `default` dir.
+ */
+export function devUserDataPath(slug: string | undefined): string {
+  return path.join(app.getPath("appData"), "Vibest Dev", slug ?? "default");
+}
+
+/**
  * Basename of the current git worktree, sanitized for a path segment (e.g.
  * `dapper-mochi`). Used to key each dev checkout's userData dir. Not
  * `basename(cwd)` — dev's cwd is `apps/desktop`, identical across worktrees.
