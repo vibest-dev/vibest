@@ -1,103 +1,111 @@
-import { readFile, readdir } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { Context, Effect, Layer } from "effect";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import { Context, Effect, FileSystem, Layer } from "effect";
 
-import { FileReadError } from "../errors";
+import {
+  WorkspaceBinaryFile,
+  WorkspaceFileTooLarge,
+  WorkspaceNotFile,
+  WorkspacePathEscape,
+  WorkspaceReadError,
+} from "../errors";
 
-export interface GrepMatch {
-  readonly file: string;
-  readonly line: number;
-  readonly text: string;
-}
+/** Largest file we will read as text; larger files are rejected, not truncated. */
+const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 
-const IGNORED = new Set([".git", "node_modules"]);
-
-/** Recursively collect file paths under `dir` (absolute), skipping IGNORED dirs. */
-const walk = async (dir: string): Promise<Array<string>> => {
-  const out: Array<string> = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (IGNORED.has(entry.name)) continue;
-      out.push(...(await walk(join(dir, entry.name))));
-    } else if (entry.isFile()) {
-      out.push(join(dir, entry.name));
-    }
-  }
-  return out;
-};
+/** A NUL byte marks the content as binary, so we refuse to read it as text. */
+const NUL = String.fromCharCode(0);
 
 /**
- * `fs` module — read-only file access. No write/watch operations and (for now)
- * no path-boundary protection (design §8).
+ * Lexical containment: is `child` at or beneath `parent`? Rejects `..` escapes
+ * and absolute paths that point elsewhere. (Same check opencode's `FSUtil.contains`
+ * and t3code's `WorkspacePaths` use.)
  */
-export class FSService extends Context.Service<
-  FSService,
+const contains = (parent: string, child: string): boolean => {
+  const rel = relative(parent, child);
+  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+};
+
+type ReadFileError =
+  | WorkspacePathEscape
+  | WorkspaceNotFile
+  | WorkspaceFileTooLarge
+  | WorkspaceBinaryFile
+  | WorkspaceReadError;
+
+/**
+ * `WorkspaceFSService` — read-only file access confined to a caller-supplied
+ * `cwd`. Built on the effect `FileSystem`, but unlike a raw passthrough it
+ * enforces a path boundary (lexical + realpath, defeating `..` and symlink
+ * escapes) and read guardrails (regular-file-only, size cap, binary rejection).
+ * All failures are typed on the effect error channel.
+ */
+export class WorkspaceFSService extends Context.Service<
+  WorkspaceFSService,
   {
-    readonly readFile: (path: string) => Effect.Effect<string, FileReadError>;
-    /** Recursive listing of files under `dir`, as paths relative to `dir`. */
-    readonly tree: (dir: string) => Effect.Effect<ReadonlyArray<string>, FileReadError>;
-    /** Substring search over file contents under `dir`. */
-    readonly grep: (
-      pattern: string,
-      dir: string,
-    ) => Effect.Effect<ReadonlyArray<GrepMatch>, FileReadError>;
-    /** Search file paths (not contents) under `dir` by substring. */
-    readonly search: (
-      query: string,
-      dir: string,
-    ) => Effect.Effect<ReadonlyArray<string>, FileReadError>;
+    /** Read `path` (relative to `cwd`) as UTF-8 text. */
+    readonly readFileString: (cwd: string, path: string) => Effect.Effect<string, ReadFileError>;
+    /** List the entries of the directory `path` (relative to `cwd`). */
+    readonly readDirectory: (
+      cwd: string,
+      path: string,
+    ) => Effect.Effect<ReadonlyArray<string>, WorkspacePathEscape | WorkspaceReadError>;
   }
->()("FSService") {}
+>()("WorkspaceFSService") {}
 
-export const FSServiceLayer: Layer.Layer<FSService> = Layer.sync(FSService, () => ({
-  readFile: (path) =>
-    Effect.tryPromise({
-      try: () => readFile(path, "utf8"),
-      catch: (cause) => new FileReadError({ path, cause }),
-    }),
+export const WorkspaceFSServiceLayer: Layer.Layer<WorkspaceFSService> = Layer.effect(
+  WorkspaceFSService,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
 
-  tree: (dir) =>
-    Effect.tryPromise({
-      try: async () => {
-        const files = await walk(dir);
-        return files.map((f) => relative(dir, f));
-      },
-      catch: (cause) => new FileReadError({ path: dir, cause }),
-    }),
+    const readErr = (path: string) => (cause: unknown) => new WorkspaceReadError({ path, cause });
 
-  grep: (pattern, dir) =>
-    Effect.tryPromise({
-      try: async () => {
-        const files = await walk(dir);
-        const matches: Array<GrepMatch> = [];
-        for (const file of files) {
-          let content: string;
-          try {
-            content = await readFile(file, "utf8");
-          } catch {
-            continue; // skip unreadable/binary files
-          }
-          const lines = content.split("\n");
-          for (let i = 0; i < lines.length; i++) {
-            const text = lines[i] ?? "";
-            if (text.includes(pattern)) {
-              matches.push({ file: relative(dir, file), line: i + 1, text });
-            }
-          }
+    // Resolve `path` against `cwd` and confine it there both lexically and after
+    // realpath — the first stops `..`, the second stops symlinks pointing out.
+    const resolveWithin = (cwd: string, path: string) =>
+      Effect.gen(function* () {
+        // `cwd` is the trusted root and must be absolute; `path` must be relative
+        // to it (an absolute `path` would silently ignore `cwd`).
+        if (!isAbsolute(cwd) || isAbsolute(path)) {
+          return yield* new WorkspacePathEscape({ cwd, path });
         }
-        return matches;
-      },
-      catch: (cause) => new FileReadError({ path: dir, cause }),
-    }),
+        const absolute = resolve(cwd, path);
+        if (!contains(cwd, absolute)) {
+          return yield* new WorkspacePathEscape({ cwd, path });
+        }
+        const realRoot = yield* fs.realPath(cwd).pipe(Effect.mapError(readErr(path)));
+        const realTarget = yield* fs.realPath(absolute).pipe(Effect.mapError(readErr(path)));
+        if (!contains(realRoot, realTarget)) {
+          return yield* new WorkspacePathEscape({ cwd, path });
+        }
+        return absolute;
+      });
 
-  search: (query, dir) =>
-    Effect.tryPromise({
-      try: async () => {
-        const files = await walk(dir);
-        return files.map((f) => relative(dir, f)).filter((p) => p.includes(query));
-      },
-      catch: (cause) => new FileReadError({ path: dir, cause }),
-    }),
-}));
+    return {
+      readFileString: (cwd, path) =>
+        Effect.gen(function* () {
+          const absolute = yield* resolveWithin(cwd, path);
+          const info = yield* fs.stat(absolute).pipe(Effect.mapError(readErr(path)));
+          if (info.type !== "File") {
+            return yield* new WorkspaceNotFile({ path });
+          }
+          const size = Number(info.size);
+          if (size > MAX_FILE_BYTES) {
+            return yield* new WorkspaceFileTooLarge({ path, size, limit: MAX_FILE_BYTES });
+          }
+          const content = yield* fs.readFileString(absolute).pipe(Effect.mapError(readErr(path)));
+          if (content.includes(NUL)) {
+            return yield* new WorkspaceBinaryFile({ path });
+          }
+          return content;
+        }),
+
+      readDirectory: (cwd, path) =>
+        Effect.gen(function* () {
+          const absolute = yield* resolveWithin(cwd, path);
+          return yield* fs.readDirectory(absolute).pipe(Effect.mapError(readErr(path)));
+        }),
+    };
+  }),
+).pipe(Layer.provide(NodeFileSystem.layer));

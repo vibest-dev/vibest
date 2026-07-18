@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./fs": "./src/fs.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts"
   },

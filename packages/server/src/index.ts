@@ -1,7 +1,7 @@
 import { Layer } from "effect";
 
 import { EventBusLayer } from "./events";
-import { FSServiceLayer } from "./fs";
+import { WorkspaceFSServiceLayer } from "./fs";
 import { GitServiceLayer } from "./git";
 import { McpRepositoryLayer, McpServiceLayer } from "./mcp";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "./project";
@@ -32,6 +32,6 @@ export const HarnessAgentDomainLayer = Layer.mergeAll(
   ProviderServiceLayer.pipe(Layer.provide(ProviderRepositoryLayer)),
   McpServiceLayer.pipe(Layer.provide(McpRepositoryLayer)),
   EventBusLayer,
-  FSServiceLayer,
+  WorkspaceFSServiceLayer,
   GitServiceLayer,
 );

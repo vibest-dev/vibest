@@ -16,6 +16,7 @@ import {
 import { Context, Effect, Layer } from "effect";
 
 import { EventBusLayer } from "../events";
+import { WorkspaceFSServiceLayer } from "../fs";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -59,4 +60,8 @@ const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(EventBusLayer),
 );
 
-export const AgentRuntimeLayer = Layer.merge(EventBusLayer, SessionServiceLayer);
+export const AgentRuntimeLayer = Layer.mergeAll(
+  EventBusLayer,
+  SessionServiceLayer,
+  WorkspaceFSServiceLayer,
+);

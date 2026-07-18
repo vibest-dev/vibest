@@ -1,67 +1,83 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { FSService, FSServiceLayer } from "../src/index";
+import { WorkspaceFSService, WorkspaceFSServiceLayer } from "../src/index";
 
-describe("FSService", () => {
-  let dir: string;
+describe("WorkspaceFSService", () => {
+  let cwd: string;
+  let outside: string;
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "vibest-fs-"));
-    await writeFile(join(dir, "a.txt"), "hello\nworld");
-    await mkdir(join(dir, "sub"), { recursive: true });
-    await writeFile(join(dir, "sub", "b.txt"), "foobar");
-    await mkdir(join(dir, "node_modules"), { recursive: true });
-    await writeFile(join(dir, "node_modules", "skip.txt"), "ignored");
+    cwd = await mkdtemp(join(tmpdir(), "vibest-fs-"));
+    outside = await mkdtemp(join(tmpdir(), "vibest-out-"));
+    await writeFile(join(cwd, "a.txt"), "hello\nworld");
+    await mkdir(join(cwd, "sub"), { recursive: true });
+    await writeFile(join(outside, "secret.txt"), "top secret");
+    await symlink(join(outside, "secret.txt"), join(cwd, "link"));
+    await writeFile(join(cwd, "bin"), Buffer.from([104, 0, 105])); // "h\0i"
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(cwd, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   });
 
-  const run = <A, E>(program: Effect.Effect<A, E, FSService>) =>
-    Effect.runPromise(Effect.provide(program, FSServiceLayer));
+  const run = <A, E>(program: Effect.Effect<A, E, WorkspaceFSService>) =>
+    Effect.runPromise(Effect.provide(program, WorkspaceFSServiceLayer));
 
-  it("reads a file", async () => {
-    const content = await run(
-      Effect.gen(function* () {
-        const fs = yield* FSService;
-        return yield* fs.readFile(join(dir, "a.txt"));
-      }),
+  // Run a program expected to fail and surface the error's `_tag` (or a sentinel
+  // if it unexpectedly succeeds).
+  const errorTag = <A, E extends { readonly _tag: string }>(
+    program: Effect.Effect<A, E, WorkspaceFSService>,
+  ) =>
+    run(
+      program.pipe(
+        Effect.match({
+          onFailure: (e) => e._tag,
+          onSuccess: () => "no-error",
+        }),
+      ),
     );
-    expect(content).toBe("hello\nworld");
+
+  const readFile = (path: string) =>
+    Effect.gen(function* () {
+      const fs = yield* WorkspaceFSService;
+      return yield* fs.readFileString(cwd, path);
+    });
+
+  it("reads a file relative to cwd", async () => {
+    expect(await run(readFile("a.txt"))).toBe("hello\nworld");
   });
 
-  it("trees files recursively, skipping node_modules", async () => {
-    const tree = await run(
-      Effect.gen(function* () {
-        const fs = yield* FSService;
-        return yield* fs.tree(dir);
-      }),
-    );
-    expect(new Set(tree)).toEqual(new Set(["a.txt", join("sub", "b.txt")]));
+  it("rejects an absolute path", async () => {
+    expect(await errorTag(readFile(join(outside, "secret.txt")))).toBe("WorkspacePathEscape");
   });
 
-  it("greps file contents", async () => {
-    const matches = await run(
+  it("lists a directory", async () => {
+    const entries = await run(
       Effect.gen(function* () {
-        const fs = yield* FSService;
-        return yield* fs.grep("world", dir);
+        const fs = yield* WorkspaceFSService;
+        return yield* fs.readDirectory(cwd, ".");
       }),
     );
-    expect(matches).toHaveLength(1);
-    expect(matches[0]).toEqual({ file: "a.txt", line: 2, text: "world" });
+    expect(new Set(entries)).toEqual(new Set(["a.txt", "sub", "link", "bin"]));
   });
 
-  it("searches file paths by name", async () => {
-    const found = await run(
-      Effect.gen(function* () {
-        const fs = yield* FSService;
-        return yield* fs.search("b.txt", dir);
-      }),
-    );
-    expect(found).toEqual([join("sub", "b.txt")]);
+  it("rejects a `..` escape", async () => {
+    expect(await errorTag(readFile("../escape.txt"))).toBe("WorkspacePathEscape");
+  });
+
+  it("rejects a symlink pointing outside cwd", async () => {
+    expect(await errorTag(readFile("link"))).toBe("WorkspacePathEscape");
+  });
+
+  it("rejects a directory read as a file", async () => {
+    expect(await errorTag(readFile("sub"))).toBe("WorkspaceNotFile");
+  });
+
+  it("rejects a binary file", async () => {
+    expect(await errorTag(readFile("bin"))).toBe("WorkspaceBinaryFile");
   });
 });
