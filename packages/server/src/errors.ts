@@ -29,7 +29,7 @@ export class GitError extends Data.TaggedError("GitError")<{
   readonly cause: unknown;
 }> {}
 
-export class SessionMetadataNotFound extends Data.TaggedError("SessionMetadataNotFound")<{
+export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{
   readonly projectId: string;
   readonly sessionId: string;
 }> {}

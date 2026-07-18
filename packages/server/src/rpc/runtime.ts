@@ -20,7 +20,7 @@ import { EventBusLayer } from "../events";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
 import {
   HarnessSessionsPortLayer,
-  SessionMetadataRepositoryLayer,
+  SessionRepositoryLayer,
   SessionRuntimeRegistryLayer,
   SessionServiceLayer,
 } from "../session";
@@ -74,15 +74,13 @@ const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(ProjectRepositoryLayer),
   Layer.provide(PathsLayer),
 );
-const SessionMetadataRepositoryProvided = SessionMetadataRepositoryLayer.pipe(
-  Layer.provide(PathsLayer),
-);
+const SessionRepositoryProvided = SessionRepositoryLayer.pipe(Layer.provide(PathsLayer));
 const HarnessSessionsPortProvided = HarnessSessionsPortLayer.pipe(
   Layer.provide(HarnessSessionServiceLayer),
 );
 const SessionServiceProvided = SessionServiceLayer.pipe(
   Layer.provide(ProjectServiceProvided),
-  Layer.provide(SessionMetadataRepositoryProvided),
+  Layer.provide(SessionRepositoryProvided),
   Layer.provide(HarnessSessionsPortProvided),
 );
 const SessionRuntimeRegistryProvided = SessionRuntimeRegistryLayer.pipe(

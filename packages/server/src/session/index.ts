@@ -1,4 +1,4 @@
-export { SessionMetadataRepository, SessionMetadataRepositoryLayer } from "./metadata";
+export { SessionRepository, SessionRepositoryLayer } from "./repository";
 export {
   type HarnessCreateError,
   type HarnessResumeError,

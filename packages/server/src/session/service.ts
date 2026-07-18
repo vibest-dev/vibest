@@ -5,21 +5,21 @@ import { Context, Effect, Layer } from "effect";
 
 import {
   type ProjectNotFound,
-  SessionMetadataNotFound,
+  SessionNotFound,
   SessionRefMismatch,
   type SessionRefNotFound,
   type StoreReadError,
   type StoreWriteError,
 } from "../errors";
 import { ProjectService } from "../project/service";
-import type { HarnessAgentId, SessionMetadata } from "../types";
-import { SessionMetadataRepository } from "./metadata";
+import type { HarnessAgentId, Session } from "../types";
 import { type HarnessCreateError, type HarnessResumeError, HarnessSessionsPort } from "./port";
+import { SessionRepository } from "./repository";
 
 /**
  * Session orchestration. Owns everything the harness must stay ignorant of:
  * resolving a `projectId` to a workspace path, generating the server
- * `sessionId`, persisting {@link SessionMetadata}, and translating a server
+ * `sessionId`, persisting {@link Session}, and translating a server
  * `SessionRef` to the agent-native `harnessSessionId` before calling the
  * {@link HarnessSessionsPort}. The harness only ever sees a cwd and a native id.
  */
@@ -37,21 +37,17 @@ export class SessionService extends Context.Service<
       ref: SessionRef,
     ) => Effect.Effect<
       SessionRef,
-      | SessionMetadataNotFound
-      | SessionRefMismatch
-      | ProjectNotFound
-      | HarnessResumeError
-      | StoreReadError
+      SessionNotFound | SessionRefMismatch | ProjectNotFound | HarnessResumeError | StoreReadError
     >;
     readonly close: (
       ref: SessionRef,
-    ) => Effect.Effect<void, SessionMetadataNotFound | SessionRefMismatch | StoreReadError>;
+    ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
     /** Close the native session and delete its stored metadata. */
     readonly delete: (
       ref: SessionRef,
     ) => Effect.Effect<
       void,
-      SessionMetadataNotFound | SessionRefMismatch | StoreReadError | StoreWriteError
+      SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError
     >;
     readonly list: (
       projectId: string,
@@ -63,7 +59,7 @@ export class SessionService extends Context.Service<
      */
     readonly resolveHarnessSessionId: (
       ref: SessionRef,
-    ) => Effect.Effect<string, SessionMetadataNotFound | SessionRefMismatch | StoreReadError>;
+    ) => Effect.Effect<string, SessionNotFound | SessionRefMismatch | StoreReadError>;
     /** Reverse a bare sessionId back into its full SessionRef. */
     readonly resolveRef: (
       sessionId: string,
@@ -74,12 +70,12 @@ export class SessionService extends Context.Service<
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  ProjectService | SessionMetadataRepository | HarnessSessionsPort
+  ProjectService | SessionRepository | HarnessSessionsPort
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
     const projects = yield* ProjectService;
-    const repo = yield* SessionMetadataRepository;
+    const repo = yield* SessionRepository;
     const harness = yield* HarnessSessionsPort;
 
     const readChecked = (ref: SessionRef) =>
@@ -105,7 +101,7 @@ export const SessionServiceLayer: Layer.Layer<
             harness.create(harnessAgentId, project.path).pipe(
               Effect.flatMap((harnessSessionId) => {
                 const sessionId = randomUUID();
-                const metadata: SessionMetadata = {
+                const metadata: Session = {
                   version: 1,
                   projectId,
                   harnessAgentId,

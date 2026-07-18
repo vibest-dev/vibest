@@ -9,8 +9,8 @@ import { layerPaths } from "../src/config/paths";
 import { AgentUnavailable } from "../src/errors";
 import { ProjectRepositoryLayer } from "../src/project/repository";
 import { ProjectService, ProjectServiceLayer } from "../src/project/service";
-import { SessionMetadataRepository, SessionMetadataRepositoryLayer } from "../src/session/metadata";
 import { type HarnessCreateError, HarnessSessionsPort } from "../src/session/port";
+import { SessionRepository, SessionRepositoryLayer } from "../src/session/repository";
 import { SessionService, SessionServiceLayer } from "../src/session/service";
 
 type PortSpy = {
@@ -55,7 +55,7 @@ describe("SessionService", () => {
     const paths = layerPaths(home);
     const base = Layer.mergeAll(
       ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(paths)),
-      SessionMetadataRepositoryLayer.pipe(Layer.provide(paths)),
+      SessionRepositoryLayer.pipe(Layer.provide(paths)),
       port,
     );
     // Expose SessionService plus the base services the programs also read from;
@@ -65,7 +65,7 @@ describe("SessionService", () => {
 
   const run = <A, E>(
     port: Layer.Layer<HarnessSessionsPort>,
-    program: Effect.Effect<A, E, SessionService | ProjectService | SessionMetadataRepository>,
+    program: Effect.Effect<A, E, SessionService | ProjectService | SessionRepository>,
   ) => Effect.runPromise(Effect.provide(program, layers(port)));
 
   it("create resolves projectId to cwd, generates a uuid sessionId, persists metadata", async () => {
@@ -75,7 +75,7 @@ describe("SessionService", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const sessions = yield* SessionService;
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
         const ref = yield* sessions.create(project.id, "claude-code");
         const stored = yield* repo.read(ref.projectId, ref.sessionId);
@@ -119,7 +119,7 @@ describe("SessionService", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const sessions = yield* SessionService;
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
         const err = yield* Effect.flip(sessions.create(project.id, "codex"));
         const listed = yield* repo.list(project.id);
@@ -151,7 +151,7 @@ describe("SessionService", () => {
     ]);
   });
 
-  it("resume fails with SessionMetadataNotFound for an unknown session", async () => {
+  it("resume fails with SessionNotFound for an unknown session", async () => {
     const { layer } = makeFakePort();
     const err = await run(
       layer,
@@ -168,7 +168,7 @@ describe("SessionService", () => {
         );
       }),
     );
-    expect(err._tag).toBe("SessionMetadataNotFound");
+    expect(err._tag).toBe("SessionNotFound");
   });
 
   it("resume fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {

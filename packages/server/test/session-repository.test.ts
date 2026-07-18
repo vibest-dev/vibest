@@ -6,13 +6,12 @@ import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { layerPaths } from "../src/config/paths";
-import { SessionMetadataRepository, SessionMetadataRepositoryLayer } from "../src/session/metadata";
-import type { SessionMetadata } from "../src/types";
+import { SessionRepository, SessionRepositoryLayer } from "../src/session/repository";
+import type { Session } from "../src/types";
 
-const makeLayer = (home: string) =>
-  SessionMetadataRepositoryLayer.pipe(Layer.provide(layerPaths(home)));
+const makeLayer = (home: string) => SessionRepositoryLayer.pipe(Layer.provide(layerPaths(home)));
 
-const meta = (projectId: string, harnessSessionId: string): SessionMetadata => ({
+const meta = (projectId: string, harnessSessionId: string): Session => ({
   version: 1,
   projectId,
   harnessAgentId: "claude-code",
@@ -20,7 +19,7 @@ const meta = (projectId: string, harnessSessionId: string): SessionMetadata => (
   createdAt: "2026-07-16T00:00:00.000Z",
 });
 
-describe("SessionMetadataRepository", () => {
+describe("SessionRepository", () => {
   let home: string;
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), "vibest-sess-"));
@@ -29,13 +28,13 @@ describe("SessionMetadataRepository", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  const run = <A, E>(program: Effect.Effect<A, E, SessionMetadataRepository>) =>
+  const run = <A, E>(program: Effect.Effect<A, E, SessionRepository>) =>
     Effect.runPromise(Effect.provide(program, makeLayer(home)));
 
   it("writes then reads back a session's metadata", async () => {
     const read = await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         yield* repo.write("sess-1", meta("proj-a", "claude-uuid-1"));
         return yield* repo.read("proj-a", "sess-1");
       }),
@@ -47,7 +46,7 @@ describe("SessionMetadataRepository", () => {
   it("persists at storage/sessions/<projectId>/<sessionId>.json, sessionId only in filename", async () => {
     await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         yield* repo.write("sess-1", meta("proj-a", "claude-uuid-1"));
       }),
     );
@@ -61,7 +60,7 @@ describe("SessionMetadataRepository", () => {
   it("lists all sessions of a project, keyed by filename sessionId", async () => {
     const listed = await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         yield* repo.write("sess-1", meta("proj-a", "u1"));
         yield* repo.write("sess-2", meta("proj-a", "u2"));
         yield* repo.write("sess-3", meta("proj-b", "u3"));
@@ -74,29 +73,29 @@ describe("SessionMetadataRepository", () => {
   it("list returns empty for a project with no session dir", async () => {
     const listed = await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         return yield* repo.list("never-created");
       }),
     );
     expect(listed).toEqual([]);
   });
 
-  it("read fails with SessionMetadataNotFound for an unknown session", async () => {
+  it("read fails with SessionNotFound for an unknown session", async () => {
     const err = await run(
       Effect.flip(
         Effect.gen(function* () {
-          const repo = yield* SessionMetadataRepository;
+          const repo = yield* SessionRepository;
           return yield* repo.read("proj-a", "nope");
         }),
       ),
     );
-    expect(err._tag).toBe("SessionMetadataNotFound");
+    expect(err._tag).toBe("SessionNotFound");
   });
 
   it("remove is idempotent and deletes the file", async () => {
     const listedAfter = await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         yield* repo.write("sess-1", meta("proj-a", "u1"));
         yield* repo.remove("proj-a", "sess-1");
         yield* repo.remove("proj-a", "sess-1"); // idempotent: second remove is a no-op
@@ -109,7 +108,7 @@ describe("SessionMetadataRepository", () => {
   it("findBySessionId reverse-looks-up a session across projects", async () => {
     const hit = await run(
       Effect.gen(function* () {
-        const repo = yield* SessionMetadataRepository;
+        const repo = yield* SessionRepository;
         yield* repo.write("sess-1", meta("proj-a", "u1"));
         yield* repo.write("sess-2", meta("proj-b", "u2"));
         return yield* repo.findBySessionId("sess-2");
@@ -123,7 +122,7 @@ describe("SessionMetadataRepository", () => {
     const err = await run(
       Effect.flip(
         Effect.gen(function* () {
-          const repo = yield* SessionMetadataRepository;
+          const repo = yield* SessionRepository;
           yield* repo.write("sess-1", meta("proj-a", "u1"));
           return yield* repo.findBySessionId("ghost");
         }),

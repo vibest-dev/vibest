@@ -21,7 +21,7 @@ import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
 import {
   HarnessSessionsPortLayer,
-  SessionMetadataRepositoryLayer,
+  SessionRepositoryLayer,
   SessionRuntimeRegistryLayer,
   SessionServiceLayer,
 } from "../src/session";
@@ -76,7 +76,7 @@ describe("session router", () => {
       Layer.provide(ProjectRepositoryLayer),
       Layer.provide(pathsLayer),
     );
-    const metadataLayer = SessionMetadataRepositoryLayer.pipe(Layer.provide(pathsLayer));
+    const metadataLayer = SessionRepositoryLayer.pipe(Layer.provide(pathsLayer));
     const portLayer = HarnessSessionsPortLayer.pipe(Layer.provide(harnessSessionLayer));
     const sessionServiceLayer = SessionServiceLayer.pipe(
       Layer.provide(projectServiceLayer),

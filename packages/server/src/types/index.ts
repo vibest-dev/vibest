@@ -73,7 +73,7 @@ export interface RuntimeConfig {
  * (claude session uuid / codex thread id) the server translates to when
  * calling the harness.
  */
-export interface SessionMetadata {
+export interface Session {
   readonly version: 1;
   readonly projectId: string;
   readonly harnessAgentId: HarnessAgentId;
