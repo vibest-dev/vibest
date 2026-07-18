@@ -12,7 +12,7 @@ import {
 } from "../errors";
 
 /** Largest file we will read as text; larger files are rejected, not truncated. */
-const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MiB
 
 /** A NUL byte marks the content as binary, so we refuse to read it as text. */
 const NUL = String.fromCharCode(0);
