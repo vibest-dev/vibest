@@ -36,7 +36,7 @@ function DraftRoute() {
   const manager = useChatManager();
   const navigate = useNavigate();
   const [model, setModel] = useState<ChatModel>("sonnet");
-  const [permissionMode, setPermissionMode] = useState<ChatPermissionMode>("default");
+  const [permissionMode, setPermissionMode] = useState<ChatPermissionMode>("ask");
 
   // Create the session and start its first turn against the manager's persisted
   // store, then navigate — the session route re-attaches the same Chat with the

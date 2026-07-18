@@ -7,7 +7,6 @@ import {
   applyInitialSessionConfig,
   type HarnessAgentAdapter,
   type HarnessAgentSession,
-  type PermissionMode,
   type SessionCapabilities,
   type UserInput,
 } from "../../runtime/adapter";
@@ -32,10 +31,16 @@ const EVENT_QUEUE_CAPACITY = 1024;
 const operationError = (sessionId: string, operation: string, cause: unknown) =>
   new AgentOperationError({ sessionId, operation, cause });
 
-// Map the harness-agnostic permission mode onto Claude's native enum. The
-// "default" / "acceptEdits" / "plan" names line up 1:1; only "bypass" differs.
-const toClaudePermissionMode = (mode: PermissionMode): sdk.PermissionMode =>
-  mode === "bypass" ? "bypassPermissions" : mode;
+// Map claude-code's outward permission-mode ids onto the SDK's native enum.
+// Unknown ids yield undefined so setPermissionMode can reject them.
+const CLAUDE_PERMISSION_MODES: Record<string, sdk.PermissionMode> = {
+  plan: "plan",
+  ask: "default",
+  acceptEdits: "acceptEdits",
+  full: "bypassPermissions",
+};
+const toClaudePermissionMode = (id: string): sdk.PermissionMode | undefined =>
+  CLAUDE_PERMISSION_MODES[id];
 
 const toClaudeMessage = (input: UserInput): sdk.SDKUserMessage["message"] => ({
   role: "user",
@@ -270,8 +275,17 @@ const makeSession = (
     const setPermissionMode: HarnessAgentSession["setPermissionMode"] = (mode) =>
       Effect.gen(function* () {
         if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        const native = toClaudePermissionMode(mode);
+        if (!native)
+          return yield* Effect.fail(
+            operationError(
+              sessionId,
+              "set-permission-mode",
+              new Error(`unknown permission mode: ${mode}`),
+            ),
+          );
         yield* agent.session
-          .setPermissionMode(sessionId, toClaudePermissionMode(mode))
+          .setPermissionMode(sessionId, native)
           .pipe(
             Effect.mapError((cause) => operationError(sessionId, "set-permission-mode", cause)),
           );

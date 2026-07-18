@@ -1,6 +1,6 @@
 import { eventIteratorToStream } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
-import type { PermissionMode, UserInputPart } from "@vibest/contract";
+import type { UserInputPart } from "@vibest/contract";
 import type { SessionEventStreamItem } from "@vibest/contract/session";
 import { isSessionEvent } from "@vibest/contract/session-events";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
@@ -328,7 +328,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     await this.client.session.setModel({ sessionId, model });
   }
 
-  async setPermissionMode(sessionId: string, permissionMode: PermissionMode): Promise<void> {
+  async setPermissionMode(sessionId: string, permissionMode: string): Promise<void> {
     await this.client.session.setPermissionMode({ sessionId, permissionMode });
   }
 }

@@ -8,18 +8,20 @@ import {
 
 import type { ChatPermissionMode } from "@/core/chat/chat-config";
 
+// claude-code's outward permission-mode ids, hardcoded for now — the app is
+// single-harness (claude-code). Once it can pick a harness, these should come
+// from that harness's capabilities.permissionModes.
 const modes: { label: string; value: ChatPermissionMode }[] = [
-  { label: "Ask", value: "default" },
-  { label: "Accept edits", value: "acceptEdits" },
   { label: "Plan", value: "plan" },
-  { label: "Bypass", value: "bypass" },
+  { label: "Ask", value: "ask" },
+  { label: "Accept edits", value: "acceptEdits" },
+  { label: "Full access", value: "full" },
 ];
 
 // Presentational permission-mode picker: value/onChange driven so it composes
 // both inside a session (ChatPermissionModeSelect binds it to ChatSession
-// context) and on the draft surface (local state, no session yet). The modes
-// are the harness-agnostic PermissionMode vocabulary; each harness maps them to
-// its own approval system server-side.
+// context) and on the draft surface (local state, no session yet). Each id is
+// an outward permission-mode id the harness maps to its native system.
 export function PermissionModeSelect({
   value,
   onChange,

@@ -8,7 +8,6 @@ import type { SessionSnapshot, SessionStatus } from "../types/session";
 import type {
   CreateSessionInput,
   HarnessAgentSession,
-  PermissionMode,
   PromptReceipt,
   SessionCapabilities,
   UserInput,
@@ -111,7 +110,7 @@ export type HarnessAgentSessionServiceShape = {
   ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
   readonly setPermissionMode: (
     sessionId: string,
-    mode: PermissionMode,
+    mode: string,
   ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
   readonly respondToAgentRequest: (
     sessionId: string,

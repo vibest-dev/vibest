@@ -266,19 +266,6 @@ export type SessionSnapshot = {
   bootId: string;
 };
 
-/**
- * Harness-agnostic permission level. Each harness adapter maps these to its
- * own native system (Claude's `permissionMode`, Codex's approval policy +
- * sandbox, …); harnesses without an approval protocol ignore it.
- *
- * - `default` — ask before risky actions
- * - `acceptEdits` — auto-accept file edits, still ask for the rest
- * - `plan` — read-only planning, no mutations
- * - `bypass` — auto-approve everything
- */
-export const PermissionModeSchema = Schema.Literals(["default", "acceptEdits", "plan", "bypass"]);
-export type PermissionMode = typeof PermissionModeSchema.Type;
-
 // A permission preset the user can pick for a session. `id` is the harness's
 // own outward vocabulary (mapped to its native system inside the adapter, e.g.
 // Claude's `permissionMode` or Codex's approval + sandbox); `label` is the
@@ -305,7 +292,8 @@ export const CreateSessionInputSchema = Schema.Struct({
   workspacePath: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.String),
-  permissionMode: Schema.optionalKey(PermissionModeSchema),
+  // Outward permission-mode id from the session's harness capabilities.
+  permissionMode: Schema.optionalKey(Schema.String),
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
@@ -365,7 +353,8 @@ export const CreateManagedSessionInputSchema = Schema.Struct({
   harnessAgentId: HarnessAgentIdSchema,
   workspacePath: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.String),
-  permissionMode: Schema.optionalKey(PermissionModeSchema),
+  // Outward permission-mode id from the session's harness capabilities.
+  permissionMode: Schema.optionalKey(Schema.String),
 });
 export type CreateManagedSessionInput = typeof CreateManagedSessionInputSchema.Type;
 
@@ -393,7 +382,7 @@ export const SetSessionModelInputSchema = Schema.Struct({
 });
 export const SetSessionPermissionModeInputSchema = Schema.Struct({
   sessionId: Schema.String,
-  permissionMode: PermissionModeSchema,
+  permissionMode: Schema.String,
 });
 export const RespondToAgentRequestInputSchema = Schema.Struct({
   sessionId: Schema.String,

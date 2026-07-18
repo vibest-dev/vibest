@@ -2,7 +2,6 @@ import type {
   CreateSessionInput,
   HarnessAgentCapabilities,
   HarnessAgentId,
-  PermissionMode,
   PromptReceipt,
   ResumeSessionInput,
   SessionCapabilities,
@@ -28,7 +27,6 @@ export {
   CreateSessionInputSchema,
   HarnessAgentCapabilitiesSchema,
   InspectorTargetSchema,
-  PermissionModeSchema,
   PromptReceiptSchema,
   ResumeSessionInputSchema,
   SessionCapabilitiesSchema,
@@ -37,7 +35,6 @@ export {
   type CreateSessionInput,
   type HarnessAgentCapabilities,
   type InspectorTarget,
-  type PermissionMode,
   type PromptReceipt,
   type ResumeSessionInput,
   type SessionCapabilities,
@@ -65,8 +62,9 @@ export interface HarnessAgentSession {
   // Session-scoped config setters. Harnesses that don't support a knob accept
   // the call and no-op (e.g. Codex has no runtime model switch).
   readonly setModel: (model: string) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  // `mode` is an outward permission-mode id from this harness's capabilities.
   readonly setPermissionMode: (
-    mode: PermissionMode,
+    mode: string,
   ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly interrupt: Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly respondToAgentRequest: (
