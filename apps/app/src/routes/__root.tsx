@@ -23,6 +23,13 @@ export interface RouterAppContext {
 }
 
 export const Route = createRootRouteWithContext<RouterAppContext>()({
+  // Negotiate harness capabilities once, right after the client connects and
+  // before any route renders — the MCP `initialize` analogue. Every consumer
+  // (e.g. the permission-mode picker) then reads the held result by id.
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(
+      context.orpcQueryUtils.harness.negotiate.queryOptions({ input: {} }),
+    ),
   component: RootLayout,
 });
 

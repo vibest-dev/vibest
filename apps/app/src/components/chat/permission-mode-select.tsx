@@ -1,5 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
 import type { HarnessAgentId } from "@vibest/contract";
 import {
   PromptInputModelSelect,
@@ -10,6 +8,7 @@ import {
 } from "@vibest/ui/ai-elements/prompt-input";
 
 import type { ChatPermissionMode } from "@/core/chat/chat-config";
+import { useHarnessAgent } from "@/core/harness/use-harness-negotiation";
 
 // Presentational permission-mode picker: value/onChange driven so it composes
 // both inside a session (ChatPermissionModeSelect binds it to ChatSession
@@ -25,13 +24,8 @@ export function PermissionModeSelect({
   value: ChatPermissionMode;
   onChange: (mode: ChatPermissionMode) => void;
 }) {
-  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
-  // Harness capabilities are static per harness, so this resolves once and is
-  // shared across every mount through the query cache.
-  const { data } = useQuery(
-    orpcQueryUtils.harness.capabilities.queryOptions({ input: { harnessAgentId } }),
-  );
-  const modes = data?.permissionModes ?? [];
+  // Read this harness's slice of the once-negotiated result — no fetch here.
+  const modes = useHarnessAgent(harnessAgentId)?.capabilities.permissionModes ?? [];
 
   return (
     <PromptInputModelSelect

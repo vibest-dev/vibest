@@ -1,17 +1,15 @@
 import { oc } from "@orpc/contract";
+import { Schema } from "effect";
 
-import {
-  HarnessAgentCapabilitiesSchema,
-  HarnessAgentIdInputSchema,
-  toStandardSchema,
-} from "./domain";
+import { HarnessNegotiationSchema, toStandardSchema } from "./domain";
 
-// Harness-level negotiation, distinct from the per-session routes: a harness's
-// capabilities are the same for every session it hosts, so they're addressed by
-// harnessAgentId — not by sessionId — and can be fetched before any session
-// exists (e.g. to drive the create-time permission-mode picker).
+// Harness-level negotiation, run once after the client connects — the MCP
+// `initialize` analogue for a vibest server that hosts many harnesses. A single
+// call returns every harness's availability + capabilities; the client holds
+// the result and reads per-harness data by id, rather than pulling capabilities
+// per harness or re-negotiating when the user switches harness.
 export const harnessContract = {
-  capabilities: oc
-    .input(toStandardSchema(HarnessAgentIdInputSchema))
-    .output(toStandardSchema(HarnessAgentCapabilitiesSchema)),
+  negotiate: oc
+    .input(toStandardSchema(Schema.Struct({})))
+    .output(toStandardSchema(HarnessNegotiationSchema)),
 };

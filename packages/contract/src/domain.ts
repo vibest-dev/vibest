@@ -285,9 +285,28 @@ export const HarnessAgentCapabilitiesSchema = Schema.Struct({
 });
 export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type;
 
-// Addresses a harness (not a session): the input to harness-level negotiation
-// calls like capabilities lookup.
-export const HarnessAgentIdInputSchema = Schema.Struct({ harnessAgentId: HarnessAgentIdSchema });
+// One entry of the negotiation result: a harness the server hosts, whether it's
+// usable right now (`available` + optional `reason`), and its capabilities. The
+// UI reads `available` to decide which harnesses to offer and `capabilities` to
+// drive per-harness controls (e.g. the permission-mode picker).
+export const HarnessAgentInfoSchema = Schema.Struct({
+  id: HarnessAgentIdSchema,
+  name: Schema.String,
+  available: Schema.Boolean,
+  reason: Schema.optionalKey(Schema.String),
+  capabilities: HarnessAgentCapabilitiesSchema,
+});
+export type HarnessAgentInfo = typeof HarnessAgentInfoSchema.Type;
+
+// The whole negotiation, exchanged once after the client connects (MCP
+// `initialize`-style): the server declares every harness it hosts with its
+// availability and capabilities in one shot. The client holds this and reads
+// per-harness data by id — it never re-negotiates to switch the selected
+// harness.
+export const HarnessNegotiationSchema = Schema.Struct({
+  agents: Schema.Array(HarnessAgentInfoSchema),
+});
+export type HarnessNegotiation = typeof HarnessNegotiationSchema.Type;
 
 // `model` / `permissionMode` are session-scoped config the user picks at create
 // time and changes mid-session via the dedicated setModel / setPermissionMode
