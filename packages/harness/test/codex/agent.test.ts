@@ -82,6 +82,14 @@ rl.on("line", (line) => {
     send({ id: msg.id, result: null });
   }
   if (msg.method === "thread/unsubscribe") send({ id: msg.id, result: null });
+  if (msg.method === "thread/read") {
+    if (msg.params.threadId === "th_missing") {
+      send({ id: msg.id, error: { code: -32000, message: "thread not found" } });
+      return;
+    }
+    const name = msg.params.threadId === "th_untitled" ? null : "My Thread";
+    send({ id: msg.id, result: { thread: { id: msg.params.threadId, name, preview: "first message", updatedAt: 1700 } } });
+  }
 });
 `;
 
@@ -186,6 +194,36 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
         ["start", "text-start", "text-delta", "text-end", "data-turn/completed", "finish"],
       );
       yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("surfaces thread metadata as session info", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const result = yield* makeCodexAdapter(agent).getSessionInfo("th_1");
+      NodeAssert.equal(result._tag, "found");
+      if (result._tag === "found") {
+        NodeAssert.equal(result.info.title, "My Thread");
+        // Codex timestamps are seconds; the adapter reports milliseconds.
+        NodeAssert.equal(result.info.updatedAt, 1_700_000);
+      }
+    }),
+  );
+
+  it.effect("falls back to the thread preview when it has no title", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const result = yield* makeCodexAdapter(agent).getSessionInfo("th_untitled");
+      NodeAssert.equal(result._tag, "found");
+      if (result._tag === "found") NodeAssert.equal(result.info.title, "first message");
+    }),
+  );
+
+  it.effect("maps an unknown thread to missing session info", () =>
+    Effect.gen(function* () {
+      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const result = yield* makeCodexAdapter(agent).getSessionInfo("th_missing");
+      NodeAssert.equal(result._tag, "missing");
     }),
   );
 

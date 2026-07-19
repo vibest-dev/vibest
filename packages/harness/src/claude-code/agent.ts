@@ -74,6 +74,16 @@ export interface ClaudeCodeAgent {
     readonly resume: (
       sessionId: string,
     ) => Effect.Effect<{ readonly sessionId: string }, ClaudeAgentFailure>;
+    /**
+     * Reads stored session metadata (title, recency) from the SDK's on-disk
+     * history without opening a live session — `null` when it's unknown. `dir`
+     * scopes the lookup to a workspace. Lets persisted sessions get live display
+     * data, so the adapter never has to reach into the SDK itself.
+     */
+    readonly getSessionInfo: (
+      sessionId: string,
+      options?: { readonly dir?: string },
+    ) => Effect.Effect<ClaudeSessionInfo, ClaudeSdkError>;
     readonly prompt: (input: {
       readonly sessionId: string;
       readonly message: sdk.SDKUserMessage["message"];
@@ -538,6 +548,11 @@ export const makeClaudeCodeAgent = ({
             }
             yield* Deferred.succeed(pending.deferred, result);
             return true;
+          }),
+        getSessionInfo: (sessionId, options) =>
+          Effect.tryPromise<ClaudeSessionInfo, ClaudeSdkError>({
+            try: () => getSessionInfo(sessionId, options?.dir ? { dir: options.dir } : undefined),
+            catch: (cause) => sdkError("get-session-info", cause),
           }),
         setModel: (sessionId, model) =>
           callQuery(sessionId, "set-model", (sdkQuery) => sdkQuery.setModel(model)),

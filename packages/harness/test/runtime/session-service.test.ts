@@ -8,6 +8,7 @@ import type { SessionEvent } from "../../src/event-manifest";
 import type {
   HarnessAgentAdapter,
   HarnessAgentSession,
+  SessionInfoResult,
   UserInput,
 } from "../../src/runtime/adapter";
 import { AgentOperationError } from "../../src/runtime/errors";
@@ -98,6 +99,7 @@ const makeFixture = Effect.gen(function* () {
         Effect.andThen(Deferred.await(resumeGate)),
         Effect.andThen(makeSession(sessionId)),
       ),
+    getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
   } satisfies HarnessAgentAdapter;
 
   const service = yield* makeHarnessAgentSessionService(makeHarnessAgentRegistry([adapter]));
