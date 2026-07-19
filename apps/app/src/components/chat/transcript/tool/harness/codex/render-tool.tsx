@@ -1,4 +1,4 @@
-import type { CodexTools } from "@vibest/harness/codex";
+import { codexTools, type CodexTools } from "@vibest/harness/codex";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 
@@ -11,28 +11,34 @@ import { CodexWebSearchTool } from "@/components/codex/web-search-tool";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
+// Narrow to this provider's typed parts by checking the part type against the
+// harness tool registry — the wire names are the single source of truth, so
+// the guard can't drift from the schema definitions.
+const codexToolTypes = new Set(Object.keys(codexTools).map((name) => `tool-${name}`));
+
+function isCodexToolPart(part: AnyToolPart): part is ToolUIPart<CodexTools> {
+  return part.type !== "dynamic-tool" && codexToolTypes.has(part.type);
+}
+
 // The codex per-tool render registry, symmetric with renderClaudeCodeTool:
 // typed tool-* parts dispatch to their dedicated card; anything unrecognized
 // (dynamic-tool — codex's mcpToolCall/dynamicToolCall arrive as dynamic)
-// returns null so the caller falls back to the generic DynamicToolPart. The
-// cast is the provider trust boundary — the harness transform guarantees
-// tool-* parts of this provider match CodexTools.
+// returns null so the caller falls back to the generic DynamicToolPart.
 export function renderCodexTool(part: AnyToolPart): ReactNode | null {
-  if (part.type === "dynamic-tool" || part.state === "input-streaming") return null;
-  const typed = part as ToolUIPart<CodexTools>;
-  switch (typed.type) {
+  if (part.state === "input-streaming" || !isCodexToolPart(part)) return null;
+  switch (part.type) {
     case "tool-commandExecution":
-      return <CodexCommandExecutionTool invocation={typed} />;
+      return <CodexCommandExecutionTool invocation={part} />;
     case "tool-fileChange":
-      return <CodexFileChangeTool invocation={typed} />;
+      return <CodexFileChangeTool invocation={part} />;
     case "tool-webSearch":
-      return <CodexWebSearchTool invocation={typed} />;
+      return <CodexWebSearchTool invocation={part} />;
     case "tool-collabAgentToolCall":
-      return <CodexCollabAgentToolCallTool invocation={typed} />;
+      return <CodexCollabAgentToolCallTool invocation={part} />;
     case "tool-imageGeneration":
-      return <CodexImageGenerationTool invocation={typed} />;
+      return <CodexImageGenerationTool invocation={part} />;
     case "tool-imageView":
-      return <CodexImageViewTool invocation={typed} />;
+      return <CodexImageViewTool invocation={part} />;
     default:
       return null;
   }
