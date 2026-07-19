@@ -44,9 +44,13 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vibest/typescript": "workspace:*",
+    "@vitejs/plugin-react": "catalog:",
+    "code-inspector-plugin": "latest",
     "react-grab": "^0.1.48",
     "react-scan": "catalog:"
   }
