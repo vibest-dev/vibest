@@ -1,40 +1,39 @@
 import type { CodexTools } from "@vibest/harness/codex";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import {
-  FilePenLineIcon,
-  ImageIcon,
-  type LucideIcon,
-  SearchIcon,
-  SquareTerminalIcon,
-  UsersIcon,
-} from "lucide-react";
 import type { ReactNode } from "react";
 
-import { CodexToolCard } from "@/components/codex/codex-tool-card";
+import { CodexCollabAgentToolCallTool } from "@/components/codex/collab-agent-tool-call-tool";
+import { CodexCommandExecutionTool } from "@/components/codex/command-execution-tool";
+import { CodexFileChangeTool } from "@/components/codex/file-change-tool";
+import { CodexImageGenerationTool } from "@/components/codex/image-generation-tool";
+import { CodexImageViewTool } from "@/components/codex/image-view-tool";
+import { CodexWebSearchTool } from "@/components/codex/web-search-tool";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
-// Icon + label per typed codex tool. Cards are input/output-only for now, so a
-// lookup table beats one thin component file per tool.
-const CODEX_TOOL_META: Record<ToolUIPart<CodexTools>["type"], { icon: LucideIcon; label: string }> =
-  {
-    "tool-commandExecution": { icon: SquareTerminalIcon, label: "Command" },
-    "tool-fileChange": { icon: FilePenLineIcon, label: "File change" },
-    "tool-webSearch": { icon: SearchIcon, label: "Web search" },
-    "tool-collabAgentToolCall": { icon: UsersIcon, label: "Collab agent" },
-    "tool-imageGeneration": { icon: ImageIcon, label: "Image generation" },
-    "tool-imageView": { icon: ImageIcon, label: "Image view" },
-  };
-
 // The codex per-tool render registry, symmetric with renderClaudeCodeTool:
-// typed tool-* parts render as a simple input/output card; anything
-// unrecognized returns null so the caller falls back to the generic
-// DynamicToolPart. The cast is the provider trust boundary — the harness
-// transform guarantees tool-* parts of this provider match CodexTools.
+// typed tool-* parts dispatch to their dedicated card; anything unrecognized
+// (dynamic-tool — codex's mcpToolCall/dynamicToolCall arrive as dynamic)
+// returns null so the caller falls back to the generic DynamicToolPart. The
+// cast is the provider trust boundary — the harness transform guarantees
+// tool-* parts of this provider match CodexTools.
 export function renderCodexTool(part: AnyToolPart): ReactNode | null {
   if (part.type === "dynamic-tool" || part.state === "input-streaming") return null;
-  const meta = CODEX_TOOL_META[part.type as ToolUIPart<CodexTools>["type"]];
-  if (!meta) return null;
-  const output = part.state === "output-available" ? part.output : undefined;
-  return <CodexToolCard icon={meta.icon} title={meta.label} input={part.input} output={output} />;
+  const typed = part as ToolUIPart<CodexTools>;
+  switch (typed.type) {
+    case "tool-commandExecution":
+      return <CodexCommandExecutionTool invocation={typed} />;
+    case "tool-fileChange":
+      return <CodexFileChangeTool invocation={typed} />;
+    case "tool-webSearch":
+      return <CodexWebSearchTool invocation={typed} />;
+    case "tool-collabAgentToolCall":
+      return <CodexCollabAgentToolCallTool invocation={typed} />;
+    case "tool-imageGeneration":
+      return <CodexImageGenerationTool invocation={typed} />;
+    case "tool-imageView":
+      return <CodexImageViewTool invocation={typed} />;
+    default:
+      return null;
+  }
 }
