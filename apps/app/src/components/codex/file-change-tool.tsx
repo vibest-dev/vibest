@@ -1,15 +1,28 @@
 import type { FileChangeUIToolInvocation } from "@vibest/harness/codex";
+import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
+import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { FilePenLineIcon } from "lucide-react";
 
-import { CodexToolCard } from "./codex-tool-card";
-
 export function CodexFileChangeTool({ invocation }: { invocation: FileChangeUIToolInvocation }) {
+  const { input } = invocation;
+  const output = invocation.state === "output-available" ? invocation.output : undefined;
   return (
-    <CodexToolCard
-      icon={FilePenLineIcon}
-      title="File change"
-      input={invocation.input}
-      output={invocation.state === "output-available" ? invocation.output : undefined}
-    />
+    <Tool>
+      <ToolHeader icon={FilePenLineIcon}>File change</ToolHeader>
+      <ToolContent>
+        {input != null && (
+          <div className="space-y-1.5">
+            <span className="text-muted-foreground text-xs font-medium">Input</span>
+            <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+          </div>
+        )}
+        {output != null && (
+          <div className="space-y-1.5">
+            <span className="text-muted-foreground text-xs font-medium">Output</span>
+            <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
+          </div>
+        )}
+      </ToolContent>
+    </Tool>
   );
 }
