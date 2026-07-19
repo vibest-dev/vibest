@@ -17,6 +17,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
+import { FileSystemServiceLayer } from "../fs";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
 import {
   HarnessAgentSessionPortLayer,
@@ -94,4 +95,6 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   EventBusLayer,
   SessionServiceProvided,
   ProjectServiceProvided,
+  FileSystemServiceLayer,
+  NodeFileSystem.layer,
 );

@@ -1,3 +1,4 @@
+import { fsContract } from "./fs";
 import { projectContract } from "./project";
 import { sessionContract } from "./session";
 
@@ -7,7 +8,8 @@ export * from "./project";
 export const contract = {
   session: sessionContract,
   project: projectContract,
+  fs: fsContract,
 };
 export type Contract = typeof contract;
 
-export { projectContract, sessionContract };
+export { fsContract, projectContract, sessionContract };
