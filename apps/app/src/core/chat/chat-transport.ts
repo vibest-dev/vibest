@@ -11,6 +11,7 @@ import { isSessionScopedEvent } from "@vibest/contract";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
+import type { ChatSessionTransport } from "./chat-transport-port";
 
 export type ChatModel = "opus" | "sonnet";
 
@@ -138,7 +139,7 @@ async function* promptChunks(
 // One transport per Chat, bound to that session's SessionRef. The ref stays an
 // object end to end; nothing here parses it out of a string. AbstractChat's
 // `options.chatId` is ignored — this transport already knows its session.
-export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
+export class OrpcChatSessionTransport implements ChatSessionTransport {
   readonly #ref: SessionRef;
 
   constructor(

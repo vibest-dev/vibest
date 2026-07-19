@@ -4,11 +4,12 @@ import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
 import { ChatState, type ChatStoreState } from "./chat-state";
-import type { ChatModel, OrpcChatSessionTransport } from "./chat-transport";
+import type { ChatModel } from "./chat-transport";
+import type { ChatSessionTransport } from "./chat-transport-port";
 
 export interface ChatInit {
   sessionRef: SessionRef;
-  transport: OrpcChatSessionTransport;
+  transport: ChatSessionTransport;
 }
 
 // Session controller: AbstractChat drives the prompt stream (optimistic user
@@ -18,7 +19,7 @@ export class Chat extends AbstractChat<UIMessage> {
   readonly harnessAgentId: HarnessAgentId;
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
-  readonly #transport: OrpcChatSessionTransport;
+  readonly #transport: ChatSessionTransport;
   readonly #unsubscribeRequests: () => void;
 
   constructor({ sessionRef, transport }: ChatInit) {
