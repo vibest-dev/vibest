@@ -14,8 +14,9 @@ import type { CodexUIMessageChunk } from "./ui-message";
 //     complete). The AI-SDK tool chunks are generic (`toolName: string`,
 //     `input/output: unknown`), so every tool arm forwards the whole item — the
 //     CodexUITools types still discriminate `message.parts` downstream.
-//   • bucket-3 items (plan/hookPrompt/review/compaction) → typed `data-*` parts.
-//   • turn/thread lifecycle → `start`/`finish` + typed `data-*` parts.
+//   • non-streamed items (plan/hookPrompt/review/compaction/…) → skipped; no
+//     `data-*` parts on the chunk track.
+//   • turn lifecycle → `start`/`finish`/`error`.
 
 // The item kinds both tracks render as generic `tool-<type>` parts — the LIVE
 // transform below and the cold-read mapper (history) must agree on this set,
@@ -142,23 +143,19 @@ export function createCodexTransform(): (
           yield { type: "reasoning-end", id: item.id };
         }
         break;
-      // bucket-3: whole-payload data parts (mirrors how Claude forwards data-*).
+      case "userMessage": // the echo of our own turn input
       case "plan":
-        yield { type: "data-plan", data: item };
-        break;
       case "hookPrompt":
-        yield { type: "data-hookPrompt", data: item };
-        break;
       case "enteredReviewMode":
-        yield { type: "data-review/entered", data: item };
-        break;
       case "exitedReviewMode":
-        yield { type: "data-review/exited", data: item };
-        break;
       case "contextCompaction":
-        yield { type: "data-compaction", data: item };
+      case "sleep":
+      case "subAgentActivity":
+        // skip — no data-* parts on the chunk track.
         break;
-      // userMessage → skip (it's the echo of our own turn input).
+      default:
+        // Exhaustive: a new ThreadItem arm must be routed (or skipped) here.
+        void (item satisfies never);
     }
   }
 
@@ -201,21 +198,11 @@ export function createCodexTransform(): (
         yield* onItemComplete(notification.params.item);
         break;
 
-      case "thread/started":
-        yield { type: "data-thread/started", data: notification.params };
-        break;
-
-      case "thread/tokenUsage/updated":
-        yield { type: "data-thread/tokenUsage", data: notification.params.tokenUsage };
-        break;
-
       case "turn/completed":
-        yield { type: "data-turn/completed", data: notification.params };
         yield { type: "finish" };
         break;
 
       case "error":
-        yield { type: "data-turn/error", data: notification.params.error };
         yield { type: "error", errorText: notification.params.error.message };
         // A retryable error keeps the turn open; a terminal one ends the message.
         if (!notification.params.willRetry) yield { type: "finish" };

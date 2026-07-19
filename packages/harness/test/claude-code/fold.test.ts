@@ -24,8 +24,7 @@ describe("foldToUIMessages", () => {
       NodeAssert.equal(messages.length, 1);
       const parts = messages[0]!.parts as ReadonlyArray<{ type: string; text?: string }>;
       NodeAssert.ok(parts.some((part) => part.type === "text" && part.text === "hello"));
-      NodeAssert.ok(parts.some((part) => part.type === "data-system/init"));
-      NodeAssert.ok(parts.some((part) => part.type === "data-result/success"));
+      NodeAssert.ok(!parts.some((part) => part.type.startsWith("data-")));
     }),
   );
 
