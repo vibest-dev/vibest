@@ -14,5 +14,5 @@ export function useHarnessNegotiation() {
 /** The negotiated info for one harness, or undefined until negotiation lands. */
 export function useHarnessAgent(harnessAgentId: HarnessAgentId): HarnessAgentInfo | undefined {
   const { data } = useHarnessNegotiation();
-  return data?.agents.find((agent) => agent.id === harnessAgentId);
+  return data?.harnessAgents.find((harnessAgent) => harnessAgent.id === harnessAgentId);
 }

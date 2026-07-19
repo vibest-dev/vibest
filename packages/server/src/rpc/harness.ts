@@ -14,7 +14,7 @@ export const harnessRouter = orpc.router({
   negotiate: orpc.negotiate.effect(function* () {
     const registry = yield* HarnessAgentRegistry;
     const descriptors = yield* registry.list;
-    const agents = yield* Effect.forEach(descriptors, (descriptor) =>
+    const harnessAgents = yield* Effect.forEach(descriptors, (descriptor) =>
       Effect.gen(function* () {
         // `descriptor.id` came from `registry.list`, so the lookup can't miss.
         const adapter = yield* registry.get(descriptor.id).pipe(Effect.orDie);
@@ -29,7 +29,7 @@ export const harnessRouter = orpc.router({
         };
       }),
     );
-    return { agents };
+    return { harnessAgents };
   }),
 });
 

@@ -304,7 +304,7 @@ export type HarnessAgentInfo = typeof HarnessAgentInfoSchema.Type;
 // per-harness data by id — it never re-negotiates to switch the selected
 // harness.
 export const HarnessNegotiationSchema = Schema.Struct({
-  agents: Schema.Array(HarnessAgentInfoSchema),
+  harnessAgents: Schema.Array(HarnessAgentInfoSchema),
 });
 export type HarnessNegotiation = typeof HarnessNegotiationSchema.Type;
 
