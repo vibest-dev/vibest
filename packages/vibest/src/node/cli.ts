@@ -1,21 +1,18 @@
 #!/usr/bin/env node
 
-import { homedir } from "node:os";
-import path from "node:path";
-
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { resolveOrSpawnDaemon, statusDaemon, stopDaemon } from "@vibest/server/daemon";
+import {
+  resolveOrSpawnDaemon,
+  resolveVibestHome,
+  statusDaemon,
+  stopDaemon,
+} from "@vibest/server/daemon";
 import { serve, serveFlags } from "@vibest/server/http";
 import { Effect, Option } from "effect";
 import { Command } from "effect/unstable/cli";
 
 import pkg from "../../package.json" with { type: "json" };
-
-/** `$VIBEST_HOME`, falling back to `~/.vibest` — matches the server's Paths. */
-function vibestHome(): string {
-  return process.env.VIBEST_HOME ?? path.join(homedir(), ".vibest");
-}
 
 /**
  * argv that re-launches this very CLI in foreground `serve` mode. The daemon is
@@ -37,7 +34,7 @@ const startDaemon = (input: DaemonStartInput) =>
   Effect.gen(function* () {
     const handle = yield* Effect.promise(() =>
       resolveOrSpawnDaemon({
-        home: vibestHome(),
+        home: resolveVibestHome(),
         serverArgv: serverArgv(),
         port: Option.getOrUndefined(input.port),
         corsOrigins: input.corsOrigin,
@@ -52,13 +49,13 @@ const startDaemon = (input: DaemonStartInput) =>
 
 const stopHandler = () =>
   Effect.gen(function* () {
-    const result = yield* Effect.promise(() => stopDaemon(vibestHome()));
+    const result = yield* Effect.promise(() => stopDaemon(resolveVibestHome()));
     console.log(result === "stopped" ? "vibest daemon stopped" : "vibest daemon is not running");
   });
 
 const statusHandler = () =>
   Effect.gen(function* () {
-    const status = yield* Effect.promise(() => statusDaemon(vibestHome()));
+    const status = yield* Effect.promise(() => statusDaemon(resolveVibestHome()));
     if (!status.running || status.record === undefined) {
       console.log("vibest daemon is not running");
       return;

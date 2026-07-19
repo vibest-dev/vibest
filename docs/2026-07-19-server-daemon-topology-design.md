@@ -248,8 +248,15 @@ _additional plane_, added when wanted, with no rework of the current work.
    of the SSH launch script; the server itself is untouched. The daemon process is
    `vibest serve` re-launched from this same CLI argv — no second bundle. Bare `vibest`
    and `vibest daemon {start,stop,status}` are the front-doors; brought forward from
-   Phase 4. **Still pending: desktop attaching this same daemon** (below) instead of
-   forking a die-with-app child — a separate behavior change to the supervisor.
+   Phase 4. **Desktop attaches this same daemon too**: the supervisor's `SpawnServer`
+   is now daemon-backed (`makeDaemonServerProcess`) — attach-or-spawn through the
+   shared launcher, exit detected by polling pid + health (a dead daemon is
+   re-spawned by the supervisor loop), and the renderer connection always serves the
+   latest port/token since a daemon respawn mints fresh ones. CORS converges at the
+   launcher: `daemon.pid` records the origins the daemon was started with, and an
+   attaching client needing more (the desktop's app:// origin joining a CLI-started
+   daemon) restarts it once with the union. Consequence, as designed: **the daemon
+   survives quitting the desktop app.**
 3. **Unified auth (built as a credential set, not a single secret).** Local token
    flows through `daemon.pid` + a same-origin `/api/bootstrap`. Model the gate as a
    set of credential sources with one member today (the file source); demote any

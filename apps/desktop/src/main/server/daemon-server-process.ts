@@ -1,0 +1,84 @@
+import {
+  type DaemonHandle,
+  healthy,
+  pidAlive,
+  resolveOrSpawnDaemon,
+  resolveVibestHome,
+} from "@vibest/server/daemon";
+import { Effect } from "effect";
+
+import { ServerSpawnError, type ServerProcessExit, type SpawnServer } from "./local-server";
+
+const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const MAX_HEALTH_MISSES = 3;
+
+export type DaemonServerProcessOptions = {
+  /** How often to probe the attached daemon's liveness. */
+  readonly pollIntervalMs?: number;
+};
+
+/**
+ * The daemon-backed `SpawnServer`: instead of forking a die-with-app child,
+ * attach the one `$VIBEST_HOME` daemon (spawning it detached if absent) via the
+ * shared launcher — the same attach-or-spawn the CLI runs, so desktop and CLI
+ * always converge on a single backend. Consequences the supervisor inherits:
+ *
+ * - The daemon outlives the app: closing this process's scope kills nothing.
+ * - "Exit" has no child handle to wait on, so it is detected by polling the
+ *   recorded pid + `/api/health`; when the daemon dies, the supervisor loop
+ *   re-runs this spawner, which re-spawns through the launcher (auto-heal —
+ *   this also resurrects a daemon explicitly stopped while the app is open).
+ */
+export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}): SpawnServer {
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+
+  return (config, port) =>
+    Effect.gen(function* () {
+      const environment = {
+        ...config.environment,
+        // The daemon runs `node <entry>` via the Electron binary.
+        ELECTRON_RUN_AS_NODE: "1",
+      };
+
+      const handle = yield* Effect.tryPromise({
+        try: () =>
+          resolveOrSpawnDaemon({
+            home: resolveVibestHome(config.environment),
+            serverArgv: [process.execPath, config.entry],
+            // 0 means "no preference" on the first attempt; afterwards the
+            // supervisor pins the port it saw, which we pass as preferred.
+            port: port === 0 ? undefined : port,
+            corsOrigins: config.corsOrigins,
+            environment,
+          }),
+        catch: (cause) =>
+          new ServerSpawnError({
+            message: `Unable to attach or spawn the vibest daemon: ${String(cause)}`,
+            cause,
+          }),
+      });
+
+      const awaitExit: Effect.Effect<ServerProcessExit, ServerSpawnError> = Effect.gen(
+        function* () {
+          let misses = 0;
+          while (true) {
+            yield* Effect.sleep(pollIntervalMs);
+            if (!pidAlive(handle.pid)) return { exitCode: null };
+            // Tolerate transient probe failures; a wedged-but-alive daemon
+            // still counts as dead after enough consecutive misses.
+            misses = (yield* Effect.promise(() => healthy(handle.address))) ? 0 : misses + 1;
+            if (misses >= MAX_HEALTH_MISSES) return { exitCode: null };
+          }
+        },
+      );
+
+      return {
+        ready: Effect.succeed(endpointOf(handle)),
+        awaitExit,
+      };
+    });
+}
+
+function endpointOf(handle: DaemonHandle): { port: number; token: string } {
+  return { port: handle.port, token: handle.token };
+}

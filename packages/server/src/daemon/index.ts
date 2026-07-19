@@ -2,6 +2,7 @@ export {
   type DaemonHandle,
   type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
+  resolveVibestHome,
   statusDaemon,
   stopDaemon,
 } from "./launcher";

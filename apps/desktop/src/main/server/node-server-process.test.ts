@@ -47,7 +47,7 @@ setInterval(() => {}, 1000);
     const runtime = makeRuntime();
 
     try {
-      const port = await runtime.runPromise(
+      const endpoint = await runtime.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -56,7 +56,7 @@ setInterval(() => {}, 1000);
           }),
         ),
       );
-      expect(port).toBe(43_123);
+      expect(endpoint).toEqual({ port: 43_123, token: "test-token" });
     } finally {
       await runtime.dispose();
     }

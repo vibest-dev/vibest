@@ -1,6 +1,7 @@
 import childProcess from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { daemonAlive, healthy, pidAlive } from "./liveness";
@@ -14,6 +15,7 @@ const STOP_GRACE_MS = 5_000;
 
 export type DaemonHandle = {
   readonly address: string;
+  readonly port: number;
   readonly token: string;
   readonly pid: number;
   /** True when an already-running daemon was attached to instead of spawned. */
@@ -32,8 +34,19 @@ export type ResolveDaemonOptions = {
   /** Preferred port; falls back to an ephemeral one if taken. Default `4000`. */
   readonly port?: number;
   readonly corsOrigins?: readonly string[];
+  /**
+   * Base environment for the spawned daemon (default `process.env`). The
+   * desktop passes its resolved login-shell environment plus
+   * `ELECTRON_RUN_AS_NODE`; the launcher's own `VIBEST_*` entries win.
+   */
+  readonly environment?: NodeJS.ProcessEnv;
   readonly readyTimeoutMs?: number;
 };
+
+/** `$VIBEST_HOME`, falling back to `~/.vibest` — mirrors the server's Paths. */
+export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
+}
 
 /**
  * The shared launcher (the local twin of the SSH launch script): read
@@ -43,9 +56,21 @@ export type ResolveDaemonOptions = {
  * daemon per `$VIBEST_HOME`.
  */
 export async function resolveOrSpawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle> {
+  const requested = options.corsOrigins ?? [];
   const existing = readRecord(options.home);
   if (existing && (await daemonAlive(existing))) {
-    return attach(existing, true);
+    // The one daemon must serve every client's origins. If this client needs
+    // origins the running daemon wasn't started with (e.g. the desktop's
+    // app:// origin joining a CLI-started daemon), converge by restarting it
+    // with the union — CORS is fixed at server boot, so a restart is the only
+    // way. This happens at most once per new origin set.
+    const missing = requested.filter((origin) => !existing.corsOrigins.includes(origin));
+    if (missing.length === 0) return attach(existing, true);
+    await stopDaemon(options.home);
+    return spawnDaemon({
+      ...options,
+      corsOrigins: [...new Set([...existing.corsOrigins, ...requested])],
+    });
   }
   // A record whose pid/health no longer holds is stale — clear it before we
   // claim the slot, so a crashed daemon never blocks a restart.
@@ -103,7 +128,7 @@ async function spawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle>
     detached: true,
     stdio: ["ignore", logFd, logFd],
     env: {
-      ...process.env,
+      ...(options.environment ?? process.env),
       VIBEST_HOME: home,
       VIBEST_PORT: String(port),
       VIBEST_AUTH_TOKEN: token,
@@ -124,7 +149,13 @@ async function spawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle>
     );
   }
 
-  const record: DaemonRecord = { pid, address, token, startedAt: now() };
+  const record: DaemonRecord = {
+    pid,
+    address,
+    token,
+    corsOrigins: options.corsOrigins ?? [],
+    startedAt: now(),
+  };
   writeRecord(home, record);
   return attach(record, false);
 }
@@ -144,7 +175,13 @@ async function waitHealthy(address: string, pid: number, timeoutMs: number): Pro
 }
 
 function attach(record: DaemonRecord, reused: boolean): DaemonHandle {
-  return { address: record.address, token: record.token, pid: record.pid, reused };
+  return {
+    address: record.address,
+    port: Number(new URL(record.address).port),
+    token: record.token,
+    pid: record.pid,
+    reused,
+  };
 }
 
 function signal(pid: number, sig: NodeJS.Signals): void {

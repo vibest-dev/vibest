@@ -5,6 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   ServerExitedBeforeReady,
   ServerReadyTimeout,
+  type ServerEndpoint,
   ServerSpawnError,
   type ServerStartError,
   type SpawnServer,
@@ -44,7 +45,7 @@ export function makeNodeServerProcess(
           ),
         );
 
-      const ready = yield* Deferred.make<number, ServerStartError>();
+      const ready = yield* Deferred.make<ServerEndpoint, ServerStartError>();
       const exited = yield* Deferred.make<{ readonly exitCode: number | null }, ServerSpawnError>();
 
       yield* handle.stdout.pipe(
@@ -52,7 +53,11 @@ export function makeNodeServerProcess(
         Stream.splitLines,
         Stream.runForEach((line) => {
           const parsed = parseReadyLine(line);
-          if (parsed) return Deferred.succeed(ready, parsed.port).pipe(Effect.asVoid);
+          if (parsed) {
+            return Deferred.succeed(ready, { port: parsed.port, token: config.token }).pipe(
+              Effect.asVoid,
+            );
+          }
           return Effect.log(line);
         }),
         Effect.catch((cause) =>

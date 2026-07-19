@@ -86,4 +86,44 @@ describe("resolveOrSpawnDaemon", () => {
   it("reports not-running when stopping with no daemon", async () => {
     expect(await stopDaemon(home)).toBe("not-running");
   });
+
+  it("attaches when the requested origins are already covered", async () => {
+    const first = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      corsOrigins: ["vibest://app", "http://localhost:5173"],
+      readyTimeoutMs: 15_000,
+    });
+
+    const attached = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      corsOrigins: ["vibest://app"],
+    });
+    expect(attached.reused).toBe(true);
+    expect(attached.pid).toBe(first.pid);
+  });
+
+  it("restarts the daemon with the origin union when a new origin joins", async () => {
+    const first = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      readyTimeoutMs: 15_000,
+    });
+
+    const second = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      corsOrigins: ["vibest://app"],
+      readyTimeoutMs: 15_000,
+    });
+    expect(second.reused).toBe(false);
+    expect(second.pid).not.toBe(first.pid);
+    expect(pidAlive(first.pid)).toBe(false);
+    expect(readRecord(home)?.corsOrigins).toEqual(["vibest://app"]);
+  });
 });

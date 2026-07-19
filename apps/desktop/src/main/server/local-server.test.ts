@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ServerExitedBeforeReady,
+  type ServerEndpoint,
   type ServerProcessConfig,
   type LocalServerConfig,
   type RunningServerProcess,
@@ -14,7 +15,7 @@ import {
 type FakeProcess = {
   readonly port: number;
   readonly config: ServerProcessConfig;
-  readonly becomeReady: (port?: number) => void;
+  readonly becomeReady: (port?: number, token?: string) => void;
   readonly failBeforeReady: () => void;
   readonly exit: () => void;
   killed: boolean;
@@ -26,14 +27,14 @@ function makeHarness(overrides: Partial<LocalServerConfig> = {}) {
 
   const spawnServer: SpawnServer = (config, port) =>
     Effect.gen(function* () {
-      const ready = yield* Deferred.make<number, ServerExitedBeforeReady>();
+      const ready = yield* Deferred.make<ServerEndpoint, ServerExitedBeforeReady>();
       const exited = yield* Deferred.make<{ exitCode: number | null }>();
       const process: FakeProcess = {
         port,
         config,
         killed: false,
-        becomeReady: (boundPort = port || 40_000) => {
-          Effect.runSync(Deferred.succeed(ready, boundPort));
+        becomeReady: (boundPort = port || 40_000, token = config.token) => {
+          Effect.runSync(Deferred.succeed(ready, { port: boundPort, token }));
         },
         failBeforeReady: () => {
           Effect.runSync(
@@ -158,6 +159,30 @@ describe("LocalServer", () => {
     await expect(Effect.runPromise(server.connection)).resolves.toMatchObject({
       httpBaseUrl: "http://127.0.0.1:50000",
     });
+    await h.dispose();
+  });
+
+  it("serves the latest endpoint after a restart hands back a new token", async () => {
+    const h = makeHarness();
+    await eventually(() => expect(h.processes).toHaveLength(1));
+    h.processes[0]!.becomeReady(50_000);
+    const server = await h.server;
+    await expect(Effect.runPromise(server.connection)).resolves.toMatchObject({
+      token: "fixed-token",
+    });
+
+    // A daemon respawn mints a fresh token — the connection must not be stale.
+    h.processes[0]!.exit();
+    await eventually(() => expect(h.processes).toHaveLength(2));
+    h.processes[1]!.becomeReady(50_001, "rotated-token");
+    await eventually(async () => {
+      await expect(Effect.runPromise(server.connection)).resolves.toEqual({
+        httpBaseUrl: "http://127.0.0.1:50001",
+        wsBaseUrl: "ws://127.0.0.1:50001",
+        token: "rotated-token",
+      });
+    });
+
     await h.dispose();
   });
 

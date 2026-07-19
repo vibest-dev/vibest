@@ -2,9 +2,9 @@ import { Effect, Layer } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { DesktopConfig } from "../desktop-config";
+import { makeDaemonServerProcess } from "./daemon-server-process";
 import { LocalServer, makeLocalServer } from "./local-server";
 import { resolveLoginShellEnvironmentWith } from "./login-shell-environment";
-import { makeNodeServerProcess } from "./node-server-process";
 
 export const LocalServerLive = Layer.effect(
   LocalServer,
@@ -15,6 +15,8 @@ export const LocalServerLive = Layer.effect(
       ? resolveLoginShellEnvironmentWith(spawner)
       : Effect.sync(() => ({ ...process.env }));
 
+    // Attach the shared $VIBEST_HOME daemon (the same one the CLI uses)
+    // instead of forking a private die-with-app child — one backend per home.
     return yield* makeLocalServer(
       {
         entry: config.serverEntry,
@@ -22,7 +24,7 @@ export const LocalServerLive = Layer.effect(
         environment,
         corsOrigins: config.allowedOrigins,
       },
-      makeNodeServerProcess(spawner),
+      makeDaemonServerProcess(),
     );
   }),
 );
