@@ -81,6 +81,24 @@ function environmentFromLaunchctl(run: RunCommand) {
   );
 }
 
+/**
+ * Shell values win over the inherited base — a Dock launch has an
+ * impoverished environment and the login shell is the richer source — except
+ * for `VIBEST_*` keys: those set on the launching process are explicit
+ * instructions to this app (e.g. `VIBEST_HOME=/tmp/x` selects the storage
+ * home) and must not be clobbered by an export in shell startup files.
+ */
+function mergeShellEnvironment(
+  base: NodeJS.ProcessEnv,
+  shell: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const merged = { ...base, ...shell };
+  for (const [key, value] of Object.entries(base)) {
+    if (key.startsWith("VIBEST_") && value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
+
 /** Resolve the exported login-shell environment, falling back without failure. */
 export function resolveLoginShellEnvironment(
   run: RunCommand,
@@ -94,7 +112,7 @@ export function resolveLoginShellEnvironment(
     if (platform === "win32") return baseEnv;
 
     const shellEnvironment = yield* environmentFromLoginShell(run, shell);
-    if (shellEnvironment) return { ...baseEnv, ...shellEnvironment };
+    if (shellEnvironment) return mergeShellEnvironment(baseEnv, shellEnvironment);
     if (platform !== "darwin") return baseEnv;
 
     const launchctlEnvironment = yield* environmentFromLaunchctl(run);
