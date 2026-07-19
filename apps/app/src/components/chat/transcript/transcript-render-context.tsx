@@ -1,9 +1,8 @@
+import type { HarnessAgentId } from "@vibest/contract";
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
-import type { AgentProviderId } from "@/core/chat/chat";
-
 export interface TranscriptRenderContextValue {
-  agentProviderId: AgentProviderId;
+  harnessAgentId: HarnessAgentId;
 }
 
 const TranscriptRenderContext = createContext<TranscriptRenderContextValue | null>(null);
@@ -11,10 +10,10 @@ const TranscriptRenderContext = createContext<TranscriptRenderContextValue | nul
 // Chat-level render constants, resolved once at ChatTranscript so transcript
 // leaves (tool dispatch) read them from context instead of prop-drilling.
 export function TranscriptRenderProvider({
-  agentProviderId,
+  harnessAgentId,
   children,
 }: TranscriptRenderContextValue & { children: ReactNode }) {
-  const value = useMemo(() => ({ agentProviderId }), [agentProviderId]);
+  const value = useMemo(() => ({ harnessAgentId }), [harnessAgentId]);
   return (
     <TranscriptRenderContext.Provider value={value}>{children}</TranscriptRenderContext.Provider>
   );
