@@ -2,11 +2,11 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { runServe, serve, serveFlags } from "@vibest/server/http";
 import { Effect } from "effect";
 import { Command } from "effect/unstable/cli";
 
 import pkg from "../../package.json" with { type: "json" };
-import { runServe, serve, serveFlags } from "./commands/serve";
 
 // The root command runs `serve` when invoked bare, so `node cli.mjs` (how the
 // desktop supervisor spawns it, args-free, config via env) starts the server.

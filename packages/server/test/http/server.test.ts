@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
-import { createServer, type ManagedServer } from "./server";
+import { createServer, type ManagedServer } from "../../src/http/server";
 
 const TOKEN = "test-token-0000";
 

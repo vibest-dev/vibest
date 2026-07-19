@@ -13,9 +13,12 @@
     "./fs": "./src/fs/index.ts",
     "./git": "./src/git/index.ts",
     "./session": "./src/session/index.ts",
-    "./rpc": "./src/rpc/index.ts"
+    "./rpc": "./src/rpc/index.ts",
+    "./http": "./src/http/index.ts",
+    "./handshake": "./src/http/handshake.ts"
   },
   "scripts": {
+    "build": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -30,6 +33,7 @@
     "@vibest/harness": "workspace:*",
     "effect": "catalog:",
     "simple-git": "catalog:",
+    "sirv": "^3.0.2",
     "uuid": "catalog:",
     "ws": "catalog:"
   },

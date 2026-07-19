@@ -324,9 +324,9 @@ importers:
       '@vibest/app':
         specifier: workspace:*
         version: link:../app
-      '@vibest/cli':
+      '@vibest/server':
         specifier: workspace:*
-        version: link:../../packages/vibest
+        version: link:../../packages/server
       effect:
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97
@@ -508,6 +508,9 @@ importers:
       simple-git:
         specifier: 'catalog:'
         version: 3.36.0
+      sirv:
+        specifier: ^3.0.2
+        version: 3.0.2
       uuid:
         specifier: 'catalog:'
         version: 14.0.1

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bearerToken, createTicketStore, TICKET_TTL_MS, tokensMatch } from "./auth";
+import { bearerToken, createTicketStore, TICKET_TTL_MS, tokensMatch } from "../../src/http/auth";
 
 describe("bearerToken", () => {
   it("extracts the token from a Bearer header", () => {

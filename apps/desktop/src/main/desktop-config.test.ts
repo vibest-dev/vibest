@@ -13,7 +13,7 @@ describe("buildDesktopConfig", () => {
     });
 
     expect(config.serverEntry).toBe(
-      "/Applications/Vibest.app/Contents/Resources/app.asar/node_modules/@vibest/cli/dist/cli.mjs",
+      "/Applications/Vibest.app/Contents/Resources/app.asar/node_modules/@vibest/server/dist/server.mjs",
     );
     expect(config.allowedOrigins).toEqual([APP_ORIGIN]);
     expect(config.token).toBe("fixed-token");
@@ -27,7 +27,7 @@ describe("buildDesktopConfig", () => {
       token: "fixed-token",
     });
 
-    expect(config.serverEntry).toMatch(/packages\/vibest\/dist\/cli\.mjs$/);
+    expect(config.serverEntry).toMatch(/packages\/server\/dist\/server\.mjs$/);
   });
 
   it("includes the dev renderer origin when a devUrl is set", () => {

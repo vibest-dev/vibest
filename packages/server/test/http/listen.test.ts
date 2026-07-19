@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listenServer } from "./listen";
+import { listenServer } from "../../src/http/listen";
 
 const servers = new Set<ReturnType<typeof createServer>>();
 

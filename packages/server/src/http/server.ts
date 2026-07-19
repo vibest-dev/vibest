@@ -4,11 +4,11 @@ import { createServer as createHttpServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createRpcRuntime, createWsRPCHandler } from "@vibest/server/rpc";
 import sirv from "sirv";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
+import { createRpcRuntime, createWsRPCHandler } from "../rpc";
 import { bearerToken, createTicketStore, tokensMatch } from "./auth";
 import { corsHeaders } from "./cors";
 

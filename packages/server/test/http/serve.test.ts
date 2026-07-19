@@ -1,7 +1,7 @@
 import { Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveServeConfig } from "./serve";
+import { resolveServeConfig } from "../../src/http/serve";
 
 const ENV_KEYS = ["VIBEST_PORT", "VIBEST_CORS_ORIGINS", "NODE_ENV"] as const;
 

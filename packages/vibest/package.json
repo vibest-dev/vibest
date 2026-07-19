@@ -8,14 +8,11 @@
     "dist"
   ],
   "type": "module",
-  "exports": {
-    "./handshake": "./src/node/handshake.ts"
-  },
   "scripts": {
     "dev": "NODE_ENV=development tsx src/node/cli.ts",
     "build": "tsdown",
     "start": "node dist/cli.mjs",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p src/node",
     "clean": "git clean -xdf node_modules dist .turbo"
   },

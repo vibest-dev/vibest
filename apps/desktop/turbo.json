@@ -3,7 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "dev": {
-      "dependsOn": ["@vibest/cli#build"],
+      "dependsOn": ["@vibest/server#build"],
       "passThroughEnv": [
         "ANTHROPIC_*",
         "CLAUDE_*",

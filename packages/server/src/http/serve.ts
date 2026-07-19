@@ -1,9 +1,9 @@
 import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { formatReadyLine } from "../handshake";
-import { listenServer } from "../listen";
-import { createServer } from "../server";
+import { formatReadyLine } from "./handshake";
+import { listenServer } from "./listen";
+import { createServer } from "./server";
 
 const DEFAULT_PORT = 4000;
 

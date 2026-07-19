@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { corsHeaders } from "./cors";
+import { corsHeaders } from "../../src/http/cors";
 
 const ALLOWED = ["vibest://app", "http://localhost:5173"];
 

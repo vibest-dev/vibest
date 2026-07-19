@@ -1,4 +1,4 @@
-import { parseReadyLine } from "@vibest/cli/handshake";
+import { parseReadyLine } from "@vibest/server/handshake";
 import { Deferred, Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 

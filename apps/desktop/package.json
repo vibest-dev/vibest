@@ -28,7 +28,7 @@
     "@orpc/experimental-effect": "catalog:orpc",
     "@orpc/server": "catalog:orpc",
     "@vibest/app": "workspace:*",
-    "@vibest/cli": "workspace:*",
+    "@vibest/server": "workspace:*",
     "effect": "catalog:",
     "react-error-boundary": "catalog:"
   },

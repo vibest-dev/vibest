@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatReadyLine, parseReadyLine, READY_PREFIX } from "./handshake";
+import { formatReadyLine, parseReadyLine, READY_PREFIX } from "../../src/http/handshake";
 
 describe("ready line", () => {
   it("round-trips the bound port", () => {
