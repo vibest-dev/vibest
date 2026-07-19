@@ -2,11 +2,16 @@ import type { DynamicToolUIPart, ToolUIPart, UIMessage } from "ai";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { DynamicToolPart } from "./tool/dynamic-tool-part";
-import { claudeCodeDynamicToolName } from "./tool/providers/claude-code/dynamic-name";
-import { renderClaudeCodeTool } from "./tool/providers/claude-code/render-tool";
+import { claudeCodeDynamicToolName } from "./tool/harness/claude-code/dynamic-name";
+import { renderClaudeCodeTool } from "./tool/harness/claude-code/render-tool";
+import { codexDynamicToolName } from "./tool/harness/codex/dynamic-name";
+import { renderCodexTool } from "./tool/harness/codex/render-tool";
 import { useTranscriptRender } from "./transcript-render-context";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
+
+const genericToolName = (part: AnyToolPart): string =>
+  part.type === "dynamic-tool" ? part.toolName : part.type.replace(/^tool-/, "");
 
 // tool-* / dynamic-tool dispatch: typed tool-* parts go through the provider's
 // per-tool switch; unrecognized tools (dynamic-tool, or typed tools with no
@@ -31,8 +36,20 @@ export function ToolPart({ message, part }: { message: UIMessage; part: AnyToolP
 // execute inside the ErrorBoundary's child render stack for a throw to be
 // caught.
 function ToolPartContent({ message, part }: { message: UIMessage; part: AnyToolPart }) {
-  const { agentProviderId } = useTranscriptRender();
-  const rendered = agentProviderId === "claude-code" ? renderClaudeCodeTool(part, message) : null;
-  if (rendered) return rendered;
-  return <DynamicToolPart part={part} name={claudeCodeDynamicToolName(part)} />;
+  const { harnessAgentId } = useTranscriptRender();
+  switch (harnessAgentId) {
+    case "claude-code":
+      return (
+        renderClaudeCodeTool(part, message) ?? (
+          <DynamicToolPart part={part} name={claudeCodeDynamicToolName(part)} />
+        )
+      );
+    case "codex":
+      return (
+        renderCodexTool(part) ?? <DynamicToolPart part={part} name={codexDynamicToolName(part)} />
+      );
+    // Harnesses without dedicated renderers (pi) show every tool generically.
+    default:
+      return <DynamicToolPart part={part} name={genericToolName(part)} />;
+  }
 }

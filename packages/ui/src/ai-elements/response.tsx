@@ -4,6 +4,7 @@ import { CodeBlock, CodeBlockCopyButton } from "@vibest/ui/ai-elements/code-bloc
 import { cn } from "@vibest/ui/lib/utils";
 import {
   cloneElement,
+  type ComponentProps,
   type DetailedHTMLProps,
   type HTMLAttributes,
   type ImgHTMLAttributes,
@@ -12,9 +13,9 @@ import {
   memo,
   type ReactNode,
 } from "react";
-import ReactMarkdown, { type ExtraProps, type Options } from "react-markdown";
+import { type Components, type ExtraProps, Streamdown } from "streamdown";
 
-type ResponseProps = Options & {
+type ResponseProps = ComponentProps<typeof Streamdown> & {
   className?: string;
 };
 
@@ -508,7 +509,7 @@ const MemoImg = memo<
 );
 MemoImg.displayName = "MarkdownImg";
 
-const components: Options["components"] = {
+const components: Components = {
   ol: MemoOl,
   li: MemoLi,
   ul: MemoUl,
@@ -549,7 +550,7 @@ export const Response = memo((props: ResponseProps) => {
         className,
       )}
     >
-      <ReactMarkdown {...rest} components={mergedComponents} />
+      <Streamdown {...rest} components={mergedComponents} />
     </div>
   );
 });
