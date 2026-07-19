@@ -23,21 +23,18 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@orpc/experimental-effect": "2.0.0-beta.16",
-    "@orpc/server": "^2.0.0-beta.16",
+    "@orpc/experimental-effect": "catalog:orpc",
+    "@orpc/server": "catalog:orpc",
     "@vibest/contract": "workspace:*",
     "@vibest/harness": "workspace:*",
     "effect": "catalog:",
-    "simple-git": "^3.36.0",
-    "uuid": "^14.0.1",
-    "ws": "^8.21.0"
+    "simple-git": "catalog:",
+    "uuid": "catalog:",
+    "ws": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@types/node": "^24.13.3",
-    "@types/ws": "^8.18.1",
-    "@vibest/typescript": "workspace:*",
-    "typescript": "^7.0.2",
-    "vitest": "catalog:"
+    "@types/ws": "catalog:",
+    "@vibest/typescript": "workspace:*"
   }
 }

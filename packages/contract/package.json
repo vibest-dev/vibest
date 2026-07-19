@@ -16,12 +16,11 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@orpc/contract": "2.0.0-beta.16",
-    "ai": "^7.0.22",
+    "@orpc/contract": "catalog:orpc",
+    "ai": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@vibest/typescript": "workspace:*",
-    "typescript": "^7.0.2"
+    "@vibest/typescript": "workspace:*"
   }
 }
