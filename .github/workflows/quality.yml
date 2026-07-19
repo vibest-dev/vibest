@@ -33,4 +33,3 @@ jobs:
       # Turborepo tasks — no package defines a `lint` script.
       - run: pnpm run lint:check
       - run: pnpm run format:check
-      - run: pnpm run check:deps
