@@ -16,6 +16,10 @@ export interface ChatInit {
 // push, chunk reduction, status transitions) against a per-Chat zustand store;
 // the agent-request plane arrives over the same Vibest session transport.
 export class Chat extends AbstractChat<UIMessage> {
+  // A Chat is bound to one harness for its whole life (a session's harness
+  // never changes), so tool rendering dispatches on it. Only claude-code and
+  // codex have dedicated renderers; any other harness falls back to the
+  // generic tool card.
   readonly harnessAgentId: HarnessAgentId;
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
