@@ -208,8 +208,81 @@ export function createCodexTransform(): (
         if (!notification.params.willRetry) yield { type: "finish" };
         break;
 
-      // Everything else (account/app/fs/mcp/realtime/… notifications) is either a
-      // session-layer event (see to-session-event) or out of scope for the chunk track.
+      // Everything else is either a session-layer event (see to-session-event)
+      // or out of scope for the chunk track. The satisfies keeps the skip-list
+      // explicit: a new notification method fails typecheck until routed or listed.
+      default:
+        void (notification.method satisfies
+          // item-level increments — the terminal item/completed snapshot covers them
+          | "item/plan/delta"
+          | "item/commandExecution/outputDelta"
+          | "item/commandExecution/terminalInteraction"
+          | "item/fileChange/outputDelta"
+          | "item/fileChange/patchUpdated"
+          | "item/mcpToolCall/progress"
+          | "item/reasoning/summaryPartAdded"
+          | "item/autoApprovalReview/started"
+          | "item/autoApprovalReview/completed"
+          | "rawResponseItem/completed"
+          // turn-level side channels
+          | "turn/diff/updated"
+          | "turn/plan/updated"
+          | "turn/moderationMetadata"
+          | "hook/started"
+          | "hook/completed"
+          // thread / session layer
+          | "thread/started"
+          | "thread/status/changed"
+          | "thread/archived"
+          | "thread/unarchived"
+          | "thread/deleted"
+          | "thread/closed"
+          | "thread/name/updated"
+          | "thread/goal/updated"
+          | "thread/goal/cleared"
+          | "thread/settings/updated"
+          | "thread/tokenUsage/updated"
+          | "thread/compacted"
+          | "skills/changed"
+          // realtime voice
+          | "thread/realtime/started"
+          | "thread/realtime/itemAdded"
+          | "thread/realtime/transcript/delta"
+          | "thread/realtime/transcript/done"
+          | "thread/realtime/outputAudio/delta"
+          | "thread/realtime/sdp"
+          | "thread/realtime/error"
+          | "thread/realtime/closed"
+          // process / exec plumbing
+          | "command/exec/outputDelta"
+          | "process/outputDelta"
+          | "process/exited"
+          // account / app / infra
+          | "account/updated"
+          | "account/rateLimits/updated"
+          | "account/login/completed"
+          | "app/list/updated"
+          | "remoteControl/status/changed"
+          | "externalAgentConfig/import/progress"
+          | "externalAgentConfig/import/completed"
+          | "fs/changed"
+          | "serverRequest/resolved"
+          | "mcpServer/oauthLogin/completed"
+          | "mcpServer/startupStatus/updated"
+          | "model/rerouted"
+          | "model/verification"
+          | "model/safetyBuffering/updated"
+          // warnings / notices
+          | "warning"
+          | "guardianWarning"
+          | "deprecationNotice"
+          | "configWarning"
+          // fuzzy file search
+          | "fuzzyFileSearch/sessionUpdated"
+          | "fuzzyFileSearch/sessionCompleted"
+          // windows
+          | "windows/worldWritableWarning"
+          | "windowsSandbox/setupCompleted");
     }
   };
 }
