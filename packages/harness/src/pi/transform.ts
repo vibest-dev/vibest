@@ -16,8 +16,8 @@ import type { PiUIMessageChunk } from "./ui-message";
 //   • tool_execution_start/end → tool-input-available + tool-output-available.
 //     The AI-SDK tool chunks are generic, so args/results forward whole; the
 //     PiTools types still discriminate `message.parts` downstream.
-//   • message_end (assistant) → `data-message/end` (usage/stopReason summary)
-//   • compaction / auto-retry → typed `data-*` parts
+//   • message_end / compaction / auto-retry → skipped; no `data-*` parts on
+//     the chunk track
 //   • agent_start/agent_settled → `start`/`finish`; a retry re-emits
 //     agent_start, so `start` is guarded to fire once per turn.
 
@@ -119,23 +119,6 @@ export function createPiTransform(
         if (event.message.role === "assistant") yield* onAssistantDelta(event);
         break;
 
-      case "message_end": {
-        const message = event.message;
-        if (message.role !== "assistant") break;
-        const summary: PiUIMessageChunk = {
-          type: "data-message/end",
-          data: {
-            model: message.model,
-            provider: message.provider,
-            usage: message.usage,
-            stopReason: message.stopReason,
-            ...(message.errorMessage !== undefined ? { errorMessage: message.errorMessage } : {}),
-          },
-        };
-        yield summary;
-        break;
-      }
-
       case "tool_execution_start":
         yield {
           type: "tool-input-available",
@@ -186,22 +169,25 @@ export function createPiTransform(
         }
         break;
 
-      case "compaction_start":
-        yield { type: "data-compaction/start", data: event };
-        break;
-      case "compaction_end":
-        yield { type: "data-compaction/end", data: event };
-        break;
-      case "auto_retry_start":
-        yield { type: "data-retry/start", data: event };
-        break;
-      case "auto_retry_end":
-        yield { type: "data-retry/end", data: event };
-        break;
-
-      // Everything else (turn_start/turn_end, user-message echoes,
-      // queue_update, entry_appended, session_info_changed, …) is either
-      // bookkeeping or an echo of our own input — out of scope for the chunk track.
+      // Everything else is bookkeeping, an echo of our own input, or a payload
+      // with no `data-*` part on the chunk track. The satisfies keeps the
+      // skip-list explicit: a new AgentSessionEvent arm fails typecheck until
+      // it's routed or listed.
+      default:
+        void (event.type satisfies
+          | "message_start"
+          | "message_end"
+          | "tool_execution_update"
+          | "turn_start"
+          | "turn_end"
+          | "queue_update"
+          | "entry_appended"
+          | "session_info_changed"
+          | "thinking_level_changed"
+          | "compaction_start"
+          | "compaction_end"
+          | "auto_retry_start"
+          | "auto_retry_end");
     }
   };
 }

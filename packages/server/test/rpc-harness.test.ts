@@ -1,18 +1,27 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { createRouterClient } from "@orpc/server";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { describe, expect, it } from "vitest";
+
+import { layerPaths } from "../src/config/paths";
+import { EventBusLayer } from "../src/events";
+import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistryLayer,
   HarnessAgentSessionServiceLayer,
   type HarnessAgentAdapter,
-} from "@vibest/harness/runtime";
-import { Effect, Layer, ManagedRuntime } from "effect";
-import { describe, expect, it } from "vitest";
-
-import { EventBusLayer } from "../src/events";
+} from "../src/harness";
+import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
+import { SessionRepositoryLayer } from "../src/session";
 
 // A negotiation-only adapter: capabilities/availability/descriptor are declared,
-// and open/resume die because negotiate never opens a session.
+// and open/resume/getSessionInfo die because negotiate never opens a session.
 const fakeAdapter = (over: {
   id: HarnessAgentAdapter["id"];
   name: string;
@@ -32,6 +41,7 @@ const fakeAdapter = (over: {
   ),
   open: () => Effect.die("negotiate must not open a session"),
   resume: () => Effect.die("negotiate must not resume a session"),
+  getSessionInfo: () => Effect.die("negotiate must not query session info"),
 });
 
 describe("harness router", () => {
@@ -65,7 +75,21 @@ describe("harness router", () => {
       Layer.provide(registryLayer),
       Layer.provide(EventBusLayer),
     );
-    const runtime = ManagedRuntime.make(Layer.mergeAll(EventBusLayer, sessionLayer, registryLayer));
+    // The router client resolves the full RpcContext; negotiate only touches
+    // EventBus/registry/session, but the shared context still needs project +
+    // session-repository services present (as makeRpcTestHarness provides).
+    const pathsLayer = layerPaths(mkdtempSync(join(tmpdir(), "vibest-home-")));
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(
+        EventBusLayer,
+        sessionLayer,
+        registryLayer,
+        FileSystemServiceLayer,
+        ProjectModuleLayer.pipe(Layer.provide(pathsLayer)),
+        SessionRepositoryLayer.pipe(Layer.provide(pathsLayer)),
+        NodeFileSystem.layer,
+      ),
+    );
     try {
       const context: RpcContext = { "effect/context": runtime.runSync(runtime.contextEffect) };
       const client = createRouterClient(router, { context });

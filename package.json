@@ -19,20 +19,22 @@
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
     "prepare": "git config core.hooksPath .githooks && simple-git-hooks",
-    "doctor": "react-doctor --yes"
+    "doctor": "turbo run doctor"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.0",
-    "@types/node": "^24.13.3",
-    "lint-staged": "^17.0.8",
+    "@changesets/cli": "^2.31.1",
+    "@types/node": "catalog:",
+    "lint-staged": "^17.1.0",
     "oxfmt": "^0.58.0",
-    "oxlint": "^1.73.0",
+    "oxlint": "^1.74.0",
     "publint": "^0.3.21",
-    "react-doctor": "^0.7.6",
     "simple-git-hooks": "^2.13.1",
     "taze": "^19.14.1",
-    "turbo": "^2.10.4",
-    "typescript": "^7.0.2",
+    "tsdown": "catalog:",
+    "tsx": "latest",
+    "turbo": "^2.10.5",
+    "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
   },
   "simple-git-hooks": {

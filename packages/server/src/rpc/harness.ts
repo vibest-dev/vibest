@@ -1,9 +1,9 @@
 import "@orpc/experimental-effect/extensions/effect";
 import { implement } from "@orpc/server";
 import { harnessContract } from "@vibest/contract/harness";
-import { HarnessAgentRegistry } from "@vibest/harness/runtime";
 import { Effect } from "effect";
 
+import { HarnessAgentRegistry } from "../harness";
 import type { RpcContext } from "./context";
 
 const orpc = implement(harnessContract).$context<RpcContext>();

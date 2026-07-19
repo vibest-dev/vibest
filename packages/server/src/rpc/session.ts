@@ -1,10 +1,10 @@
 import "@orpc/experimental-effect/extensions/effect";
 import { implement } from "@orpc/server";
 import { sessionContract } from "@vibest/contract/session";
-import { HarnessAgentSessionService } from "@vibest/harness/runtime";
 import { Effect, Stream } from "effect";
 
 import { EventBus } from "../events";
+import { HarnessAgentSessionService } from "../harness";
 import { ProjectService } from "../project";
 import { SessionRepository } from "../session";
 import type { RpcContext } from "./context";

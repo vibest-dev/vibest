@@ -83,6 +83,30 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it("resolves awaitExit with a null code when the server dies from a signal", async () => {
+    const entry = makeScript('process.kill(process.pid, "SIGKILL");\n');
+    const runtime = makeRuntime();
+
+    try {
+      const { exit, readyError } = await runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const running = yield* makeNodeServerProcess(spawner)(config(entry), 0);
+            const exitValue = yield* running.awaitExit;
+            const readyFailure = yield* Effect.flip(running.ready);
+            return { exit: exitValue, readyError: readyFailure };
+          }),
+        ),
+      );
+
+      expect(exit).toEqual({ exitCode: null });
+      expect(readyError).toMatchObject({ _tag: "ServerExitedBeforeReady", exitCode: null });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("passes the configured proxy environment to the server process", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "vibest-server-env-"));
     const marker = path.join(dir, "proxy");

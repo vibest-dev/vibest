@@ -31,6 +31,25 @@ describe("SDK-typed tools: input/output ARE the sdk-tools types", () => {
     expectTypeOf<In<"ExitPlanMode">>().toEqualTypeOf<st.ExitPlanModeInput>();
     expectTypeOf<In<"EnterWorktree">>().toEqualTypeOf<st.EnterWorktreeInput>();
     expectTypeOf<In<"ExitWorktree">>().toEqualTypeOf<st.ExitWorktreeInput>();
+    expectTypeOf<In<"ReportFindings">>().toEqualTypeOf<st.ReportFindingsInput>();
+    expectTypeOf<In<"Workflow">>().toEqualTypeOf<st.WorkflowInput>();
+    expectTypeOf<In<"ScheduleWakeup">>().toEqualTypeOf<st.ScheduleWakeupInput>();
+    expectTypeOf<In<"Monitor">>().toEqualTypeOf<st.MonitorInput>();
+    expectTypeOf<In<"CronCreate">>().toEqualTypeOf<st.CronCreateInput>();
+    expectTypeOf<In<"CronDelete">>().toEqualTypeOf<st.CronDeleteInput>();
+    expectTypeOf<In<"CronList">>().toEqualTypeOf<st.CronListInput>();
+    expectTypeOf<In<"RemoteTrigger">>().toEqualTypeOf<st.RemoteTriggerInput>();
+    expectTypeOf<In<"PushNotification">>().toEqualTypeOf<st.PushNotificationInput>();
+    expectTypeOf<In<"ListMcpResourcesTool">>().toEqualTypeOf<st.ListMcpResourcesInput>();
+    expectTypeOf<In<"ReadMcpResourceTool">>().toEqualTypeOf<st.ReadMcpResourceInput>();
+    expectTypeOf<In<"ReadMcpResourceDirTool">>().toEqualTypeOf<st.ReadMcpResourceDirInput>();
+    expectTypeOf<In<"DesignSync">>().toEqualTypeOf<st.ClaudeDesignInput>();
+    expectTypeOf<In<"Artifact">>().toEqualTypeOf<st.ArtifactInput>();
+    expectTypeOf<In<"REPL">>().toEqualTypeOf<st.REPLInput>();
+    expectTypeOf<In<"Projects">>().toEqualTypeOf<st.ProjectsInput>();
+    expectTypeOf<
+      In<"ShowOnboardingRolePicker">
+    >().toEqualTypeOf<st.ShowOnboardingRolePickerInput>();
   });
 
   test("outputs", () => {
@@ -46,6 +65,25 @@ describe("SDK-typed tools: input/output ARE the sdk-tools types", () => {
     expectTypeOf<Out<"WebFetch">>().toEqualTypeOf<st.WebFetchOutput>();
     expectTypeOf<Out<"WebSearch">>().toEqualTypeOf<st.WebSearchOutput>();
     expectTypeOf<Out<"AskUserQuestion">>().toEqualTypeOf<st.AskUserQuestionOutput>();
+    expectTypeOf<Out<"ReportFindings">>().toEqualTypeOf<st.ReportFindingsOutput>();
+    expectTypeOf<Out<"Workflow">>().toEqualTypeOf<st.WorkflowOutput>();
+    expectTypeOf<Out<"ScheduleWakeup">>().toEqualTypeOf<st.ScheduleWakeupOutput>();
+    expectTypeOf<Out<"Monitor">>().toEqualTypeOf<st.MonitorOutput>();
+    expectTypeOf<Out<"CronCreate">>().toEqualTypeOf<st.CronCreateOutput>();
+    expectTypeOf<Out<"CronDelete">>().toEqualTypeOf<st.CronDeleteOutput>();
+    expectTypeOf<Out<"CronList">>().toEqualTypeOf<st.CronListOutput>();
+    expectTypeOf<Out<"RemoteTrigger">>().toEqualTypeOf<st.RemoteTriggerOutput>();
+    expectTypeOf<Out<"PushNotification">>().toEqualTypeOf<st.PushNotificationOutput>();
+    expectTypeOf<Out<"ListMcpResourcesTool">>().toEqualTypeOf<st.ListMcpResourcesOutput>();
+    expectTypeOf<Out<"ReadMcpResourceTool">>().toEqualTypeOf<st.ReadMcpResourceOutput>();
+    expectTypeOf<Out<"ReadMcpResourceDirTool">>().toEqualTypeOf<st.ReadMcpResourceDirOutput>();
+    expectTypeOf<Out<"DesignSync">>().toEqualTypeOf<st.ClaudeDesignOutput>();
+    expectTypeOf<Out<"Artifact">>().toEqualTypeOf<st.ArtifactOutput>();
+    expectTypeOf<Out<"REPL">>().toEqualTypeOf<st.REPLOutput>();
+    expectTypeOf<Out<"Projects">>().toEqualTypeOf<st.ProjectsOutput>();
+    expectTypeOf<
+      Out<"ShowOnboardingRolePicker">
+    >().toEqualTypeOf<st.ShowOnboardingRolePickerOutput>();
   });
 
   test("legacy hand-written tools keep their shapes", () => {

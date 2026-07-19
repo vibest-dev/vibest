@@ -1,23 +1,23 @@
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
-import {
-  makeClaudeCodeAdapter,
-  makeClaudeCodeAgent,
-  type ClaudeCodeAgent,
-} from "@vibest/harness/claude-code";
-import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "@vibest/harness/codex";
-import { makePiAdapter, makePiAgent, type PiAgent } from "@vibest/harness/pi";
-import {
-  HarnessAgentRegistry,
-  HarnessAgentSessionServiceLayer,
-  makeHarnessAgentRegistry,
-} from "@vibest/harness/runtime";
 import { Context, Effect, Layer } from "effect";
 
 import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
 import { FileSystemServiceLayer } from "../fs";
+import {
+  HarnessAgentRegistry,
+  HarnessAgentSessionServiceLayer,
+  makeHarnessAgentRegistry,
+} from "../harness";
+import {
+  makeClaudeCodeAdapter,
+  makeClaudeCodeAgent,
+  type ClaudeCodeAgent,
+} from "../harness/claude-code";
+import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
+import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
 import { ProjectModuleLayer } from "../project";
 import { SessionRepositoryLayer } from "../session";
 

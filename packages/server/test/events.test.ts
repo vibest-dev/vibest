@@ -9,7 +9,7 @@ import { EventBus, EventBusLayer } from "../src/index";
 const evt = (sessionId: string): SessionEnvelopeDraft => ({
   sessionId,
   harnessAgentId: "claude-code",
-  body: { type: "session.updated", sessionId },
+  body: { type: "session.turn.started", sessionId, turnId: "t1" },
 });
 
 layer(EventBusLayer)("EventBus", (it) => {

@@ -60,6 +60,23 @@ describe("resolveLoginShellEnvironment", () => {
     ]);
   });
 
+  it("keeps launch-time VIBEST_* variables over login-shell exports", async () => {
+    const command = vi.fn<RunCommand>(() =>
+      Effect.succeed(fenced({ PATH: "/opt/homebrew/bin", VIBEST_HOME: "/Users/test/.vibest" })),
+    );
+
+    await expect(
+      resolve(command, {
+        platform: "darwin",
+        shell: "/bin/zsh",
+        baseEnv: { PATH: "/usr/bin", VIBEST_HOME: "/tmp/switched-home" },
+      }),
+    ).resolves.toEqual({
+      PATH: "/opt/homebrew/bin",
+      VIBEST_HOME: "/tmp/switched-home",
+    });
+  });
+
   it("falls back to launchctl for PATH and proxy variables on darwin", async () => {
     const command = vi.fn<RunCommand>((file, args) => {
       if (file !== "/bin/launchctl") return Effect.fail(new Error("shell failed"));
