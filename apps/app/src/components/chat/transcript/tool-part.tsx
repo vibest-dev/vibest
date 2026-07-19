@@ -4,10 +4,10 @@ import type { ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { DynamicToolPart } from "./tool/dynamic-tool-part";
-import { claudeCodeDynamicToolName } from "./tool/providers/claude-code/dynamic-name";
-import { renderClaudeCodeTool } from "./tool/providers/claude-code/render-tool";
-import { codexDynamicToolName } from "./tool/providers/codex/dynamic-name";
-import { renderCodexTool } from "./tool/providers/codex/render-tool";
+import { claudeCodeDynamicToolName } from "./tool/harness/claude-code/dynamic-name";
+import { renderClaudeCodeTool } from "./tool/harness/claude-code/render-tool";
+import { codexDynamicToolName } from "./tool/harness/codex/dynamic-name";
+import { renderCodexTool } from "./tool/harness/codex/render-tool";
 import { useTranscriptRender } from "./transcript-render-context";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
