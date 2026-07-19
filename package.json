@@ -19,7 +19,7 @@
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
     "prepare": "git config core.hooksPath .githooks && simple-git-hooks",
-    "doctor": "react-doctor --yes"
+    "doctor": "turbo run doctor"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
@@ -28,7 +28,6 @@
     "oxfmt": "^0.58.0",
     "oxlint": "^1.74.0",
     "publint": "^0.3.21",
-    "react-doctor": "^0.7.8",
     "simple-git-hooks": "^2.13.1",
     "taze": "^19.14.1",
     "tsdown": "catalog:",

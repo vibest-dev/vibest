@@ -161,9 +161,6 @@ importers:
       publint:
         specifier: ^0.3.21
         version: 0.3.21
-      react-doctor:
-        specifier: ^0.7.8
-        version: 0.7.8(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))(eslint@10.7.0(jiti@2.7.0))(oxlint-tsgolint@0.24.0)
       simple-git-hooks:
         specifier: ^2.13.1
         version: 2.13.1
@@ -294,6 +291,9 @@ importers:
       code-inspector-plugin:
         specifier: latest
         version: 2.0.3(@opencode-ai/sdk@1.18.3)
+      react-doctor:
+        specifier: ^0.7.8
+        version: 0.7.8(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))(eslint@10.7.0(jiti@2.7.0))(oxlint-tsgolint@0.24.0)
       react-grab:
         specifier: ^0.1.48
         version: 0.1.48(react@19.2.7)
