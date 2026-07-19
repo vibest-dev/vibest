@@ -46,7 +46,8 @@ export function ChatSessionProvider({
 }) {
   const chat = useChatHandle(sessionId);
   const [model, setModelState] = useState<ChatModel>("sonnet");
-  const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("ask");
+  // Matches the draft surface's default (claude-code's "full" → bypassPermissions).
+  const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("full");
   const turnInProgress = useStore(chat.store, selectTurnInProgress);
 
   // Config changes are a separate session call, applied optimistically to the
