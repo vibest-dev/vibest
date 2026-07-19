@@ -362,6 +362,10 @@ export type CreateManagedSessionInput = typeof CreateManagedSessionInputSchema.T
 export const CreateManagedSessionResultSchema = Schema.Struct({
   sessionId: Schema.String,
   harnessAgentId: HarnessAgentIdSchema,
+  // Backend session id (claude-code SDK session / codex threadId). Distinct from
+  // the vibest-internal `sessionId`; used to resume the backend. Always present
+  // on a freshly created session — the adapter opens the backend eagerly.
+  harnessSessionId: Schema.String,
 });
 export type CreateManagedSessionResult = typeof CreateManagedSessionResultSchema.Type;
 
@@ -369,8 +373,57 @@ export const ResumeManagedSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
   harnessAgentId: HarnessAgentIdSchema,
   workspacePath: Schema.optionalKey(Schema.String),
+  // The backend id to hand the adapter. Required — the caller resumes from a
+  // listed session, which always carries it (a session with no backend id was
+  // never opened and can only be created, not resumed).
+  harnessSessionId: Schema.String,
 });
 export type ResumeManagedSessionInput = typeof ResumeManagedSessionInputSchema.Type;
+
+/**
+ * Persisted session metadata — vibest's own record, one file per session at
+ * `storage/sessions/<projectId>/<sessionId>.json`. Holds only what the backend
+ * harness cannot: the vibest-internal id, its mapping to the backend id, the
+ * owning project, the workspace it was opened against, and vibest-owned state
+ * (`archived`). Display data (title, timestamps) is fetched live from the
+ * backend and merged at list time — never persisted here, to avoid drift.
+ */
+export const SessionRecordSchema = Schema.Struct({
+  /** vibest-internal id (uuid v7) — the file name and primary key. */
+  sessionId: Schema.String,
+  /** Backend id used to resume; absent for a draft not yet opened. */
+  harnessSessionId: Schema.optionalKey(Schema.String),
+  harnessAgentId: HarnessAgentIdSchema,
+  projectId: Schema.String,
+  /** Workspace path the session was opened against (the backend's cwd key). */
+  cwd: Schema.String,
+  archived: Schema.Boolean,
+  createdAt: Schema.String,
+});
+export type SessionRecord = typeof SessionRecordSchema.Type;
+
+export const ListSessionsInputSchema = Schema.Struct({ projectId: Schema.String });
+export type ListSessionsInput = typeof ListSessionsInputSchema.Type;
+
+/**
+ * A session list item: the persisted record plus display fields merged live
+ * from the backend. `transcriptMissing` is derived (the backend no longer has
+ * the transcript behind `harnessSessionId`) — never persisted. `title`/
+ * `updatedAt` are absent until the adapter surfaces session info (phase 2).
+ */
+export const SessionSummarySchema = Schema.Struct({
+  sessionId: Schema.String,
+  harnessSessionId: Schema.optionalKey(Schema.String),
+  harnessAgentId: HarnessAgentIdSchema,
+  projectId: Schema.String,
+  cwd: Schema.String,
+  archived: Schema.Boolean,
+  createdAt: Schema.String,
+  title: Schema.optionalKey(Schema.String),
+  updatedAt: Schema.optionalKey(Schema.Number),
+  transcriptMissing: Schema.Boolean,
+});
+export type SessionSummary = typeof SessionSummarySchema.Type;
 
 export const SessionIdInputSchema = Schema.Struct({ sessionId: Schema.String });
 export const PromptSessionInputSchema = Schema.Struct({

@@ -1,3 +1,4 @@
+import type { HarnessAgentId } from "@vibest/contract";
 import { AbstractChat, type UIMessage } from "ai";
 import type { StoreApi } from "zustand/vanilla";
 
@@ -5,10 +6,9 @@ import type { AgentResponse } from "./agent-requests";
 import { ChatState, type ChatStoreState } from "./chat-state";
 import type { ChatModel, OrpcChatSessionTransport } from "./chat-transport";
 
-export type AgentProviderId = "claude-code";
-
 export interface ChatInit {
   sessionId: string;
+  harnessAgentId: HarnessAgentId;
   transport: OrpcChatSessionTransport;
 }
 
@@ -16,13 +16,17 @@ export interface ChatInit {
 // push, chunk reduction, status transitions) against a per-Chat zustand store;
 // the agent-request plane arrives over the same Vibest session transport.
 export class Chat extends AbstractChat<UIMessage> {
-  readonly agentProviderId: AgentProviderId = "claude-code";
+  // A Chat is bound to one harness for its whole life (a session's harness
+  // never changes), so tool rendering dispatches on it. Only claude-code and
+  // codex have dedicated renderers; any other harness falls back to the
+  // generic tool card.
+  readonly harnessAgentId: HarnessAgentId;
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
   readonly #transport: OrpcChatSessionTransport;
   readonly #unsubscribeRequests: () => void;
 
-  constructor({ sessionId, transport }: ChatInit) {
+  constructor({ sessionId, harnessAgentId, transport }: ChatInit) {
     const state = new ChatState();
     super({
       id: sessionId,
@@ -32,6 +36,7 @@ export class Chat extends AbstractChat<UIMessage> {
       // lingers in the transcript.
       onFinish: () => state.clearPendingRequests(),
     });
+    this.harnessAgentId = harnessAgentId;
     this.store = state.store;
     this.#state = state;
     this.#transport = transport;

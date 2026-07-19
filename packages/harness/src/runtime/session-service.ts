@@ -10,6 +10,7 @@ import type {
   HarnessAgentSession,
   PromptReceipt,
   SessionCapabilities,
+  SessionInfoResult,
   UserInput,
 } from "./adapter";
 import {
@@ -19,6 +20,7 @@ import {
   AgentUnavailable,
   CapabilityUnsupported,
   type CreateSessionError,
+  type HarnessAgentNotFound,
   type ResumeSessionError,
   SessionClosed,
   SessionNotFound,
@@ -46,6 +48,11 @@ type Projection = {
 };
 
 type ManagedSession = {
+  /** vibest-internal id — the `active`/`inFlight`/`closing` map key and the id
+   *  every envelope and cold operation uses. */
+  readonly sessionId: string;
+  /** Backend id (`session.sessionId`) — what the adapter needs to resume. */
+  readonly harnessSessionId: string;
   readonly session: HarnessAgentSession;
   readonly scope: Scope.Closeable;
   readonly pump: Fiber.Fiber<void>;
@@ -118,6 +125,13 @@ export type HarnessAgentSessionServiceShape = {
   readonly getStatus: (sessionId: string) => Effect.Effect<SessionStatus, SessionNotFound>;
   readonly getSnapshot: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFound>;
   readonly close: (sessionId: string) => Effect.Effect<void>;
+  /** Look up live backend display info for a persisted session (cold — the
+   *  session need not be active). Delegates to the owning adapter. */
+  readonly getSessionInfo: (
+    harnessAgentId: HarnessAgentId,
+    harnessSessionId: string,
+    workspacePath?: string,
+  ) => Effect.Effect<SessionInfoResult, HarnessAgentNotFound | AgentOperationError>;
 };
 
 export class HarnessAgentSessionService extends Context.Service<
@@ -232,6 +246,7 @@ export const makeHarnessAgentSessionService = (
         );
 
     const startManaged = (
+      sessionId: string,
       session: HarnessAgentSession,
       sessionScope: Scope.Closeable,
     ): Effect.Effect<{
@@ -242,15 +257,19 @@ export const makeHarnessAgentSessionService = (
         const projection = yield* Ref.make(initialProjection());
         const pumpDone = yield* Deferred.make<void>();
         const activation = yield* Deferred.make<void>();
+        // The adapter stamps envelopes with its backend id; rewrite them to the
+        // vibest-internal id so everything downstream (subscribers, cold ops)
+        // speaks one id.
+        const events = session.events.pipe(Stream.map((draft) => ({ ...draft, sessionId })));
         const pumpEffect = Deferred.await(activation).pipe(
-          Effect.andThen(Stream.runForEach(session.events, (draft) => publish(projection, draft))),
+          Effect.andThen(Stream.runForEach(events, (draft) => publish(projection, draft))),
           Effect.catch((error) =>
             publish(projection, {
               harnessAgentId: session.harnessAgentId,
-              sessionId: session.sessionId,
+              sessionId,
               body: {
                 type: "session.crashed",
-                sessionId: session.sessionId,
+                sessionId,
                 reason: error.message,
               },
             }),
@@ -261,7 +280,7 @@ export const makeHarnessAgentSessionService = (
                 Ref.get(projection).pipe(
                   Effect.flatMap((current) =>
                     current.status.status === "crashed"
-                      ? Effect.forkIn(close(session.sessionId), ownerScope).pipe(Effect.asVoid)
+                      ? Effect.forkIn(close(sessionId), ownerScope).pipe(Effect.asVoid)
                       : Effect.void,
                   ),
                 ),
@@ -271,20 +290,28 @@ export const makeHarnessAgentSessionService = (
         );
         const pump = yield* Effect.forkIn(pumpEffect, sessionScope);
         return {
-          managed: { session, scope: sessionScope, pump, pumpDone, projection },
+          managed: {
+            sessionId,
+            harnessSessionId: session.sessionId,
+            session,
+            scope: sessionScope,
+            pump,
+            pumpDone,
+            projection,
+          },
           activate: Deferred.succeed(activation, undefined).pipe(Effect.asVoid),
         };
       });
 
     const register = (candidate: ManagedSession) =>
       Ref.modify(state, (current) => {
-        const existing = current.active.get(candidate.session.sessionId);
+        const existing = current.active.get(candidate.sessionId);
         if (existing) return [existing, current] as const;
         return [
           candidate,
           {
             ...current,
-            active: new Map(current.active).set(candidate.session.sessionId, candidate),
+            active: new Map(current.active).set(candidate.sessionId, candidate),
           },
         ] as const;
       }).pipe(
@@ -328,15 +355,19 @@ export const makeHarnessAgentSessionService = (
         const adapter = yield* checkAvailable(harnessAgentId);
         const sessionScope = yield* Scope.fork(ownerScope, "sequential");
         return yield* Effect.gen(function* () {
+          // vibest-internal id: freshly minted on open, or the caller's own id on
+          // resume. Distinct from the adapter's backend id (`session.sessionId`).
+          const sessionId = mode._tag === "Open" ? uuid() : mode.input.sessionId;
           const session = yield* (
             mode._tag === "Open"
               ? adapter.open(mode.input)
               : adapter.resume({
-                  sessionId: mode.input.sessionId,
+                  // Adapters resume by backend id, distinct from our internal id.
+                  sessionId: mode.input.harnessSessionId,
                   workspacePath: mode.input.workspacePath,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
-          const candidate = yield* startManaged(session, sessionScope);
+          const candidate = yield* startManaged(sessionId, session, sessionScope);
           const managed = yield* register(candidate.managed);
           if (managed === candidate.managed) yield* candidate.activate;
           return managed;
@@ -487,7 +518,8 @@ export const makeHarnessAgentSessionService = (
       create: (harnessAgentId, input) =>
         build({ _tag: "Open", harnessAgentId, input }).pipe(
           Effect.map((managed) => ({
-            sessionId: managed.session.sessionId,
+            sessionId: managed.sessionId,
+            harnessSessionId: managed.harnessSessionId,
             harnessAgentId: managed.session.harnessAgentId,
           })),
           Effect.mapError((error) =>
@@ -544,6 +576,12 @@ export const makeHarnessAgentSessionService = (
           ),
         ),
       close,
+      getSessionInfo: (harnessAgentId, harnessSessionId, workspacePath) =>
+        registry
+          .get(harnessAgentId)
+          .pipe(
+            Effect.flatMap((adapter) => adapter.getSessionInfo(harnessSessionId, workspacePath)),
+          ),
     } satisfies HarnessAgentSessionServiceShape;
   });
 

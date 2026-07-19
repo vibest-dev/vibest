@@ -1,8 +1,10 @@
 import { eventIterator, oc, type } from "@orpc/contract";
+import { Schema } from "effect";
 
 import {
   CreateManagedSessionInputSchema,
   CreateManagedSessionResultSchema,
+  ListSessionsInputSchema,
   PromptReceiptSchema,
   PromptSessionInputSchema,
   RespondToAgentRequestInputSchema,
@@ -10,6 +12,7 @@ import {
   SessionCapabilitiesSchema,
   SessionEventsInputSchema,
   SessionIdInputSchema,
+  SessionSummarySchema,
   toStandardSchema,
   type SessionEnvelope,
   type SessionSnapshot,
@@ -21,6 +24,10 @@ export type SessionEventStreamItem =
   | { readonly type: "gap"; readonly cursor: number; readonly terminal: boolean };
 
 export const sessionContract = {
+  /** vibest's persisted sessions for a project, merged with live backend display data. */
+  list: oc
+    .input(toStandardSchema(ListSessionsInputSchema))
+    .output(toStandardSchema(Schema.Array(SessionSummarySchema))),
   create: oc
     .input(toStandardSchema(CreateManagedSessionInputSchema))
     .output(toStandardSchema(CreateManagedSessionResultSchema)),
