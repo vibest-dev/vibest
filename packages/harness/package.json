@@ -6,14 +6,13 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime": "./src/runtime/index.ts",
     "./claude-code": "./src/claude-code/index.ts",
-    "./claude-code/runtime": "./src/claude-code/runtime/index.ts",
     "./codex": "./src/codex/index.ts",
-    "./codex/runtime": "./src/codex/runtime/index.ts",
+    "./codex/protocol": "./src/codex/protocol/index.ts",
+    "./codex/protocol/v2": "./src/codex/protocol/v2/index.ts",
     "./opencode": "./src/opencode/index.ts",
     "./pi": "./src/pi/index.ts",
-    "./pi/runtime": "./src/pi/runtime/index.ts"
+    "./pi/protocol": "./src/pi/protocol.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -32,7 +31,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@orpc/contract": "2.0.0-beta.16",
     "@vibest/typescript": "workspace:*",

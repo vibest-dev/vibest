@@ -5,17 +5,18 @@ import { join } from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createRouterClient } from "@orpc/server";
 import { isSessionEvent } from "@vibest/contract";
-import { makeCodexAdapter, makeCodexAgent } from "@vibest/harness/codex";
-import {
-  HarnessAgentRegistry,
-  HarnessAgentSessionServiceLayer,
-  makeHarnessAgentRegistry,
-} from "@vibest/harness/runtime";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { layerPaths } from "../src/config/paths";
 import { EventBusLayer } from "../src/events";
+import { FileSystemServiceLayer } from "../src/fs";
+import {
+  HarnessAgentRegistry,
+  HarnessAgentSessionServiceLayer,
+  makeHarnessAgentRegistry,
+} from "../src/harness";
+import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
 import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
@@ -73,8 +74,10 @@ describe("session router", () => {
       Layer.mergeAll(
         EventBusLayer,
         sessionLayer,
+        FileSystemServiceLayer,
         ProjectModuleLayer.pipe(Layer.provide(pathsLayer)),
         SessionRepositoryLayer.pipe(Layer.provide(pathsLayer)),
+        NodeServices.layer,
       ),
     );
     try {

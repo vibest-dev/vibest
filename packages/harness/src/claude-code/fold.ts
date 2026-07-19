@@ -2,8 +2,8 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { readUIMessageStream } from "ai";
 import { Effect } from "effect";
 
-import { ClaudeSdkError } from "../runtime/errors";
 import type { ClaudeCodeUIMessageChunk } from "../types/envelope";
+import { ClaudeSdkError } from "./errors";
 import { createTransform } from "./transform";
 import type { ClaudeCodeUIMessage } from "./ui-message";
 

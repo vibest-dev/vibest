@@ -12,7 +12,8 @@ const draft = (sessionId: string, body: SessionEnvelopeDraft["body"]): SessionEn
 const delta = (sessionId: string, index: number) =>
   draft(sessionId, { type: "text-delta", id: "text", delta: String(index) });
 
-const control = (sessionId: string) => draft(sessionId, { type: "session.updated", sessionId });
+const control = (sessionId: string) =>
+  draft(sessionId, { type: "session.turn.started", sessionId, turnId: "t1" });
 
 it.effect("drops an overflowing delta and emits one observable gap", () =>
   Effect.scoped(

@@ -4,9 +4,10 @@ import {
   type SessionEnvelope,
   type SessionEnvelopeDraft,
 } from "@vibest/contract";
-import { SessionEventPublisher, type SessionEventPublisherShape } from "@vibest/harness/runtime";
 import { Context, Effect, Layer, Queue, Ref, Scope, Stream, SynchronizedRef } from "effect";
 import type * as Cause from "effect/Cause";
+
+import { SessionEventPublisher, type SessionEventPublisherShape } from "../harness";
 
 const DEFAULT_SUBSCRIBER_CAPACITY = 256;
 
