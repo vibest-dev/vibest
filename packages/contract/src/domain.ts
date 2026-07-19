@@ -372,6 +372,34 @@ export const SessionCapabilitiesSchema = Schema.Struct({
 });
 export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;
 
+export const ProjectSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  path: Schema.String,
+  createdAt: Schema.String,
+});
+export type Project = typeof ProjectSchema.Type;
+
+/** The project name is derived server-side from the folder's basename. */
+export const CreateProjectInputSchema = Schema.Struct({
+  path: Schema.String,
+});
+
+export const DirectoryEntrySchema = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+});
+export type DirectoryEntry = typeof DirectoryEntrySchema.Type;
+
+export const BrowseInputSchema = Schema.Struct({
+  path: Schema.optionalKey(Schema.String),
+});
+export const BrowseResultSchema = Schema.Struct({
+  path: Schema.String,
+  parent: Schema.Union([Schema.String, Schema.Null]),
+  directories: Schema.Array(DirectoryEntrySchema),
+});
+
 export const CreateManagedSessionInputSchema = Schema.Struct({
   harnessAgentId: HarnessAgentIdSchema,
   workspacePath: Schema.optionalKey(Schema.String),

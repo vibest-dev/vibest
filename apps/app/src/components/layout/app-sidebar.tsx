@@ -11,6 +11,8 @@ import {
 } from "@vibest/ui/components/sidebar";
 import { Blocks, FolderCode, MessageSquare, Pin, Search, SquarePen } from "lucide-react";
 
+import { ProjectsSidebarGroup } from "@/components/projects/projects-sidebar-group";
+
 // Placeholder mock data — no session.list endpoint yet.
 const PINNED = [
   "Refactor auth module",
@@ -59,6 +61,8 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <ProjectsSidebarGroup />
 
         <SidebarGroup>
           <SidebarGroupLabel>Pinned</SidebarGroupLabel>

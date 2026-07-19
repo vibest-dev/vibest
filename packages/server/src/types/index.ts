@@ -14,12 +14,7 @@ export const isHarnessAgentId = (value: string): value is HarnessAgentId =>
   (HARNESS_AGENT_IDS as ReadonlyArray<string>).includes(value);
 
 /** A project is a workspace path the runtime can open sessions against. */
-export interface Project {
-  readonly id: string;
-  readonly name: string;
-  readonly path: string;
-  readonly createdAt: string;
-}
+export type { Project } from "@vibest/contract";
 
 /**
  * A configured provider — either a built-in whose credentials the user filled

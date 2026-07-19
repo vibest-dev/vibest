@@ -1,1 +1,1 @@
-export { FSService, FSServiceLayer, type GrepMatch } from "./service";
+export { FileSystemService, FileSystemServiceLayer } from "./service";
