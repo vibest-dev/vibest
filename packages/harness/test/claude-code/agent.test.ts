@@ -231,14 +231,7 @@ describe("ClaudeCodeAgent", () => {
       NodeAssert.equal(receipt.cursor, 0);
       NodeAssert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
-        [
-          "session.turn.started",
-          "start",
-          "data-system/init",
-          "data-result/success",
-          "finish",
-          "session.turn.ended",
-        ],
+        ["session.turn.started", "start", "finish", "session.turn.ended"],
       );
       NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
       yield* session.close;

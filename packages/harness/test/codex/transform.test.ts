@@ -57,26 +57,40 @@ describe("createCodexTransform", () => {
     expect(chunks[0]).toMatchObject({ dynamic: true });
   });
 
-  it("turn/completed → data + finish; terminal error → data + error + finish", () => {
+  it("sleep and subAgentActivity are skipped", () => {
+    const t = createCodexTransform();
+    const sleep = { type: "sleep", id: "s1", durationMs: 1000 };
+    expect([...t(n("item/completed", { threadId: "th", item: sleep }))]).toEqual([]);
+    const activity = {
+      type: "subAgentActivity",
+      id: "a1",
+      kind: "spawned",
+      agentThreadId: "th2",
+      agentPath: "p",
+    };
+    expect([...t(n("item/completed", { threadId: "th", item: activity }))]).toEqual([]);
+  });
+
+  it("turn/completed → finish; terminal error → error + finish", () => {
     const t = createCodexTransform();
     expect(
       types([
         ...t(n("turn/completed", { threadId: "th", turn: { id: "t1", status: "completed" } })),
       ]),
-    ).toEqual(["data-turn/completed", "finish"]);
+    ).toEqual(["finish"]);
     expect(
       types([
         ...t(
           n("error", { threadId: "th", turnId: "t1", willRetry: false, error: { message: "x" } }),
         ),
       ]),
-    ).toEqual(["data-turn/error", "error", "finish"]);
+    ).toEqual(["error", "finish"]);
     expect(
       types([
         ...t(
           n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } }),
         ),
       ]),
-    ).toEqual(["data-turn/error", "error"]);
+    ).toEqual(["error"]);
   });
 });

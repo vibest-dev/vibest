@@ -95,7 +95,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const chunks = yield* Stream.runCollect(prompt.output);
       NodeAssert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
-        ["start", "text-start", "text-delta", "text-end", "data-message/end", "finish"],
+        ["start", "text-start", "text-delta", "text-end", "finish"],
       );
       yield* agent.session.abort(sessionId);
     }),
@@ -294,7 +294,6 @@ layer(NodeServices.layer)("PiAgent", (it) => {
           "text-start",
           "text-delta",
           "text-end",
-          "data-message/end",
           "finish",
           "session.turn.ended",
         ],

@@ -41,10 +41,10 @@ function DraftRoute() {
   // turn already streaming.
   const startSession = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
-      const { sessionId } = await orpcQueryUtils.session.create.call({
+      const { sessionId, harnessAgentId } = await orpcQueryUtils.session.create.call({
         harnessAgentId: "claude-code",
       });
-      void manager.attach(sessionId).prompt(text, { model });
+      void manager.attach(sessionId, harnessAgentId).prompt(text, { model });
       return sessionId;
     },
     onSuccess: (sessionId) => {

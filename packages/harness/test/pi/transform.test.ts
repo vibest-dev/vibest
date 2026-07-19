@@ -129,15 +129,11 @@ describe("createPiTransform", () => {
     expect(failed[0]).toMatchObject({ type: "tool-output-error", errorText: "nope" });
   });
 
-  it("summarizes assistant messages and surfaces run errors", () => {
+  it("skips assistant summaries and surfaces run errors", () => {
     const t = createPiTransform("s1");
     const run = (event: AgentSessionEvent) => [...t(event)];
     run(e({ type: "agent_start" }));
-    const summary = [...t(e({ type: "message_end", message: assistant() }))];
-    expect(summary[0]).toMatchObject({
-      type: "data-message/end",
-      data: { model: "m1", stopReason: "stop", usage: { input: 1, output: 2 } },
-    });
+    expect([...t(e({ type: "message_end", message: assistant() }))]).toEqual([]);
 
     const failed = assistant({ stopReason: "error", errorMessage: "boom" });
     const ended = [...t(e({ type: "agent_end", messages: [failed], willRetry: false }))];
@@ -146,32 +142,18 @@ describe("createPiTransform", () => {
     expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
   });
 
-  it("forwards compaction and retry lifecycles as data parts", () => {
+  it("skips compaction and retry lifecycles", () => {
     const t = createPiTransform("s1");
-    expect(types([...t(e({ type: "compaction_start", reason: "threshold" }))])).toEqual([
-      "data-compaction/start",
-    ]);
-    expect(
-      types([
-        ...t(e({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false })),
-      ]),
-    ).toEqual(["data-compaction/end"]);
-    expect(
-      types([
-        ...t(
-          e({
-            type: "auto_retry_start",
-            attempt: 1,
-            maxAttempts: 3,
-            delayMs: 10,
-            errorMessage: "x",
-          }),
-        ),
-      ]),
-    ).toEqual(["data-retry/start"]);
-    expect(types([...t(e({ type: "auto_retry_end", success: true, attempt: 1 }))])).toEqual([
-      "data-retry/end",
-    ]);
+    expect([...t(e({ type: "compaction_start", reason: "threshold" }))]).toEqual([]);
+    expect([
+      ...t(e({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false })),
+    ]).toEqual([]);
+    expect([
+      ...t(
+        e({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "x" }),
+      ),
+    ]).toEqual([]);
+    expect([...t(e({ type: "auto_retry_end", success: true, attempt: 1 }))]).toEqual([]);
   });
 
   it("ignores bookkeeping events and user-message echoes", () => {

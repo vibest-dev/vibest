@@ -12,9 +12,14 @@ import { z } from "zod";
 //     `z.custom` is a typed pass-through with no runtime checking.
 //
 // All tools run inside the Claude Code process (provider-executed). Tools the SDK
-// exports no type for (Cron*/ToolSearch/ScheduleWakeup/Skill/Workflow/… and any
-// MCP tool) are NOT in the registry: the transform flags them `dynamic` and the
-// UI renders them generically.
+// exports no type for (ToolSearch/Skill/SendMessage/…) are NOT in the registry:
+// the transform flags them `dynamic` and the UI renders them generically. MCP
+// tools stay dynamic too — the SDK types them (`McpInput`/`McpOutput`) but their
+// wire names (`mcp__<server>__<tool>`) are per-server, so no fixed key exists.
+//
+// Wire names that differ from the SDK type names were verified against the CLI
+// binary's own name map: FileRead→Read, ClaudeDesign→DesignSync,
+// ListMcpResources→ListMcpResourcesTool, ReadMcpResource(Dir)→ReadMcpResource(Dir)Tool.
 
 export const Bash = tool({
   inputSchema: z.custom<st.BashInput>(),
@@ -105,6 +110,74 @@ export const ExitWorktree = tool({
   inputSchema: z.custom<st.ExitWorktreeInput>(),
   outputSchema: z.custom<st.ExitWorktreeOutput>(),
 });
+export const ReportFindings = tool({
+  inputSchema: z.custom<st.ReportFindingsInput>(),
+  outputSchema: z.custom<st.ReportFindingsOutput>(),
+});
+export const Workflow = tool({
+  inputSchema: z.custom<st.WorkflowInput>(),
+  outputSchema: z.custom<st.WorkflowOutput>(),
+});
+export const ScheduleWakeup = tool({
+  inputSchema: z.custom<st.ScheduleWakeupInput>(),
+  outputSchema: z.custom<st.ScheduleWakeupOutput>(),
+});
+export const Monitor = tool({
+  inputSchema: z.custom<st.MonitorInput>(),
+  outputSchema: z.custom<st.MonitorOutput>(),
+});
+export const CronCreate = tool({
+  inputSchema: z.custom<st.CronCreateInput>(),
+  outputSchema: z.custom<st.CronCreateOutput>(),
+});
+export const CronDelete = tool({
+  inputSchema: z.custom<st.CronDeleteInput>(),
+  outputSchema: z.custom<st.CronDeleteOutput>(),
+});
+export const CronList = tool({
+  inputSchema: z.custom<st.CronListInput>(),
+  outputSchema: z.custom<st.CronListOutput>(),
+});
+export const RemoteTrigger = tool({
+  inputSchema: z.custom<st.RemoteTriggerInput>(),
+  outputSchema: z.custom<st.RemoteTriggerOutput>(),
+});
+export const PushNotification = tool({
+  inputSchema: z.custom<st.PushNotificationInput>(),
+  outputSchema: z.custom<st.PushNotificationOutput>(),
+});
+export const ListMcpResourcesTool = tool({
+  inputSchema: z.custom<st.ListMcpResourcesInput>(),
+  outputSchema: z.custom<st.ListMcpResourcesOutput>(),
+}); // SDK: ListMcpResources
+export const ReadMcpResourceTool = tool({
+  inputSchema: z.custom<st.ReadMcpResourceInput>(),
+  outputSchema: z.custom<st.ReadMcpResourceOutput>(),
+}); // SDK: ReadMcpResource
+export const ReadMcpResourceDirTool = tool({
+  inputSchema: z.custom<st.ReadMcpResourceDirInput>(),
+  outputSchema: z.custom<st.ReadMcpResourceDirOutput>(),
+}); // SDK: ReadMcpResourceDir
+export const DesignSync = tool({
+  inputSchema: z.custom<st.ClaudeDesignInput>(),
+  outputSchema: z.custom<st.ClaudeDesignOutput>(),
+}); // SDK: ClaudeDesign
+export const Artifact = tool({
+  inputSchema: z.custom<st.ArtifactInput>(),
+  outputSchema: z.custom<st.ArtifactOutput>(),
+});
+export const REPL = tool({
+  inputSchema: z.custom<st.REPLInput>(),
+  outputSchema: z.custom<st.REPLOutput>(),
+});
+export const Projects = tool({
+  inputSchema: z.custom<st.ProjectsInput>(),
+  outputSchema: z.custom<st.ProjectsOutput>(),
+});
+export const ShowOnboardingRolePicker = tool({
+  inputSchema: z.custom<st.ShowOnboardingRolePickerInput>(),
+  outputSchema: z.custom<st.ShowOnboardingRolePickerOutput>(),
+});
 
 // ── Legacy tools (pre-rename CLI wire names; SDK exports no types for them). ──
 // Kept hand-written so their typed UI components keep working on replayed
@@ -169,6 +242,23 @@ export const claudeCodeTools = {
   ExitPlanMode,
   EnterWorktree,
   ExitWorktree,
+  ReportFindings,
+  Workflow,
+  ScheduleWakeup,
+  Monitor,
+  CronCreate,
+  CronDelete,
+  CronList,
+  RemoteTrigger,
+  PushNotification,
+  ListMcpResourcesTool,
+  ReadMcpResourceTool,
+  ReadMcpResourceDirTool,
+  DesignSync,
+  Artifact,
+  REPL,
+  Projects,
+  ShowOnboardingRolePicker,
   MultiEdit,
   SlashCommand,
   BashOutput,
@@ -201,6 +291,27 @@ export type EnterPlanModeUIToolInvocation = UIToolInvocation<typeof EnterPlanMod
 export type ExitPlanModeUIToolInvocation = UIToolInvocation<typeof ExitPlanMode>;
 export type EnterWorktreeUIToolInvocation = UIToolInvocation<typeof EnterWorktree>;
 export type ExitWorktreeUIToolInvocation = UIToolInvocation<typeof ExitWorktree>;
+export type ReportFindingsUIToolInvocation = UIToolInvocation<typeof ReportFindings>;
+export type WorkflowUIToolInvocation = UIToolInvocation<typeof Workflow>;
+export type ScheduleWakeupUIToolInvocation = UIToolInvocation<typeof ScheduleWakeup>;
+export type MonitorUIToolInvocation = UIToolInvocation<typeof Monitor>;
+export type CronCreateUIToolInvocation = UIToolInvocation<typeof CronCreate>;
+export type CronDeleteUIToolInvocation = UIToolInvocation<typeof CronDelete>;
+export type CronListUIToolInvocation = UIToolInvocation<typeof CronList>;
+export type RemoteTriggerUIToolInvocation = UIToolInvocation<typeof RemoteTrigger>;
+export type PushNotificationUIToolInvocation = UIToolInvocation<typeof PushNotification>;
+export type ListMcpResourcesToolUIToolInvocation = UIToolInvocation<typeof ListMcpResourcesTool>;
+export type ReadMcpResourceToolUIToolInvocation = UIToolInvocation<typeof ReadMcpResourceTool>;
+export type ReadMcpResourceDirToolUIToolInvocation = UIToolInvocation<
+  typeof ReadMcpResourceDirTool
+>;
+export type DesignSyncUIToolInvocation = UIToolInvocation<typeof DesignSync>;
+export type ArtifactUIToolInvocation = UIToolInvocation<typeof Artifact>;
+export type REPLUIToolInvocation = UIToolInvocation<typeof REPL>;
+export type ProjectsUIToolInvocation = UIToolInvocation<typeof Projects>;
+export type ShowOnboardingRolePickerUIToolInvocation = UIToolInvocation<
+  typeof ShowOnboardingRolePicker
+>;
 export type MultiEditUIToolInvocation = UIToolInvocation<typeof MultiEdit>;
 export type SlashCommandUIToolInvocation = UIToolInvocation<typeof SlashCommand>;
 export type BashOutputUIToolInvocation = UIToolInvocation<typeof BashOutput>;

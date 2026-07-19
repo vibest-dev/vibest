@@ -191,7 +191,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const chunks = yield* Stream.runCollect(prompt.output);
       NodeAssert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
-        ["start", "text-start", "text-delta", "text-end", "data-turn/completed", "finish"],
+        ["start", "text-start", "text-delta", "text-end", "finish"],
       );
       yield* agent.session.abort(sessionId);
     }),
@@ -390,7 +390,6 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           "text-start",
           "text-delta",
           "text-end",
-          "data-turn/completed",
           "finish",
           "session.turn.ended",
         ],
