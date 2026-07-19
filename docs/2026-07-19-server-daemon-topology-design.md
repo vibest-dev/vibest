@@ -231,20 +231,25 @@ _additional plane_, added when wanted, with no rework of the current work.
 
 ## Phased plan
 
-1. **Extract the plain server into `@vibest/server`.** Move
+1. **✅ Landed — Extract the plain server into `@vibest/server`.** Move
    `server.ts / auth / cors / listen / handshake` from `@vibest/cli` into
    `@vibest/server` (`./http`); add a tsdown build producing `dist/server.mjs`. This
    stays a daemon-unaware foreground server (bind, serve, print the ready line). Keep
    `@vibest/cli` a thin, self-contained bin (`serve` still bundles `@vibest/server`
    so the npm-installed remote runner keeps working). `apps/desktop` forks the
-   `@vibest/server` artifact and imports `parseReadyLine` from `@vibest/server/http`;
+   `@vibest/server` artifact and imports `parseReadyLine` from `@vibest/server/handshake`;
    drop the `@vibest/cli` dependency. **Touches build outputs and the
    electron-builder asar path — needs a packaged-build check.**
-2. **Add the daemon launcher (a layer above the server, not inside it).** A shared
-   `resolveOrSpawnDaemon` — used by both CLI and desktop — that reads/writes
-   `$VIBEST_HOME/daemon.pid`, does the pid-alive + health-check reuse, spawns
-   `serve` detached, and applies two-signal readiness and the `:4000 → :0` fallback.
-   The local twin of the SSH launch script; the server itself is untouched.
+2. **✅ Landed (CLI) — Add the daemon launcher (a layer above the server, not inside
+   it).** A shared `resolveOrSpawnDaemon` (`@vibest/server/daemon`) that reads/writes
+   `$VIBEST_HOME/daemon.pid`, does the pid-alive + health-check reuse, spawns the
+   foreground server detached (streamed to `daemon.log`), and applies two-signal
+   readiness (pid alive + `/api/health`) and the `:4000 → :0` fallback. The local twin
+   of the SSH launch script; the server itself is untouched. The daemon process is
+   `vibest serve` re-launched from this same CLI argv — no second bundle. Bare `vibest`
+   and `vibest daemon {start,stop,status}` are the front-doors; brought forward from
+   Phase 4. **Still pending: desktop attaching this same daemon** (below) instead of
+   forking a die-with-app child — a separate behavior change to the supervisor.
 3. **Unified auth (built as a credential set, not a single secret).** Local token
    flows through `daemon.pid` + a same-origin `/api/bootstrap`. Model the gate as a
    set of credential sources with one member today (the file source); demote any
