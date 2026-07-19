@@ -20,26 +20,21 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.207",
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@effect/platform-node": "catalog:",
-    "@orpc/contract": "2.0.0-beta.16",
-    "@orpc/server": "^2.0.0-beta.16",
-    "ai": "^7.0.22",
+    "@orpc/contract": "catalog:orpc",
+    "@orpc/server": "catalog:orpc",
+    "ai": "catalog:",
     "effect": "catalog:",
     "sirv": "^3.0.2",
-    "uuid": "^14.0.1",
-    "ws": "^8.21.0",
-    "zod": "^4.4.3"
+    "uuid": "catalog:",
+    "ws": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
+    "@types/ws": "catalog:",
     "@vibest/server": "workspace:*",
-    "@vibest/typescript": "workspace:*",
-    "tsdown": "^0.22.5",
-    "tsx": "latest",
-    "typescript": "^7.0.2",
-    "vite": "catalog:",
-    "vitest": "catalog:"
+    "@vibest/typescript": "workspace:*"
   },
   "engines": {
     "node": ">=24.0.0 <25"

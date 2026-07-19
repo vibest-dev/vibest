@@ -1,20 +1,20 @@
 import type { AgentResponse } from "@vibest/contract";
-import { HarnessAgentSessionService } from "@vibest/harness/runtime";
-import type {
-  AgentOperationError,
-  AgentRequestUnavailable,
-  CreateSessionError,
-  PromptReceipt,
-  ResumeSessionError,
-  SessionClosed,
-  SessionEnvelopeBody,
-  SessionNotFound as HarnessSessionNotFound,
-  TurnAlreadyRunning,
-  UserInput,
-} from "@vibest/harness/runtime";
 import { Context, Effect, Layer, Stream } from "effect";
 
 import { AgentUnavailable, SessionOpenFailed, SessionResumeFailed } from "../errors";
+import {
+  type AgentOperationError,
+  type AgentRequestUnavailable,
+  type CreateSessionError,
+  HarnessAgentSessionService,
+  type PromptReceipt,
+  type ResumeSessionError,
+  type SessionClosed,
+  type SessionEnvelopeBody,
+  type SessionNotFound as HarnessSessionNotFound,
+  type TurnAlreadyRunning,
+  type UserInput,
+} from "../harness";
 import type { HarnessAgentId } from "../types";
 
 export type HarnessCreateError = AgentUnavailable | SessionOpenFailed;

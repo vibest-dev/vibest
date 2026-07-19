@@ -15,6 +15,7 @@ export const test = base.extend<{
   e2ePaths: {
     fakeClaudeLog: string;
     userData: string;
+    vibestHome: string;
   };
   electronApp: ElectronApplication;
   window: Page;
@@ -23,9 +24,15 @@ export const test = base.extend<{
   e2ePaths: async ({}, use, testInfo) => {
     const output = testInfo.outputPath();
     mkdirSync(output, { recursive: true });
+    // Per-test server storage: without this the spawned server resolves
+    // $VIBEST_HOME to the developer's real ~/.vibest, so their projects and
+    // sessions leak into the UI and test chats write into their history.
+    const vibestHome = path.join(output, "vibest-home");
+    mkdirSync(vibestHome, { recursive: true });
     await use({
       fakeClaudeLog: path.join(output, "fake-claude.jsonl"),
       userData: path.join(output, "user-data"),
+      vibestHome,
     });
   },
 
@@ -48,6 +55,7 @@ export const test = base.extend<{
         VIBEST_E2E_CLAUDE_EXECUTABLE: fakeClaudePath,
         VIBEST_E2E_CLAUDE_LOG: e2ePaths.fakeClaudeLog,
         VIBEST_E2E_CLAUDE_RESPONSE: "Desktop fake Claude reply",
+        VIBEST_HOME: e2ePaths.vibestHome,
       },
     });
 

@@ -8,7 +8,6 @@ import type {
   SessionStatus,
   SessionSummary,
 } from "@vibest/contract";
-import type { PromptReceipt, UserInput } from "@vibest/harness/runtime";
 import { Context, Effect, Layer } from "effect";
 
 import {
@@ -21,6 +20,7 @@ import {
   UnsupportedPromptPart,
 } from "../errors";
 import { EventBus } from "../events";
+import type { PromptReceipt, UserInput } from "../harness";
 import { ProjectService } from "../project/service";
 import type { HarnessAgentId, Session } from "../types";
 import {

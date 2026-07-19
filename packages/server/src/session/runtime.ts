@@ -8,15 +8,15 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import type {
-  AgentOperationError,
-  SessionEnvelopeBody,
-  SessionEvent,
-} from "@vibest/harness/runtime";
-import { isSessionEvent } from "@vibest/harness/runtime";
 import { Context, Data, Effect, Fiber, Layer, Ref, Scope, Stream } from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
+import {
+  type AgentOperationError,
+  isSessionEvent,
+  type SessionEnvelopeBody,
+  type SessionEvent,
+} from "../harness";
 
 /** The AI-SDK UI chunk type, sourced from the contract to avoid an `ai` dependency. */
 type WireChunk = SessionMessageChunkEvent["chunk"];

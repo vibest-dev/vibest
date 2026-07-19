@@ -13,7 +13,8 @@ import { claudeCodeTools } from "./tools";
  *   • tool output = the structured `tool_use_result`; NO content fallback —
  *     subagent messages omit it, so their output stays undefined.
  *   • tool errors = flattened model-facing content as errorText.
- *   • system/result messages are forwarded whole as `data-*` parts.
+ *   • system/result payloads are NOT forwarded (no `data-*` parts); only the
+ *     start/error/finish lifecycle chunks are derived from them.
  */
 export function createTransform(): (message: SDKMessage) => Generator<ClaudeCodeUIMessageChunk> {
   const dynamicToolCalls = new Map<string, boolean>();
@@ -21,12 +22,7 @@ export function createTransform(): (message: SDKMessage) => Generator<ClaudeCode
   return function* transform(message) {
     switch (message.type) {
       case "system": {
-        if (message.subtype === "init") {
-          yield { type: "start" };
-          yield { type: "data-system/init", data: message };
-        } else if (message.subtype === "compact_boundary") {
-          yield { type: "data-system/compact_boundary", data: message };
-        }
+        if (message.subtype === "init") yield { type: "start" };
         return;
       }
       case "assistant": {
@@ -90,25 +86,6 @@ export function createTransform(): (message: SDKMessage) => Generator<ClaudeCode
       case "result": {
         if (message.subtype !== "success") {
           yield { type: "error", errorText: resultErrorText(message) };
-        }
-        // Emit per-subtype so the discriminated `type`↔`data` pairing holds
-        // without a cast — a template-literal type would widen the union.
-        switch (message.subtype) {
-          case "success":
-            yield { type: "data-result/success", data: message };
-            break;
-          case "error_during_execution":
-            yield { type: "data-result/error_during_execution", data: message };
-            break;
-          case "error_max_budget_usd":
-            yield { type: "data-result/error_max_budget_usd", data: message };
-            break;
-          case "error_max_structured_output_retries":
-            yield { type: "data-result/error_max_structured_output_retries", data: message };
-            break;
-          case "error_max_turns":
-            yield { type: "data-result/error_max_turns", data: message };
-            break;
         }
         yield { type: "finish" };
         return;

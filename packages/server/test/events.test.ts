@@ -31,7 +31,9 @@ layer(EventBusLayer)("EventBus", (it) => {
       yield* bus.publish(started("a", 2));
 
       const items = yield* Fiber.join(collector);
-      const seqs = items.flatMap((item) => (item.type === "event" ? [item.event.seq] : []));
+      const seqs = items.flatMap((item) =>
+        item.type === "event" && "seq" in item.event ? [item.event.seq] : [],
+      );
       NodeAssert.deepStrictEqual(seqs, [1, 2]);
     }),
   );

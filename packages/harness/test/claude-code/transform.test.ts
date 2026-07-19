@@ -22,10 +22,10 @@ const toolResult = (over: Record<string, unknown> = {}, id = "t1"): SDKMessage =
   }) as unknown as SDKMessage;
 
 describe("createTransform", () => {
-  it("emits start + data-system/init for system.init", () => {
+  it("emits start for system.init", () => {
     const transform = createTransform();
     const chunks = [...transform({ type: "system", subtype: "init" } as SDKMessage)];
-    expect(types(chunks)).toEqual(["start", "data-system/init"]);
+    expect(types(chunks)).toEqual(["start"]);
   });
 
   it("tool output is the structured tool_use_result, not the model-facing content", () => {
@@ -80,13 +80,13 @@ describe("createTransform", () => {
     expect(chunks[0]).toMatchObject({ type: "tool-output-error", errorText: "boom" });
   });
 
-  it("result.success emits data-result/success + finish", () => {
+  it("result.success emits finish", () => {
     const transform = createTransform();
     const chunks = [...transform({ type: "result", subtype: "success" } as SDKMessage)];
-    expect(types(chunks)).toEqual(["data-result/success", "finish"]);
+    expect(types(chunks)).toEqual(["finish"]);
   });
 
-  it("result errors emit error + data-result/<subtype> + finish", () => {
+  it("result errors emit error + finish", () => {
     const transform = createTransform();
     const chunks = [
       ...transform({
@@ -95,7 +95,7 @@ describe("createTransform", () => {
         errors: ["too many turns"],
       } as unknown as SDKMessage),
     ];
-    expect(types(chunks)).toEqual(["error", "data-result/error_max_turns", "finish"]);
+    expect(types(chunks)).toEqual(["error", "finish"]);
     expect(chunks[0]).toMatchObject({ errorText: "too many turns" });
   });
 });

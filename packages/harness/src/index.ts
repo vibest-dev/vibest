@@ -1,7 +1,10 @@
-// This package contains AI SDK integrations for various agents.
+// Pure conversion layer for harness agents: wire-protocol types, message
+// transforms, tool schemas, and session-event mapping. No runtime here —
+// session lifecycle, adapters, and transports live in @vibest/server.
 // Import from specific agent implementations:
 // - @vibest/harness/claude-code
 // - @vibest/harness/codex
+// - @vibest/harness/opencode
 // - @vibest/harness/pi
 
 export * from "./schema/standard";
