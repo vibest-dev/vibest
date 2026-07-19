@@ -51,10 +51,10 @@ export function ChatTranscriptView({
 // message updates re-render only the transcript, never its siblings (the
 // composer subscribes narrowly on its own).
 export function ChatTranscript() {
-  const { store, agentProviderId, respondToRequest } = useChatSession();
+  const { store, harnessAgentId, respondToRequest } = useChatSession();
   const snapshot = useStore(store);
   return (
-    <TranscriptRenderProvider agentProviderId={agentProviderId}>
+    <TranscriptRenderProvider harnessAgentId={harnessAgentId}>
       <ChatTranscriptView snapshot={snapshot} onRespond={respondToRequest} />
     </TranscriptRenderProvider>
   );

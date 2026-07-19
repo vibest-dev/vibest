@@ -1,9 +1,9 @@
+import type { HarnessAgentId } from "@vibest/contract";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "@/core/chat/agent-requests";
-import type { AgentProviderId } from "@/core/chat/chat";
 import type { ChatStoreState } from "@/core/chat/chat-state";
 import type { ChatModel } from "@/core/chat/chat-transport";
 import { selectTurnInProgress, useChatHandle } from "@/core/chat/use-chat-handle";
@@ -12,7 +12,7 @@ export type { ChatModel };
 
 export interface ChatSessionValue {
   sessionId: string;
-  agentProviderId: AgentProviderId;
+  harnessAgentId: HarnessAgentId;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatStoreState>;
   prompt: (text: string) => void | Promise<void>;
@@ -48,7 +48,7 @@ export function ChatSessionProvider({
 
   const value: ChatSessionValue = {
     sessionId,
-    agentProviderId: chat.agentProviderId,
+    harnessAgentId: chat.harnessAgentId,
     store: chat.store,
     prompt: (text) => chat.prompt(text, { model }),
     respondToRequest: chat.respondToAgentRequest,
