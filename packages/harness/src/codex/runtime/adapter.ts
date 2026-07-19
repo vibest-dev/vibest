@@ -6,12 +6,14 @@ import {
   applyInitialSessionConfig,
   type HarnessAgentAdapter,
   type HarnessAgentSession,
+  type SessionInfoResult,
   type UserInput,
 } from "../../runtime/adapter";
 import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
+  CodexRpcError,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -281,5 +283,26 @@ export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
           : new AgentOpenError({ harnessAgentId: "codex", cause }),
       ),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+    ),
+  getSessionInfo: (harnessSessionId) =>
+    agent.session.read({ sessionId: harnessSessionId }).pipe(
+      Effect.map((thread): SessionInfoResult => {
+        const title = thread.name ?? thread.preview;
+        return {
+          _tag: "found",
+          info: {
+            ...(title ? { title } : {}),
+            // Codex reports thread timestamps in seconds; callers expect ms.
+            updatedAt: thread.updatedAt * 1000,
+          },
+        };
+      }),
+      // A well-formed "not found" reply means the thread's history is gone;
+      // any other transport failure is a real error the caller degrades.
+      Effect.catch((cause) =>
+        cause instanceof CodexRpcError
+          ? Effect.succeed<SessionInfoResult>({ _tag: "missing" })
+          : Effect.fail(operationError(harnessSessionId, "get-session-info", cause)),
+      ),
     ),
 });

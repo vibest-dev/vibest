@@ -19,6 +19,7 @@ import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
 import { FileSystemServiceLayer } from "../fs";
 import { ProjectModuleLayer } from "../project";
+import { SessionRepositoryLayer } from "../session";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -71,5 +72,6 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   RegistryLayer,
   FileSystemServiceLayer,
   ProjectModuleLayer.pipe(Layer.provide(PathsLayer)),
+  SessionRepositoryLayer.pipe(Layer.provide(PathsLayer)),
   NodeFileSystem.layer,
 );

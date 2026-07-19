@@ -15,6 +15,7 @@ import type { ServerNotification, ServerRequest } from "./protocol";
 import type {
   AskForApproval,
   SandboxPolicy,
+  ThreadReadResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
   TurnStartResponse,
@@ -125,6 +126,14 @@ export interface CodexAgent {
       readonly sessionId: string;
       readonly workspacePath?: string;
     }) => Effect.Effect<{ readonly sessionId: string }, CodexTransportFailure>;
+    /**
+     * Reads a thread's stored metadata (title, recency) straight from the
+     * app-server's history — works for threads that aren't loaded as live
+     * sessions, so persisted sessions can be given live display data.
+     */
+    readonly read: (config: {
+      readonly sessionId: string;
+    }) => Effect.Effect<ThreadReadResponse["thread"], CodexTransportFailure>;
     readonly prompt: (input: {
       readonly sessionId: string;
       readonly text: string;
@@ -554,6 +563,14 @@ export const makeCodexAgentWithDependencies = <R>(
               sandbox: "workspace-write",
             });
             return yield* registerSession(response.thread.id, generation);
+          }),
+        read: (config) =>
+          Effect.gen(function* () {
+            const transport = yield* holder.ensure;
+            const response = yield* transport.request<ThreadReadResponse>("thread/read", {
+              threadId: config.sessionId,
+            });
+            return response.thread;
           }),
         prompt: (input) =>
           Effect.gen(function* () {

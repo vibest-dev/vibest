@@ -5,6 +5,7 @@ import type { FileSystem } from "effect/FileSystem";
 import type { EventBus } from "../events";
 import type { FileSystemService } from "../fs";
 import type { ProjectService } from "../project";
+import type { SessionRepository } from "../session";
 
 /** Services every RPC procedure may `yield*`. */
 export type RpcContext = WithEffectContext<
@@ -14,4 +15,5 @@ export type RpcContext = WithEffectContext<
   | HarnessAgentRegistry
   | ProjectService
   | FileSystemService
+  | SessionRepository
 >;
