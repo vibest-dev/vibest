@@ -1,6 +1,4 @@
 import "@orpc/experimental-effect/extensions/effect";
-import { resolve } from "node:path";
-
 import { implement } from "@orpc/server";
 import { sessionContract } from "@vibest/contract/session";
 import { HarnessAgentSessionService } from "@vibest/harness/runtime";
@@ -15,34 +13,25 @@ import { streamToAsyncGenerator } from "./stream";
 
 const orpc = implement(sessionContract).$context<RpcContext>();
 
-/** The registered project whose folder a session was opened against, if any. */
-const projectForPath = (workspacePath: string) =>
-  Effect.gen(function* () {
-    const projects = yield* ProjectService;
-    const all = yield* projects.list();
-    const target = resolve(workspacePath);
-    return all.find((p) => resolve(p.path) === target);
-  });
-
 export const sessionRouter = orpc.router({
   list: orpc.list.effect(function* ({ input }) {
     const repo = yield* SessionRepository;
     const sessions = yield* HarnessAgentSessionService;
     const records = yield* repo.list(input.projectId);
     // vibest's records are the authoritative list; merge live backend display
-    // data (title/updatedAt) and derive harnessMissing per record. A failed
+    // data (title/updatedAt) and derive transcriptMissing per record. A failed
     // lookup degrades to "unknown" so one bad session can't sink the whole list.
     return yield* Effect.forEach(
       records,
       (record) =>
         Effect.gen(function* () {
-          if (!record.harnessSessionId) return { ...record, harnessMissing: false };
+          if (!record.harnessSessionId) return { ...record, transcriptMissing: false };
           const info = yield* sessions
             .getSessionInfo(record.harnessAgentId, record.harnessSessionId, record.cwd)
             .pipe(Effect.catch(() => Effect.succeed({ _tag: "unsupported" as const })));
           return info._tag === "found"
-            ? { ...record, ...info.info, harnessMissing: false }
-            : { ...record, harnessMissing: info._tag === "missing" };
+            ? { ...record, ...info.info, transcriptMissing: false }
+            : { ...record, transcriptMissing: info._tag === "missing" };
         }),
       { concurrency: "unbounded" },
     );
@@ -54,8 +43,9 @@ export const sessionRouter = orpc.router({
     // Persist a record under its owning project so the session survives restarts
     // and can be listed/resumed. A session opened against a path that isn't a
     // registered project isn't persisted — there's no project to list it under.
-    const project = yield* projectForPath(workspacePath);
-    if (project && result.harnessSessionId) {
+    const projects = yield* ProjectService;
+    const project = yield* projects.findByPath(workspacePath);
+    if (project) {
       const repo = yield* SessionRepository;
       yield* repo.save({
         sessionId: result.sessionId,
@@ -71,18 +61,8 @@ export const sessionRouter = orpc.router({
   }),
   resume: orpc.resume.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;
-    // Adapters resume by backend id. Prefer the caller's harnessSessionId, else
-    // recover it from the persisted record via the session's workspace path.
-    let harnessSessionId = input.harnessSessionId;
-    if (!harnessSessionId && input.workspacePath) {
-      const project = yield* projectForPath(input.workspacePath);
-      if (project) {
-        const repo = yield* SessionRepository;
-        const record = yield* repo.get(project.id, input.sessionId);
-        harnessSessionId = record?.harnessSessionId;
-      }
-    }
-    yield* sessions.resume({ ...input, harnessSessionId });
+    // The caller resumes a listed session, so it already carries the backend id.
+    yield* sessions.resume(input);
   }),
   prompt: orpc.prompt.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;

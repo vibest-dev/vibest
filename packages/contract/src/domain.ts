@@ -363,9 +363,9 @@ export const CreateManagedSessionResultSchema = Schema.Struct({
   sessionId: Schema.String,
   harnessAgentId: HarnessAgentIdSchema,
   // Backend session id (claude-code SDK session / codex threadId). Distinct from
-  // the vibest-internal `sessionId`; used to resume the backend. `optionalKey`
-  // until the runtime is wired to surface it (see SessionRecord below).
-  harnessSessionId: Schema.optionalKey(Schema.String),
+  // the vibest-internal `sessionId`; used to resume the backend. Always present
+  // on a freshly created session — the adapter opens the backend eagerly.
+  harnessSessionId: Schema.String,
 });
 export type CreateManagedSessionResult = typeof CreateManagedSessionResultSchema.Type;
 
@@ -373,9 +373,10 @@ export const ResumeManagedSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
   harnessAgentId: HarnessAgentIdSchema,
   workspacePath: Schema.optionalKey(Schema.String),
-  // The backend id to hand the adapter. When absent, callers fall back to
-  // `sessionId` (legacy behaviour, where the two were the same value).
-  harnessSessionId: Schema.optionalKey(Schema.String),
+  // The backend id to hand the adapter. Required — the caller resumes from a
+  // listed session, which always carries it (a session with no backend id was
+  // never opened and can only be created, not resumed).
+  harnessSessionId: Schema.String,
 });
 export type ResumeManagedSessionInput = typeof ResumeManagedSessionInputSchema.Type;
 
@@ -406,9 +407,9 @@ export type ListSessionsInput = typeof ListSessionsInputSchema.Type;
 
 /**
  * A session list item: the persisted record plus display fields merged live
- * from the backend. `harnessMissing` is derived (backend has no record for
- * `harnessSessionId`) — never persisted. `title`/`updatedAt` are absent until
- * the adapter surfaces session info (phase 2).
+ * from the backend. `transcriptMissing` is derived (the backend no longer has
+ * the transcript behind `harnessSessionId`) — never persisted. `title`/
+ * `updatedAt` are absent until the adapter surfaces session info (phase 2).
  */
 export const SessionSummarySchema = Schema.Struct({
   sessionId: Schema.String,
@@ -420,7 +421,7 @@ export const SessionSummarySchema = Schema.Struct({
   createdAt: Schema.String,
   title: Schema.optionalKey(Schema.String),
   updatedAt: Schema.optionalKey(Schema.Number),
-  harnessMissing: Schema.Boolean,
+  transcriptMissing: Schema.Boolean,
 });
 export type SessionSummary = typeof SessionSummarySchema.Type;
 

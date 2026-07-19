@@ -23,13 +23,13 @@ export const McpRepositoryLayer: Layer.Layer<McpRepository, never, Paths> = Laye
   McpRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
-    const readConfig = () => readJson<RuntimeConfig>(paths.configFile, {});
+    const readConfig = () => readJson<RuntimeConfig>(paths.configStore, {});
     return {
       list: () => readConfig().pipe(Effect.map((config) => config.mcp ?? [])),
       save: (servers) =>
         Effect.gen(function* () {
           const config = yield* readConfig();
-          yield* writeJsonAtomic(paths.configFile, {
+          yield* writeJsonAtomic(paths.configStore, {
             ...config,
             mcp: servers,
           });

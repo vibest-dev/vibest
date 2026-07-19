@@ -1,5 +1,4 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
-import { getSessionInfo } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -400,21 +399,20 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
   getSessionInfo: (harnessSessionId, workspacePath) =>
-    Effect.tryPromise({
-      try: () =>
-        getSessionInfo(harnessSessionId, workspacePath ? { dir: workspacePath } : undefined),
-      catch: (cause) => operationError(harnessSessionId, "get-session-info", cause),
-    }).pipe(
-      Effect.map(
-        (info): SessionInfoResult =>
-          info
-            ? {
-                _tag: "found",
-                // customTitle (user /rename) wins over the auto summary; both fall
-                // back to undefined title if empty.
-                info: { title: info.customTitle ?? info.summary, updatedAt: info.lastModified },
-              }
-            : { _tag: "missing" },
+    agent.session
+      .getSessionInfo(harnessSessionId, workspacePath ? { dir: workspacePath } : undefined)
+      .pipe(
+        Effect.mapError((cause) => operationError(harnessSessionId, "get-session-info", cause)),
+        Effect.map(
+          (info): SessionInfoResult =>
+            info
+              ? {
+                  _tag: "found",
+                  // customTitle (user /rename) wins over the auto summary; both fall
+                  // back to undefined title if empty.
+                  info: { title: info.customTitle ?? info.summary, updatedAt: info.lastModified },
+                }
+              : { _tag: "missing" },
+        ),
       ),
-    ),
 });

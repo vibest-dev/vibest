@@ -16,6 +16,8 @@ export class ProjectService extends Context.Service<
   {
     readonly list: () => Effect.Effect<ReadonlyArray<Project>, StoreReadError>;
     readonly findById: (id: string) => Effect.Effect<Project, StoreReadError | ProjectNotFound>;
+    /** The project registered at a workspace path, if any (paths are resolved). */
+    readonly findByPath: (path: string) => Effect.Effect<Project | undefined, StoreReadError>;
     /** `name` defaults to the folder's basename. */
     readonly create: (input: {
       readonly name?: string;
@@ -44,6 +46,13 @@ export const ProjectServiceLayer: Layer.Layer<ProjectService, never, ProjectRepo
               return yield* Effect.fail(new ProjectNotFound({ projectId: id }));
             }
             return found;
+          }),
+
+        findByPath: (path) =>
+          Effect.gen(function* () {
+            const projects = yield* repo.list();
+            const target = resolvePath(path);
+            return projects.find((p) => resolvePath(p.path) === target);
           }),
 
         create: (input) =>

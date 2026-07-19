@@ -183,7 +183,11 @@ it.effect("tears down a session after its event stream reports a crash", () =>
 it.effect("single-flights resume in owner scope when the first waiter cancels", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
+    const input = {
+      sessionId: "resumed-session",
+      harnessAgentId: "claude-code",
+      harnessSessionId: "resumed-backend",
+    } as const;
     const first = yield* Effect.forkChild(fixture.service.resume(input));
     const second = yield* Effect.forkChild(fixture.service.resume(input));
 
@@ -223,6 +227,7 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
       fixture.service.resume({
         sessionId: created.sessionId,
         harnessAgentId: "claude-code",
+        harnessSessionId: created.harnessSessionId,
       }),
     );
 
@@ -249,7 +254,11 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
 it.effect("closes a session that is still being resumed", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
+    const input = {
+      sessionId: "resumed-session",
+      harnessAgentId: "claude-code",
+      harnessSessionId: "resumed-backend",
+    } as const;
     const resume = yield* Effect.forkChild(fixture.service.resume(input));
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(

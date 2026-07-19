@@ -362,9 +362,8 @@ export const makeHarnessAgentSessionService = (
             mode._tag === "Open"
               ? adapter.open(mode.input)
               : adapter.resume({
-                  // Adapters resume by backend id; fall back to `sessionId` for
-                  // legacy records written before the two were split.
-                  sessionId: mode.input.harnessSessionId ?? mode.input.sessionId,
+                  // Adapters resume by backend id, distinct from our internal id.
+                  sessionId: mode.input.harnessSessionId,
                   workspacePath: mode.input.workspacePath,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));

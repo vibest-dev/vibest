@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import type { SessionRecord } from "@vibest/contract";
 import { Context, Effect, Layer } from "effect";
 
@@ -32,15 +30,17 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
   SessionRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
-    const fileFor = (projectId: string, sessionId: string) =>
-      join(paths.sessionsDir, projectId, `${sessionId}.json`);
 
     return {
-      list: (projectId) => readJsonDir<SessionRecord>(join(paths.sessionsDir, projectId)),
+      list: (projectId) => readJsonDir<SessionRecord>(paths.sessionStoreDir(projectId)),
       get: (projectId, sessionId) =>
-        readJson<SessionRecord | undefined>(fileFor(projectId, sessionId), undefined),
-      save: (record) => writeJsonAtomic(fileFor(record.projectId, record.sessionId), record),
-      remove: (projectId, sessionId) => removeFile(fileFor(projectId, sessionId)),
+        readJson<SessionRecord | undefined>(
+          paths.sessionStoreFile(projectId, sessionId),
+          undefined,
+        ),
+      save: (record) =>
+        writeJsonAtomic(paths.sessionStoreFile(record.projectId, record.sessionId), record),
+      remove: (projectId, sessionId) => removeFile(paths.sessionStoreFile(projectId, sessionId)),
     };
   }),
 );
