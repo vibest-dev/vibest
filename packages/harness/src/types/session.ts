@@ -1,13 +1,7 @@
 export type { SessionSnapshot, SessionStatus } from "@vibest/contract";
 
-export type SessionSummary = {
-  sessionId: string;
-  harnessAgentId: import("@vibest/contract").HarnessAgentId;
-  title?: string;
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+// The session record/summary shape is owned by @vibest/contract
+// (`SessionRecord` / `SessionSummary`); no local placeholder here.
 
 export type UserInput = { text: string };
 export type CreateSessionConfig = { workspacePath: string };

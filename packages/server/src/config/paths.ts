@@ -16,6 +16,8 @@ export class Paths extends Context.Service<
     readonly home: string;
     readonly projectsFile: string;
     readonly configFile: string;
+    /** Root of the per-project session record tree (`storage/sessions`). */
+    readonly sessionsDir: string;
   }
 >()("Paths") {}
 
@@ -23,6 +25,7 @@ const resolve = (home: string) => ({
   home,
   projectsFile: join(home, "storage", "projects.json"),
   configFile: join(home, "config.json"),
+  sessionsDir: join(home, "storage", "sessions"),
 });
 
 /** Point the runtime at an explicit home directory (used in tests). */

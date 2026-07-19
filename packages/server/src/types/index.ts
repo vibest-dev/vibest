@@ -61,13 +61,8 @@ export interface RuntimeConfig {
   readonly mcp?: ReadonlyArray<McpServerConfig>;
 }
 
-/** Session-related placeholder shapes (fields not fully designed yet). */
-export interface SessionSummary {
-  readonly id: string;
-  readonly harnessAgentId: HarnessAgentId;
-  readonly name?: string;
-  readonly archived: boolean;
-}
+/** The persisted session shape lives in @vibest/contract (`SessionRecord`). */
+export type { SessionRecord, SessionSummary } from "@vibest/contract";
 
 /** A session event pushed over the event stream (payload shape is a placeholder). */
 export interface SessionEvent {

@@ -2,7 +2,12 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type { SessionEvent } from "../../event-manifest";
-import type { HarnessAgentAdapter, HarnessAgentSession, UserInput } from "../../runtime/adapter";
+import type {
+  HarnessAgentAdapter,
+  HarnessAgentSession,
+  SessionInfoResult,
+  UserInput,
+} from "../../runtime/adapter";
 import {
   AgentOpenError,
   AgentOperationError,
@@ -227,4 +232,5 @@ export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
       ),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
+  getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
 });

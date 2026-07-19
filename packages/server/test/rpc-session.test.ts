@@ -14,10 +14,13 @@ import {
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { layerPaths } from "../src/config/paths";
 import { EventBusLayer } from "../src/events";
+import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
+import { SessionRepositoryLayer } from "../src/session";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -63,18 +66,32 @@ describe("session router", () => {
       Layer.provide(registryLayer),
       Layer.provide(EventBusLayer),
     );
-    const runtime = ManagedRuntime.make(Layer.merge(EventBusLayer, sessionLayer));
+    // create now persists a session record (and resume can recover the backend
+    // id from it), so the router needs ProjectService + SessionRepository too.
+    const pathsLayer = layerPaths(mkdtempSync(join(tmpdir(), "vibest-home-")));
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(
+        EventBusLayer,
+        sessionLayer,
+        ProjectModuleLayer.pipe(Layer.provide(pathsLayer)),
+        SessionRepositoryLayer.pipe(Layer.provide(pathsLayer)),
+      ),
+    );
     try {
       const context: RpcContext = {
         "effect/context": runtime.runSync(runtime.contextEffect),
       };
       const client = createRouterClient(router, { context });
 
-      const { sessionId } = await client.session.create({
+      const { sessionId, harnessSessionId } = await client.session.create({
         harnessAgentId: "codex",
         workspacePath: "/tmp",
       });
-      expect(sessionId).toBe("th_1");
+      // sessionId is now a vibest-internal id; the backend threadId surfaces as
+      // harnessSessionId.
+      expect(harnessSessionId).toBe("th_1");
+      expect(sessionId).toBeTruthy();
+      expect(sessionId).not.toBe("th_1");
 
       const events = await client.session.events({ sessionId });
       const receipt = await client.session.prompt({

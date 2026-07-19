@@ -2,7 +2,12 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type { SessionEvent } from "../../event-manifest";
-import type { HarnessAgentAdapter, HarnessAgentSession, UserInput } from "../../runtime/adapter";
+import type {
+  HarnessAgentAdapter,
+  HarnessAgentSession,
+  SessionInfoResult,
+  UserInput,
+} from "../../runtime/adapter";
 import {
   AgentOpenError,
   AgentOperationError,
@@ -224,4 +229,7 @@ export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
       ),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
+  // TODO: codex exposes thread title via thread/list|read on the app-server;
+  // surface it here so persisted codex sessions get live display data too.
+  getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
 });

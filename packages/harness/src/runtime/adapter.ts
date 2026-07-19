@@ -49,6 +49,23 @@ export type AvailabilityResult = {
   readonly reason?: string;
 };
 
+/** Live display data for a session, fetched from the backend at list time. */
+export type HarnessSessionInfo = {
+  readonly title?: string;
+  readonly updatedAt?: number;
+};
+
+/**
+ * Result of looking up a persisted session's backend info:
+ * - `found`       — backend still has it; `info` carries display fields
+ * - `missing`     — backend transcript is gone (deleted); not resumable
+ * - `unsupported` — this adapter can't query session info (treat as unknown)
+ */
+export type SessionInfoResult =
+  | { readonly _tag: "found"; readonly info: HarnessSessionInfo }
+  | { readonly _tag: "missing" }
+  | { readonly _tag: "unsupported" };
+
 export interface HarnessAgentSession {
   readonly sessionId: string;
   readonly harnessAgentId: HarnessAgentId;
@@ -86,4 +103,12 @@ export interface HarnessAgentAdapter {
     SessionNotResumable | AgentUnavailable | ExecutableNotFound | AgentOpenError,
     Scope.Scope
   >;
+  /**
+   * Look up live display info for a persisted session by backend id, without
+   * opening it. `workspacePath` (the session's cwd) narrows the backend search.
+   */
+  readonly getSessionInfo: (
+    harnessSessionId: string,
+    workspacePath?: string,
+  ) => Effect.Effect<SessionInfoResult, AgentOperationError>;
 }
