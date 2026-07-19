@@ -149,6 +149,9 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
   // Own userData so its single-instance lock can't collide with a real `dev`.
   const userData = path.join(testInfo.outputPath(), "user-data");
   mkdirSync(userData, { recursive: true });
+  // Own server storage so the developer's real ~/.vibest never leaks in.
+  const vibestHome = path.join(testInfo.outputPath(), "vibest-home");
+  mkdirSync(vibestHome, { recursive: true });
 
   const app = await electron.launch({
     args: [
@@ -160,6 +163,7 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
       NODE_ENV: "development",
       ELECTRON_RENDERER_URL: origin,
       VIBEST_E2E: "1",
+      VIBEST_HOME: vibestHome,
     },
   });
 
