@@ -70,7 +70,6 @@ function makeHarness(overrides: Partial<LocalServerConfig> = {}) {
       PATH: "/login/bin:/usr/bin",
       HTTPS_PROXY: "http://proxy.test:8443",
     }),
-    corsOrigins: ["vibest://app"],
     initialRestartDelayMs: 0,
     maxRestartDelayMs: 0,
     maxFastFailures: 5,

@@ -49,7 +49,6 @@ export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}
         // 0 means "no preference" on the first attempt; afterwards the
         // supervisor pins the port it saw, which we pass as preferred.
         port: port === 0 ? undefined : port,
-        corsOrigins: config.corsOrigins,
         environment,
         autoRespawn: port !== 0,
       }).pipe(

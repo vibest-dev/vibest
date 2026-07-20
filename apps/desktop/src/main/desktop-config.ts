@@ -3,8 +3,6 @@ import { fileURLToPath } from "node:url";
 
 import { Context, Layer } from "effect";
 
-import { APP_ORIGIN } from "./electron/app-protocol";
-
 export class DesktopConfig extends Context.Service<
   DesktopConfig,
   {
@@ -12,7 +10,6 @@ export class DesktopConfig extends Context.Service<
     readonly devUrl: string | undefined;
     readonly serverEntry: string;
     readonly token: string;
-    readonly allowedOrigins: readonly string[];
   }
 >()("desktop/DesktopConfig") {}
 
@@ -44,7 +41,6 @@ export function buildDesktopConfig(inputs: DesktopConfigInputs): DesktopConfig["
     devUrl: inputs.devUrl,
     serverEntry: resolveServerEntry(inputs.isPackaged, inputs.resourcesPath),
     token: inputs.token,
-    allowedOrigins: [APP_ORIGIN, ...(inputs.devUrl ? [new URL(inputs.devUrl).origin] : [])],
   };
 }
 

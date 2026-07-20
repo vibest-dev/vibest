@@ -37,7 +37,6 @@ export type ResolveDaemonOptions = {
   readonly serverArgv: readonly string[];
   /** Preferred port; falls back to an ephemeral one if taken. Default `4000`. */
   readonly port?: number;
-  readonly corsOrigins?: readonly string[];
   /**
    * Base environment for the spawned daemon (default `process.env`). The
    * desktop passes its resolved login-shell environment plus
@@ -72,32 +71,21 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
  * Effect-based orchestration around one deliberately-raw seam: the detached
  * spawn itself (see `spawnDetached`) — everything that sleeps, times out, or
  * can fail lives in Effect so callers get interruption and typed errors.
+ *
+ * There is no origin negotiation here: the daemon's CORS policy is static (the
+ * desktop scheme + loopback are always trusted), so any client attaches to the
+ * one daemon regardless of who started it — no restart-to-widen-CORS.
  */
 export const resolveOrSpawnDaemon = (
   options: ResolveDaemonOptions,
 ): Effect.Effect<DaemonHandle, DaemonLauncherError> =>
   Effect.gen(function* () {
-    const requested = options.corsOrigins ?? [];
     const existing = readRecord(options.home);
 
     if (existing && (yield* daemonAlive(existing))) {
-      // The one daemon must serve every client's origins. If this client needs
-      // origins the running daemon wasn't started with (e.g. the desktop's
-      // app:// origin joining a CLI-started daemon), converge by restarting it
-      // with the union — CORS is fixed at server boot, so a restart is the only
-      // way. This happens at most once per new origin set.
-      const missing = requested.filter((origin) => !existing.corsOrigins.includes(origin));
-      if (missing.length === 0) {
-        // A live daemon makes any tombstone stale (someone started it again).
-        clearTombstone(options.home);
-        return attach(existing, true);
-      }
-      yield* killPid(existing.pid);
-      removeRecord(options.home);
-      return yield* spawnLocked({
-        ...options,
-        corsOrigins: unionOrigins(existing.corsOrigins, requested),
-      });
+      // A live daemon makes any tombstone stale (someone started it again).
+      clearTombstone(options.home);
+      return attach(existing, true);
     }
 
     if (options.autoRespawn === true && hasTombstone(options.home)) {
@@ -117,12 +105,7 @@ export const resolveOrSpawnDaemon = (
       yield* killPid(existing.pid);
       removeRecord(options.home);
     }
-    // Preserve the origins other clients negotiated into the record even across
-    // a crash respawn — a respawn must never narrow the daemon's CORS.
-    return yield* spawnLocked({
-      ...options,
-      corsOrigins: existing ? unionOrigins(existing.corsOrigins, requested) : requested,
-    });
+    return yield* spawnLocked(options);
   });
 
 /** Read the current daemon's status without starting one. */
@@ -166,13 +149,6 @@ const killPid = (pid: number): Effect.Effect<void> =>
     }
     if (pidAlive(pid)) signal(pid, "SIGKILL");
   });
-
-function unionOrigins(
-  recorded: readonly string[],
-  requested: readonly string[],
-): readonly string[] {
-  return [...new Set([...recorded, ...requested])];
-}
 
 function lockPath(home: string): string {
   return path.join(home, "daemon.lock");
@@ -233,9 +209,8 @@ const spawnLocked = (
           continue;
         }
         // Another launcher is spawning right now: wait for its daemon, then
-        // re-enter the full resolve so this caller's own origin requirements
-        // are still enforced against the winner's daemon (origins only grow,
-        // so the recursion converges).
+        // re-enter the full resolve so this caller attaches to the winner's
+        // daemon (which by then is recorded and healthy).
         const winner = yield* waitForRecord(home, timeoutMs);
         if (winner) return yield* resolveOrSpawnDaemon(options);
         continue;
@@ -323,7 +298,6 @@ const spawnDaemon = (
       pid,
       address,
       token,
-      corsOrigins: options.corsOrigins ?? [],
       startedAt: yield* Clock.currentTimeMillis,
     };
     writeRecord(home, record);
@@ -348,11 +322,13 @@ function spawnDetached(options: ResolveDaemonOptions, port: number, token: strin
       detached: true,
       stdio: ["ignore", logFd, logFd],
       env: {
+        // Extra CORS origins (if any) ride the inherited environment's
+        // VIBEST_CORS_ORIGINS — the launcher no longer computes a per-launch
+        // set, since the daemon's policy is otherwise static.
         ...(options.environment ?? process.env),
         VIBEST_HOME: home,
         VIBEST_PORT: String(port),
         VIBEST_AUTH_TOKEN: token,
-        VIBEST_CORS_ORIGINS: (options.corsOrigins ?? []).join(","),
       },
     });
     child.unref();

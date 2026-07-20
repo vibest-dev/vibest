@@ -39,7 +39,6 @@ describe("DaemonServerProcess", () => {
     entry,
     token: "unused-desktop-token",
     environment: { ...process.env, VIBEST_HOME: home },
-    corsOrigins: ["vibest://app"],
   });
 
   it("spawns the shared daemon and reports its endpoint, then attaches on respawn", async () => {

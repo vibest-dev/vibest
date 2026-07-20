@@ -28,7 +28,6 @@ export function makeNodeServerProcess(
           ELECTRON_RUN_AS_NODE: "1",
           VIBEST_AUTH_TOKEN: config.token,
           VIBEST_PORT: String(port),
-          VIBEST_CORS_ORIGINS: config.corsOrigins.join(","),
         },
         stdin: "ignore",
         stdout: "pipe",

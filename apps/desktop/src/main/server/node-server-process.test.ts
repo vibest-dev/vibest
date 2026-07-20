@@ -33,7 +33,6 @@ const config = (entry: string): ServerProcessConfig => ({
     ...process.env,
     HTTPS_PROXY: "http://desktop-proxy.test:8443",
   },
-  corsOrigins: ["vibest://app"],
 });
 
 describe("NodeServerProcess", () => {

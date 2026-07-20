@@ -32,14 +32,14 @@ type DaemonStartInput = {
 // backend that outlives it, so it attaches to the running daemon or spawns one.
 const startDaemon = (input: DaemonStartInput) =>
   Effect.gen(function* () {
-    // Same flag > env > default precedence as `vibest serve`, so
-    // VIBEST_PORT/VIBEST_CORS_ORIGINS behave identically on both paths.
-    const { port, corsOrigins } = resolveServeConfig(input);
+    // Same flag > env > default port precedence as `vibest serve`. CORS is not
+    // resolved here: the daemon's policy is static, and any extra origins are
+    // inherited from the ambient VIBEST_CORS_ORIGINS by the spawned daemon.
+    const { port } = resolveServeConfig(input);
     const handle = yield* resolveOrSpawnDaemon({
       home: resolveVibestHome(),
       serverArgv: serverArgv(),
       port,
-      corsOrigins,
     });
     console.log(
       handle.reused

@@ -16,7 +16,6 @@ const record: DaemonRecord = {
   pid: 4321,
   address: "http://127.0.0.1:41234",
   token: "sekret",
-  corsOrigins: ["vibest://app"],
   startedAt: 1_700_000_000_000,
 };
 
@@ -56,12 +55,6 @@ describe("daemon record", () => {
 
     fs.writeFileSync(recordPath(home), JSON.stringify({ pid: 1 }));
     expect(readRecord(home)).toBeUndefined();
-  });
-
-  it("defaults corsOrigins for records written before the field existed", () => {
-    const { corsOrigins: _dropped, ...legacy } = record;
-    fs.writeFileSync(recordPath(home), JSON.stringify(legacy));
-    expect(readRecord(home)?.corsOrigins).toEqual([]);
   });
 
   it("removeRecord is a no-op when the file is already gone", () => {

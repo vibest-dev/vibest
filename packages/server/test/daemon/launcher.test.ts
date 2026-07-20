@@ -83,54 +83,18 @@ describe("resolveOrSpawnDaemon", () => {
     expect(await Effect.runPromise(stopDaemon(home))).toBe("not-running");
   });
 
-  it("attaches when the requested origins are already covered", async () => {
-    const first = await resolve({
-      home,
-      port: 0,
-      corsOrigins: ["vibest://app", "http://localhost:5173"],
-      readyTimeoutMs: 15_000,
-    });
-
-    const attached = await resolve({ home, port: 0, corsOrigins: ["vibest://app"] });
-    expect(attached.reused).toBe(true);
-    expect(attached.pid).toBe(first.pid);
-  });
-
-  it("restarts the daemon with the origin union when a new origin joins", async () => {
+  it("respawns after a crash that left the record behind", async () => {
     const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
 
-    const second = await resolve({
-      home,
-      port: 0,
-      corsOrigins: ["vibest://app"],
-      readyTimeoutMs: 15_000,
-    });
-    expect(second.reused).toBe(false);
-    expect(second.pid).not.toBe(first.pid);
-    expect(pidAlive(first.pid)).toBe(false);
-    expect(readRecord(home)?.corsOrigins).toEqual(["vibest://app"]);
-  });
-
-  it("preserves the recorded origins across a crash respawn", async () => {
-    const first = await resolve({
-      home,
-      port: 0,
-      corsOrigins: ["vibest://app"],
-      readyTimeoutMs: 15_000,
-    });
-
-    // Simulate a crash: kill the process without stopDaemon, record stays.
+    // Simulate a crash: kill the process without stopDaemon, so the stale
+    // record (pid dead) stays and must be replaced, not attached to.
     process.kill(first.pid, "SIGKILL");
     while (pidAlive(first.pid)) await new Promise((done) => setTimeout(done, 20));
 
-    const second = await resolve({
-      home,
-      port: 0,
-      corsOrigins: ["http://localhost:5173"],
-      readyTimeoutMs: 15_000,
-    });
+    const second = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
     expect(second.reused).toBe(false);
-    expect(readRecord(home)?.corsOrigins).toEqual(["vibest://app", "http://localhost:5173"]);
+    expect(second.pid).not.toBe(first.pid);
+    expect(pidAlive(second.pid)).toBe(true);
   });
 
   it("kills a wedged daemon (pid alive, health failing) before respawning", async () => {
@@ -141,7 +105,6 @@ describe("resolveOrSpawnDaemon", () => {
       pid: wedgedPid,
       address: "http://127.0.0.1:1",
       token: "stale",
-      corsOrigins: [],
       startedAt: 0,
     });
 

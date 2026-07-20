@@ -45,7 +45,6 @@ export type ServerProcessConfig = {
   readonly entry: string;
   readonly token: string;
   readonly environment: NodeJS.ProcessEnv;
-  readonly corsOrigins: readonly string[];
 };
 
 export type ServerProcessExit = {
@@ -140,7 +139,6 @@ export function makeLocalServer(
         entry: config.entry,
         token: config.token,
         environment: yield* config.environment,
-        corsOrigins: config.corsOrigins,
       };
       let first = true;
       let pinnedPort = 0;

@@ -22,7 +22,6 @@ export const LocalServerLive = Layer.effect(
         entry: config.serverEntry,
         token: config.token,
         environment,
-        corsOrigins: config.allowedOrigins,
       },
       makeDaemonServerProcess(),
     );

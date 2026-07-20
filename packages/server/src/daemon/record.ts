@@ -14,12 +14,6 @@ export type DaemonRecord = {
   readonly address: string;
   /** The auth token the daemon was started with; front-doors read it from here. */
   readonly token: string;
-  /**
-   * Origins the daemon was started to allow. Recorded so an attaching client
-   * that needs more (e.g. the desktop's app:// origin) can detect the gap and
-   * have the launcher restart the daemon with the union.
-   */
-  readonly corsOrigins: readonly string[];
   /** Epoch millis the record was written. */
   readonly startedAt: number;
 };
@@ -48,9 +42,6 @@ export function readRecord(home: string): DaemonRecord | undefined {
         pid: parsed.pid,
         address: parsed.address,
         token: parsed.token,
-        corsOrigins: Array.isArray(parsed.corsOrigins)
-          ? parsed.corsOrigins.filter((origin): origin is string => typeof origin === "string")
-          : [],
         startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : 0,
       };
     }

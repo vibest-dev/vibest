@@ -1,3 +1,4 @@
+import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -85,10 +86,34 @@ describe("createServer CORS", () => {
   });
 });
 
+describe("createServer anti DNS-rebinding", () => {
+  it("refuses a request whose Host is not loopback, even /api/health", async () => {
+    await start({});
+    const { port } = server!.address() as AddressInfo;
+    const status = await new Promise<number>((resolve) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path: "/api/health", headers: { host: "evil.example" } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on("error", () => resolve(0));
+      req.end();
+    });
+    expect(status).toBe(403);
+  });
+});
+
 describe("createServer WebSocket ticket", () => {
-  async function connect(base: string, query: string, path = "/ws/rpc"): Promise<number> {
+  async function connect(
+    base: string,
+    query: string,
+    path = "/ws/rpc",
+    options?: WebSocket.ClientOptions,
+  ): Promise<number> {
     const url = `${base.replace("http://", "ws://")}${path}${query}`;
-    const socket = new WebSocket(url, "vibest");
+    const socket = new WebSocket(url, "vibest", options);
     return await new Promise<number>((resolve) => {
       socket.on("open", () => {
         socket.close();
@@ -139,5 +164,10 @@ describe("createServer WebSocket ticket", () => {
   it("accepts an upgrade with no ticket when no token is configured (browser mode)", async () => {
     const base = await start({});
     expect(await connect(base, "")).toBe(200);
+  });
+
+  it("rejects a browser Origin outside the allowlist, even in browser mode", async () => {
+    const base = await start({});
+    expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
   });
 });

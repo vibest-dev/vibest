@@ -10,7 +10,7 @@ import { WebSocketServer } from "ws";
 
 import { createRpcRuntime, createWsRPCHandler } from "../rpc";
 import { bearerToken, createTicketStore, tokensMatch } from "./auth";
-import { corsHeaders } from "./cors";
+import { corsHeaders, isAllowedOrigin, isLoopbackHost } from "./cors";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -27,7 +27,11 @@ export type CreateServerOptions = {
    * valid single-use `?ticket=`. Unset (browser mode) disables both.
    */
   authToken?: string | undefined;
-  /** Origins permitted to make cross-origin requests. Empty = same-origin only. */
+  /**
+   * Extra cross-origin allowlist entries on top of the built-in trusted set
+   * (the desktop scheme + loopback). For a future hosted web app; unset in the
+   * common case, where the static policy already covers every real client.
+   */
   corsOrigins?: readonly string[] | undefined;
 };
 
@@ -72,6 +76,15 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     try {
+      // Anti DNS-rebinding: the server binds loopback, so a request whose Host
+      // is not loopback comes from an attacker page whose domain rebound to
+      // 127.0.0.1 — CORS would not stop it, this does.
+      if (!isLoopbackHost(req.headers.host)) {
+        res.statusCode = 403;
+        res.end("Forbidden");
+        return;
+      }
+
       const headers = corsHeaders(req.headers.origin, corsOrigins);
       if (headers) {
         for (const [name, value] of Object.entries(headers)) {
@@ -176,6 +189,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
     if (requestUrl.pathname !== "/ws/rpc") {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    // CORS never guards WebSockets, so the upgrade repeats the HTTP checks:
+    // reject a rebinding Host and any browser Origin outside the allowlist.
+    // A native client (no Origin) still passes, gated only by the ticket below.
+    const origin = req.headers.origin;
+    if (
+      !isLoopbackHost(req.headers.host) ||
+      (origin !== undefined && !isAllowedOrigin(origin, corsOrigins))
+    ) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }

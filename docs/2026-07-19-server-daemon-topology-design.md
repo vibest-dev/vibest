@@ -252,11 +252,15 @@ _additional plane_, added when wanted, with no rework of the current work.
    is now daemon-backed (`makeDaemonServerProcess`) — attach-or-spawn through the
    shared launcher, exit detected by polling pid + health (a dead daemon is
    re-spawned by the supervisor loop), and the renderer connection always serves the
-   latest port/token since a daemon respawn mints fresh ones. CORS converges at the
-   launcher: `daemon.pid` records the origins the daemon was started with, and an
-   attaching client needing more (the desktop's app:// origin joining a CLI-started
-   daemon) restarts it once with the union (preserved across crash respawns too).
-   Consequence, as designed: **the daemon survives quitting the desktop app.**
+   latest port/token since a daemon respawn mints fresh ones. CORS needs no
+   convergence: the daemon's origin policy is **static** (the desktop scheme +
+   loopback are always trusted; extra origins ride ambient `VIBEST_CORS_ORIGINS`),
+   so any client attaches to the one daemon regardless of who started it — the
+   old record-origins-and-restart-with-the-union dance is gone. Defense-in-depth
+   beyond CORS (which does not guard WebSockets): the WS upgrade repeats the
+   origin check, and every request is refused unless its Host is loopback
+   (anti DNS-rebinding). Consequence, as designed: **the daemon survives quitting
+   the desktop app.**
    The launcher is Effect-based orchestration (typed `DaemonLaunchError` /
    `DaemonStoppedError` in the error channel, `Effect.sleep`/`Clock` polling,
    interruption-safe lock release via `ensuring`) around one deliberately-raw
@@ -274,7 +278,7 @@ _additional plane_, added when wanted, with no rework of the current work.
 
    **Open issue — first-spawner environment/runtime freeze.** The daemon inherits
    the environment (and executable: Electron-as-node vs node) of whichever client
-   spawned it first; attaching clients never converge it, unlike CORS origins. A
+   spawned it first; attaching clients never converge it. A
    CLI-spawned daemon from an env-poor shell bypasses the desktop's login-shell
    resolution (proxy vars — the known silent-hang failure mode), and a
    desktop-spawned daemon runs under the app bundle's binary, which an app
