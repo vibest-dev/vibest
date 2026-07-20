@@ -1,12 +1,5 @@
 import type { InferUIMessageChunk, UIMessage } from "ai";
 
-import type {
-  ThreadItem,
-  ThreadStartedNotification,
-  ThreadTokenUsage,
-  TurnCompletedNotification,
-  TurnError,
-} from "./protocol/v2";
 import type { CodexTools } from "./tools";
 
 export type CodexMetadata = {
@@ -14,22 +7,10 @@ export type CodexMetadata = {
   sessionId: string;
 };
 
-type Item<T extends ThreadItem["type"]> = Extract<ThreadItem, { type: T }>;
-
-// `data-*` parts carry the WHOLE payload verbatim (mirrors claude-code/ui-message.ts).
-export type CodexDataTypes = {
-  "thread/started": ThreadStartedNotification;
-  "turn/completed": TurnCompletedNotification;
-  "turn/error": TurnError;
-  "thread/tokenUsage": ThreadTokenUsage;
-  plan: Item<"plan">;
-  hookPrompt: Item<"hookPrompt">;
-  "review/entered": Item<"enteredReviewMode">;
-  "review/exited": Item<"exitedReviewMode">;
-  compaction: Item<"contextCompaction">;
-  /** History replay only — never emitted by the live transform. */
-  userMessage: Item<"userMessage">;
-};
+// No `data-*` parts (mirrors claude-code/ui-message.ts) — turn/thread payloads
+// and non-streamed items (plan/hookPrompt/review/compaction/…) stay off the
+// chunk track until a data part earns its keep.
+export type CodexDataTypes = Record<never, never>;
 
 export type CodexUIMessage = UIMessage<CodexMetadata, CodexDataTypes, CodexTools>;
 export type CodexUIMessageChunk = InferUIMessageChunk<CodexUIMessage>;

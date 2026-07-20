@@ -1,4 +1,4 @@
-import { tool, type InferUITools, type ToolSet } from "ai";
+import { tool, type InferUITools, type ToolSet, type UIToolInvocation } from "ai";
 import { z } from "zod";
 
 import type { ThreadItem } from "./protocol/v2";
@@ -56,3 +56,10 @@ export const codexTools = {
 } satisfies ToolSet;
 
 export type CodexTools = InferUITools<typeof codexTools>;
+
+export type CommandExecutionUIToolInvocation = UIToolInvocation<typeof commandExecution>;
+export type FileChangeUIToolInvocation = UIToolInvocation<typeof fileChange>;
+export type WebSearchUIToolInvocation = UIToolInvocation<typeof webSearch>;
+export type CollabAgentToolCallUIToolInvocation = UIToolInvocation<typeof collabAgentToolCall>;
+export type ImageGenerationUIToolInvocation = UIToolInvocation<typeof imageGeneration>;
+export type ImageViewUIToolInvocation = UIToolInvocation<typeof imageView>;

@@ -17,3 +17,5 @@ export const projectRouter = orpc.router({
     return yield* projects.create(input);
   }),
 });
+
+export type ProjectRouter = typeof projectRouter;

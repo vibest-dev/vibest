@@ -7,6 +7,22 @@ export const toStandardSchema = <S extends Schema.ConstraintDecoder<unknown>>(sc
 export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi"]);
 export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
 
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+export const SessionRefSchema = Schema.Struct({
+  projectId: Schema.String.check(Schema.isUUID()),
+  harnessAgentId: HarnessAgentIdSchema,
+  // Server-generated, opaque to clients; unique within a project.
+  sessionId: Schema.NonEmptyString,
+});
+export type SessionRef = typeof SessionRefSchema.Type;
+
+// ---------------------------------------------------------------------------
+// Approval model (agent requests / responses)
+// ---------------------------------------------------------------------------
+
 export const AgentGrantSchema = Schema.Struct({ type: Schema.Literal("session") });
 export type AgentGrant = typeof AgentGrantSchema.Type;
 
@@ -104,23 +120,9 @@ export const AgentResponseSchema = Schema.Union([
 ]);
 export type AgentResponse = typeof AgentResponseSchema.Type;
 
-export interface EventDef<
-  T extends string = string,
-  S extends Schema.Struct<Schema.Struct.Fields> = Schema.Struct<Schema.Struct.Fields>,
-> {
-  readonly type: T;
-  readonly schema: S;
-}
-
-export type EventValue<D extends EventDef> =
-  D extends EventDef<infer T, infer S> ? { readonly type: T } & S["Type"] : never;
-
-export function defineEvent<const T extends string, const F extends Schema.Struct.Fields>(def: {
-  readonly type: T;
-  readonly schema: F;
-}): EventDef<T, Schema.Struct<F>> {
-  return { type: def.type, schema: Schema.Struct(def.schema) };
-}
+// ---------------------------------------------------------------------------
+// Turn outcome
+// ---------------------------------------------------------------------------
 
 export const TokenUsageSchema = Schema.Struct({
   inputTokens: Schema.Number,
@@ -148,122 +150,149 @@ export const TurnErrorSchema = Schema.Struct({
 });
 export type TurnError = typeof TurnErrorSchema.Type;
 
-const sid = { sessionId: Schema.String };
-export const SessionTurnStarted = defineEvent({
-  type: "session.turn.started",
-  schema: { ...sid, turnId: Schema.String },
-});
-export const SessionTurnEnded = defineEvent({
-  type: "session.turn.ended",
-  schema: {
-    ...sid,
-    turnId: Schema.String,
-    outcome: Schema.Literals(["completed", "failed", "canceled"]),
-    usage: Schema.optionalKey(TokenUsageSchema),
-    error: Schema.optionalKey(TurnErrorSchema),
-  },
-});
-export const SessionRequestAsked = defineEvent({
-  type: "session.request.asked",
-  schema: { ...sid, request: AgentRequestSchema },
-});
-export const SessionRequestReplied = defineEvent({
-  type: "session.request.replied",
-  schema: { ...sid, requestId: Schema.String },
-});
-export const SessionRequestRejected = defineEvent({
-  type: "session.request.rejected",
-  schema: { ...sid, requestId: Schema.String, reason: Schema.optionalKey(Schema.String) },
-});
-export const SessionCrashed = defineEvent({
-  type: "session.crashed",
-  schema: { ...sid, reason: Schema.String },
-});
-export const SessionCreated = defineEvent({
-  type: "session.created",
-  schema: { sessionId: Schema.String, harnessAgentId: HarnessAgentIdSchema },
-});
-export const SessionUpdated = defineEvent({
-  type: "session.updated",
-  schema: { sessionId: Schema.String },
-});
-export const SessionDeleted = defineEvent({
-  type: "session.deleted",
-  schema: { sessionId: Schema.String },
-});
-export const SessionRenamed = defineEvent({
-  type: "session.renamed",
-  schema: { sessionId: Schema.String, name: Schema.String },
-});
-export const ProjectUpdated = defineEvent({
-  type: "project.updated",
-  schema: { projectId: Schema.String },
-});
-export const PtyCreated = defineEvent({ type: "pty.created", schema: { ptyId: Schema.String } });
-export const PtyUpdated = defineEvent({ type: "pty.updated", schema: { ptyId: Schema.String } });
-export const PtyExited = defineEvent({
-  type: "pty.exited",
-  schema: { ptyId: Schema.String, exitCode: Schema.optionalKey(Schema.Number) },
-});
-export const ProviderUpdated = defineEvent({
-  type: "provider.updated",
-  schema: { providerId: Schema.String },
-});
-export const McpUpdated = defineEvent({
-  type: "mcp.updated",
-  schema: { serverId: Schema.String },
-});
-export const ServerConnected = defineEvent({ type: "server.connected", schema: {} });
-export const ServerDisconnected = defineEvent({ type: "server.disconnected", schema: {} });
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
 
-export const SessionEventDefs = [
-  SessionTurnStarted,
-  SessionTurnEnded,
-  SessionRequestAsked,
-  SessionRequestReplied,
-  SessionRequestRejected,
-  SessionCrashed,
+export const SessionPhaseSchema = Schema.Literals([
+  "idle",
+  "running",
+  "requires_action",
+  "crashed",
+]);
+export type SessionPhase = typeof SessionPhaseSchema.Type;
+
+export const SessionStatusSchema = Schema.Struct({
+  phase: SessionPhaseSchema,
+  activeTurnId: Schema.optionalKey(Schema.String),
+});
+export type SessionStatus = typeof SessionStatusSchema.Type;
+
+// ---------------------------------------------------------------------------
+// Events
+//
+// Session-scoped events carry `seq`: contiguous per session, stamped by the
+// SessionRuntime, starting at 1. Collection events are unnumbered — they are
+// invalidation signals recovered via list methods, never replayed. Events are
+// TypeScript types, not Schemas: they are produced by the server and never
+// validated as RPC input.
+// ---------------------------------------------------------------------------
+
+export const SessionScopedEventTypes = [
+  "session.message.chunk",
+  "session.turn.started",
+  "session.turn.ended",
+  "session.request.asked",
+  "session.request.replied",
+  "session.request.rejected",
+  "session.crashed",
 ] as const;
-export type SessionEvent = EventValue<(typeof SessionEventDefs)[number]>;
+export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
 
-export const GlobalEventDefs = [
-  SessionCreated,
-  SessionUpdated,
-  SessionDeleted,
-  SessionRenamed,
-  ProjectUpdated,
-  PtyCreated,
-  PtyUpdated,
-  PtyExited,
-  ProviderUpdated,
-  McpUpdated,
-  ServerConnected,
-  ServerDisconnected,
+export const CollectionEventTypes = [
+  "session.created",
+  "session.deleted",
+  "session.renamed",
 ] as const;
-export type GlobalEvent = EventValue<(typeof GlobalEventDefs)[number]>;
+export type CollectionEventType = (typeof CollectionEventTypes)[number];
 
-export type SessionEnvelopeBody = UIMessageChunk | SessionEvent;
-export type SessionEnvelope = {
-  readonly harnessAgentId: HarnessAgentId;
-  readonly sessionId: string;
-  readonly seq: number;
-  readonly body: SessionEnvelopeBody;
+export type SessionScopedEventBody =
+  | {
+      readonly type: "session.message.chunk";
+      readonly turnId: string;
+      readonly chunk: UIMessageChunk;
+    }
+  | { readonly type: "session.turn.started"; readonly turnId: string }
+  | {
+      readonly type: "session.turn.ended";
+      readonly turnId: string;
+      readonly outcome: "completed" | "failed" | "canceled";
+      readonly usage?: TokenUsage;
+      readonly error?: TurnError;
+    }
+  | { readonly type: "session.request.asked"; readonly request: AgentRequest }
+  | { readonly type: "session.request.replied"; readonly requestId: string }
+  | {
+      readonly type: "session.request.rejected";
+      readonly requestId: string;
+      readonly reason?: string;
+    }
+  | { readonly type: "session.crashed"; readonly reason: string };
+
+/** A session-scoped event before the SessionRuntime stamps its `seq`. */
+export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
+
+export type SessionScopedEvent = { readonly seq: number } & SessionScopedEventDraft;
+
+export type CollectionEvent = { readonly ref: SessionRef } & (
+  | { readonly type: "session.created" }
+  | { readonly type: "session.deleted" }
+  | { readonly type: "session.renamed"; readonly name: string }
+);
+
+export type ServerEvent = SessionScopedEvent | CollectionEvent;
+
+export type SessionMessageChunkEvent = Extract<
+  SessionScopedEvent,
+  { type: "session.message.chunk" }
+>;
+
+const collectionEventTypes = new Set<string>(CollectionEventTypes);
+
+export const isSessionScopedEvent = (event: ServerEvent): event is SessionScopedEvent =>
+  !collectionEventTypes.has(event.type);
+
+// ---------------------------------------------------------------------------
+// Subscription
+// ---------------------------------------------------------------------------
+
+export const SubscriptionScopeSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("session"), ref: SessionRefSchema }),
+  // Firehose: every event of every session plus collection events.
+  Schema.Struct({ kind: Schema.Literal("global") }),
+]);
+export type SubscriptionScope = typeof SubscriptionScopeSchema.Type;
+
+export const SubscribeInputSchema = Schema.Struct({ scope: SubscriptionScopeSchema });
+export type SubscribeInput = typeof SubscribeInputSchema.Type;
+
+export const SubscriptionClosedReasonSchema = Schema.Literals([
+  "session_closed",
+  "session_deleted",
+  "stream_replaced",
+  "slow_consumer",
+  "server_shutdown",
+  "internal_error",
+]);
+export type SubscriptionClosedReason = typeof SubscriptionClosedReasonSchema.Type;
+
+export type SubscribeStreamEvent =
+  | { readonly type: "event"; readonly event: ServerEvent }
+  | { readonly type: "closed"; readonly reason: SubscriptionClosedReason };
+
+/**
+ * Client-side reducer position; never sent on the wire. Only meaningful while
+ * the renderer still holds the reducer state merged up to `lastAppliedSeq` of
+ * `turnId` — recovery re-reads `getSnapshot` and replays `activeTurn.chunks`
+ * with `seq > lastAppliedSeq`.
+ */
+export type StreamingCursor = {
+  readonly turnId: string;
+  readonly lastAppliedSeq: number;
 };
-export type SessionEnvelopeDraft = Omit<SessionEnvelope, "seq">;
 
-export type SessionStatus = {
-  status: "initializing" | "running" | "closed" | "crashed";
-  isBusy: boolean;
-  needsAttention: boolean;
-};
+// ---------------------------------------------------------------------------
+// Runtime snapshot
+// ---------------------------------------------------------------------------
 
-export type SessionSnapshot = {
-  history: UIMessage[];
-  activeTurn: { turnId: string; chunks: SessionEnvelope[]; complete: boolean } | null;
-  pendingRequests: AgentRequest[];
-  cursor: number;
-  degraded: boolean;
-  bootId: string;
+export type ActiveTurnSnapshot = {
+  readonly turnId: string;
+  // null until the turn's first `start` chunk announces the message id.
+  readonly messageId: string | null;
+  readonly chunks: ReadonlyArray<SessionMessageChunkEvent>;
+  // A finished turn's buffer is retained (complete: true) until the next turn
+  // starts, so recovery can replay a tail that ended mid-disconnect.
+  readonly complete: boolean;
 };
 
 // A permission preset the user can pick for a session. `id` is the harness's
@@ -308,23 +337,26 @@ export const HarnessNegotiationSchema = Schema.Struct({
 });
 export type HarnessNegotiation = typeof HarnessNegotiationSchema.Type;
 
-// `model` / `permissionMode` are session-scoped config the user picks at create
-// time and changes mid-session via the dedicated setModel / setPermissionMode
-// calls — never carried on a prompt turn.
-export const CreateSessionInputSchema = Schema.Struct({
-  workspacePath: Schema.String,
-  sessionId: Schema.optionalKey(Schema.String),
-  model: Schema.optionalKey(Schema.String),
-  // Outward permission-mode id from the session's harness capabilities.
-  permissionMode: Schema.optionalKey(Schema.String),
-});
-export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
+export type SessionRuntimeSnapshot = {
+  readonly ref: SessionRef;
+  readonly status: SessionStatus;
+  readonly pendingRequests: ReadonlyArray<AgentRequest>;
+  readonly activeTurn: ActiveTurnSnapshot | null;
+  // Last session-scoped seq folded into this snapshot; 0 before any event.
+  readonly cursor: number;
+};
 
-export const ResumeSessionInputSchema = Schema.Struct({
-  sessionId: Schema.String,
-  workspacePath: Schema.optionalKey(Schema.String),
-});
-export type ResumeSessionInput = typeof ResumeSessionInputSchema.Type;
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+export type SessionMessages = {
+  readonly messages: ReadonlyArray<UIMessage>;
+};
+
+// ---------------------------------------------------------------------------
+// Prompt
+// ---------------------------------------------------------------------------
 
 export const InspectorTargetSchema = Schema.Struct({
   file: Schema.String,
@@ -333,26 +365,38 @@ export const InspectorTargetSchema = Schema.Struct({
 });
 export type InspectorTarget = typeof InspectorTargetSchema.Type;
 
-export const UserInputPartSchema = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+export const PromptPartSchema = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.NonEmptyString }),
+  // Reserved wire shape: servers reject file parts with UNSUPPORTED until an
+  // agent capability lands. Never silently dropped.
+  Schema.Struct({
+    type: Schema.Literal("file"),
+    mediaType: Schema.String,
+    url: Schema.String,
+    filename: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({
     type: Schema.Literal("data-inspector"),
     data: Schema.Array(InspectorTargetSchema),
   }),
 ]);
-export type UserInputPart = typeof UserInputPartSchema.Type;
+export type PromptPart = typeof PromptPartSchema.Type;
 
-export const UserInputSchema = Schema.Struct({
-  parts: Schema.Array(UserInputPartSchema),
+export const PromptInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
+  // Per-prompt model selection is a vibest addition not in the original design;
+  // it stays until session-scoped setModel fully replaces it.
+  model: Schema.optionalKey(Schema.String),
 });
-export type UserInput = typeof UserInputSchema.Type;
+export type PromptInput = typeof PromptInputSchema.Type;
 
-export const PromptReceiptSchema = Schema.Struct({
-  turnId: Schema.String,
-  cursor: Schema.Number,
-  started: Schema.Boolean,
-});
-export type PromptReceipt = typeof PromptReceiptSchema.Type;
+export const PromptOutputSchema = Schema.Struct({ turnId: Schema.String });
+export type PromptOutput = typeof PromptOutputSchema.Type;
+
+// ---------------------------------------------------------------------------
+// Session capabilities (unchanged; setModel/config remains out of scope)
+// ---------------------------------------------------------------------------
 
 export const SessionCapabilitiesSchema = Schema.Struct({
   models: Schema.optionalKey(
@@ -371,6 +415,10 @@ export const SessionCapabilitiesSchema = Schema.Struct({
   supportsPermissions: Schema.Boolean,
 });
 export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;
+
+// ---------------------------------------------------------------------------
+// Project
+// ---------------------------------------------------------------------------
 
 export const ProjectSchema = Schema.Struct({
   id: Schema.String,
@@ -400,47 +448,110 @@ export const BrowseResultSchema = Schema.Struct({
   directories: Schema.Array(DirectoryEntrySchema),
 });
 
-export const CreateManagedSessionInputSchema = Schema.Struct({
+// ---------------------------------------------------------------------------
+// Lifecycle method inputs / outputs
+// ---------------------------------------------------------------------------
+
+// `model` / `permissionMode` are session-scoped config the user picks at create
+// time and changes mid-session via the dedicated setModel / setPermissionMode
+// calls — never carried on a prompt turn.
+export const CreateSessionInputSchema = Schema.Struct({
+  projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  workspacePath: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.String),
   // Outward permission-mode id from the session's harness capabilities.
   permissionMode: Schema.optionalKey(Schema.String),
 });
-export type CreateManagedSessionInput = typeof CreateManagedSessionInputSchema.Type;
+export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
-export const CreateManagedSessionResultSchema = Schema.Struct({
-  sessionId: Schema.String,
-  harnessAgentId: HarnessAgentIdSchema,
-});
-export type CreateManagedSessionResult = typeof CreateManagedSessionResultSchema.Type;
+export const ResumeSessionInputSchema = Schema.Struct({ ref: SessionRefSchema });
+export type ResumeSessionInput = typeof ResumeSessionInputSchema.Type;
 
-export const ResumeManagedSessionInputSchema = Schema.Struct({
-  sessionId: Schema.String,
-  harnessAgentId: HarnessAgentIdSchema,
-  workspacePath: Schema.optionalKey(Schema.String),
+export const ListSessionsInputSchema = Schema.Struct({
+  projectId: Schema.String.check(Schema.isUUID()),
 });
-export type ResumeManagedSessionInput = typeof ResumeManagedSessionInputSchema.Type;
+export type ListSessionsInput = typeof ListSessionsInputSchema.Type;
 
-export const SessionIdInputSchema = Schema.Struct({ sessionId: Schema.String });
-export const PromptSessionInputSchema = Schema.Struct({
-  sessionId: Schema.String,
-  input: UserInputSchema,
+export type SessionSummary = {
+  readonly projectId: string;
+  readonly harnessAgentId: HarnessAgentId;
+  readonly sessionId: string;
+  readonly title?: string;
+  readonly createdAt: string;
+  readonly updatedAt?: string;
+  readonly historyAvailable: boolean;
+  readonly status?: SessionStatus;
+};
+
+export type ListSessionsOutput = {
+  readonly sessions: ReadonlyArray<SessionSummary>;
+};
+
+export const RenameSessionInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  name: Schema.NonEmptyString,
 });
+export type RenameSessionInput = typeof RenameSessionInputSchema.Type;
+
+export const RefInputSchema = Schema.Struct({ ref: SessionRefSchema });
+export type RefInput = typeof RefInputSchema.Type;
+
+// The server sessionId is a globally-unique uuid, so projectId + harnessAgentId
+// are recoverable from it alone. Clients that only hold a sessionId (a
+// bookmarked/reloaded URL) resolve the full SessionRef through this.
+export const ResolveRefInputSchema = Schema.Struct({
+  sessionId: Schema.String.check(Schema.isUUID()),
+});
+export type ResolveRefInput = typeof ResolveRefInputSchema.Type;
+
+// Session-scoped config setters; `model` / `permissionMode` use the harness's
+// outward vocabulary (see HarnessAgentCapabilities).
 export const SetSessionModelInputSchema = Schema.Struct({
-  sessionId: Schema.String,
+  ref: SessionRefSchema,
   model: Schema.String,
 });
+export type SetSessionModelInput = typeof SetSessionModelInputSchema.Type;
+
 export const SetSessionPermissionModeInputSchema = Schema.Struct({
-  sessionId: Schema.String,
+  ref: SessionRefSchema,
   permissionMode: Schema.String,
 });
+export type SetSessionPermissionModeInput = typeof SetSessionPermissionModeInputSchema.Type;
+
 export const RespondToAgentRequestInputSchema = Schema.Struct({
-  sessionId: Schema.String,
+  ref: SessionRefSchema,
   requestId: Schema.String,
   response: AgentResponseSchema,
 });
-export const SessionEventsInputSchema = Schema.Struct({
-  sessionId: Schema.String,
-  after: Schema.optionalKey(Schema.Number),
-});
+export type RespondToAgentRequestInput = typeof RespondToAgentRequestInputSchema.Type;
+
+// ---------------------------------------------------------------------------
+// Errors
+//
+// Shared oRPC error map. New-contract procedures attach it with
+// `oc.errors(serverErrors)`; clients branch on the error code, never on the
+// message.
+// ---------------------------------------------------------------------------
+
+export const ServerErrorCodes = [
+  "INVALID_ARGUMENT",
+  "FORBIDDEN",
+  "NOT_FOUND",
+  "SESSION_NOT_ACTIVE",
+  "SESSION_CRASHED",
+  "CONFLICT",
+  "UNSUPPORTED",
+  "INTERNAL",
+] as const;
+export type ServerErrorCode = (typeof ServerErrorCodes)[number];
+
+export const serverErrors = {
+  INVALID_ARGUMENT: {},
+  FORBIDDEN: {},
+  NOT_FOUND: {},
+  SESSION_NOT_ACTIVE: {},
+  SESSION_CRASHED: {},
+  CONFLICT: {},
+  UNSUPPORTED: {},
+  INTERNAL: {},
+} as const;

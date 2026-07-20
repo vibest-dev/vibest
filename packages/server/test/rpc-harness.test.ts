@@ -1,15 +1,12 @@
-import { createRouterClient } from "@orpc/server";
-import {
-  HarnessAgentRegistryLayer,
-  HarnessAgentSessionServiceLayer,
-  type HarnessAgentAdapter,
-} from "@vibest/harness/runtime";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { EventBusLayer } from "../src/events";
-import type { RpcContext } from "../src/rpc/context";
-import { router } from "../src/rpc/router";
+import type { HarnessAgentAdapter } from "../src/harness";
+import { makeRpcTestHarness } from "./rpc-harness";
 
 // A negotiation-only adapter: capabilities/availability/descriptor are declared,
 // and open/resume die because negotiate never opens a session.
@@ -32,11 +29,12 @@ const fakeAdapter = (over: {
   ),
   open: () => Effect.die("negotiate must not open a session"),
   resume: () => Effect.die("negotiate must not resume a session"),
+  getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
 });
 
 describe("harness router", () => {
   it("negotiates every harness's availability and capabilities in one call", async () => {
-    const registryLayer = HarnessAgentRegistryLayer([
+    const adapters: ReadonlyArray<HarnessAgentAdapter> = [
       fakeAdapter({
         id: "claude-code",
         name: "Claude Code",
@@ -60,16 +58,10 @@ describe("harness router", () => {
         ],
       }),
       fakeAdapter({ id: "pi", name: "Pi", available: true }),
-    ]);
-    const sessionLayer = HarnessAgentSessionServiceLayer.pipe(
-      Layer.provide(registryLayer),
-      Layer.provide(EventBusLayer),
-    );
-    const runtime = ManagedRuntime.make(Layer.mergeAll(EventBusLayer, sessionLayer, registryLayer));
+    ];
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-rpc-harness-"));
+    const { client, dispose } = makeRpcTestHarness(home, adapters);
     try {
-      const context: RpcContext = { "effect/context": runtime.runSync(runtime.contextEffect) };
-      const client = createRouterClient(router, { context });
-
       const { harnessAgents } = await client.harness.negotiate({});
 
       expect(harnessAgents.map((agent) => agent.id)).toEqual(["claude-code", "codex", "pi"]);
@@ -91,7 +83,8 @@ describe("harness router", () => {
       expect(pi?.available).toBe(true);
       expect(pi?.capabilities.permissionModes).toBeUndefined();
     } finally {
-      await runtime.dispose();
+      await dispose();
+      await fs.rm(home, { recursive: true, force: true });
     }
   });
 });

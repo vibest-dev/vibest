@@ -1,9 +1,9 @@
+import type { HarnessAgentId, SessionRef } from "@vibest/contract";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "@/core/chat/agent-requests";
-import type { AgentProviderId } from "@/core/chat/chat";
 import type { ChatModel, ChatPermissionMode } from "@/core/chat/chat-config";
 import type { ChatStoreState } from "@/core/chat/chat-state";
 import { selectTurnInProgress, useChatHandle } from "@/core/chat/use-chat-handle";
@@ -12,7 +12,7 @@ export type { ChatModel, ChatPermissionMode };
 
 export interface ChatSessionValue {
   sessionId: string;
-  agentProviderId: AgentProviderId;
+  harnessAgentId: HarnessAgentId;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatStoreState>;
   prompt: (text: string) => void | Promise<void>;
@@ -38,13 +38,13 @@ export function useChatSession(): ChatSessionValue {
 // components (ChatTranscript / ChatInputComposer / ChatModelSelect). Chat
 // state lives in the per-Chat store, not in React — it survives unmounts.
 export function ChatSessionProvider({
-  sessionId,
+  sessionRef,
   children,
 }: {
-  sessionId: string;
+  sessionRef: SessionRef;
   children: ReactNode;
 }) {
-  const chat = useChatHandle(sessionId);
+  const chat = useChatHandle(sessionRef);
   const [model, setModelState] = useState<ChatModel>("sonnet");
   // Matches the draft surface's default (claude-code's "full" → bypassPermissions).
   const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("full");
@@ -64,8 +64,8 @@ export function ChatSessionProvider({
   };
 
   const value: ChatSessionValue = {
-    sessionId,
-    agentProviderId: chat.agentProviderId,
+    sessionId: sessionRef.sessionId,
+    harnessAgentId: chat.harnessAgentId,
     store: chat.store,
     prompt: (text) => chat.prompt(text),
     respondToRequest: chat.respondToAgentRequest,

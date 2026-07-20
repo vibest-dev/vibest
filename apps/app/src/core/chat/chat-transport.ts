@@ -1,20 +1,25 @@
 import { eventIteratorToStream } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
-import type { UserInputPart } from "@vibest/contract";
-import type { SessionEventStreamItem } from "@vibest/contract/session";
-import { isSessionEvent } from "@vibest/contract/session-events";
+import type {
+  PromptInput,
+  PromptPart,
+  SessionRef,
+  SessionRuntimeSnapshot,
+  SubscribeStreamEvent,
+} from "@vibest/contract";
+import { isSessionScopedEvent } from "@vibest/contract";
 import type { ChatTransport as AiChatTransport, UIMessage, UIMessageChunk } from "ai";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
+import type { ChatSessionTransport } from "./chat-transport-port";
 
 const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
 
-const emptyChunkStream = (): ReadableStream<UIMessageChunk> =>
-  new ReadableStream({ start: (controller) => controller.close() });
-
-const toUserInput = (message: UIMessage) => {
-  const parts: UserInputPart[] = [];
+// Model / permission mode are session config applied via their own calls
+// (setModel / setPermissionMode) — a prompt turn never carries them.
+const toPromptInput = (ref: SessionRef, message: UIMessage): PromptInput => {
+  const parts: PromptPart[] = [];
   for (const part of message.parts) {
     if (part.type === "text") {
       parts.push({ type: "text", text: part.text });
@@ -37,32 +42,28 @@ const toUserInput = (message: UIMessage) => {
       });
     }
   }
-  return { parts };
+  return { ref, parts };
 };
 
 type EventSubscription = {
-  readonly events: AsyncIterable<SessionEventStreamItem>;
+  readonly events: AsyncIterable<SubscribeStreamEvent>;
   readonly close: () => void;
 };
 
 type VibestSessionClient = VibestClient["session"];
 
-type SessionClient = Omit<
-  Pick<
-    VibestSessionClient,
-    | "events"
-    | "interrupt"
-    | "prompt"
-    | "respondToAgentRequest"
-    | "setModel"
-    | "setPermissionMode"
-    | "snapshot"
-  >,
-  "events"
+type SessionClient = Pick<
+  VibestSessionClient,
+  | "interrupt"
+  | "prompt"
+  | "respondToAgentRequest"
+  | "setModel"
+  | "setPermissionMode"
+  | "getSnapshot"
 > & {
-  events: (
-    ...args: Parameters<VibestSessionClient["events"]>
-  ) => Promise<AsyncIterable<SessionEventStreamItem>>;
+  subscribe: (
+    ...args: Parameters<VibestSessionClient["subscribe"]>
+  ) => Promise<AsyncIterable<SubscribeStreamEvent>>;
 };
 
 export type ChatTransportClient = {
@@ -71,62 +72,73 @@ export type ChatTransportClient = {
 
 type PromptRecovery = {
   readonly subscription: EventSubscription;
-  readonly snapshot: Awaited<ReturnType<SessionClient["snapshot"]>>;
+  readonly snapshot: SessionRuntimeSnapshot;
 };
 
+// The scoped subscription has no replay: a `closed` mid-turn (slow consumer or
+// server teardown) is recovered by re-fetching the snapshot — which still
+// carries the active turn's buffered chunks — replaying what we haven't seen,
+// then re-subscribing. `cursor` is the last session `seq` yielded, so recovery
+// never double-emits.
 async function* promptChunks(
   initial: EventSubscription,
-  receipt: { turnId: string; cursor: number },
-  recover: (after: number) => Promise<PromptRecovery>,
+  turnId: string,
+  recover: () => Promise<PromptRecovery>,
   finalize: () => void,
 ): AsyncGenerator<UIMessageChunk> {
   let current = initial;
-  let cursor = receipt.cursor;
+  let cursor = 0;
   let started = false;
   try {
     while (true) {
       let restarting = false;
       for await (const item of current.events) {
-        if (item.type === "gap") {
-          const recovery = await recover(cursor);
+        if (item.type === "closed") {
+          const recovery = await recover();
           current.close();
           current = recovery.subscription;
-          if (recovery.snapshot.degraded) {
-            throw new Error("Session snapshot replay is degraded");
-          }
           const activeTurn = recovery.snapshot.activeTurn;
-          if (activeTurn?.turnId === receipt.turnId) {
-            for (const envelope of activeTurn.chunks) {
-              if (envelope.seq <= cursor || isSessionEvent(envelope.body)) continue;
-              cursor = envelope.seq;
-              yield envelope.body;
+          if (activeTurn?.turnId === turnId) {
+            // The snapshot proving our turn exists is what marks it started —
+            // its buffer may legitimately still be empty (no chunk yet), and
+            // `session.turn.started` will never be redelivered.
+            started = true;
+            for (const chunkEvent of activeTurn.chunks) {
+              if (chunkEvent.seq <= cursor) continue;
+              cursor = chunkEvent.seq;
+              yield chunkEvent.chunk;
             }
           }
           cursor = Math.max(cursor, recovery.snapshot.cursor);
-          if (!activeTurn || activeTurn.turnId !== receipt.turnId || activeTurn.complete) return;
-          started = true;
+          // A newer turn replaced ours, or the session restarted → nothing more
+          // for us. A retained buffer marked complete has just been fully
+          // replayed → the turn is over.
+          if (!activeTurn || activeTurn.turnId !== turnId || activeTurn.complete) return;
           restarting = true;
           break;
         }
         const event = item.event;
+        if (!isSessionScopedEvent(event)) continue;
         if (event.seq <= cursor) continue;
         cursor = event.seq;
-        const body = event.body;
-        if (isSessionEvent(body)) {
-          if (body.type === "session.turn.started" && body.turnId === receipt.turnId) {
-            started = true;
+        switch (event.type) {
+          case "session.turn.started":
+            if (event.turnId === turnId) started = true;
             continue;
-          }
-          if (
-            started &&
-            ((body.type === "session.turn.ended" && body.turnId === receipt.turnId) ||
-              body.type === "session.crashed")
-          ) {
+          case "session.message.chunk":
+            if (started && event.turnId === turnId) yield event.chunk;
+            continue;
+          case "session.turn.ended":
+            if (started && event.turnId === turnId) return;
+            continue;
+          case "session.crashed":
+            // Crash always terminates the stream — a crash before our
+            // `turn.started` arrived means the turn will never run, and no
+            // further event (or `closed`) is coming to end the loop otherwise.
             return;
-          }
-          continue;
+          default:
+            continue;
         }
-        if (started) yield body;
       }
       if (!restarting) return;
     }
@@ -136,21 +148,27 @@ async function* promptChunks(
   }
 }
 
-export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
-  constructor(private readonly client: ChatTransportClient) {}
+// One transport per Chat, bound to that session's SessionRef. The ref stays an
+// object end to end; nothing here parses it out of a string. AbstractChat's
+// `options.chatId` is ignored — this transport already knows its session.
+export class OrpcChatSessionTransport implements ChatSessionTransport {
+  readonly #ref: SessionRef;
 
-  async #openEvents(
-    sessionId: string,
-    after: number | undefined,
-    signal: AbortSignal | undefined,
-  ): Promise<EventSubscription> {
+  constructor(
+    private readonly client: ChatTransportClient,
+    sessionRef: SessionRef,
+  ) {
+    this.#ref = sessionRef;
+  }
+
+  async #subscribe(signal: AbortSignal | undefined): Promise<EventSubscription> {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     try {
-      const events = await this.client.session.events(
-        { sessionId, ...(after === undefined ? {} : { after }) },
+      const events = await this.client.session.subscribe(
+        { scope: { kind: "session", ref: this.#ref } },
         { signal: controller.signal },
       );
       return {
@@ -171,26 +189,23 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
   ): Promise<ReadableStream<UIMessageChunk>> {
     const message = options.messages.at(-1);
     if (!message) throw new Error("message is required");
-    const initial = await this.#openEvents(options.chatId, undefined, options.abortSignal);
+    // Subscribe before prompting: the live stream has no replay, so the turn's
+    // first events must not race ahead of the subscription.
+    const initial = await this.#subscribe(options.abortSignal);
     try {
-      const receipt = await this.client.session.prompt(
-        { sessionId: options.chatId, input: toUserInput(message) },
-        { signal: options.abortSignal },
-      );
-      if (!receipt.started) {
-        initial.close();
-        return emptyChunkStream();
-      }
+      const receipt = await this.client.session.prompt(toPromptInput(this.#ref, message), {
+        signal: options.abortSignal,
+      });
       const interrupt = () => {
-        void this.client.session.interrupt({ sessionId: options.chatId }).catch((error) => {
+        void this.client.session.interrupt({ ref: this.#ref }).catch((error) => {
           if (!isAbortError(error)) console.error("Failed to interrupt session", error);
         });
       };
       options.abortSignal?.addEventListener("abort", interrupt, { once: true });
-      const recover = async (after: number): Promise<PromptRecovery> => {
-        const subscription = await this.#openEvents(options.chatId, after, options.abortSignal);
+      const recover = async (): Promise<PromptRecovery> => {
+        const subscription = await this.#subscribe(options.abortSignal);
         try {
-          const snapshot = await this.client.session.snapshot({ sessionId: options.chatId });
+          const snapshot = await this.client.session.getSnapshot({ ref: this.#ref });
           return { subscription, snapshot };
         } catch (error) {
           subscription.close();
@@ -198,7 +213,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
         }
       };
       return eventIteratorToStream(
-        promptChunks(initial, receipt, recover, () =>
+        promptChunks(initial, receipt.turnId, recover, () =>
           options.abortSignal?.removeEventListener("abort", interrupt),
         ),
       );
@@ -213,7 +228,6 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
   }
 
   subscribeAgentRequests(
-    sessionId: string,
     onRequest: (request: AgentRequest) => void,
     onRequestResolved: (requestId: string) => void = () => undefined,
   ): () => void {
@@ -232,7 +246,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
       if (request.type === "plan" && !request.plan.trim()) {
         void this.client.session
           .respondToAgentRequest({
-            sessionId,
+            ref: this.#ref,
             requestId: request.id,
             response: { type: "plan", behavior: "allow" },
           })
@@ -250,8 +264,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     };
 
     const hydratePendingRequests = async () => {
-      const snapshot = await this.client.session.snapshot({ sessionId });
-      if (snapshot.degraded) throw new Error("Session snapshot replay is degraded");
+      const snapshot = await this.client.session.getSnapshot({ ref: this.#ref });
       const pendingRequestIds = new Set(snapshot.pendingRequests.map((request) => request.id));
       for (const requestId of deliveredRequestIds) {
         if (!pendingRequestIds.has(requestId)) resolveRequest(requestId);
@@ -261,7 +274,7 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     };
 
     const run = async () => {
-      current = await this.#openEvents(sessionId, undefined, abortController.signal);
+      current = await this.#subscribe(abortController.signal);
       let cursor: number;
       try {
         cursor = await hydratePendingRequests();
@@ -272,8 +285,8 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
       while (!abortController.signal.aborted) {
         let restarting = false;
         for await (const item of current.events) {
-          if (item.type === "gap") {
-            const replacement = await this.#openEvents(sessionId, cursor, abortController.signal);
+          if (item.type === "closed") {
+            const replacement = await this.#subscribe(abortController.signal);
             try {
               cursor = Math.max(cursor, await hydratePendingRequests());
             } catch (error) {
@@ -285,17 +298,17 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
             restarting = true;
             break;
           }
-          if (item.event.seq <= cursor) continue;
-          cursor = item.event.seq;
-          if (!isSessionEvent(item.event.body)) continue;
-          const body = item.event.body;
-          if (body.type === "session.request.asked") {
-            await handleRequest(body.request);
+          const event = item.event;
+          if (!isSessionScopedEvent(event)) continue;
+          if (event.seq <= cursor) continue;
+          cursor = event.seq;
+          if (event.type === "session.request.asked") {
+            await handleRequest(event.request);
           } else if (
-            body.type === "session.request.replied" ||
-            body.type === "session.request.rejected"
+            event.type === "session.request.replied" ||
+            event.type === "session.request.rejected"
           ) {
-            resolveRequest(body.requestId);
+            resolveRequest(event.requestId);
           }
         }
         if (!restarting) return;
@@ -312,23 +325,19 @@ export class OrpcChatSessionTransport implements AiChatTransport<UIMessage> {
     };
   }
 
-  async respondToAgentRequest(
-    sessionId: string,
-    requestId: string,
-    response: AgentResponse,
-  ): Promise<void> {
+  async respondToAgentRequest(requestId: string, response: AgentResponse): Promise<void> {
     await this.client.session.respondToAgentRequest({
-      sessionId,
+      ref: this.#ref,
       requestId,
       response,
     });
   }
 
-  async setModel(sessionId: string, model: string): Promise<void> {
-    await this.client.session.setModel({ sessionId, model });
+  async setModel(model: string): Promise<void> {
+    await this.client.session.setModel({ ref: this.#ref, model });
   }
 
-  async setPermissionMode(sessionId: string, permissionMode: string): Promise<void> {
-    await this.client.session.setPermissionMode({ sessionId, permissionMode });
+  async setPermissionMode(permissionMode: string): Promise<void> {
+    await this.client.session.setPermissionMode({ ref: this.#ref, permissionMode });
   }
 }

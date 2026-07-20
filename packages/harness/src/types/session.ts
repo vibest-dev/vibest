@@ -1,5 +1,3 @@
-export type { SessionSnapshot, SessionStatus } from "@vibest/contract";
-
 export type SessionSummary = {
   sessionId: string;
   harnessAgentId: import("@vibest/contract").HarnessAgentId;

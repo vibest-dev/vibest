@@ -17,4 +17,4 @@ export {
   SessionTurnEnded,
   SessionTurnStarted,
   SessionUpdated,
-} from "@vibest/contract";
+} from "./framework";

@@ -45,13 +45,17 @@ function DraftRoute() {
   // turn already streaming.
   const startSession = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
-      const { sessionId } = await orpcQueryUtils.session.create.call({
+      // Bootstrap the session under the server's working-directory project until
+      // real project selection lands (project.create dedups by path).
+      const project = await orpcQueryUtils.project.create.call({ path: "." });
+      const ref = await orpcQueryUtils.session.create.call({
+        projectId: project.id,
         harnessAgentId: "claude-code",
         model,
         permissionMode,
       });
-      void manager.attach(sessionId).prompt(text);
-      return sessionId;
+      void manager.attach(ref).prompt(text);
+      return ref.sessionId;
     },
     onSuccess: (sessionId) => {
       navigate({ to: "/session/$sessionId", params: { sessionId } });

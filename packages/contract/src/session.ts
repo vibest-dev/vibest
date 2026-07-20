@@ -1,46 +1,72 @@
 import { eventIterator, oc, type } from "@orpc/contract";
 
 import {
-  CreateManagedSessionInputSchema,
-  CreateManagedSessionResultSchema,
-  PromptReceiptSchema,
-  PromptSessionInputSchema,
+  CreateSessionInputSchema,
+  serverErrors,
+  ListSessionsInputSchema,
+  type ListSessionsOutput,
+  PromptInputSchema,
+  PromptOutputSchema,
+  RefInputSchema,
+  RenameSessionInputSchema,
+  ResolveRefInputSchema,
   RespondToAgentRequestInputSchema,
-  ResumeManagedSessionInputSchema,
-  SessionCapabilitiesSchema,
-  SessionEventsInputSchema,
-  SessionIdInputSchema,
+  ResumeSessionInputSchema,
+  type SessionMessages,
+  SessionRefSchema,
+  type SessionRuntimeSnapshot,
+  SessionStatusSchema,
   SetSessionModelInputSchema,
   SetSessionPermissionModeInputSchema,
+  SubscribeInputSchema,
+  type SubscribeStreamEvent,
   toStandardSchema,
-  type SessionEnvelope,
-  type SessionSnapshot,
-  type SessionStatus,
 } from "./domain";
 
-export type SessionEventStreamItem =
-  | { readonly type: "event"; readonly event: SessionEnvelope }
-  | { readonly type: "gap"; readonly cursor: number; readonly terminal: boolean };
+const base = oc.errors(serverErrors);
 
+/**
+ * SessionRef-based session contract (docs/wayfinder/session-streaming-refactor).
+ * Complex outputs that embed UIMessage/UIMessageChunk (snapshot, messages,
+ * list, the subscribe stream) are declared with `type<>()` and validated
+ * structurally on the server rather than by a wire schema.
+ */
 export const sessionContract = {
-  create: oc
-    .input(toStandardSchema(CreateManagedSessionInputSchema))
-    .output(toStandardSchema(CreateManagedSessionResultSchema)),
-  resume: oc.input(toStandardSchema(ResumeManagedSessionInputSchema)),
-  prompt: oc
-    .input(toStandardSchema(PromptSessionInputSchema))
-    .output(toStandardSchema(PromptReceiptSchema)),
-  interrupt: oc.input(toStandardSchema(SessionIdInputSchema)),
-  close: oc.input(toStandardSchema(SessionIdInputSchema)),
-  setModel: oc.input(toStandardSchema(SetSessionModelInputSchema)),
-  setPermissionMode: oc.input(toStandardSchema(SetSessionPermissionModeInputSchema)),
-  events: oc
-    .input(toStandardSchema(SessionEventsInputSchema))
-    .output(eventIterator(type<SessionEventStreamItem>())),
-  snapshot: oc.input(toStandardSchema(SessionIdInputSchema)).output(type<SessionSnapshot>()),
-  status: oc.input(toStandardSchema(SessionIdInputSchema)).output(type<SessionStatus>()),
-  capabilities: oc
-    .input(toStandardSchema(SessionIdInputSchema))
-    .output(toStandardSchema(SessionCapabilitiesSchema)),
-  respondToAgentRequest: oc.input(toStandardSchema(RespondToAgentRequestInputSchema)),
+  // lifecycle
+  create: base
+    .input(toStandardSchema(CreateSessionInputSchema))
+    .output(toStandardSchema(SessionRefSchema)),
+  resume: base
+    .input(toStandardSchema(ResumeSessionInputSchema))
+    .output(toStandardSchema(SessionRefSchema)),
+  close: base.input(toStandardSchema(RefInputSchema)),
+
+  // history / index
+  list: base.input(toStandardSchema(ListSessionsInputSchema)).output(type<ListSessionsOutput>()),
+  rename: base.input(toStandardSchema(RenameSessionInputSchema)),
+  delete: base.input(toStandardSchema(RefInputSchema)),
+  getMessages: base.input(toStandardSchema(RefInputSchema)).output(type<SessionMessages>()),
+  // sessionId (a bookmarked URL) → full SessionRef via server-side reverse lookup.
+  resolveRef: base
+    .input(toStandardSchema(ResolveRefInputSchema))
+    .output(toStandardSchema(SessionRefSchema)),
+
+  // active instance
+  prompt: base
+    .input(toStandardSchema(PromptInputSchema))
+    .output(toStandardSchema(PromptOutputSchema)),
+  interrupt: base.input(toStandardSchema(RefInputSchema)),
+  // Session-scoped config, changed via dedicated calls — never on a prompt turn.
+  setModel: base.input(toStandardSchema(SetSessionModelInputSchema)),
+  setPermissionMode: base.input(toStandardSchema(SetSessionPermissionModeInputSchema)),
+  respondToAgentRequest: base.input(toStandardSchema(RespondToAgentRequestInputSchema)),
+  getStatus: base
+    .input(toStandardSchema(RefInputSchema))
+    .output(toStandardSchema(SessionStatusSchema)),
+  getSnapshot: base.input(toStandardSchema(RefInputSchema)).output(type<SessionRuntimeSnapshot>()),
+
+  // events (scope covers both single-session and global firehose)
+  subscribe: base
+    .input(toStandardSchema(SubscribeInputSchema))
+    .output(eventIterator(type<SubscribeStreamEvent>())),
 };

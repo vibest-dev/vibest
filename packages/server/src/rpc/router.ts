@@ -10,8 +10,8 @@ const orpc = os.$context<RpcContext>();
 
 export const router = orpc.router({
   harness: harnessRouter,
-  project: projectRouter,
   session: sessionRouter,
+  project: projectRouter,
   fs: fsRouter,
 });
 export type Router = typeof router;

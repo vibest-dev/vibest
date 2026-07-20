@@ -3,7 +3,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 
 import { createServer } from "node:http";
 import path from "node:path";
 
-import { _electron as electron } from "@playwright/test";
+import { _electron as electron, type Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
@@ -65,7 +65,22 @@ async function waitForDifferentServer(parentPid: number, previousPid: number): P
   return serverPid(parentPid);
 }
 
-async function driveServerToFailed(parentPid: number): Promise<void> {
+/**
+ * The server child appears well before it reports ready, and a first spawn
+ * killed pre-ready is a boot failure by design (terminal state, no respawn).
+ * These kill tests mean "kill a running server", so wait until the renderer
+ * left the splash — that requires the ready handshake to have completed.
+ */
+async function waitForConnectedUi(window: Page): Promise<void> {
+  // The splash carries "Starting Vibest" as an aria-label, not text content,
+  // and unmounts permanently once the renderer connects.
+  await expect(window.getByRole("main", { name: "Starting Vibest" })).toBeHidden({
+    timeout: 30_000,
+  });
+}
+
+async function driveServerToFailed(window: Page, parentPid: number): Promise<void> {
+  await waitForConnectedUi(window);
   let currentPid = await waitForServer(parentPid);
   for (let failure = 0; failure < 6; failure += 1) {
     process.kill(currentPid, "SIGKILL");
@@ -149,6 +164,9 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
   // Own userData so its single-instance lock can't collide with a real `dev`.
   const userData = path.join(testInfo.outputPath(), "user-data");
   mkdirSync(userData, { recursive: true });
+  // Own server storage so the developer's real ~/.vibest never leaks in.
+  const vibestHome = path.join(testInfo.outputPath(), "vibest-home");
+  mkdirSync(vibestHome, { recursive: true });
 
   const app = await electron.launch({
     args: [
@@ -160,6 +178,7 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
       NODE_ENV: "development",
       ELECTRON_RENDERER_URL: origin,
       VIBEST_E2E: "1",
+      VIBEST_HOME: vibestHome,
     },
   });
 
@@ -179,13 +198,15 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
   e2ePaths,
   window,
 }) => {
-  await window.getByRole("button", { name: "Start Chatting" }).click();
-  await expect(window).toHaveURL(/\/chat\/[0-9a-f-]+$/);
+  // The app lands on /draft, the new-session surface: typing the first
+  // message creates the session and navigates into it.
+  await waitForConnectedUi(window);
 
   const input = window.locator("[contenteditable='true']");
   await input.fill("Desktop SDK E2E");
   await input.press("Enter");
 
+  await expect(window).toHaveURL(/\/session\/[0-9a-f-]+/);
   await expect(window.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
   await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
   await expect
@@ -199,6 +220,7 @@ test("reports a server crash and recovers on the pinned connection", async ({
   electronApp,
   window,
 }) => {
+  await waitForConnectedUi(window);
   const initialPid = await waitForServer(electronApp.process().pid);
   process.kill(initialPid, "SIGKILL");
 
@@ -223,12 +245,16 @@ test("disposes the server process during Electron shutdown", async ({ electronAp
 test("offers Retry after repeated server failures", async ({ electronApp, window }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveServerToFailed(parentPid);
+  await driveServerToFailed(window, parentPid);
 
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
   await window.getByRole("button", { name: "Retry" }).click();
   await expect.poll(() => findServerPid(parentPid), { timeout: 10_000 }).toBeTruthy();
   await expect(window.getByText("The local server stopped")).toBeHidden({ timeout: 10_000 });
+  // Wait for the recovery to complete, not just the respawn to appear: quitting
+  // while the replacement server is still booting can hang the app shutdown
+  // (known issue), and teardown closes the app right after this test ends.
+  await expect(window.getByText("Reconnecting…")).toBeHidden({ timeout: 15_000 });
 });
 
 test("quits through Desktop RPC from the terminal failure state", async ({
@@ -237,7 +263,7 @@ test("quits through Desktop RPC from the terminal failure state", async ({
 }) => {
   test.setTimeout(60_000);
   const parentPid = electronApp.process().pid;
-  await driveServerToFailed(parentPid);
+  await driveServerToFailed(window, parentPid);
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
 
   await window.getByRole("button", { name: "Quit" }).click();

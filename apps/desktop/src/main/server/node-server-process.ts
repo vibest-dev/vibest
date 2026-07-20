@@ -75,24 +75,26 @@ export function makeNodeServerProcess(
       );
 
       yield* handle.exitCode.pipe(
-        Effect.map((exitCode) => Number(exitCode)),
+        Effect.map((exitCode): number | null => Number(exitCode)),
+        // A signal-terminated child has no exit code, and effect's exitCode
+        // fails on it instead of returning one. The process is equally gone
+        // either way, so fold that failure into a null-code exit — reporting
+        // it as an error would make the supervisor treat a plain kill as a
+        // spawn problem.
+        Effect.catch(() => Effect.succeed(null)),
         Effect.tap((exitCode) =>
           Deferred.fail(
             ready,
             new ServerExitedBeforeReady({
               exitCode,
-              message: `Server exited during startup with code ${exitCode}`,
+              message:
+                exitCode === null
+                  ? "Server was terminated by a signal during startup"
+                  : `Server exited during startup with code ${exitCode}`,
             }),
           ),
         ),
         Effect.flatMap((exitCode) => Deferred.succeed(exited, { exitCode })),
-        Effect.catch((cause) => {
-          const error = spawnError(`Failed while waiting for the server: ${String(cause)}`, cause);
-          return Deferred.fail(ready, error).pipe(
-            Effect.andThen(Deferred.fail(exited, error)),
-            Effect.asVoid,
-          );
-        }),
         Effect.forkScoped,
       );
 

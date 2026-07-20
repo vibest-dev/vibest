@@ -5,10 +5,10 @@ import { PermissionModeSelect } from "./permission-mode-select";
 // ChatSession context so it can be composed anywhere inside
 // ChatSessionProvider (e.g. the composer toolbar).
 export function ChatPermissionModeSelect() {
-  const { agentProviderId, permissionMode, setPermissionMode } = useChatSession();
+  const { harnessAgentId, permissionMode, setPermissionMode } = useChatSession();
   return (
     <PermissionModeSelect
-      harnessAgentId={agentProviderId}
+      harnessAgentId={harnessAgentId}
       value={permissionMode}
       onChange={setPermissionMode}
     />
