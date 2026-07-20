@@ -6,7 +6,7 @@ import { Effect } from "effect";
 
 import { StoreReadError, StoreWriteError } from "../errors";
 
-const isEnoent = (cause: unknown): boolean =>
+export const isEnoent = (cause: unknown): boolean =>
   typeof cause === "object" && cause !== null && (cause as NodeJS.ErrnoException).code === "ENOENT";
 
 /**

@@ -23,21 +23,25 @@ type PortSpy = {
 
 const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
   const spy: PortSpy = { create: [], resume: [], close: [] };
+  // Spy side effects live inside the effects (not at construction): callers
+  // may build an effect without running it — e.g. the `onCrash` handed to the
+  // runtime — and only executions should be counted.
   const layer = Layer.succeed(HarnessAgentSessionPort, {
-    create: (harnessAgentId, workspacePath) => {
-      spy.create.push({ harnessAgentId, workspacePath });
-      return opts.failCreate
-        ? Effect.fail(opts.failCreate)
-        : Effect.succeed(`native-${spy.create.length}`);
-    },
-    resume: (harnessAgentId, harnessSessionId, workspacePath) => {
-      spy.resume.push({ harnessAgentId, harnessSessionId, workspacePath });
-      return Effect.void;
-    },
-    close: (harnessSessionId) => {
-      spy.close.push(harnessSessionId);
-      return Effect.void;
-    },
+    create: (harnessAgentId, workspacePath) =>
+      Effect.suspend(() => {
+        spy.create.push({ harnessAgentId, workspacePath });
+        return opts.failCreate
+          ? Effect.fail(opts.failCreate)
+          : Effect.succeed(`native-${spy.create.length}`);
+      }),
+    resume: (harnessAgentId, harnessSessionId, workspacePath) =>
+      Effect.sync(() => {
+        spy.resume.push({ harnessAgentId, harnessSessionId, workspacePath });
+      }),
+    close: (harnessSessionId) =>
+      Effect.sync(() => {
+        spy.close.push(harnessSessionId);
+      }),
     // A started session drains an empty native stream — enough to exercise the
     // create/resume → runtime-start path without any active-instance ops.
     events: () => Effect.succeed(Stream.empty),
@@ -246,7 +250,8 @@ describe("SessionService", () => {
     expect(result.listed.map((s) => s.sessionId).toSorted()).toEqual(
       [result.a.sessionId, result.b.sessionId].toSorted(),
     );
-    expect(result.listed.every((s) => s.historyAvailable)).toBe(true);
+    // getMessages is not implemented yet, so listings must not advertise history.
+    expect(result.listed.every((s) => !s.historyAvailable)).toBe(true);
   });
 
   it("list fails with ProjectNotFound for an unknown project", async () => {

@@ -94,16 +94,21 @@ async function* promptChunks(
           current = recovery.subscription;
           const activeTurn = recovery.snapshot.activeTurn;
           if (activeTurn?.turnId === turnId) {
+            // The snapshot proving our turn exists is what marks it started —
+            // its buffer may legitimately still be empty (no chunk yet), and
+            // `session.turn.started` will never be redelivered.
+            started = true;
             for (const chunkEvent of activeTurn.chunks) {
               if (chunkEvent.seq <= cursor) continue;
               cursor = chunkEvent.seq;
-              started = true;
               yield chunkEvent.chunk;
             }
           }
           cursor = Math.max(cursor, recovery.snapshot.cursor);
-          // Our turn is no longer the active one → it finished while we were away.
-          if (!activeTurn || activeTurn.turnId !== turnId) return;
+          // A newer turn replaced ours, or the session restarted → nothing more
+          // for us. A retained buffer marked complete has just been fully
+          // replayed → the turn is over.
+          if (!activeTurn || activeTurn.turnId !== turnId || activeTurn.complete) return;
           restarting = true;
           break;
         }
@@ -122,8 +127,10 @@ async function* promptChunks(
             if (started && event.turnId === turnId) return;
             continue;
           case "session.crashed":
-            if (started) return;
-            continue;
+            // Crash always terminates the stream — a crash before our
+            // `turn.started` arrived means the turn will never run, and no
+            // further event (or `closed`) is coming to end the loop otherwise.
+            return;
           default:
             continue;
         }

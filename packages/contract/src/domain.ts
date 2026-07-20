@@ -290,6 +290,9 @@ export type ActiveTurnSnapshot = {
   // null until the turn's first `start` chunk announces the message id.
   readonly messageId: string | null;
   readonly chunks: ReadonlyArray<SessionMessageChunkEvent>;
+  // A finished turn's buffer is retained (complete: true) until the next turn
+  // starts, so recovery can replay a tail that ended mid-disconnect.
+  readonly complete: boolean;
 };
 
 export type SessionRuntimeSnapshot = {

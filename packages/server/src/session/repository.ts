@@ -1,15 +1,12 @@
-import { readdir, rm } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { Context, Effect, Layer } from "effect";
 
 import { Paths } from "../config/paths";
 import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
-import { readJson, writeJsonAtomic } from "../infra/json-store";
+import { isEnoent, readJson, removeFile, writeJsonAtomic } from "../infra/json-store";
 import type { Session } from "../types";
-
-const isEnoent = (cause: unknown): boolean =>
-  typeof cause === "object" && cause !== null && (cause as NodeJS.ErrnoException).code === "ENOENT";
 
 /**
  * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The server
@@ -44,8 +41,6 @@ export class SessionRepository extends Context.Service<
   }
 >()("SessionRepository") {}
 
-const SENTINEL = "__vibest_missing__";
-
 export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths> = Layer.effect(
   SessionRepository,
   Effect.gen(function* () {
@@ -74,9 +69,11 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
       projectId: string,
       sessionId: string,
     ): Effect.Effect<Session, StoreReadError | SessionNotFound> =>
-      readJson<Session | typeof SENTINEL>(sessionFile(projectId, sessionId), SENTINEL).pipe(
+      // JSON.parse can never produce `undefined`, so the fallback is an
+      // unambiguous "file absent" signal.
+      readJson<Session | undefined>(sessionFile(projectId, sessionId), undefined).pipe(
         Effect.flatMap((value) =>
-          value === SENTINEL
+          value === undefined
             ? Effect.fail(new SessionNotFound({ projectId, sessionId }))
             : Effect.succeed(value),
         ),
@@ -139,13 +136,7 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
       write: (sessionId, metadata) =>
         writeJsonAtomic(sessionFile(metadata.projectId, sessionId), metadata),
 
-      remove: (projectId, sessionId) =>
-        Effect.tryPromise({
-          // rm with force:true does not throw on ENOENT; any error is a real
-          // write failure.
-          try: () => rm(sessionFile(projectId, sessionId), { force: true }),
-          catch: (cause) => new StoreWriteError({ file: sessionFile(projectId, sessionId), cause }),
-        }),
+      remove: (projectId, sessionId) => removeFile(sessionFile(projectId, sessionId)),
     };
   }),
 );

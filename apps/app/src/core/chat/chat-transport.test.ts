@@ -1,4 +1,5 @@
 import type { AgentRequest, SessionRuntimeSnapshot, SubscribeStreamEvent } from "@vibest/contract";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { OrpcChatSessionTransport, type ChatTransportClient } from "./chat-transport";
@@ -165,5 +166,167 @@ describe("OrpcChatSessionTransport agent requests", () => {
     unsubscribe();
 
     expect(received).toEqual([pendingRequest]);
+  });
+});
+
+// Yields `items`, then hangs forever: the stream may only end through an
+// explicit `return` in promptChunks, never by the iterable running dry — so a
+// missing termination guard shows up as a test timeout, not a false pass.
+const hangingIterableOf = (
+  items: readonly SubscribeStreamEvent[],
+): AsyncIterable<SubscribeStreamEvent> => ({
+  [Symbol.asyncIterator]() {
+    let index = 0;
+    return {
+      next: () => {
+        const item = items[index];
+        index += 1;
+        if (item) return Promise.resolve({ done: false as const, value: item });
+        return new Promise<never>(() => undefined);
+      },
+    };
+  },
+});
+
+const userMessage: UIMessage = {
+  id: "message-1",
+  role: "user",
+  parts: [{ type: "text", text: "hello" }],
+};
+
+const sendOptions = {
+  trigger: "submit-message" as const,
+  chatId: "chat-1",
+  messageId: undefined,
+  messages: [userMessage],
+  abortSignal: undefined,
+};
+
+const readAll = async (stream: ReadableStream<UIMessageChunk>): Promise<UIMessageChunk[]> => {
+  const reader = stream.getReader();
+  const chunks: UIMessageChunk[] = [];
+  while (true) {
+    const result = await reader.read();
+    if (result.done) return chunks;
+    chunks.push(result.value);
+  }
+};
+
+describe("OrpcChatSessionTransport sendMessages recovery", () => {
+  it("marks the turn started from a recovery snapshot with an empty buffer", async () => {
+    // The subscription drops before any event arrives; the snapshot proves the
+    // turn exists but has buffered nothing yet. `session.turn.started` is never
+    // redelivered, so post-recovery chunks must still flow.
+    let subscribeCalls = 0;
+    const session = {
+      getSnapshot: async (): Promise<SessionRuntimeSnapshot> => ({
+        ref,
+        status: { phase: "running", activeTurnId: "turn-1" },
+        pendingRequests: [],
+        activeTurn: { turnId: "turn-1", messageId: null, chunks: [], complete: false },
+        cursor: 1,
+      }),
+      prompt: async () => ({ turnId: "turn-1" }),
+      interrupt: unexpectedCall,
+      respondToAgentRequest: unexpectedCall,
+      subscribe: async () => {
+        subscribeCalls += 1;
+        if (subscribeCalls === 1) {
+          return hangingIterableOf([{ type: "closed", reason: "stream_replaced" }]);
+        }
+        return hangingIterableOf([
+          {
+            type: "event",
+            event: {
+              seq: 2,
+              ref,
+              type: "session.message.chunk",
+              turnId: "turn-1",
+              chunk: { type: "text-delta", id: "m1", delta: "hi" },
+            },
+          },
+          {
+            type: "event",
+            event: {
+              seq: 3,
+              ref,
+              type: "session.turn.ended",
+              turnId: "turn-1",
+              outcome: "completed",
+            },
+          },
+        ]);
+      },
+    };
+    const transport = new OrpcChatSessionTransport({ session } satisfies ChatTransportClient, ref);
+
+    const chunks = await readAll(await transport.sendMessages(sendOptions));
+
+    expect(subscribeCalls).toBe(2);
+    expect(chunks).toEqual([{ type: "text-delta", id: "m1", delta: "hi" }]);
+  });
+
+  it("replays a completed retained buffer and terminates without further events", async () => {
+    // The turn ended while we were disconnected: the snapshot's buffer is
+    // marked complete. Replaying it must end the stream — waiting on the fresh
+    // subscription would hang forever.
+    let subscribeCalls = 0;
+    const session = {
+      getSnapshot: async (): Promise<SessionRuntimeSnapshot> => ({
+        ref,
+        status: { phase: "idle" },
+        pendingRequests: [],
+        activeTurn: {
+          turnId: "turn-1",
+          messageId: "m1",
+          chunks: [
+            {
+              seq: 2,
+              ref,
+              type: "session.message.chunk",
+              turnId: "turn-1",
+              chunk: { type: "text-delta", id: "m1", delta: "tail" },
+            },
+          ],
+          complete: true,
+        },
+        cursor: 3,
+      }),
+      prompt: async () => ({ turnId: "turn-1" }),
+      interrupt: unexpectedCall,
+      respondToAgentRequest: unexpectedCall,
+      subscribe: async () => {
+        subscribeCalls += 1;
+        if (subscribeCalls === 1) {
+          return hangingIterableOf([{ type: "closed", reason: "stream_replaced" }]);
+        }
+        return hangingIterableOf([]);
+      },
+    };
+    const transport = new OrpcChatSessionTransport({ session } satisfies ChatTransportClient, ref);
+
+    const chunks = await readAll(await transport.sendMessages(sendOptions));
+
+    expect(chunks).toEqual([{ type: "text-delta", id: "m1", delta: "tail" }]);
+  });
+
+  it("terminates on session.crashed even before turn.started arrived", async () => {
+    // A crash before our turn started means the turn will never run; no other
+    // event is coming, so the crash itself must end the stream.
+    const session = {
+      getSnapshot: unexpectedCall,
+      prompt: async () => ({ turnId: "turn-1" }),
+      interrupt: unexpectedCall,
+      respondToAgentRequest: unexpectedCall,
+      subscribe: async () =>
+        hangingIterableOf([
+          { type: "event", event: { seq: 1, ref, type: "session.crashed", reason: "boom" } },
+        ]),
+    };
+    const transport = new OrpcChatSessionTransport({ session } satisfies ChatTransportClient, ref);
+
+    const chunks = await readAll(await transport.sendMessages(sendOptions));
+
+    expect(chunks).toEqual([]);
   });
 });

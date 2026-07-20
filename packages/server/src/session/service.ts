@@ -166,9 +166,13 @@ export const SessionServiceLayer: Layer.Layer<
 
     // Drain the native event stream into a fresh runtime. A session that 404s on
     // its own stream right after create/resume is a bug, not a user-facing error.
+    // On a stream crash the manager keeps the projection queryable (phase
+    // "crashed"); releasing the native session's resources is our side.
     const startRuntime = (ref: SessionRef, harnessSessionId: string) =>
       port.events(harnessSessionId).pipe(
-        Effect.flatMap((events) => manager.start(ref, events)),
+        Effect.flatMap((events) =>
+          manager.start(ref, events, { onCrash: port.close(harnessSessionId) }),
+        ),
         Effect.orDie,
       );
 
@@ -258,9 +262,10 @@ export const SessionServiceLayer: Layer.Layer<
                 harnessAgentId: metadata.harnessAgentId,
                 sessionId,
                 createdAt: metadata.createdAt,
-                // Best-effort until native history reads land (ticket 10/11); a
-                // metadata file without readable native history flips this.
-                historyAvailable: true,
+                // getMessages fails UNSUPPORTED until native history reads land
+                // (tickets 10/11); advertising history we cannot serve would
+                // make clients skip their "transcript missing" handling.
+                historyAvailable: false,
               };
               // Merge the live phase from the runtime; a session with no runtime
               // simply carries no status.

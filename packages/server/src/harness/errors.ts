@@ -204,19 +204,6 @@ export class CapabilityUnsupported extends Schema.TaggedErrorClass<CapabilityUns
   }
 }
 
-export class LifecycleViolation extends Schema.TaggedErrorClass<LifecycleViolation>()(
-  "LifecycleViolation",
-  {
-    sessionId: Schema.String,
-    state: Schema.String,
-    transition: Schema.String,
-  },
-) {
-  override get message() {
-    return `Invalid lifecycle transition '${this.transition}' from '${this.state}' in session '${this.sessionId}'.`;
-  }
-}
-
 export type CreateSessionError =
   | HarnessAgentNotFound
   | AgentUnavailable

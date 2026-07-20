@@ -12,65 +12,204 @@ import { streamToAsyncGenerator } from "./stream";
 const orpc = implement(sessionContract).$context<RpcContext>();
 
 // Thin transport binding: every session operation is a one-liner onto the
-// SessionService façade. Only `subscribe` reaches the EventBus directly — it is
-// the event plane, distinct from the session control plane.
+// SessionService façade, plus a catchTags block mapping its typed effect errors
+// onto the contract's declared codes — clients branch on the code, never on the
+// message. Unmapped errors (store I/O) intentionally surface as INTERNAL. Only
+// `subscribe` reaches the EventBus directly — it is the event plane, distinct
+// from the session control plane.
 export const sessionRouter = orpc.router({
   // lifecycle -----------------------------------------------------------------
-  create: orpc.create.effect(function* ({ input }) {
+  create: orpc.create.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.create(input.projectId, input.harnessAgentId);
+    return yield* sessions.create(input.projectId, input.harnessAgentId).pipe(
+      Effect.catchTags({
+        ProjectNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
+        AgentUnavailable: (e) =>
+          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
+        SessionOpenFailed: (e) => Effect.fail(errors.INTERNAL({ message: e.reason })),
+      }),
+    );
   }),
-  resume: orpc.resume.effect(function* ({ input }) {
+  resume: orpc.resume.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.resume(input.ref);
+    return yield* sessions.resume(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        ProjectNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
+        AgentUnavailable: (e) =>
+          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
+        SessionResumeFailed: (e) => Effect.fail(errors.INTERNAL({ message: e.reason })),
+      }),
+    );
   }),
-  close: orpc.close.effect(function* ({ input }) {
+  close: orpc.close.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.close(input.ref);
+    yield* sessions.close(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+      }),
+    );
   }),
 
   // history / index -----------------------------------------------------------
-  list: orpc.list.effect(function* ({ input }) {
+  list: orpc.list.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return { sessions: yield* sessions.list(input.projectId) };
+    return {
+      sessions: yield* sessions.list(input.projectId).pipe(
+        Effect.catchTags({
+          ProjectNotFound: (e) =>
+            Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
+        }),
+      ),
+    };
   }),
-  rename: orpc.rename.effect(function* ({ input }) {
+  rename: orpc.rename.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.rename(input.ref, input.name);
+    yield* sessions.rename(input.ref, input.name).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+      }),
+    );
   }),
-  delete: orpc.delete.effect(function* ({ input }) {
+  delete: orpc.delete.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.delete(input.ref);
+    yield* sessions.delete(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+      }),
+    );
   }),
-  getMessages: orpc.getMessages.effect(function* () {
-    // Native history reads land with a later effort; empty for now.
-    return yield* Effect.succeed({ messages: [] });
+  getMessages: orpc.getMessages.effect(function* ({ errors }) {
+    // Native history reads land with tickets 10/11. Failing UNSUPPORTED (per
+    // the contract's convention — never silently degrade) keeps an empty
+    // transcript distinguishable from an unimplemented endpoint.
+    return yield* Effect.fail(
+      errors.UNSUPPORTED({ message: "native history reads not implemented yet" }),
+    );
   }),
-  resolveRef: orpc.resolveRef.effect(function* ({ input }) {
+  resolveRef: orpc.resolveRef.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.resolveRef(input.sessionId);
+    return yield* sessions.resolveRef(input.sessionId).pipe(
+      Effect.catchTags({
+        SessionRefNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+      }),
+    );
   }),
 
   // active instance -----------------------------------------------------------
-  prompt: orpc.prompt.effect(function* ({ input }) {
+  prompt: orpc.prompt.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.prompt(input);
+    return yield* sessions.prompt(input).pipe(
+      Effect.catchTags({
+        // The repository's SessionNotFound (has projectId) means the metadata is
+        // gone → NOT_FOUND; the harness's (bare sessionId) means the native
+        // session is not open → SESSION_NOT_ACTIVE.
+        SessionNotFound: (e) =>
+          Effect.fail(
+            "projectId" in e
+              ? errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })
+              : errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        UnsupportedPromptPart: (e) =>
+          Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
+        SessionClosed: (e) =>
+          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
+        TurnAlreadyRunning: (e) =>
+          Effect.fail(
+            errors.CONFLICT({ message: `a turn is already running in session ${e.sessionId}` }),
+          ),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
   }),
-  interrupt: orpc.interrupt.effect(function* ({ input }) {
+  interrupt: orpc.interrupt.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.interrupt(input.ref);
+    yield* sessions.interrupt(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(
+            "projectId" in e
+              ? errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })
+              : errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        SessionClosed: (e) =>
+          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
   }),
-  respondToAgentRequest: orpc.respondToAgentRequest.effect(function* ({ input }) {
+  respondToAgentRequest: orpc.respondToAgentRequest.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.respondToAgentRequest(input.ref, input.requestId, input.response);
+    yield* sessions.respondToAgentRequest(input.ref, input.requestId, input.response).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(
+            "projectId" in e
+              ? errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })
+              : errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        AgentRequestUnavailable: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `request ${e.requestId} is not pending` })),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
   }),
-  getStatus: orpc.getStatus.effect(function* ({ input }) {
+  getStatus: orpc.getStatus.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.getStatus(input.ref);
+    return yield* sessions.getStatus(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotActive: (e) =>
+          Effect.fail(
+            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+      }),
+    );
   }),
-  getSnapshot: orpc.getSnapshot.effect(function* ({ input }) {
+  getSnapshot: orpc.getSnapshot.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return yield* sessions.getSnapshot(input.ref);
+    return yield* sessions.getSnapshot(input.ref).pipe(
+      Effect.catchTags({
+        SessionNotActive: (e) =>
+          Effect.fail(
+            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+      }),
+    );
   }),
 
   // events --------------------------------------------------------------------
