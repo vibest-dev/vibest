@@ -1,15 +1,16 @@
 import childProcess from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { Clock, Effect } from "effect";
 
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
+import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
 import { reservePort } from "./port";
 import { type DaemonRecord, readRecord, removeRecord, writeRecord } from "./record";
+import { clearTombstone, hasTombstone, writeTombstone } from "./tombstone";
 
 const DEFAULT_PORT = 4000;
 const READY_TIMEOUT_MS = 30_000;
@@ -54,11 +55,6 @@ export type ResolveDaemonOptions = {
 };
 
 export type DaemonLauncherError = DaemonLaunchError | DaemonStoppedError;
-
-/** `$VIBEST_HOME`, falling back to `~/.vibest` — mirrors the server's Paths. */
-export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
-}
 
 /**
  * The shared launcher (the local twin of the SSH launch script): read
@@ -150,37 +146,12 @@ const killPid = (pid: number): Effect.Effect<void> =>
     if (pidAlive(pid)) signal(pid, "SIGKILL");
   });
 
-function lockPath(home: string): string {
-  return path.join(home, "daemon.lock");
-}
-
-function tombstonePath(home: string): string {
-  return path.join(home, "daemon.stopped");
-}
-
-function hasTombstone(home: string): boolean {
-  return fs.existsSync(tombstonePath(home));
-}
-
-function writeTombstone(home: string): void {
-  fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(tombstonePath(home), String(Date.now()), { mode: 0o600 });
-}
-
-function clearTombstone(home: string): void {
-  try {
-    fs.rmSync(tombstonePath(home));
-  } catch {
-    // already gone
-  }
-}
-
 /**
- * Serialize spawns with an exclusive-create lock file so two launchers racing
+ * Serialize spawns with the launch lock (see `lock.ts`) so two launchers racing
  * an empty `$VIBEST_HOME` (or a respawn window) cannot both spawn a daemon —
- * the loser waits for the winner's record and attaches. The lock holds the
- * holder's pid; a lock whose holder died is reclaimed. `ensuring` releases the
- * lock even when the spawn is interrupted.
+ * the loser waits for the winner's record and attaches. A lock whose holder pid
+ * died is reclaimed. `ensuring` releases the lock even when the spawn is
+ * interrupted.
  */
 const spawnLocked = (
   options: ResolveDaemonOptions,
@@ -188,12 +159,11 @@ const spawnLocked = (
   Effect.gen(function* () {
     const { home } = options;
     fs.mkdirSync(home, { recursive: true });
-    const lock = lockPath(home);
     const timeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
 
     for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
       const acquired = yield* Effect.try({
-        try: () => tryAcquireLock(lock),
+        try: () => tryAcquireLock(home),
         catch: (cause) =>
           new DaemonLaunchError({
             message: `Unable to acquire the vibest daemon launch lock: ${String(cause)}`,
@@ -202,10 +172,10 @@ const spawnLocked = (
       });
 
       if (!acquired) {
-        const holder = readLockPid(lock);
+        const holder = readLockPid(home);
         if (holder !== undefined && !pidAlive(holder)) {
           // The locking launcher died mid-spawn; reclaim and try again.
-          removeQuietly(lock);
+          releaseLock(home);
           continue;
         }
         // Another launcher is spawning right now: wait for its daemon, then
@@ -217,41 +187,13 @@ const spawnLocked = (
       }
 
       return yield* spawnDaemon(options).pipe(
-        Effect.ensuring(Effect.sync(() => removeQuietly(lock))),
+        Effect.ensuring(Effect.sync(() => releaseLock(home))),
       );
     }
     return yield* Effect.fail(
       new DaemonLaunchError({ message: "Could not acquire the vibest daemon launch lock" }),
     );
   });
-
-/** True when the lock was created; false when someone else holds it. */
-function tryAcquireLock(lock: string): boolean {
-  try {
-    fs.writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
-  }
-}
-
-function readLockPid(lock: string): number | undefined {
-  try {
-    const pid = Number.parseInt(fs.readFileSync(lock, "utf8"), 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function removeQuietly(file: string): void {
-  try {
-    fs.rmSync(file);
-  } catch {
-    // already gone (or lost a reclaim race — the retry loop handles it)
-  }
-}
 
 /** Poll for a healthy record to appear (a concurrent launcher is spawning). */
 const waitForRecord = (home: string, timeoutMs: number): Effect.Effect<DaemonRecord | undefined> =>
@@ -260,7 +202,7 @@ const waitForRecord = (home: string, timeoutMs: number): Effect.Effect<DaemonRec
     while ((yield* Clock.currentTimeMillis) < deadline) {
       const record = readRecord(home);
       if (record && (yield* daemonAlive(record))) return record;
-      if (!fs.existsSync(lockPath(home))) return undefined;
+      if (!lockExists(home)) return undefined;
       yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
     }
     return undefined;

@@ -36,11 +36,18 @@ const resolve = (home: string) => {
   };
 };
 
+/**
+ * `$VIBEST_HOME`, falling back to `~/.vibest` — the single home every client
+ * (server Paths, CLI, desktop, daemon launcher) resolves through, so the
+ * one-daemon-per-home invariant can never drift on a second definition.
+ */
+export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.VIBEST_HOME ?? join(homedir(), ".vibest");
+}
+
 /** Point the runtime at an explicit home directory (used in tests). */
 export const layerPaths = (home: string): Layer.Layer<Paths> =>
   Layer.sync(Paths, () => resolve(home));
 
 /** Default: `$VIBEST_HOME`, falling back to `~/.vibest`. */
-export const PathsLayer: Layer.Layer<Paths> = Layer.sync(Paths, () =>
-  resolve(process.env.VIBEST_HOME ?? join(homedir(), ".vibest")),
-);
+export const PathsLayer: Layer.Layer<Paths> = Layer.sync(Paths, () => resolve(resolveVibestHome()));

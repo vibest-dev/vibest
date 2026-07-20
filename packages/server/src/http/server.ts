@@ -1,20 +1,15 @@
-import fs from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer as createHttpServer } from "node:http";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import sirv from "sirv";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
 import { createRpcRuntime, createWsRPCHandler } from "../rpc";
 import { bearerToken, createTicketStore, tokensMatch } from "./auth";
 import { corsHeaders, isAllowedOrigin, isLoopbackHost } from "./cors";
+import { createUIHandler, type UIHandler } from "./ui";
 
 const isDev = process.env.NODE_ENV === "development";
-
-type UIHandler = (req: IncomingMessage, res: ServerResponse) => void;
 
 export type ManagedServer = Server & {
   readonly dispose: () => Promise<void>;
@@ -38,26 +33,6 @@ export type CreateServerOptions = {
 function notFound(res: ServerResponse) {
   res.statusCode = 404;
   res.end("Not Found");
-}
-
-/**
- * Locate the built web UI: the packaged layout ships it next to the server
- * bundle as `client/`, while running from monorepo source falls back to
- * `apps/app/dist`.
- */
-function resolveStaticDir(): string | undefined {
-  const candidates = [
-    new URL("./client/", import.meta.url), // packaged: dist/client next to dist/cli.js
-    new URL("../../../../apps/app/dist/", import.meta.url), // monorepo, from src/node
-    new URL("../../../apps/app/dist/", import.meta.url), // monorepo, from packages/vibest/dist
-  ];
-  for (const candidate of candidates) {
-    const dir = path.resolve(fileURLToPath(candidate));
-    if (fs.existsSync(path.join(dir, "index.html"))) {
-      return dir;
-    }
-  }
-  return undefined;
 }
 
 export async function createServer(options: CreateServerOptions = {}): Promise<ManagedServer> {
@@ -139,36 +114,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     }
   }
 
-  if (isDev) {
-    // Import vite lazily so the production bundle never depends on it
-    // (vite is a devDependency and marked external in tsdown.config.ts).
-    const { createServer: createViteDevServer } = await import("vite");
-    const vite = await createViteDevServer({
-      // Serve the standalone web app package (apps/app) through this server.
-      root: path.resolve(fileURLToPath(new URL("../../../../apps/app/", import.meta.url))),
-      server: {
-        middlewareMode: true,
-        hmr: {
-          server,
-        },
-      },
-    });
-    serveUI = (req, res) => vite.middlewares(req, res, () => notFound(res));
-    closeUI = () => vite.close();
-  } else {
-    const staticDir = resolveStaticDir();
-    if (!staticDir) {
-      serveUI = (_req, res) => {
-        res.statusCode = 503;
-        res.end("Web UI not built. Run the @vibest/app build first.");
-      };
-    } else {
-      const assets = sirv(staticDir, {
-        single: true,
-      });
-      serveUI = (req, res) => assets(req, res, () => notFound(res));
-    }
-  }
+  ({ serveUI, closeUI } = await createUIHandler(server, isDev));
 
   const wss = new WebSocketServer({ noServer: true });
 
