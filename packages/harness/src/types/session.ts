@@ -8,7 +8,7 @@ export type SessionSummary = {
 };
 
 export type UserInput = { text: string };
-export type CreateSessionConfig = { workspacePath: string };
+export type CreateSessionConfig = { cwd: string };
 export type AvailabilityResult = { available: boolean; reason?: string };
 
 export interface LifecycleView {

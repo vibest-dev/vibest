@@ -152,10 +152,10 @@ export interface HarnessAgentAdapter {
   >;
   /**
    * Look up live display info for a persisted session by backend id, without
-   * opening it. `workspacePath` (the session's cwd) narrows the backend search.
+   * opening it. `cwd` (the session's cwd) narrows the backend search.
    */
   readonly getSessionInfo: (
     harnessSessionId: string,
-    workspacePath?: string,
+    cwd?: string,
   ) => Effect.Effect<SessionInfoResult, AgentOperationError>;
 }

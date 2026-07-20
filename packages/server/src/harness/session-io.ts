@@ -9,7 +9,7 @@ import { Schema } from "effect";
  */
 
 export const CreateSessionInputSchema = Schema.Struct({
-  workspacePath: Schema.String,
+  cwd: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
   // Session config chosen at create time, applied via the session's own
   // setModel / setPermissionMode before the first prompt (applyInitialSessionConfig).
@@ -21,14 +21,14 @@ export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
 export const ResumeSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
-  workspacePath: Schema.optionalKey(Schema.String),
+  cwd: Schema.optionalKey(Schema.String),
 });
 export type ResumeSessionInput = typeof ResumeSessionInputSchema.Type;
 
 export const ResumeManagedSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
   harnessAgentId: HarnessAgentIdSchema,
-  workspacePath: Schema.optionalKey(Schema.String),
+  cwd: Schema.optionalKey(Schema.String),
 });
 export type ResumeManagedSessionInput = typeof ResumeManagedSessionInputSchema.Type;
 

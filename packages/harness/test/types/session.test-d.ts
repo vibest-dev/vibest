@@ -8,5 +8,5 @@ test("LifecycleView exposes the active turn and a turn-id minter", () => {
 });
 
 test("CreateSessionConfig requires a workspace path", () => {
-  expectTypeOf<CreateSessionConfig["workspacePath"]>().toEqualTypeOf<string>();
+  expectTypeOf<CreateSessionConfig["cwd"]>().toEqualTypeOf<string>();
 });

@@ -12,7 +12,7 @@ layer(NodeServices.layer)("codex live smoke", (it) => {
     () =>
       Effect.gen(function* () {
         const agent = yield* makeCodexAgent();
-        const { sessionId } = yield* agent.session.create({ workspacePath: process.cwd() });
+        const { sessionId } = yield* agent.session.create({ cwd: process.cwd() });
         const prompt = yield* agent.session.prompt({
           sessionId,
           text: "Reply with exactly: PONG",

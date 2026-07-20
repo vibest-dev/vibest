@@ -225,12 +225,12 @@ export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
   capabilities: Effect.succeed({}),
   checkAvailability: Effect.succeed({ available: true }),
   open: (input) =>
-    agent.session.create({ workspacePath: input.workspacePath }).pipe(
+    agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "pi", cause })),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
   resume: (input) =>
-    agent.session.resume({ sessionId: input.sessionId, workspacePath: input.workspacePath }).pipe(
+    agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
       Effect.mapError((cause) =>
         cause instanceof SessionNotResumable
           ? cause

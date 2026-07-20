@@ -189,7 +189,7 @@ describe("ClaudeCodeAgent", () => {
         return queryInstance;
       });
       const agent = yield* makeClaudeCodeAgent();
-      const session = yield* makeClaudeCodeAdapter(agent).open({ workspacePath: "/tmp" });
+      const session = yield* makeClaudeCodeAdapter(agent).open({ cwd: "/tmp" });
       const crashSeen = yield* Deferred.make<void>();
       yield* Stream.runForEach(session.events, (event) =>
         event.body.type === "session.crashed"
@@ -216,7 +216,7 @@ describe("ClaudeCodeAgent", () => {
       ];
       const agent = yield* makeClaudeCodeAgent();
       const session = yield* makeClaudeCodeAdapter(agent).open({
-        workspacePath: "/tmp",
+        cwd: "/tmp",
         model: "opus",
       });
       const collected = yield* Effect.forkChild(

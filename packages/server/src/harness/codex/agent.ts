@@ -116,11 +116,11 @@ export interface CodexAgentDependencies<R> {
 export interface CodexAgent {
   readonly session: {
     readonly create: (config: {
-      readonly workspacePath: string;
+      readonly cwd: string;
     }) => Effect.Effect<{ readonly sessionId: string }, CodexTransportFailure>;
     readonly resume: (config: {
       readonly sessionId: string;
-      readonly workspacePath?: string;
+      readonly cwd?: string;
     }) => Effect.Effect<{ readonly sessionId: string }, CodexTransportFailure>;
     /**
      * Reads a thread's stored metadata (title, recency) straight from the
@@ -542,7 +542,7 @@ export const makeCodexAgentWithDependencies = <R>(
             const transport = yield* holder.ensure;
             const generation = yield* getTransportGeneration(transport);
             const response = yield* transport.request<ThreadStartResponse>("thread/start", {
-              cwd: config.workspacePath,
+              cwd: config.cwd,
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });
@@ -554,7 +554,7 @@ export const makeCodexAgentWithDependencies = <R>(
             const generation = yield* getTransportGeneration(transport);
             const response = yield* transport.request<ThreadResumeResponse>("thread/resume", {
               threadId: config.sessionId,
-              cwd: config.workspacePath,
+              cwd: config.cwd,
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });

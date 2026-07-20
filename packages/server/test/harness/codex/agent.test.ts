@@ -18,12 +18,12 @@ const path = require("node:path");
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
 const send = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
-let workspacePath;
+let cwd;
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.method === "initialize") send({ id: msg.id, result: {} });
   if (msg.method === "thread/start") {
-    workspacePath = msg.params.cwd;
+    cwd = msg.params.cwd;
     send({ id: msg.id, result: { thread: { id: "th_1" } } });
     if (msg.params.cwd === "/tmp/idle-crash") setImmediate(() => process.exit(1));
   }
@@ -34,9 +34,9 @@ rl.on("line", (line) => {
       return;
     }
     if (msg.params.input[0].text === "slow-start") {
-      fs.writeFileSync(path.join(workspacePath, "turn-start-requested"), "");
+      fs.writeFileSync(path.join(cwd, "turn-start-requested"), "");
       setTimeout(() => {
-        fs.writeFileSync(path.join(workspacePath, "turn-start-replied"), "");
+        fs.writeFileSync(path.join(cwd, "turn-start-replied"), "");
         send({ id: msg.id, result: { turn: { id: "turn_slow" } } });
         send({ method: "turn/started", params: { threadId: "th_1", turn: { id: "turn_slow" } } });
       }, 50);
@@ -78,7 +78,7 @@ rl.on("line", (line) => {
     return;
   }
   if (msg.method === "turn/interrupt") {
-    fs.writeFileSync(path.join(workspacePath, "turn-interrupted"), "");
+    fs.writeFileSync(path.join(cwd, "turn-interrupted"), "");
     send({ id: msg.id, result: null });
   }
   if (msg.method === "thread/unsubscribe") send({ id: msg.id, result: null });
@@ -155,10 +155,10 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           }),
       });
 
-      const first = yield* agent.session.create({ workspacePath: "/tmp/first" });
+      const first = yield* agent.session.create({ cwd: "/tmp/first" });
       yield* controls[0]!.terminate;
       yield* Deferred.await(oldCrashStarted);
-      const second = yield* agent.session.create({ workspacePath: "/tmp/second" });
+      const second = yield* agent.session.create({ cwd: "/tmp/second" });
       yield* Deferred.succeed(oldCrashGate, undefined);
       yield* Effect.eventually(
         agent.session
@@ -184,7 +184,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("creates a thread and streams a full turn", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       NodeAssert.equal(sessionId, "th_1");
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
@@ -230,7 +230,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("reports a transport crash while the adapter session is idle", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const session = yield* makeCodexAdapter(agent).open({ workspacePath: "/tmp/idle-crash" });
+      const session = yield* makeCodexAdapter(agent).open({ cwd: "/tmp/idle-crash" });
       const crashSeen = yield* Deferred.make<void>();
       yield* Stream.runForEach(session.events, (event) =>
         event.body.type === "session.crashed"
@@ -264,15 +264,15 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts a turn requested while turn/start is still pending", () =>
     Effect.gen(function* () {
-      const workspacePath = mkdtempSync(join(tmpdir(), "codex-starting-interrupt-"));
+      const cwd = mkdtempSync(join(tmpdir(), "codex-starting-interrupt-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath });
+      const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
         agent.session.prompt({ sessionId, text: "slow-start" }),
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(workspacePath, "turn-start-requested"))).pipe(
+        Effect.sync(() => existsSync(join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -284,7 +284,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
       NodeAssert.equal(
-        existsSync(join(workspacePath, "turn-interrupted")),
+        existsSync(join(cwd, "turn-interrupted")),
         true,
         "turn/start completed without the pending interrupt",
       );
@@ -294,15 +294,15 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts the native turn when the prompt caller cancels during turn/start", () =>
     Effect.gen(function* () {
-      const workspacePath = mkdtempSync(join(tmpdir(), "codex-starting-cancel-"));
+      const cwd = mkdtempSync(join(tmpdir(), "codex-starting-cancel-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath });
+      const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
         agent.session.prompt({ sessionId, text: "slow-start" }),
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(workspacePath, "turn-start-requested"))).pipe(
+        Effect.sync(() => existsSync(join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -311,7 +311,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Fiber.interrupt(prompt);
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(workspacePath, "turn-start-replied"))).pipe(
+        Effect.sync(() => existsSync(join(cwd, "turn-start-replied"))).pipe(
           Effect.filterOrFail(
             (replied) => replied,
             () => new Error("turn/start did not reply"),
@@ -321,7 +321,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
       NodeAssert.equal(
-        existsSync(join(workspacePath, "turn-interrupted")),
+        existsSync(join(cwd, "turn-interrupted")),
         true,
         "cancelled prompt left the native turn running",
       );
@@ -332,7 +332,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("unblocks a waiting prompt when the transport crashes", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       yield* agent.session.prompt({ sessionId, text: "hold" });
       const secondDone = yield* Deferred.make<void>();
       yield* agent.session.prompt({ sessionId, text: "steer-after-crash" }).pipe(
@@ -368,7 +368,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("exposes prompt output through the unified adapter event stream", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const session = yield* makeCodexAdapter(agent).open({ workspacePath: "/tmp" });
+      const session = yield* makeCodexAdapter(agent).open({ cwd: "/tmp" });
       const collected = yield* Effect.forkChild(
         Stream.runCollect(
           session.events.pipe(
@@ -400,7 +400,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("keeps a retryable error inside the active turn", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "retry" });
       const chunks = yield* Stream.runCollect(prompt.output);
 
@@ -413,12 +413,12 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("does not let an abandoned session stall the shared transport", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "flood" });
       yield* Stream.runHead(prompt.output);
       const replacement = yield* agent.session
-        .create({ workspacePath: "/tmp" })
+        .create({ cwd: "/tmp" })
         .pipe(Effect.timeout("2 seconds"));
       NodeAssert.equal(replacement.sessionId, "th_1");
       yield* agent.session.abort(replacement.sessionId);
@@ -428,7 +428,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("crashes existing sessions and lazily starts a replacement transport", () =>
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
       NodeAssert.deepStrictEqual(
@@ -436,7 +436,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
         ["start", "text-start", "text-delta", "error"],
       );
 
-      const replacement = yield* agent.session.create({ workspacePath: "/tmp" });
+      const replacement = yield* agent.session.create({ cwd: "/tmp" });
       const replacementPrompt = yield* agent.session.prompt({
         sessionId: replacement.sessionId,
         text: "ping",

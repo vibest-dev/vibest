@@ -190,7 +190,7 @@ export const makeHarnessAgentSessionService = (
               ? adapter.open(mode.input)
               : adapter.resume({
                   sessionId: mode.input.sessionId,
-                  workspacePath: mode.input.workspacePath,
+                  cwd: mode.input.cwd,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
           return yield* register({ session, scope: sessionScope });

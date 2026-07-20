@@ -16,8 +16,8 @@ import { SessionManagerLayer } from "../src/session/runtime";
 import { SessionService, SessionServiceLayer } from "../src/session/service";
 
 type PortSpy = {
-  create: Array<{ harnessAgentId: string; workspacePath: string }>;
-  resume: Array<{ harnessAgentId: string; harnessSessionId: string; workspacePath: string }>;
+  create: Array<{ harnessAgentId: string; cwd: string }>;
+  resume: Array<{ harnessAgentId: string; harnessSessionId: string; cwd: string }>;
   close: Array<string>;
 };
 
@@ -27,16 +27,16 @@ const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
   // may build an effect without running it — e.g. the `onCrash` handed to the
   // runtime — and only executions should be counted.
   const layer = Layer.succeed(HarnessAgentSessionPort, {
-    create: (harnessAgentId, workspacePath) =>
+    create: (harnessAgentId, cwd) =>
       Effect.suspend(() => {
-        spy.create.push({ harnessAgentId, workspacePath });
+        spy.create.push({ harnessAgentId, cwd });
         return opts.failCreate
           ? Effect.fail(opts.failCreate)
           : Effect.succeed(`native-${spy.create.length}`);
       }),
-    resume: (harnessAgentId, harnessSessionId, workspacePath) =>
+    resume: (harnessAgentId, harnessSessionId, cwd) =>
       Effect.sync(() => {
-        spy.resume.push({ harnessAgentId, harnessSessionId, workspacePath });
+        spy.resume.push({ harnessAgentId, harnessSessionId, cwd });
       }),
     close: (harnessSessionId) =>
       Effect.sync(() => {
@@ -104,7 +104,7 @@ describe("SessionService", () => {
     expect(result.ref.sessionId).toMatch(UUID_RE);
     // harness saw the resolved cwd, never a projectId
     expect(spy.create).toEqual([
-      { harnessAgentId: "claude-code", workspacePath: resolvePath("/tmp/vibest-app") },
+      { harnessAgentId: "claude-code", cwd: resolvePath("/tmp/vibest-app") },
     ]);
     // metadata stores the native id, keyed by the server sessionId (filename)
     expect(result.stored.harnessSessionId).toBe("native-1");
@@ -162,7 +162,7 @@ describe("SessionService", () => {
       {
         harnessAgentId: "claude-code",
         harnessSessionId: "native-1",
-        workspacePath: resolvePath("/tmp/vibest-app"),
+        cwd: resolvePath("/tmp/vibest-app"),
       },
     ]);
   });

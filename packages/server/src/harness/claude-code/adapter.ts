@@ -438,21 +438,19 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       ),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
-  getSessionInfo: (harnessSessionId, workspacePath) =>
-    agent.session
-      .getSessionInfo(harnessSessionId, workspacePath ? { dir: workspacePath } : undefined)
-      .pipe(
-        Effect.mapError((cause) => operationError(harnessSessionId, "get-session-info", cause)),
-        Effect.map(
-          (info): SessionInfoResult =>
-            info
-              ? {
-                  _tag: "found",
-                  // customTitle (user /rename) wins over the auto summary; both fall
-                  // back to undefined title if empty.
-                  info: { title: info.customTitle ?? info.summary, updatedAt: info.lastModified },
-                }
-              : { _tag: "missing" },
-        ),
+  getSessionInfo: (harnessSessionId, cwd) =>
+    agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(
+      Effect.mapError((cause) => operationError(harnessSessionId, "get-session-info", cause)),
+      Effect.map(
+        (info): SessionInfoResult =>
+          info
+            ? {
+                _tag: "found",
+                // customTitle (user /rename) wins over the auto summary; both fall
+                // back to undefined title if empty.
+                info: { title: info.customTitle ?? info.summary, updatedAt: info.lastModified },
+              }
+            : { _tag: "missing" },
       ),
+    ),
 });

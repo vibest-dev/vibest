@@ -78,18 +78,18 @@ export interface PiAgentOptions {
 export interface PiAgentDependencies<R> {
   readonly makeTransport: (config: {
     readonly sessionId: string;
-    readonly workspacePath?: string;
+    readonly cwd?: string;
   }) => Effect.Effect<PiTransport, PiTransportError, R | Scope.Scope>;
 }
 
 export interface PiAgent {
   readonly session: {
     readonly create: (config: {
-      readonly workspacePath: string;
+      readonly cwd: string;
     }) => Effect.Effect<{ readonly sessionId: string }, PiTransportFailure>;
     readonly resume: (config: {
       readonly sessionId: string;
-      readonly workspacePath?: string;
+      readonly cwd?: string;
     }) => Effect.Effect<{ readonly sessionId: string }, PiTransportFailure>;
     readonly prompt: (input: {
       readonly sessionId: string;
@@ -299,13 +299,13 @@ export const makePiAgentWithDependencies = <R>(
 
     const openSession = (
       sessionId: string,
-      workspacePath?: string,
+      cwd?: string,
     ): Effect.Effect<{ readonly sessionId: string }, PiTransportFailure> =>
       Effect.gen(function* () {
         const scope = yield* Scope.fork(ownerScope, "sequential");
         return yield* Effect.gen(function* () {
           const transport = yield* dependencies
-            .makeTransport({ sessionId, ...(workspacePath ? { workspacePath } : {}) })
+            .makeTransport({ sessionId, ...(cwd ? { cwd } : {}) })
             .pipe(Effect.provideService(Scope.Scope, scope), Effect.provideContext(buildContext));
 
           // Readiness handshake: pi's CLI front-end resolves the session (and
@@ -390,8 +390,8 @@ export const makePiAgentWithDependencies = <R>(
 
     return {
       session: {
-        create: (config) => openSession(uuid(), config.workspacePath),
-        resume: (config) => openSession(config.sessionId, config.workspacePath),
+        create: (config) => openSession(uuid(), config.cwd),
+        resume: (config) => openSession(config.sessionId, config.cwd),
         prompt: (input) =>
           Effect.gen(function* () {
             const session = yield* getSession(input.sessionId);
@@ -574,6 +574,6 @@ export const makePiAgent = (
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
         ...(options.args ? { args: options.args } : {}),
         sessionId: config.sessionId,
-        ...(config.workspacePath ? { cwd: config.workspacePath } : {}),
+        ...(config.cwd ? { cwd: config.cwd } : {}),
       }),
   });

@@ -87,7 +87,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("creates a session and streams a full turn", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       NodeAssert.match(sessionId, /^[0-9a-f]{8}-[0-9a-f-]{27}$/);
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
@@ -106,7 +106,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.resume({
         sessionId: "custom-id",
-        workspacePath: "/tmp",
+        cwd: "/tmp",
       });
       NodeAssert.equal(sessionId, "custom-id");
       yield* agent.session.abort(sessionId);
@@ -117,7 +117,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const error = yield* agent.session
-        .resume({ sessionId: "missing-session", workspacePath: "/tmp" })
+        .resume({ sessionId: "missing-session", cwd: "/tmp" })
         .pipe(Effect.flip);
       NodeAssert.equal(error._tag, "AgentProcessExited");
     }),
@@ -126,7 +126,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("streams tool executions as typed tool chunks", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "tool" });
       const chunks = yield* Stream.runCollect(prompt.output);
       NodeAssert.deepStrictEqual(
@@ -140,7 +140,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("round-trips a blocking extension UI request through respondPermission", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
         Effect.forkChild,
       );
@@ -191,7 +191,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("steers an active turn instead of starting a new one", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const first = yield* agent.session.prompt({ sessionId, text: "hold" });
       NodeAssert.equal(first.started, true);
 
@@ -208,7 +208,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("interrupt aborts the run and the turn still finishes", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "hold" });
       const collected = yield* Effect.forkChild(Stream.runCollect(prompt.output));
 
@@ -222,7 +222,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("a failed prompt command leaves the session promptable", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ workspacePath: "/tmp" });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const error = yield* agent.session.prompt({ sessionId, text: "fail" }).pipe(Effect.flip);
       NodeAssert.equal(error._tag, "PiRpcError");
 
@@ -236,8 +236,8 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("a child crash evicts only that session and surfaces an error chunk", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const healthy = yield* agent.session.create({ workspacePath: "/tmp" });
-      const doomed = yield* agent.session.create({ workspacePath: "/tmp" });
+      const healthy = yield* agent.session.create({ cwd: "/tmp" });
+      const doomed = yield* agent.session.create({ cwd: "/tmp" });
 
       const prompt = yield* agent.session.prompt({ sessionId: doomed.sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
@@ -272,7 +272,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("exposes prompt output through the unified adapter event stream", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const session = yield* makePiAdapter(agent).open({ workspacePath: "/tmp" });
+      const session = yield* makePiAdapter(agent).open({ cwd: "/tmp" });
       const collected = yield* Effect.forkChild(
         Stream.runCollect(
           session.events.pipe(
@@ -311,7 +311,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("reports a child crash while the adapter session is idle", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
-      const session = yield* makePiAdapter(agent).open({ workspacePath: "/tmp" });
+      const session = yield* makePiAdapter(agent).open({ cwd: "/tmp" });
       const crashSeen = yield* Deferred.make<void>();
       yield* Stream.runForEach(session.events, (event) =>
         event.body.type === "session.crashed"

@@ -128,7 +128,7 @@ const isActive = (
 it.effect("exposes the raw per-session event stream and tears down on close", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
+    const created = yield* fixture.service.create("claude-code", { cwd: "/tmp" });
     const stream = yield* fixture.service.events(created.sessionId);
     const collected = yield* Effect.forkChild(
       Stream.runCollect(stream.pipe(Stream.map((draft) => draft.body.type))),
@@ -180,7 +180,7 @@ it.effect("single-flights resume in owner scope when the first waiter cancels", 
 it.effect("waits for an in-flight close before resuming the same session id", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
+    const created = yield* fixture.service.create("claude-code", { cwd: "/tmp" });
     yield* Ref.set(fixture.holdClose, true);
     const close = yield* Effect.forkChild(fixture.service.close(created.sessionId));
     yield* Effect.eventually(
@@ -245,7 +245,7 @@ it.effect("closes a session that is still being resumed", () =>
 it.effect("shares one idempotent close operation", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
+    const created = yield* fixture.service.create("claude-code", { cwd: "/tmp" });
     const first = yield* Effect.forkChild(fixture.service.close(created.sessionId));
     const second = yield* Effect.forkChild(fixture.service.close(created.sessionId));
 

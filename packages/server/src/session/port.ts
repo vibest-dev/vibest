@@ -37,7 +37,7 @@ export type HarnessRespondError =
  * only to this port, never to `@vibest/harness` directly, so the orchestration
  * (projectId resolution, id translation, metadata, runtime fan-out) can be
  * built and tested against a fake. The port speaks the agent-native session id
- * and a resolved `workspacePath` only — it never sees a projectId or a server
+ * and a resolved `cwd` only — it never sees a projectId or a server
  * sessionId. Create/resume errors are mapped to server errors here; the
  * active-instance ops pass the HarnessAgent's own errors through.
  */
@@ -47,14 +47,14 @@ export class HarnessAgentSessionPort extends Context.Service<
     /** Open a fresh native session; returns the agent-native session id. */
     readonly create: (
       harnessAgentId: HarnessAgentId,
-      workspacePath: string,
+      cwd: string,
       config?: { readonly model?: string; readonly permissionMode?: string },
     ) => Effect.Effect<string, HarnessCreateError>;
     /** Ensure a native session is active again from its stored native id. */
     readonly resume: (
       harnessAgentId: HarnessAgentId,
       harnessSessionId: string,
-      workspacePath: string,
+      cwd: string,
     ) => Effect.Effect<void, HarnessResumeError>;
     /** Close a native session; idempotent no-op if it is not active. */
     readonly close: (harnessSessionId: string) => Effect.Effect<void>;
@@ -108,10 +108,10 @@ export const HarnessAgentSessionPortLayer: Layer.Layer<
   Effect.gen(function* () {
     const harness = yield* HarnessAgentSessionService;
     return {
-      create: (harnessAgentId, workspacePath, config) =>
+      create: (harnessAgentId, cwd, config) =>
         harness
           .create(harnessAgentId, {
-            workspacePath,
+            cwd,
             ...(config?.model !== undefined ? { model: config.model } : {}),
             ...(config?.permissionMode !== undefined
               ? { permissionMode: config.permissionMode }
@@ -121,9 +121,9 @@ export const HarnessAgentSessionPortLayer: Layer.Layer<
             Effect.map((result) => result.sessionId),
             Effect.mapError(mapCreateError(harnessAgentId)),
           ),
-      resume: (harnessAgentId, harnessSessionId, workspacePath) =>
+      resume: (harnessAgentId, harnessSessionId, cwd) =>
         harness
-          .resume({ sessionId: harnessSessionId, harnessAgentId, workspacePath })
+          .resume({ sessionId: harnessSessionId, harnessAgentId, cwd })
           .pipe(Effect.mapError(mapResumeError(harnessAgentId, harnessSessionId))),
       close: (harnessSessionId) => harness.close(harnessSessionId),
       events: (harnessSessionId) =>
