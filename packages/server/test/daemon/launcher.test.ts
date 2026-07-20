@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import url from "node:url";
 
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { DaemonStoppedError } from "../../src/daemon/errors";
 import {
-  DaemonStoppedError,
+  type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
   statusDaemon,
   stopDaemon,
@@ -22,6 +24,9 @@ const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", impo
 // booting the real runtime.
 const serverArgv = [process.execPath, FAKE_SERVER];
 
+const resolve = (options: Omit<ResolveDaemonOptions, "serverArgv">) =>
+  Effect.runPromise(resolveOrSpawnDaemon({ serverArgv, ...options }));
+
 describe("resolveOrSpawnDaemon", () => {
   let home: string;
 
@@ -29,17 +34,12 @@ describe("resolveOrSpawnDaemon", () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-"));
   });
   afterEach(async () => {
-    await stopDaemon(home);
+    await Effect.runPromise(stopDaemon(home));
     fs.rmSync(home, { recursive: true, force: true });
   });
 
   it("spawns a daemon, records it, then attaches on the next call", async () => {
-    const spawned = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const spawned = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
     expect(spawned.reused).toBe(false);
     expect(spawned.address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(pidAlive(spawned.pid)).toBe(true);
@@ -49,80 +49,58 @@ describe("resolveOrSpawnDaemon", () => {
     expect(record?.address).toBe(spawned.address);
     expect(record?.token).toBe(spawned.token);
 
-    const attached = await resolveOrSpawnDaemon({ home, serverArgv, port: 0 });
+    const attached = await resolve({ home, port: 0 });
     expect(attached.reused).toBe(true);
     expect(attached.pid).toBe(spawned.pid);
     expect(attached.address).toBe(spawned.address);
   });
 
   it("reports status and stops the daemon", async () => {
-    const spawned = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const spawned = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
 
-    const running = await statusDaemon(home);
+    const running = await Effect.runPromise(statusDaemon(home));
     expect(running.running).toBe(true);
     expect(running.record?.pid).toBe(spawned.pid);
 
-    expect(await stopDaemon(home)).toBe("stopped");
+    expect(await Effect.runPromise(stopDaemon(home))).toBe("stopped");
     expect(pidAlive(spawned.pid)).toBe(false);
     expect(readRecord(home)).toBeUndefined();
-    expect((await statusDaemon(home)).running).toBe(false);
+    expect((await Effect.runPromise(statusDaemon(home))).running).toBe(false);
   });
 
   it("respawns when the recorded daemon is dead", async () => {
-    const first = await resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 });
-    await stopDaemon(home);
+    const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+    await Effect.runPromise(stopDaemon(home));
     expect(pidAlive(first.pid)).toBe(false);
 
-    const second = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const second = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
     expect(second.reused).toBe(false);
     expect(second.pid).not.toBe(first.pid);
     expect(pidAlive(second.pid)).toBe(true);
   });
 
   it("reports not-running when stopping with no daemon", async () => {
-    expect(await stopDaemon(home)).toBe("not-running");
+    expect(await Effect.runPromise(stopDaemon(home))).toBe("not-running");
   });
 
   it("attaches when the requested origins are already covered", async () => {
-    const first = await resolveOrSpawnDaemon({
+    const first = await resolve({
       home,
-      serverArgv,
       port: 0,
       corsOrigins: ["vibest://app", "http://localhost:5173"],
       readyTimeoutMs: 15_000,
     });
 
-    const attached = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      corsOrigins: ["vibest://app"],
-    });
+    const attached = await resolve({ home, port: 0, corsOrigins: ["vibest://app"] });
     expect(attached.reused).toBe(true);
     expect(attached.pid).toBe(first.pid);
   });
 
   it("restarts the daemon with the origin union when a new origin joins", async () => {
-    const first = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
 
-    const second = await resolveOrSpawnDaemon({
+    const second = await resolve({
       home,
-      serverArgv,
       port: 0,
       corsOrigins: ["vibest://app"],
       readyTimeoutMs: 15_000,
@@ -134,9 +112,8 @@ describe("resolveOrSpawnDaemon", () => {
   });
 
   it("preserves the recorded origins across a crash respawn", async () => {
-    const first = await resolveOrSpawnDaemon({
+    const first = await resolve({
       home,
-      serverArgv,
       port: 0,
       corsOrigins: ["vibest://app"],
       readyTimeoutMs: 15_000,
@@ -144,11 +121,10 @@ describe("resolveOrSpawnDaemon", () => {
 
     // Simulate a crash: kill the process without stopDaemon, record stays.
     process.kill(first.pid, "SIGKILL");
-    while (pidAlive(first.pid)) await new Promise((resolve) => setTimeout(resolve, 20));
+    while (pidAlive(first.pid)) await new Promise((done) => setTimeout(done, 20));
 
-    const second = await resolveOrSpawnDaemon({
+    const second = await resolve({
       home,
-      serverArgv,
       port: 0,
       corsOrigins: ["http://localhost:5173"],
       readyTimeoutMs: 15_000,
@@ -169,41 +145,32 @@ describe("resolveOrSpawnDaemon", () => {
       startedAt: 0,
     });
 
-    const handle = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const handle = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
     expect(handle.reused).toBe(false);
     expect(pidAlive(wedgedPid)).toBe(false);
     expect(handle.pid).not.toBe(wedgedPid);
   });
 
   it("refuses to auto-respawn a daemon the user explicitly stopped", async () => {
-    await resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 });
-    await stopDaemon(home);
+    await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+    await Effect.runPromise(stopDaemon(home));
 
-    await expect(
-      resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true }),
-    ).rejects.toBeInstanceOf(DaemonStoppedError);
+    const error = await Effect.runPromise(
+      Effect.flip(resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true })),
+    );
+    expect(error).toBeInstanceOf(DaemonStoppedError);
 
     // An explicit start clears the tombstone; auto-respawn works again after.
-    const restarted = await resolveOrSpawnDaemon({
-      home,
-      serverArgv,
-      port: 0,
-      readyTimeoutMs: 15_000,
-    });
+    const restarted = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
     expect(restarted.reused).toBe(false);
-    const attached = await resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true });
+    const attached = await resolve({ home, port: 0, autoRespawn: true });
     expect(attached.pid).toBe(restarted.pid);
   });
 
   it("serializes concurrent launchers onto a single daemon", async () => {
     const [a, b] = await Promise.all([
-      resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 }),
-      resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 }),
+      resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
+      resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
     ]);
     expect(a.pid).toBe(b.pid);
     expect(a.address).toBe(b.address);

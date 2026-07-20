@@ -1,6 +1,7 @@
+export { DaemonLaunchError, DaemonStoppedError } from "./errors";
 export {
   type DaemonHandle,
-  DaemonStoppedError,
+  type DaemonLauncherError,
   type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
   resolveVibestHome,

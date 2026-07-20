@@ -257,6 +257,12 @@ _additional plane_, added when wanted, with no rework of the current work.
    attaching client needing more (the desktop's app:// origin joining a CLI-started
    daemon) restarts it once with the union (preserved across crash respawns too).
    Consequence, as designed: **the daemon survives quitting the desktop app.**
+   The launcher is Effect-based orchestration (typed `DaemonLaunchError` /
+   `DaemonStoppedError` in the error channel, `Effect.sleep`/`Clock` polling,
+   interruption-safe lock release via `ensuring`) around one deliberately-raw
+   seam: the detached, unref'd, log-fd spawn itself, which is the opposite of
+   the supervised-child model `effect/unstable/process` provides and so stays
+   plain `node:child_process`.
    Post-review hardening: spawns are serialized by an exclusive-create
    `daemon.lock` (loser attaches to the winner), a wedged daemon (pid alive,
    health failing) is killed before its replacement spawns, health probes are

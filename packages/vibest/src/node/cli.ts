@@ -35,14 +35,12 @@ const startDaemon = (input: DaemonStartInput) =>
     // Same flag > env > default precedence as `vibest serve`, so
     // VIBEST_PORT/VIBEST_CORS_ORIGINS behave identically on both paths.
     const { port, corsOrigins } = resolveServeConfig(input);
-    const handle = yield* Effect.promise(() =>
-      resolveOrSpawnDaemon({
-        home: resolveVibestHome(),
-        serverArgv: serverArgv(),
-        port,
-        corsOrigins,
-      }),
-    );
+    const handle = yield* resolveOrSpawnDaemon({
+      home: resolveVibestHome(),
+      serverArgv: serverArgv(),
+      port,
+      corsOrigins,
+    });
     console.log(
       handle.reused
         ? `vibest daemon already running at ${handle.address} (pid ${handle.pid})`
@@ -58,13 +56,13 @@ const startDaemon = (input: DaemonStartInput) =>
 
 const stopHandler = () =>
   Effect.gen(function* () {
-    const result = yield* Effect.promise(() => stopDaemon(resolveVibestHome()));
+    const result = yield* stopDaemon(resolveVibestHome());
     console.log(result === "stopped" ? "vibest daemon stopped" : "vibest daemon is not running");
   });
 
 const statusHandler = () =>
   Effect.gen(function* () {
-    const status = yield* Effect.promise(() => statusDaemon(resolveVibestHome()));
+    const status = yield* statusDaemon(resolveVibestHome());
     if (!status.running || status.record === undefined) {
       console.log("vibest daemon is not running");
       return;

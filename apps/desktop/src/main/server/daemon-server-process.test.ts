@@ -31,7 +31,7 @@ describe("DaemonServerProcess", () => {
     fs.writeFileSync(entry, FAKE_SERVER);
   });
   afterEach(async () => {
-    await stopDaemon(home);
+    await Effect.runPromise(stopDaemon(home));
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -83,7 +83,7 @@ describe("DaemonServerProcess", () => {
         Effect.gen(function* () {
           const running = yield* spawn(config(), 0);
           yield* running.ready;
-          yield* Effect.promise(() => stopDaemon(home));
+          yield* stopDaemon(home);
           return yield* running.awaitExit;
         }),
       ),

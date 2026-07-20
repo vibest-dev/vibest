@@ -1,5 +1,9 @@
 import net from "node:net";
 
+import { Effect } from "effect";
+
+import { DaemonLaunchError } from "./errors";
+
 /**
  * Reserve a loopback port for the daemon. Prefer `preferred` (default `:4000`)
  * so the daemon lands on a predictable address; if it is taken, fall back to an
@@ -11,9 +15,15 @@ import net from "node:net";
  * makes the daemon fail to bind, the health poll times out, and the launcher
  * reports it) and matched by how the SSH launch script picks a port.
  */
-export function reservePort(preferred: number): Promise<number> {
-  return tryListen(preferred).catch(() => tryListen(0));
-}
+export const reservePort = (preferred: number): Effect.Effect<number, DaemonLaunchError> =>
+  Effect.tryPromise({
+    try: () => tryListen(preferred).catch(() => tryListen(0)),
+    catch: (cause) =>
+      new DaemonLaunchError({
+        message: `Unable to reserve a port for the vibest daemon: ${String(cause)}`,
+        cause,
+      }),
+  });
 
 function tryListen(port: number): Promise<number> {
   return new Promise((resolve, reject) => {

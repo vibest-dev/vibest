@@ -43,24 +43,24 @@ export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}
         ELECTRON_RUN_AS_NODE: "1",
       };
 
-      const handle = yield* Effect.tryPromise({
-        try: () =>
-          resolveOrSpawnDaemon({
-            home: resolveVibestHome(config.environment),
-            serverArgv: [process.execPath, config.entry],
-            // 0 means "no preference" on the first attempt; afterwards the
-            // supervisor pins the port it saw, which we pass as preferred.
-            port: port === 0 ? undefined : port,
-            corsOrigins: config.corsOrigins,
-            environment,
-            autoRespawn: port !== 0,
-          }),
-        catch: (cause) =>
-          new ServerSpawnError({
-            message: `Unable to attach or spawn the vibest daemon: ${String(cause)}`,
-            cause,
-          }),
-      });
+      const handle = yield* resolveOrSpawnDaemon({
+        home: resolveVibestHome(config.environment),
+        serverArgv: [process.execPath, config.entry],
+        // 0 means "no preference" on the first attempt; afterwards the
+        // supervisor pins the port it saw, which we pass as preferred.
+        port: port === 0 ? undefined : port,
+        corsOrigins: config.corsOrigins,
+        environment,
+        autoRespawn: port !== 0,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServerSpawnError({
+              message: `Unable to attach or spawn the vibest daemon: ${cause.message}`,
+              cause,
+            }),
+        ),
+      );
 
       const awaitExit: Effect.Effect<ServerProcessExit, ServerSpawnError> = Effect.gen(
         function* () {
@@ -70,7 +70,7 @@ export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}
             if (!pidAlive(handle.pid)) return { exitCode: null };
             // Tolerate transient probe failures; a wedged-but-alive daemon
             // still counts as dead after enough consecutive misses.
-            misses = (yield* Effect.promise(() => healthy(handle.address))) ? 0 : misses + 1;
+            misses = (yield* healthy(handle.address)) ? 0 : misses + 1;
             if (misses >= MAX_HEALTH_MISSES) return { exitCode: null };
           }
         },
