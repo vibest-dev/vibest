@@ -43,7 +43,6 @@ export type ServerStartError = ServerSpawnError | ServerReadyTimeout | ServerExi
 
 export type ServerProcessConfig = {
   readonly entry: string;
-  readonly token: string;
   readonly environment: NodeJS.ProcessEnv;
 };
 
@@ -137,7 +136,6 @@ export function makeLocalServer(
     const supervise = Effect.gen(function* () {
       const processConfig: ServerProcessConfig = {
         entry: config.entry,
-        token: config.token,
         environment: yield* config.environment,
       };
       let first = true;

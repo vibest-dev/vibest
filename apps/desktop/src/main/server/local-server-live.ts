@@ -20,7 +20,6 @@ export const LocalServerLive = Layer.effect(
     return yield* makeLocalServer(
       {
         entry: config.serverEntry,
-        token: config.token,
         environment,
       },
       makeDaemonServerProcess(),

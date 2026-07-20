@@ -8,13 +8,11 @@ describe("buildDesktopConfig", () => {
       isPackaged: true,
       resourcesPath: "/Applications/Vibest.app/Contents/Resources",
       devUrl: undefined,
-      token: "fixed-token",
     });
 
     expect(config.serverEntry).toBe(
       "/Applications/Vibest.app/Contents/Resources/app.asar/node_modules/@vibest/server/dist/server.mjs",
     );
-    expect(config.token).toBe("fixed-token");
   });
 
   it("resolves the dev server entry relative to the package output", () => {
@@ -22,7 +20,6 @@ describe("buildDesktopConfig", () => {
       isPackaged: false,
       resourcesPath: "/unused",
       devUrl: undefined,
-      token: "fixed-token",
     });
 
     expect(config.serverEntry).toMatch(/packages\/server\/dist\/server\.mjs$/);

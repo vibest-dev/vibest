@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
@@ -22,7 +20,6 @@ function makeRuntime(devUrl: string | undefined) {
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     devUrl,
-    token: randomUUID(),
   });
 
   return ManagedRuntime.make(

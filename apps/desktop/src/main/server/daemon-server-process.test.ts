@@ -37,7 +37,6 @@ describe("DaemonServerProcess", () => {
 
   const config = (): ServerProcessConfig => ({
     entry,
-    token: "unused-desktop-token",
     environment: { ...process.env, VIBEST_HOME: home },
   });
 
@@ -55,12 +54,11 @@ describe("DaemonServerProcess", () => {
 
     const record = readRecord(home);
     expect(record).toBeDefined();
+    // The endpoint carries the daemon's own minted token, read from the record.
     expect(endpoint).toEqual({
       port: Number(new URL(record!.address).port),
       token: record!.token,
     });
-    // The daemon's own token, not the desktop's config token.
-    expect(endpoint.token).not.toBe("unused-desktop-token");
 
     const again = await Effect.runPromise(
       Effect.scoped(

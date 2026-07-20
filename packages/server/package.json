@@ -15,7 +15,6 @@
     "./session": "./src/session/index.ts",
     "./rpc": "./src/rpc/index.ts",
     "./http": "./src/http/index.ts",
-    "./handshake": "./src/http/handshake.ts",
     "./daemon": "./src/daemon/index.ts"
   },
   "scripts": {
