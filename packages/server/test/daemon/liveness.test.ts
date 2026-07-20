@@ -1,4 +1,5 @@
 import http from "node:http";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,5 +52,21 @@ describe("healthy", () => {
 
   it("is false when nothing is listening", async () => {
     expect(await healthy("http://127.0.0.1:1")).toBe(false);
+  });
+
+  it("times out instead of hanging on a wedged server that never responds", async () => {
+    // Accepts the TCP connection but never writes an HTTP response.
+    const wedged = await new Promise<import("node:net").Server>((resolve) => {
+      const listener = net.createServer(() => {});
+      listener.listen(0, "127.0.0.1", () => resolve(listener));
+    });
+    try {
+      const port = (wedged.address() as AddressInfo).port;
+      const started = Date.now();
+      expect(await healthy(`http://127.0.0.1:${port}`)).toBe(false);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      wedged.close();
+    }
   });
 });

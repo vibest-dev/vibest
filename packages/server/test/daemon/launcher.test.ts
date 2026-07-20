@@ -1,15 +1,21 @@
+import childProcess from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import url from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveOrSpawnDaemon, statusDaemon, stopDaemon } from "../../src/daemon/launcher";
+import {
+  DaemonStoppedError,
+  resolveOrSpawnDaemon,
+  statusDaemon,
+  stopDaemon,
+} from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
-import { readRecord } from "../../src/daemon/record";
+import { readRecord, writeRecord } from "../../src/daemon/record";
 
-const FAKE_SERVER = fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
+const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
 
 // The daemon = this argv spawned detached. Point it at the fake server so the
 // launcher's attach-or-spawn/health/record orchestration is exercised without
@@ -125,5 +131,82 @@ describe("resolveOrSpawnDaemon", () => {
     expect(second.pid).not.toBe(first.pid);
     expect(pidAlive(first.pid)).toBe(false);
     expect(readRecord(home)?.corsOrigins).toEqual(["vibest://app"]);
+  });
+
+  it("preserves the recorded origins across a crash respawn", async () => {
+    const first = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      corsOrigins: ["vibest://app"],
+      readyTimeoutMs: 15_000,
+    });
+
+    // Simulate a crash: kill the process without stopDaemon, record stays.
+    process.kill(first.pid, "SIGKILL");
+    while (pidAlive(first.pid)) await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      corsOrigins: ["http://localhost:5173"],
+      readyTimeoutMs: 15_000,
+    });
+    expect(second.reused).toBe(false);
+    expect(readRecord(home)?.corsOrigins).toEqual(["vibest://app", "http://localhost:5173"]);
+  });
+
+  it("kills a wedged daemon (pid alive, health failing) before respawning", async () => {
+    // A live process that is not a server: pid answers signals, health fails.
+    const wedged = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+    const wedgedPid = wedged.pid!;
+    writeRecord(home, {
+      pid: wedgedPid,
+      address: "http://127.0.0.1:1",
+      token: "stale",
+      corsOrigins: [],
+      startedAt: 0,
+    });
+
+    const handle = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      readyTimeoutMs: 15_000,
+    });
+    expect(handle.reused).toBe(false);
+    expect(pidAlive(wedgedPid)).toBe(false);
+    expect(handle.pid).not.toBe(wedgedPid);
+  });
+
+  it("refuses to auto-respawn a daemon the user explicitly stopped", async () => {
+    await resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 });
+    await stopDaemon(home);
+
+    await expect(
+      resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true }),
+    ).rejects.toBeInstanceOf(DaemonStoppedError);
+
+    // An explicit start clears the tombstone; auto-respawn works again after.
+    const restarted = await resolveOrSpawnDaemon({
+      home,
+      serverArgv,
+      port: 0,
+      readyTimeoutMs: 15_000,
+    });
+    expect(restarted.reused).toBe(false);
+    const attached = await resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true });
+    expect(attached.pid).toBe(restarted.pid);
+  });
+
+  it("serializes concurrent launchers onto a single daemon", async () => {
+    const [a, b] = await Promise.all([
+      resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 }),
+      resolveOrSpawnDaemon({ home, serverArgv, port: 0, readyTimeoutMs: 15_000 }),
+    ]);
+    expect(a.pid).toBe(b.pid);
+    expect(a.address).toBe(b.address);
+    expect([a.reused, b.reused].filter((reused) => !reused)).toHaveLength(1);
   });
 });

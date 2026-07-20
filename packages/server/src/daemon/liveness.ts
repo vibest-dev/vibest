@@ -12,10 +12,18 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** True if `${address}/api/health` answers `ok`. */
+const HEALTH_TIMEOUT_MS = 1_000;
+
+/**
+ * True if `${address}/api/health` answers `ok`. Always bounded: a wedged
+ * daemon that accepts connections but never responds must read as unhealthy,
+ * not hang the probe (and with it every liveness poll built on top).
+ */
 export async function healthy(address: string, signal?: AbortSignal): Promise<boolean> {
   try {
-    const res = await fetch(new URL("/api/health", address), { signal });
+    const res = await fetch(new URL("/api/health", address), {
+      signal: signal ?? AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+    });
     return res.ok && (await res.text()) === "ok";
   } catch {
     return false;

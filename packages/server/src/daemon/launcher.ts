@@ -12,6 +12,7 @@ const DEFAULT_PORT = 4000;
 const READY_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_INTERVAL_MS = 150;
 const STOP_GRACE_MS = 5_000;
+const LOCK_ATTEMPTS = 10;
 
 export type DaemonHandle = {
   readonly address: string;
@@ -22,8 +23,17 @@ export type DaemonHandle = {
   readonly reused: boolean;
 };
 
+/**
+ * Thrown when an auto-respawn caller finds the `daemon.stopped` tombstone: the
+ * user explicitly stopped the daemon and automatic supervision must not undo
+ * that. An explicit start (CLI `vibest daemon start`, app launch) clears it.
+ */
+export class DaemonStoppedError extends Error {
+  override readonly name = "DaemonStoppedError";
+}
+
 export type ResolveDaemonOptions = {
-  /** `$VIBEST_HOME` — owns `daemon.pid` and `daemon.log`. */
+  /** `$VIBEST_HOME` — owns `daemon.pid`, `daemon.log`, and the launch lock. */
   readonly home: string;
   /**
    * argv that launches the plain foreground server, e.g.
@@ -40,6 +50,13 @@ export type ResolveDaemonOptions = {
    * `ELECTRON_RUN_AS_NODE`; the launcher's own `VIBEST_*` entries win.
    */
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * Set by automatic supervision loops (the desktop's exit-triggered respawn).
+   * While the `daemon.stopped` tombstone is present, an autoRespawn caller
+   * fails with `DaemonStoppedError` instead of resurrecting a daemon the user
+   * explicitly stopped. Explicit front-doors leave this unset.
+   */
+  readonly autoRespawn?: boolean;
   readonly readyTimeoutMs?: number;
 };
 
@@ -52,12 +69,14 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
  * The shared launcher (the local twin of the SSH launch script): read
  * `daemon.pid`; if a healthy daemon is there, attach; otherwise spawn the
  * foreground server detached, wait for it to answer health, and record it. Both
- * the CLI and (later) the desktop go through here so there is exactly one
- * daemon per `$VIBEST_HOME`.
+ * the CLI and the desktop go through here so there is exactly one daemon per
+ * `$VIBEST_HOME` — concurrent launchers are serialized by an exclusive-create
+ * launch lock, and the loser attaches to the winner's daemon.
  */
 export async function resolveOrSpawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle> {
   const requested = options.corsOrigins ?? [];
   const existing = readRecord(options.home);
+
   if (existing && (await daemonAlive(existing))) {
     // The one daemon must serve every client's origins. If this client needs
     // origins the running daemon wasn't started with (e.g. the desktop's
@@ -65,17 +84,39 @@ export async function resolveOrSpawnDaemon(options: ResolveDaemonOptions): Promi
     // with the union — CORS is fixed at server boot, so a restart is the only
     // way. This happens at most once per new origin set.
     const missing = requested.filter((origin) => !existing.corsOrigins.includes(origin));
-    if (missing.length === 0) return attach(existing, true);
-    await stopDaemon(options.home);
-    return spawnDaemon({
+    if (missing.length === 0) {
+      // A live daemon makes any tombstone stale (someone started it again).
+      clearTombstone(options.home);
+      return attach(existing, true);
+    }
+    await killPid(existing.pid);
+    removeRecord(options.home);
+    return spawnLocked({
       ...options,
-      corsOrigins: [...new Set([...existing.corsOrigins, ...requested])],
+      corsOrigins: unionOrigins(existing.corsOrigins, requested),
     });
   }
-  // A record whose pid/health no longer holds is stale — clear it before we
-  // claim the slot, so a crashed daemon never blocks a restart.
-  if (existing) removeRecord(options.home);
-  return spawnDaemon(options);
+
+  if (options.autoRespawn === true && hasTombstone(options.home)) {
+    throw new DaemonStoppedError(
+      "vibest daemon was stopped explicitly; not auto-respawning (run `vibest daemon start` to start it again)",
+    );
+  }
+  clearTombstone(options.home);
+
+  if (existing) {
+    // Wedged (pid alive but unhealthy) daemons must die before we replace
+    // them, or they leak as orphans still holding their port. A dead pid is
+    // a no-op here.
+    await killPid(existing.pid);
+    removeRecord(options.home);
+  }
+  // Preserve the origins other clients negotiated into the record even across
+  // a crash respawn — a respawn must never narrow the daemon's CORS.
+  return spawnLocked({
+    ...options,
+    corsOrigins: existing ? unionOrigins(existing.corsOrigins, requested) : requested,
+  });
 }
 
 /** Read the current daemon's status without starting one. */
@@ -88,8 +129,10 @@ export async function statusDaemon(
 }
 
 /**
- * Stop the daemon: SIGTERM, wait for it to exit, escalate to SIGKILL if it
- * overstays, then clear the record. Returns whether anything was running.
+ * Stop the daemon and leave a `daemon.stopped` tombstone so automatic
+ * supervision (the desktop's respawn loop) does not resurrect it. The
+ * tombstone is written before the kill so a respawn racing the stop still
+ * sees it. Returns whether anything was running.
  */
 export async function stopDaemon(home: string): Promise<"stopped" | "not-running"> {
   const record = readRecord(home);
@@ -98,20 +141,127 @@ export async function stopDaemon(home: string): Promise<"stopped" | "not-running
     return "not-running";
   }
 
-  signal(record.pid, "SIGTERM");
-  const deadline = now() + STOP_GRACE_MS;
-  while (now() < deadline && pidAlive(record.pid)) {
-    await delay(100);
-  }
-  if (pidAlive(record.pid)) signal(record.pid, "SIGKILL");
-
+  writeTombstone(home);
+  await killPid(record.pid);
   removeRecord(home);
   return "stopped";
 }
 
-async function spawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle> {
+/** SIGTERM, wait up to the grace period, escalate to SIGKILL. */
+async function killPid(pid: number): Promise<void> {
+  if (!pidAlive(pid)) return;
+  signal(pid, "SIGTERM");
+  const deadline = now() + STOP_GRACE_MS;
+  while (now() < deadline && pidAlive(pid)) {
+    await delay(100);
+  }
+  if (pidAlive(pid)) signal(pid, "SIGKILL");
+}
+
+function unionOrigins(
+  recorded: readonly string[],
+  requested: readonly string[],
+): readonly string[] {
+  return [...new Set([...recorded, ...requested])];
+}
+
+function lockPath(home: string): string {
+  return path.join(home, "daemon.lock");
+}
+
+function tombstonePath(home: string): string {
+  return path.join(home, "daemon.stopped");
+}
+
+function hasTombstone(home: string): boolean {
+  return fs.existsSync(tombstonePath(home));
+}
+
+function writeTombstone(home: string): void {
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(tombstonePath(home), String(now()), { mode: 0o600 });
+}
+
+function clearTombstone(home: string): void {
+  try {
+    fs.rmSync(tombstonePath(home));
+  } catch {
+    // already gone
+  }
+}
+
+/**
+ * Serialize spawns with an exclusive-create lock file so two launchers racing
+ * an empty `$VIBEST_HOME` (or a respawn window) cannot both spawn a daemon —
+ * the loser waits for the winner's record and attaches. The lock holds the
+ * holder's pid; a lock whose holder died is reclaimed.
+ */
+async function spawnLocked(options: ResolveDaemonOptions): Promise<DaemonHandle> {
   const { home } = options;
   fs.mkdirSync(home, { recursive: true });
+  const lock = lockPath(home);
+  const timeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
+
+  for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const holder = readLockPid(lock);
+      if (holder !== undefined && !pidAlive(holder)) {
+        // The locking launcher died mid-spawn; reclaim and try again.
+        try {
+          fs.rmSync(lock);
+        } catch {
+          // lost the reclaim race — loop
+        }
+        continue;
+      }
+      // Another launcher is spawning right now: wait for its daemon, then
+      // re-enter the full resolve so this caller's own origin requirements
+      // are still enforced against the winner's daemon (origins only grow,
+      // so the recursion converges).
+      const winner = await waitForRecord(home, timeoutMs);
+      if (winner) return resolveOrSpawnDaemon(options);
+      continue;
+    }
+
+    try {
+      return await spawnDaemon(options);
+    } finally {
+      try {
+        fs.rmSync(lock);
+      } catch {
+        // already gone
+      }
+    }
+  }
+  throw new Error("Could not acquire the vibest daemon launch lock");
+}
+
+function readLockPid(lock: string): number | undefined {
+  try {
+    const pid = Number.parseInt(fs.readFileSync(lock, "utf8"), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Poll for a healthy record to appear (a concurrent launcher is spawning). */
+async function waitForRecord(home: string, timeoutMs: number): Promise<DaemonRecord | undefined> {
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    const record = readRecord(home);
+    if (record && (await daemonAlive(record))) return record;
+    if (!fs.existsSync(lockPath(home))) return undefined;
+    await delay(HEALTH_POLL_INTERVAL_MS);
+  }
+  return undefined;
+}
+
+async function spawnDaemon(options: ResolveDaemonOptions): Promise<DaemonHandle> {
+  const { home } = options;
 
   const port = await reservePort(options.port ?? DEFAULT_PORT);
   const token = crypto.randomBytes(32).toString("hex");

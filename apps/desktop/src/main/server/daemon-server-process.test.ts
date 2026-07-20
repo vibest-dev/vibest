@@ -1,5 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { readRecord, stopDaemon } from "@vibest/server/daemon";
@@ -26,13 +26,13 @@ describe("DaemonServerProcess", () => {
   let entry: string;
 
   beforeEach(() => {
-    home = mkdtempSync(path.join(tmpdir(), "vibest-daemon-desktop-"));
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-desktop-"));
     entry = path.join(home, "fake-server.mjs");
-    writeFileSync(entry, FAKE_SERVER);
+    fs.writeFileSync(entry, FAKE_SERVER);
   });
   afterEach(async () => {
     await stopDaemon(home);
-    rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   const config = (): ServerProcessConfig => ({

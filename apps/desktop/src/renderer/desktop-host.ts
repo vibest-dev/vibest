@@ -11,6 +11,13 @@ function isAbortError(error: unknown): boolean {
 export type DesktopHost = {
   platform: Platform;
   server: Promise<ServerConnection>;
+  /**
+   * Re-fetch the current connection. The daemon mints a fresh token (and can
+   * land on a new port) every time it respawns, so the startup connection goes
+   * stale on every server restart — consumers re-fetch when the status feed
+   * reports ready again.
+   */
+  refreshServer: () => Promise<ServerConnection>;
   status: ServerStatusFeed;
 };
 
@@ -34,6 +41,7 @@ export function createDesktopHost(
       },
     },
     server,
+    refreshServer: () => client.server.connection(),
     status: {
       initial: bootstrap.status,
       subscribe: (listener) => {

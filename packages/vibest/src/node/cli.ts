@@ -8,7 +8,7 @@ import {
   statusDaemon,
   stopDaemon,
 } from "@vibest/server/daemon";
-import { serve, serveFlags } from "@vibest/server/http";
+import { resolveServeConfig, serve, serveFlags } from "@vibest/server/http";
 import { Effect, Option } from "effect";
 import { Command } from "effect/unstable/cli";
 
@@ -32,12 +32,15 @@ type DaemonStartInput = {
 // backend that outlives it, so it attaches to the running daemon or spawns one.
 const startDaemon = (input: DaemonStartInput) =>
   Effect.gen(function* () {
+    // Same flag > env > default precedence as `vibest serve`, so
+    // VIBEST_PORT/VIBEST_CORS_ORIGINS behave identically on both paths.
+    const { port, corsOrigins } = resolveServeConfig(input);
     const handle = yield* Effect.promise(() =>
       resolveOrSpawnDaemon({
         home: resolveVibestHome(),
         serverArgv: serverArgv(),
-        port: Option.getOrUndefined(input.port),
-        corsOrigins: input.corsOrigin,
+        port,
+        corsOrigins,
       }),
     );
     console.log(
@@ -45,6 +48,12 @@ const startDaemon = (input: DaemonStartInput) =>
         ? `vibest daemon already running at ${handle.address} (pid ${handle.pid})`
         : `vibest daemon started at ${handle.address} (pid ${handle.pid})`,
     );
+    const explicitPort = Option.getOrUndefined(input.port);
+    if (handle.reused && explicitPort !== undefined && handle.port !== explicitPort) {
+      console.log(
+        `note: --port ${explicitPort} ignored — attached to the daemon already running on port ${handle.port}`,
+      );
+    }
   });
 
 const stopHandler = () =>

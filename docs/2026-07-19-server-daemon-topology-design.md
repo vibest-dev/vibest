@@ -255,8 +255,27 @@ _additional plane_, added when wanted, with no rework of the current work.
    latest port/token since a daemon respawn mints fresh ones. CORS converges at the
    launcher: `daemon.pid` records the origins the daemon was started with, and an
    attaching client needing more (the desktop's app:// origin joining a CLI-started
-   daemon) restarts it once with the union. Consequence, as designed: **the daemon
-   survives quitting the desktop app.**
+   daemon) restarts it once with the union (preserved across crash respawns too).
+   Consequence, as designed: **the daemon survives quitting the desktop app.**
+   Post-review hardening: spawns are serialized by an exclusive-create
+   `daemon.lock` (loser attaches to the winner), a wedged daemon (pid alive,
+   health failing) is killed before its replacement spawns, health probes are
+   hard-bounded (1s) so a wedged daemon cannot hang liveness, and `stopDaemon`
+   leaves a `daemon.stopped` tombstone that auto-respawn honors
+   (`DaemonStoppedError`) while explicit starts clear it. The renderer re-fetches
+   its connection on every ready transition, since a respawned daemon mints a
+   fresh token.
+
+   **Open issue — first-spawner environment/runtime freeze.** The daemon inherits
+   the environment (and executable: Electron-as-node vs node) of whichever client
+   spawned it first; attaching clients never converge it, unlike CORS origins. A
+   CLI-spawned daemon from an env-poor shell bypasses the desktop's login-shell
+   resolution (proxy vars — the known silent-hang failure mode), and a
+   desktop-spawned daemon runs under the app bundle's binary, which an app
+   update/uninstall invalidates. Candidate fix for Phase 3/4: record an env
+   fingerprint in `daemon.pid` and converge like CORS, and prefer one canonical
+   runtime (system node when present) regardless of the spawning front-door.
+
 3. **Unified auth (built as a credential set, not a single secret).** Local token
    flows through `daemon.pid` + a same-origin `/api/bootstrap`. Model the gate as a
    set of credential sources with one member today (the file source); demote any

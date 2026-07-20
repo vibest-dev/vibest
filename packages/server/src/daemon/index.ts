@@ -1,5 +1,6 @@
 export {
   type DaemonHandle,
+  DaemonStoppedError,
   type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
   resolveVibestHome,

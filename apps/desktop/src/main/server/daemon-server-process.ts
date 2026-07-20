@@ -26,8 +26,11 @@ export type DaemonServerProcessOptions = {
  * - The daemon outlives the app: closing this process's scope kills nothing.
  * - "Exit" has no child handle to wait on, so it is detected by polling the
  *   recorded pid + `/api/health`; when the daemon dies, the supervisor loop
- *   re-runs this spawner, which re-spawns through the launcher (auto-heal —
- *   this also resurrects a daemon explicitly stopped while the app is open).
+ *   re-runs this spawner, which re-spawns through the launcher (auto-heal).
+ * - Respawn attempts (port !== 0) set `autoRespawn`, so an explicit
+ *   `vibest daemon stop` is respected: the launcher refuses to resurrect a
+ *   tombstoned daemon and the supervisor surfaces "failed" instead. A fresh
+ *   app launch (port === 0) is explicit intent and clears the tombstone.
  */
 export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}): SpawnServer {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -50,6 +53,7 @@ export function makeDaemonServerProcess(options: DaemonServerProcessOptions = {}
             port: port === 0 ? undefined : port,
             corsOrigins: config.corsOrigins,
             environment,
+            autoRespawn: port !== 0,
           }),
         catch: (cause) =>
           new ServerSpawnError({
