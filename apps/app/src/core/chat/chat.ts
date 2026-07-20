@@ -1,16 +1,15 @@
-import type { HarnessAgentId } from "@vibest/contract";
+import type { HarnessAgentId, SessionRef } from "@vibest/contract";
 import { AbstractChat, type UIMessage } from "ai";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
 import type { ChatModel, ChatPermissionMode } from "./chat-config";
 import { ChatState, type ChatStoreState } from "./chat-state";
-import type { OrpcChatSessionTransport } from "./chat-transport";
+import type { ChatSessionTransport } from "./chat-transport-port";
 
 export interface ChatInit {
-  sessionId: string;
-  harnessAgentId: HarnessAgentId;
-  transport: OrpcChatSessionTransport;
+  sessionRef: SessionRef;
+  transport: ChatSessionTransport;
 }
 
 // Session controller: AbstractChat drives the prompt stream (optimistic user
@@ -24,36 +23,35 @@ export class Chat extends AbstractChat<UIMessage> {
   readonly harnessAgentId: HarnessAgentId;
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
-  readonly #transport: OrpcChatSessionTransport;
+  readonly #transport: ChatSessionTransport;
   readonly #unsubscribeRequests: () => void;
 
-  constructor({ sessionId, harnessAgentId, transport }: ChatInit) {
+  constructor({ sessionRef, transport }: ChatInit) {
     const state = new ChatState();
     super({
-      id: sessionId,
+      id: sessionRef.sessionId,
       transport,
       state,
       // Turn ended: unanswered requests are stale — drop them so no ghost card
       // lingers in the transcript.
       onFinish: () => state.clearPendingRequests(),
     });
-    this.harnessAgentId = harnessAgentId;
+    this.harnessAgentId = sessionRef.harnessAgentId;
     this.store = state.store;
     this.#state = state;
     this.#transport = transport;
     this.#unsubscribeRequests = transport.subscribeAgentRequests(
-      sessionId,
       (request) => state.addPendingRequest(request),
       (requestId) => state.removePendingRequest(requestId),
     );
   }
 
-  prompt = async (text: string): Promise<void> => {
-    await this.sendMessage({ text });
+  prompt = async (text: string, options?: { model?: ChatModel }): Promise<void> => {
+    await this.sendMessage({ text }, { body: { model: options?.model } });
   };
 
-  // Model / permission are session config, changed via their own calls — never
-  // bundled into a prompt turn.
+  // Model / permission are also session config, changed mid-session via their
+  // own calls (in addition to the optional per-prompt model override above).
   setModel = async (model: ChatModel): Promise<void> => {
     await this.#transport.setModel(this.id, model);
   };
@@ -66,7 +64,7 @@ export class Chat extends AbstractChat<UIMessage> {
     const request = this.store.getState().pendingRequests.find((r) => r.id === requestId);
     this.#state.removePendingRequest(requestId); // optimistic: the card closes immediately
     try {
-      await this.#transport.respondToAgentRequest(this.id, requestId, response);
+      await this.#transport.respondToAgentRequest(requestId, response);
     } catch (respondError) {
       // Failure = the request is still pending server-side: restore the card so
       // the user can answer again (addPendingRequest is idempotent by id).

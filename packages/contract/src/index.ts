@@ -4,15 +4,14 @@ import { projectContract } from "./project";
 import { sessionContract } from "./session";
 
 export * from "./domain";
-export * from "./session-events";
+export * from "./project";
 
 export const contract = {
   harness: harnessContract,
-  project: projectContract,
   session: sessionContract,
+  project: projectContract,
   fs: fsContract,
 };
 export type Contract = typeof contract;
 
 export { fsContract, harnessContract, projectContract, sessionContract };
-export type { SessionEventStreamItem } from "./session";

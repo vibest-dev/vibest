@@ -1,12 +1,6 @@
 import { expectTypeOf, test } from "vitest";
 
-import type { CreateSessionConfig, LifecycleView, SessionSnapshot } from "../../src/types/session";
-
-test("SessionSnapshot carries cold history + hot active turn + cursor", () => {
-  expectTypeOf<SessionSnapshot>().toHaveProperty("history");
-  expectTypeOf<SessionSnapshot>().toHaveProperty("activeTurn");
-  expectTypeOf<SessionSnapshot["cursor"]>().toEqualTypeOf<number>();
-});
+import type { CreateSessionConfig, LifecycleView } from "../../src/types/session";
 
 test("LifecycleView exposes the active turn and a turn-id minter", () => {
   expectTypeOf<LifecycleView["activeTurnId"]>().toEqualTypeOf<string | undefined>();

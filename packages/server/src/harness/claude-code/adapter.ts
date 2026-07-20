@@ -166,7 +166,6 @@ const makeSession = (
     const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
       EVENT_QUEUE_CAPACITY,
     );
-    const cursor = yield* Ref.make(0);
     const closed = yield* Ref.make(false);
     const activeTurn = yield* Ref.make<string | undefined>(undefined);
     const pendingPermissions = yield* Ref.make<ReadonlyMap<string, ToolPermissionRequest>>(
@@ -178,7 +177,7 @@ const makeSession = (
       Queue.offer(events, { harnessAgentId: "claude-code", sessionId, body }).pipe(
         Effect.flatMap((accepted) =>
           accepted
-            ? Ref.update(cursor, (current) => current + 1)
+            ? Effect.void
             : Effect.fail(
                 operationError(sessionId, "publish-event", new Error("Event queue closed")),
               ),
@@ -331,11 +330,7 @@ const makeSession = (
                   : operationError(sessionId, "prompt", cause),
               ),
             );
-          const receipt = {
-            turnId: prompt.turnId,
-            cursor: yield* Ref.get(cursor),
-            started: true,
-          };
+          const receipt = { turnId: prompt.turnId };
           yield* Ref.set(activeTurn, prompt.turnId);
           yield* emit({ type: "session.turn.started", sessionId, turnId: prompt.turnId });
 

@@ -284,8 +284,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const receipt = yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
       const events = yield* Fiber.join(collected);
 
-      NodeAssert.equal(receipt.cursor, 0);
-      NodeAssert.equal(receipt.started, true);
+      NodeAssert.equal(typeof receipt.turnId, "string");
       NodeAssert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         [

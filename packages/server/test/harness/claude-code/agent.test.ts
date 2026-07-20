@@ -232,7 +232,7 @@ describe("ClaudeCodeAgent", () => {
       });
       const events = yield* Fiber.join(collected);
 
-      NodeAssert.equal(receipt.cursor, 0);
+      NodeAssert.equal(typeof receipt.turnId, "string");
       NodeAssert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         ["session.turn.started", "start", "finish", "session.turn.ended"],

@@ -61,8 +61,28 @@ export interface RuntimeConfig {
   readonly mcp?: ReadonlyArray<McpServerConfig>;
 }
 
-/** The persisted session shape lives in @vibest/contract (`SessionRecord`). */
-export type { SessionRecord, SessionSummary } from "@vibest/contract";
+/**
+ * Server-owned recovery record for one session, persisted at
+ * `storage/sessions/<projectId>/<sessionId>.json`. The server `sessionId` is
+ * the filename, not a field; `harnessSessionId` is the agent-native id
+ * (claude session uuid / codex thread id) the server translates to when
+ * calling the harness.
+ */
+export interface Session {
+  readonly version: 1;
+  readonly projectId: string;
+  readonly harnessAgentId: HarnessAgentId;
+  readonly harnessSessionId: string;
+  readonly createdAt: string;
+}
+
+/** Session-related placeholder shapes (fields not fully designed yet). */
+export interface SessionSummary {
+  readonly id: string;
+  readonly harnessAgentId: HarnessAgentId;
+  readonly name?: string;
+  readonly archived: boolean;
+}
 
 /** A session event pushed over the event stream (payload shape is a placeholder). */
 export interface SessionEvent {

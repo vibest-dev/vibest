@@ -1,18 +1,14 @@
 import * as NodeAssert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
-import type { SessionEvent } from "@vibest/harness";
-import type {
-  ClaudeCodeUIMessageChunk,
-  SessionEnvelope,
-  SessionEnvelopeDraft,
-} from "@vibest/harness";
-import { Deferred, Effect, Fiber, Queue, Ref, Scope } from "effect";
+import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft, SessionEvent } from "@vibest/harness";
+import { Deferred, Effect, Exit, Fiber, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type {
   HarnessAgentAdapter,
   HarnessAgentSession,
+  SessionInfoResult,
   UserInput,
 } from "../../src/harness/adapter";
 import { AgentOperationError } from "../../src/harness/errors";
@@ -27,8 +23,6 @@ const makeFixture = Effect.gen(function* () {
   const holdClose = yield* Ref.make(false);
   const closeGate = yield* Deferred.make<void>();
   const crashGate = yield* Deferred.make<void>();
-  const sequence = yield* Ref.make(0);
-  const published = yield* Ref.make<ReadonlyArray<SessionEnvelope>>([]);
 
   const makeSession = (sessionId: string): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
     Effect.gen(function* () {
@@ -81,7 +75,7 @@ const makeFixture = Effect.gen(function* () {
               turnId: "turn-1",
               outcome: "completed",
             });
-            return { turnId: "turn-1", cursor: 0, started: true };
+            return { turnId: "turn-1" };
           }),
         setModel: () => Effect.void,
         setPermissionMode: () => Effect.void,
@@ -101,23 +95,16 @@ const makeFixture = Effect.gen(function* () {
     descriptor: { id: "claude-code", name: "Claude Code" },
     checkAvailability: Effect.succeed({ available: true }),
     capabilities: Effect.succeed({}),
-    getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
     open: () => makeSession("created-session"),
     resume: ({ sessionId }) =>
       Ref.update(resumeCalls, (current) => current + 1).pipe(
         Effect.andThen(Deferred.await(resumeGate)),
         Effect.andThen(makeSession(sessionId)),
       ),
+    getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
   } satisfies HarnessAgentAdapter;
 
-  const service = yield* makeHarnessAgentSessionService(makeHarnessAgentRegistry([adapter]), {
-    publish: (draft) =>
-      Ref.modify(sequence, (current) => [current + 1, current + 1] as const).pipe(
-        Effect.tap((seq) =>
-          Ref.update(published, (current) => [...current, { ...draft, seq } as SessionEnvelope]),
-        ),
-      ),
-  });
+  const service = yield* makeHarnessAgentSessionService(makeHarnessAgentRegistry([adapter]));
 
   return {
     service,
@@ -127,70 +114,48 @@ const makeFixture = Effect.gen(function* () {
     holdClose,
     closeGate,
     crashGate,
-    published,
   };
 });
 
-it.effect("owns the event pump and projects a reconnect snapshot", () =>
+/** Liveness probe: `events` succeeds while a session is active, fails once torn down. */
+const isActive = (
+  fixture: {
+    readonly service: { readonly events: (id: string) => Effect.Effect<unknown, unknown> };
+  },
+  sessionId: string,
+) => fixture.service.events(sessionId).pipe(Effect.exit, Effect.map(Exit.isSuccess));
+
+it.effect("exposes the raw per-session event stream and tears down on close", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
     const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
+    const stream = yield* fixture.service.events(created.sessionId);
+    const collected = yield* Effect.forkChild(
+      Stream.runCollect(stream.pipe(Stream.map((draft) => draft.body.type))),
+    );
+
     const receipt = yield* fixture.service.prompt(created.sessionId, {
       parts: [{ type: "text", text: "hello" }],
     });
-    const snapshot = yield* Effect.eventually(
-      fixture.service.getSnapshot(created.sessionId).pipe(
-        Effect.filterOrFail(
-          (current) => current.cursor === 3,
-          () => new Error("event pump has not drained"),
-        ),
-      ),
-    );
-
-    NodeAssert.deepStrictEqual(receipt, { turnId: "turn-1", cursor: 0, started: true });
-    NodeAssert.equal(snapshot.activeTurn?.chunks[0]?.body.type, "start");
-    NodeAssert.deepStrictEqual(
-      Array.from(yield* Ref.get(fixture.published), (event) => event.body.type),
-      ["session.turn.started", "start", "session.turn.ended"],
-    );
-
+    // Ending the native queue (via close) completes the single-consumer stream.
     yield* fixture.service.close(created.sessionId);
+    const events = yield* Fiber.join(collected);
+
+    NodeAssert.deepStrictEqual(receipt, { turnId: "turn-1" });
+    NodeAssert.deepStrictEqual(Array.from(events), [
+      "session.turn.started",
+      "start",
+      "session.turn.ended",
+    ]);
     NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    const missing = yield* fixture.service.getStatus(created.sessionId).pipe(Effect.flip);
-    NodeAssert.equal(missing._tag, "SessionNotFound");
-  }),
-);
-
-it.effect("tears down a session after its event stream reports a crash", () =>
-  Effect.gen(function* () {
-    const fixture = yield* makeFixture;
-    const created = yield* fixture.service.create("claude-code", { workspacePath: "/tmp" });
-
-    yield* Deferred.succeed(fixture.crashGate, undefined);
-    yield* Effect.eventually(
-      Ref.get(fixture.published).pipe(
-        Effect.filterOrFail(
-          (events) => events.some((event) => event.body.type === "session.crashed"),
-          () => new Error("crash event was not published"),
-        ),
-      ),
-    );
-
-    yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
-    NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1, "crashed session scope was not closed");
-    const missing = yield* fixture.service.getStatus(created.sessionId).pipe(Effect.flip);
-    NodeAssert.equal(missing._tag, "SessionNotFound");
+    NodeAssert.equal(yield* isActive(fixture, created.sessionId), false);
   }),
 );
 
 it.effect("single-flights resume in owner scope when the first waiter cancels", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const input = {
-      sessionId: "resumed-session",
-      harnessAgentId: "claude-code",
-      harnessSessionId: "resumed-backend",
-    } as const;
+    const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
     const first = yield* Effect.forkChild(fixture.service.resume(input));
     const second = yield* Effect.forkChild(fixture.service.resume(input));
 
@@ -207,7 +172,7 @@ it.effect("single-flights resume in owner scope when the first waiter cancels", 
     yield* Fiber.join(second);
 
     NodeAssert.equal(yield* Ref.get(fixture.resumeCalls), 1);
-    NodeAssert.equal((yield* fixture.service.getStatus(input.sessionId)).status, "running");
+    NodeAssert.equal(yield* isActive(fixture, input.sessionId), true);
     yield* fixture.service.close(input.sessionId);
   }),
 );
@@ -230,7 +195,6 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
       fixture.service.resume({
         sessionId: created.sessionId,
         harnessAgentId: "claude-code",
-        harnessSessionId: created.harnessSessionId,
       }),
     );
 
@@ -249,7 +213,7 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
     yield* Fiber.join(close);
     yield* Fiber.join(resume);
 
-    NodeAssert.equal((yield* fixture.service.getStatus(created.sessionId)).status, "running");
+    NodeAssert.equal(yield* isActive(fixture, created.sessionId), true);
     yield* fixture.service.close(created.sessionId);
   }),
 );
@@ -257,11 +221,7 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
 it.effect("closes a session that is still being resumed", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const input = {
-      sessionId: "resumed-session",
-      harnessAgentId: "claude-code",
-      harnessSessionId: "resumed-backend",
-    } as const;
+    const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
     const resume = yield* Effect.forkChild(fixture.service.resume(input));
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(
@@ -278,10 +238,7 @@ it.effect("closes a session that is still being resumed", () =>
     yield* Fiber.join(close);
 
     NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    NodeAssert.equal(
-      (yield* fixture.service.getStatus(input.sessionId).pipe(Effect.flip))._tag,
-      "SessionNotFound",
-    );
+    NodeAssert.equal(yield* isActive(fixture, input.sessionId), false);
   }),
 );
 

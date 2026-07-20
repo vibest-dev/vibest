@@ -1,4 +1,4 @@
-import type { HarnessAgentId } from "@vibest/contract";
+import type { HarnessAgentId, SessionRef } from "@vibest/contract";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
@@ -38,13 +38,13 @@ export function useChatSession(): ChatSessionValue {
 // components (ChatTranscript / ChatInputComposer / ChatModelSelect). Chat
 // state lives in the per-Chat store, not in React — it survives unmounts.
 export function ChatSessionProvider({
-  sessionId,
+  sessionRef,
   children,
 }: {
-  sessionId: string;
+  sessionRef: SessionRef;
   children: ReactNode;
 }) {
-  const chat = useChatHandle(sessionId);
+  const chat = useChatHandle(sessionRef);
   const [model, setModelState] = useState<ChatModel>("sonnet");
   // Matches the draft surface's default (claude-code's "full" → bypassPermissions).
   const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("full");
@@ -64,7 +64,7 @@ export function ChatSessionProvider({
   };
 
   const value: ChatSessionValue = {
-    sessionId,
+    sessionId: sessionRef.sessionId,
     harnessAgentId: chat.harnessAgentId,
     store: chat.store,
     prompt: (text) => chat.prompt(text),

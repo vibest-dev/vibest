@@ -381,7 +381,6 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const events = yield* Fiber.join(collected);
 
       NodeAssert.equal(receipt.turnId, "turn_1");
-      NodeAssert.equal(receipt.cursor, 0);
       NodeAssert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         [

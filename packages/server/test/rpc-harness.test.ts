@@ -18,7 +18,12 @@ import {
 import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
-import { SessionRepositoryLayer } from "../src/session";
+import {
+  HarnessAgentSessionPortLayer,
+  SessionManagerLayer,
+  SessionRepositoryLayer,
+  SessionServiceLayer,
+} from "../src/session";
 
 // A negotiation-only adapter: capabilities/availability/descriptor are declared,
 // and open/resume/getSessionInfo die because negotiate never opens a session.
@@ -71,22 +76,29 @@ describe("harness router", () => {
       }),
       fakeAdapter({ id: "pi", name: "Pi", available: true }),
     ]);
-    const sessionLayer = HarnessAgentSessionServiceLayer.pipe(
+    // The router client resolves the full RpcContext; negotiate only touches
+    // EventBus/registry, but the shared context still needs the SessionService
+    // façade present (as the production AgentRuntimeLayer provides). The same
+    // registry instance backs both the harness route and the session service.
+    const pathsLayer = layerPaths(mkdtempSync(join(tmpdir(), "vibest-home-")));
+    const projectLayer = ProjectModuleLayer.pipe(Layer.provide(pathsLayer));
+    const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
       Layer.provide(registryLayer),
+    );
+    const sessionServiceLayer = SessionServiceLayer.pipe(
+      Layer.provide(projectLayer),
+      Layer.provide(SessionRepositoryLayer.pipe(Layer.provide(pathsLayer))),
+      Layer.provide(HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer))),
+      Layer.provide(SessionManagerLayer.pipe(Layer.provide(EventBusLayer))),
       Layer.provide(EventBusLayer),
     );
-    // The router client resolves the full RpcContext; negotiate only touches
-    // EventBus/registry/session, but the shared context still needs project +
-    // session-repository services present (as makeRpcTestHarness provides).
-    const pathsLayer = layerPaths(mkdtempSync(join(tmpdir(), "vibest-home-")));
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         EventBusLayer,
-        sessionLayer,
+        sessionServiceLayer,
+        projectLayer,
         registryLayer,
         FileSystemServiceLayer,
-        ProjectModuleLayer.pipe(Layer.provide(pathsLayer)),
-        SessionRepositoryLayer.pipe(Layer.provide(pathsLayer)),
         NodeFileSystem.layer,
       ),
     );

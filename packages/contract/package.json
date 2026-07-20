@@ -13,6 +13,8 @@
     "./session-events": "./src/session-events.ts"
   },
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules dist .turbo"
   },
@@ -22,6 +24,8 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@vibest/typescript": "workspace:*"
+    "@vibest/typescript": "workspace:*",
+    "typescript": "^7.0.2",
+    "vitest": "catalog:"
   }
 }

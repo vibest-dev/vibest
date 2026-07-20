@@ -24,8 +24,43 @@ export class GitError extends Data.TaggedError("GitError")<{
   readonly cause: unknown;
 }> {}
 
-export class InvalidSessionId extends Data.TaggedError("InvalidSessionId")<{
+export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{
+  readonly projectId: string;
   readonly sessionId: string;
+}> {}
+
+/** A SessionRef's harnessAgentId disagrees with the stored session metadata. */
+export class SessionRefMismatch extends Data.TaggedError("SessionRefMismatch")<{
+  readonly projectId: string;
+  readonly sessionId: string;
+}> {}
+
+/** No stored session matches a bare sessionId during reverse lookup. */
+export class SessionRefNotFound extends Data.TaggedError("SessionRefNotFound")<{
+  readonly sessionId: string;
+}> {}
+
+/** The requested harness agent backend is not available to open/resume. */
+export class AgentUnavailable extends Data.TaggedError("AgentUnavailable")<{
+  readonly harnessAgentId: string;
+  readonly reason: string;
+}> {}
+
+/** The harness failed to open a fresh native session. */
+export class SessionOpenFailed extends Data.TaggedError("SessionOpenFailed")<{
+  readonly harnessAgentId: string;
+  readonly reason: string;
+}> {}
+
+/** The harness failed to resume a native session from its stored id. */
+export class SessionResumeFailed extends Data.TaggedError("SessionResumeFailed")<{
+  readonly harnessSessionId: string;
+  readonly reason: string;
+}> {}
+
+/** A prompt carried a part type this server cannot yet forward (e.g. `file`). */
+export class UnsupportedPromptPart extends Data.TaggedError("UnsupportedPromptPart")<{
+  readonly kind: string;
 }> {}
 
 /** A requested path resolves outside its `cwd` (via `..` or a symlink). */

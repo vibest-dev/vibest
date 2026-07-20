@@ -24,13 +24,13 @@ export const ProviderRepositoryLayer: Layer.Layer<ProviderRepository, never, Pat
   ProviderRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
-    const readConfig = () => readJson<RuntimeConfig>(paths.configStore, {});
+    const readConfig = () => readJson<RuntimeConfig>(paths.configFile, {});
     return {
       list: () => readConfig().pipe(Effect.map((config) => config.provider ?? [])),
       save: (providers) =>
         Effect.gen(function* () {
           const config = yield* readConfig();
-          yield* writeJsonAtomic(paths.configStore, {
+          yield* writeJsonAtomic(paths.configFile, {
             ...config,
             provider: providers,
           });

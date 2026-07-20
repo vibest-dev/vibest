@@ -13,7 +13,12 @@ import {
 import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
-import { SessionRepositoryLayer } from "../src/session";
+import {
+  HarnessAgentSessionPortLayer,
+  SessionManagerLayer,
+  SessionRepositoryLayer,
+  SessionServiceLayer,
+} from "../src/session";
 
 /**
  * A router client backed by the full `RpcContext`, with an adapterless session
@@ -21,22 +26,30 @@ import { SessionRepositoryLayer } from "../src/session";
  * (rpc-session) build their own layers instead.
  */
 export function makeRpcTestHarness(home: string) {
-  // Shared registry instance: provided into the session service and merged at
-  // the top level so the harness route can resolve capabilities directly off
-  // it (mirrors the production AgentRuntimeLayer). Effect memoizes by reference.
+  const paths = layerPaths(home);
+  // Shared registry instance: provided into the harness session service and
+  // merged at the top level so the harness route can resolve capabilities
+  // directly off it (mirrors the production AgentRuntimeLayer). Effect memoizes
+  // by reference.
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry([]));
-  const sessionLayer = HarnessAgentSessionServiceLayer.pipe(
+  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
     Layer.provide(registryLayer),
+  );
+  const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
+  const sessionServiceLayer = SessionServiceLayer.pipe(
+    Layer.provide(projectLayer),
+    Layer.provide(SessionRepositoryLayer.pipe(Layer.provide(paths))),
+    Layer.provide(HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer))),
+    Layer.provide(SessionManagerLayer.pipe(Layer.provide(EventBusLayer))),
     Layer.provide(EventBusLayer),
   );
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       EventBusLayer,
-      sessionLayer,
+      sessionServiceLayer,
+      projectLayer,
       registryLayer,
       FileSystemServiceLayer,
-      ProjectModuleLayer.pipe(Layer.provide(layerPaths(home))),
-      SessionRepositoryLayer.pipe(Layer.provide(layerPaths(home))),
       NodeFileSystem.layer,
     ),
   );

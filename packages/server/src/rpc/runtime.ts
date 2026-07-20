@@ -18,8 +18,13 @@ import {
 } from "../harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
-import { ProjectModuleLayer } from "../project";
-import { SessionRepositoryLayer } from "../session";
+import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
+import {
+  HarnessAgentSessionPortLayer,
+  SessionManagerLayer,
+  SessionRepositoryLayer,
+  SessionServiceLayer,
+} from "../session";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -58,8 +63,31 @@ const RegistryLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ProvidersLayer));
 
-const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
+// Harness session lifecycle (agent-native ids only); shared by the port and RPC.
+const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(RegistryLayer),
+);
+
+// Server-owned services. Each shared dependency (EventBus, harness service,
+// ProjectService) is a single Layer reference, so Effect memoizes it to one
+// instance across every consumer below.
+const ProjectServiceProvided = ProjectServiceLayer.pipe(
+  Layer.provide(ProjectRepositoryLayer),
+  Layer.provide(PathsLayer),
+);
+const SessionRepositoryProvided = SessionRepositoryLayer.pipe(Layer.provide(PathsLayer));
+const HarnessAgentSessionPortProvided = HarnessAgentSessionPortLayer.pipe(
+  Layer.provide(HarnessSessionServiceLayer),
+);
+// The manager and the bus are internal collaborators of SessionService now, so
+// the façade composes them here. EventBusLayer is one reference, so publish
+// (SessionService), fan-out (SessionManager), and subscribe (RPC) share it.
+const SessionManagerProvided = SessionManagerLayer.pipe(Layer.provide(EventBusLayer));
+const SessionServiceProvided = SessionServiceLayer.pipe(
+  Layer.provide(ProjectServiceProvided),
+  Layer.provide(SessionRepositoryProvided),
+  Layer.provide(HarnessAgentSessionPortProvided),
+  Layer.provide(SessionManagerProvided),
   Layer.provide(EventBusLayer),
 );
 
@@ -68,10 +96,9 @@ const SessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
 // the harness route can resolve capabilities directly off it.
 export const AgentRuntimeLayer = Layer.mergeAll(
   EventBusLayer,
-  SessionServiceLayer,
+  SessionServiceProvided,
+  ProjectServiceProvided,
   RegistryLayer,
   FileSystemServiceLayer,
-  ProjectModuleLayer.pipe(Layer.provide(PathsLayer)),
-  SessionRepositoryLayer.pipe(Layer.provide(PathsLayer)),
   NodeFileSystem.layer,
 );

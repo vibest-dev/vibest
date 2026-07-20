@@ -22,8 +22,8 @@ export const ProjectRepositoryLayer: Layer.Layer<ProjectRepository, never, Paths
   Effect.gen(function* () {
     const paths = yield* Paths;
     return {
-      list: () => readJson<ReadonlyArray<Project>>(paths.projectsStore, []),
-      save: (projects) => writeJsonAtomic(paths.projectsStore, projects),
+      list: () => readJson<ReadonlyArray<Project>>(paths.projectsFile, []),
+      save: (projects) => writeJsonAtomic(paths.projectsFile, projects),
     };
   }),
 );
