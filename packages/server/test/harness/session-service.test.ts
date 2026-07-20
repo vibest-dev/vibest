@@ -1,11 +1,7 @@
 import * as NodeAssert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
-import type {
-  ClaudeCodeUIMessageChunk,
-  SessionEnvelopeDraft,
-  SessionEvent,
-} from "@vibest/harness";
+import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft, SessionEvent } from "@vibest/harness";
 import { Deferred, Effect, Exit, Fiber, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 

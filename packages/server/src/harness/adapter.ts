@@ -5,9 +5,9 @@ import type {
   SessionCapabilities,
 } from "@vibest/contract";
 import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
+import type { SessionEnvelopeDraft } from "@vibest/harness";
 import type { Effect, Scope, Stream } from "effect";
 
-import type { SessionEnvelopeDraft } from "@vibest/harness";
 import type {
   AgentOpenError,
   AgentOperationError,
