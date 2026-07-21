@@ -35,6 +35,7 @@ rl.on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.method === "initialize") send({ id: msg.id, result: {} });
   if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "th_1" } } });
+  if (msg.method === "thread/read") send({ id: msg.id, result: { thread: { id: "th_1", name: "Fake thread", preview: "hi", updatedAt: 1700000000 } } });
   if (msg.method === "turn/start") {
     send({ id: msg.id, result: { turn: { id: "turn_1" } } });
     send({ method: "turn/started", params: { threadId: "th_1", turn: { id: "turn_1" } } });
@@ -148,20 +149,20 @@ describe("session router", () => {
 
       // Active session: list carries the live phase from the running runtime.
       const active = await client.session.list({ projectId: project.id });
-      expect(active.sessions).toHaveLength(1);
-      expect(active.sessions[0]?.sessionId).toBe(ref.sessionId);
-      expect(active.sessions[0]?.status?.phase).toBeDefined();
+      expect(active).toHaveLength(1);
+      expect(active[0]?.sessionId).toBe(ref.sessionId);
+      expect(active[0]?.status?.phase).toBeDefined();
 
       // Closed but not deleted: metadata stays, the runtime is gone → no status.
       await client.session.close({ ref });
       const idle = await client.session.list({ projectId: project.id });
-      expect(idle.sessions).toHaveLength(1);
-      expect(idle.sessions[0]?.status).toBeUndefined();
+      expect(idle).toHaveLength(1);
+      expect(idle[0]?.status).toBeUndefined();
 
       // Delete: metadata removed → the session leaves the listing entirely.
       await client.session.delete({ ref });
       const empty = await client.session.list({ projectId: project.id });
-      expect(empty.sessions).toHaveLength(0);
+      expect(empty).toHaveLength(0);
     } finally {
       await dispose();
     }

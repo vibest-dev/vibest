@@ -71,14 +71,12 @@ export const sessionRouter = orpc.router({
   // history / index -----------------------------------------------------------
   list: orpc.list.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    return {
-      sessions: yield* sessions.list(input.projectId).pipe(
-        Effect.catchTags({
-          ProjectNotFound: (e) =>
-            Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
-        }),
-      ),
-    };
+    return yield* sessions.list(input.projectId).pipe(
+      Effect.catchTags({
+        ProjectNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
+      }),
+    );
   }),
   rename: orpc.rename.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;

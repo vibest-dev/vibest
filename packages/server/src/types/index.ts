@@ -63,31 +63,16 @@ export interface RuntimeConfig {
 
 /**
  * Server-owned recovery record for one session, persisted at
- * `storage/sessions/<projectId>/<sessionId>.json`. The server `sessionId` is
- * the filename, not a field; `harnessSessionId` is the agent-native id
- * (claude session uuid / codex thread id) the server translates to when
- * calling the harness.
+ * `storage/sessions/<projectId>/<sessionId>.json`. The filename mirrors
+ * `sessionId`, which is also stored in the body so a loaded record is
+ * self-contained; `harnessSessionId` is the agent-native id (claude session
+ * uuid / codex thread id) the server translates to when calling the harness.
  */
 export interface Session {
   readonly version: 1;
+  readonly sessionId: string;
   readonly projectId: string;
   readonly harnessAgentId: HarnessAgentId;
   readonly harnessSessionId: string;
   readonly createdAt: string;
-}
-
-/** Session-related placeholder shapes (fields not fully designed yet). */
-export interface SessionSummary {
-  readonly id: string;
-  readonly harnessAgentId: HarnessAgentId;
-  readonly name?: string;
-  readonly archived: boolean;
-}
-
-/** A session event pushed over the event stream (payload shape is a placeholder). */
-export interface SessionEvent {
-  readonly sessionId: string;
-  readonly harnessAgentId: HarnessAgentId;
-  readonly type: string;
-  readonly payload: unknown;
 }

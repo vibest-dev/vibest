@@ -202,13 +202,14 @@ export const SessionServiceLayer: Layer.Layer<
                 const sessionId = randomUUID();
                 const metadata: Session = {
                   version: 1,
+                  sessionId,
                   projectId,
                   harnessAgentId,
                   harnessSessionId,
                   createdAt: new Date().toISOString(),
                 };
                 const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-                return repo.write(sessionId, metadata).pipe(
+                return repo.write(metadata).pipe(
                   // A failed metadata write must not leak the native session.
                   Effect.tapError(() => port.close(harnessSessionId)),
                   Effect.andThen(startRuntime(ref, harnessSessionId)),
@@ -266,31 +267,53 @@ export const SessionServiceLayer: Layer.Layer<
 
       list: (projectId) =>
         projects.findById(projectId).pipe(
-          Effect.flatMap(() => repo.list(projectId)),
-          Effect.flatMap((entries) =>
-            Effect.forEach(entries, ({ sessionId, metadata }) => {
-              const ref: SessionRef = {
-                projectId: metadata.projectId,
-                harnessAgentId: metadata.harnessAgentId,
-                sessionId,
-              };
-              const base: SessionSummary = {
-                projectId: metadata.projectId,
-                harnessAgentId: metadata.harnessAgentId,
-                sessionId,
-                createdAt: metadata.createdAt,
-                // getMessages fails UNSUPPORTED until native history reads land
-                // (tickets 10/11); advertising history we cannot serve would
-                // make clients skip their "transcript missing" handling.
-                historyAvailable: false,
-              };
-              // Merge the live phase from the runtime; a session with no runtime
-              // simply carries no status.
-              return manager.status(ref).pipe(
-                Effect.map((status): SessionSummary => ({ ...base, status })),
-                Effect.catchTag("SessionNotActive", () => Effect.succeed(base)),
-              );
-            }),
+          Effect.flatMap((project) =>
+            repo.list(projectId).pipe(
+              Effect.flatMap((sessions) =>
+                Effect.forEach(
+                  sessions,
+                  (metadata) =>
+                    Effect.gen(function* () {
+                      const ref: SessionRef = {
+                        projectId: metadata.projectId,
+                        harnessAgentId: metadata.harnessAgentId,
+                        sessionId: metadata.sessionId,
+                      };
+                      // Display data (title, recency, existence) from the
+                      // harness's own session index; best-effort, never fatal.
+                      const info = yield* port.getSessionInfo(
+                        metadata.harnessAgentId,
+                        metadata.harnessSessionId,
+                        project.path,
+                      );
+                      // Live phase from the runtime; null when no runtime is up.
+                      const status = yield* manager.status(ref).pipe(
+                        Effect.map((s): SessionStatus | null => s),
+                        Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+                      );
+                      const found = info._tag === "found";
+                      return {
+                        projectId: metadata.projectId,
+                        harnessAgentId: metadata.harnessAgentId,
+                        sessionId: metadata.sessionId,
+                        createdAt: metadata.createdAt,
+                        // Existence in the harness's session index is the truth
+                        // for whether history can be served: a session it no
+                        // longer knows (`missing`) has none.
+                        historyAvailable: found,
+                        ...(found && info.info.title !== undefined
+                          ? { title: info.info.title }
+                          : {}),
+                        ...(found && info.info.updatedAt !== undefined
+                          ? { updatedAt: new Date(info.info.updatedAt).toISOString() }
+                          : {}),
+                        ...(status !== null ? { status } : {}),
+                      } satisfies SessionSummary;
+                    }),
+                  { concurrency: "unbounded" },
+                ),
+              ),
+            ),
           ),
         ),
 
@@ -327,10 +350,10 @@ export const SessionServiceLayer: Layer.Layer<
       resolveRef: (sessionId) =>
         repo.findBySessionId(sessionId).pipe(
           Effect.map(
-            ({ projectId, metadata }): SessionRef => ({
-              projectId,
+            (metadata): SessionRef => ({
+              projectId: metadata.projectId,
               harnessAgentId: metadata.harnessAgentId,
-              sessionId,
+              sessionId: metadata.sessionId,
             }),
           ),
         ),

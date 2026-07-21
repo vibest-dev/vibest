@@ -483,9 +483,8 @@ export type SessionSummary = {
   readonly status?: SessionStatus;
 };
 
-export type ListSessionsOutput = {
-  readonly sessions: ReadonlyArray<SessionSummary>;
-};
+/** `session.list` returns the summaries directly — one shape, no wrapper. */
+export type ListSessionsOutput = ReadonlyArray<SessionSummary>;
 
 export const RenameSessionInputSchema = Schema.Struct({
   ref: SessionRefSchema,

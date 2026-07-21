@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { layerPaths } from "../src/config/paths";
 import { AgentUnavailable } from "../src/errors";
 import { EventBusLayer } from "../src/events";
+import type { SessionInfoResult } from "../src/harness";
 import { ProjectRepositoryLayer } from "../src/project/repository";
 import { ProjectService, ProjectServiceLayer } from "../src/project/service";
 import { type HarnessCreateError, HarnessAgentSessionPort } from "../src/session/port";
@@ -21,7 +22,9 @@ type PortSpy = {
   close: Array<string>;
 };
 
-const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
+const makeFakePort = (
+  opts: { failCreate?: HarnessCreateError; sessionInfo?: SessionInfoResult } = {},
+) => {
   const spy: PortSpy = { create: [], resume: [], close: [] };
   // Spy side effects live inside the effects (not at construction): callers
   // may build an effect without running it — e.g. the `onCrash` handed to the
@@ -45,6 +48,8 @@ const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
     // A started session drains an empty native stream — enough to exercise the
     // create/resume → runtime-start path without any active-instance ops.
     events: () => Effect.succeed(Stream.empty),
+    getSessionInfo: () =>
+      Effect.succeed<SessionInfoResult>(opts.sessionInfo ?? { _tag: "unsupported" }),
     prompt: () => Effect.die("prompt not exercised"),
     interrupt: () => Effect.die("interrupt not exercised"),
     setModel: () => Effect.die("setModel not exercised"),
@@ -252,8 +257,46 @@ describe("SessionService", () => {
     expect(result.listed.map((s) => s.sessionId).toSorted()).toEqual(
       [result.a.sessionId, result.b.sessionId].toSorted(),
     );
-    // getMessages is not implemented yet, so listings must not advertise history.
+    // The default fake reports `unsupported`, so history is not advertised.
     expect(result.listed.every((s) => !s.historyAvailable)).toBe(true);
+  });
+
+  it("list reflects the harness's title, recency, and history availability", async () => {
+    const { layer } = makeFakePort({
+      sessionInfo: { _tag: "found", info: { title: "My chat", updatedAt: 1_700_000_000_000 } },
+    });
+    const listed = await run(
+      layer,
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const sessions = yield* SessionService;
+        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
+        yield* sessions.create(project.id, "claude-code");
+        return yield* sessions.list(project.id);
+      }),
+    );
+    expect(listed).toHaveLength(1);
+    // A session the harness still knows carries history + its display fields.
+    expect(listed[0]?.historyAvailable).toBe(true);
+    expect(listed[0]?.title).toBe("My chat");
+    expect(listed[0]?.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
+  });
+
+  it("list marks a session the harness no longer knows as history-unavailable", async () => {
+    const { layer } = makeFakePort({ sessionInfo: { _tag: "missing" } });
+    const listed = await run(
+      layer,
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const sessions = yield* SessionService;
+        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
+        yield* sessions.create(project.id, "claude-code");
+        return yield* sessions.list(project.id);
+      }),
+    );
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.historyAvailable).toBe(false);
+    expect(listed[0]?.title).toBeUndefined();
   });
 
   it("list fails with ProjectNotFound for an unknown project", async () => {

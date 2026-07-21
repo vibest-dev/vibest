@@ -9,33 +9,28 @@ import { isEnoent, readJson, removeFile, writeJsonAtomic } from "../infra/json-s
 import type { Session } from "../types";
 
 /**
- * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The server
- * `sessionId` is the filename; the file body holds {@link Session}. No
- * business rules — orchestration (id generation, projectId resolution) lives in
+ * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The filename
+ * mirrors {@link Session.sessionId}, which the body also carries. No business
+ * rules — orchestration (id generation, projectId resolution) lives in
  * SessionService.
  */
 export class SessionRepository extends Context.Service<
   SessionRepository,
   {
     /** All session metadata under a project; empty if the project dir is absent. */
-    readonly list: (
-      projectId: string,
-    ) => Effect.Effect<ReadonlyArray<{ sessionId: string; metadata: Session }>, StoreReadError>;
+    readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<Session>, StoreReadError>;
     readonly read: (
       projectId: string,
       sessionId: string,
     ) => Effect.Effect<Session, StoreReadError | SessionNotFound>;
     /**
      * Reverse lookup: find a session by its (globally unique) sessionId alone,
-     * scanning every project directory. Returns the owning projectId too.
+     * scanning every project directory. The record carries its own projectId.
      */
     readonly findBySessionId: (
       sessionId: string,
-    ) => Effect.Effect<
-      { projectId: string; metadata: Session },
-      StoreReadError | SessionRefNotFound
-    >;
-    readonly write: (sessionId: string, metadata: Session) => Effect.Effect<void, StoreWriteError>;
+    ) => Effect.Effect<Session, StoreReadError | SessionRefNotFound>;
+    readonly write: (metadata: Session) => Effect.Effect<void, StoreWriteError>;
     /** Idempotent: removing an absent file succeeds. */
     readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void, StoreWriteError>;
   }
@@ -101,7 +96,6 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
               ids,
               (sessionId) =>
                 read(projectId, sessionId).pipe(
-                  Effect.map((metadata) => ({ sessionId, metadata })),
                   // A file that vanished between listing and reading is skipped,
                   // not fatal to the whole listing.
                   Effect.catchTag("SessionNotFound", () => Effect.succeed(null)),
@@ -121,7 +115,6 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
               projectIds,
               (projectId) =>
                 read(projectId, sessionId).pipe(
-                  Effect.map((metadata) => ({ projectId, metadata })),
                   Effect.catchTag("SessionNotFound", () => Effect.succeed(null)),
                 ),
               { concurrency: "unbounded" },
@@ -133,8 +126,8 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
           ),
         ),
 
-      write: (sessionId, metadata) =>
-        writeJsonAtomic(sessionFile(metadata.projectId, sessionId), metadata),
+      write: (metadata) =>
+        writeJsonAtomic(sessionFile(metadata.projectId, metadata.sessionId), metadata),
 
       remove: (projectId, sessionId) => removeFile(sessionFile(projectId, sessionId)),
     };
