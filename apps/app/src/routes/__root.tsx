@@ -42,7 +42,10 @@ function RootLayout() {
 
   return (
     // -webkit-app-region drags the desktop window (no-op in the browser).
-    <SidebarProvider className="[-webkit-app-region:drag]">
+    // h-svh pins the shell to the viewport: the provider's own min-h-svh leaves
+    // the height auto, so a long transcript would stretch the whole card and
+    // scroll the document instead of the message list.
+    <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel isFetching={isFetching} />
       {/*
