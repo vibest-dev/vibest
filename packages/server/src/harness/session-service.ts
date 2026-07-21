@@ -117,7 +117,7 @@ export type HarnessAgentSessionServiceShape = {
   readonly getSessionInfo: (
     harnessAgentId: HarnessAgentId,
     harnessSessionId: string,
-    workspacePath?: string,
+    cwd?: string,
   ) => Effect.Effect<SessionInfoResult, HarnessAgentNotFound | AgentOperationError>;
   /**
    * The raw per-session event stream, drained by the server SessionRuntime. The
@@ -371,12 +371,10 @@ export const makeHarnessAgentSessionService = (
         ),
       getCapabilities: (sessionId) =>
         getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.getCapabilities)),
-      getSessionInfo: (harnessAgentId, harnessSessionId, workspacePath) =>
+      getSessionInfo: (harnessAgentId, harnessSessionId, cwd) =>
         registry
           .get(harnessAgentId)
-          .pipe(
-            Effect.flatMap((adapter) => adapter.getSessionInfo(harnessSessionId, workspacePath)),
-          ),
+          .pipe(Effect.flatMap((adapter) => adapter.getSessionInfo(harnessSessionId, cwd))),
       events: (sessionId) =>
         getManaged(sessionId).pipe(Effect.map((managed) => managed.session.events)),
       close,

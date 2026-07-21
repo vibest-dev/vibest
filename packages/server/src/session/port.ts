@@ -76,7 +76,7 @@ export class HarnessAgentSessionPort extends Context.Service<
     readonly getSessionInfo: (
       harnessAgentId: HarnessAgentId,
       harnessSessionId: string,
-      workspacePath: string,
+      cwd: string,
     ) => Effect.Effect<SessionInfoResult>;
     // Session-scoped config setters; values use the harness's outward vocabulary.
     readonly setModel: (
@@ -143,9 +143,9 @@ export const HarnessAgentSessionPortLayer: Layer.Layer<
           .pipe(Effect.map((stream) => stream.pipe(Stream.map((draft) => draft.body)))),
       prompt: (harnessSessionId, input) => harness.prompt(harnessSessionId, input),
       interrupt: (harnessSessionId) => harness.interrupt(harnessSessionId),
-      getSessionInfo: (harnessAgentId, harnessSessionId, workspacePath) =>
+      getSessionInfo: (harnessAgentId, harnessSessionId, cwd) =>
         harness
-          .getSessionInfo(harnessAgentId, harnessSessionId, workspacePath)
+          .getSessionInfo(harnessAgentId, harnessSessionId, cwd)
           .pipe(Effect.catch(() => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }))),
       setModel: (harnessSessionId, model) => harness.setModel(harnessSessionId, model),
       setPermissionMode: (harnessSessionId, permissionMode) =>
