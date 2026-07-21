@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
+import type { Project } from "@vibest/contract";
 import { Button } from "@vibest/ui/components/button";
 import {
   Command,
@@ -26,7 +27,14 @@ interface Entry {
  * Command-palette folder browser: drill into a folder, then import it.
  * Mount only while open — browsing state resets by unmounting on close.
  */
-export function ImportProjectDialog({ onClose }: { onClose: () => void }) {
+export function ImportProjectDialog({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  /** Fires after a successful import, with the created (or deduped) project. */
+  onImported?: (project: Project) => void;
+}) {
   // null = the server's default starting point (the home directory).
   const [path, setPath] = useState<string | null>(null);
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
@@ -54,8 +62,9 @@ export function ImportProjectDialog({ onClose }: { onClose: () => void }) {
 
   const importProject = useMutation({
     mutationFn: (target: string) => orpcQueryUtils.project.create.call({ path: target }),
-    onSuccess: () => {
+    onSuccess: (project) => {
       onClose();
+      onImported?.(project);
       return queryClient.invalidateQueries({ queryKey: orpcQueryUtils.project.list.key() });
     },
     onError: (error) => {

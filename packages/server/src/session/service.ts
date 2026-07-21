@@ -310,7 +310,13 @@ export const SessionServiceLayer: Layer.Layer<
                         ...(status !== null ? { status } : {}),
                       } satisfies SessionSummary;
                     }),
-                  { concurrency: "unbounded" },
+                  // Bounded: each entry costs a harness session-index lookup
+                  // (a claude-code SDK read, a codex `thread/read` RPC), and the
+                  // sidebar lists every project at once. Unbounded turned a
+                  // project with a few hundred sessions into a matching burst of
+                  // concurrent filesystem/RPC work on the connection that also
+                  // carries the live chat stream.
+                  { concurrency: 8 },
                 ),
               ),
             ),

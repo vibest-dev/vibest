@@ -26,9 +26,19 @@ export function ChatTranscriptView({
 }) {
   const lastIndex = snapshot.messages.length - 1;
   const turnInProgress = snapshot.status === "submitted" || snapshot.status === "streaming";
+  // A session opened from the sidebar starts empty: `session.getMessages` is
+  // still UNSUPPORTED, so past turns cannot be replayed. The agent itself
+  // resumes with its own context, so the conversation can continue regardless.
+  const showEmptyNotice = snapshot.messages.length === 0 && snapshot.status === "ready";
   return (
     <Conversation>
       <ConversationContent>
+        {showEmptyNotice && (
+          <div className="text-muted-foreground mx-auto max-w-md py-12 text-center text-sm">
+            Past messages can&apos;t be replayed yet. The agent still has its own context, so you
+            can pick up where you left off.
+          </div>
+        )}
         {snapshot.messages.map((message, index) => (
           <MessageView
             key={message.id}

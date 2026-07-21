@@ -1,10 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import {
-  createRootRouteWithContext,
-  Outlet,
-  useNavigate,
-  useRouterState,
-} from "@tanstack/react-router";
+import { createRootRouteWithContext, Outlet, useNavigate } from "@tanstack/react-router";
 import {
   SidebarInset,
   SidebarProvider,
@@ -14,7 +9,6 @@ import {
 import { cn } from "@vibest/ui/lib/utils";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import Loader from "@/components/loader";
 import type { AppClients } from "@/lib/orpc";
 
 export interface RouterAppContext {
@@ -35,7 +29,6 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
-  const isFetching = useRouterState({ select: (s) => s.isLoading });
   const navigate = useNavigate();
 
   const handleNewChat = () => navigate({ to: "/draft" });
@@ -47,7 +40,7 @@ function RootLayout() {
     // scroll the document instead of the message list.
     <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
-      <CardPanel isFetching={isFetching} />
+      <CardPanel />
       {/*
        * Single fixed toggle for every state: the offcanvas sidebar would carry
        * an inside toggle off-screen on collapse, and swapping two copies
@@ -59,7 +52,7 @@ function RootLayout() {
 }
 
 // Split out so it can read sidebar state via useSidebar().
-function CardPanel({ isFetching }: { isFetching: boolean }) {
+function CardPanel() {
   const { state, isMobile } = useSidebar();
   // Collapsed, the card slides under the toggle + traffic lights — pad so the
   // title clears them.
@@ -81,8 +74,16 @@ function CardPanel({ isFetching }: { isFetching: boolean }) {
           <span className="text-muted-foreground">Playground</span>
         </div>
       </header>
+      {/*
+       * Always the Outlet, never a router-state-driven swap: `isLoading` flips
+       * on *every* navigation, including a same-route search-param change like
+       * /draft?projectId=…, and swapping the Outlet out unmounts the active
+       * route — which would dispose the draft composer's editor and drop
+       * whatever the user had typed. Slow route loaders are already covered by
+       * the router's own `defaultPendingComponent` (see router.tsx).
+       */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {isFetching ? <Loader /> : <Outlet />}
+        <Outlet />
       </div>
     </SidebarInset>
   );

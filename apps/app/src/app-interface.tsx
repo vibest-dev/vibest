@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { useState, type ReactElement } from "react";
+import { Toaster } from "sonner";
 
 import "./index.css";
 
@@ -47,6 +48,12 @@ function AppRuntime({ orpcClient, queryClient, orpcQueryUtils }: AppClients): Re
     <QueryClientProvider client={queryClient}>
       <ChatManagerProvider manager={chatManager}>
         <RouterProvider router={router} />
+        {/*
+         * The app's only error surface. Every `toast.*` call — the QueryClient's
+         * global query-error handler in lib/orpc.ts, failed imports, failed
+         * session creates, failed resumes — renders nothing without this mount.
+         */}
+        <Toaster theme="system" />
       </ChatManagerProvider>
     </QueryClientProvider>
   );
