@@ -438,8 +438,12 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       ),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
     ),
-  getSessionInfo: (harnessSessionId, cwd) =>
-    agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(
+  // `cwd` is deliberately ignored: the SDK buckets a session under the cwd the
+  // *session* ran in, which is not necessarily the project's path, so narrowing
+  // by `dir` misses the file and reports a titleless `missing`. The session id
+  // is a uuid, so the unnarrowed search can't collide.
+  getSessionInfo: (harnessSessionId) =>
+    agent.session.getSessionInfo(harnessSessionId).pipe(
       Effect.mapError((cause) => operationError(harnessSessionId, "get-session-info", cause)),
       Effect.map(
         (info): SessionInfoResult =>
