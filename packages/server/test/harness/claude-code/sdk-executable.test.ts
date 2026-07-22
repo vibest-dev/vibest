@@ -20,7 +20,7 @@ it.effect("communicates with Claude Agent SDK through a fake Claude executable",
         VIBEST_E2E_CLAUDE_EXECUTABLE: fakeClaude,
       },
     });
-    const { sessionId } = yield* agent.session.create;
+    const { sessionId } = yield* agent.session.create();
 
     NodeAssert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
       {

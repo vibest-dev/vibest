@@ -70,10 +70,14 @@ type ResumeDecision =
 
 export interface ClaudeCodeAgent {
   readonly session: {
-    readonly create: Effect.Effect<{ readonly sessionId: string }, ClaudeSdkError>;
-    readonly resume: (
-      sessionId: string,
-    ) => Effect.Effect<{ readonly sessionId: string }, ClaudeAgentFailure>;
+    /** `cwd` is the session's working directory; the SDK defaults to `process.cwd()`. */
+    readonly create: (input?: {
+      readonly cwd?: string;
+    }) => Effect.Effect<{ readonly sessionId: string }, ClaudeSdkError>;
+    readonly resume: (input: {
+      readonly sessionId: string;
+      readonly cwd?: string;
+    }) => Effect.Effect<{ readonly sessionId: string }, ClaudeAgentFailure>;
     /**
      * Reads stored session metadata (title, recency) from the SDK's on-disk
      * history without opening a live session — `null` when it's unknown. `dir`
@@ -185,7 +189,7 @@ export const makeClaudeCodeAgent = ({
 
     const buildSession = (
       sessionId: string,
-      identity: Pick<sdk.Options, "sessionId" | "resume">,
+      identity: Pick<sdk.Options, "sessionId" | "resume" | "cwd">,
     ): Effect.Effect<SessionState, ClaudeSdkError> =>
       Effect.gen(function* () {
         const sessionScope = yield* Scope.fork(ownerScope, "sequential");
@@ -388,7 +392,10 @@ export const makeClaudeCodeAgent = ({
         ),
       );
 
-    const resume = (sessionId: string): Effect.Effect<SessionState, ClaudeAgentFailure> =>
+    const resume = (
+      sessionId: string,
+      cwd?: string,
+    ): Effect.Effect<SessionState, ClaudeAgentFailure> =>
       Effect.tryPromise<ClaudeSessionInfo, ClaudeSdkError>({
         try: () => getSessionInfo(sessionId),
         catch: (cause) => sdkError("get-session-info", cause),
@@ -396,12 +403,20 @@ export const makeClaudeCodeAgent = ({
         Effect.flatMap(
           (info): Effect.Effect<SessionState, SessionNotResumable | ClaudeSdkError> =>
             info
-              ? buildSession(sessionId, { resume: sessionId })
+              ? buildSession(sessionId, {
+                  resume: sessionId,
+                  ...(cwd !== undefined ? { cwd } : {}),
+                })
               : Effect.fail(new SessionNotResumable({ sessionId })),
         ),
       );
 
-    const ensure = (sessionId: string): Effect.Effect<SessionState, ClaudeAgentFailure> =>
+    // `cwd` is only consulted when the session has to be rebuilt (a resume): a
+    // session already live in the map keeps the cwd it was opened with.
+    const ensure = (
+      sessionId: string,
+      cwd?: string,
+    ): Effect.Effect<SessionState, ClaudeAgentFailure> =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const existing = yield* Ref.get(sessions).pipe(
@@ -424,7 +439,7 @@ export const makeClaudeCodeAgent = ({
 
           if (decision._tag === "Start") {
             yield* Effect.forkIn(
-              resume(sessionId).pipe(
+              resume(sessionId, cwd).pipe(
                 Effect.exit,
                 Effect.flatMap((exit) => Deferred.done(decision.deferred, exit)),
                 Effect.ensuring(
@@ -459,12 +474,16 @@ export const makeClaudeCodeAgent = ({
 
     return {
       session: {
-        create: Effect.gen(function* () {
-          const sessionId = uuid();
-          yield* buildSession(sessionId, { sessionId });
-          return { sessionId };
-        }),
-        resume: (sessionId) => ensure(sessionId).pipe(Effect.as({ sessionId })),
+        create: (input) =>
+          Effect.gen(function* () {
+            const sessionId = uuid();
+            yield* buildSession(sessionId, {
+              sessionId,
+              ...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
+            });
+            return { sessionId };
+          }),
+        resume: (input) => ensure(input.sessionId, input.cwd).pipe(Effect.as(input)),
         prompt: (input) =>
           Effect.gen(function* () {
             const session = yield* ensure(input.sessionId);

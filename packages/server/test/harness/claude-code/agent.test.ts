@@ -99,7 +99,7 @@ describe("ClaudeCodeAgent", () => {
           HTTPS_PROXY: "http://desktop-proxy.test:8443",
         },
       });
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       NodeAssert.equal(lastOptions().env?.["HTTPS_PROXY"], "http://desktop-proxy.test:8443");
       yield* agent.session.abort(sessionId);
@@ -109,7 +109,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("leaves the permission mode to the SDK default when none is provided", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       NodeAssert.equal(lastOptions().permissionMode, undefined);
       // The bypass capability is always enabled so a session can be switched to
@@ -122,7 +122,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("forwards bypass permission mode and the required safety flag", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent({ permissionMode: "bypassPermissions" });
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       NodeAssert.equal(lastOptions().permissionMode, "bypassPermissions");
       NodeAssert.equal(lastOptions().allowDangerouslySkipPermissions, true);
@@ -133,7 +133,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("creates a scoped session and exposes SDK capabilities as Effects", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       NodeAssert.match(
         sessionId,
@@ -161,7 +161,7 @@ describe("ClaudeCodeAgent", () => {
         { type: "result", subtype: "success" } as sdk.SDKMessage,
       ];
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       yield* agent.session.setModel(sessionId, "opus");
       const prompt = yield* agent.session.prompt({
@@ -246,7 +246,7 @@ describe("ClaudeCodeAgent", () => {
     Effect.gen(function* () {
       messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
       const first = yield* agent.session.prompt({
         sessionId,
         message: { role: "user", content: "first" },
@@ -274,7 +274,7 @@ describe("ClaudeCodeAgent", () => {
       });
       mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
 
       const first = yield* agent.session.prompt({
         sessionId,
@@ -326,7 +326,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("denies pending SDK permissions when the session scope closes", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
       const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
         Effect.forkChild,
       );
@@ -360,7 +360,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("bridges SDK permission promises through Deferred", () =>
     Effect.gen(function* () {
       const agent = yield* makeClaudeCodeAgent();
-      const { sessionId } = yield* agent.session.create;
+      const { sessionId } = yield* agent.session.create();
       const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
         Effect.forkChild,
       );
