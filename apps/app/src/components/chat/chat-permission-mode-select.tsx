@@ -3,12 +3,13 @@ import { PermissionModeSelect } from "./permission-mode-select";
 
 // Session-config slot: binds the presentational PermissionModeSelect to the
 // ChatSession context so it can be composed anywhere inside
-// ChatSessionProvider (e.g. the composer toolbar).
+// ChatSessionProvider (e.g. the composer toolbar). Renders nothing when the
+// harness has no permission protocol.
 export function ChatPermissionModeSelect() {
-  const { harnessAgentId, permissionMode, setPermissionMode } = useChatSession();
+  const { permissionModes, permissionMode, setPermissionMode } = useChatSession();
   return (
     <PermissionModeSelect
-      harnessAgentId={harnessAgentId}
+      permissionModes={permissionModes}
       value={permissionMode}
       onChange={setPermissionMode}
     />

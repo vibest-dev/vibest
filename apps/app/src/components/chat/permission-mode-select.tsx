@@ -1,4 +1,3 @@
-import type { HarnessAgentId } from "@vibest/contract";
 import {
   PromptInputModelSelect,
   PromptInputModelSelectContent,
@@ -7,38 +6,41 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import type { ChatPermissionMode } from "@/core/chat/chat-config";
-import { useHarnessAgent } from "@/core/harness/use-harness-negotiation";
+import type { SessionConfigOption } from "@/core/harness/session-config";
 
 // Presentational permission-mode picker: value/onChange driven so it composes
 // both inside a session (ChatPermissionModeSelect binds it to ChatSession
-// context) and on the draft surface (local state, no session yet). The options
-// come from the harness's negotiated capabilities — each id is an outward
-// permission-mode id the harness maps to its own native system.
+// context) and on the draft surface (URL search params, no session yet).
+//
+// Each id is an outward permission-mode id the harness maps to its own native
+// system. An empty list means the harness has no permission protocol at all
+// (pi) — render nothing rather than an empty dropdown.
 export function PermissionModeSelect({
-  harnessAgentId,
+  permissionModes,
   value,
   onChange,
 }: {
-  harnessAgentId: HarnessAgentId;
-  value: ChatPermissionMode;
-  onChange: (mode: ChatPermissionMode) => void;
+  permissionModes: ReadonlyArray<SessionConfigOption>;
+  value: string | undefined;
+  onChange: (mode: string) => void;
 }) {
-  // Read this harness's slice of the once-negotiated result — no fetch here.
-  const modes = useHarnessAgent(harnessAgentId)?.capabilities.permissionModes ?? [];
+  if (permissionModes.length === 0) return null;
+
+  const items = permissionModes.map((mode) => ({ label: mode.label, value: mode.id }));
 
   return (
     <PromptInputModelSelect
-      value={value}
+      items={items}
+      value={value ?? null}
       onValueChange={(next) => {
-        if (next) onChange(next as ChatPermissionMode);
+        if (next) onChange(String(next));
       }}
     >
       <PromptInputModelSelectTrigger className="min-h-8 py-0">
         <PromptInputModelSelectValue />
       </PromptInputModelSelectTrigger>
       <PromptInputModelSelectContent>
-        {modes.map((mode) => (
+        {permissionModes.map((mode) => (
           <PromptInputModelSelectItem key={mode.id} value={mode.id}>
             {mode.label}
           </PromptInputModelSelectItem>

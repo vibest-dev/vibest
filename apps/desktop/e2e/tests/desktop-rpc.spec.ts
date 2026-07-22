@@ -15,7 +15,9 @@ function findServerPid(parentPid: number): number | undefined {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
     if (!match) continue;
     const [, pid, ppid, command] = match;
-    if (Number(ppid) === parentPid && command.includes("packages/vibest/dist/cli.mjs")) {
+    // Must track apps/desktop/src/main/desktop-config.ts's serverEntry: the
+    // child is the built @vibest/server, not the CLI it used to be.
+    if (Number(ppid) === parentPid && command.includes("packages/server/dist/server.mjs")) {
       return Number(pid);
     }
   }

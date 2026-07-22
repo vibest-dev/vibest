@@ -7,21 +7,34 @@ import type { AgentResponse } from "@/core/chat/agent-requests";
 import type { ChatModel, ChatPermissionMode } from "@/core/chat/chat-config";
 import type { ChatStoreState } from "@/core/chat/chat-state";
 import { selectTurnInProgress, useChatHandle } from "@/core/chat/use-chat-handle";
+import {
+  resolveSessionConfig,
+  type SessionConfigOption,
+  type SessionConfigSelection,
+} from "@/core/harness/session-config";
+import { useHarnessAgent, useHarnessCatalog } from "@/core/harness/use-harness-negotiation";
+import { useProjectPath } from "@/core/harness/use-project-path";
 
 export type { ChatModel, ChatPermissionMode };
 
 export interface ChatSessionValue {
   sessionId: string;
   harnessAgentId: HarnessAgentId;
+  /** Display name of the harness running this session, for read-only chrome. */
+  harnessAgentName: string;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatStoreState>;
   prompt: (text: string) => void | Promise<void>;
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;
   /** A turn is producing a reply (submitted / streaming). */
   turnInProgress: boolean;
-  model: ChatModel;
+  /** The harness's model catalog; empty when it has no model switch. */
+  models: ReadonlyArray<SessionConfigOption>;
+  model: ChatModel | undefined;
   setModel: (model: ChatModel) => void;
-  permissionMode: ChatPermissionMode;
+  /** The harness's permission presets; empty when it has no permission protocol. */
+  permissionModes: ReadonlyArray<SessionConfigOption>;
+  permissionMode: ChatPermissionMode | undefined;
   setPermissionMode: (mode: ChatPermissionMode) => void;
 }
 
@@ -45,19 +58,29 @@ export function ChatSessionProvider({
   children: ReactNode;
 }) {
   const chat = useChatHandle(sessionRef);
-  const [model, setModelState] = useState<ChatModel>("sonnet");
-  // Matches the draft surface's default (claude-code's "full" → bypassPermissions).
-  const [permissionMode, setPermissionModeState] = useState<ChatPermissionMode>("full");
+  // Only what the user changed in this session lives in state; anything unset
+  // follows the harness's declared default. Session config isn't persisted yet
+  // (see docs/design/harness-agent-selection-design.md §7), so after a reload
+  // these show the harness defaults rather than what the session actually runs
+  // with — but never a value the harness doesn't offer.
+  const [selection, setSelection] = useState<SessionConfigSelection>({});
+  const harnessAgent = useHarnessAgent(chat.harnessAgentId);
+  // What this harness offers *in this session's directory* — a project's own
+  // settings can remap what a model id resolves to, so the catalog has to be
+  // asked for per project, not once per harness.
+  const cwd = useProjectPath(sessionRef.projectId);
+  const catalog = useHarnessCatalog(chat.harnessAgentId, cwd);
+  const config = resolveSessionConfig(harnessAgent, catalog, selection);
   const turnInProgress = useStore(chat.store, selectTurnInProgress);
 
   // Config changes are a separate session call, applied optimistically to the
   // local selection so the control stays responsive.
   const setModel = (next: ChatModel) => {
-    setModelState(next);
+    setSelection((current) => ({ ...current, model: next }));
     void chat.setModel(next).catch((error) => console.error("Failed to set model", error));
   };
   const setPermissionMode = (next: ChatPermissionMode) => {
-    setPermissionModeState(next);
+    setSelection((current) => ({ ...current, permissionMode: next }));
     void chat
       .setPermissionMode(next)
       .catch((error) => console.error("Failed to set permission mode", error));
@@ -66,13 +89,16 @@ export function ChatSessionProvider({
   const value: ChatSessionValue = {
     sessionId: sessionRef.sessionId,
     harnessAgentId: chat.harnessAgentId,
+    harnessAgentName: harnessAgent?.name ?? chat.harnessAgentId,
     store: chat.store,
     prompt: (text) => chat.prompt(text),
     respondToRequest: chat.respondToAgentRequest,
     turnInProgress,
-    model,
+    models: config.models,
+    model: config.model,
     setModel,
-    permissionMode,
+    permissionModes: config.permissionModes,
+    permissionMode: config.permissionMode,
     setPermissionMode,
   };
 

@@ -23,7 +23,7 @@ import { hasChatContent } from "./input/serialize";
 // prompt/turnInProgress come from ChatSessionProvider — not props.
 // toolbar = surface-composed toolbar content (e.g. <ChatModelSelect/>).
 export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
-  const { prompt, turnInProgress, store } = useChatSession();
+  const { prompt, turnInProgress, store, harnessAgentName } = useChatSession();
   const status = useStore(store, (s) => s.status);
   const turnInProgressRef = useLatestRef(turnInProgress);
 
@@ -32,7 +32,7 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
     // otherwise bare Enter is consumed by the default newline behavior before
     // the keymap ever sees it.
     extensions: (self) => [
-      ...createChatBaseExtensions({ placeholder: () => "Ask Claude Code anything..." }),
+      ...createChatBaseExtensions({ placeholder: () => `Ask ${harnessAgentName} anything...` }),
       createSubmitKeymap({ onSubmit: () => void self.submit() }),
     ],
     onSubmit: (text) => {

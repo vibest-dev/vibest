@@ -1,15 +1,16 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEditorState } from "@tiptap/react";
+import { HARNESS_AGENT_IDS, type HarnessAgentId } from "@vibest/contract";
 import {
   PromptInput,
   PromptInputSubmit,
   PromptInputToolbar,
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
-import { useState } from "react";
 import { toast } from "sonner";
 
+import { HarnessSelect } from "@/components/chat/harness-select";
 import { ChatInput } from "@/components/chat/input/chat-input";
 import {
   ChatInputProvider,
@@ -20,25 +21,84 @@ import { createSubmitKeymap } from "@/components/chat/input/extensions/keymaps";
 import { hasChatContent } from "@/components/chat/input/serialize";
 import { ModelSelect } from "@/components/chat/model-select";
 import { PermissionModeSelect } from "@/components/chat/permission-mode-select";
-import type { ChatModel, ChatPermissionMode } from "@/core/chat/chat-config";
 import { useChatManager } from "@/core/chat/chat-context";
+import { pickDefaultHarnessAgentId, resolveSessionConfig } from "@/core/harness/session-config";
+import {
+  useHarnessAgent,
+  useHarnessAgents,
+  useHarnessCatalog,
+} from "@/core/harness/use-harness-negotiation";
+
+// Until the user picks one. Every other config default is declared by the
+// harness itself; which harness to start from is the one thing no harness can
+// answer, so it is a product decision and lives here. It is a preference, not a
+// guarantee — see pickDefaultHarnessAgentId for what happens when it isn't
+// installed.
+const PREFERRED_HARNESS_AGENT_ID: HarnessAgentId = "claude-code";
+
+// The directory a draft is about, which decides what its harness can offer —
+// a project's own settings can remap what a model id resolves to. It matches
+// the `project.create` path below on purpose: both resolve server-side to the
+// same directory, so the catalog shown is the catalog the session will get.
+// Both become the selected project's path once project selection lands.
+const DRAFT_CWD = ".";
+
+/**
+ * The draft config lives in the URL, and only what the user explicitly picked
+ * is written there. Everything absent follows the selected harness's declared
+ * default, which is the same thing "omit the field" means to `session.create`.
+ *
+ * That is what makes switching harness free of reset logic: navigating with a
+ * new `harness` simply drops `model` and `permission`, so both fall back to the
+ * new harness's defaults. No effect, no state to synchronise, no frame where a
+ * dropdown holds a value the new harness doesn't offer.
+ */
+type DraftSearch = {
+  readonly harness?: HarnessAgentId;
+  readonly model?: string;
+  readonly permission?: string;
+};
+
+const asHarnessAgentId = (value: unknown): HarnessAgentId | undefined =>
+  HARNESS_AGENT_IDS.find((id) => id === value);
+
+const asText = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+const optional = <K extends string>(key: K, value: string | undefined) =>
+  value === undefined ? {} : ({ [key]: value } as Record<K, string>);
 
 // "/draft" is the new-session surface: type a first message, which creates a
 // session, sends it as the opening turn, and navigates into the live session.
 // Keep the "/draft" path literal — the router plugin requires a string literal
 // (autoCodeSplitting breaks otherwise).
 export const Route = createFileRoute("/draft")({
+  validateSearch: (search: Record<string, unknown>): DraftSearch => ({
+    ...optional("harness", asHarnessAgentId(search.harness)),
+    ...optional("model", asText(search.model)),
+    ...optional("permission", asText(search.permission)),
+  }),
   component: DraftRoute,
 });
 
 function DraftRoute() {
   const { orpcQueryUtils } = Route.useRouteContext();
+  const search = Route.useSearch();
   const manager = useChatManager();
   const navigate = useNavigate();
-  const [model, setModel] = useState<ChatModel>("sonnet");
-  // Default to the most permissive mode (claude-code's "full" → bypassPermissions)
-  // so first-run turns aren't gated on approvals; the user can dial it down.
-  const [permissionMode, setPermissionMode] = useState<ChatPermissionMode>("full");
+
+  const harnessAgents = useHarnessAgents();
+  const harnessAgentId =
+    search.harness ?? pickDefaultHarnessAgentId(harnessAgents, PREFERRED_HARNESS_AGENT_ID);
+  const harnessAgent = useHarnessAgent(harnessAgentId);
+  // Undefined until the probe lands. That is not a wait: the model picker just
+  // has nothing to offer yet, and submitting meanwhile omits `model` — which is
+  // exactly what "the user didn't pick one" already means.
+  const catalog = useHarnessCatalog(harnessAgentId, DRAFT_CWD);
+  const config = resolveSessionConfig(harnessAgent, catalog, {
+    ...optional("model", search.model),
+    ...optional("permissionMode", search.permission),
+  });
 
   // Create the session and start its first turn against the manager's persisted
   // store, then navigate — the session route re-attaches the same Chat with the
@@ -47,12 +107,14 @@ function DraftRoute() {
     mutationFn: async ({ text }: { text: string }) => {
       // Bootstrap the session under the server's working-directory project until
       // real project selection lands (project.create dedups by path).
-      const project = await orpcQueryUtils.project.create.call({ path: "." });
+      const project = await orpcQueryUtils.project.create.call({ path: DRAFT_CWD });
       const ref = await orpcQueryUtils.session.create.call({
         projectId: project.id,
-        harnessAgentId: "claude-code",
-        model,
-        permissionMode,
+        harnessAgentId,
+        // Omitted when the harness declares no such dimension, which is how it
+        // ends up using its own configured default.
+        ...optional("model", config.model),
+        ...optional("permissionMode", config.permissionMode),
       });
       void manager.attach(ref).prompt(text);
       return ref.sessionId;
@@ -70,7 +132,9 @@ function DraftRoute() {
     // otherwise bare Enter is consumed by the default newline behavior before
     // the keymap ever sees it.
     extensions: (self) => [
-      ...createChatBaseExtensions({ placeholder: () => "Ask Claude Code anything..." }),
+      ...createChatBaseExtensions({
+        placeholder: () => `Ask ${harnessAgent?.name ?? "your agent"} anything...`,
+      }),
       createSubmitKeymap({ onSubmit: () => void self.submit() }),
     ],
     onSubmit: (text) => {
@@ -100,12 +164,25 @@ function DraftRoute() {
         <ChatInputProvider controller={controller}>
           <ChatInput />
           <PromptInputToolbar>
+            {/* Harness first: it decides what the other two can offer. */}
             <PromptInputTools>
-              <ModelSelect value={model} onChange={setModel} />
+              <HarnessSelect
+                value={harnessAgentId}
+                onChange={(next) => void navigate({ to: "/draft", search: { harness: next } })}
+              />
+              <ModelSelect
+                models={config.models}
+                value={config.model}
+                onChange={(model) =>
+                  void navigate({ to: "/draft", search: (prev) => ({ ...prev, model }) })
+                }
+              />
               <PermissionModeSelect
-                harnessAgentId="claude-code"
-                value={permissionMode}
-                onChange={setPermissionMode}
+                permissionModes={config.permissionModes}
+                value={config.permissionMode}
+                onChange={(permission) =>
+                  void navigate({ to: "/draft", search: (prev) => ({ ...prev, permission }) })
+                }
               />
             </PromptInputTools>
             <PromptInputSubmit disabled={!hasContent || startSession.isPending} />

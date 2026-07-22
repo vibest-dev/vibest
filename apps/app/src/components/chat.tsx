@@ -6,6 +6,7 @@ import { ChatModelSelect } from "@/components/chat/chat-model-select";
 import { ChatPermissionModeSelect } from "@/components/chat/chat-permission-mode-select";
 import { ChatSessionProvider } from "@/components/chat/chat-session-context";
 import { ChatTranscript } from "@/components/chat/chat-transcript";
+import { HarnessBadge } from "@/components/chat/harness-badge";
 
 // Default assembly of the compositional chat pieces: ChatSessionProvider owns
 // the session context; transcript, composer, and config slots compose as
@@ -19,6 +20,9 @@ export function Chat({ className, sessionRef }: { className?: string; sessionRef
           <ChatInputComposer
             toolbar={
               <>
+                {/* Same slot the draft surface puts the harness picker in, so
+                    the toolbar reads the same before and after creation. */}
+                <HarnessBadge />
                 <ChatModelSelect />
                 <ChatPermissionModeSelect />
               </>
