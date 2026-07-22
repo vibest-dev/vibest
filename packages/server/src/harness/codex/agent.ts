@@ -15,6 +15,8 @@ import type { CodexUIMessageChunk } from "@vibest/harness/codex";
 import type { ServerNotification, ServerRequest } from "@vibest/harness/codex/protocol";
 import type {
   AskForApproval,
+  Model,
+  ModelListResponse,
   SandboxPolicy,
   ThreadReadResponse,
   ThreadResumeResponse,
@@ -40,6 +42,9 @@ import { makeCodexTransportHolder } from "./transport-holder";
 
 const CLIENT_INFO = { name: "vibest", title: "Vibest", version: "0.0.0" };
 const SESSION_QUEUE_CAPACITY = 1024;
+// Guard against a server that keeps handing back a cursor, not a real ceiling:
+// no account has anywhere near this many models.
+const MAX_MODEL_PAGES = 20;
 
 type PendingRequest = {
   readonly deferred: Deferred.Deferred<unknown>;
@@ -114,6 +119,12 @@ export interface CodexAgentDependencies<R> {
 }
 
 export interface CodexAgent {
+  /**
+   * The model catalog for the signed-in account, read straight from the
+   * app-server. Follows the account and the installed codex version, so it can
+   * only be probed — never hardcoded.
+   */
+  readonly listModels: Effect.Effect<ReadonlyArray<Model>, CodexTransportFailure>;
   readonly session: {
     readonly create: (config: {
       readonly cwd: string;
@@ -135,6 +146,7 @@ export interface CodexAgent {
       readonly text: string;
       readonly approvalPolicy?: AskForApproval;
       readonly sandboxPolicy?: SandboxPolicy;
+      readonly model?: string;
     }) => Effect.Effect<
       {
         readonly turnId: string;
@@ -536,6 +548,30 @@ export const makeCodexAgentWithDependencies = <R>(
       });
 
     return {
+      // `includeHidden` is deliberately not sent: the app-server already filters
+      // the picker list down to what this account can actually run, which is
+      // exactly what the UI should offer.
+      //
+      // `model/list` is paginated with a server-chosen page size, so a single
+      // call is not the catalog — it is the first page of one. Follow the
+      // cursor: a truncated list is invisible, the user simply never sees the
+      // model they wanted. The page cap is a runaway guard, not a limit anyone
+      // is expected to hit.
+      listModels: Effect.gen(function* () {
+        const transport = yield* holder.ensure;
+        const models: Model[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < MAX_MODEL_PAGES; page++) {
+          const response: ModelListResponse = yield* transport.request<ModelListResponse>(
+            "model/list",
+            cursor === null ? {} : { cursor },
+          );
+          models.push(...response.data);
+          cursor = response.nextCursor;
+          if (cursor === null) break;
+        }
+        return models;
+      }),
       session: {
         create: (config) =>
           Effect.gen(function* () {
@@ -671,10 +707,14 @@ export const makeCodexAgentWithDependencies = <R>(
                     .request<TurnStartResponse>("turn/start", {
                       threadId: session.threadId,
                       input: turnInput,
-                      // Per-turn permission override (applies to this and
-                      // subsequent turns); omitted keys keep the thread default.
+                      // Per-turn permission / model override (applies to this
+                      // and subsequent turns); omitted keys keep the thread
+                      // default. This is also how a model chosen at create time
+                      // reaches Codex: `thread/start` fixes one, but the first
+                      // turn can override it before the model is ever used.
                       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
                       ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
+                      ...(input.model ? { model: input.model } : {}),
                     })
                     .pipe(
                       Effect.tapError(() =>

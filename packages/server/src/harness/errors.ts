@@ -192,6 +192,18 @@ export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolErr
   }
 }
 
+export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
+  "CapabilityProbeFailed",
+  {
+    harnessAgentId: HarnessAgentIdSchema,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Failed to probe '${this.harnessAgentId}' capabilities.`;
+  }
+}
+
 export class CapabilityUnsupported extends Schema.TaggedErrorClass<CapabilityUnsupported>()(
   "CapabilityUnsupported",
   {

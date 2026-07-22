@@ -19,6 +19,7 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
+  CapabilityProbeFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -28,6 +29,9 @@ import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
 import { resolveClaudeExecutable } from "./executable";
 
 const EVENT_QUEUE_CAPACITY = 1024;
+
+// The catalog row that means "let Claude Code decide", as the CLI names it.
+const CLAUDE_DEFAULT_MODEL_ID = "default";
 
 const operationError = (sessionId: string, operation: string, cause: unknown) =>
   new AgentOperationError({ sessionId, operation, cause });
@@ -401,14 +405,35 @@ const makeSession = (
 export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapter => ({
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
-  capabilities: Effect.succeed({
+  capabilities: {
     permissionModes: [
       { id: "plan", label: "Plan" },
       { id: "ask", label: "Ask" },
       { id: "acceptEdits", label: "Accept edits" },
       { id: "full", label: "Full access" },
     ],
-  }),
+    // Keeps today's behaviour: the first turn shouldn't be gated on approvals.
+    // Codex defaults lower because its "full" also drops the sandbox; this one
+    // only bypasses the prompts.
+    defaultPermissionMode: "full",
+  },
+  probeCatalog: (cwd) =>
+    agent.listModels(cwd).pipe(
+      Effect.map((models) => ({
+        models: models.map((model) => ({ id: model.value, name: model.displayName })),
+        // The SDK lists "Default (recommended)" as a real entry, so the default
+        // is also something the user can pick deliberately — but read it back
+        // out of the probe rather than asserting it: a CLI that stops listing
+        // the row would otherwise have us advertise a default that isn't in its
+        // own catalog, which the client drops, leaving the picker unselected.
+        ...(models.some((model) => model.value === CLAUDE_DEFAULT_MODEL_ID)
+          ? { defaultModel: CLAUDE_DEFAULT_MODEL_ID }
+          : {}),
+      })),
+      Effect.mapError(
+        (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
+      ),
+    ),
   checkAvailability: Effect.try({
     try: () => {
       resolveClaudeExecutable();

@@ -1,6 +1,6 @@
 import type { SessionEvent } from "@vibest/harness";
 import type { CodexUIMessageChunk, SessionEnvelopeDraft } from "@vibest/harness";
-import type { AskForApproval, SandboxPolicy } from "@vibest/harness/codex/protocol/v2";
+import type { AskForApproval, Model, SandboxPolicy } from "@vibest/harness/codex/protocol/v2";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -15,11 +15,13 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
+  CapabilityProbeFailed,
   CodexRpcError,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
+import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { CodexAgent } from "./agent";
 
@@ -61,6 +63,13 @@ const CODEX_PERMISSIONS: Record<string, CodexPermission> = {
 };
 const toCodexPermission = (id: string): CodexPermission | undefined => CODEX_PERMISSIONS[id];
 
+// Codex marks its own default in the catalog. Nothing is inferred from list
+// order — `model/list` never promised one.
+const pickDefaultModel = (models: ReadonlyArray<Model>): { defaultModel?: string } => {
+  const preferred = models.find((model) => model.isDefault);
+  return preferred ? { defaultModel: preferred.id } : {};
+};
+
 const makeSession = (
   agent: CodexAgent,
   sessionId: string,
@@ -76,6 +85,11 @@ const makeSession = (
     // Codex has no session-wide permission call; it takes an approval policy +
     // sandbox per turn. We hold the current mode here and apply it on each turn.
     const permissionMode = yield* Ref.make<CodexPermission | undefined>(undefined);
+    // Same story for the model: `thread/start` fixes one, but `turn/start`
+    // overrides it for that turn and every turn after. Holding it here is what
+    // lets create-time selection work at all — applyInitialSessionConfig calls
+    // setModel before the first prompt, and that first turn carries it.
+    const model = yield* Ref.make<string | undefined>(undefined);
 
     const emit = (body: CodexUIMessageChunk | SessionEvent) =>
       Queue.offer(events, { harnessAgentId: "codex", sessionId, body }).pipe(
@@ -166,8 +180,14 @@ const makeSession = (
         Effect.gen(function* () {
           if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
           const permission = yield* Ref.get(permissionMode);
+          const selectedModel = yield* Ref.get(model);
           const prompt = yield* agent.session
-            .prompt({ sessionId, text: toPromptText(input), ...permission })
+            .prompt({
+              sessionId,
+              text: toPromptText(input),
+              ...permission,
+              ...(selectedModel ? { model: selectedModel } : {}),
+            })
             .pipe(
               Effect.mapError((cause) =>
                 cause instanceof TurnAlreadyRunning
@@ -221,9 +241,10 @@ const makeSession = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
-      // Codex fixes its model at thread start; there's no runtime switch, so we
-      // accept the call and no-op rather than fail the caller.
-      setModel: () => Effect.void,
+      // Stored, not sent: codex has no standalone set-model call, the override
+      // rides on the next `turn/start`. So a mid-session switch takes effect
+      // from the next turn — unlike claude-code, where it is immediate.
+      setModel: (next) => Ref.set(model, next),
       setPermissionMode: (mode) =>
         Effect.gen(function* () {
           const native = toCodexPermission(mode);
@@ -256,10 +277,13 @@ const makeSession = (
     } satisfies HarnessAgentSession;
   });
 
-export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
+export const makeCodexAdapter = (
+  agent: CodexAgent,
+  options: { readonly executablePath?: string } = {},
+): HarnessAgentAdapter => ({
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
-  capabilities: Effect.succeed({
+  capabilities: {
     permissionModes: [
       // Codex has no "plan" (it never produces a plan) — its read-only preset
       // is a pure read-only sandbox, declared under its own id.
@@ -267,8 +291,30 @@ export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
       { id: "ask", label: "Ask" },
       { id: "full", label: "Full access" },
     ],
-  }),
-  checkAvailability: Effect.succeed({ available: true }),
+    // Lower than claude-code's on purpose: codex's "full" is
+    // `approvalPolicy: "never"` *plus* `dangerFullAccess`, i.e. no sandbox at
+    // all — not a default anyone should land on without asking for it.
+    defaultPermissionMode: "ask",
+  },
+  // `cwd` is ignored, not forgotten: codex's `model/list` takes no directory —
+  // it answers for the whole app-server. Taking the argument anyway keeps the
+  // seam uniform, so callers never branch on which harness cares, and the day
+  // codex grows per-project config this is a one-line change here.
+  probeCatalog: (_cwd) =>
+    agent.listModels.pipe(
+      Effect.map((models) => ({
+        models: models.map((model) => ({ id: model.id, name: model.displayName })),
+        ...pickDefaultModel(models),
+      })),
+      Effect.mapError((cause) => new CapabilityProbeFailed({ harnessAgentId: "codex", cause })),
+    ),
+  // A PATH lookup, not a spawn: negotiate has to stay cheap on machines where
+  // codex simply isn't installed, which is the common case.
+  checkAvailability: Effect.sync(() =>
+    findExecutable(options.executablePath ?? "codex")
+      ? { available: true }
+      : { available: false, reason: "Codex was not found on PATH." },
+  ),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),

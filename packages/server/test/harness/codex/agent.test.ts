@@ -1,5 +1,5 @@
 import * as NodeAssert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,6 +28,7 @@ rl.on("line", (line) => {
     if (msg.params.cwd === "/tmp/idle-crash") setImmediate(() => process.exit(1));
   }
   if (msg.method === "turn/start") {
+    if (cwd) fs.writeFileSync(path.join(cwd, "turn-model"), "model" in msg.params ? String(msg.params.model) : "<absent>");
     if (msg.params.input[0].text === "hold") {
       send({ id: msg.id, result: { turn: { id: "turn_hold" } } });
       send({ method: "turn/started", params: { threadId: "th_1", turn: { id: "turn_hold" } } });
@@ -195,6 +196,38 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* agent.session.abort(sessionId);
     }),
+  );
+
+  it.effect("carries the model chosen at create time on the very first turn", () =>
+    Effect.gen(function* () {
+      // Codex fixes a model at thread/start and has no set-model call, so a
+      // create-time choice can only reach it as a turn override. If this
+      // regresses, picking a model silently does nothing.
+      const workspace = mkdtempSync(join(tmpdir(), "codex-model-"));
+      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const session = yield* makeCodexAdapter(agent).open({
+        cwd: workspace,
+        model: "gpt-5.6-luna",
+      });
+
+      yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
+
+      NodeAssert.equal(readFileSync(join(workspace, "turn-model"), "utf8"), "gpt-5.6-luna");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("leaves the model unset when nothing was chosen", () =>
+    Effect.gen(function* () {
+      const workspace = mkdtempSync(join(tmpdir(), "codex-model-"));
+      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
+
+      yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
+
+      // Absent, not null or undefined: the key has to be missing entirely so
+      // codex keeps the model from its own config.
+      NodeAssert.equal(readFileSync(join(workspace, "turn-model"), "utf8"), "<absent>");
+    }).pipe(Effect.scoped),
   );
 
   it.effect("surfaces thread metadata as session info", () =>

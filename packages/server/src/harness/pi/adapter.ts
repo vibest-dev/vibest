@@ -18,6 +18,7 @@ import {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
+import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
 
@@ -218,12 +219,20 @@ const makeSession = (
     } satisfies HarnessAgentSession;
   });
 
-export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
+export const makePiAdapter = (
+  agent: PiAgent,
+  options: { readonly executablePath?: string } = {},
+): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
-  // Pi has no permission protocol — declare no modes at all.
-  capabilities: Effect.succeed({}),
-  checkAvailability: Effect.succeed({ available: true }),
+  // Pi has neither a permission protocol nor a model switch — declaring
+  // nothing is what makes the UI render no config controls for it.
+  capabilities: {},
+  checkAvailability: Effect.sync(() =>
+    findExecutable(options.executablePath ?? "pi")
+      ? { available: true }
+      : { available: false, reason: "Pi was not found on PATH." },
+  ),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "pi", cause })),

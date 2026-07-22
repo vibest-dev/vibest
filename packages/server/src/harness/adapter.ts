@@ -1,6 +1,7 @@
 import type {
   AgentResponse,
   HarnessAgentCapabilities,
+  HarnessAgentCatalog,
   HarnessAgentId,
   InspectorTarget,
   SessionCapabilities,
@@ -18,6 +19,7 @@ import type {
   AgentOperationError,
   AgentRequestUnavailable,
   AgentUnavailable,
+  CapabilityProbeFailed,
   CapabilityUnsupported,
   ExecutableNotFound,
   SessionClosed,
@@ -134,8 +136,32 @@ export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly descriptor: AgentDescriptor;
   readonly checkAvailability: Effect.Effect<AvailabilityResult>;
-  // Negotiated once when the adapter is constructed; shared by all its sessions.
-  readonly capabilities: Effect.Effect<HarnessAgentCapabilities>;
+  /**
+   * What the harness can do regardless of who is signed in or which directory
+   * it runs in — the permission presets and which one to default to. A plain
+   * value, not an effect: it follows from the harness's own vocabulary, so
+   * declaring it can never fail and never costs a process.
+   */
+  readonly capabilities: HarnessAgentCapabilities;
+  /**
+   * The runtime catalog for one working directory, read from the CLI. It
+   * follows the signed-in account, the installed version *and* the directory's
+   * own config, so it can only be probed — never hardcoded, and never probed
+   * once for everyone. Absent for harnesses with no runtime catalog (pi).
+   *
+   * `cwd` is honoured where it matters: claude-code passes it to the SDK
+   * because a project's settings can remap what a model id resolves to. Codex
+   * ignores it — its `model/list` is app-server-global — but still takes it, so
+   * callers never have to know which is which.
+   *
+   * The error channel is the point: a probe that fails has to stay
+   * distinguishable from a harness that genuinely has no models, otherwise an
+   * expired login gets cached as "this harness has no model picker".
+   * {@link HarnessAgentCatalogService} owns the timeout, caching and de-duplication.
+   */
+  readonly probeCatalog?: (
+    cwd: string,
+  ) => Effect.Effect<HarnessAgentCatalog, CapabilityProbeFailed>;
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<

@@ -24,9 +24,7 @@ const fakeAdapter = (over: {
       ? { available: over.available, reason: over.reason }
       : { available: over.available },
   ),
-  capabilities: Effect.succeed(
-    over.permissionModes ? { permissionModes: over.permissionModes } : {},
-  ),
+  capabilities: over.permissionModes ? { permissionModes: over.permissionModes } : {},
   open: () => Effect.die("negotiate must not open a session"),
   resume: () => Effect.die("negotiate must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),

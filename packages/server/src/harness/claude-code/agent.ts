@@ -69,6 +69,16 @@ type ResumeDecision =
     };
 
 export interface ClaudeCodeAgent {
+  /**
+   * The model catalog, read without opening a session. It follows the user's
+   * account and the resolved CLI, so it can only be probed — never hardcoded.
+   */
+  /**
+   * The models a session started in `cwd` could run. The directory is not
+   * incidental: a project's `.claude/settings.json` can remap what an id
+   * resolves to, so the same `sonnet` is a different model in two projects.
+   */
+  readonly listModels: (cwd: string) => Effect.Effect<sdk.ModelInfo[], ClaudeSdkError>;
   readonly session: {
     readonly create: Effect.Effect<{ readonly sessionId: string }, ClaudeSdkError>;
     readonly resume: (
@@ -457,7 +467,69 @@ export const makeClaudeCodeAgent = ({
         ),
       );
 
+    // A throwaway query that exists only to answer the supported-models control
+    // request: `maxTurns: 0` with a prompt stream that never yields means the
+    // CLI connects, replies, and does nothing else. Verified to leave no trace
+    // on disk — no transcript under ~/.claude/projects, no history entry, so it
+    // never pollutes `claude --resume`. It does run the user's SessionStart
+    // hooks, which is the one cost worth knowing about.
+    //
+    // `cwd` is the whole reason this takes an argument. Together with
+    // `settingSources` it is what makes the answer specific to the project the
+    // user is about to work in: a project that sets
+    // `env.ANTHROPIC_DEFAULT_SONNET_MODEL` (or runs through Bedrock/Vertex)
+    // keeps the same ids but changes what they resolve to, so a catalog probed
+    // in some other directory is a catalog for someone else's project.
+    //
+    // Two things *are* stripped, because a probe should cost as little as a
+    // question. Medians of five runs on a developer machine:
+    //
+    //   4.3s  a session's own options
+    //   2.7s  + mcpServers:{} + strictMcpConfig — otherwise the SDK merges the
+    //         user's .mcp.json, settings and plugins and boots their entire MCP
+    //         fleet to read a model list
+    //   0.7s  + CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC — the CLI's documented
+    //         master switch for autoupdater / telemetry / error reporting /
+    //         feedback, none of which a process that lives 700ms and is thrown
+    //         away should be doing
+    //
+    // Dropping `settingSources` to `[]` would save another ~0.3s and is exactly
+    // the trade this must not make — it is the switch that turns the paragraph
+    // above off. Both strippings that *were* taken were checked the same way:
+    // diffing `supportedModels()` against a project carrying such a settings
+    // file, byte-identical.
+    const listModels = (cwd: string): Effect.Effect<sdk.ModelInfo[], ClaudeSdkError> =>
+      Effect.acquireUseRelease(
+        Effect.try({
+          try: () =>
+            query({
+              prompt: Stream.toAsyncIterable(Stream.never),
+              options: {
+                cwd,
+                maxTurns: 0,
+                mcpServers: {},
+                strictMcpConfig: true,
+                settingSources: ["user", "project", "local"],
+                stderr: (error) => console.error(error),
+                executable: process.execPath as "node",
+                pathToClaudeCodeExecutable: resolveClaudeExecutable({ env }),
+                env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+              },
+            }),
+          catch: (cause) => sdkError("list-models", cause),
+        }),
+        (probe) =>
+          Effect.tryPromise({
+            try: () => probe.supportedModels(),
+            catch: (cause) => sdkError("list-models", cause),
+          }),
+        // Returning the generator is what tears the child process down; a probe
+        // that leaked one per call would be a process leak per directory.
+        (probe) => Effect.promise(() => probe.return()).pipe(Effect.ignore),
+      );
+
     return {
+      listModels,
       session: {
         create: Effect.gen(function* () {
           const sessionId = uuid();

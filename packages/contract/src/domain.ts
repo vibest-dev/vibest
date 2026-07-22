@@ -6,6 +6,10 @@ export const toStandardSchema = <S extends Schema.ConstraintDecoder<unknown>>(sc
 
 export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi"]);
 export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
+// Derived from the schema rather than written out a second time: clients that
+// need the ids as data (narrowing a URL param, say) would otherwise keep their
+// own copy, and a fourth harness would silently miss it.
+export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSchema.literals;
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -305,14 +309,60 @@ export const HarnessAgentPermissionModeSchema = Schema.Struct({
 });
 export type HarnessAgentPermissionMode = typeof HarnessAgentPermissionModeSchema.Type;
 
-// Capabilities negotiated once per harness, not per session — identical for
-// every session of a given harness (they depend on the agent's type + CLI/SDK
-// version, not on any one session). Absent `permissionModes` means the harness
-// has no permission protocol at all (e.g. Pi).
+// A model the harness can run a session on. `id` is what travels back in
+// `session.create` / `setModel`; `name` is the display string.
+export const HarnessAgentModelSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optionalKey(Schema.String),
+});
+export type HarnessAgentModel = typeof HarnessAgentModelSchema.Type;
+
+// What a harness can do by virtue of being that harness: its permission
+// vocabulary, and which entry to preselect. Static — it follows from the
+// agent's type and the installed CLI, never from a project or a session, which
+// is why it can be declared without running anything. Everything whose answer
+// changes with the working directory lives in HarnessAgentCatalog instead.
+//
+// Every field is optional and absence is meaningful: it means the harness has
+// no such dimension, and the UI renders no control for it (Pi has no permission
+// protocol at all). `defaultPermissionMode` says which entry to preselect — the
+// harness declares it because the answer differs per harness (Codex's "full"
+// disables its sandbox outright, so it defaults to "ask" where claude-code
+// defaults to "full"). A missing default means "don't preselect": the create
+// call omits the field and the harness falls back to its own configured one.
 export const HarnessAgentCapabilitiesSchema = Schema.Struct({
   permissionModes: Schema.optionalKey(Schema.Array(HarnessAgentPermissionModeSchema)),
+  defaultPermissionMode: Schema.optionalKey(Schema.String),
 });
 export type HarnessAgentCapabilities = typeof HarnessAgentCapabilitiesSchema.Type;
+
+// The runtime half: what a harness offers *in a given working directory*. Kept
+// out of the negotiation because the answer genuinely differs per directory —
+// a project's `.claude/settings.json` can remap what `sonnet` resolves to, so a
+// catalog probed anywhere else is a catalog for someone else's project. It also
+// costs a CLI spawn to obtain, which is not something the startup path should
+// ever wait on.
+//
+// Same optionality rule as capabilities: no `models` key means this harness has
+// no model switch (Pi), the UI renders no picker, and `session.create` omits
+// the field. Skills / agents / slash commands land here later — all of them are
+// per-directory for the same reason.
+export const HarnessAgentCatalogSchema = Schema.Struct({
+  models: Schema.optionalKey(Schema.Array(HarnessAgentModelSchema)),
+  defaultModel: Schema.optionalKey(Schema.String),
+});
+export type HarnessAgentCatalog = typeof HarnessAgentCatalogSchema.Type;
+
+// Addressed by directory, not by projectId: the harness layer has never known
+// what a project is (see `session/port.ts` — "the port speaks ... a resolved
+// `cwd` only"), and the directory is what the answer actually depends on. It
+// also makes the cache key right for free: two projects registered at the same
+// path share one catalog instead of probing twice for the same answer.
+export const HarnessAgentCatalogInputSchema = Schema.Struct({
+  harnessAgentId: HarnessAgentIdSchema,
+  cwd: Schema.String,
+});
+export type HarnessAgentCatalogInput = typeof HarnessAgentCatalogInputSchema.Type;
 
 // One entry of the negotiation result: a harness the server hosts, whether it's
 // usable right now (`available` + optional `reason`), and its capabilities. The
