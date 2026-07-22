@@ -20,8 +20,6 @@ export type { ChatModel, ChatPermissionMode };
 export interface ChatSessionValue {
   sessionId: string;
   harnessAgentId: HarnessAgentId;
-  /** Display name of the harness running this session, for read-only chrome. */
-  harnessAgentName: string;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatStoreState>;
   prompt: (text: string) => void | Promise<void>;
@@ -89,7 +87,6 @@ export function ChatSessionProvider({
   const value: ChatSessionValue = {
     sessionId: sessionRef.sessionId,
     harnessAgentId: chat.harnessAgentId,
-    harnessAgentName: harnessAgent?.name ?? chat.harnessAgentId,
     store: chat.store,
     prompt: (text) => chat.prompt(text),
     respondToRequest: chat.respondToAgentRequest,
