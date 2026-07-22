@@ -79,6 +79,8 @@ When using TanStack Query (server state) with Zustand (client state):
 - **Server state stays in TanStack Query** - Don't duplicate server data in Zustand. TanStack Query handles caching, refetching, and invalidation.
 - **Client state stays in Zustand** - Use Zustand for UI state like selections, form inputs, and local preferences.
 - **Store IDs, not objects** - For selections, store `selectedId` in Zustand and derive `selectedItem` from server data.
+- **Narrow a query with `select`, not in the component** - When a hook only needs one field out of a list query, derive it inside `useQuery`'s `select`. Narrowing after the fact (`data?.find(...)`) subscribes the component to the whole list, so an unrelated entry changing re-renders it; `select` only notifies when the derived value changes.
+- **A `select` that closes over a prop must be memoised** - `select: useCallback(fn, [dep])`. An inline closure is a new function every render, which makes TanStack Query re-run it and lose referential stability — i.e. it silently undoes the point of using `select`. Say so in a comment so nobody "simplifies" the `useCallback` away.
 - **Avoid localStorage persistence for ephemeral UI state** - Desktop apps don't need to persist UI selections across restarts; terminal sessions don't survive anyway.
 
 ## Engineering Practices
