@@ -8,7 +8,6 @@ import {
 import type { ReactNode } from "react";
 import { useStore } from "zustand";
 
-import { useHarnessAgent } from "@/core/harness/use-harness-negotiation";
 import { useLatestRef } from "@/hooks/use-latest-ref";
 
 import { useChatSession } from "./chat-session-context";
@@ -24,8 +23,7 @@ import { hasChatContent } from "./input/serialize";
 // prompt/turnInProgress come from ChatSessionProvider — not props.
 // toolbar = surface-composed toolbar content (e.g. <ChatModelSelect/>).
 export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
-  const { prompt, turnInProgress, store, harnessAgentId } = useChatSession();
-  const harnessAgent = useHarnessAgent(harnessAgentId);
+  const { prompt, turnInProgress, store } = useChatSession();
   const status = useStore(store, (s) => s.status);
   const turnInProgressRef = useLatestRef(turnInProgress);
 
@@ -34,9 +32,7 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
     // otherwise bare Enter is consumed by the default newline behavior before
     // the keymap ever sees it.
     extensions: (self) => [
-      ...createChatBaseExtensions({
-        placeholder: () => `Ask ${harnessAgent?.name ?? harnessAgentId} anything...`,
-      }),
+      ...createChatBaseExtensions(),
       createSubmitKeymap({ onSubmit: () => void self.submit() }),
     ],
     onSubmit: (text) => {
