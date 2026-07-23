@@ -181,6 +181,45 @@ export const SessionServiceLayer: Layer.Layer<
     const resolveHarnessSessionId = (ref: SessionRef) =>
       readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
 
+    // Reconcile a record's display overlay against the harness index and persist
+    // it back, so a subsequent `list` reads storage without a backend round-trip.
+    // Called lazily from `list` for records that were never reconciled (no
+    // stored title). `found` refreshes title/updatedAt and marks history
+    // available; `missing` records that the transcript is gone; `unsupported`
+    // (pi) leaves the floor untouched. A write only happens when something
+    // actually changed.
+    const reconcileDisplay = (cwd: string, metadata: Session) =>
+      port.getSessionInfo(metadata.harnessAgentId, metadata.harnessSessionId, cwd).pipe(
+        Effect.flatMap((info) => {
+          const next: Session =
+            info._tag === "found"
+              ? {
+                  ...metadata,
+                  historyAvailable: true,
+                  ...(info.info.title !== undefined ? { title: info.info.title } : {}),
+                  ...(info.info.updatedAt !== undefined
+                    ? { updatedAt: new Date(info.info.updatedAt).toISOString() }
+                    : {}),
+                }
+              : info._tag === "missing"
+                ? { ...metadata, historyAvailable: false }
+                : metadata;
+          const changed =
+            next.title !== metadata.title ||
+            next.updatedAt !== metadata.updatedAt ||
+            next.historyAvailable !== metadata.historyAvailable;
+          // Persisting the heal is best-effort: a failed write must not fail the
+          // list. Return the reconciled record anyway (this list still shows the
+          // title); the next list re-heals and retries the write.
+          return changed
+            ? repo.write(next).pipe(
+                Effect.as(next),
+                Effect.catchTag("StoreWriteError", () => Effect.succeed(next)),
+              )
+            : Effect.succeed(metadata);
+        }),
+      );
+
     // Drain the native event stream into a fresh runtime. A session that 404s on
     // its own stream right after create/resume is a bug, not a user-facing error.
     // On a stream crash the manager keeps the projection queryable (phase
@@ -207,6 +246,10 @@ export const SessionServiceLayer: Layer.Layer<
                   harnessAgentId,
                   harnessSessionId,
                   createdAt: new Date().toISOString(),
+                  // Our own floor field: the session's working directory. Stored
+                  // so an imported/rehomed session stays self-contained and a
+                  // resume has cwd before it can call getSessionInfo.
+                  cwd: project.path,
                 };
                 const ref: SessionRef = { projectId, harnessAgentId, sessionId };
                 return repo.write(metadata).pipe(
@@ -279,43 +322,44 @@ export const SessionServiceLayer: Layer.Layer<
                         harnessAgentId: metadata.harnessAgentId,
                         sessionId: metadata.sessionId,
                       };
-                      // Display data (title, recency, existence) from the
-                      // harness's own session index; best-effort, never fatal.
-                      const info = yield* port.getSessionInfo(
-                        metadata.harnessAgentId,
-                        metadata.harnessSessionId,
-                        project.path,
-                      );
+                      // Display fields come from our own record (the floor +
+                      // persisted overlay). A record that was never reconciled
+                      // (no stored title) is healed once here — one backend
+                      // lookup, persisted back — and read straight from storage
+                      // ever after. So the per-list backend cost decays to zero
+                      // as titles settle, instead of a lookup per session every
+                      // time. pi (unsupported) has no title to store, so it is
+                      // re-checked each list, but its getSessionInfo is a pure
+                      // in-memory `unsupported` — no I/O.
+                      const record =
+                        metadata.title !== undefined
+                          ? metadata
+                          : yield* reconcileDisplay(metadata.cwd ?? project.path, metadata);
                       // Live phase from the runtime; null when no runtime is up.
                       const status = yield* manager.status(ref).pipe(
                         Effect.map((s): SessionStatus | null => s),
                         Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
                       );
-                      const found = info._tag === "found";
                       return {
-                        projectId: metadata.projectId,
-                        harnessAgentId: metadata.harnessAgentId,
-                        sessionId: metadata.sessionId,
-                        createdAt: metadata.createdAt,
-                        // Existence in the harness's session index is the truth
-                        // for whether history can be served: a session it no
-                        // longer knows (`missing`) has none.
-                        historyAvailable: found,
-                        ...(found && info.info.title !== undefined
-                          ? { title: info.info.title }
-                          : {}),
-                        ...(found && info.info.updatedAt !== undefined
-                          ? { updatedAt: new Date(info.info.updatedAt).toISOString() }
-                          : {}),
+                        projectId: record.projectId,
+                        harnessAgentId: record.harnessAgentId,
+                        sessionId: record.sessionId,
+                        createdAt: record.createdAt,
+                        // `found` → true, `missing` → false (both persisted by the
+                        // heal above and read back here). Absent means no positive
+                        // evidence — a backend with no index (pi/unsupported) or a
+                        // record that couldn't be reconciled — which reads as
+                        // false, same as before this became storage-backed.
+                        historyAvailable: record.historyAvailable ?? false,
+                        ...(record.title !== undefined ? { title: record.title } : {}),
+                        ...(record.updatedAt !== undefined ? { updatedAt: record.updatedAt } : {}),
                         ...(status !== null ? { status } : {}),
                       } satisfies SessionSummary;
                     }),
-                  // Bounded: each entry costs a harness session-index lookup
-                  // (a claude-code SDK read, a codex `thread/read` RPC), and the
-                  // sidebar lists every project at once. Unbounded turned a
-                  // project with a few hundred sessions into a matching burst of
-                  // concurrent filesystem/RPC work on the connection that also
-                  // carries the live chat stream.
+                  // Bounded: the lazy heal above can still fan a handful of
+                  // backend lookups out on the first list of a project with many
+                  // never-reconciled sessions, on the connection that also carries
+                  // the live chat stream.
                   { concurrency: 8 },
                 ),
               ),

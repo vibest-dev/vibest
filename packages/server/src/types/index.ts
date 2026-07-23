@@ -67,6 +67,14 @@ export interface RuntimeConfig {
  * `sessionId`, which is also stored in the body so a loaded record is
  * self-contained; `harnessSessionId` is the agent-native id (claude session
  * uuid / codex thread id) the server translates to when calling the harness.
+ *
+ * The record is the durable *floor* for session display data. Identity + `cwd`
+ * + `createdAt` are ours, written at create. The display *overlay* (`title`,
+ * `updatedAt`, `historyAvailable`) is reconciled from the harness's own session
+ * index and persisted back here, so `list` reads this record instead of
+ * re-querying every backend on every call. A backend with no session index
+ * (pi) never fills the overlay and rides the floor. See
+ * docs/adr/0002-session-info-storage-floor-harness-overlay.md.
  */
 export interface Session {
   readonly version: 1;
@@ -75,4 +83,23 @@ export interface Session {
   readonly harnessAgentId: HarnessAgentId;
   readonly harnessSessionId: string;
   readonly createdAt: string;
+  /**
+   * Working directory. Our input at `create` (currently the project path);
+   * required to resume a claude session before any `getSessionInfo` is possible.
+   * Optional for legacy records written before this field existed — callers fall
+   * back to the project path.
+   */
+  readonly cwd?: string;
+  /**
+   * Display title, reconciled from the harness index (auto-summary / customTitle,
+   * falling back to the first prompt). Persisted so `list` needn't re-query.
+   */
+  readonly title?: string;
+  /** Recency (ISO), reconciled from the harness's last-modified time. */
+  readonly updatedAt?: string;
+  /**
+   * Whether the backend still has this session's transcript. `false` once a
+   * reconcile finds it gone (not resumable); absent means never reconciled.
+   */
+  readonly historyAvailable?: boolean;
 }
