@@ -89,39 +89,41 @@ answer is a floor + overlay reconciled into one persisted record.
 
 ## Implementation status
 
-Landed (server-only, no contract or client change, storage schema kept at
-`version: 1` with no migration — legacy records simply lack the new optional
-fields and fall back):
+**Current: fully self-owned, `getSessionInfo` is off the hot path.** An empirical
+check settled the open question this ADR was hedging: `getSessionInfo.summary`
+does return an apt title for an established session (a real one probed as
+`"rename-controller-types-accuracy"` vs its first prompt `"给我一下当前 daemon 的架构"`),
+but that apt title is `customTitle`, generated only after the session matures —
+short/new sessions get only the first prompt back, the same crude string we
+already hold. So consulting the harness buys aptness only sometimes, at the cost
+of a per-session backend call and the whole overlay/reconcile machinery. We chose
+to **not** pay that for now: own every display field, accept the first prompt as
+the title, and reserve the harness for a future on-demand path.
 
-- The persisted `Session` record (`packages/server/src/types/index.ts`) carries
-  the floor + overlay fields: `cwd`, `title`, `updatedAt`, `historyAvailable`.
-- `create` stamps `cwd` (the project path).
-- `list` reads display fields from the record, reconciling against the harness
-  index (`reconcileDisplay`) when the overlay may be stale: a record never
-  reconciled (no stored `title`), **or a live session** (`status !== null`). The
-  live condition matters because a title is not immutable — claude refines the
-  first prompt into an auto-summary as turns accumulate, and recency advances —
-  so a heal-once-then-freeze would pin the title to the first prompt forever.
-  `reconcileDisplay` writes only when `getSessionInfo` returns something new, so
-  a dormant-but-open session reads without writing, and idle/unopened/titled
-  sessions (the bulk of a long sidebar) are a pure storage read with no backend
-  lookup. Because the client re-lists on turn end, a refined title lands in that
-  same list. A `missing` reconcile persists `historyAvailable: false`;
-  `unsupported` (pi) leaves the floor. The heal-write is best-effort (a failed
-  write never fails the list).
+Landed (server-only, storage schema at `version: 1`, no migration):
 
-Deferred (the "push" half — a follow-up, because it touches the contract event
-union and the client):
+- The persisted `Session` record (`packages/server/src/types/index.ts`) holds
+  `cwd`, `title`, plus reserved `updatedAt` / `historyAvailable`.
+- `create` stamps `cwd`. The **first `prompt`** sets `title` from its text
+  (`deriveTitle`: trim, collapse whitespace, clamp to 60 chars); a best-effort
+  write that never blocks the prompt. Later prompts don't rename.
+- `list` is a **pure read** of our records — no `getSessionInfo`, no fan-out, no
+  concurrency bound. The one overlay is live `status`, from the in-memory runtime
+  (not the harness index). `historyAvailable` reads `true` (we own the record;
+  resume proves otherwise reactively; history isn't served yet regardless).
 
-- A `session.updated` bus event so _other_ clients (a second tab, the desktop)
-  converge without their own turn-end trigger. The single active client already
-  sees refined titles via the live-reconcile-on-list above driven by its own
-  turn-end `session.list` invalidation, so this is a multi-client optimization,
-  not a correctness gap.
-- Removing the client-side turn-end store subscription in `draft.tsx` (only
-  worthwhile once the server publishes `session.updated`).
-- Surfacing `gitBranch` (needs `HarnessSessionInfo` + the claude/codex adapters
-  widened first).
+Deferred to a future **on-demand reconcile** (only when the harness is genuinely
+irreplaceable — none of it needed for what the sidebar shows today):
+
+- A refined/apt title (claude's `customTitle`) — either read via `getSessionInfo`
+  on session open, or generate our own (t3code runs a dedicated
+  `claude -p --json-schema` title call). Both are out of the list hot path.
+- Real recency (`updatedAt`) — stamp locally at `session.turn.ended`, or read
+  `lastModified`.
+- Transcript existence / `historyAvailable`, and real history replay via
+  `getSessionMessages` (today `getMessages` is `UNSUPPORTED`).
+- Imported/externally-created sessions (only the harness has their metadata) and
+  a `session.updated` bus event for multi-client convergence.
 
 ## Consequences
 

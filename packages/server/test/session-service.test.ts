@@ -50,7 +50,7 @@ const makeFakePort = (
     events: () => Effect.succeed(Stream.empty),
     getSessionInfo: () =>
       Effect.succeed<SessionInfoResult>(opts.sessionInfo ?? { _tag: "unsupported" }),
-    prompt: () => Effect.die("prompt not exercised"),
+    prompt: () => Effect.succeed({ turnId: "turn-1" }),
     interrupt: () => Effect.die("interrupt not exercised"),
     setModel: () => Effect.die("setModel not exercised"),
     setPermissionMode: () => Effect.die("setPermissionMode not exercised"),
@@ -257,14 +257,46 @@ describe("SessionService", () => {
     expect(result.listed.map((s) => s.sessionId).toSorted()).toEqual(
       [result.a.sessionId, result.b.sessionId].toSorted(),
     );
-    // The default fake reports `unsupported`, so history is not advertised.
-    expect(result.listed.every((s) => !s.historyAvailable)).toBe(true);
+    // We own the record, so a session we created reads as history-available.
+    expect(result.listed.every((s) => s.historyAvailable)).toBe(true);
   });
 
-  it("list reflects the harness's title, recency, and history availability", async () => {
-    const { layer } = makeFakePort({
-      sessionInfo: { _tag: "found", info: { title: "My chat", updatedAt: 1_700_000_000_000 } },
-    });
+  it("titles a session from its first prompt, collapsing whitespace", async () => {
+    const { layer } = makeFakePort();
+    const listed = await run(
+      layer,
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const sessions = yield* SessionService;
+        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
+        const ref = yield* sessions.create(project.id, "claude-code");
+        yield* sessions.prompt({ ref, parts: [{ type: "text", text: "  Fix the  login  bug " }] });
+        return yield* sessions.list(project.id);
+      }),
+    );
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.title).toBe("Fix the login bug");
+  });
+
+  it("keeps the first prompt's title; later prompts don't rename", async () => {
+    const { layer } = makeFakePort();
+    const listed = await run(
+      layer,
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const sessions = yield* SessionService;
+        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
+        const ref = yield* sessions.create(project.id, "claude-code");
+        yield* sessions.prompt({ ref, parts: [{ type: "text", text: "first" }] });
+        yield* sessions.prompt({ ref, parts: [{ type: "text", text: "second" }] });
+        return yield* sessions.list(project.id);
+      }),
+    );
+    expect(listed[0]?.title).toBe("first");
+  });
+
+  it("lists a session with no title until its first prompt", async () => {
+    const { layer } = makeFakePort();
     const listed = await run(
       layer,
       Effect.gen(function* () {
@@ -276,26 +308,6 @@ describe("SessionService", () => {
       }),
     );
     expect(listed).toHaveLength(1);
-    // A session the harness still knows carries history + its display fields.
-    expect(listed[0]?.historyAvailable).toBe(true);
-    expect(listed[0]?.title).toBe("My chat");
-    expect(listed[0]?.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
-  });
-
-  it("list marks a session the harness no longer knows as history-unavailable", async () => {
-    const { layer } = makeFakePort({ sessionInfo: { _tag: "missing" } });
-    const listed = await run(
-      layer,
-      Effect.gen(function* () {
-        const projects = yield* ProjectService;
-        const sessions = yield* SessionService;
-        const project = yield* projects.create({ name: "app", path: "/tmp/vibest-app" });
-        yield* sessions.create(project.id, "claude-code");
-        return yield* sessions.list(project.id);
-      }),
-    );
-    expect(listed).toHaveLength(1);
-    expect(listed[0]?.historyAvailable).toBe(false);
     expect(listed[0]?.title).toBeUndefined();
   });
 

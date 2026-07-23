@@ -35,6 +35,20 @@ import {
 import { SessionRepository } from "./repository";
 import { SessionManager, type SessionNotActive } from "./runtime";
 
+/**
+ * A session's title, derived from its first prompt's text — the crude but
+ * self-owned placeholder we show until (if ever) something better replaces it.
+ * Collapses whitespace and clamps length; no text part (e.g. inspector-only)
+ * yields no title.
+ */
+const MAX_TITLE_CHARS = 60;
+const deriveTitle = (parts: PromptInput["parts"]): string | undefined => {
+  const text = parts.find((part) => part.type === "text")?.text.trim();
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ");
+  return collapsed.length > MAX_TITLE_CHARS ? collapsed.slice(0, MAX_TITLE_CHARS) : collapsed;
+};
+
 /** Wire prompt parts → HarnessAgent UserInput; `file` parts are rejected, never dropped. */
 const toUserInput = (
   parts: PromptInput["parts"],
@@ -181,44 +195,17 @@ export const SessionServiceLayer: Layer.Layer<
     const resolveHarnessSessionId = (ref: SessionRef) =>
       readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
 
-    // Reconcile a record's display overlay against the harness index and persist
-    // it back, so an unchanged session later reads from storage with no backend
-    // round-trip. Called from `list` for never-reconciled or live sessions.
-    // `found` refreshes title/updatedAt and marks history available; `missing`
-    // records that the transcript is gone; `unsupported` (pi) leaves the floor
-    // untouched. A write only happens when something actually changed — so
-    // re-running this on a live-but-idle session is a read with no write.
-    const reconcileDisplay = (cwd: string, metadata: Session) =>
-      port.getSessionInfo(metadata.harnessAgentId, metadata.harnessSessionId, cwd).pipe(
-        Effect.flatMap((info) => {
-          const next: Session =
-            info._tag === "found"
-              ? {
-                  ...metadata,
-                  historyAvailable: true,
-                  ...(info.info.title !== undefined ? { title: info.info.title } : {}),
-                  ...(info.info.updatedAt !== undefined
-                    ? { updatedAt: new Date(info.info.updatedAt).toISOString() }
-                    : {}),
-                }
-              : info._tag === "missing"
-                ? { ...metadata, historyAvailable: false }
-                : metadata;
-          const changed =
-            next.title !== metadata.title ||
-            next.updatedAt !== metadata.updatedAt ||
-            next.historyAvailable !== metadata.historyAvailable;
-          // Persisting the heal is best-effort: a failed write must not fail the
-          // list. Return the reconciled record anyway (this list still shows the
-          // title); the next list re-heals and retries the write.
-          return changed
-            ? repo.write(next).pipe(
-                Effect.as(next),
-                Effect.catchTag("StoreWriteError", () => Effect.succeed(next)),
-              )
-            : Effect.succeed(metadata);
-        }),
-      );
+    // The first prompt establishes the session title. Best-effort: a failed
+    // title write must never block the prompt itself. A record that already has
+    // a title (any later prompt) is left alone.
+    const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
+      if (metadata.title !== undefined) return Effect.void;
+      const title = deriveTitle(parts);
+      if (title === undefined) return Effect.void;
+      return repo
+        .write({ ...metadata, title })
+        .pipe(Effect.catchTag("StoreWriteError", () => Effect.void));
+    };
 
     // Drain the native event stream into a fresh runtime. A session that 404s on
     // its own stream right after create/resume is a bug, not a user-facing error.
@@ -308,76 +295,57 @@ export const SessionServiceLayer: Layer.Layer<
           Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
         ),
 
+      // A pure read of our own records — display data is self-owned (title from
+      // the first prompt, createdAt/cwd from create), so no per-session backend
+      // lookup. `status` is the one overlay, and it comes from the in-memory
+      // runtime, not the harness index.
       list: (projectId) =>
         projects.findById(projectId).pipe(
-          Effect.flatMap((project) =>
-            repo.list(projectId).pipe(
-              Effect.flatMap((sessions) =>
-                Effect.forEach(
-                  sessions,
-                  (metadata) =>
-                    Effect.gen(function* () {
-                      const ref: SessionRef = {
+          Effect.andThen(repo.list(projectId)),
+          Effect.flatMap((sessions) =>
+            Effect.forEach(sessions, (metadata) =>
+              manager
+                .status({
+                  projectId: metadata.projectId,
+                  harnessAgentId: metadata.harnessAgentId,
+                  sessionId: metadata.sessionId,
+                })
+                .pipe(
+                  Effect.map((s): SessionStatus | null => s),
+                  Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+                  Effect.map(
+                    (status) =>
+                      ({
                         projectId: metadata.projectId,
                         harnessAgentId: metadata.harnessAgentId,
                         sessionId: metadata.sessionId,
-                      };
-                      // Live phase from the runtime; null when no runtime is up.
-                      const status = yield* manager.status(ref).pipe(
-                        Effect.map((s): SessionStatus | null => s),
-                        Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
-                      );
-                      // Display fields come from our own record (the floor +
-                      // persisted overlay), reconciled against the harness index
-                      // when the overlay may be stale:
-                      //  - never reconciled (no stored title) — the bootstrap heal;
-                      //  - a *live* session (`status !== null`) — a running
-                      //    session's title (claude refines the first prompt into
-                      //    an auto-summary as turns accumulate) and recency still
-                      //    change, so freezing after one heal would pin the title
-                      //    to the first prompt forever.
-                      // `reconcileDisplay` only writes when getSessionInfo returns
-                      // something new, so a dormant-but-open session reads without
-                      // writing. Idle, unopened, already-titled sessions (the bulk
-                      // of a long sidebar) are a pure storage read — no backend
-                      // lookup. The client re-lists on turn end, so a refined title
-                      // lands in that same list, no separate event needed.
-                      const record =
-                        metadata.title === undefined || status !== null
-                          ? yield* reconcileDisplay(metadata.cwd ?? project.path, metadata)
-                          : metadata;
-                      return {
-                        projectId: record.projectId,
-                        harnessAgentId: record.harnessAgentId,
-                        sessionId: record.sessionId,
-                        createdAt: record.createdAt,
-                        // `found` → true, `missing` → false (both persisted by the
-                        // heal above and read back here). Absent means no positive
-                        // evidence — a backend with no index (pi/unsupported) or a
-                        // record that couldn't be reconciled — which reads as
-                        // false, same as before this became storage-backed.
-                        historyAvailable: record.historyAvailable ?? false,
-                        ...(record.title !== undefined ? { title: record.title } : {}),
-                        ...(record.updatedAt !== undefined ? { updatedAt: record.updatedAt } : {}),
+                        createdAt: metadata.createdAt,
+                        // We own the record, so the session exists as far as we
+                        // know; a resume proves otherwise reactively. History
+                        // isn't served yet regardless (getMessages is UNSUPPORTED).
+                        historyAvailable: metadata.historyAvailable ?? true,
+                        ...(metadata.title !== undefined ? { title: metadata.title } : {}),
+                        ...(metadata.updatedAt !== undefined
+                          ? { updatedAt: metadata.updatedAt }
+                          : {}),
                         ...(status !== null ? { status } : {}),
-                      } satisfies SessionSummary;
-                    }),
-                  // Bounded: reconcile above can still fan a handful of backend
-                  // lookups out — the first list of a project with many
-                  // never-reconciled sessions, or the live sessions in it — on the
-                  // connection that also carries the live chat stream.
-                  { concurrency: 8 },
+                      }) satisfies SessionSummary,
+                  ),
                 ),
-              ),
             ),
           ),
         ),
 
       prompt: (input) =>
-        resolveHarnessSessionId(input.ref).pipe(
-          Effect.flatMap((harnessSessionId) =>
+        readChecked(input.ref).pipe(
+          Effect.flatMap((metadata) =>
             toUserInput(input.parts, input.model).pipe(
-              Effect.flatMap((userInput) => port.prompt(harnessSessionId, userInput)),
+              Effect.flatMap((userInput) =>
+                // The first prompt names the session before it reaches the harness.
+                stampTitleFromFirstPrompt(metadata, input.parts).pipe(
+                  Effect.andThen(port.prompt(metadata.harnessSessionId, userInput)),
+                ),
+              ),
             ),
           ),
         ),
