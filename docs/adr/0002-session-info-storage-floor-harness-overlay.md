@@ -96,22 +96,28 @@ fields and fall back):
 - The persisted `Session` record (`packages/server/src/types/index.ts`) carries
   the floor + overlay fields: `cwd`, `title`, `updatedAt`, `historyAvailable`.
 - `create` stamps `cwd` (the project path).
-- `list` reads display fields from the record. A record never reconciled (no
-  stored `title`) is **healed lazily**: one `getSessionInfo`, persisted back via
-  `reconcileDisplay`, and read straight from storage on every later list — the
-  per-list backend cost decays to zero as titles settle. A `missing` reconcile
-  persists `historyAvailable: false`; `unsupported` (pi) leaves the floor and is
-  re-checked cheaply (its `getSessionInfo` is a pure in-memory `unsupported`).
-  The heal-write is best-effort (a failed write never fails the list).
+- `list` reads display fields from the record, reconciling against the harness
+  index (`reconcileDisplay`) when the overlay may be stale: a record never
+  reconciled (no stored `title`), **or a live session** (`status !== null`). The
+  live condition matters because a title is not immutable — claude refines the
+  first prompt into an auto-summary as turns accumulate, and recency advances —
+  so a heal-once-then-freeze would pin the title to the first prompt forever.
+  `reconcileDisplay` writes only when `getSessionInfo` returns something new, so
+  a dormant-but-open session reads without writing, and idle/unopened/titled
+  sessions (the bulk of a long sidebar) are a pure storage read with no backend
+  lookup. Because the client re-lists on turn end, a refined title lands in that
+  same list. A `missing` reconcile persists `historyAvailable: false`;
+  `unsupported` (pi) leaves the floor. The heal-write is best-effort (a failed
+  write never fails the list).
 
 Deferred (the "push" half — a follow-up, because it touches the contract event
 union and the client):
 
-- Proactive reconcile on **turn end** (so a live session's title/recency refresh
-  without waiting for the next list) and a `session.updated` bus event so all
-  clients converge. The lazy-list heal already persists titles and is driven by
-  the client's existing turn-end `session.list` invalidation, so this is an
-  optimization, not a correctness gap.
+- A `session.updated` bus event so _other_ clients (a second tab, the desktop)
+  converge without their own turn-end trigger. The single active client already
+  sees refined titles via the live-reconcile-on-list above driven by its own
+  turn-end `session.list` invalidation, so this is a multi-client optimization,
+  not a correctness gap.
 - Removing the client-side turn-end store subscription in `draft.tsx` (only
   worthwhile once the server publishes `session.updated`).
 - Surfacing `gitBranch` (needs `HarnessSessionInfo` + the claude/codex adapters

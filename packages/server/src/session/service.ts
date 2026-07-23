@@ -182,12 +182,12 @@ export const SessionServiceLayer: Layer.Layer<
       readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
 
     // Reconcile a record's display overlay against the harness index and persist
-    // it back, so a subsequent `list` reads storage without a backend round-trip.
-    // Called lazily from `list` for records that were never reconciled (no
-    // stored title). `found` refreshes title/updatedAt and marks history
-    // available; `missing` records that the transcript is gone; `unsupported`
-    // (pi) leaves the floor untouched. A write only happens when something
-    // actually changed.
+    // it back, so an unchanged session later reads from storage with no backend
+    // round-trip. Called from `list` for never-reconciled or live sessions.
+    // `found` refreshes title/updatedAt and marks history available; `missing`
+    // records that the transcript is gone; `unsupported` (pi) leaves the floor
+    // untouched. A write only happens when something actually changed — so
+    // re-running this on a live-but-idle session is a read with no write.
     const reconcileDisplay = (cwd: string, metadata: Session) =>
       port.getSessionInfo(metadata.harnessAgentId, metadata.harnessSessionId, cwd).pipe(
         Effect.flatMap((info) => {
@@ -322,24 +322,30 @@ export const SessionServiceLayer: Layer.Layer<
                         harnessAgentId: metadata.harnessAgentId,
                         sessionId: metadata.sessionId,
                       };
-                      // Display fields come from our own record (the floor +
-                      // persisted overlay). A record that was never reconciled
-                      // (no stored title) is healed once here — one backend
-                      // lookup, persisted back — and read straight from storage
-                      // ever after. So the per-list backend cost decays to zero
-                      // as titles settle, instead of a lookup per session every
-                      // time. pi (unsupported) has no title to store, so it is
-                      // re-checked each list, but its getSessionInfo is a pure
-                      // in-memory `unsupported` — no I/O.
-                      const record =
-                        metadata.title !== undefined
-                          ? metadata
-                          : yield* reconcileDisplay(metadata.cwd ?? project.path, metadata);
                       // Live phase from the runtime; null when no runtime is up.
                       const status = yield* manager.status(ref).pipe(
                         Effect.map((s): SessionStatus | null => s),
                         Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
                       );
+                      // Display fields come from our own record (the floor +
+                      // persisted overlay), reconciled against the harness index
+                      // when the overlay may be stale:
+                      //  - never reconciled (no stored title) — the bootstrap heal;
+                      //  - a *live* session (`status !== null`) — a running
+                      //    session's title (claude refines the first prompt into
+                      //    an auto-summary as turns accumulate) and recency still
+                      //    change, so freezing after one heal would pin the title
+                      //    to the first prompt forever.
+                      // `reconcileDisplay` only writes when getSessionInfo returns
+                      // something new, so a dormant-but-open session reads without
+                      // writing. Idle, unopened, already-titled sessions (the bulk
+                      // of a long sidebar) are a pure storage read — no backend
+                      // lookup. The client re-lists on turn end, so a refined title
+                      // lands in that same list, no separate event needed.
+                      const record =
+                        metadata.title === undefined || status !== null
+                          ? yield* reconcileDisplay(metadata.cwd ?? project.path, metadata)
+                          : metadata;
                       return {
                         projectId: record.projectId,
                         harnessAgentId: record.harnessAgentId,
@@ -356,10 +362,10 @@ export const SessionServiceLayer: Layer.Layer<
                         ...(status !== null ? { status } : {}),
                       } satisfies SessionSummary;
                     }),
-                  // Bounded: the lazy heal above can still fan a handful of
-                  // backend lookups out on the first list of a project with many
-                  // never-reconciled sessions, on the connection that also carries
-                  // the live chat stream.
+                  // Bounded: reconcile above can still fan a handful of backend
+                  // lookups out — the first list of a project with many
+                  // never-reconciled sessions, or the live sessions in it — on the
+                  // connection that also carries the live chat stream.
                   { concurrency: 8 },
                 ),
               ),
