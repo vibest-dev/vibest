@@ -78,7 +78,12 @@ function DraftRoute() {
       return ref;
     },
     onSuccess: (ref, { text }) => {
-      const listKey = orpcQueryUtils.session.list.key({ input: { projectId: ref.projectId } });
+      // Use the `queryOptions` key (it carries `type: "query"`), not the bare
+      // `.key({ input })` — the latter omits `type` and setQueryData would write
+      // a phantom entry the sidebar never reads.
+      const listKey = orpcQueryUtils.session.list.queryOptions({
+        input: { projectId: ref.projectId },
+      }).queryKey;
 
       // Optimistic title: seed the row with the prompt text so it appears named
       // the instant we navigate. The server owns the durable title — it stamps a

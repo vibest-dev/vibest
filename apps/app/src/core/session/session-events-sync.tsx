@@ -28,8 +28,11 @@ export function SessionEventsSync({
   useEffect(() => {
     const abort = new AbortController();
 
+    // The exact key the sidebar's `session.list` query reads — the `queryOptions`
+    // key carries `type: "query"`, which the bare `.key({ input })` omits, so
+    // setQueryData must use this or it writes a phantom entry nothing renders.
     const listKeyFor = (projectId: string) =>
-      orpcQueryUtils.session.list.key({ input: { projectId } });
+      orpcQueryUtils.session.list.queryOptions({ input: { projectId } }).queryKey;
 
     const apply = (event: CollectionEvent) => {
       const listKey = listKeyFor(event.ref.projectId);
