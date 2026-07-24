@@ -111,6 +111,20 @@ Landed (server-only, storage schema at `version: 1`, no migration):
   concurrency bound. The one overlay is live `status`, from the in-memory runtime
   (not the harness index). `historyAvailable` reads `true` (we own the record;
   resume proves otherwise reactively; history isn't served yet regardless).
+- The **`session.updated` collection event carries the reconciler**: the server
+  publishes it (with the new title) when the first prompt stamps the title — the
+  "specific event", never a timer. A single always-mounted client subscriber
+  (`SessionEventsSync`) consumes the global firehose and patches each open
+  `session.list` cache in place (updated → merge title, renamed, deleted;
+  created is a no-op the creating tab already seeded). This is multi-client,
+  survives navigation/reload, and replaced the fragile per-route turn-end
+  `chat.store` subscription that used to drive the heal. The client keeps only
+  the optimistic `setQueryData` seed on create.
+  - _Gotcha found in verification_: `setQueryData` needs the **exact** query key.
+    oRPC's `session.list.key({ input })` omits the `type: "query"` segment that
+    `queryOptions({ input }).queryKey` carries, so writes with the bare `.key()`
+    land on a phantom entry the sidebar never reads. Use the `queryOptions` key
+    for cache writes; `.key()` (partial) is fine only for `invalidateQueries`.
 
 Deferred to a future **on-demand reconcile** (only when the harness is genuinely
 irreplaceable — none of it needed for what the sidebar shows today):
@@ -122,8 +136,9 @@ irreplaceable — none of it needed for what the sidebar shows today):
   `lastModified`.
 - Transcript existence / `historyAvailable`, and real history replay via
   `getSessionMessages` (today `getMessages` is `UNSUPPORTED`).
-- Imported/externally-created sessions (only the harness has their metadata) and
-  a `session.updated` bus event for multi-client convergence.
+- Imported/externally-created sessions (only the harness has their metadata).
+  (The `session.updated` bus event itself now exists — see above — it just has a
+  single producer, the title stamp, until on-demand reconcile adds more.)
 
 ## Consequences
 
