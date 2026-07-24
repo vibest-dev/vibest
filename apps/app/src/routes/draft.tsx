@@ -80,12 +80,12 @@ function DraftRoute() {
     onSuccess: (ref, { text }) => {
       const listKey = orpcQueryUtils.session.list.key({ input: { projectId: ref.projectId } });
 
-      // Optimistic title. The harness writes the session's summary to disk ~1s
-      // after the first prompt (with no upper bound), so a bare invalidate here
-      // races that write and flashes "New chat" until the next fetch. Instead we
-      // seed the row directly with the prompt text — which is exactly what
-      // getSessionInfo reports as the initial summary (custom title → auto
-      // summary → first prompt), so this is the real value, not a placeholder.
+      // Optimistic title: seed the row with the prompt text so it appears named
+      // the instant we navigate. The server owns the durable title — it stamps a
+      // whitespace-collapsed, length-clamped version from this same first prompt
+      // and emits `session.updated`, which SessionEventsSync patches over this
+      // row. So this is the real value, reconciled in place, never a placeholder
+      // that flashes "New chat".
       queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) => {
         if (prev?.some((session) => session.sessionId === ref.sessionId)) return prev;
         const optimistic: SessionSummary = {
@@ -93,33 +93,11 @@ function DraftRoute() {
           harnessAgentId: ref.harnessAgentId,
           sessionId: ref.sessionId,
           title: text,
-          // Placeholder ordering key; the real createdAt arrives on reconcile.
+          // Placeholder ordering key (≈ now); the real createdAt loads on reload.
           createdAt: new Date().toISOString(),
-          historyAvailable: false,
+          historyAvailable: true,
         };
         return [...(prev ?? []), optimistic];
-      });
-
-      // Reconcile against the harness's authoritative summary on a *specific
-      // event* — this session's turn ending — never a fixed timer. Turn end is
-      // guaranteed to be after the summary is on disk (the first assistant chunk
-      // alone lands seconds later), so the refetch can't miss it. The Chat is
-      // owned by the manager and outlives this route, so the subscription is
-      // safe after we navigate away.
-      const chat = manager.attach(ref);
-      const isActive = (status: string) => status === "submitted" || status === "streaming";
-      let wentActive = isActive(chat.store.getState().status);
-      const unsubscribe = chat.store.subscribe((state) => {
-        if (isActive(state.status)) {
-          wentActive = true;
-          return;
-        }
-        // Settled: reached "ready"/"error" after streaming, or errored before it
-        // ever started. Either way the summary is now readable.
-        if (wentActive || state.status === "error") {
-          unsubscribe();
-          void queryClient.invalidateQueries({ queryKey: listKey });
-        }
       });
 
       navigate({ to: "/session/$sessionId", params: { sessionId: ref.sessionId } });

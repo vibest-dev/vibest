@@ -8,6 +8,7 @@ import "./index.css";
 import { ChatManagerProvider } from "./core/chat/chat-context";
 import { ChatManager } from "./core/chat/chat-manager";
 import { OrpcChatSessionTransport } from "./core/chat/chat-transport";
+import { SessionEventsSync } from "./core/session/session-events-sync";
 import { createAppClients, type AppClients } from "./lib/orpc";
 import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";
@@ -47,6 +48,15 @@ function AppRuntime({ orpcClient, queryClient, orpcQueryUtils }: AppClients): Re
   return (
     <QueryClientProvider client={queryClient}>
       <ChatManagerProvider manager={chatManager}>
+        {/*
+         * Keeps every `session.list` cache converged from the server's collection
+         * events (multi-tab / desktop), independent of which surface is mounted.
+         */}
+        <SessionEventsSync
+          client={orpcClient}
+          orpcQueryUtils={orpcQueryUtils}
+          queryClient={queryClient}
+        />
         <RouterProvider router={router} />
         {/*
          * The app's only error surface. Every `toast.*` call — the QueryClient's

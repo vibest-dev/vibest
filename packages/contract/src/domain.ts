@@ -191,6 +191,7 @@ export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
 
 export const CollectionEventTypes = [
   "session.created",
+  "session.updated",
   "session.deleted",
   "session.renamed",
 ] as const;
@@ -226,6 +227,10 @@ export type SessionScopedEvent = { readonly seq: number } & SessionScopedEventDr
 
 export type CollectionEvent = { readonly ref: SessionRef } & (
   | { readonly type: "session.created" }
+  // Self-owned display data changed on the server (currently the title, stamped
+  // from the first prompt). Carries the new value so clients patch the row in
+  // place instead of clobbering an optimistic title with a refetch.
+  | { readonly type: "session.updated"; readonly title?: string }
   | { readonly type: "session.deleted" }
   | { readonly type: "session.renamed"; readonly name: string }
 );

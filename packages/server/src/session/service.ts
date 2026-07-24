@@ -197,14 +197,22 @@ export const SessionServiceLayer: Layer.Layer<
 
     // The first prompt establishes the session title. Best-effort: a failed
     // title write must never block the prompt itself. A record that already has
-    // a title (any later prompt) is left alone.
+    // a title (any later prompt) is left alone. On a real write we publish
+    // `session.updated` so every client patches the row — the specific event
+    // that reconciles the optimistic title, in place of any timer.
     const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
       if (metadata.title !== undefined) return Effect.void;
       const title = deriveTitle(parts);
       if (title === undefined) return Effect.void;
-      return repo
-        .write({ ...metadata, title })
-        .pipe(Effect.catchTag("StoreWriteError", () => Effect.void));
+      const ref: SessionRef = {
+        projectId: metadata.projectId,
+        harnessAgentId: metadata.harnessAgentId,
+        sessionId: metadata.sessionId,
+      };
+      return repo.write({ ...metadata, title }).pipe(
+        Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
+        Effect.catchTag("StoreWriteError", () => Effect.void),
+      );
     };
 
     // Drain the native event stream into a fresh runtime. A session that 404s on
