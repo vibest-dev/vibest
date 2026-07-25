@@ -19,7 +19,8 @@ import { z } from "zod";
 //
 // Wire names that differ from the SDK type names were verified against the CLI
 // binary's own name map: FileRead→Read, ClaudeDesign→DesignSync,
-// ListMcpResources→ListMcpResourcesTool, ReadMcpResource(Dir)→ReadMcpResource(Dir)Tool.
+// ListMcpResources→ListMcpResourcesTool, ReadMcpResource(Dir)→ReadMcpResource(Dir)Tool,
+// ProposeSkills→propose_skills (the only snake_case name the CLI ships).
 
 export const Bash = tool({
   inputSchema: z.custom<st.BashInput>(),
@@ -178,6 +179,18 @@ export const ShowOnboardingRolePicker = tool({
   inputSchema: z.custom<st.ShowOnboardingRolePickerInput>(),
   outputSchema: z.custom<st.ShowOnboardingRolePickerOutput>(),
 });
+export const RefreshMcpTools = tool({
+  inputSchema: z.custom<st.RefreshMcpToolsInput>(),
+  outputSchema: z.custom<st.RefreshMcpToolsOutput>(),
+});
+export const SendFeedback = tool({
+  inputSchema: z.custom<st.SendFeedbackInput>(),
+  outputSchema: z.custom<st.SendFeedbackOutput>(),
+});
+export const ProposeSkills = tool({
+  inputSchema: z.custom<st.ProposeSkillsInput>(),
+  outputSchema: z.custom<st.ProposeSkillsOutput>(),
+}); // wire name: propose_skills
 
 // ── Legacy tools (pre-rename CLI wire names; SDK exports no types for them). ──
 // Kept hand-written so their typed UI components keep working on replayed
@@ -259,6 +272,9 @@ export const claudeCodeTools = {
   REPL,
   Projects,
   ShowOnboardingRolePicker,
+  RefreshMcpTools,
+  SendFeedback,
+  propose_skills: ProposeSkills,
   MultiEdit,
   SlashCommand,
   BashOutput,
@@ -312,6 +328,9 @@ export type ProjectsUIToolInvocation = UIToolInvocation<typeof Projects>;
 export type ShowOnboardingRolePickerUIToolInvocation = UIToolInvocation<
   typeof ShowOnboardingRolePicker
 >;
+export type RefreshMcpToolsUIToolInvocation = UIToolInvocation<typeof RefreshMcpTools>;
+export type SendFeedbackUIToolInvocation = UIToolInvocation<typeof SendFeedback>;
+export type ProposeSkillsUIToolInvocation = UIToolInvocation<typeof ProposeSkills>;
 export type MultiEditUIToolInvocation = UIToolInvocation<typeof MultiEdit>;
 export type SlashCommandUIToolInvocation = UIToolInvocation<typeof SlashCommand>;
 export type BashOutputUIToolInvocation = UIToolInvocation<typeof BashOutput>;
