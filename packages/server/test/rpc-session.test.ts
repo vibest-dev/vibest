@@ -63,14 +63,18 @@ function setup() {
   const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
   const pathsLayer = layerPaths(home);
 
-  const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath: makeFake() })).pipe(
+  // The fake path goes to the adapter too: `session.create` gates on
+  // checkAvailability, which is a PATH lookup — without the override the test
+  // silently depends on a real codex install.
+  const executablePath = makeFake();
+  const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath })).pipe(
     Layer.provide(NodeServices.layer),
   );
   const registryLayer = Layer.effect(
     HarnessAgentRegistry,
     Effect.gen(function* () {
       const codex = yield* Codex;
-      return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
+      return makeHarnessAgentRegistry([makeCodexAdapter(codex, { executablePath })]);
     }),
   ).pipe(Layer.provide(codexLayer));
 
