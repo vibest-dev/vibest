@@ -11,8 +11,9 @@ import type { Session } from "../src/types";
 
 const makeLayer = (home: string) => SessionRepositoryLayer.pipe(Layer.provide(layerPaths(home)));
 
-const meta = (projectId: string, harnessSessionId: string): Session => ({
+const meta = (sessionId: string, projectId: string, harnessSessionId: string): Session => ({
   version: 1,
+  sessionId,
   projectId,
   harnessAgentId: "claude-code",
   harnessSessionId,
@@ -35,39 +36,40 @@ describe("SessionRepository", () => {
     const read = await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
-        yield* repo.write("sess-1", meta("proj-a", "claude-uuid-1"));
+        yield* repo.write(meta("sess-1", "proj-a", "claude-uuid-1"));
         return yield* repo.read("proj-a", "sess-1");
       }),
     );
+    expect(read.sessionId).toBe("sess-1");
     expect(read.harnessSessionId).toBe("claude-uuid-1");
     expect(read.version).toBe(1);
   });
 
-  it("persists at storage/sessions/<projectId>/<sessionId>.json, sessionId only in filename", async () => {
+  it("persists at storage/sessions/<projectId>/<sessionId>.json, sessionId in the body too", async () => {
     await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
-        yield* repo.write("sess-1", meta("proj-a", "claude-uuid-1"));
+        yield* repo.write(meta("sess-1", "proj-a", "claude-uuid-1"));
       }),
     );
     const raw = JSON.parse(
       await readFile(join(home, "storage", "sessions", "proj-a", "sess-1.json"), "utf8"),
     );
-    expect(raw).not.toHaveProperty("sessionId");
+    expect(raw.sessionId).toBe("sess-1");
     expect(raw.projectId).toBe("proj-a");
   });
 
-  it("lists all sessions of a project, keyed by filename sessionId", async () => {
+  it("lists all sessions of a project", async () => {
     const listed = await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
-        yield* repo.write("sess-1", meta("proj-a", "u1"));
-        yield* repo.write("sess-2", meta("proj-a", "u2"));
-        yield* repo.write("sess-3", meta("proj-b", "u3"));
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
+        yield* repo.write(meta("sess-2", "proj-a", "u2"));
+        yield* repo.write(meta("sess-3", "proj-b", "u3"));
         return yield* repo.list("proj-a");
       }),
     );
-    expect(listed.map((entry) => entry.sessionId).toSorted()).toEqual(["sess-1", "sess-2"]);
+    expect(listed.map((session) => session.sessionId).toSorted()).toEqual(["sess-1", "sess-2"]);
   });
 
   it("list returns empty for a project with no session dir", async () => {
@@ -96,7 +98,7 @@ describe("SessionRepository", () => {
     const listedAfter = await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
-        yield* repo.write("sess-1", meta("proj-a", "u1"));
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
         yield* repo.remove("proj-a", "sess-1");
         yield* repo.remove("proj-a", "sess-1"); // idempotent: second remove is a no-op
         return yield* repo.list("proj-a");
@@ -109,13 +111,14 @@ describe("SessionRepository", () => {
     const hit = await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
-        yield* repo.write("sess-1", meta("proj-a", "u1"));
-        yield* repo.write("sess-2", meta("proj-b", "u2"));
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
+        yield* repo.write(meta("sess-2", "proj-b", "u2"));
         return yield* repo.findBySessionId("sess-2");
       }),
     );
     expect(hit.projectId).toBe("proj-b");
-    expect(hit.metadata.harnessSessionId).toBe("u2");
+    expect(hit.sessionId).toBe("sess-2");
+    expect(hit.harnessSessionId).toBe("u2");
   });
 
   it("findBySessionId fails with SessionRefNotFound for an unknown session", async () => {
@@ -123,7 +126,7 @@ describe("SessionRepository", () => {
       Effect.flip(
         Effect.gen(function* () {
           const repo = yield* SessionRepository;
-          yield* repo.write("sess-1", meta("proj-a", "u1"));
+          yield* repo.write(meta("sess-1", "proj-a", "u1"));
           return yield* repo.findBySessionId("ghost");
         }),
       ),

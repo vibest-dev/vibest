@@ -37,6 +37,20 @@ import {
 import { SessionRepository } from "./repository";
 import { SessionManager, type SessionNotActive } from "./runtime";
 
+/**
+ * A session's title, derived from its first prompt's text — the crude but
+ * self-owned placeholder we show until (if ever) something better replaces it.
+ * Collapses whitespace and clamps length; no text part (e.g. inspector-only)
+ * yields no title.
+ */
+const MAX_TITLE_CHARS = 60;
+const deriveTitle = (parts: PromptInput["parts"]): string | undefined => {
+  const text = parts.find((part) => part.type === "text")?.text.trim();
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ");
+  return collapsed.length > MAX_TITLE_CHARS ? collapsed.slice(0, MAX_TITLE_CHARS) : collapsed;
+};
+
 /** Wire prompt parts → HarnessAgent UserInput; `file` parts are rejected, never dropped. */
 const toUserInput = (
   parts: PromptInput["parts"],
@@ -193,6 +207,26 @@ export const SessionServiceLayer: Layer.Layer<
     const resolveHarnessSessionId = (ref: SessionRef) =>
       readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
 
+    // The first prompt establishes the session title. Best-effort: a failed
+    // title write must never block the prompt itself. A record that already has
+    // a title (any later prompt) is left alone. On a real write we publish
+    // `session.updated` so every client patches the row — the specific event
+    // that reconciles the optimistic title, in place of any timer.
+    const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
+      if (metadata.title !== undefined) return Effect.void;
+      const title = deriveTitle(parts);
+      if (title === undefined) return Effect.void;
+      const ref: SessionRef = {
+        projectId: metadata.projectId,
+        harnessAgentId: metadata.harnessAgentId,
+        sessionId: metadata.sessionId,
+      };
+      return repo.write({ ...metadata, title }).pipe(
+        Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
+        Effect.catchTag("StoreWriteError", () => Effect.void),
+      );
+    };
+
     // Drain the native event stream into a fresh runtime. A session that 404s on
     // its own stream right after create/resume is a bug, not a user-facing error.
     // On a stream crash the manager keeps the projection queryable (phase
@@ -214,13 +248,18 @@ export const SessionServiceLayer: Layer.Layer<
                 const sessionId = randomUUID();
                 const metadata: Session = {
                   version: 1,
+                  sessionId,
                   projectId,
                   harnessAgentId,
                   harnessSessionId,
                   createdAt: new Date().toISOString(),
+                  // Our own floor field: the session's working directory. Stored
+                  // so an imported/rehomed session stays self-contained and a
+                  // resume has cwd before it can call getSessionInfo.
+                  cwd: project.path,
                 };
                 const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-                return repo.write(sessionId, metadata).pipe(
+                return repo.write(metadata).pipe(
                   // A failed metadata write must not leak the native session.
                   Effect.tapError(() => port.close(harnessSessionId)),
                   Effect.andThen(startRuntime(ref, harnessSessionId)),
@@ -276,41 +315,57 @@ export const SessionServiceLayer: Layer.Layer<
           Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
         ),
 
+      // A pure read of our own records — display data is self-owned (title from
+      // the first prompt, createdAt/cwd from create), so no per-session backend
+      // lookup. `status` is the one overlay, and it comes from the in-memory
+      // runtime, not the harness index.
       list: (projectId) =>
         projects.findById(projectId).pipe(
-          Effect.flatMap(() => repo.list(projectId)),
-          Effect.flatMap((entries) =>
-            Effect.forEach(entries, ({ sessionId, metadata }) => {
-              const ref: SessionRef = {
-                projectId: metadata.projectId,
-                harnessAgentId: metadata.harnessAgentId,
-                sessionId,
-              };
-              const base: SessionSummary = {
-                projectId: metadata.projectId,
-                harnessAgentId: metadata.harnessAgentId,
-                sessionId,
-                createdAt: metadata.createdAt,
-                // getMessages fails UNSUPPORTED until native history reads land
-                // (tickets 10/11); advertising history we cannot serve would
-                // make clients skip their "transcript missing" handling.
-                historyAvailable: false,
-              };
-              // Merge the live phase from the runtime; a session with no runtime
-              // simply carries no status.
-              return manager.status(ref).pipe(
-                Effect.map((status): SessionSummary => ({ ...base, status })),
-                Effect.catchTag("SessionNotActive", () => Effect.succeed(base)),
-              );
-            }),
+          Effect.andThen(repo.list(projectId)),
+          Effect.flatMap((sessions) =>
+            Effect.forEach(sessions, (metadata) =>
+              manager
+                .status({
+                  projectId: metadata.projectId,
+                  harnessAgentId: metadata.harnessAgentId,
+                  sessionId: metadata.sessionId,
+                })
+                .pipe(
+                  Effect.map((s): SessionStatus | null => s),
+                  Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+                  Effect.map(
+                    (status) =>
+                      ({
+                        projectId: metadata.projectId,
+                        harnessAgentId: metadata.harnessAgentId,
+                        sessionId: metadata.sessionId,
+                        createdAt: metadata.createdAt,
+                        // We own the record, so the session exists as far as we
+                        // know; a resume proves otherwise reactively. History
+                        // isn't served yet regardless (getMessages is UNSUPPORTED).
+                        historyAvailable: metadata.historyAvailable ?? true,
+                        ...(metadata.title !== undefined ? { title: metadata.title } : {}),
+                        ...(metadata.updatedAt !== undefined
+                          ? { updatedAt: metadata.updatedAt }
+                          : {}),
+                        ...(status !== null ? { status } : {}),
+                      }) satisfies SessionSummary,
+                  ),
+                ),
+            ),
           ),
         ),
 
       prompt: (input) =>
-        resolveHarnessSessionId(input.ref).pipe(
-          Effect.flatMap((harnessSessionId) =>
+        readChecked(input.ref).pipe(
+          Effect.flatMap((metadata) =>
             toUserInput(input.parts).pipe(
-              Effect.flatMap((userInput) => port.prompt(harnessSessionId, userInput)),
+              Effect.flatMap((userInput) =>
+                // The first prompt names the session before it reaches the harness.
+                stampTitleFromFirstPrompt(metadata, input.parts).pipe(
+                  Effect.andThen(port.prompt(metadata.harnessSessionId, userInput)),
+                ),
+              ),
             ),
           ),
         ),
@@ -344,10 +399,10 @@ export const SessionServiceLayer: Layer.Layer<
       resolveRef: (sessionId) =>
         repo.findBySessionId(sessionId).pipe(
           Effect.map(
-            ({ projectId, metadata }): SessionRef => ({
-              projectId,
+            (metadata): SessionRef => ({
+              projectId: metadata.projectId,
               harnessAgentId: metadata.harnessAgentId,
-              sessionId,
+              sessionId: metadata.sessionId,
             }),
           ),
         ),

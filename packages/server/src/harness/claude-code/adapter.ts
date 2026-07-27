@@ -448,13 +448,13 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
     ),
   ),
   open: (input) =>
-    agent.session.create.pipe(
+    agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
       Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
       Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
-    agent.session.resume(input.sessionId).pipe(
+    agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
       Effect.mapError((cause) =>
         cause instanceof SessionNotResumable
           ? cause
@@ -464,6 +464,17 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
     ),
   getSessionInfo: (harnessSessionId, cwd) =>
     agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(
+      // The SDK buckets a session under the cwd it ran in. That is the project's
+      // path for anything opened since `open`/`resume` started forwarding cwd —
+      // the narrowed lookup, one directory. Sessions created before that ran in
+      // the server's cwd and would now report a titleless `missing`, so fall
+      // back to the unnarrowed search (every project dir) only when the fast
+      // path misses. The session id is a uuid, so it can't collide.
+      Effect.flatMap((info) =>
+        info !== undefined || cwd === undefined
+          ? Effect.succeed(info)
+          : agent.session.getSessionInfo(harnessSessionId),
+      ),
       Effect.mapError((cause) => operationError(harnessSessionId, "get-session-info", cause)),
       Effect.map(
         (info): SessionInfoResult =>

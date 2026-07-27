@@ -12,6 +12,7 @@ import {
   type ResumeSessionError,
   type SessionClosed,
   type SessionEnvelopeBody,
+  type SessionInfoResult,
   type SessionNotFound as HarnessSessionNotFound,
   type TurnAlreadyRunning,
   type UserInput,
@@ -72,6 +73,16 @@ export class HarnessAgentSessionPort extends Context.Service<
       input: UserInput,
     ) => Effect.Effect<PromptReceipt, HarnessPromptError>;
     readonly interrupt: (harnessSessionId: string) => Effect.Effect<void, HarnessInterruptError>;
+    /**
+     * Best-effort display info (title, recency, existence) for a persisted
+     * session, for listings. Never fails: a missing agent or a backend error
+     * degrades to `unsupported` so one bad lookup can't sink a whole listing.
+     */
+    readonly getSessionInfo: (
+      harnessAgentId: HarnessAgentId,
+      harnessSessionId: string,
+      cwd: string,
+    ) => Effect.Effect<SessionInfoResult>;
     // Session-scoped config setters. `model` is the provider-local model id —
     // the RPC boundary unpacked and validated the providerId/modelId pair already.
     readonly setModel: (
@@ -149,6 +160,10 @@ export const HarnessAgentSessionPortLayer: Layer.Layer<
           .pipe(Effect.map((stream) => stream.pipe(Stream.map((draft) => draft.body)))),
       prompt: (harnessSessionId, input) => harness.prompt(harnessSessionId, input),
       interrupt: (harnessSessionId) => harness.interrupt(harnessSessionId),
+      getSessionInfo: (harnessAgentId, harnessSessionId, cwd) =>
+        harness
+          .getSessionInfo(harnessAgentId, harnessSessionId, cwd)
+          .pipe(Effect.catch(() => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }))),
       setModel: (harnessSessionId, model) => harness.setModel(harnessSessionId, model),
       setReasoningEffort: (harnessSessionId, reasoningEffort) =>
         harness.setReasoningEffort(harnessSessionId, reasoningEffort),
