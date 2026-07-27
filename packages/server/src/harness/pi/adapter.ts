@@ -194,9 +194,10 @@ const makeSession = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
-      // Pi has neither a model switch nor a permission protocol; accept the
-      // config calls and no-op rather than fail the caller.
+      // Pi has neither a model switch, an reasoningEffort switch, nor a permission
+      // protocol; accept the config calls and no-op rather than fail the caller.
       setModel: () => Effect.void,
+      setReasoningEffort: () => Effect.void,
       setPermissionMode: () => Effect.void,
       interrupt,
       respondToAgentRequest: (requestId, response) =>
@@ -225,9 +226,10 @@ export const makePiAdapter = (
 ): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
-  // Pi has neither a permission protocol nor a model switch — declaring
-  // nothing is what makes the UI render no config controls for it.
-  capabilities: {},
+  // Pi has neither a permission protocol nor a model catalogue — declaring
+  // nothing (empty subset, no probe) is what makes the UI render no config
+  // controls for it.
+  permissionModes: [],
   checkAvailability: Effect.sync(() =>
     findExecutable(options.executablePath ?? "pi")
       ? { available: true }

@@ -147,6 +147,7 @@ export interface CodexAgent {
       readonly approvalPolicy?: AskForApproval;
       readonly sandboxPolicy?: SandboxPolicy;
       readonly model?: string;
+      readonly reasoningEffort?: string;
     }) => Effect.Effect<
       {
         readonly turnId: string;
@@ -715,6 +716,7 @@ export const makeCodexAgentWithDependencies = <R>(
                       ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
                       ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
                       ...(input.model ? { model: input.model } : {}),
+                      ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {}),
                     })
                     .pipe(
                       Effect.tapError(() =>

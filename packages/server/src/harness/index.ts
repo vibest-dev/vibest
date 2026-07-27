@@ -8,8 +8,8 @@ export {
 export * from "./adapter";
 export * from "./errors";
 export * from "./executable";
-export * from "./catalog";
-export * from "./negotiation";
+export * from "./list";
+export * from "./probe";
 export * from "./queue-stream";
 export * from "./registry";
 export * from "./session-io";

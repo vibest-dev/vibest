@@ -13,8 +13,8 @@ import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistry,
   HarnessAgentSessionServiceLayer,
-  HarnessAgentCatalogLayer,
-  HarnessNegotiationLayer,
+  HarnessListLayer,
+  HarnessProbeLayer,
   makeHarnessAgentRegistry,
 } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
@@ -94,8 +94,8 @@ function setup() {
     sessionServiceLayer,
     projectServiceLayer,
     registryLayer,
-    HarnessNegotiationLayer.pipe(Layer.provide(registryLayer)),
-    HarnessAgentCatalogLayer.pipe(Layer.provide(registryLayer)),
+    HarnessListLayer.pipe(Layer.provide(registryLayer)),
+    HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer,
     NodeServices.layer,
   );

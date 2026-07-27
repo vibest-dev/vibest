@@ -1,8 +1,7 @@
-import type { SessionRef } from "@vibest/contract";
+import type { PermissionMode, ReasoningEffort, SessionRef } from "@vibest/contract";
 import type { ChatTransport as AiChatTransport, UIMessage } from "ai";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
-import type { ChatModel, ChatPermissionMode } from "./chat-config";
 
 // The seam between Chat orchestration and any concrete wire implementation.
 // Chat and ChatManager depend only on this port; the oRPC binding
@@ -18,9 +17,12 @@ export interface ChatSessionTransport extends AiChatTransport<UIMessage> {
   ): () => void;
   respondToAgentRequest(requestId: string, response: AgentResponse): Promise<void>;
   // Session-scoped config setters — separate session calls, never bundled into
-  // a prompt turn. The transport already knows its SessionRef.
-  setModel(model: ChatModel): Promise<void>;
-  setPermissionMode(mode: ChatPermissionMode): Promise<void>;
+  // a prompt turn. The transport already knows its SessionRef. The model is
+  // the flat providerId/modelId pair — always together, modelId alone is only
+  // unique within its provider.
+  setModel(providerId: string, modelId: string): Promise<void>;
+  setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<void>;
+  setPermissionMode(mode: PermissionMode): Promise<void>;
 }
 
 // Binds a SessionRef to a transport. ChatManager holds one of these instead of

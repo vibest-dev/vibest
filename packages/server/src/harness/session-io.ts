@@ -1,4 +1,9 @@
-import { HarnessAgentIdSchema, InspectorTargetSchema } from "@vibest/contract";
+import {
+  HarnessAgentIdSchema,
+  InspectorTargetSchema,
+  PermissionModeSchema,
+  ReasoningEffortSchema,
+} from "@vibest/contract";
 import { Schema } from "effect";
 
 /**
@@ -12,10 +17,14 @@ export const CreateSessionInputSchema = Schema.Struct({
   cwd: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
   // Session config chosen at create time, applied via the session's own
-  // setModel / setPermissionMode before the first prompt (applyInitialSessionConfig).
+  // setters before the first prompt (applyInitialSessionConfig). `model` is
+  // the provider-local model id — the server unpacked and validated the
+  // providerId/modelId pair before the harness layer ever sees it.
   model: Schema.optionalKey(Schema.String),
-  // Outward permission-mode id from the harness's capabilities.
-  permissionMode: Schema.optionalKey(Schema.String),
+  reasoningEffort: Schema.optionalKey(ReasoningEffortSchema),
+  // Vibest's own permission vocabulary; membership in this harness's declared
+  // subset was checked at the RPC boundary.
+  permissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
@@ -49,7 +58,6 @@ export type UserInputPart = typeof UserInputPartSchema.Type;
 
 export const UserInputSchema = Schema.Struct({
   parts: Schema.Array(UserInputPartSchema),
-  model: Schema.optionalKey(Schema.String),
 });
 export type UserInput = typeof UserInputSchema.Type;
 

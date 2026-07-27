@@ -192,6 +192,22 @@ export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolErr
   }
 }
 
+// The requested permission mode is a member of vibest's vocabulary, but not of
+// this harness's declared subset — a client bug by definition (the subset is
+// closed and fully known to the client), so it maps to INVALID_ARGUMENT at the
+// RPC boundary rather than being silently ignored or half-applied.
+export class PermissionModeUnsupported extends Schema.TaggedErrorClass<PermissionModeUnsupported>()(
+  "PermissionModeUnsupported",
+  {
+    harnessAgentId: HarnessAgentIdSchema,
+    mode: Schema.String,
+  },
+) {
+  override get message() {
+    return `Harness agent '${this.harnessAgentId}' does not support permission mode '${this.mode}'.`;
+  }
+}
+
 export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
   "CapabilityProbeFailed",
   {
@@ -220,6 +236,7 @@ export type CreateSessionError =
   | HarnessAgentNotFound
   | AgentUnavailable
   | ExecutableNotFound
+  | PermissionModeUnsupported
   | AgentOpenError;
 
 export type ResumeSessionError =

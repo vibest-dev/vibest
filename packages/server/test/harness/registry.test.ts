@@ -10,7 +10,7 @@ const claude = {
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
   checkAvailability: Effect.succeed({ available: true }),
-  capabilities: {},
+  permissionModes: [],
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
   open: () => Effect.die("not used"),
   resume: () => Effect.die("not used"),

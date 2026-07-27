@@ -1,3 +1,5 @@
+import type { InputModality, PermissionMode, ModelInfo, ReasoningEffort } from "@vibest/contract";
+import { InputModalitySchema, ReasoningEffortSchema } from "@vibest/contract";
 import type { SessionEvent } from "@vibest/harness";
 import type { CodexUIMessageChunk, SessionEnvelopeDraft } from "@vibest/harness";
 import type { AskForApproval, Model, SandboxPolicy } from "@vibest/harness/codex/protocol/v2";
@@ -51,23 +53,56 @@ const workspaceWrite: SandboxPolicy = {
   excludeSlashTmp: false,
 };
 
-// Map codex's outward permission-mode ids onto its approval policy + sandbox.
-// Unknown ids yield undefined so setPermissionMode can reject them.
-const CODEX_PERMISSIONS: Record<string, CodexPermission> = {
+// Map vibest's permission vocabulary onto codex's approval policy + sandbox.
+// Codex has no "plan" (it never produces a plan) — its read-only preset is a
+// pure read-only sandbox, declared as our `read-only` member. The keys are the
+// single source for the `permissionModes` declaration below.
+const CODEX_PERMISSIONS = {
   "read-only": {
     approvalPolicy: "on-request",
     sandboxPolicy: { type: "readOnly", networkAccess: false },
   },
   ask: { approvalPolicy: "on-request", sandboxPolicy: workspaceWrite },
   full: { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } },
-};
-const toCodexPermission = (id: string): CodexPermission | undefined => CODEX_PERMISSIONS[id];
+} as const satisfies Partial<Record<PermissionMode, CodexPermission>>;
+const CODEX_PERMISSION_MODE_IDS = Object.keys(CODEX_PERMISSIONS) as ReadonlyArray<PermissionMode>;
+const toCodexPermission = (mode: PermissionMode): CodexPermission | undefined =>
+  (CODEX_PERMISSIONS as Partial<Record<PermissionMode, CodexPermission>>)[mode];
 
-// Codex marks its own default in the catalog. Nothing is inferred from list
-// order — `model/list` never promised one.
-const pickDefaultModel = (models: ReadonlyArray<Model>): { defaultModel?: string } => {
-  const preferred = models.find((model) => model.isDefault);
-  return preferred ? { defaultModel: preferred.id } : {};
+// Codex's wire enums are open strings; translate into our closed sets and drop
+// what we don't recognise — a newer codex degrades to "one less option", never
+// to an unrenderable value (harness-concept-ownership §3.4).
+const toReasoningEffort = (value: string): ReasoningEffort | undefined =>
+  (ReasoningEffortSchema.literals as ReadonlyArray<string>).includes(value)
+    ? (value as ReasoningEffort)
+    : undefined;
+const toInputModality = (value: string): InputModality | undefined =>
+  (InputModalitySchema.literals as ReadonlyArray<string>).includes(value)
+    ? (value as InputModality)
+    : undefined;
+
+const toModelInfo = (model: Model): ModelInfo => {
+  const reasoningEfforts = model.supportedReasoningEfforts
+    .map((option) => toReasoningEffort(option.reasoningEffort))
+    .filter((reasoningEffort): reasoningEffort is ReasoningEffort => reasoningEffort !== undefined);
+  const defaultReasoningEffort = toReasoningEffort(model.defaultReasoningEffort);
+  const modalities = model.inputModalities
+    .map(toInputModality)
+    .filter((modality): modality is InputModality => modality !== undefined);
+  return {
+    id: model.id,
+    label: model.displayName,
+    ...(reasoningEfforts.length > 0
+      ? {
+          reasoningEfforts,
+          ...(defaultReasoningEffort !== undefined &&
+          reasoningEfforts.includes(defaultReasoningEffort)
+            ? { defaultReasoningEffort }
+            : {}),
+        }
+      : {}),
+    ...(modalities.length > 0 ? { modalities } : {}),
+  };
 };
 
 const makeSession = (
@@ -90,6 +125,10 @@ const makeSession = (
     // lets create-time selection work at all — applyInitialSessionConfig calls
     // setModel before the first prompt, and that first turn carries it.
     const model = yield* Ref.make<string | undefined>(undefined);
+    // ReasoningEffort rides `turn/start` the same way. Cleared on setModel: an reasoningEffort
+    // picked for one model must not survive onto another — no override means
+    // codex applies the new model's own default.
+    const reasoningEffort = yield* Ref.make<ReasoningEffort | undefined>(undefined);
 
     const emit = (body: CodexUIMessageChunk | SessionEvent) =>
       Queue.offer(events, { harnessAgentId: "codex", sessionId, body }).pipe(
@@ -181,12 +220,14 @@ const makeSession = (
           if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
           const permission = yield* Ref.get(permissionMode);
           const selectedModel = yield* Ref.get(model);
+          const selectedEffort = yield* Ref.get(reasoningEffort);
           const prompt = yield* agent.session
             .prompt({
               sessionId,
               text: toPromptText(input),
               ...permission,
               ...(selectedModel ? { model: selectedModel } : {}),
+              ...(selectedEffort ? { reasoningEffort: selectedEffort } : {}),
             })
             .pipe(
               Effect.mapError((cause) =>
@@ -244,7 +285,11 @@ const makeSession = (
       // Stored, not sent: codex has no standalone set-model call, the override
       // rides on the next `turn/start`. So a mid-session switch takes effect
       // from the next turn — unlike claude-code, where it is immediate.
-      setModel: (next) => Ref.set(model, next),
+      // Switching the model also clears the reasoningEffort override, so the next turn
+      // runs on the new model's own default reasoningEffort.
+      setModel: (next) =>
+        Ref.set(model, next).pipe(Effect.andThen(Ref.set(reasoningEffort, undefined))),
+      setReasoningEffort: (next) => Ref.set(reasoningEffort, next),
       setPermissionMode: (mode) =>
         Effect.gen(function* () {
           const native = toCodexPermission(mode);
@@ -283,29 +328,22 @@ export const makeCodexAdapter = (
 ): HarnessAgentAdapter => ({
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
-  capabilities: {
-    permissionModes: [
-      // Codex has no "plan" (it never produces a plan) — its read-only preset
-      // is a pure read-only sandbox, declared under its own id.
-      { id: "read-only", label: "Read only" },
-      { id: "ask", label: "Ask" },
-      { id: "full", label: "Full access" },
-    ],
-    // Lower than claude-code's on purpose: codex's "full" is
-    // `approvalPolicy: "never"` *plus* `dangerFullAccess`, i.e. no sandbox at
-    // all — not a default anyone should land on without asking for it.
-    defaultPermissionMode: "ask",
-  },
+  permissionModes: CODEX_PERMISSION_MODE_IDS,
+  // Lower than claude-code's on purpose: codex's "full" is
+  // `approvalPolicy: "never"` *plus* `dangerFullAccess`, i.e. no sandbox at
+  // all — not a default anyone should land on without asking for it.
+  defaultPermissionMode: "ask",
   // `cwd` is ignored, not forgotten: codex's `model/list` takes no directory —
   // it answers for the whole app-server. Taking the argument anyway keeps the
   // seam uniform, so callers never branch on which harness cares, and the day
   // codex grows per-project config this is a one-line change here.
-  probeCatalog: (_cwd) =>
+  probeModels: (_cwd) =>
     agent.listModels.pipe(
-      Effect.map((models) => ({
-        models: models.map((model) => ({ id: model.id, name: model.displayName })),
-        ...pickDefaultModel(models),
-      })),
+      // The catalog's `isDefault` flag is deliberately not forwarded: it is
+      // the API's suggestion, while an unconfigured session actually runs
+      // whatever the user's own config.toml says — which is not probeable.
+      // The default is expressed by absence, not by a marker.
+      Effect.map((models) => models.map(toModelInfo)),
       Effect.mapError((cause) => new CapabilityProbeFailed({ harnessAgentId: "codex", cause })),
     ),
   // A PATH lookup, not a spawn: negotiate has to stay cheap on machines where

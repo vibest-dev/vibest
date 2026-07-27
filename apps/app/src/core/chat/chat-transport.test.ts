@@ -86,6 +86,7 @@ describe("OrpcChatSessionTransport agent requests", () => {
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
       setModel: unexpectedCall,
+      setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
@@ -148,6 +149,7 @@ describe("OrpcChatSessionTransport agent requests", () => {
       prompt: unexpectedCall,
       interrupt: unexpectedCall,
       setModel: unexpectedCall,
+      setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
       respondToAgentRequest: async () => automaticResponse,
       subscribe: async () => asyncIterableOf(items, finishStream),
@@ -233,6 +235,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       prompt: async () => ({ turnId: "turn-1" }),
       interrupt: unexpectedCall,
       setModel: unexpectedCall,
+      setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
@@ -301,6 +304,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       prompt: async () => ({ turnId: "turn-1" }),
       interrupt: unexpectedCall,
       setModel: unexpectedCall,
+      setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
@@ -326,6 +330,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       prompt: async () => ({ turnId: "turn-1" }),
       interrupt: unexpectedCall,
       setModel: unexpectedCall,
+      setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () =>

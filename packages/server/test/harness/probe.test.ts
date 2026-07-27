@@ -4,21 +4,21 @@ import { it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
 
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
-import { makeHarnessAgentCatalog } from "../../src/harness/catalog";
 import { CapabilityProbeFailed } from "../../src/harness/errors";
+import { makeHarnessProbe } from "../../src/harness/probe";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 
 const adapter = (over: {
   id: HarnessAgentAdapter["id"];
-  probeCatalog?: HarnessAgentAdapter["probeCatalog"];
+  probeModels?: HarnessAgentAdapter["probeModels"];
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.id },
   checkAvailability: Effect.succeed({ available: true }),
-  capabilities: {},
-  ...(over.probeCatalog ? { probeCatalog: over.probeCatalog } : {}),
-  open: () => Effect.die("catalog must not open a session"),
-  resume: () => Effect.die("catalog must not resume a session"),
+  permissionModes: [],
+  ...(over.probeModels ? { probeModels: over.probeModels } : {}),
+  open: () => Effect.die("probe must not open a session"),
+  resume: () => Effect.die("probe must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
 });
 
@@ -26,79 +26,74 @@ const adapter = (over: {
 const recordingProbe = (seen: Ref.Ref<ReadonlyArray<string>>) => (cwd: string) =>
   Ref.update(seen, (current) => [...current, cwd]).pipe(
     Effect.andThen(Effect.yieldNow),
-    Effect.as({ models: [{ id: "sonnet", name: "Sonnet" }], defaultModel: "sonnet" }),
+    Effect.as([{ id: "sonnet", label: "Sonnet" }]),
   );
 
-it.effect("probes the directory it was asked about", () =>
+it.effect("probes the directory it was asked about, grouped under the built-in provider", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([
-        adapter({ id: "claude-code", probeCatalog: recordingProbe(seen) }),
-      ]),
+    const probe = yield* makeHarnessProbe(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
     );
 
-    const result = yield* catalog.get({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const result = yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     NodeAssert.deepStrictEqual(yield* Ref.get(seen), ["/work/app"]);
-    NodeAssert.equal(result.defaultModel, "sonnet");
+    // Models never leave their provider: the built-in provider carries the
+    // harness's own id, which is the other half of every providerId/modelId pair.
+    NodeAssert.equal(result.providers[0]?.id, "claude-code");
+    NodeAssert.equal(result.providers[0]?.models[0]?.id, "sonnet");
   }),
 );
 
 it.effect("gives concurrent callers one probe, not one each", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([
-        adapter({ id: "claude-code", probeCatalog: recordingProbe(seen) }),
-      ]),
+    const probe = yield* makeHarnessProbe(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
     );
-    const ask = catalog.get({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     // Two tabs on the same directory, arriving before the first probe settles.
     const [first, second] = yield* Effect.all([ask, ask], { concurrency: "unbounded" });
 
     NodeAssert.equal((yield* Ref.get(seen)).length, 1);
-    NodeAssert.equal(first.defaultModel, "sonnet");
-    NodeAssert.equal(second.defaultModel, "sonnet");
+    NodeAssert.equal(first.providers[0]?.models[0]?.id, "sonnet");
+    NodeAssert.equal(second.providers[0]?.models[0]?.id, "sonnet");
   }),
 );
 
-it.effect("treats two directories as two catalogs, and does not serialise them", () =>
+it.effect("treats two directories as two probes, and does not serialise them", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([
-        adapter({ id: "claude-code", probeCatalog: recordingProbe(seen) }),
-      ]),
+    const probe = yield* makeHarnessProbe(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
     );
 
     yield* Effect.all(
       [
-        catalog.get({ harnessAgentId: "claude-code", cwd: "/work/a" }),
-        catalog.get({ harnessAgentId: "claude-code", cwd: "/work/b" }),
+        probe.probe({ harnessAgentId: "claude-code", cwd: "/work/a" }),
+        probe.probe({ harnessAgentId: "claude-code", cwd: "/work/b" }),
       ],
       { concurrency: "unbounded" },
     );
 
     // Both ran; if the registration lock covered the probes, the second would
     // have queued behind the first rather than interleaving.
-    NodeAssert.deepStrictEqual((yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
+    NodeAssert.deepStrictEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
   }),
 );
 
 it.effect("normalises the directory, so one answer serves its aliases", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([
-        adapter({ id: "claude-code", probeCatalog: recordingProbe(seen) }),
-      ]),
+    const probe = yield* makeHarnessProbe(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
     );
 
-    yield* catalog.get({ harnessAgentId: "claude-code", cwd: "/work/app" });
-    yield* catalog.get({ harnessAgentId: "claude-code", cwd: "/work/app/" });
-    yield* catalog.get({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
+    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app/" });
+    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
 
     NodeAssert.equal((yield* Ref.get(seen)).length, 1);
   }),
@@ -112,21 +107,21 @@ it.effect("caches a success but retries a failure", () =>
       Ref.updateAndGet(calls, (n) => n + 1).pipe(
         Effect.flatMap((n) =>
           n > 1
-            ? Effect.succeed({ models: [{ id: "sonnet" }], defaultModel: "sonnet" })
+            ? Effect.succeed([{ id: "sonnet" }])
             : Effect.fail(
                 new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause: "boom" }),
               ),
         ),
       );
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeCatalog: flaky })]),
+    const probe = yield* makeHarnessProbe(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: flaky })]),
     );
-    const ask = catalog.get({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     // A cached failure would pin "no models" for the whole TTL, so the user
     // would have to wait it out after logging back in.
     yield* Effect.result(ask);
-    NodeAssert.equal((yield* ask).defaultModel, "sonnet");
+    NodeAssert.equal((yield* ask).providers[0]?.models[0]?.id, "sonnet");
     NodeAssert.equal(yield* Ref.get(calls), 2);
 
     // The success, on the other hand, is worth keeping: no second spawn.
@@ -135,14 +130,14 @@ it.effect("caches a success but retries a failure", () =>
   }),
 );
 
-it.effect("answers an empty catalog for a harness that has no probe", () =>
+it.effect("answers an empty provider list for a harness that has no probe", () =>
   Effect.gen(function* () {
-    const catalog = yield* makeHarnessAgentCatalog(
-      makeHarnessAgentRegistry([adapter({ id: "pi" })]),
-    );
+    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([adapter({ id: "pi" })]));
 
     // Not a failure: pi genuinely has no models, and the client renders no
     // picker rather than an error.
-    NodeAssert.deepStrictEqual(yield* catalog.get({ harnessAgentId: "pi", cwd: "/work/app" }), {});
+    NodeAssert.deepStrictEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
+      providers: [],
+    });
   }),
 );

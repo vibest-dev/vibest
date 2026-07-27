@@ -48,6 +48,7 @@ const makeFakePort = (opts: { failCreate?: HarnessCreateError } = {}) => {
     prompt: () => Effect.die("prompt not exercised"),
     interrupt: () => Effect.die("interrupt not exercised"),
     setModel: () => Effect.die("setModel not exercised"),
+    setReasoningEffort: () => Effect.die("setReasoningEffort not exercised"),
     setPermissionMode: () => Effect.die("setPermissionMode not exercised"),
     respondToAgentRequest: () => Effect.die("respond not exercised"),
   });

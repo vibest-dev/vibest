@@ -4,43 +4,38 @@ import { makeClaudeCodeAdapter, type ClaudeCodeAgent } from "../../src/harness/c
 import { makeCodexAdapter, type CodexAgent } from "../../src/harness/codex";
 import { makePiAdapter, type PiAgent } from "../../src/harness/pi";
 
-// Static capabilities are a pure declaration that never touches the agent, so a
-// stub is enough to lock each harness's outward permission vocabulary and the
-// default it wants the UI to preselect.
+// Permission declarations are pure values that never touch the agent, so a
+// stub is enough to lock each harness's declared subset of vibest's permission
+// vocabulary and the default it wants the UI to preselect.
 const stub = <T>() => ({}) as T;
 
-it("claude-code negotiates plan/ask/acceptEdits/full, defaulting to full", () => {
-  const caps = makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).capabilities;
+it("claude-code declares plan/ask/acceptEdits/full, defaulting to full", () => {
+  const adapter = makeClaudeCodeAdapter(stub<ClaudeCodeAgent>());
 
-  expect(caps.permissionModes?.map((mode) => mode.id)).toEqual([
-    "plan",
-    "ask",
-    "acceptEdits",
-    "full",
-  ]);
-  expect(caps.defaultPermissionMode).toBe("full");
+  expect(adapter.permissionModes).toEqual(["plan", "ask", "acceptEdits", "full"]);
+  expect(adapter.defaultPermissionMode).toBe("full");
 });
 
-it("codex negotiates read-only/ask/full (no plan), defaulting to ask", () => {
-  const caps = makeCodexAdapter(stub<CodexAgent>()).capabilities;
+it("codex declares read-only/ask/full (no plan), defaulting to ask", () => {
+  const adapter = makeCodexAdapter(stub<CodexAgent>());
 
-  expect(caps.permissionModes?.map((mode) => mode.id)).toEqual(["read-only", "ask", "full"]);
+  expect(adapter.permissionModes).toEqual(["read-only", "ask", "full"]);
   // Deliberately not "full": codex's full access also drops the sandbox.
-  expect(caps.defaultPermissionMode).toBe("ask");
+  expect(adapter.defaultPermissionMode).toBe("ask");
 });
 
-it("pi negotiates neither permission modes nor a default", () => {
-  const caps = makePiAdapter(stub<PiAgent>()).capabilities;
+it("pi declares an empty permission subset and no default", () => {
+  const adapter = makePiAdapter(stub<PiAgent>());
 
-  expect(caps.permissionModes).toBeUndefined();
-  expect(caps.defaultPermissionMode).toBeUndefined();
+  expect(adapter.permissionModes).toEqual([]);
+  expect(adapter.defaultPermissionMode).toBeUndefined();
 });
 
-it("only the harnesses with a runtime catalog declare a probe", () => {
-  expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).probeCatalog).toBeDefined();
-  expect(makeCodexAdapter(stub<CodexAgent>()).probeCatalog).toBeDefined();
+it("only the harnesses with a model catalogue declare a probe", () => {
+  expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).probeModels).toBeDefined();
+  expect(makeCodexAdapter(stub<CodexAgent>()).probeModels).toBeDefined();
   // Absent, not empty: pi has no model switch, so the client renders no picker.
-  expect(makePiAdapter(stub<PiAgent>()).probeCatalog).toBeUndefined();
+  expect(makePiAdapter(stub<PiAgent>()).probeModels).toBeUndefined();
 });
 
 it("declaring an adapter never touches its agent", () => {

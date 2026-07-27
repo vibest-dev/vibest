@@ -1,16 +1,13 @@
 import type {
   AgentResponse,
-  HarnessAgentCapabilities,
-  HarnessAgentCatalog,
   HarnessAgentId,
   InspectorTarget,
+  PermissionMode,
+  ModelInfo,
+  ReasoningEffort,
   SessionCapabilities,
 } from "@vibest/contract";
-import {
-  HarnessAgentCapabilitiesSchema,
-  InspectorTargetSchema,
-  SessionCapabilitiesSchema,
-} from "@vibest/contract";
+import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
 import type { SessionEnvelopeDraft } from "@vibest/harness";
 import { Effect, type Scope, type Stream } from "effect";
 
@@ -41,7 +38,6 @@ import {
 
 export {
   CreateSessionInputSchema,
-  HarnessAgentCapabilitiesSchema,
   InspectorTargetSchema,
   PromptReceiptSchema,
   ResumeSessionInputSchema,
@@ -51,7 +47,6 @@ export {
 };
 export type {
   CreateSessionInput,
-  HarnessAgentCapabilities,
   InspectorTarget,
   PromptReceipt,
   ResumeSessionInput,
@@ -94,12 +89,19 @@ export interface HarnessAgentSession {
   readonly prompt: (
     input: UserInput,
   ) => Effect.Effect<PromptReceipt, SessionClosed | TurnAlreadyRunning | AgentOperationError>;
-  // Session-scoped config setters. Harnesses that don't support a knob accept
-  // the call and no-op (e.g. Codex has no runtime model switch).
+  // Session-scoped config setters. `model` is the provider-local model id —
+  // the server resolves and validates the providerId before it ever
+  // reaches an adapter. Harnesses without a knob accept the call and no-op.
   readonly setModel: (model: string) => Effect.Effect<void, SessionClosed | AgentOperationError>;
-  // `mode` is an outward permission-mode id from this harness's capabilities.
+  readonly setReasoningEffort: (
+    reasoningEffort: ReasoningEffort,
+  ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  // `mode` is vibest's own vocabulary; the adapter maps it to its native
+  // system. A mode outside the adapter's declared subset is rejected at the
+  // RPC boundary, so by the time it lands here it is a member the adapter
+  // claimed to support.
   readonly setPermissionMode: (
-    mode: string,
+    mode: PermissionMode,
   ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly interrupt: Effect.Effect<void, SessionClosed | AgentOperationError>;
   readonly respondToAgentRequest: (
@@ -113,41 +115,72 @@ export interface HarnessAgentSession {
   readonly close: Effect.Effect<void>;
 }
 
-// Seed a freshly opened session with the model / permission mode chosen at
-// create time, using the same session setters the UI drives mid-session. Runs
-// before the first prompt, so the config is live by the opening turn.
+// Seed a freshly opened session with the config chosen at create time, using
+// the same session setters the UI drives mid-session. Runs before the first
+// prompt, so the config is live by the opening turn.
+//
+// The two channels fail differently on purpose (harness-concept-ownership §3.3):
+// `permissionMode` was validated at the RPC boundary, so failing to apply it is
+// a real fault and the open fails with it. `model`/`reasoningEffort` come from probed
+// lists that go stale (an old URL, a re-mapped alias), so they are best-effort:
+// a miss is logged and the session opens on the harness default rather than
+// turning "the list was a bit old" into "the session cannot be created".
 export const applyInitialSessionConfig = (
   session: HarnessAgentSession,
   input: CreateSessionInput,
 ): Effect.Effect<void, AgentOpenError> =>
-  Effect.all(
-    [
-      input.model ? session.setModel(input.model) : Effect.void,
-      input.permissionMode ? session.setPermissionMode(input.permissionMode) : Effect.void,
-    ],
-    { discard: true },
-  ).pipe(
-    Effect.mapError(
-      (cause) => new AgentOpenError({ harnessAgentId: session.harnessAgentId, cause }),
-    ),
-  );
+  Effect.gen(function* () {
+    if (input.permissionMode) {
+      yield* session
+        .setPermissionMode(input.permissionMode)
+        .pipe(
+          Effect.mapError(
+            (cause) => new AgentOpenError({ harnessAgentId: session.harnessAgentId, cause }),
+          ),
+        );
+    }
+    if (input.model) {
+      yield* session
+        .setModel(input.model)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("create-time model apply failed; using the harness default", cause),
+          ),
+        );
+    }
+    if (input.reasoningEffort) {
+      yield* session
+        .setReasoningEffort(input.reasoningEffort)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning(
+              "create-time reasoningEffort apply failed; using the model default",
+              cause,
+            ),
+          ),
+        );
+    }
+  });
 
 export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly descriptor: AgentDescriptor;
   readonly checkAvailability: Effect.Effect<AvailabilityResult>;
   /**
-   * What the harness can do regardless of who is signed in or which directory
-   * it runs in — the permission presets and which one to default to. A plain
-   * value, not an effect: it follows from the harness's own vocabulary, so
-   * declaring it can never fail and never costs a process.
+   * The subset of vibest's permission vocabulary this harness can honour, and
+   * which member to preselect. Plain values, not effects: they follow from the
+   * adapter's own mapping table, so declaring them can never fail and never
+   * costs a process. Empty means the harness has no permission protocol (pi).
+   * The mapping to the native system (claude's `bypassPermissions`, codex's
+   * approval policy + sandbox) is the adapter's private knowledge.
    */
-  readonly capabilities: HarnessAgentCapabilities;
+  readonly permissionModes: ReadonlyArray<PermissionMode>;
+  readonly defaultPermissionMode?: PermissionMode;
   /**
-   * The runtime catalog for one working directory, read from the CLI. It
+   * Probe this harness's built-in model provider in one working directory. It
    * follows the signed-in account, the installed version *and* the directory's
    * own config, so it can only be probed — never hardcoded, and never probed
-   * once for everyone. Absent for harnesses with no runtime catalog (pi).
+   * once for everyone. Absent for harnesses with no model catalogue (pi).
    *
    * `cwd` is honoured where it matters: claude-code passes it to the SDK
    * because a project's settings can remap what a model id resolves to. Codex
@@ -157,11 +190,11 @@ export interface HarnessAgentAdapter {
    * The error channel is the point: a probe that fails has to stay
    * distinguishable from a harness that genuinely has no models, otherwise an
    * expired login gets cached as "this harness has no model picker".
-   * {@link HarnessAgentCatalogService} owns the timeout, caching and de-duplication.
+   * {@link HarnessProbeService} owns the timeout, caching and de-duplication.
    */
-  readonly probeCatalog?: (
+  readonly probeModels?: (
     cwd: string,
-  ) => Effect.Effect<HarnessAgentCatalog, CapabilityProbeFailed>;
+  ) => Effect.Effect<ReadonlyArray<ModelInfo>, CapabilityProbeFailed>;
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<

@@ -1,8 +1,10 @@
 import { eventIteratorToStream } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
 import type {
+  PermissionMode,
   PromptInput,
   PromptPart,
+  ReasoningEffort,
   SessionRef,
   SessionRuntimeSnapshot,
   SubscribeStreamEvent,
@@ -57,6 +59,7 @@ type SessionClient = Pick<
   | "interrupt"
   | "prompt"
   | "respondToAgentRequest"
+  | "setReasoningEffort"
   | "setModel"
   | "setPermissionMode"
   | "getSnapshot"
@@ -333,11 +336,15 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
     });
   }
 
-  async setModel(model: string): Promise<void> {
-    await this.client.session.setModel({ ref: this.#ref, model });
+  async setModel(providerId: string, modelId: string): Promise<void> {
+    await this.client.session.setModel({ ref: this.#ref, providerId, modelId });
   }
 
-  async setPermissionMode(permissionMode: string): Promise<void> {
+  async setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<void> {
+    await this.client.session.setReasoningEffort({ ref: this.#ref, reasoningEffort });
+  }
+
+  async setPermissionMode(permissionMode: PermissionMode): Promise<void> {
     await this.client.session.setPermissionMode({ ref: this.#ref, permissionMode });
   }
 }

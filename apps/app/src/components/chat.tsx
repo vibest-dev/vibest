@@ -4,6 +4,7 @@ import { cn } from "@vibest/ui/lib/utils";
 import { ChatInputComposer } from "@/components/chat/chat-input-composer";
 import { ChatModelSelect } from "@/components/chat/chat-model-select";
 import { ChatPermissionModeSelect } from "@/components/chat/chat-permission-mode-select";
+import { ChatReasoningEffortSelect } from "@/components/chat/chat-reasoning-effort-select";
 import { ChatSessionProvider } from "@/components/chat/chat-session-context";
 import { ChatTranscript } from "@/components/chat/chat-transcript";
 import { HarnessBadge } from "@/components/chat/harness-badge";
@@ -24,6 +25,9 @@ export function Chat({ className, sessionRef }: { className?: string; sessionRef
                     the toolbar reads the same before and after creation. */}
                 <HarnessBadge />
                 <ChatModelSelect />
+                {/* Cascades from the model above: appears only when the
+                    selected model declares reasoningEffort levels. */}
+                <ChatReasoningEffortSelect />
                 <ChatPermissionModeSelect />
               </>
             }

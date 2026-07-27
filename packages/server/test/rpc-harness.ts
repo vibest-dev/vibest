@@ -8,8 +8,8 @@ import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistry,
   HarnessAgentSessionServiceLayer,
-  HarnessAgentCatalogLayer,
-  HarnessNegotiationLayer,
+  HarnessListLayer,
+  HarnessProbeLayer,
   makeHarnessAgentRegistry,
   type HarnessAgentAdapter,
 } from "../src/harness";
@@ -35,8 +35,8 @@ export function makeRpcTestHarness(
   const paths = layerPaths(home);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
-  const negotiationLayer = HarnessNegotiationLayer.pipe(Layer.provide(registryLayer));
-  const catalogLayer = HarnessAgentCatalogLayer.pipe(Layer.provide(registryLayer));
+  const listLayer = HarnessListLayer.pipe(Layer.provide(registryLayer));
+  const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const sessionServiceLayer = SessionServiceLayer.pipe(
     Layer.provide(projectLayer),
@@ -53,8 +53,8 @@ export function makeRpcTestHarness(
       sessionServiceLayer,
       projectLayer,
       registryLayer,
-      negotiationLayer,
-      catalogLayer,
+      listLayer,
+      probeLayer,
       FileSystemServiceLayer,
       NodeFileSystem.layer,
     ),

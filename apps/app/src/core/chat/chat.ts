@@ -1,9 +1,8 @@
-import type { HarnessAgentId, SessionRef } from "@vibest/contract";
+import type { HarnessAgentId, PermissionMode, ReasoningEffort, SessionRef } from "@vibest/contract";
 import { AbstractChat, type UIMessage } from "ai";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
-import type { ChatModel, ChatPermissionMode } from "./chat-config";
 import { ChatState, type ChatStoreState } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
 
@@ -50,13 +49,17 @@ export class Chat extends AbstractChat<UIMessage> {
     await this.sendMessage({ text });
   };
 
-  // Model / permission are session config, changed via their own calls — never
-  // bundled into a prompt turn.
-  setModel = async (model: ChatModel): Promise<void> => {
-    await this.#transport.setModel(model);
+  // Model / reasoningEffort / permission are session config, changed via their own
+  // calls — never bundled into a prompt turn.
+  setModel = async (providerId: string, modelId: string): Promise<void> => {
+    await this.#transport.setModel(providerId, modelId);
   };
 
-  setPermissionMode = async (mode: ChatPermissionMode): Promise<void> => {
+  setReasoningEffort = async (reasoningEffort: ReasoningEffort): Promise<void> => {
+    await this.#transport.setReasoningEffort(reasoningEffort);
+  };
+
+  setPermissionMode = async (mode: PermissionMode): Promise<void> => {
     await this.#transport.setPermissionMode(mode);
   };
 

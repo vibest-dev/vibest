@@ -9,8 +9,8 @@ import { FileSystemServiceLayer } from "../fs";
 import {
   HarnessAgentRegistry,
   HarnessAgentSessionServiceLayer,
-  HarnessAgentCatalogLayer,
-  HarnessNegotiationLayer,
+  HarnessListLayer,
+  HarnessProbeLayer,
   makeHarnessAgentRegistry,
 } from "../harness";
 import {
@@ -66,10 +66,10 @@ const RegistryLayer = Layer.effect(
 ).pipe(Layer.provide(ProvidersLayer));
 
 // Both harness routes read the same registry instance. It matters most for the
-// catalog: one cache, shared by every connecting client, so N tabs on the same
+// probe: one cache, shared by every connecting client, so N tabs on the same
 // directory still cost one CLI spawn.
-const HarnessNegotiationProvided = HarnessNegotiationLayer.pipe(Layer.provide(RegistryLayer));
-const HarnessAgentCatalogProvided = HarnessAgentCatalogLayer.pipe(Layer.provide(RegistryLayer));
+const HarnessListProvided = HarnessListLayer.pipe(Layer.provide(RegistryLayer));
+const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
 
 // Harness session lifecycle (agent-native ids only); shared by the port and RPC.
 const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
@@ -107,8 +107,8 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   SessionServiceProvided,
   ProjectServiceProvided,
   RegistryLayer,
-  HarnessNegotiationProvided,
-  HarnessAgentCatalogProvided,
+  HarnessListProvided,
+  HarnessProbeProvided,
   FileSystemServiceLayer,
   NodeFileSystem.layer,
 );

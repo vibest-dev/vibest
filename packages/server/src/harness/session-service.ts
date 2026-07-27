@@ -1,3 +1,4 @@
+import type { PermissionMode, ReasoningEffort } from "@vibest/contract";
 import type { AgentResponse, HarnessAgentId, SessionEnvelopeDraft } from "@vibest/harness";
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect";
 
@@ -15,6 +16,7 @@ import {
   AgentUnavailable,
   CapabilityUnsupported,
   type CreateSessionError,
+  PermissionModeUnsupported,
   type ResumeSessionError,
   SessionClosed,
   SessionNotFound,
@@ -92,10 +94,17 @@ export type HarnessAgentSessionServiceShape = {
     sessionId: string,
     model: string,
   ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
+  readonly setReasoningEffort: (
+    sessionId: string,
+    reasoningEffort: ReasoningEffort,
+  ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
   readonly setPermissionMode: (
     sessionId: string,
-    mode: string,
-  ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
+    mode: PermissionMode,
+  ) => Effect.Effect<
+    void,
+    SessionNotFound | PermissionModeUnsupported | SessionClosed | AgentOperationError
+  >;
   readonly respondToAgentRequest: (
     sessionId: string,
     requestId: string,
@@ -329,9 +338,31 @@ export const makeHarnessAgentSessionService = (
       ),
     );
 
+    // The permission mode is our closed vocabulary, so membership in the
+    // harness's declared subset is checked here — the boundary between the
+    // wire and the adapters — and rejected loudly. Opaque values (model) get
+    // no such check: their lists go stale legitimately, so adapters treat
+    // misses as best-effort instead.
+    const checkPermissionMode = (
+      harnessAgentId: HarnessAgentId,
+      mode: PermissionMode | undefined,
+    ) =>
+      mode === undefined
+        ? Effect.void
+        : registry
+            .get(harnessAgentId)
+            .pipe(
+              Effect.flatMap((adapter) =>
+                adapter.permissionModes.includes(mode)
+                  ? Effect.void
+                  : Effect.fail(new PermissionModeUnsupported({ harnessAgentId, mode })),
+              ),
+            );
+
     return {
       create: (harnessAgentId, input) =>
-        build({ _tag: "Open", harnessAgentId, input }).pipe(
+        checkPermissionMode(harnessAgentId, input.permissionMode).pipe(
+          Effect.andThen(build({ _tag: "Open", harnessAgentId, input })),
           Effect.map((managed) => ({
             sessionId: managed.session.sessionId,
             harnessAgentId: managed.session.harnessAgentId,
@@ -349,9 +380,19 @@ export const makeHarnessAgentSessionService = (
         getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.interrupt)),
       setModel: (sessionId, model) =>
         getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.setModel(model))),
+      setReasoningEffort: (sessionId, reasoningEffort) =>
+        getManaged(sessionId).pipe(
+          Effect.flatMap((managed) => managed.session.setReasoningEffort(reasoningEffort)),
+        ),
       setPermissionMode: (sessionId, mode) =>
         getManaged(sessionId).pipe(
-          Effect.flatMap((managed) => managed.session.setPermissionMode(mode)),
+          Effect.flatMap((managed) =>
+            // The session is open, so its adapter is registered by construction.
+            checkPermissionMode(managed.session.harnessAgentId, mode).pipe(
+              Effect.catchTag("HarnessAgentNotFound", (cause) => Effect.die(cause)),
+              Effect.andThen(managed.session.setPermissionMode(mode)),
+            ),
+          ),
         ),
       respondToAgentRequest: (sessionId, requestId, response) =>
         getManaged(sessionId).pipe(

@@ -70,13 +70,11 @@ type ResumeDecision =
 
 export interface ClaudeCodeAgent {
   /**
-   * The model catalog, read without opening a session. It follows the user's
-   * account and the resolved CLI, so it can only be probed — never hardcoded.
-   */
-  /**
-   * The models a session started in `cwd` could run. The directory is not
-   * incidental: a project's `.claude/settings.json` can remap what an id
-   * resolves to, so the same `sonnet` is a different model in two projects.
+   * The models a session started in `cwd` could run, read without opening a
+   * session. The catalog follows the user's account and the resolved CLI, so
+   * it can only be probed — never hardcoded. The directory is not incidental:
+   * a project's `.claude/settings.json` can remap what an id resolves to, so
+   * the same `sonnet` is a different model in two projects.
    */
   readonly listModels: (cwd: string) => Effect.Effect<sdk.ModelInfo[], ClaudeSdkError>;
   readonly session: {

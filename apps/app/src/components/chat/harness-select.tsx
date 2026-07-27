@@ -7,14 +7,14 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import { useHarnessAgents } from "@/core/harness/use-harness-negotiation";
+import { useHarnessAgents } from "@/core/harness/use-harness";
 
 // Which agent runs the session. Only offered before the session exists: the
 // harness is part of the SessionRef, so it is fixed at create time (see
 // HarnessBadge for how a live session shows it).
 //
 // Harnesses whose CLI is missing stay in the list, disabled and labelled with
-// the negotiated `reason` — hiding them turns "why is Codex not here?" into a
+// the declared `reason` — hiding them turns "why is Codex not here?" into a
 // dead end, where "Codex was not found on PATH." is something the user can act
 // on.
 export function HarnessSelect({

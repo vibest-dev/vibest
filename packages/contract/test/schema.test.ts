@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CollectionEventTypes,
-  HarnessAgentCatalogInputSchema,
-  HarnessAgentCatalogSchema,
-  HarnessNegotiationSchema,
+  HarnessListOutputSchema,
+  HarnessProbeInputSchema,
+  HarnessProbeOutputSchema,
   type ServerEvent,
   serverErrors,
   ServerErrorCodes,
@@ -104,77 +104,98 @@ describe("server error map", () => {
   });
 });
 
-describe("HarnessNegotiation", () => {
-  const negotiation = (capabilities: unknown) => ({
-    harnessAgents: [{ id: "codex", name: "Codex", available: true, capabilities }],
+describe("HarnessListOutput", () => {
+  const listing = (entry: Record<string, unknown>) => ({
+    harnessAgents: [{ id: "codex", name: "Codex", available: true, ...entry }],
   });
 
-  it("carries the permission vocabulary and its declared default", () => {
+  it("carries the permission subset as our closed vocabulary, with its default", () => {
     expect(
       accepts(
-        HarnessNegotiationSchema,
-        negotiation({
-          permissionModes: [{ id: "ask", label: "Ask" }],
-          defaultPermissionMode: "ask",
-        }),
+        HarnessListOutputSchema,
+        listing({ permissionModes: ["read-only", "ask", "full"], defaultPermissionMode: "ask" }),
       ),
     ).toBe(true);
   });
 
-  it("accepts empty capabilities — absence is how a harness says it has no such dimension", () => {
-    expect(accepts(HarnessNegotiationSchema, negotiation({}))).toBe(true);
+  it("accepts an empty subset — how a harness says it has no permission protocol", () => {
+    expect(accepts(HarnessListOutputSchema, listing({ permissionModes: [] }))).toBe(true);
   });
 
-  it("strips a runtime catalog off the wire — models are per directory, so they travel on harness.catalog", () => {
-    const decoded = Schema.decodeUnknownExit(HarnessNegotiationSchema)(
-      negotiation({ permissionModes: [{ id: "ask", label: "Ask" }], models: [{ id: "sonnet" }] }),
-    );
-
-    // Not a rejection (Struct ignores excess), but the field does not survive:
-    // an older client cannot smuggle a directory-independent model list through
-    // the negotiation and have anyone read it back.
-    expect(Exit.isSuccess(decoded)).toBe(true);
-    if (!Exit.isSuccess(decoded)) return;
-    expect(decoded.value.harnessAgents[0]?.capabilities).toStrictEqual({
-      permissionModes: [{ id: "ask", label: "Ask" }],
-    });
-  });
-
-  it("rejects an unavailable harness reported without a shape", () => {
+  it("rejects a mode outside the vocabulary — labels and native ids never travel", () => {
     expect(
-      accepts(HarnessNegotiationSchema, {
+      accepts(HarnessListOutputSchema, listing({ permissionModes: ["bypassPermissions"] })),
+    ).toBe(false);
+    expect(
+      accepts(HarnessListOutputSchema, listing({ permissionModes: [{ id: "ask", label: "Ask" }] })),
+    ).toBe(false);
+  });
+
+  it("requires the subset — the field is an answer, not an option", () => {
+    expect(
+      accepts(HarnessListOutputSchema, {
         harnessAgents: [{ id: "codex", name: "Codex", available: false }],
       }),
     ).toBe(false);
   });
 });
 
-describe("HarnessAgentCatalog", () => {
-  it("carries the probed models and the harness's declared default", () => {
+describe("HarnessProbeOutput", () => {
+  const output = (providers: unknown) => ({ providers });
+
+  it("keeps models inside their provider", () => {
     expect(
-      accepts(HarnessAgentCatalogSchema, {
-        models: [{ id: "gpt-5.6-sol", name: "GPT 5.6 Sol" }],
-        defaultModel: "gpt-5.6-sol",
-      }),
+      accepts(
+        HarnessProbeOutputSchema,
+        output([{ id: "codex", models: [{ id: "gpt-5.6-sol", label: "GPT 5.6 Sol" }] }]),
+      ),
     ).toBe(true);
   });
 
-  it("accepts an empty catalog — how a harness says it has no model switch", () => {
-    expect(accepts(HarnessAgentCatalogSchema, {})).toBe(true);
+  it("accepts an empty provider list — how a harness says it has no model switch", () => {
+    expect(accepts(HarnessProbeOutputSchema, output([]))).toBe(true);
   });
 
-  it("accepts a model with no display name", () => {
-    expect(accepts(HarnessAgentCatalogSchema, { models: [{ id: "sonnet" }] })).toBe(true);
+  it("carries normalized traits next to the opaque id", () => {
+    expect(
+      accepts(
+        HarnessProbeOutputSchema,
+        output([
+          {
+            id: "codex",
+            models: [
+              {
+                id: "gpt-5.6-sol",
+                reasoningEfforts: ["low", "medium", "high"],
+                defaultReasoningEffort: "medium",
+                modalities: ["text", "image"],
+              },
+            ],
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an reasoningEffort outside the vocabulary — adapters must drop what they can't translate", () => {
+    expect(
+      accepts(
+        HarnessProbeOutputSchema,
+        output([{ id: "codex", models: [{ id: "m", reasoningEfforts: ["turbo"] }] }]),
+      ),
+    ).toBe(false);
   });
 
   it("rejects a model without an id", () => {
-    expect(accepts(HarnessAgentCatalogSchema, { models: [{ name: "Sonnet" }] })).toBe(false);
+    expect(
+      accepts(HarnessProbeOutputSchema, output([{ id: "codex", models: [{ label: "Sonnet" }] }])),
+    ).toBe(false);
   });
 
-  it("addresses a catalog by directory, not by project", () => {
-    expect(
-      accepts(HarnessAgentCatalogInputSchema, { harnessAgentId: "codex", cwd: "/work/app" }),
-    ).toBe(true);
-    expect(accepts(HarnessAgentCatalogInputSchema, { harnessAgentId: "codex" })).toBe(false);
+  it("addresses a probe by directory, not by project", () => {
+    expect(accepts(HarnessProbeInputSchema, { harnessAgentId: "codex", cwd: "/work/app" })).toBe(
+      true,
+    );
+    expect(accepts(HarnessProbeInputSchema, { harnessAgentId: "codex" })).toBe(false);
   });
 });

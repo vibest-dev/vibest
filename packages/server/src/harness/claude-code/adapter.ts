@@ -1,4 +1,5 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
+import type { PermissionMode } from "@vibest/contract";
 import type { SessionEvent } from "@vibest/harness";
 import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft } from "@vibest/harness";
 import type { AgentRequest, AgentResponse } from "@vibest/harness";
@@ -30,22 +31,23 @@ import { resolveClaudeExecutable } from "./executable";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 
-// The catalog row that means "let Claude Code decide", as the CLI names it.
-const CLAUDE_DEFAULT_MODEL_ID = "default";
-
 const operationError = (sessionId: string, operation: string, cause: unknown) =>
   new AgentOperationError({ sessionId, operation, cause });
 
-// Map claude-code's outward permission-mode ids onto the SDK's native enum.
-// Unknown ids yield undefined so setPermissionMode can reject them.
-const CLAUDE_PERMISSION_MODES: Record<string, sdk.PermissionMode> = {
+// Map vibest's permission vocabulary onto the SDK's native enum. The keys are
+// this adapter's declared subset — the single source for both the mapping and
+// the `permissionModes` declaration below, so the two can't drift.
+const CLAUDE_PERMISSION_MODES = {
   plan: "plan",
   ask: "default",
   acceptEdits: "acceptEdits",
   full: "bypassPermissions",
-};
-const toClaudePermissionMode = (id: string): sdk.PermissionMode | undefined =>
-  CLAUDE_PERMISSION_MODES[id];
+} as const satisfies Partial<Record<PermissionMode, sdk.PermissionMode>>;
+const CLAUDE_PERMISSION_MODE_IDS = Object.keys(
+  CLAUDE_PERMISSION_MODES,
+) as ReadonlyArray<PermissionMode>;
+const toClaudePermissionMode = (mode: PermissionMode): sdk.PermissionMode | undefined =>
+  (CLAUDE_PERMISSION_MODES as Partial<Record<PermissionMode, sdk.PermissionMode>>)[mode];
 
 const toClaudeMessage = (input: UserInput): sdk.SDKUserMessage["message"] => ({
   role: "user",
@@ -318,6 +320,11 @@ const makeSession = (
       } satisfies SessionCapabilities;
     });
 
+    // The SDK has no runtime reasoningEffort control (only a query-start option), so
+    // this adapter declares no `reasoningEfforts` traits on its models and the setter
+    // is a defensive no-op — the client renders no reasoningEffort control for it.
+    const setReasoningEffort: HarnessAgentSession["setReasoningEffort"] = () => Effect.void;
+
     return {
       sessionId,
       harnessAgentId: "claude-code",
@@ -366,6 +373,7 @@ const makeSession = (
           return receipt;
         }),
       setModel,
+      setReasoningEffort,
       setPermissionMode,
       interrupt,
       respondToAgentRequest: (requestId, response) =>
@@ -405,31 +413,22 @@ const makeSession = (
 export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapter => ({
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
-  capabilities: {
-    permissionModes: [
-      { id: "plan", label: "Plan" },
-      { id: "ask", label: "Ask" },
-      { id: "acceptEdits", label: "Accept edits" },
-      { id: "full", label: "Full access" },
-    ],
-    // Keeps today's behaviour: the first turn shouldn't be gated on approvals.
-    // Codex defaults lower because its "full" also drops the sandbox; this one
-    // only bypasses the prompts.
-    defaultPermissionMode: "full",
-  },
-  probeCatalog: (cwd) =>
+  permissionModes: CLAUDE_PERMISSION_MODE_IDS,
+  // Keeps today's behaviour: the first turn shouldn't be gated on approvals.
+  // Codex defaults lower because its "full" also drops the sandbox; this one
+  // only bypasses the prompts.
+  defaultPermissionMode: "full",
+  probeModels: (cwd) =>
     agent.listModels(cwd).pipe(
-      Effect.map((models) => ({
-        models: models.map((model) => ({ id: model.value, name: model.displayName })),
-        // The SDK lists "Default (recommended)" as a real entry, so the default
-        // is also something the user can pick deliberately — but read it back
-        // out of the probe rather than asserting it: a CLI that stops listing
-        // the row would otherwise have us advertise a default that isn't in its
-        // own catalog, which the client drops, leaving the picker unselected.
-        ...(models.some((model) => model.value === CLAUDE_DEFAULT_MODEL_ID)
-          ? { defaultModel: CLAUDE_DEFAULT_MODEL_ID }
-          : {}),
-      })),
+      // No `reasoningEfforts` traits on purpose: the SDK exposes the levels in its
+      // catalogue but offers no runtime call to apply one, and declaring a
+      // capability we cannot honour would render a dead control. The SDK's
+      // "Default (recommended)" row passes through as an ordinary pickable
+      // model — it is an option whose meaning is "let the CLI decide", not a
+      // preselection marker.
+      Effect.map((models) =>
+        models.map((model) => ({ id: model.value, label: model.displayName })),
+      ),
       Effect.mapError(
         (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
       ),

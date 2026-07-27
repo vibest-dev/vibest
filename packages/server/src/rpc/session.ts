@@ -21,9 +21,29 @@ export const sessionRouter = orpc.router({
   // lifecycle -----------------------------------------------------------------
   create: orpc.create.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
+    // The providerId/modelId pair is validated and unpacked here: the two are
+    // only meaningful together (a half pair is a client bug), and today a
+    // harness can only consume its own built-in provider, so anything else is
+    // a request this server cannot honour. Past this point the model travels
+    // as a provider-local id.
+    if ((input.providerId === undefined) !== (input.modelId === undefined)) {
+      return yield* Effect.fail(
+        errors.INVALID_ARGUMENT({
+          message: "providerId and modelId must be given together",
+        }),
+      );
+    }
+    if (input.providerId !== undefined && input.providerId !== input.harnessAgentId) {
+      return yield* Effect.fail(
+        errors.UNSUPPORTED({
+          message: `provider ${input.providerId} is not consumable by ${input.harnessAgentId}`,
+        }),
+      );
+    }
     return yield* sessions
       .create(input.projectId, input.harnessAgentId, {
-        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.modelId !== undefined ? { model: input.modelId } : {}),
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
         ...(input.permissionMode !== undefined ? { permissionMode: input.permissionMode } : {}),
       })
       .pipe(
@@ -32,6 +52,8 @@ export const sessionRouter = orpc.router({
             Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
           AgentUnavailable: (e) =>
             Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
+          PermissionModeUnsupported: (e) =>
+            Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
           SessionOpenFailed: (e) => Effect.fail(errors.INTERNAL({ message: e.reason })),
         }),
       );
@@ -176,7 +198,36 @@ export const sessionRouter = orpc.router({
   }),
   setModel: orpc.setModel.effect(function* ({ input, errors }) {
     const sessions = yield* SessionService;
-    yield* sessions.setModel(input.ref, input.model).pipe(
+    // Same providerId gate as `create`: a harness only consumes its own
+    // built-in provider today.
+    if (input.providerId !== input.ref.harnessAgentId) {
+      return yield* Effect.fail(
+        errors.UNSUPPORTED({
+          message: `provider ${input.providerId} is not consumable by ${input.ref.harnessAgentId}`,
+        }),
+      );
+    }
+    yield* sessions.setModel(input.ref, input.modelId).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(
+            "projectId" in e
+              ? errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })
+              : errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        SessionClosed: (e) =>
+          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
+  }),
+  setReasoningEffort: orpc.setReasoningEffort.effect(function* ({ input, errors }) {
+    const sessions = yield* SessionService;
+    yield* sessions.setReasoningEffort(input.ref, input.reasoningEffort).pipe(
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(
@@ -208,6 +259,10 @@ export const sessionRouter = orpc.router({
           Effect.fail(
             errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
           ),
+        // Our closed vocabulary, but outside this harness's declared subset —
+        // a client bug (the subset is fully known client-side), never ignored.
+        PermissionModeUnsupported: (e) =>
+          Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),

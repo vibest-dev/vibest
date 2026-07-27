@@ -1,4 +1,4 @@
-import { useHarnessAgent } from "@/core/harness/use-harness-negotiation";
+import { useHarnessAgent } from "@/core/harness/use-harness";
 
 import { useChatSession } from "./chat-session-context";
 

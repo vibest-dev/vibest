@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AgentResponse,
+  PermissionMode,
   PromptInput,
+  ReasoningEffort,
   SessionRef,
   SessionRuntimeSnapshot,
   SessionStatus,
@@ -20,7 +22,7 @@ import {
   UnsupportedPromptPart,
 } from "../errors";
 import { EventBus } from "../events";
-import type { PromptReceipt, UserInput } from "../harness";
+import type { PermissionModeUnsupported, PromptReceipt, UserInput } from "../harness";
 import { ProjectService } from "../project/service";
 import type { HarnessAgentId, Session } from "../types";
 import {
@@ -38,18 +40,12 @@ import { SessionManager, type SessionNotActive } from "./runtime";
 /** Wire prompt parts → HarnessAgent UserInput; `file` parts are rejected, never dropped. */
 const toUserInput = (
   parts: PromptInput["parts"],
-  model: string | undefined,
 ): Effect.Effect<UserInput, UnsupportedPromptPart> =>
   Effect.forEach(parts, (part) =>
     part.type === "file"
       ? Effect.fail(new UnsupportedPromptPart({ kind: "file" }))
       : Effect.succeed(part),
-  ).pipe(
-    Effect.map((userParts) => ({
-      parts: userParts,
-      ...(model !== undefined ? { model } : {}),
-    })),
-  );
+  ).pipe(Effect.map((userParts) => ({ parts: userParts })));
 
 /**
  * The outward session façade — everything the app's session control-plane goes
@@ -67,7 +63,11 @@ export class SessionService extends Context.Service<
     readonly create: (
       projectId: string,
       harnessAgentId: HarnessAgentId,
-      config?: { readonly model?: string; readonly permissionMode?: string },
+      config?: {
+        readonly model?: string;
+        readonly reasoningEffort?: ReasoningEffort;
+        readonly permissionMode?: PermissionMode;
+      },
     ) => Effect.Effect<
       SessionRef,
       ProjectNotFound | HarnessCreateError | StoreReadError | StoreWriteError
@@ -111,7 +111,8 @@ export class SessionService extends Context.Service<
       void,
       SessionNotFound | SessionRefMismatch | StoreReadError | HarnessInterruptError
     >;
-    /** Session-scoped config setters; values use the harness's outward vocabulary. */
+    // Session-scoped config setters. `model` is the provider-local model id —
+    // the RPC layer unpacked and validated the providerId/modelId pair before this façade.
     readonly setModel: (
       ref: SessionRef,
       model: string,
@@ -119,12 +120,23 @@ export class SessionService extends Context.Service<
       void,
       SessionNotFound | SessionRefMismatch | StoreReadError | HarnessSetConfigError
     >;
-    readonly setPermissionMode: (
+    readonly setReasoningEffort: (
       ref: SessionRef,
-      permissionMode: string,
+      reasoningEffort: ReasoningEffort,
     ) => Effect.Effect<
       void,
       SessionNotFound | SessionRefMismatch | StoreReadError | HarnessSetConfigError
+    >;
+    readonly setPermissionMode: (
+      ref: SessionRef,
+      permissionMode: PermissionMode,
+    ) => Effect.Effect<
+      void,
+      | SessionNotFound
+      | SessionRefMismatch
+      | StoreReadError
+      | HarnessSetConfigError
+      | PermissionModeUnsupported
     >;
     readonly respondToAgentRequest: (
       ref: SessionRef,
@@ -297,7 +309,7 @@ export const SessionServiceLayer: Layer.Layer<
       prompt: (input) =>
         resolveHarnessSessionId(input.ref).pipe(
           Effect.flatMap((harnessSessionId) =>
-            toUserInput(input.parts, input.model).pipe(
+            toUserInput(input.parts).pipe(
               Effect.flatMap((userInput) => port.prompt(harnessSessionId, userInput)),
             ),
           ),
@@ -308,6 +320,11 @@ export const SessionServiceLayer: Layer.Layer<
 
       setModel: (ref, model) =>
         resolveHarnessSessionId(ref).pipe(Effect.flatMap((id) => port.setModel(id, model))),
+
+      setReasoningEffort: (ref, reasoningEffort) =>
+        resolveHarnessSessionId(ref).pipe(
+          Effect.flatMap((id) => port.setReasoningEffort(id, reasoningEffort)),
+        ),
 
       setPermissionMode: (ref, permissionMode) =>
         resolveHarnessSessionId(ref).pipe(

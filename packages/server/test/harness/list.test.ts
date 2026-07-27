@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import { Effect } from "effect";
 
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
-import { makeHarnessNegotiation } from "../../src/harness/negotiation";
+import { makeHarnessList } from "../../src/harness/list";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 
 const adapter = (over: {
@@ -19,46 +19,45 @@ const adapter = (over: {
       ? { available: false, ...(over.reason ? { reason: over.reason } : {}) }
       : { available: true },
   ),
-  capabilities: { permissionModes: [{ id: "ask", label: "Ask" }], defaultPermissionMode: "ask" },
-  // Negotiation must never reach for one of these: declaring a catalog probe
+  permissionModes: ["ask"],
+  defaultPermissionMode: "ask",
+  // Listing must never reach for one of these: declaring a model probe
   // changes nothing about what this call returns.
-  probeCatalog: () => Effect.die("negotiate must not probe a catalog"),
-  open: () => Effect.die("negotiate must not open a session"),
-  resume: () => Effect.die("negotiate must not resume a session"),
+  probeModels: () => Effect.die("list must not probe models"),
+  open: () => Effect.die("list must not open a session"),
+  resume: () => Effect.die("list must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
 });
 
-it.effect("declares each harness's availability and static capabilities", () =>
+it.effect("declares each harness's availability and permission subset", () =>
   Effect.gen(function* () {
     const registry = makeHarnessAgentRegistry([adapter({ id: "claude-code" })]);
 
-    const { harnessAgents } = yield* makeHarnessNegotiation(registry).negotiate;
+    const { harnessAgents } = yield* makeHarnessList(registry).list;
 
     NodeAssert.deepStrictEqual(harnessAgents[0], {
       id: "claude-code",
       name: "claude-code",
       available: true,
-      capabilities: {
-        permissionModes: [{ id: "ask", label: "Ask" }],
-        defaultPermissionMode: "ask",
-      },
+      permissionModes: ["ask"],
+      defaultPermissionMode: "ask",
     });
   }),
 );
 
-it.effect("keeps declaring capabilities for a harness whose CLI is missing", () =>
+it.effect("keeps declaring settings for a harness whose CLI is missing", () =>
   Effect.gen(function* () {
     const registry = makeHarnessAgentRegistry([
       adapter({ id: "codex", available: false, reason: "Codex was not found on PATH." }),
     ]);
 
-    const { harnessAgents } = yield* makeHarnessNegotiation(registry).negotiate;
+    const { harnessAgents } = yield* makeHarnessList(registry).list;
 
     // The picker greys it out and shows the reason — but what it *would* be
     // able to do has nothing to do with whether it is installed right now.
     NodeAssert.equal(harnessAgents[0]?.available, false);
     NodeAssert.equal(harnessAgents[0]?.reason, "Codex was not found on PATH.");
-    NodeAssert.equal(harnessAgents[0]?.capabilities.defaultPermissionMode, "ask");
+    NodeAssert.equal(harnessAgents[0]?.defaultPermissionMode, "ask");
   }),
 );
 
@@ -70,7 +69,7 @@ it.effect("reports every registered harness, in registration order", () =>
       adapter({ id: "pi" }),
     ]);
 
-    const { harnessAgents } = yield* makeHarnessNegotiation(registry).negotiate;
+    const { harnessAgents } = yield* makeHarnessList(registry).list;
 
     NodeAssert.deepStrictEqual(
       harnessAgents.map((harnessAgent) => harnessAgent.id),
