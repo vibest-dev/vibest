@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { layerPaths } from "../src/config/paths";
 import { SessionRepository, SessionRepositoryLayer } from "../src/session/repository";
 import type { Session } from "../src/types";
+import { NodePlatformLayer } from "./platform";
 
-const makeLayer = (home: string) => SessionRepositoryLayer.pipe(Layer.provide(layerPaths(home)));
+const makeLayer = (home: string) =>
+  SessionRepositoryLayer.pipe(Layer.provide(layerPaths(home)), Layer.provide(NodePlatformLayer));
 
 const meta = (sessionId: string, projectId: string, harnessSessionId: string): Session => ({
   version: 1,

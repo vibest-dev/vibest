@@ -14,6 +14,7 @@ import {
   ProviderRepository,
   ProviderRepositoryLayer,
 } from "../src/index";
+import { NodePlatformLayer } from "./platform";
 
 const stdioServer: McpServerConfig = {
   id: "fs",
@@ -23,7 +24,7 @@ const stdioServer: McpServerConfig = {
 };
 
 const makeLayer = (home: string) => {
-  const paths = layerPaths(home);
+  const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
   const mcpRepo = McpRepositoryLayer.pipe(Layer.provide(paths));
   const provRepo = ProviderRepositoryLayer.pipe(Layer.provide(paths));
   return Layer.mergeAll(provRepo, McpServiceLayer.pipe(Layer.provide(mcpRepo)));

@@ -12,11 +12,13 @@ import {
   ProviderService,
   ProviderServiceLayer,
 } from "../src/index";
+import { NodePlatformLayer } from "./platform";
 
 const makeLayer = (home: string) =>
   ProviderServiceLayer.pipe(
     Layer.provide(ProviderRepositoryLayer),
     Layer.provide(layerPaths(home)),
+    Layer.provide(NodePlatformLayer),
   );
 
 const openai: ProviderConfig = {

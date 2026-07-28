@@ -1,4 +1,3 @@
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { ProjectSchema } from "@vibest/contract";
 import { type JsonDocument, makeJsonDocument } from "@vibest/effect-json-store";
 import { Context, Effect, FileSystem, Layer, Option, Ref, Schema, Semaphore } from "effect";
@@ -26,7 +25,11 @@ export class ProjectRepository extends Context.Service<
   }
 >()("ProjectRepository") {}
 
-export const ProjectRepositoryLayer: Layer.Layer<ProjectRepository, never, Paths> = Layer.effect(
+export const ProjectRepositoryLayer: Layer.Layer<
+  ProjectRepository,
+  never,
+  Paths | FileSystem.FileSystem
+> = Layer.effect(
   ProjectRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
@@ -76,4 +79,4 @@ export const ProjectRepositoryLayer: Layer.Layer<ProjectRepository, never, Paths
         ),
     };
   }),
-).pipe(Layer.provide(NodeFileSystem.layer));
+);
