@@ -76,7 +76,7 @@ describe("SessionService", () => {
   const layers = (port: Layer.Layer<HarnessAgentSessionPort>) => {
     // Paths plus the platform services the repositories' JSON store runs on;
     // one reference, so the repositories share the same temp-dir wiring.
-    const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
+    const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
     const base = Layer.mergeAll(
       ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(paths)),
       SessionRepositoryLayer.pipe(Layer.provide(paths)),

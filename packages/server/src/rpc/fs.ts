@@ -1,11 +1,11 @@
 import "@orpc/experimental-effect/extensions/effect";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 
 import { implement } from "@orpc/server";
 import { fsContract } from "@vibest/contract/fs";
 import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
+import { Path } from "effect/Path";
 
 import { FileSystemService } from "../fs";
 import type { RpcContext } from "./context";
@@ -36,7 +36,10 @@ export const fsRouter = orpc.router({
   }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;
-    const path = resolve(input.path ?? homedir());
+    const pathService = yield* Path;
+    // `node:os.homedir` has no Effect equivalent; everything else is the
+    // Path service.
+    const path = pathService.resolve(input.path ?? homedir());
     // Folder-picker policy (owned here, not a shared fs service): directories
     // only, hide dotfolders and node_modules, sorted by name.
     const names = yield* fs
@@ -48,7 +51,7 @@ export const fsRouter = orpc.router({
     const flagged = yield* Effect.forEach(
       candidates,
       (name) =>
-        fs.stat(join(path, name)).pipe(
+        fs.stat(pathService.join(path, name)).pipe(
           Effect.map((info) => info.type === "Directory"),
           Effect.catch(() => Effect.succeed(false)),
           Effect.map((isDirectory) => ({ name, isDirectory })),
@@ -57,9 +60,9 @@ export const fsRouter = orpc.router({
     );
     const directories = flagged
       .filter((e) => e.isDirectory)
-      .map((e) => ({ name: e.name, path: join(path, e.name) }));
+      .map((e) => ({ name: e.name, path: pathService.join(path, e.name) }));
     directories.sort((a, b) => a.name.localeCompare(b.name));
-    const parent = dirname(path);
+    const parent = pathService.dirname(path);
     return { path, parent: parent === path ? null : parent, directories };
   }),
 });
