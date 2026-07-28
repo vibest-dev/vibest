@@ -19,6 +19,7 @@ export function ClaudeCodeTaskTool({
       message.parts.filter(
         (part): part is ToolUIPart<ClaudeCodeTools> =>
           isToolUIPart(part) &&
+          part.type !== "tool-Agent" &&
           part.type !== "tool-Task" &&
           part.type !== "dynamic-tool" &&
           part.state !== "input-streaming" &&

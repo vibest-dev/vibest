@@ -25,18 +25,17 @@ const TOOL_BUCKETS: Record<string, BucketKey> = {
   "tool-WebSearch": "searches",
   "tool-Edit": "edits",
   "tool-Write": "edits",
-  "tool-MultiEdit": "edits",
   "tool-NotebookEdit": "edits",
   "tool-Bash": "commands",
-  "tool-BashOutput": "commands",
-  "tool-KillShell": "commands",
-  "tool-SlashCommand": "commands",
+  "tool-TaskOutput": "commands",
 };
 
 // Tools that opt OUT of batching and render as their own item. Subagent
 // invocations carry a description and a nested message tree; collapsing them
 // into a bucket count flattens that hierarchy.
-const STANDALONE_TOOL_TYPES = new Set<string>(["tool-Task"]);
+// `tool-Agent` is the current subagent wire name; `tool-Task` is its legacy
+// alias on replayed transcripts. Both opt out of batching.
+const STANDALONE_TOOL_TYPES = new Set<string>(["tool-Agent", "tool-Task"]);
 
 export function bucketFor(part: ToolUIPart): BucketKey | null {
   return TOOL_BUCKETS[part.type] ?? null;
@@ -53,8 +52,7 @@ export function filePathOf(part: ToolUIPart): string | undefined {
   switch (part.type) {
     case "tool-Read":
     case "tool-Edit":
-    case "tool-Write":
-    case "tool-MultiEdit": {
+    case "tool-Write": {
       const fp = input?.file_path;
       return typeof fp === "string" ? fp : undefined;
     }

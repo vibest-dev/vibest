@@ -2,34 +2,47 @@ import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
 import type { DynamicToolUIPart, ToolUIPart, UIDataTypes, UIMessage } from "ai";
 import type { ReactNode } from "react";
 
-import { ClaudeCodeBashOutputTool } from "@/components/claude-code/bash-output-tool";
 import { ClaudeCodeBashTool } from "@/components/claude-code/bash-tool";
 import { ClaudeCodeEditTool } from "@/components/claude-code/edit-tool";
 import { ClaudeCodeGlobTool } from "@/components/claude-code/glob-tool";
 import { ClaudeCodeGrepTool } from "@/components/claude-code/grep-tool";
-import { ClaudeCodeMultiEditTool } from "@/components/claude-code/multi-edit-tool";
 import { ClaudeCodeReadTool } from "@/components/claude-code/read-tool";
-import { ClaudeCodeSlashCommandTool } from "@/components/claude-code/slash-command-tool";
+import { ClaudeCodeTaskOutputTool } from "@/components/claude-code/task-output-tool";
 import { ClaudeCodeTaskTool } from "@/components/claude-code/task-tool";
 import { ClaudeCodeTodoWriteTool } from "@/components/claude-code/todo-write-tool";
 import { ClaudeCodeWebFetchTool } from "@/components/claude-code/web-fetch-tool";
 import { ClaudeCodeWebSearchTool } from "@/components/claude-code/web-search-tool";
 import { ClaudeCodeWriteTool } from "@/components/claude-code/write-tool";
 
+import { DynamicToolPart } from "../../dynamic-tool-part";
+import { claudeCodeDynamicToolName } from "./dynamic-name";
+
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
 type ClaudeCodeMessage = UIMessage<unknown, UIDataTypes, ClaudeCodeTools>;
 
-// The claude-code per-tool render registry: typed tool-* parts dispatch to
-// their dedicated card; anything unrecognized (dynamic-tool / unknown MCP
-// tools) returns null so the caller falls back to the generic DynamicToolPart.
-// The cast is the provider trust boundary — the harness transform guarantees
-// tool-* parts of this provider match ClaudeCodeTools.
+// The claude-code per-tool render registry. The switch is EXHAUSTIVE over every
+// tool in `ClaudeCodeTools`: typed tools with a dedicated card dispatch to it;
+// typed tools without one render through the generic card at an explicit call
+// site (not the caller's dynamic-tool fallback). The `default: satisfies never`
+// makes a newly-registered tool a compile error here until it is placed in one
+// bucket or the other — the UI-side complement to the harness registry guard.
+//
+// A true `dynamic-tool` part (an unknown MCP tool with no fixed type) returns
+// null so the caller falls back to its own DynamicToolPart.
 export function renderClaudeCodeTool(part: AnyToolPart, message: UIMessage): ReactNode | null {
   if (part.type === "dynamic-tool") return null;
   const typed = part as ToolUIPart<ClaudeCodeTools>;
   const typedMessage = message as ClaudeCodeMessage;
+
+  // Typed tool with no dedicated card — the generic card, but reached here (not
+  // via the caller's dynamic-tool path) so the switch below stays exhaustive.
+  const generic = () => <DynamicToolPart part={typed} name={claudeCodeDynamicToolName(typed)} />;
+
   switch (typed.type) {
+    // `Agent` is the current wire name; `Task` is its legacy alias, still found
+    // on replayed transcripts. Both drive the subagent card.
+    case "tool-Agent":
     case "tool-Task":
       return (
         <ClaudeCodeTaskTool
@@ -40,8 +53,8 @@ export function renderClaudeCodeTool(part: AnyToolPart, message: UIMessage): Rea
       );
     case "tool-Bash":
       return <ClaudeCodeBashTool invocation={typed} />;
-    case "tool-BashOutput":
-      return <ClaudeCodeBashOutputTool invocation={typed} />;
+    case "tool-TaskOutput":
+      return <ClaudeCodeTaskOutputTool invocation={typed} />;
     case "tool-Read":
       return <ClaudeCodeReadTool invocation={typed} />;
     case "tool-Grep":
@@ -56,13 +69,46 @@ export function renderClaudeCodeTool(part: AnyToolPart, message: UIMessage): Rea
       return <ClaudeCodeTodoWriteTool invocation={typed} />;
     case "tool-Glob":
       return <ClaudeCodeGlobTool invocation={typed} />;
-    case "tool-MultiEdit":
-      return <ClaudeCodeMultiEditTool invocation={typed} />;
     case "tool-Write":
       return <ClaudeCodeWriteTool invocation={typed} />;
-    case "tool-SlashCommand":
-      return <ClaudeCodeSlashCommandTool message={typedMessage} invocation={typed} />;
+
+    // Typed tools with no dedicated card yet — rendered generically. Listed so
+    // the exhaustiveness check below fires when the registry gains a tool.
+    case "tool-TaskStop":
+    case "tool-TaskCreate":
+    case "tool-TaskUpdate":
+    case "tool-TaskGet":
+    case "tool-TaskList":
+    case "tool-NotebookEdit":
+    case "tool-AskUserQuestion":
+    case "tool-EnterPlanMode":
+    case "tool-ExitPlanMode":
+    case "tool-EnterWorktree":
+    case "tool-ExitWorktree":
+    case "tool-ReportFindings":
+    case "tool-Workflow":
+    case "tool-ScheduleWakeup":
+    case "tool-Monitor":
+    case "tool-CronCreate":
+    case "tool-CronDelete":
+    case "tool-CronList":
+    case "tool-RemoteTrigger":
+    case "tool-PushNotification":
+    case "tool-ListMcpResourcesTool":
+    case "tool-ReadMcpResourceTool":
+    case "tool-ReadMcpResourceDirTool":
+    case "tool-DesignSync":
+    case "tool-Artifact":
+    case "tool-REPL":
+    case "tool-Projects":
+    case "tool-ShowOnboardingRolePicker":
+    case "tool-RefreshMcpTools":
+    case "tool-SendFeedback":
+    case "tool-propose_skills":
+      return generic();
+
     default:
-      return null;
+      typed satisfies never;
+      return generic();
   }
 }
