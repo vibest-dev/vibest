@@ -114,7 +114,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     }
   }
 
-  ({ serveUI, closeUI } = await createUIHandler(server, isDev));
+  // The UI handler is Effect-native; run it on the RPC runtime rather than
+  // building a second platform layer inside this Promise-shaped module.
+  ({ serveUI, closeUI } = await rpcRuntime.run(createUIHandler(server, isDev)));
 
   const wss = new WebSocketServer({ noServer: true });
 

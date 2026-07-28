@@ -3,6 +3,7 @@ import type * as http from "node:http";
 import type { Socket } from "node:net";
 
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
+import type { Effect, Layer } from "effect";
 import { ManagedRuntime } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
@@ -25,8 +26,18 @@ async function logErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
 
 export type RpcRuntime = {
   readonly context: RpcContext;
+  /**
+   * Run an effect on the server's own runtime. `http/server.ts` is Promise-
+   * shaped (node:http + ws + Vite share one server), so this is how the
+   * Effect-native pieces it wires up — the UI handler — get their services
+   * without a second composition root.
+   */
+  readonly run: <A, E>(effect: Effect.Effect<A, E, AgentRuntime>) => Promise<A>;
   readonly dispose: () => Promise<void>;
 };
+
+/** Everything `AgentRuntimeLayer` provides, as a requirement. */
+type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 
 export async function createRpcRuntime(): Promise<RpcRuntime> {
   const runtime = ManagedRuntime.make(AgentRuntimeLayer);
@@ -36,6 +47,7 @@ export async function createRpcRuntime(): Promise<RpcRuntime> {
   let disposing: Promise<void> | undefined;
   return {
     context,
+    run: (effect) => runtime.runPromise(effect),
     dispose: () => (disposing ??= runtime.dispose()),
   };
 }

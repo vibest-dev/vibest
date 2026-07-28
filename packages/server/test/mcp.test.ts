@@ -24,7 +24,7 @@ const stdioServer: McpServerConfig = {
 };
 
 const makeLayer = (home: string) => {
-  const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
+  const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
   const mcpRepo = McpRepositoryLayer.pipe(Layer.provide(paths));
   const provRepo = ProviderRepositoryLayer.pipe(Layer.provide(paths));
   return Layer.mergeAll(provRepo, McpServiceLayer.pipe(Layer.provide(mcpRepo)));

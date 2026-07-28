@@ -62,7 +62,7 @@ async function setup() {
   const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
   const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
   // Paths plus the platform services the repositories' JSON store runs on.
-  const pathsLayer = Layer.merge(layerPaths(home), NodeServices.layer);
+  const pathsLayer = Layer.provideMerge(layerPaths(home), NodeServices.layer);
 
   // The fake path goes to the adapter too: `session.create` gates on
   // checkAvailability, which is a PATH lookup — without the override the test
