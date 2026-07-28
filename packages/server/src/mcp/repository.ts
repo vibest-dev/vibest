@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { Paths } from "../config/paths";
 import type { StoreReadError, StoreWriteError } from "../errors";
-import { readJson, writeJsonAtomic } from "../infra/json-store";
+import { readJson, writeJsonAtomic, type JsonStorePlatform } from "../infra/json-store";
 import type { McpServerConfig, RuntimeConfig } from "../types";
 
 /**
@@ -19,21 +19,29 @@ export class McpRepository extends Context.Service<
   }
 >()("McpRepository") {}
 
-export const McpRepositoryLayer: Layer.Layer<McpRepository, never, Paths> = Layer.effect(
-  McpRepository,
-  Effect.gen(function* () {
-    const paths = yield* Paths;
-    const readConfig = () => readJson<RuntimeConfig>(paths.configFile, {});
-    return {
-      list: () => readConfig().pipe(Effect.map((config) => config.mcp ?? [])),
-      save: (servers) =>
-        Effect.gen(function* () {
-          const config = yield* readConfig();
-          yield* writeJsonAtomic(paths.configFile, {
-            ...config,
-            mcp: servers,
-          });
-        }),
-    };
-  }),
-);
+export const McpRepositoryLayer: Layer.Layer<McpRepository, never, Paths | JsonStorePlatform> =
+  Layer.effect(
+    McpRepository,
+    Effect.gen(function* () {
+      const paths = yield* Paths;
+      // Bind the platform services once so the methods below stay R-free; the
+      // Layer's R carries the requirement to the composition root instead.
+      const platform = yield* Effect.context<JsonStorePlatform>();
+      const readConfig = () => readJson<RuntimeConfig>(paths.configFile, {});
+      return {
+        list: () =>
+          readConfig().pipe(
+            Effect.map((config) => config.mcp ?? []),
+            Effect.provide(platform),
+          ),
+        save: (servers) =>
+          Effect.gen(function* () {
+            const config = yield* readConfig();
+            yield* writeJsonAtomic(paths.configFile, {
+              ...config,
+              mcp: servers,
+            });
+          }).pipe(Effect.provide(platform)),
+      };
+    }),
+  );

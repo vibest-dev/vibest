@@ -1,4 +1,5 @@
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, Layer } from "effect";
@@ -37,9 +38,14 @@ export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
   makeClaudeCodeAgent(),
 );
 
-const NodeProcessLayer = NodeChildProcessSpawner.layer.pipe(
-  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer)),
-);
+/**
+ * The Node platform services. Every effect that touches disk, paths, or random
+ * bytes bubbles these up its `R` channel; this is the one place they are
+ * satisfied for the server runtime.
+ */
+const PlatformLayer = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, NodeCrypto.layer);
+
+const NodeProcessLayer = NodeChildProcessSpawner.layer.pipe(Layer.provide(PlatformLayer));
 
 export const CodexLayer: Layer.Layer<Codex> = Layer.effect(Codex, makeCodexAgent()).pipe(
   Layer.provide(NodeProcessLayer),
@@ -82,8 +88,12 @@ const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
 const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(ProjectRepositoryLayer),
   Layer.provide(PathsLayer),
+  Layer.provide(PlatformLayer),
 );
-const SessionRepositoryProvided = SessionRepositoryLayer.pipe(Layer.provide(PathsLayer));
+const SessionRepositoryProvided = SessionRepositoryLayer.pipe(
+  Layer.provide(PathsLayer),
+  Layer.provide(PlatformLayer),
+);
 const HarnessAgentSessionPortProvided = HarnessAgentSessionPortLayer.pipe(
   Layer.provide(HarnessSessionServiceLayer),
 );
@@ -110,5 +120,5 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   HarnessListProvided,
   HarnessProbeProvided,
   FileSystemServiceLayer,
-  NodeFileSystem.layer,
+  PlatformLayer,
 );

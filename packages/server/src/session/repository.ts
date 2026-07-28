@@ -1,6 +1,5 @@
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { type JsonStoreLoadError, makeJsonCollection } from "@vibest/effect-json-store";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 
 import { Paths } from "../config/paths";
 import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
@@ -61,7 +60,11 @@ export class SessionRepository extends Context.Service<
 const isSafeId = (id: string): boolean =>
   id.length > 0 && !/[/\\]/.test(id) && id !== "." && id !== "..";
 
-export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths> = Layer.effect(
+export const SessionRepositoryLayer: Layer.Layer<
+  SessionRepository,
+  never,
+  Paths | FileSystem.FileSystem
+> = Layer.effect(
   SessionRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
@@ -128,4 +131,4 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
           : sessions.remove(entryId(projectId, sessionId)).pipe(Effect.mapError(asWriteError)),
     };
   }),
-).pipe(Layer.provide(NodeFileSystem.layer));
+);

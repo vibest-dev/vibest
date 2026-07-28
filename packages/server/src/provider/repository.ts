@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { Paths } from "../config/paths";
 import type { StoreReadError, StoreWriteError } from "../errors";
-import { readJson, writeJsonAtomic } from "../infra/json-store";
+import { readJson, writeJsonAtomic, type JsonStorePlatform } from "../infra/json-store";
 import type { ProviderConfig, RuntimeConfig } from "../types";
 
 /**
@@ -20,13 +20,24 @@ export class ProviderRepository extends Context.Service<
   }
 >()("ProviderRepository") {}
 
-export const ProviderRepositoryLayer: Layer.Layer<ProviderRepository, never, Paths> = Layer.effect(
+export const ProviderRepositoryLayer: Layer.Layer<
+  ProviderRepository,
+  never,
+  Paths | JsonStorePlatform
+> = Layer.effect(
   ProviderRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
+    // Bind the platform services once so the methods below stay R-free; the
+    // Layer's R carries the requirement to the composition root instead.
+    const platform = yield* Effect.context<JsonStorePlatform>();
     const readConfig = () => readJson<RuntimeConfig>(paths.configFile, {});
     return {
-      list: () => readConfig().pipe(Effect.map((config) => config.provider ?? [])),
+      list: () =>
+        readConfig().pipe(
+          Effect.map((config) => config.provider ?? []),
+          Effect.provide(platform),
+        ),
       save: (providers) =>
         Effect.gen(function* () {
           const config = yield* readConfig();
@@ -34,7 +45,7 @@ export const ProviderRepositoryLayer: Layer.Layer<ProviderRepository, never, Pat
             ...config,
             provider: providers,
           });
-        }),
+        }).pipe(Effect.provide(platform)),
     };
   }),
 );

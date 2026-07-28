@@ -61,7 +61,8 @@ function makeFake(): string {
 async function setup() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-ws-"));
-  const pathsLayer = layerPaths(home);
+  // Paths plus the platform services the repositories' JSON store runs on.
+  const pathsLayer = Layer.merge(layerPaths(home), NodeServices.layer);
 
   // The fake path goes to the adapter too: `session.create` gates on
   // checkAvailability, which is a PATH lookup — without the override the test

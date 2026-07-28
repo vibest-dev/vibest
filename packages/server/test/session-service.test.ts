@@ -16,6 +16,7 @@ import { type HarnessCreateError, HarnessAgentSessionPort } from "../src/session
 import { SessionRepository, SessionRepositoryLayer } from "../src/session/repository";
 import { SessionManagerLayer } from "../src/session/runtime";
 import { SessionService, SessionServiceLayer } from "../src/session/service";
+import { NodePlatformLayer } from "./platform";
 
 type PortSpy = {
   create: Array<{ harnessAgentId: string; cwd: string }>;
@@ -73,7 +74,9 @@ describe("SessionService", () => {
   });
 
   const layers = (port: Layer.Layer<HarnessAgentSessionPort>) => {
-    const paths = layerPaths(home);
+    // Paths plus the platform services the repositories' JSON store runs on;
+    // one reference, so the repositories share the same temp-dir wiring.
+    const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
     const base = Layer.mergeAll(
       ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(paths)),
       SessionRepositoryLayer.pipe(Layer.provide(paths)),

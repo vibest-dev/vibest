@@ -11,9 +11,14 @@ import {
   ProjectService,
   ProjectServiceLayer,
 } from "../src/index";
+import { NodePlatformLayer } from "./platform";
 
 const makeLayer = (home: string) =>
-  ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer), Layer.provide(layerPaths(home)));
+  ProjectServiceLayer.pipe(
+    Layer.provide(ProjectRepositoryLayer),
+    Layer.provide(layerPaths(home)),
+    Layer.provide(NodePlatformLayer),
+  );
 
 describe("ProjectService", () => {
   let home: string;
