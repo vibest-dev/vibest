@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
+import { Clock, Effect, FileSystem, Path, type PlatformError } from "effect";
 
 /**
  * The stop tombstone — `$VIBEST_HOME/daemon.stopped`, written by an explicit
@@ -7,23 +6,33 @@ import path from "node:path";
  * resurrect a daemon the user deliberately stopped. An explicit start clears
  * it. Its mere existence is the signal; the timestamp is only for debugging.
  */
-function tombstonePath(home: string): string {
-  return path.join(home, "daemon.stopped");
-}
+const tombstoneFile = (path: Path.Path, home: string): string => path.join(home, "daemon.stopped");
 
-export function hasTombstone(home: string): boolean {
-  return fs.existsSync(tombstonePath(home));
-}
+export const hasTombstone = (
+  home: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    return yield* fs.exists(tombstoneFile(path, home)).pipe(Effect.orElseSucceed(() => false));
+  });
 
-export function writeTombstone(home: string): void {
-  fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(tombstonePath(home), String(Date.now()), { mode: 0o600 });
-}
+export const writeTombstone = (
+  home: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const now = yield* Clock.currentTimeMillis;
+    yield* fs.makeDirectory(home, { recursive: true });
+    yield* fs.writeFileString(tombstoneFile(path, home), String(now), { mode: 0o600 });
+  });
 
-export function clearTombstone(home: string): void {
-  try {
-    fs.rmSync(tombstonePath(home));
-  } catch {
-    // already gone
-  }
-}
+export const clearTombstone = (
+  home: string,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.remove(tombstoneFile(path, home), { force: true }).pipe(Effect.ignore);
+  });

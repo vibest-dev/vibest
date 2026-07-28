@@ -3,6 +3,7 @@ export { DaemonLaunchError, DaemonStoppedError } from "./errors";
 export {
   type DaemonHandle,
   type DaemonLauncherError,
+  type DaemonPlatform,
   type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
   statusDaemon,
