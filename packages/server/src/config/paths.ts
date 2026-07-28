@@ -1,7 +1,7 @@
 import os from "node:os";
-import path from "node:path";
+import nodePath from "node:path";
 
-import { Context, Layer } from "effect";
+import { Context, Effect, Layer, Path } from "effect";
 
 /**
  * Resolved filesystem locations the runtime persists to. Injected as a service
@@ -21,7 +21,7 @@ export class Paths extends Context.Service<
   }
 >()("Paths") {}
 
-const resolve = (home: string) => ({
+const resolve = (path: Path.Path, home: string) => ({
   home,
   projectsFile: path.join(home, "storage", "projects.json"),
   configFile: path.join(home, "config.json"),
@@ -32,14 +32,32 @@ const resolve = (home: string) => ({
  * `$VIBEST_HOME`, falling back to `~/.vibest` — the single home every client
  * (server Paths, CLI, desktop, daemon launcher) resolves through, so the
  * one-daemon-per-home invariant can never drift on a second definition.
+ *
+ * Deliberately a plain function: it is the one thing every front door needs
+ * before it has a runtime, and `node:os.homedir` has no Effect equivalent
+ * anyway, so the join rides along with it.
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
+  return env.VIBEST_HOME ?? nodePath.join(os.homedir(), ".vibest");
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */
-export const layerPaths = (home: string): Layer.Layer<Paths> =>
-  Layer.sync(Paths, () => resolve(home));
+export const layerPaths = (home: string): Layer.Layer<Paths, never, Path.Path> =>
+  Layer.effect(
+    Paths,
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      return resolve(path, home);
+    }),
+  );
 
 /** Default: `$VIBEST_HOME`, falling back to `~/.vibest`. */
-export const PathsLayer: Layer.Layer<Paths> = Layer.sync(Paths, () => resolve(resolveVibestHome()));
+export const PathsLayer: Layer.Layer<Paths, never, Path.Path> = Layer.effect(
+  Paths,
+  // Resolved when the layer is built, not when this module is imported — the
+  // daemon sets `VIBEST_HOME` in the child's environment.
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    return resolve(path, resolveVibestHome());
+  }),
+);

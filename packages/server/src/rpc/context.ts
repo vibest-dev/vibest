@@ -1,5 +1,6 @@
 import type { WithEffectContext } from "@orpc/experimental-effect";
 import type { FileSystem } from "effect/FileSystem";
+import type { Path } from "effect/Path";
 
 import type { EventBus } from "../events";
 import type { FileSystemService } from "../fs";
@@ -11,6 +12,7 @@ import type { SessionService } from "../session";
 export type RpcContext = WithEffectContext<
   | EventBus
   | FileSystem
+  | Path
   | HarnessAgentRegistry
   | HarnessListService
   | HarnessProbeService

@@ -1,4 +1,3 @@
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { createRouterClient } from "@orpc/server";
 import { Layer, ManagedRuntime } from "effect";
 
@@ -34,7 +33,7 @@ export async function makeRpcTestHarness(
   adapters: ReadonlyArray<HarnessAgentAdapter> = [],
 ) {
   // Paths plus the platform services the repositories' JSON store runs on.
-  const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
+  const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
     Layer.provide(registryLayer),
@@ -65,7 +64,7 @@ export async function makeRpcTestHarness(
       listLayer,
       probeLayer,
       FileSystemServiceLayer,
-      NodeFileSystem.layer,
+      NodePlatformLayer,
     ),
   );
   // Layer construction does file I/O now (the project document loads eagerly),

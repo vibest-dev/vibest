@@ -39,7 +39,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
   const rpcRuntime = await createRpcRuntime();
   const wsHandler = createWsRPCHandler(rpcRuntime.context);
   const tickets = createTicketStore();
-  const serveUI = createUIHandler();
+  // The UI handler is Effect-native; run it on the RPC runtime rather than
+  // building a second platform layer inside this Promise-shaped module.
+  const serveUI = await rpcRuntime.run(createUIHandler());
 
   const server = http.createServer((req, res) => {
     void handleRequest(req, res);
