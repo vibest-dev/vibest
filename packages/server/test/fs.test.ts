@@ -2,10 +2,13 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FileSystemService, FileSystemServiceLayer } from "../src/index";
+import { NodePlatformLayer } from "./platform";
+
+const fsServiceLayer = FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer));
 
 describe("FileSystemService", () => {
   let cwd: string;
@@ -25,7 +28,7 @@ describe("FileSystemService", () => {
   });
 
   const run = <A, E>(program: Effect.Effect<A, E, FileSystemService>) =>
-    Effect.runPromise(Effect.provide(program, FileSystemServiceLayer));
+    Effect.runPromise(Effect.provide(program, fsServiceLayer));
 
   // Run a program expected to fail and surface the error's `_tag` (or a sentinel
   // if it unexpectedly succeeds).

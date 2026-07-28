@@ -124,6 +124,6 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   RegistryLayer,
   HarnessListProvided,
   HarnessProbeProvided,
-  FileSystemServiceLayer,
+  FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
   PlatformLayer,
 );
