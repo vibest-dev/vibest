@@ -1,29 +1,37 @@
 ---
 name: verify
-description: Build/launch/drive recipe for verifying vibest web changes at runtime (tsx dev server, dynamic port)
+description: Build/launch/drive recipe for verifying vibest web changes at runtime (two processes: vite dev + the server)
 ---
 
 # Verifying vibest at runtime
 
 ## Build + launch
 
+Dev is **two processes**: Vite serves the app, the vibest server serves the API,
+and Vite proxies `/api` + `/ws/rpc` across so the browser stays same-origin.
+
 ```bash
-# Start the dev server (run_in_background) — no prebuild needed:
+# The API server (run_in_background) — no prebuild needed:
 # workspace packages export src/*.ts directly and tsx resolves them.
-# Pin the port so the URL is deterministic (dev otherwise picks a random one):
-cd packages/vibest && VIBEST_PORT=4000 pnpm dev
+cd packages/vibest && pnpm dev            # foreground `serve` on VIBEST_PORT=4000
+
+# The app (run_in_background), in a second call:
+cd apps/app && pnpm dev                   # vite on 5173, proxying to 4000
 ```
 
-This runs `NODE_ENV=development tsx src/node/cli.ts`: one server bound to
-`127.0.0.1` with Vite middleware serving **`apps/app`**, oRPC at `/api/rpc`, WS
-at `/ws/rpc`, health at `/api/health`.
+Open **the Vite URL** (`http://localhost:5173/`), not the server port — the
+server only answers `/api/*`, `/ws/rpc`, and the _built_ bundle (503 until you
+`turbo run build --filter=@vibest/app`). `pnpm dev` at the root runs both through
+turbo.
 
-**Port is dynamic in dev.** `readPort()` returns `0` under `NODE_ENV=development`
-(the OS assigns an ephemeral port) unless `VIBEST_PORT` is set. Either pin it
-with `VIBEST_PORT=4000` (recommended), or read the actual port from the dev
-output — the server prints `vibest:ready {"port":<PORT>}` then
-`vibest listening on http://127.0.0.1:<PORT>`. Health check:
-`curl http://127.0.0.1:<PORT>/api/health` → `ok`.
+Health check: `curl http://127.0.0.1:4000/api/health` → `ok`, and
+`curl http://localhost:5173/api/health` → `ok` proves the proxy.
+
+To move the API off 4000, export `VIBEST_PORT` for **both** processes —
+`vite.config.ts` reads the same variable to pick its proxy target.
+
+Restarting the server no longer reloads the browser: Vite keeps the page, the
+client reconnects over the proxied WS.
 
 Gotchas:
 
@@ -31,10 +39,10 @@ Gotchas:
   typecheck; `pnpm run format` to fix formatting. Typecheck one package with
   `turbo run typecheck --filter=@vibest/app`.
 - **TanStack Router's `routeTree.gen.ts` regenerates only when the Vite router
-  plugin runs** — on app load through the dev server, NOT on typecheck. After
-  adding/renaming/deleting route files, hit the app root once
-  (`curl -o /dev/null http://127.0.0.1:<PORT>/`) before typechecking, or
-  typecheck fails against the stale tree.
+  plugin runs** — on app load through the Vite dev server, NOT on typecheck.
+  After adding/renaming/deleting route files, hit the app root once
+  (`curl -o /dev/null http://localhost:5173/`) before typechecking, or typecheck
+  fails against the stale tree.
 
 ## Flows worth driving
 

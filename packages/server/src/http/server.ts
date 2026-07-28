@@ -7,9 +7,7 @@ import { WebSocketServer } from "ws";
 import { createRpcRuntime, createWsRPCHandler } from "../rpc";
 import { bearerToken, createTicketStore, tokensMatch } from "./auth";
 import { corsHeaders, isAllowedOrigin, isLoopbackHost } from "./cors";
-import { createUIHandler, type UIHandler } from "./ui";
-
-const isDev = process.env.NODE_ENV === "development";
+import { createUIHandler } from "./ui";
 
 export type ManagedServer = Server & {
   readonly dispose: () => Promise<void>;
@@ -41,9 +39,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
   const rpcRuntime = await createRpcRuntime();
   const wsHandler = createWsRPCHandler(rpcRuntime.context);
   const tickets = createTicketStore();
-
-  let serveUI: UIHandler;
-  let closeUI = async () => {};
+  const serveUI = createUIHandler();
 
   const server = http.createServer((req, res) => {
     void handleRequest(req, res);
@@ -114,8 +110,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     }
   }
 
-  ({ serveUI, closeUI } = await createUIHandler(server, isDev));
-
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws) => {
@@ -125,13 +119,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     console.error(e);
   });
 
-  // Share the same HTTP server between Vite's HMR socket and our custom WebSocketServer.
+  // The only upgrade this server answers. Vite's HMR socket used to share it;
+  // now `apps/app` runs its own dev server and proxies `/ws/rpc` here instead.
   server.on("upgrade", (req, socket, head) => {
-    if (isDev) {
-      const protocol = req.headers["sec-websocket-protocol"];
-      if (protocol && ["vite-ping", "vite-hmr"].includes(protocol)) return;
-    }
-
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
     if (requestUrl.pathname !== "/ws/rpc") {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
@@ -180,7 +170,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await serverClosed;
-      await closeUI();
       await rpcRuntime.dispose();
     })());
 

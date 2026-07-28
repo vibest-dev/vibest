@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import url from "node:url";
 
@@ -33,46 +33,21 @@ function resolveStaticDir(): string | undefined {
 }
 
 /**
- * The UI-serving half of the server, isolated from auth/CORS/routing: Vite
- * middleware in dev (its HMR socket shares the HTTP server), `sirv` over the
- * built bundle in prod, and a 503 when the bundle has not been built.
+ * The UI-serving half of the server, isolated from auth/CORS/routing: `sirv`
+ * over the built bundle, and a 503 when the bundle has not been built. There is
+ * no dev branch — `apps/app` runs its own `vite dev` and proxies `/api` and
+ * `/ws/rpc` here, so this server serves files in every mode and never hosts a
+ * bundler.
  */
-export async function createUIHandler(
-  server: Server,
-  isDev: boolean,
-): Promise<{ readonly serveUI: UIHandler; readonly closeUI: () => Promise<void> }> {
-  if (isDev) {
-    // Import vite lazily so the production bundle never depends on it
-    // (vite is a devDependency and marked external in tsdown.config.ts).
-    const { createServer: createViteDevServer } = await import("vite");
-    const vite = await createViteDevServer({
-      // Serve the standalone web app package (apps/app) through this server.
-      root: path.resolve(url.fileURLToPath(new URL("../../../../apps/app/", import.meta.url))),
-      server: {
-        middlewareMode: true,
-        hmr: { server },
-      },
-    });
-    return {
-      serveUI: (req, res) => vite.middlewares(req, res, () => notFound(res)),
-      closeUI: () => vite.close(),
-    };
-  }
-
+export function createUIHandler(): UIHandler {
   const staticDir = resolveStaticDir();
   if (!staticDir) {
-    return {
-      serveUI: (_req, res) => {
-        res.statusCode = 503;
-        res.end("Web UI not built. Run the @vibest/app build first.");
-      },
-      closeUI: async () => {},
+    return (_req, res) => {
+      res.statusCode = 503;
+      res.end("Web UI not built. Run the @vibest/app build first.");
     };
   }
 
   const assets = sirv(staticDir, { single: true });
-  return {
-    serveUI: (req, res) => assets(req, res, () => notFound(res)),
-    closeUI: async () => {},
-  };
+  return (req, res) => assets(req, res, () => notFound(res));
 }
