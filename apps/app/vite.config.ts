@@ -12,21 +12,22 @@ import { defineConfig } from "vite";
  * same-origin with the RPC, the way it is when the server serves the built
  * bundle. Add a prefix here whenever the server grows one.
  *
- * 4100, not the server's own default of 4000: that port belongs to the daemon,
- * which the desktop app spawns and which holds an auth token this browser
- * cannot present. Proxying there answers `/api/health` but 401s the ws-ticket,
- * so the app loads and never connects. Keep dev on a port nothing else claims.
+ * 4180/4190 rather than 4000/5173, which are taken: 4000 is the daemon's
+ * default, spawned by the desktop app and guarded by an auth token this browser
+ * cannot present — proxying there answers `/api/health` but 401s the ws-ticket,
+ * so the app loads and silently never connects. 5173 is `apps/desktop`'s
+ * electron-vite renderer. 4180/4190 are claimed by no common dev tool. Open
+ * 4190: 4180 serves the last *built* bundle, so it works but shows stale UI.
  */
-const SERVER_PORT = Number(process.env.VIBEST_PORT ?? 4100);
+const SERVER_PORT = Number(process.env.VIBEST_PORT ?? 4180);
 const serverTarget = `http://127.0.0.1:${SERVER_PORT}`;
 
 export default defineConfig({
   server: {
-    // Pinned, and strict: 5173 is `apps/desktop`'s electron-vite renderer, so
-    // under `pnpm dev` Vite's default would silently land on 5174 — and whoever
-    // opened 5173 would get the desktop renderer, which has no proxy and never
-    // connects. Fail to boot instead of drifting to another port.
-    port: 5180,
+    // Strict, so a taken port fails the boot instead of silently drifting to
+    // the next one — that drift is how you end up reading someone else's dev
+    // server at the URL you expected to be ours.
+    port: 4190,
     strictPort: true,
     proxy: {
       "/api": { target: serverTarget, changeOrigin: true },
