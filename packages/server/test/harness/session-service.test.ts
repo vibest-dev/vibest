@@ -15,6 +15,7 @@ import { AgentOperationError } from "../../src/harness/errors";
 import { streamFromQueueOne } from "../../src/harness/queue-stream";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 import { makeHarnessAgentSessionService } from "../../src/harness/session-service";
+import { NodePlatformLayer } from "../platform";
 
 const makeFixture = Effect.gen(function* () {
   const resumeGate = yield* Deferred.make<void>();
@@ -105,7 +106,9 @@ const makeFixture = Effect.gen(function* () {
     getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
   } satisfies HarnessAgentAdapter;
 
-  const service = yield* makeHarnessAgentSessionService(makeHarnessAgentRegistry([adapter]));
+  const service = yield* makeHarnessAgentSessionService(makeHarnessAgentRegistry([adapter])).pipe(
+    Effect.provide(NodePlatformLayer),
+  );
 
   return {
     service,

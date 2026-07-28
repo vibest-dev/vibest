@@ -433,19 +433,9 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
         (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
       ),
     ),
-  checkAvailability: Effect.try({
-    try: () => {
-      resolveClaudeExecutable();
-      return { available: true };
-    },
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.succeed({
-        available: false,
-        reason: cause instanceof Error ? cause.message : String(cause),
-      }),
-    ),
+  checkAvailability: resolveClaudeExecutable().pipe(
+    Effect.as({ available: true }),
+    Effect.catch((cause) => Effect.succeed({ available: false, reason: cause.message })),
   ),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(

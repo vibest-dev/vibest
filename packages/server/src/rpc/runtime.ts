@@ -33,11 +33,6 @@ export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
 export class Pi extends Context.Service<Pi, PiAgent>()("Pi") {}
 
-export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
-  ClaudeCode,
-  makeClaudeCodeAgent(),
-);
-
 /**
  * The Node platform services. Every effect that touches disk, paths, or random
  * bytes bubbles these up its `R` channel; this is the one place they are
@@ -46,6 +41,11 @@ export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
 const PlatformLayer = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, NodeCrypto.layer);
 
 const NodeProcessLayer = NodeChildProcessSpawner.layer.pipe(Layer.provide(PlatformLayer));
+
+export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
+  ClaudeCode,
+  makeClaudeCodeAgent(),
+).pipe(Layer.provide(PlatformLayer));
 
 export const CodexLayer: Layer.Layer<Codex> = Layer.effect(Codex, makeCodexAgent()).pipe(
   Layer.provide(NodeProcessLayer),
@@ -74,12 +74,16 @@ const RegistryLayer = Layer.effect(
 // Both harness routes read the same registry instance. It matters most for the
 // probe: one cache, shared by every connecting client, so N tabs on the same
 // directory still cost one CLI spawn.
-const HarnessListProvided = HarnessListLayer.pipe(Layer.provide(RegistryLayer));
+const HarnessListProvided = HarnessListLayer.pipe(
+  Layer.provide(RegistryLayer),
+  Layer.provide(PlatformLayer),
+);
 const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
 
 // Harness session lifecycle (agent-native ids only); shared by the port and RPC.
 const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(RegistryLayer),
+  Layer.provide(PlatformLayer),
 );
 
 // Server-owned services. Each shared dependency (EventBus, harness service,

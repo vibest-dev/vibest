@@ -36,8 +36,14 @@ export function makeRpcTestHarness(
   // Paths plus the platform services the repositories' JSON store runs on.
   const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
-  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
-  const listLayer = HarnessListLayer.pipe(Layer.provide(registryLayer));
+  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(NodePlatformLayer),
+  );
+  const listLayer = HarnessListLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(NodePlatformLayer),
+  );
   const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const sessionServiceLayer = SessionServiceLayer.pipe(
