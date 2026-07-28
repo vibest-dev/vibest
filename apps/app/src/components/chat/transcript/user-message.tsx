@@ -7,6 +7,10 @@ export function UserMessage({ message }: { message: UIMessage }) {
     <>
       {message.parts.map((part, index) =>
         part.type === "text" ? (
+          // A user message is built once at submit time and never streamed, so
+          // `parts` is a frozen array that cannot reorder or filter. Text parts
+          // carry no id of their own, which leaves the position as the only key.
+          // react-doctor-disable-next-line no-array-index-as-key
           <Message key={index} from="user">
             <MessageContent>
               <CollapsibleUserText text={part.text} />

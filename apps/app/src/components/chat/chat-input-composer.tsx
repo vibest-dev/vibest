@@ -12,10 +12,11 @@ import { useLatestRef } from "@/hooks/use-latest-ref";
 
 import { useChatSession } from "./chat-session-context";
 import { ChatInput } from "./input/chat-input";
-import { ChatInputProvider, useChatInputController } from "./input/chat-input-provider";
+import { ChatInputProvider } from "./input/chat-input-provider";
 import { createChatBaseExtensions } from "./input/extensions/chat-base-extensions";
 import { createSubmitKeymap } from "./input/extensions/keymaps";
 import { hasChatContent } from "./input/serialize";
+import { useChatInputController } from "./input/use-chat-input-controller";
 
 // Live-session input bar on the TipTap chat-input kit: Enter sends (IME-safe,
 // handled by the submit keymap) / Shift+Enter breaks the line; an in-flight

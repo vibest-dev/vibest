@@ -1,33 +1,7 @@
 import { EditorContext } from "@tiptap/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
-import { useLatestRef } from "@/hooks/use-latest-ref";
-
-import { ChatInputController, type ChatInputControllerOptions } from "./chat-input-controller";
-
-// Create the controller inside an effect (under StrictMode each effect run
-// creates and disposes its own instance — a destroyed editor is never reused);
-// callbacks go through a latest-ref so closures never see stale state. First
-// render returns null — consumers must tolerate it.
-export function useChatInputController(
-  opts: ChatInputControllerOptions,
-): ChatInputController | null {
-  const optsRef = useLatestRef(opts);
-  const [controller, setController] = useState<ChatInputController | null>(null);
-  useEffect(() => {
-    const created = new ChatInputController({
-      extensions: (self) => optsRef.current.extensions(self),
-      onSubmit: (text) => optsRef.current.onSubmit(text),
-    });
-    setController(created);
-    return () => {
-      setController(null);
-      created.dispose();
-    };
-    // optsRef is a stable ref; the controller's lifetime is bound to mount only.
-  }, [optsRef]);
-  return controller;
-}
+import type { ChatInputController } from "./chat-input-controller";
 
 export function ChatInputProvider({
   controller,
@@ -36,9 +10,9 @@ export function ChatInputProvider({
   controller: ChatInputController | null;
   children: ReactNode;
 }) {
-  return (
-    <EditorContext.Provider value={{ editor: controller?.editor ?? null }}>
-      {children}
-    </EditorContext.Provider>
-  );
+  // `editor` is readonly on the controller, so the identity only changes when
+  // the controller itself is replaced — memoising here keeps every Tiptap
+  // consumer from re-rendering on unrelated parent renders.
+  const value = useMemo(() => ({ editor: controller?.editor ?? null }), [controller]);
+  return <EditorContext.Provider value={value}>{children}</EditorContext.Provider>;
 }

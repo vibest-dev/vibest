@@ -5,7 +5,7 @@ import { ChatInputComposer } from "@/components/chat/chat-input-composer";
 import { ChatModelSelect } from "@/components/chat/chat-model-select";
 import { ChatPermissionModeSelect } from "@/components/chat/chat-permission-mode-select";
 import { ChatReasoningEffortSelect } from "@/components/chat/chat-reasoning-effort-select";
-import { ChatSessionProvider } from "@/components/chat/chat-session-context";
+import { ChatSessionProvider } from "@/components/chat/chat-session-provider";
 import { ChatTranscript } from "@/components/chat/chat-transcript";
 import { HarnessBadge } from "@/components/chat/harness-badge";
 

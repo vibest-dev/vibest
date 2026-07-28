@@ -245,7 +245,9 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
       onRequestResolved(requestId);
     };
 
-    const handleRequest = async (request: AgentRequest) => {
+    // Synchronous on purpose: the auto-approve call is fire-and-forget, so
+    // nothing here is awaited and callers must not serialise on it.
+    const handleRequest = (request: AgentRequest) => {
       if (request.type === "plan" && !request.plan.trim()) {
         void this.client.session
           .respondToAgentRequest({
@@ -272,7 +274,7 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
       for (const requestId of deliveredRequestIds) {
         if (!pendingRequestIds.has(requestId)) resolveRequest(requestId);
       }
-      for (const request of snapshot.pendingRequests) await handleRequest(request);
+      for (const request of snapshot.pendingRequests) handleRequest(request);
       return snapshot.cursor;
     };
 
@@ -306,7 +308,7 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
           if (event.seq <= cursor) continue;
           cursor = event.seq;
           if (event.type === "session.request.asked") {
-            await handleRequest(event.request);
+            handleRequest(event.request);
           } else if (
             event.type === "session.request.replied" ||
             event.type === "session.request.rejected"

@@ -5,8 +5,8 @@ import { Toaster } from "sonner";
 
 import "./index.css";
 
-import { ChatManagerProvider } from "./core/chat/chat-context";
 import { ChatManager } from "./core/chat/chat-manager";
+import { ChatManagerProvider } from "./core/chat/chat-manager-provider";
 import { OrpcChatSessionTransport } from "./core/chat/chat-transport";
 import { SessionEventsSync } from "./core/session/session-events-sync";
 import { createAppClients, type AppClients } from "./lib/orpc";
