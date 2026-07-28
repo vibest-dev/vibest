@@ -106,7 +106,7 @@ async function setup() {
     registryLayer,
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
-    FileSystemServiceLayer,
+    FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
   );
   const runtime = ManagedRuntime.make(appLayer);
