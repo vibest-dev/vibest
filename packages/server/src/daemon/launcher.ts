@@ -244,6 +244,7 @@ const spawnDaemon = (
   Effect.gen(function* () {
     const { home } = options;
     const crypto = yield* Crypto.Crypto;
+    const path = yield* Path.Path;
     const port = yield* reservePort(options.port ?? DEFAULT_PORT);
     const token = yield* crypto.randomBytes(32).pipe(
       Effect.map(hex),
@@ -267,7 +268,7 @@ const spawnDaemon = (
       signal(pid, "SIGTERM");
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${nodePath.join(home, "daemon.log")}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${path.join(home, "daemon.log")}`,
         }),
       );
     }
