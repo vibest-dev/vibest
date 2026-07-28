@@ -7,6 +7,7 @@ import { beforeEach, describe, vi } from "vitest";
 
 import { makeClaudeCodeAdapter } from "../../../src/harness/claude-code/adapter";
 import { makeClaudeCodeAgent } from "../../../src/harness/claude-code/agent";
+import { NodePlatformLayer } from "../../platform";
 
 const mockQuery = vi.hoisted(() =>
   vi.fn<
@@ -19,6 +20,11 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: mockQuery,
   getSessionInfo: mockGetSessionInfo,
 }));
+
+// The agent locates the `claude` binary through FileSystem/Path; every test
+// here runs against the real Node platform services.
+const claudeAgent = (options?: Parameters<typeof makeClaudeCodeAgent>[0]) =>
+  makeClaudeCodeAgent(options).pipe(Effect.provide(NodePlatformLayer));
 
 type FakeQuery = sdk.Query & {
   readonly supportedCommands: ReturnType<typeof vi.fn>;
@@ -93,7 +99,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("passes the server environment to the Claude Code process", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent({
+      const agent = yield* claudeAgent({
         env: {
           ...process.env,
           HTTPS_PROXY: "http://desktop-proxy.test:8443",
@@ -108,7 +114,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("leaves the permission mode to the SDK default when none is provided", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
 
       assert.equal(lastOptions().permissionMode, undefined);
@@ -121,7 +127,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("forwards bypass permission mode and the required safety flag", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent({ permissionMode: "bypassPermissions" });
+      const agent = yield* claudeAgent({ permissionMode: "bypassPermissions" });
       const { sessionId } = yield* agent.session.create();
 
       assert.equal(lastOptions().permissionMode, "bypassPermissions");
@@ -132,7 +138,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("creates a scoped session and exposes SDK capabilities as Effects", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
 
       assert.match(
@@ -160,7 +166,7 @@ describe("ClaudeCodeAgent", () => {
         { type: "system", subtype: "init", session_id: "sdk-session" } as sdk.SDKMessage,
         { type: "result", subtype: "success" } as sdk.SDKMessage,
       ];
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
 
       yield* agent.session.setModel(sessionId, "opus");
@@ -188,7 +194,7 @@ describe("ClaudeCodeAgent", () => {
         queryInstance = makeFakeQuery(prompt, false, reportNativeFailure);
         return queryInstance;
       });
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const session = yield* makeClaudeCodeAdapter(agent).open({ cwd: "/tmp" });
       const crashSeen = yield* Deferred.make<void>();
       yield* Stream.runForEach(session.events, (event) =>
@@ -214,7 +220,7 @@ describe("ClaudeCodeAgent", () => {
         { type: "system", subtype: "init", session_id: "sdk-session" } as sdk.SDKMessage,
         { type: "result", subtype: "success" } as sdk.SDKMessage,
       ];
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const session = yield* makeClaudeCodeAdapter(agent).open({
         cwd: "/tmp",
         model: "opus",
@@ -245,7 +251,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("rejects a concurrent turn while the previous turn is unfinished", () =>
     Effect.gen(function* () {
       messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
       const first = yield* agent.session.prompt({
         sessionId,
@@ -273,7 +279,7 @@ describe("ClaudeCodeAgent", () => {
         return queryInstance;
       });
       mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
 
       const first = yield* agent.session.prompt({
@@ -299,7 +305,7 @@ describe("ClaudeCodeAgent", () => {
   it.effect("single-flights concurrent resume and fails when no transcript exists", () =>
     Effect.gen(function* () {
       mockGetSessionInfo.mockResolvedValue({ sessionId: "present" });
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const sessionId = "019f6013-0000-7000-8000-000000000002";
 
       yield* Effect.all(
@@ -315,7 +321,7 @@ describe("ClaudeCodeAgent", () => {
       assert.equal(lastOptions().sessionId, undefined);
 
       mockGetSessionInfo.mockResolvedValue(undefined);
-      const missing = yield* makeClaudeCodeAgent();
+      const missing = yield* claudeAgent();
       const error = yield* missing.session
         .getSupportedCommands("019f6013-0000-7000-8000-000000000003")
         .pipe(Effect.flip);
@@ -325,7 +331,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("denies pending SDK permissions when the session scope closes", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
       const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
         Effect.forkChild,
@@ -359,7 +365,7 @@ describe("ClaudeCodeAgent", () => {
 
   it.effect("bridges SDK permission promises through Deferred", () =>
     Effect.gen(function* () {
-      const agent = yield* makeClaudeCodeAgent();
+      const agent = yield* claudeAgent();
       const { sessionId } = yield* agent.session.create();
       const requestFiber = yield* Stream.runHead(agent.session.requestPermission(sessionId)).pipe(
         Effect.forkChild,

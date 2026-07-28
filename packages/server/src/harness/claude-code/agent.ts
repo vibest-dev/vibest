@@ -1,6 +1,17 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Exit, FiberSet, Queue, Ref, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  FiberSet,
+  FileSystem,
+  Path,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import type * as Cause from "effect/Cause";
 import { v7 as uuid } from "uuid";
 
@@ -159,9 +170,22 @@ export interface ClaudeCodeAgentOptions {
 export const makeClaudeCodeAgent = ({
   env = process.env,
   permissionMode,
-}: ClaudeCodeAgentOptions = {}): Effect.Effect<ClaudeCodeAgent, never, Scope.Scope> =>
+}: ClaudeCodeAgentOptions = {}): Effect.Effect<
+  ClaudeCodeAgent,
+  never,
+  Scope.Scope | FileSystem.FileSystem | Path.Path
+> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
+    // Locating the `claude` binary reads the filesystem. Bind the platform
+    // services once here so the agent's own methods stay R-free; a machine
+    // with no Claude Code install is a defect at this point, since the
+    // adapter's availability check has already gated on it.
+    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+    const claudeExecutable = resolveClaudeExecutable({ env }).pipe(
+      Effect.orDie,
+      Effect.provide(platform),
+    );
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
       new Map<string, Deferred.Deferred<SessionState, ClaudeAgentFailure>>(),
@@ -289,7 +313,7 @@ export const makeClaudeCodeAgent = ({
             allowDangerouslySkipPermissions: true,
             stderr: (error) => console.error(error),
             executable: process.execPath as "node",
-            pathToClaudeCodeExecutable: resolveClaudeExecutable({ env }),
+            pathToClaudeCodeExecutable: yield* claudeExecutable,
             env: { ...env },
             systemPrompt: { type: "preset", preset: "claude_code" },
             settingSources: ["user", "project", "local"],
@@ -513,24 +537,26 @@ export const makeClaudeCodeAgent = ({
     // file, byte-identical.
     const listModels = (cwd: string): Effect.Effect<sdk.ModelInfo[], ClaudeSdkError> =>
       Effect.acquireUseRelease(
-        Effect.try({
-          try: () =>
-            query({
-              prompt: Stream.toAsyncIterable(Stream.never),
-              options: {
-                cwd,
-                maxTurns: 0,
-                mcpServers: {},
-                strictMcpConfig: true,
-                settingSources: ["user", "project", "local"],
-                stderr: (error) => console.error(error),
-                executable: process.execPath as "node",
-                pathToClaudeCodeExecutable: resolveClaudeExecutable({ env }),
-                env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
-              },
-            }),
-          catch: (cause) => sdkError("list-models", cause),
-        }),
+        Effect.flatMap(claudeExecutable, (pathToClaudeCodeExecutable) =>
+          Effect.try({
+            try: () =>
+              query({
+                prompt: Stream.toAsyncIterable(Stream.never),
+                options: {
+                  cwd,
+                  maxTurns: 0,
+                  mcpServers: {},
+                  strictMcpConfig: true,
+                  settingSources: ["user", "project", "local"],
+                  stderr: (error) => console.error(error),
+                  executable: process.execPath as "node",
+                  pathToClaudeCodeExecutable,
+                  env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+                },
+              }),
+            catch: (cause) => sdkError("list-models", cause),
+          }),
+        ),
         (probe) =>
           Effect.tryPromise({
             try: () => probe.supportedModels(),

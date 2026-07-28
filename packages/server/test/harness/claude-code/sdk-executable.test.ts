@@ -5,6 +5,7 @@ import { it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
 
 import { makeClaudeCodeAgent } from "../../../src/harness/claude-code/agent";
+import { NodePlatformLayer } from "../../platform";
 
 const fakeClaude = path.resolve(
   import.meta.dirname,
@@ -19,7 +20,7 @@ it.effect("communicates with Claude Agent SDK through a fake Claude executable",
         VIBEST_E2E: "1",
         VIBEST_E2E_CLAUDE_EXECUTABLE: fakeClaude,
       },
-    });
+    }).pipe(Effect.provide(NodePlatformLayer));
     const { sessionId } = yield* agent.session.create();
 
     assert.deepEqual(yield* agent.session.getSupportedModels(sessionId), [

@@ -229,10 +229,10 @@ export const makePiAdapter = (
   // nothing (empty subset, no probe) is what makes the UI render no config
   // controls for it.
   permissionModes: [],
-  checkAvailability: Effect.sync(() =>
-    findExecutable(options.executablePath ?? "pi")
-      ? { available: true }
-      : { available: false, reason: "Pi was not found on PATH." },
+  checkAvailability: findExecutable(options.executablePath ?? "pi").pipe(
+    Effect.map((found) =>
+      found ? { available: true } : { available: false, reason: "Pi was not found on PATH." },
+    ),
   ),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(

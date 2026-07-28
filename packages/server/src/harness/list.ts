@@ -1,5 +1,5 @@
 import type { HarnessAgentInfo, HarnessListOutput } from "@vibest/contract";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 
 import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry";
 
@@ -22,11 +22,16 @@ export type HarnessListShape = {
   readonly list: Effect.Effect<HarnessListOutput>;
 };
 
+/** What {@link makeHarnessList} returns before its layer binds the platform. */
+type UnboundHarnessList = {
+  readonly list: Effect.Effect<HarnessListOutput, never, FileSystem.FileSystem | Path.Path>;
+};
+
 export class HarnessListService extends Context.Service<HarnessListService, HarnessListShape>()(
   "HarnessListService",
 ) {}
 
-export const makeHarnessList = (registry: HarnessAgentRegistryShape): HarnessListShape => ({
+export const makeHarnessList = (registry: HarnessAgentRegistryShape): UnboundHarnessList => ({
   list: registry.list.pipe(
     Effect.flatMap((descriptors) =>
       Effect.forEach(descriptors, (descriptor) =>
@@ -54,11 +59,18 @@ export const makeHarnessList = (registry: HarnessAgentRegistryShape): HarnessLis
   ),
 });
 
-export const HarnessListLayer: Layer.Layer<HarnessListService, never, HarnessAgentRegistry> =
-  Layer.effect(
-    HarnessListService,
-    Effect.gen(function* () {
-      const registry = yield* HarnessAgentRegistry;
-      return makeHarnessList(registry);
-    }),
-  );
+export const HarnessListLayer: Layer.Layer<
+  HarnessListService,
+  never,
+  HarnessAgentRegistry | FileSystem.FileSystem | Path.Path
+> = Layer.effect(
+  HarnessListService,
+  Effect.gen(function* () {
+    const registry = yield* HarnessAgentRegistry;
+    // Availability is a PATH lookup, so it needs the filesystem. Bind it once
+    // here and the service's `list` stays R-free for its RPC caller.
+    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+    const { list } = makeHarnessList(registry);
+    return { list: list.pipe(Effect.provide(platform)) };
+  }),
+);

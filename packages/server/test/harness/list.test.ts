@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
 import { makeHarnessList } from "../../src/harness/list";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { NodePlatformLayer } from "../platform";
 
 const adapter = (over: {
   id: HarnessAgentAdapter["id"];
@@ -33,7 +34,9 @@ it.effect("declares each harness's availability and permission subset", () =>
   Effect.gen(function* () {
     const registry = makeHarnessAgentRegistry([adapter({ id: "claude-code" })]);
 
-    const { harnessAgents } = yield* makeHarnessList(registry).list;
+    const { harnessAgents } = yield* makeHarnessList(registry).list.pipe(
+      Effect.provide(NodePlatformLayer),
+    );
 
     assert.deepEqual(harnessAgents[0], {
       id: "claude-code",
@@ -51,7 +54,9 @@ it.effect("keeps declaring settings for a harness whose CLI is missing", () =>
       adapter({ id: "codex", available: false, reason: "Codex was not found on PATH." }),
     ]);
 
-    const { harnessAgents } = yield* makeHarnessList(registry).list;
+    const { harnessAgents } = yield* makeHarnessList(registry).list.pipe(
+      Effect.provide(NodePlatformLayer),
+    );
 
     // The picker greys it out and shows the reason — but what it *would* be
     // able to do has nothing to do with whether it is installed right now.
@@ -69,7 +74,9 @@ it.effect("reports every registered harness, in registration order", () =>
       adapter({ id: "pi" }),
     ]);
 
-    const { harnessAgents } = yield* makeHarnessList(registry).list;
+    const { harnessAgents } = yield* makeHarnessList(registry).list.pipe(
+      Effect.provide(NodePlatformLayer),
+    );
 
     assert.deepEqual(
       harnessAgents.map((harnessAgent) => harnessAgent.id),

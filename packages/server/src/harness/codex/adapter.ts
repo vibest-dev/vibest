@@ -348,10 +348,10 @@ export const makeCodexAdapter = (
     ),
   // A PATH lookup, not a spawn: negotiate has to stay cheap on machines where
   // codex simply isn't installed, which is the common case.
-  checkAvailability: Effect.sync(() =>
-    findExecutable(options.executablePath ?? "codex")
-      ? { available: true }
-      : { available: false, reason: "Codex was not found on PATH." },
+  checkAvailability: findExecutable(options.executablePath ?? "codex").pipe(
+    Effect.map((found) =>
+      found ? { available: true } : { available: false, reason: "Codex was not found on PATH." },
+    ),
   ),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
