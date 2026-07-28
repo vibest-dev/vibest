@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 
 /**
  * The discovery record the launcher writes to `$VIBEST_HOME/daemon.pid` — the
@@ -18,21 +17,30 @@ export type DaemonRecord = {
   readonly startedAt: number;
 };
 
+const recordFile = (path: Path.Path, home: string): string => path.join(home, "daemon.pid");
+
 /** `$VIBEST_HOME/daemon.pid`. */
-export function recordPath(home: string): string {
-  return path.join(home, "daemon.pid");
-}
+export const recordPath = (home: string): Effect.Effect<string, never, Path.Path> =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    return recordFile(path, home);
+  });
 
 /** Read and validate the record, or `undefined` if missing/garbage. */
-export function readRecord(home: string): DaemonRecord | undefined {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(recordPath(home), "utf8");
-  } catch {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(raw) as Partial<DaemonRecord>;
+export const readRecord = (
+  home: string,
+): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const raw = yield* fs
+      .readFileString(recordFile(path, home))
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (raw === undefined) return undefined;
+
+    const parsed = yield* Effect.try(() => JSON.parse(raw) as Partial<DaemonRecord>).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
     if (
       typeof parsed?.pid === "number" &&
       typeof parsed?.address === "string" &&
@@ -45,31 +53,37 @@ export function readRecord(home: string): DaemonRecord | undefined {
         startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : 0,
       };
     }
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
+    return undefined;
+  });
 
 /**
  * Atomically write the record with `0600` perms (token is a secret): write a
  * sibling temp file, chmod, then rename over the target so a concurrent reader
  * never sees a half-written file.
  */
-export function writeRecord(home: string, record: DaemonRecord): void {
-  fs.mkdirSync(home, { recursive: true });
-  const target = recordPath(home);
-  const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, target);
-}
+export const writeRecord = (
+  home: string,
+  record: DaemonRecord,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(home, { recursive: true });
+    const target = recordFile(path, home);
+    const tmp = `${target}.${process.pid}.tmp`;
+    yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
+    // `mode` only applies when the write creates the file, so a leftover temp
+    // from a crashed launcher would otherwise keep its old perms.
+    yield* fs.chmod(tmp, 0o600);
+    yield* fs.rename(tmp, target);
+  });
 
 /** Remove the record; a missing file is not an error. */
-export function removeRecord(home: string): void {
-  try {
-    fs.rmSync(recordPath(home));
-  } catch {
-    // already gone
-  }
-}
+export const removeRecord = (
+  home: string,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.remove(recordFile(path, home), { force: true }).pipe(Effect.ignore);
+  });

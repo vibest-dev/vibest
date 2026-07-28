@@ -22,7 +22,7 @@ export const LocalServerLive = Layer.effect(
         entry: config.serverEntry,
         environment,
       },
-      makeDaemonServerProcess(),
+      yield* makeDaemonServerProcess(),
     );
   }),
 );

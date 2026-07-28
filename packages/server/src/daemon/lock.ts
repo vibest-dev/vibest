@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 
 /**
  * The launch lock — an exclusive-create `$VIBEST_HOME/daemon.lock` holding the
@@ -9,41 +8,61 @@ import path from "node:path";
  * reclaimable. This is the file-state seam; the retry/wait orchestration lives
  * in the launcher.
  */
-function lockPath(home: string): string {
-  return path.join(home, "daemon.lock");
-}
+const lockPath = (path: Path.Path, home: string): string => path.join(home, "daemon.lock");
 
-/** Create the lock atomically. True when acquired; false when someone holds it. */
-export function tryAcquireLock(home: string): boolean {
-  try {
-    fs.writeFileSync(lockPath(home), String(process.pid), { flag: "wx", mode: 0o600 });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
-  }
-}
+/**
+ * Create the lock atomically. True when acquired; false when someone holds it.
+ *
+ * The exclusivity is the OS's, not ours: `wx` is `O_CREAT | O_EXCL`, so exactly
+ * one racing launcher can win however the writes are scheduled. Anything other
+ * than "already there" (unwritable home, full disk) is a real launch failure
+ * and stays in the error channel.
+ */
+export const tryAcquireLock = (
+  home: string,
+): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    return yield* fs
+      .writeFileString(lockPath(path, home), String(process.pid), { flag: "wx", mode: 0o600 })
+      .pipe(
+        Effect.as(true),
+        Effect.catchIf(
+          (error) => error.reason._tag === "AlreadyExists",
+          () => Effect.succeed(false),
+        ),
+      );
+  });
 
 /** The pid recorded in the lock, or `undefined` if missing/garbage. */
-export function readLockPid(home: string): number | undefined {
-  try {
-    const pid = Number.parseInt(fs.readFileSync(lockPath(home), "utf8"), 10);
+export const readLockPid = (
+  home: string,
+): Effect.Effect<number | undefined, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const raw = yield* fs.readFileString(lockPath(path, home)).pipe(Effect.orElseSucceed(() => ""));
+    const pid = Number.parseInt(raw, 10);
     return Number.isInteger(pid) && pid > 0 ? pid : undefined;
-  } catch {
-    return undefined;
-  }
-}
+  });
 
 /** Whether the lock still exists (a concurrent launcher is still spawning). */
-export function lockExists(home: string): boolean {
-  return fs.existsSync(lockPath(home));
-}
+export const lockExists = (
+  home: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    return yield* fs.exists(lockPath(path, home)).pipe(Effect.orElseSucceed(() => false));
+  });
 
 /** Release the lock; a missing lock (or a lost reclaim race) is not an error. */
-export function releaseLock(home: string): void {
-  try {
-    fs.rmSync(lockPath(home));
-  } catch {
-    // already gone (or lost a reclaim race — the retry loop handles it)
-  }
-}
+export const releaseLock = (
+  home: string,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.remove(lockPath(path, home), { force: true }).pipe(Effect.ignore);
+  });

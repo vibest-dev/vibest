@@ -1,9 +1,8 @@
 import childProcess from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
+import nodePath from "node:path";
 
-import { Clock, Effect } from "effect";
+import { Clock, Crypto, Effect, FileSystem, Path, type PlatformError } from "effect";
 
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
@@ -57,6 +56,12 @@ export type ResolveDaemonOptions = {
 export type DaemonLauncherError = DaemonLaunchError | DaemonStoppedError;
 
 /**
+ * The platform services the launcher's file state runs on. Provided at each
+ * front door's composition root (CLI `NodeServices`, desktop runtime).
+ */
+export type DaemonPlatform = FileSystem.FileSystem | Path.Path | Crypto.Crypto;
+
+/**
  * The shared launcher (the local twin of the SSH launch script): read
  * `daemon.pid`; if a healthy daemon is there, attach; otherwise spawn the
  * foreground server detached, wait for it to answer health, and record it. Both
@@ -74,17 +79,17 @@ export type DaemonLauncherError = DaemonLaunchError | DaemonStoppedError;
  */
 export const resolveOrSpawnDaemon = (
   options: ResolveDaemonOptions,
-): Effect.Effect<DaemonHandle, DaemonLauncherError> =>
+): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
   Effect.gen(function* () {
-    const existing = readRecord(options.home);
+    const existing = yield* readRecord(options.home);
 
     if (existing && (yield* daemonAlive(existing))) {
       // A live daemon makes any tombstone stale (someone started it again).
-      clearTombstone(options.home);
+      yield* clearTombstone(options.home);
       return attach(existing, true);
     }
 
-    if (options.autoRespawn === true && hasTombstone(options.home)) {
+    if (options.autoRespawn === true && (yield* hasTombstone(options.home))) {
       return yield* Effect.fail(
         new DaemonStoppedError({
           message:
@@ -92,14 +97,14 @@ export const resolveOrSpawnDaemon = (
         }),
       );
     }
-    clearTombstone(options.home);
+    yield* clearTombstone(options.home);
 
     if (existing) {
       // Wedged (pid alive but unhealthy) daemons must die before we replace
       // them, or they leak as orphans still holding their port. A dead pid is
       // a no-op here.
       yield* killPid(existing.pid);
-      removeRecord(options.home);
+      yield* removeRecord(options.home);
     }
     return yield* spawnLocked(options);
   });
@@ -107,9 +112,13 @@ export const resolveOrSpawnDaemon = (
 /** Read the current daemon's status without starting one. */
 export const statusDaemon = (
   home: string,
-): Effect.Effect<{ readonly running: boolean; readonly record?: DaemonRecord }> =>
+): Effect.Effect<
+  { readonly running: boolean; readonly record?: DaemonRecord },
+  never,
+  FileSystem.FileSystem | Path.Path
+> =>
   Effect.gen(function* () {
-    const record = readRecord(home);
+    const record = yield* readRecord(home);
     if (record && (yield* daemonAlive(record))) return { running: true, record };
     return { running: false };
   });
@@ -120,17 +129,23 @@ export const statusDaemon = (
  * tombstone is written before the kill so a respawn racing the stop still
  * sees it. Returns whether anything was running.
  */
-export const stopDaemon = (home: string): Effect.Effect<"stopped" | "not-running"> =>
+export const stopDaemon = (
+  home: string,
+): Effect.Effect<
+  "stopped" | "not-running",
+  PlatformError.PlatformError,
+  FileSystem.FileSystem | Path.Path
+> =>
   Effect.gen(function* () {
-    const record = readRecord(home);
+    const record = yield* readRecord(home);
     if (!record || !pidAlive(record.pid)) {
-      removeRecord(home);
+      yield* removeRecord(home);
       return "not-running";
     }
 
-    writeTombstone(home);
+    yield* writeTombstone(home);
     yield* killPid(record.pid);
-    removeRecord(home);
+    yield* removeRecord(home);
     return "stopped";
   });
 
@@ -155,27 +170,41 @@ const killPid = (pid: number): Effect.Effect<void> =>
  */
 const spawnLocked = (
   options: ResolveDaemonOptions,
-): Effect.Effect<DaemonHandle, DaemonLauncherError> =>
+): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
   Effect.gen(function* () {
     const { home } = options;
-    fs.mkdirSync(home, { recursive: true });
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem
+      .makeDirectory(home, { recursive: true })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new DaemonLaunchError({ message: `Unable to create ${home}: ${cause.message}`, cause }),
+        ),
+      );
     const timeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
 
     for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
-      const acquired = yield* Effect.try({
-        try: () => tryAcquireLock(home),
-        catch: (cause) =>
-          new DaemonLaunchError({
-            message: `Unable to acquire the vibest daemon launch lock: ${String(cause)}`,
-            cause,
-          }),
-      });
+      // The exclusive create is still one atomic syscall, so making the
+      // surrounding steps async moves no decision: only the winner proceeds to
+      // spawn, and every other branch below already assumes the file state can
+      // change under it (a reclaim can lose its race, and the retry loop is
+      // what covers that).
+      const acquired = yield* tryAcquireLock(home).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DaemonLaunchError({
+              message: `Unable to acquire the vibest daemon launch lock: ${cause.message}`,
+              cause,
+            }),
+        ),
+      );
 
       if (!acquired) {
-        const holder = readLockPid(home);
+        const holder = yield* readLockPid(home);
         if (holder !== undefined && !pidAlive(holder)) {
           // The locking launcher died mid-spawn; reclaim and try again.
-          releaseLock(home);
+          yield* releaseLock(home);
           continue;
         }
         // Another launcher is spawning right now: wait for its daemon, then
@@ -186,9 +215,7 @@ const spawnLocked = (
         continue;
       }
 
-      return yield* spawnDaemon(options).pipe(
-        Effect.ensuring(Effect.sync(() => releaseLock(home))),
-      );
+      return yield* spawnDaemon(options).pipe(Effect.ensuring(releaseLock(home)));
     }
     return yield* Effect.fail(
       new DaemonLaunchError({ message: "Could not acquire the vibest daemon launch lock" }),
@@ -196,13 +223,16 @@ const spawnLocked = (
   });
 
 /** Poll for a healthy record to appear (a concurrent launcher is spawning). */
-const waitForRecord = (home: string, timeoutMs: number): Effect.Effect<DaemonRecord | undefined> =>
+const waitForRecord = (
+  home: string,
+  timeoutMs: number,
+): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + timeoutMs;
     while ((yield* Clock.currentTimeMillis) < deadline) {
-      const record = readRecord(home);
+      const record = yield* readRecord(home);
       if (record && (yield* daemonAlive(record))) return record;
-      if (!lockExists(home)) return undefined;
+      if (!(yield* lockExists(home))) return undefined;
       yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
     }
     return undefined;
@@ -210,11 +240,17 @@ const waitForRecord = (home: string, timeoutMs: number): Effect.Effect<DaemonRec
 
 const spawnDaemon = (
   options: ResolveDaemonOptions,
-): Effect.Effect<DaemonHandle, DaemonLaunchError> =>
+): Effect.Effect<DaemonHandle, DaemonLaunchError, DaemonPlatform> =>
   Effect.gen(function* () {
     const { home } = options;
+    const crypto = yield* Crypto.Crypto;
     const port = yield* reservePort(options.port ?? DEFAULT_PORT);
-    const token = crypto.randomBytes(32).toString("hex");
+    const token = yield* crypto.randomBytes(32).pipe(
+      Effect.map(hex),
+      Effect.mapError(
+        (cause) => new DaemonLaunchError({ message: "Unable to generate a daemon token", cause }),
+      ),
+    );
     const address = `http://127.0.0.1:${port}`;
 
     const pid = yield* Effect.try({
@@ -231,7 +267,7 @@ const spawnDaemon = (
       signal(pid, "SIGTERM");
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${path.join(home, "daemon.log")}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${nodePath.join(home, "daemon.log")}`,
         }),
       );
     }
@@ -242,9 +278,21 @@ const spawnDaemon = (
       token,
       startedAt: yield* Clock.currentTimeMillis,
     };
-    writeRecord(home, record);
+    yield* writeRecord(home, record).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DaemonLaunchError({
+            message: `Unable to record the vibest daemon: ${cause.message}`,
+            cause,
+          }),
+      ),
+    );
     return attach(record, false);
   });
+
+/** Hex, without reaching for Buffer — the token is a display/URL string. */
+const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /**
  * The one seam Effect cannot model: a detached, unref'd child with stdio
@@ -255,7 +303,7 @@ const spawnDaemon = (
  */
 function spawnDetached(options: ResolveDaemonOptions, port: number, token: string): number {
   const { home } = options;
-  const logFd = fs.openSync(path.join(home, "daemon.log"), "a", 0o600);
+  const logFd = fs.openSync(nodePath.join(home, "daemon.log"), "a", 0o600);
   try {
     const [command, ...args] = options.serverArgv;
     if (command === undefined) throw new Error("serverArgv must not be empty");

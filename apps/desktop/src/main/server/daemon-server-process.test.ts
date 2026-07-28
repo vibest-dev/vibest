@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { readRecord, stopDaemon } from "@vibest/server/daemon";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,6 +22,11 @@ const server = http.createServer((req, res) => {
 server.listen(Number(process.env.VIBEST_PORT ?? 0), "127.0.0.1");
 `;
 
+// The launcher's file state runs on the platform services; the real ones here,
+// exactly as the desktop runtime provides them.
+const run = <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices>) =>
+  Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));
+
 describe("DaemonServerProcess", () => {
   let home: string;
   let entry: string;
@@ -31,7 +37,7 @@ describe("DaemonServerProcess", () => {
     fs.writeFileSync(entry, FAKE_SERVER);
   });
   afterEach(async () => {
-    await Effect.runPromise(stopDaemon(home));
+    await run(stopDaemon(home));
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -41,18 +47,17 @@ describe("DaemonServerProcess", () => {
   });
 
   it("spawns the shared daemon and reports its endpoint, then attaches on respawn", async () => {
-    const spawn = makeDaemonServerProcess({ pollIntervalMs: 100 });
-
-    const endpoint = await Effect.runPromise(
+    const endpoint = await run(
       Effect.scoped(
         Effect.gen(function* () {
+          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
           const running = yield* spawn(config(), 0);
           return yield* running.ready;
         }),
       ),
     );
 
-    const record = readRecord(home);
+    const record = await run(readRecord(home));
     expect(record).toBeDefined();
     // The endpoint carries the daemon's own minted token, read from the record.
     expect(endpoint).toEqual({
@@ -60,24 +65,24 @@ describe("DaemonServerProcess", () => {
       token: record!.token,
     });
 
-    const again = await Effect.runPromise(
+    const again = await run(
       Effect.scoped(
         Effect.gen(function* () {
+          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
           const running = yield* spawn(config(), endpoint.port);
           return yield* running.ready;
         }),
       ),
     );
     expect(again).toEqual(endpoint);
-    expect(readRecord(home)?.pid).toBe(record!.pid);
+    expect((await run(readRecord(home)))?.pid).toBe(record!.pid);
   });
 
   it("resolves awaitExit when the daemon dies", async () => {
-    const spawn = makeDaemonServerProcess({ pollIntervalMs: 50 });
-
-    const exit = await Effect.runPromise(
+    const exit = await run(
       Effect.scoped(
         Effect.gen(function* () {
+          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 50 });
           const running = yield* spawn(config(), 0);
           yield* running.ready;
           yield* stopDaemon(home);
