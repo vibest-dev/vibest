@@ -58,7 +58,7 @@ function makeFake(): string {
   return file;
 }
 
-function setup() {
+async function setup() {
   const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
   const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
   const pathsLayer = layerPaths(home);
@@ -105,8 +105,10 @@ function setup() {
     NodeServices.layer,
   );
   const runtime = ManagedRuntime.make(appLayer);
+  // Layer construction does file I/O now (the project document loads eagerly),
+  // so the context must be built asynchronously.
   const context: RpcContext = {
-    "effect/context": runtime.runSync(runtime.contextEffect),
+    "effect/context": await runtime.runPromise(runtime.contextEffect),
   };
   const client = createRouterClient(router, { context });
   return { client, workspace, dispose: () => runtime.dispose() };
@@ -114,7 +116,7 @@ function setup() {
 
 describe("session router", () => {
   it("creates a session from a project and streams its scoped events", async () => {
-    const { client, workspace, dispose } = setup();
+    const { client, workspace, dispose } = await setup();
     try {
       const project = await client.project.create({ path: workspace });
       const ref = await client.session.create({
@@ -150,7 +152,7 @@ describe("session router", () => {
   });
 
   it("lists sessions with live status and drops them on delete", async () => {
-    const { client, workspace, dispose } = setup();
+    const { client, workspace, dispose } = await setup();
     try {
       const project = await client.project.create({ path: workspace });
       const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });

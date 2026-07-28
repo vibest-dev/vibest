@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,8 +55,27 @@ describe("SessionRepository", () => {
     const raw = JSON.parse(
       await readFile(join(home, "storage", "sessions", "proj-a", "sess-1.json"), "utf8"),
     );
-    expect(raw.sessionId).toBe("sess-1");
-    expect(raw.projectId).toBe("proj-a");
+    expect(raw.version).toBe(1);
+    expect(raw.data.sessionId).toBe("sess-1");
+    expect(raw.data.projectId).toBe("proj-a");
+  });
+
+  it("reads a pre-envelope record and adopts it into envelope form", async () => {
+    const file = join(home, "storage", "sessions", "proj-a", "sess-1.json");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(meta("sess-1", "proj-a", "claude-uuid-1")), "utf8");
+
+    const read = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        return yield* repo.read("proj-a", "sess-1");
+      }),
+    );
+    expect(read.harnessSessionId).toBe("claude-uuid-1");
+
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    expect(raw.version).toBe(1);
+    expect(raw.data.sessionId).toBe("sess-1");
   });
 
   it("lists all sessions of a project", async () => {

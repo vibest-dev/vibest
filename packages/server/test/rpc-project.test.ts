@@ -10,7 +10,7 @@ describe("project router", () => {
   it("creates a project named after the folder, dedupes by path, and lists it", async () => {
     const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
     const workspace = mkdtempSync(join(tmpdir(), "vibest-project-"));
-    const h = makeRpcTestHarness(home);
+    const h = await makeRpcTestHarness(home);
     try {
       const created = await h.client.project.create({ path: workspace });
       expect(created).toMatchObject({ name: basename(workspace), path: workspace });

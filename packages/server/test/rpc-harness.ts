@@ -28,7 +28,7 @@ import {
  * service and project storage under `home`. Tests that need live adapters
  * (rpc-session) build their own layers instead.
  */
-export function makeRpcTestHarness(
+export async function makeRpcTestHarness(
   home: string,
   adapters: ReadonlyArray<HarnessAgentAdapter> = [],
 ) {
@@ -59,8 +59,10 @@ export function makeRpcTestHarness(
       NodeFileSystem.layer,
     ),
   );
+  // Layer construction does file I/O now (the project document loads eagerly),
+  // so the context must be built asynchronously.
   const context: RpcContext = {
-    "effect/context": runtime.runSync(runtime.contextEffect),
+    "effect/context": await runtime.runPromise(runtime.contextEffect),
   };
   return {
     client: createRouterClient(router, { context }),

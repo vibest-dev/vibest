@@ -14,7 +14,7 @@ describe("fs router", () => {
     mkdirSync(join(dir, "alpha"));
     mkdirSync(join(dir, ".hidden"));
     mkdirSync(join(dir, "node_modules"));
-    const h = makeRpcTestHarness(home);
+    const h = await makeRpcTestHarness(home);
     try {
       const listing = await h.client.fs.browse({ path: dir });
       expect(listing.path).toBe(dir);

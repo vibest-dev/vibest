@@ -50,7 +50,7 @@ describe("harness router", () => {
       fakeAdapter({ id: "pi", name: "Pi", available: true }),
     ];
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-rpc-harness-"));
-    const { client, dispose } = makeRpcTestHarness(home, adapters);
+    const { client, dispose } = await makeRpcTestHarness(home, adapters);
     try {
       const { harnessAgents } = await client.harness.list({});
 

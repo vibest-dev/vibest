@@ -1,0 +1,27 @@
+{
+  "name": "@vibest/effect-json-store",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Effect-native JSON file store with schema validation and integer-versioned migrations",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf node_modules dist .turbo"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@vibest/typescript": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

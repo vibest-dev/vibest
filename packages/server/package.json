@@ -30,6 +30,7 @@
     "@orpc/experimental-effect": "catalog:orpc",
     "@orpc/server": "catalog:orpc",
     "@vibest/contract": "workspace:*",
+    "@vibest/effect-json-store": "workspace:*",
     "@vibest/harness": "workspace:*",
     "effect": "catalog:",
     "simple-git": "catalog:",

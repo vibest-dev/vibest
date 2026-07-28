@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -77,6 +77,25 @@ describe("ProjectService", () => {
       }),
     );
     expect(remaining).toHaveLength(0);
+  });
+
+  it("reads a pre-envelope projects.json and adopts it into envelope form", async () => {
+    const file = join(home, "storage", "projects.json");
+    const project = { id: "p1", name: "app", path: "/tmp/app", createdAt: "2026-07-16T00:00:00Z" };
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify([project]), "utf8");
+
+    const listed = await run(
+      Effect.gen(function* () {
+        const svc = yield* ProjectService;
+        return yield* svc.list();
+      }),
+    );
+    expect(listed).toEqual([project]);
+
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    expect(raw.version).toBe(1);
+    expect(raw.data).toEqual([project]);
   });
 
   it("remove fails with ProjectNotFound for an unknown id", async () => {
