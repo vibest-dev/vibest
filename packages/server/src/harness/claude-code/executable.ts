@@ -1,9 +1,12 @@
-import { accessSync, constants } from "node:fs";
+import { execFile } from "node:child_process";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 const moduleRequire = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 
 /** Where the native installer and the common package managers put `claude`. */
 function extraInstallDirs(home: string): string[] {
@@ -92,4 +95,90 @@ export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
     "Claude Code was not found. Install it from https://claude.com/claude-code, " +
       "or set VIBEST_CLAUDE_EXECUTABLE to the path of the `claude` binary.",
   );
+}
+
+/**
+ * The CLI version vibest is built against: the version the Agent SDK bundles,
+ * read from its manifest so the floor tracks the catalog bump automatically
+ * (no hand-maintained constant). In a checkout the resolved binary IS this
+ * version, so the floor never trips; only a user's own (older) install can.
+ */
+export function requiredClaudeVersion(): string {
+  const main = moduleRequire.resolve("@anthropic-ai/claude-agent-sdk");
+  const manifest = JSON.parse(
+    readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
+  ) as { claudeCodeVersion?: string };
+  if (!manifest.claudeCodeVersion) {
+    throw new Error("Claude Agent SDK manifest is missing claudeCodeVersion.");
+  }
+  return manifest.claudeCodeVersion;
+}
+
+/** Runs `<executable> --version`; returns its raw stdout (e.g. "2.1.216 (Claude Code)"). */
+async function readClaudeVersion(executable: string): Promise<string> {
+  const { stdout } = await execFileAsync(executable, ["--version"], { timeout: 5000 });
+  return stdout.trim();
+}
+
+/** "2.1.216 (Claude Code)" → [2, 1, 216]; undefined when no x.y.z is present. */
+function parseVersion(raw: string): readonly number[] | undefined {
+  const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
+}
+
+function isBelow(actual: readonly number[], floor: readonly number[]): boolean {
+  for (let i = 0; i < floor.length; i++) {
+    const a = actual[i] ?? 0;
+    const f = floor[i] ?? 0;
+    if (a !== f) return a < f;
+  }
+  return false;
+}
+
+export type AvailabilityResult = { available: true } | { available: false; reason: string };
+
+export type AvailabilityDeps = ResolveDeps & {
+  /** Reads the CLI's reported version; injectable for tests. */
+  readVersion?: (executable: string) => Promise<string>;
+  /** The version floor; injectable for tests. */
+  requiredVersion?: () => string;
+};
+
+/**
+ * Is a usable Claude Code present? Fails closed only on a POSITIVELY too-old
+ * CLI: a missing binary reports the resolve error, but an unreadable or
+ * unparseable `--version` fails OPEN (available) rather than blocking on a
+ * version we could not establish — the SDK will surface any real launch fault.
+ */
+export async function checkClaudeAvailability(
+  deps: AvailabilityDeps = {},
+): Promise<AvailabilityResult> {
+  let executable: string;
+  try {
+    executable = resolveClaudeExecutable(deps);
+  } catch (cause) {
+    return { available: false, reason: cause instanceof Error ? cause.message : String(cause) };
+  }
+
+  const required = (deps.requiredVersion ?? requiredClaudeVersion)();
+  const floor = parseVersion(required);
+
+  let raw: string;
+  try {
+    raw = await (deps.readVersion ?? readClaudeVersion)(executable);
+  } catch {
+    return { available: true };
+  }
+
+  const actual = parseVersion(raw);
+  if (floor && actual && isBelow(actual, floor)) {
+    const reported = raw.split(/\s+/)[0] ?? raw;
+    return {
+      available: false,
+      reason:
+        `Claude Code ${reported} is too old — vibest requires ${required} or newer. ` +
+        "Update it from https://claude.com/claude-code.",
+    };
+  }
+  return { available: true };
 }

@@ -27,7 +27,7 @@ import {
 } from "../errors";
 import { streamFromQueueOne } from "../queue-stream";
 import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
-import { resolveClaudeExecutable } from "./executable";
+import { checkClaudeAvailability } from "./executable";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 
@@ -433,20 +433,11 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
         (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
       ),
     ),
-  checkAvailability: Effect.try({
-    try: () => {
-      resolveClaudeExecutable();
-      return { available: true };
-    },
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.succeed({
-        available: false,
-        reason: cause instanceof Error ? cause.message : String(cause),
-      }),
-    ),
-  ),
+  // Present AND new enough: a resolvable binary that is older than the version
+  // the SDK bundles reports as unavailable, so a too-old install fails fast
+  // (AgentUnavailable → UNSUPPORTED) instead of launching against a CLI whose
+  // wire protocol the harness types no longer match.
+  checkAvailability: Effect.promise(() => checkClaudeAvailability()),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
