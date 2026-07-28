@@ -51,6 +51,11 @@ means matching this.
 - **Tests:** real-fs + `mkdtemp` for behaviour, `FileSystem.makeNoop` (see
   `packages/server/test/fake-file-system.ts`) for failures a real disk won't
   produce on demand.
+- **The HTTP seam is `NodeHttpServer.makeHandler`,** not `HttpServer.serve`:
+  `serve` registers its own `upgrade` listener, and that event belongs to oRPC
+  and Vite's HMR socket. `makeHandler` yields a plain node `request` listener,
+  so `http/app.ts` is an ordinary Effect while `http/server.ts` keeps the raw
+  upgrade block.
 
 Exempt, deliberately — these are boundaries Effect doesn't model, and "it's
 already written" is not a reason to add to the list:
@@ -58,7 +63,7 @@ already written" is not a reason to add to the list:
 | Location                                                                  | Why                                                                                                  |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `daemon/launcher.ts`'s `spawnDetached`                                    | detached + unref + stdio to a log fd is the opposite of `ChildProcessSpawner`'s supervised semantics |
-| `http/server.ts` as a whole                                               | node:http, ws, the oRPC WS handler, and Vite HMR share one server and its upgrade event              |
+| `http/server.ts`'s `upgrade` path                                         | oRPC and Vite HMR share that event; Effect's own websocket handler would fight them for the listener |
 | Call sites inside an exempt file                                          | e.g. `http/auth.ts`'s ticket `randomUUID`, called synchronously from Promise-shaped `http/server.ts` |
 | `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle      |
 | `packages/services`' terminal-manager                                     | node-pty has no Effect equivalent (and the package is dormant)                                       |

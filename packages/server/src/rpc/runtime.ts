@@ -1,6 +1,7 @@
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, Layer } from "effect";
 
@@ -126,4 +127,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   HarnessProbeProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
   PlatformLayer,
+  // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a
+  // response. Sealed by the vendor layer, hence no `Layer.provide` here.
+  NodeHttpPlatform.layer,
 );
