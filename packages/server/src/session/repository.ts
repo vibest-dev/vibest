@@ -1,11 +1,14 @@
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
-
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 
 import { Paths } from "../config/paths";
 import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
-import { isEnoent, readJson, removeFile, writeJsonAtomic } from "../infra/json-store";
+import {
+  isNotFound,
+  readJson,
+  removeFile,
+  writeJsonAtomic,
+  type JsonStorePlatform,
+} from "../infra/json-store";
 import type { Session } from "../types";
 
 /**
@@ -36,29 +39,39 @@ export class SessionRepository extends Context.Service<
   }
 >()("SessionRepository") {}
 
-export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths> = Layer.effect(
+export const SessionRepositoryLayer: Layer.Layer<
+  SessionRepository,
+  never,
+  Paths | JsonStorePlatform
+> = Layer.effect(
   SessionRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
-    const projectDir = (projectId: string) => join(paths.sessionsDir, projectId);
+    const fs = yield* FileSystem.FileSystem;
+    const pathService = yield* Path.Path;
+    // Bind the platform services once so the methods below stay R-free; the
+    // Layer's R carries the requirement to the composition root instead.
+    const platform = yield* Effect.context<JsonStorePlatform>();
+
+    const projectDir = (projectId: string) => pathService.join(paths.sessionsDir, projectId);
     const sessionFile = (projectId: string, sessionId: string) =>
-      join(projectDir(projectId), `${sessionId}.json`);
+      pathService.join(projectDir(projectId), `${sessionId}.json`);
+
+    /** Directory entries, or `[]` when the directory has never been written. */
+    const readDirOrEmpty = (dir: string): Effect.Effect<ReadonlyArray<string>, StoreReadError> =>
+      fs.readDirectory(dir).pipe(
+        Effect.catchIf(isNotFound, () => Effect.succeed<Array<string>>([])),
+        Effect.mapError((cause) => new StoreReadError({ file: dir, cause })),
+      );
 
     const readIds = (projectId: string): Effect.Effect<ReadonlyArray<string>, StoreReadError> =>
-      Effect.tryPromise({
-        try: async () => {
-          try {
-            const entries = await readdir(projectDir(projectId));
-            return entries
-              .filter((name) => name.endsWith(".json"))
-              .map((name) => name.slice(0, -".json".length));
-          } catch (cause) {
-            if (isEnoent(cause)) return [];
-            throw cause;
-          }
-        },
-        catch: (cause) => new StoreReadError({ file: projectDir(projectId), cause }),
-      });
+      readDirOrEmpty(projectDir(projectId)).pipe(
+        Effect.map((names) =>
+          names
+            .filter((name) => name.endsWith(".json"))
+            .map((name) => name.slice(0, -".json".length)),
+        ),
+      );
 
     const read = (
       projectId: string,
@@ -72,21 +85,27 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
             ? Effect.fail(new SessionNotFound({ projectId, sessionId }))
             : Effect.succeed(value),
         ),
+        Effect.provide(platform),
       );
 
+    // `readDirectory` yields names only, so each entry is stat'd to keep just the
+    // directories. A failing stat (raced deletion, broken symlink) drops that
+    // entry rather than the whole listing.
     const listProjectIds = (): Effect.Effect<ReadonlyArray<string>, StoreReadError> =>
-      Effect.tryPromise({
-        try: async () => {
-          try {
-            const entries = await readdir(paths.sessionsDir, { withFileTypes: true });
-            return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-          } catch (cause) {
-            if (isEnoent(cause)) return [];
-            throw cause;
-          }
-        },
-        catch: (cause) => new StoreReadError({ file: paths.sessionsDir, cause }),
-      });
+      readDirOrEmpty(paths.sessionsDir).pipe(
+        Effect.flatMap((names) =>
+          Effect.forEach(
+            names,
+            (name) =>
+              fs.stat(pathService.join(paths.sessionsDir, name)).pipe(
+                Effect.map((info) => (info.type === "Directory" ? name : undefined)),
+                Effect.catch(() => Effect.succeed(undefined)),
+              ),
+            { concurrency: "unbounded" },
+          ),
+        ),
+        Effect.map((names) => names.filter((name) => name !== undefined)),
+      );
 
     return {
       list: (projectId) =>
@@ -127,9 +146,12 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
         ),
 
       write: (metadata) =>
-        writeJsonAtomic(sessionFile(metadata.projectId, metadata.sessionId), metadata),
+        writeJsonAtomic(sessionFile(metadata.projectId, metadata.sessionId), metadata).pipe(
+          Effect.provide(platform),
+        ),
 
-      remove: (projectId, sessionId) => removeFile(sessionFile(projectId, sessionId)),
+      remove: (projectId, sessionId) =>
+        removeFile(sessionFile(projectId, sessionId)).pipe(Effect.provide(platform)),
     };
   }),
 );

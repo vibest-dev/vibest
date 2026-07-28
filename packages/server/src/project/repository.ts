@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { Paths } from "../config/paths";
 import type { StoreReadError, StoreWriteError } from "../errors";
-import { readJson, writeJsonAtomic } from "../infra/json-store";
+import { readJson, writeJsonAtomic, type JsonStorePlatform } from "../infra/json-store";
 import type { Project } from "../types";
 
 /**
@@ -17,13 +17,22 @@ export class ProjectRepository extends Context.Service<
   }
 >()("ProjectRepository") {}
 
-export const ProjectRepositoryLayer: Layer.Layer<ProjectRepository, never, Paths> = Layer.effect(
+export const ProjectRepositoryLayer: Layer.Layer<
+  ProjectRepository,
+  never,
+  Paths | JsonStorePlatform
+> = Layer.effect(
   ProjectRepository,
   Effect.gen(function* () {
     const paths = yield* Paths;
+    // Bind the platform services once so the methods below stay R-free; the
+    // Layer's R carries the requirement to the composition root instead.
+    const platform = yield* Effect.context<JsonStorePlatform>();
     return {
-      list: () => readJson<ReadonlyArray<Project>>(paths.projectsFile, []),
-      save: (projects) => writeJsonAtomic(paths.projectsFile, projects),
+      list: () =>
+        readJson<ReadonlyArray<Project>>(paths.projectsFile, []).pipe(Effect.provide(platform)),
+      save: (projects) =>
+        writeJsonAtomic(paths.projectsFile, projects).pipe(Effect.provide(platform)),
     };
   }),
 );

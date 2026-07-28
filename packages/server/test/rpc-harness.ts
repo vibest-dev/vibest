@@ -22,6 +22,7 @@ import {
   SessionRepositoryLayer,
   SessionServiceLayer,
 } from "../src/session";
+import { NodePlatformLayer } from "./platform";
 
 /**
  * A router client backed by the full `RpcContext`, with an adapterless session
@@ -32,7 +33,8 @@ export function makeRpcTestHarness(
   home: string,
   adapters: ReadonlyArray<HarnessAgentAdapter> = [],
 ) {
-  const paths = layerPaths(home);
+  // Paths plus the platform services the repositories' JSON store runs on.
+  const paths = Layer.merge(layerPaths(home), NodePlatformLayer);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
   const listLayer = HarnessListLayer.pipe(Layer.provide(registryLayer));
