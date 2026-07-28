@@ -35,7 +35,6 @@
     "ai": "catalog:",
     "effect": "catalog:",
     "simple-git": "catalog:",
-    "sirv": "^3.0.2",
     "uuid": "catalog:",
     "ws": "catalog:",
     "zod": "catalog:"

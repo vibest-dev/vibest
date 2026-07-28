@@ -1,15 +1,20 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
 import url from "node:url";
 
 import { Effect, FileSystem, Path } from "effect";
-import sirv from "sirv";
+import type { HttpPlatform } from "effect/unstable/http";
+import { HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/unstable/http";
 
-export type UIHandler = (req: IncomingMessage, res: ServerResponse) => void;
+/**
+ * Answers everything the API routes did not claim. `never` on the error channel
+ * because a UI miss is a response (404 / 503), not a failure.
+ */
+export type UIApp = Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+>;
 
-function notFound(res: ServerResponse) {
-  res.statusCode = 404;
-  res.end("Not Found");
-}
+const notFound = HttpServerResponse.text("Not Found", { status: 404 });
 
 /** `node:url` has no Effect equivalent; the URLs below are all module-relative. */
 const fromModuleUrl = (relative: string) => url.fileURLToPath(new URL(relative, import.meta.url));
@@ -43,26 +48,44 @@ const resolveStaticDir = (): Effect.Effect<
   });
 
 /**
- * The UI-serving half of the server, isolated from auth/CORS/routing: `sirv`
- * over the built bundle, and a 503 when the bundle has not been built. There is
- * no dev branch — `apps/app` runs its own `vite dev` and proxies `/api` and
- * `/ws/rpc` here, so this server serves files in every mode and never hosts a
- * bundler.
+ * The UI-serving half of the server, isolated from auth/CORS/routing:
+ * `HttpStaticServer` over the built bundle, and a 503 when the bundle has not
+ * been built. There is no dev branch — `apps/app` runs its own `vite dev` and
+ * proxies `/api` and `/ws/rpc` here, so this server serves files in every mode
+ * and never hosts a bundler.
  */
 export const createUIHandler = (): Effect.Effect<
-  UIHandler,
+  UIApp,
   never,
-  FileSystem.FileSystem | Path.Path
+  FileSystem.FileSystem | Path.Path | HttpPlatform.HttpPlatform
 > =>
   Effect.gen(function* () {
     const staticDir = yield* resolveStaticDir();
     if (!staticDir) {
-      return (_req, res) => {
-        res.statusCode = 503;
-        res.end("Web UI not built. Run the @vibest/app build first.");
-      };
+      return Effect.succeed(
+        HttpServerResponse.text("Web UI not built. Run the @vibest/app build first.", {
+          status: 503,
+        }),
+      );
     }
 
-    const assets = sirv(staticDir, { single: true });
-    return (req, res) => assets(req, res, () => notFound(res));
+    // `spa: true` is the old `sirv(dir, { single: true })`: an unknown path
+    // falls back to index.html so the client router owns deep links.
+    const assets = yield* HttpStaticServer.make({ root: staticDir, spa: true }).pipe(Effect.orDie);
+
+    // A path that matches no file is a 404; anything else went wrong on our
+    // side. `RouteNotFound` covers both a missing asset and a deep link the
+    // SPA fallback declined (it only rewrites extensionless paths from a
+    // client that accepts HTML — a browser navigation, never a fetch).
+    return assets.pipe(
+      Effect.catch((error) =>
+        error.reason._tag === "RouteNotFound"
+          ? Effect.succeed(notFound)
+          : Effect.as(
+              Effect.logError("static asset read failed", error),
+              HttpServerResponse.text("Internal Server Error", { status: 500 }),
+            ),
+      ),
+    );
+  });
   });

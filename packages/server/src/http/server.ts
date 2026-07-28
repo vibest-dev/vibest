@@ -1,12 +1,15 @@
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import type { Server } from "node:http";
 import http from "node:http";
 
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { Effect, Exit, Scope } from "effect";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
 import { createRpcRuntime, createWsRPCHandler } from "../rpc";
-import { bearerToken, createTicketStore, tokensMatch } from "./auth";
-import { corsHeaders, isAllowedOrigin, isLoopbackHost } from "./cors";
+import { makeRequestApp } from "./app";
+import { createTicketStore } from "./auth";
+import { isAllowedOrigin, isLoopbackHost } from "./cors";
 import { createUIHandler } from "./ui";
 
 export type ManagedServer = Server & {
@@ -28,89 +31,28 @@ export type CreateServerOptions = {
   corsOrigins?: readonly string[] | undefined;
 };
 
-function notFound(res: ServerResponse) {
-  res.statusCode = 404;
-  res.end("Not Found");
-}
-
 export async function createServer(options: CreateServerOptions = {}): Promise<ManagedServer> {
   const { authToken, corsOrigins = [] } = options;
 
   const rpcRuntime = await createRpcRuntime();
   const wsHandler = createWsRPCHandler(rpcRuntime.context);
   const tickets = createTicketStore();
-  // The UI handler is Effect-native; run it on the RPC runtime rather than
-  // building a second platform layer inside this Promise-shaped module.
-  const serveUI = await rpcRuntime.run(createUIHandler());
 
-  const server = http.createServer((req, res) => {
-    void handleRequest(req, res);
-  });
+  const server = http.createServer();
 
-  async function handleRequest(req: IncomingMessage, res: ServerResponse) {
-    try {
-      // Anti DNS-rebinding: the server binds loopback, so a request whose Host
-      // is not loopback comes from an attacker page whose domain rebound to
-      // 127.0.0.1 — CORS would not stop it, this does.
-      if (!isLoopbackHost(req.headers.host)) {
-        res.statusCode = 403;
-        res.end("Forbidden");
-        return;
-      }
-
-      const headers = corsHeaders(req.headers.origin, corsOrigins);
-      if (headers) {
-        for (const [name, value] of Object.entries(headers)) {
-          res.setHeader(name, value);
-        }
-      }
-
-      if (req.method === "OPTIONS") {
-        // A preflight from an origin we don't allow gets no headers, so the
-        // browser blocks the real request that would have followed.
-        res.statusCode = headers ? 204 : 403;
-        res.end();
-        return;
-      }
-
-      const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
-
-      // Unauthenticated on purpose: the desktop supervisor polls this before
-      // it holds a token, and it discloses nothing.
-      if (req.method === "GET" && pathname === "/api/health") {
-        res.setHeader("content-type", "text/plain");
-        res.end("ok");
-        return;
-      }
-
-      if (authToken !== undefined && pathname.startsWith("/api/")) {
-        if (!tokensMatch(authToken, bearerToken(req.headers.authorization))) {
-          res.statusCode = 401;
-          res.end("Unauthorized");
-          return;
-        }
-      }
-
-      if (req.method === "POST" && pathname === "/api/ws-ticket") {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ ticket: tickets.issue() }));
-        return;
-      }
-
-      if (pathname.startsWith("/api/")) {
-        notFound(res);
-        return;
-      }
-
-      serveUI(req, res);
-    } catch (error) {
-      console.error(error);
-      if (!res.headersSent) {
-        res.statusCode = 500;
-      }
-      res.end();
-    }
-  }
+  // The request half is Effect-native and runs on the RPC runtime, which
+  // already carries FileSystem/Path/HttpPlatform. `makeHandler` gives back a
+  // plain node `request` listener, which is the whole point: it leaves the
+  // `upgrade` event below untouched. (`HttpServer.serve` would register its own
+  // upgrade handler and fight oRPC for it.)
+  const ui = await rpcRuntime.run(createUIHandler());
+  const requestScope = Scope.makeUnsafe();
+  const handleRequest = await rpcRuntime.run(
+    NodeHttpServer.makeHandler(makeRequestApp({ authToken, corsOrigins, tickets, ui }), {
+      scope: requestScope,
+    }),
+  );
+  server.on("request", handleRequest);
 
   const wss = new WebSocketServer({ noServer: true });
 
@@ -121,8 +63,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     console.error(e);
   });
 
-  // The only upgrade this server answers. Vite's HMR socket used to share it;
-  // now `apps/app` runs its own dev server and proxies `/ws/rpc` here instead.
+  // The only upgrade this server answers. Raw on purpose: oRPC owns this event,
+  // so Effect's own websocket support (`NodeHttpServer.makeUpgradeHandler`)
+  // must stay out of it.
   server.on("upgrade", (req, socket, head) => {
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
     if (requestUrl.pathname !== "/ws/rpc") {
@@ -172,6 +115,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await serverClosed;
+      // Interrupts any request fiber still in flight before the runtime goes.
+      await Effect.runPromise(Scope.close(requestScope, Exit.void));
       await rpcRuntime.dispose();
     })());
 
