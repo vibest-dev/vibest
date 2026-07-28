@@ -82,6 +82,7 @@ describe("SessionService", () => {
       SessionRepositoryLayer.pipe(Layer.provide(paths)),
       SessionManagerLayer.pipe(Layer.provide(EventBusLayer)),
       EventBusLayer,
+      NodePlatformLayer,
       port,
     );
     // Expose SessionService plus the base services the programs also read from;
