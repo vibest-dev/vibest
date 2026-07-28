@@ -1,4 +1,5 @@
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
@@ -14,7 +15,9 @@ import { LocalServerLive } from "./server/local-server-live";
 import { formatStartupFailure } from "./startup-failure";
 
 function makeRuntime(devUrl: string | undefined) {
-  const nodeBase = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+  // The Node platform services: the daemon launcher's file state and token
+  // minting bubble these up their R channel, and this is where they land.
+  const nodeBase = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, NodeCrypto.layer);
   const ChildProcessSpawnerLive = NodeChildProcessSpawner.layer.pipe(Layer.provide(nodeBase));
   const DesktopConfigLive = makeDesktopConfigLive({
     isPackaged: app.isPackaged,
@@ -29,6 +32,7 @@ function makeRuntime(devUrl: string | undefined) {
       Layer.provide(LocalServerLive),
       Layer.provide(DesktopConfigLive),
       Layer.provide(ChildProcessSpawnerLive),
+      Layer.provide(nodeBase),
     ),
   );
 }
