@@ -9,6 +9,25 @@ export const notFound = (method: string, path: string): PlatformError.PlatformEr
     pathOrDescriptor: path,
   });
 
+/** A failure that is *not* `NotFound`, so it must not be swallowed as "absent". */
+export const permissionDenied = (method: string, path: string): PlatformError.PlatformError =>
+  PlatformError.systemError({
+    _tag: "PermissionDenied",
+    module: "FileSystem",
+    method,
+    pathOrDescriptor: path,
+  });
+
+/**
+ * A `FileSystem` with only the listed methods implemented. Everything else
+ * fails `NotFound`, which is what `FileSystem.makeNoop` does — so a bare
+ * `fakeFileSystem({})` is a machine where nothing exists.
+ */
+export const fakeFileSystem = (
+  overrides: Partial<FileSystem.FileSystem>,
+): Layer.Layer<FileSystem.FileSystem> =>
+  Layer.succeed(FileSystem.FileSystem, FileSystem.makeNoop(overrides));
+
 /** A `File.Info` carrying only the two fields these tests read. */
 export const fileInfo = (
   type: FileSystem.File.Info["type"],
