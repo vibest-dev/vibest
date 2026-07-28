@@ -46,6 +46,7 @@ export function makeRpcTestHarness(
     Layer.provide(HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer))),
     Layer.provide(SessionManagerLayer.pipe(Layer.provide(EventBusLayer))),
     Layer.provide(EventBusLayer),
+    Layer.provide(NodePlatformLayer),
   );
   // registryLayer is merged in as well as provided into the session service;
   // Layer memoization (same reference) keeps it one registry instance.
