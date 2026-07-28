@@ -1,15 +1,28 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import path from "node:path";
 import { promisify } from "node:util";
+
+import { Data, Effect, FileSystem, Path } from "effect";
 
 const moduleRequire = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 
+/** No `claude` binary anywhere we look — carries the user-facing remedy. */
+export class ClaudeExecutableNotFound extends Data.TaggedError("ClaudeExecutableNotFound")<{
+  readonly reason: string;
+}> {
+  override get message() {
+    return this.reason;
+  }
+}
+
+const NOT_FOUND =
+  "Claude Code was not found. Install it from https://claude.com/claude-code, " +
+  "or set VIBEST_CLAUDE_EXECUTABLE to the path of the `claude` binary.";
+
 /** Where the native installer and the common package managers put `claude`. */
-function extraInstallDirs(home: string): string[] {
+function extraInstallDirs(path: Path.Path, home: string): string[] {
   return [
     path.join(home, ".local", "bin"),
     path.join(home, ".bun", "bin"),
@@ -18,26 +31,19 @@ function extraInstallDirs(home: string): string[] {
   ];
 }
 
-function isExecutableFile(candidate: string): boolean {
-  try {
-    accessSync(candidate, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The version-matched binary the Claude Agent SDK ships as an optional platform
  * dependency. Present when running from a checkout; absent in the packaged
  * desktop app, which excludes it (it is ~230 MB — the user's own Claude Code
  * install is used there instead).
  *
+ * `createRequire` has no Effect equivalent, so module resolution stays raw.
+ *
  * A path inside an asar archive is rejected: it resolves and stats fine, since
  * Electron's fs shim reads archives transparently — but an OS exec cannot
  * traverse one, and the SDK would fail late with a bare ENOTDIR.
  */
-function sdkBinary(binary: string): string | undefined {
+function sdkBinary(path: Path.Path, binary: string): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
   try {
     const resolved = moduleRequire.resolve(`${pkg}/${binary}`);
@@ -51,10 +57,28 @@ export type ResolveDeps = {
   env?: NodeJS.ProcessEnv;
   home?: string;
   /** The SDK's own bundled binary, if it is really on disk. */
-  bundled?: (binary: string) => string | undefined;
-  isExecutable?: (candidate: string) => boolean;
+  bundled?: (path: Path.Path, binary: string) => string | undefined;
   platform?: NodeJS.Platform;
 };
+
+/** PATH's separator. `effect/Path` exposes `sep`, but not this one. */
+const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
+
+/**
+ * Executability by mode bits — see the note on the shared `findExecutable`:
+ * `effect/FileSystem.access` has no `X_OK`.
+ */
+const isExecutableFile = (
+  fs: FileSystem.FileSystem,
+  candidate: string,
+  platform: NodeJS.Platform,
+): Effect.Effect<boolean> =>
+  fs.stat(candidate).pipe(
+    Effect.map(
+      (info) => info.type === "File" && (platform === "win32" || (info.mode & 0o111) !== 0),
+    ),
+    Effect.catch(() => Effect.succeed(false)),
+  );
 
 /**
  * The `claude` binary the SDK should exec.
@@ -64,38 +88,43 @@ export type ResolveDeps = {
  * only option in the packaged app, which is why the desktop host has to hand
  * the server a login-shell PATH: launchd gives a GUI app a bare one.
  */
-export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
-  const {
-    env = process.env,
-    home = homedir(),
-    bundled = sdkBinary,
-    isExecutable = isExecutableFile,
-    platform = process.platform,
-  } = deps;
+export const resolveClaudeExecutable = (
+  deps: ResolveDeps = {},
+): Effect.Effect<string, ClaudeExecutableNotFound, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const {
+      env = process.env,
+      home = homedir(),
+      bundled = sdkBinary,
+      platform = process.platform,
+    } = deps;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
 
-  const override =
-    env["VIBEST_E2E"] === "1"
-      ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
-      : env["VIBEST_CLAUDE_EXECUTABLE"];
-  if (override) return override;
+    const override =
+      env["VIBEST_E2E"] === "1"
+        ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
+        : env["VIBEST_CLAUDE_EXECUTABLE"];
+    if (override) return override;
 
-  const binary = platform === "win32" ? "claude.exe" : "claude";
+    const binary = platform === "win32" ? "claude.exe" : "claude";
 
-  const fromSdk = bundled(binary);
-  if (fromSdk && isExecutable(fromSdk)) return fromSdk;
+    const fromSdk = bundled(path, binary);
+    if (fromSdk && (yield* isExecutable(fromSdk))) return fromSdk;
 
-  const dirs = [...(env["PATH"] ?? "").split(path.delimiter), ...extraInstallDirs(home)];
-  for (const dir of dirs) {
-    if (!dir) continue;
-    const candidate = path.join(dir, binary);
-    if (isExecutable(candidate)) return candidate;
-  }
+    const dirs = [
+      ...(env["PATH"] ?? "").split(pathDelimiter(platform)),
+      ...extraInstallDirs(path, home),
+    ];
+    for (const dir of dirs) {
+      if (!dir) continue;
+      const candidate = path.join(dir, binary);
+      if (yield* isExecutable(candidate)) return candidate;
+    }
 
-  throw new Error(
-    "Claude Code was not found. Install it from https://claude.com/claude-code, " +
-      "or set VIBEST_CLAUDE_EXECUTABLE to the path of the `claude` binary.",
-  );
-}
+    return yield* Effect.fail(new ClaudeExecutableNotFound({ reason: NOT_FOUND }));
+  });
 
 /**
  * The CLI version vibest is built against: the version the Agent SDK bundles,
@@ -103,22 +132,37 @@ export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
  * (no hand-maintained constant). In a checkout the resolved binary IS this
  * version, so the floor never trips; only a user's own (older) install can.
  */
-export function requiredClaudeVersion(): string {
-  const main = moduleRequire.resolve("@anthropic-ai/claude-agent-sdk");
-  const manifest = JSON.parse(
-    readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
-  ) as { claudeCodeVersion?: string };
-  if (!manifest.claudeCodeVersion) {
-    throw new Error("Claude Agent SDK manifest is missing claudeCodeVersion.");
-  }
-  return manifest.claudeCodeVersion;
-}
+export const requiredClaudeVersion = (): Effect.Effect<
+  string,
+  Error,
+  FileSystem.FileSystem | Path.Path
+> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const main = yield* Effect.try(() => moduleRequire.resolve("@anthropic-ai/claude-agent-sdk"));
+    const raw = yield* fs.readFileString(path.join(path.dirname(main), "package.json"));
+    const manifest = yield* Effect.try(() => JSON.parse(raw) as { claudeCodeVersion?: string });
+    if (!manifest.claudeCodeVersion) {
+      return yield* Effect.fail(
+        new Error("Claude Agent SDK manifest is missing claudeCodeVersion."),
+      );
+    }
+    return manifest.claudeCodeVersion;
+  }).pipe(Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))));
 
-/** Runs `<executable> --version`; returns its raw stdout (e.g. "2.1.216 (Claude Code)"). */
-async function readClaudeVersion(executable: string): Promise<string> {
+/**
+ * Runs `<executable> --version`; returns its raw stdout (e.g. "2.1.216 (Claude Code)").
+ *
+ * Still `node:child_process`: `ChildProcessSpawner` supervises its children
+ * through a `Scope`, and threading one into `checkAvailability` would push
+ * `Scope` onto every harness adapter's availability check for a single
+ * short-lived capture. Left as a follow-up rather than widened here.
+ */
+const readClaudeVersion = async (executable: string): Promise<string> => {
   const { stdout } = await execFileAsync(executable, ["--version"], { timeout: 5000 });
   return stdout.trim();
-}
+};
 
 /** "2.1.216 (Claude Code)" → [2, 1, 216]; undefined when no x.y.z is present. */
 function parseVersion(raw: string): readonly number[] | undefined {
@@ -141,7 +185,7 @@ export type AvailabilityDeps = ResolveDeps & {
   /** Reads the CLI's reported version; injectable for tests. */
   readVersion?: (executable: string) => Promise<string>;
   /** The version floor; injectable for tests. */
-  requiredVersion?: () => string;
+  requiredVersion?: () => Effect.Effect<string, Error, FileSystem.FileSystem | Path.Path>;
 };
 
 /**
@@ -150,35 +194,36 @@ export type AvailabilityDeps = ResolveDeps & {
  * unparseable `--version` fails OPEN (available) rather than blocking on a
  * version we could not establish — the SDK will surface any real launch fault.
  */
-export async function checkClaudeAvailability(
+export const checkClaudeAvailability = (
   deps: AvailabilityDeps = {},
-): Promise<AvailabilityResult> {
-  let executable: string;
-  try {
-    executable = resolveClaudeExecutable(deps);
-  } catch (cause) {
-    return { available: false, reason: cause instanceof Error ? cause.message : String(cause) };
-  }
+): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const executable = yield* resolveClaudeExecutable(deps).pipe(
+      Effect.map((path) => ({ ok: true as const, path })),
+      Effect.catch((cause) => Effect.succeed({ ok: false as const, reason: cause.message })),
+    );
+    if (!executable.ok) return { available: false, reason: executable.reason };
 
-  const required = (deps.requiredVersion ?? requiredClaudeVersion)();
-  const floor = parseVersion(required);
+    // An unreadable floor is as unknowable as an unreadable version: fail open.
+    const required = yield* (deps.requiredVersion ?? requiredClaudeVersion)().pipe(
+      Effect.catch(() => Effect.succeed(undefined)),
+    );
+    const floor = required ? parseVersion(required) : undefined;
 
-  let raw: string;
-  try {
-    raw = await (deps.readVersion ?? readClaudeVersion)(executable);
-  } catch {
+    const raw = yield* Effect.tryPromise(() =>
+      (deps.readVersion ?? readClaudeVersion)(executable.path),
+    ).pipe(Effect.catch(() => Effect.succeed(undefined)));
+    if (raw === undefined) return { available: true };
+
+    const actual = parseVersion(raw);
+    if (required && floor && actual && isBelow(actual, floor)) {
+      const reported = raw.split(/\s+/)[0] ?? raw;
+      return {
+        available: false,
+        reason:
+          `Claude Code ${reported} is too old — vibest requires ${required} or newer. ` +
+          "Update it from https://claude.com/claude-code.",
+      };
+    }
     return { available: true };
-  }
-
-  const actual = parseVersion(raw);
-  if (floor && actual && isBelow(actual, floor)) {
-    const reported = raw.split(/\s+/)[0] ?? raw;
-    return {
-      available: false,
-      reason:
-        `Claude Code ${reported} is too old — vibest requires ${required} or newer. ` +
-        "Update it from https://claude.com/claude-code.",
-    };
-  }
-  return { available: true };
-}
+  });

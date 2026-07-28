@@ -437,7 +437,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   // the SDK bundles reports as unavailable, so a too-old install fails fast
   // (AgentUnavailable → UNSUPPORTED) instead of launching against a CLI whose
   // wire protocol the harness types no longer match.
-  checkAvailability: Effect.promise(() => checkClaudeAvailability()),
+  checkAvailability: checkClaudeAvailability(),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),

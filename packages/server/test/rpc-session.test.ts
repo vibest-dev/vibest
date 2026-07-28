@@ -79,7 +79,10 @@ async function setup() {
     }),
   ).pipe(Layer.provide(codexLayer));
 
-  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(Layer.provide(registryLayer));
+  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(NodeServices.layer),
+  );
   const projectServiceLayer = ProjectServiceLayer.pipe(
     Layer.provide(ProjectRepositoryLayer),
     Layer.provide(pathsLayer),
@@ -101,7 +104,7 @@ async function setup() {
     sessionServiceLayer,
     projectServiceLayer,
     registryLayer,
-    HarnessListLayer.pipe(Layer.provide(registryLayer)),
+    HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer,
     NodeServices.layer,
