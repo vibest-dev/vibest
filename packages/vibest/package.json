@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "VIBEST_PORT=4000 tsx src/node/cli.ts serve",
+    "dev": "VIBEST_PORT=4100 tsx src/node/cli.ts serve",
     "build": "tsdown",
     "start": "node dist/cli.mjs",
     "test": "vitest run --passWithNoTests",

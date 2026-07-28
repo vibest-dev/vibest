@@ -13,22 +13,27 @@ and Vite proxies `/api` + `/ws/rpc` across so the browser stays same-origin.
 ```bash
 # The API server (run_in_background) — no prebuild needed:
 # workspace packages export src/*.ts directly and tsx resolves them.
-cd packages/vibest && pnpm dev            # foreground `serve` on VIBEST_PORT=4000
+cd packages/vibest && pnpm dev            # foreground `serve` on VIBEST_PORT=4100
 
 # The app (run_in_background), in a second call:
-cd apps/app && pnpm dev                   # vite on 5173, proxying to 4000
+cd apps/app && pnpm dev                   # vite on 5180 (strict), proxying to 4100
 ```
 
-Open **the Vite URL** (`http://localhost:5173/`), not the server port — the
+Open **the Vite URL** (`http://localhost:5180/`), not the server port — the
 server only answers `/api/*`, `/ws/rpc`, and the _built_ bundle (503 until you
 `turbo run build --filter=@vibest/app`). `pnpm dev` at the root runs both through
 turbo.
 
-Health check: `curl http://127.0.0.1:4000/api/health` → `ok`, and
-`curl http://localhost:5173/api/health` → `ok` proves the proxy.
+Health check: `curl http://127.0.0.1:4100/api/health` → `ok`, and
+`curl http://localhost:5180/api/health` → `ok` proves the proxy.
 
-To move the API off 4000, export `VIBEST_PORT` for **both** processes —
-`vite.config.ts` reads the same variable to pick its proxy target.
+To move the API off 4100, export `VIBEST_PORT` for **both** processes —
+`vite.config.ts` reads the same variable to pick its proxy target. Don't point
+it at **4000**: that is the daemon's port, which the desktop app spawns and
+guards with an auth token, so the app would load and then fail to connect
+(`/api/health` 200, `/api/ws-ticket` 401) instead of failing loudly. If the app
+loads but shows no data, check which process owns the proxy target first:
+`lsof -nP -iTCP:4100 -sTCP:LISTEN`.
 
 Restarting the server no longer reloads the browser: Vite keeps the page, the
 client reconnects over the proxied WS.
@@ -41,7 +46,7 @@ Gotchas:
 - **TanStack Router's `routeTree.gen.ts` regenerates only when the Vite router
   plugin runs** — on app load through the Vite dev server, NOT on typecheck.
   After adding/renaming/deleting route files, hit the app root once
-  (`curl -o /dev/null http://localhost:5173/`) before typechecking, or typecheck
+  (`curl -o /dev/null http://localhost:5180/`) before typechecking, or typecheck
   fails against the stale tree.
 
 ## Flows worth driving
