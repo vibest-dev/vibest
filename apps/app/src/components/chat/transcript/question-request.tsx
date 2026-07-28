@@ -14,10 +14,13 @@ const EMPTY_DRAFT: AnswerDraft = { selected: [], other: "" };
 
 function QuestionItem({
   question,
+  labelId,
   value,
   onChange,
 }: {
   question: QuestionRequest["questions"][number];
+  /** id of the <p> carrying the question text rendered just above this field. */
+  labelId: string;
   value: AnswerDraft;
   onChange: (next: AnswerDraft) => void;
 }) {
@@ -26,8 +29,11 @@ function QuestionItem({
 
   if (!isChoice) {
     return (
+      // The question itself is the label — pointing at it beats a placeholder,
+      // which disappears on first keystroke and is not announced as a name.
       <input
         type="text"
+        aria-labelledby={labelId}
         className="border-border/70 text-foreground placeholder:text-muted-foreground/70 focus:ring-ring w-full rounded-md border bg-transparent px-2 py-1.5 text-sm outline-none focus:ring-1"
         placeholder="Type your answer…"
         value={value.selected[0] ?? ""}
@@ -128,9 +134,12 @@ export function QuestionRequestView({
             {question.header && (
               <p className="text-muted-foreground text-xs font-medium">{question.header}</p>
             )}
-            <p className="text-foreground text-sm font-medium">{question.question}</p>
+            <p id={`question-${question.id}`} className="text-foreground text-sm font-medium">
+              {question.question}
+            </p>
             <QuestionItem
               question={question}
+              labelId={`question-${question.id}`}
               value={answers[index] ?? EMPTY_DRAFT}
               onChange={(next) =>
                 setAnswers((prev) => prev.map((draft, i) => (i === index ? next : draft)))
