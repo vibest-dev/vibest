@@ -91,15 +91,4 @@ describe("SDK-typed tools: input/output ARE the sdk-tools types", () => {
     expectTypeOf<Out<"SendFeedback">>().toEqualTypeOf<st.SendFeedbackOutput>();
     expectTypeOf<Out<"propose_skills">>().toEqualTypeOf<st.ProposeSkillsOutput>();
   });
-
-  test("legacy hand-written tools keep their shapes", () => {
-    expectTypeOf<In<"MultiEdit">>().toEqualTypeOf<{
-      file_path: string;
-      edits: { old_string: string; new_string: string; replace_all?: boolean }[];
-    }>();
-    expectTypeOf<Out<"MultiEdit">>().toEqualTypeOf<string>();
-    expectTypeOf<In<"SlashCommand">>().toEqualTypeOf<{ command: string }>();
-    expectTypeOf<In<"BashOutput">>().toEqualTypeOf<{ bash_id: string; filter?: string }>();
-    expectTypeOf<In<"KillShell">>().toEqualTypeOf<{ shell_id: string }>();
-  });
 });

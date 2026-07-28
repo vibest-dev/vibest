@@ -20,7 +20,8 @@ import { z } from "zod";
 // Wire names that differ from the SDK type names were verified against the CLI
 // binary's own name map: FileRead→Read, ClaudeDesign→DesignSync,
 // ListMcpResources→ListMcpResourcesTool, ReadMcpResource(Dir)→ReadMcpResource(Dir)Tool,
-// ProposeSkills→propose_skills (the only snake_case name the CLI ships).
+// ProposeSkills→propose_skills (the only snake_case wire name). The registry ↔
+// SDK name map is enforced by the source-text guard in tools-registry.test.ts.
 
 export const Bash = tool({
   inputSchema: z.custom<st.BashInput>(),
@@ -190,45 +191,7 @@ export const SendFeedback = tool({
 export const ProposeSkills = tool({
   inputSchema: z.custom<st.ProposeSkillsInput>(),
   outputSchema: z.custom<st.ProposeSkillsOutput>(),
-}); // wire name: propose_skills
-
-// ── Legacy tools (pre-rename CLI wire names; SDK exports no types for them). ──
-// Kept hand-written so their typed UI components keep working on replayed
-// transcripts. They no longer occur on the current CLI (BashOutput→TaskOutput,
-// KillShell→TaskStop; MultiEdit and SlashCommand were removed upstream).
-
-export const MultiEdit = tool({
-  inputSchema: z.object({
-    file_path: z.string(),
-    edits: z.array(
-      z.object({
-        old_string: z.string(),
-        new_string: z.string(),
-        replace_all: z.boolean().optional(),
-      }),
-    ),
-  }),
-  outputSchema: z.string(),
-});
-export const SlashCommand = tool({
-  inputSchema: z.object({
-    command: z.string(),
-  }),
-  outputSchema: z.string(),
-});
-export const BashOutput = tool({
-  inputSchema: z.object({
-    bash_id: z.string(),
-    filter: z.string().optional(),
-  }),
-  outputSchema: z.string(),
-});
-export const KillShell = tool({
-  inputSchema: z.object({
-    shell_id: z.string(),
-  }),
-  outputSchema: z.string(),
-});
+}); // wire name: propose_skills (the sole snake_case tool)
 
 /** Registry of typed Claude Code tools. Keys are the wire tool names. */
 export const claudeCodeTools = {
@@ -274,11 +237,7 @@ export const claudeCodeTools = {
   ShowOnboardingRolePicker,
   RefreshMcpTools,
   SendFeedback,
-  propose_skills: ProposeSkills,
-  MultiEdit,
-  SlashCommand,
-  BashOutput,
-  KillShell,
+  propose_skills: ProposeSkills, // wire name is snake_case (verified in CLI binary)
 } satisfies ToolSet;
 
 /** Discriminated UI tool union, keyed `tool-Bash` | `tool-Read` | … */
@@ -331,7 +290,3 @@ export type ShowOnboardingRolePickerUIToolInvocation = UIToolInvocation<
 export type RefreshMcpToolsUIToolInvocation = UIToolInvocation<typeof RefreshMcpTools>;
 export type SendFeedbackUIToolInvocation = UIToolInvocation<typeof SendFeedback>;
 export type ProposeSkillsUIToolInvocation = UIToolInvocation<typeof ProposeSkills>;
-export type MultiEditUIToolInvocation = UIToolInvocation<typeof MultiEdit>;
-export type SlashCommandUIToolInvocation = UIToolInvocation<typeof SlashCommand>;
-export type BashOutputUIToolInvocation = UIToolInvocation<typeof BashOutput>;
-export type KillShellUIToolInvocation = UIToolInvocation<typeof KillShell>;
