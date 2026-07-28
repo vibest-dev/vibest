@@ -1,4 +1,3 @@
-import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import { Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -82,15 +81,5 @@ export const makeRequestApp = (
       return withCors(notFound);
     }
 
-    // The dev branch of the UI app writes its own bytes to the raw response, so
-    // a header added to the value it returns would never reach the socket. Set
-    // them on the socket as well; node merges `setHeader` into `writeHead`, so
-    // the static branch below still ends up with exactly one of each.
-    if (headers) {
-      const nodeResponse = NodeHttpServerRequest.toServerResponse(request);
-      for (const [name, value] of Object.entries(headers)) {
-        nodeResponse.setHeader(name, value);
-      }
-    }
     return withCors(yield* options.ui);
   });

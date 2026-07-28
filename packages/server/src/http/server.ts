@@ -10,9 +10,7 @@ import { createRpcRuntime, createWsRPCHandler } from "../rpc";
 import { makeRequestApp } from "./app";
 import { createTicketStore } from "./auth";
 import { isAllowedOrigin, isLoopbackHost } from "./cors";
-import { createUIHandler } from "./ui";
-
-const isDev = process.env.NODE_ENV === "development";
+import { createUIApp } from "./ui";
 
 export type ManagedServer = Server & {
   readonly dispose: () => Promise<void>;
@@ -47,7 +45,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
   // plain node `request` listener, which is the whole point: it leaves the
   // `upgrade` event below untouched. (`HttpServer.serve` would register its own
   // upgrade handler and fight oRPC and Vite's HMR socket for it.)
-  const { ui, closeUI } = await rpcRuntime.run(createUIHandler(server, isDev));
+  const ui = await rpcRuntime.run(createUIApp());
   const requestScope = Scope.makeUnsafe();
   const handleRequest = await rpcRuntime.run(
     NodeHttpServer.makeHandler(makeRequestApp({ authToken, corsOrigins, tickets, ui }), {
@@ -65,15 +63,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
     console.error(e);
   });
 
-  // Share the same HTTP server between Vite's HMR socket and our custom
-  // WebSocketServer. Raw on purpose: oRPC owns this event, so Effect's own
-  // websocket support (`NodeHttpServer.makeUpgradeHandler`) must stay out of it.
+  // Raw on purpose: oRPC owns this event, so Effect's own websocket support
+  // (`NodeHttpServer.makeUpgradeHandler`) must stay out of it — it hands back a
+  // `Socket`, and oRPC wants a WebSocket-shaped object. `/ws/rpc` is the only
+  // upgrade this server answers.
   server.on("upgrade", (req, socket, head) => {
-    if (isDev) {
-      const protocol = req.headers["sec-websocket-protocol"];
-      if (protocol && ["vite-ping", "vite-hmr"].includes(protocol)) return;
-    }
-
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
     if (requestUrl.pathname !== "/ws/rpc") {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
@@ -124,7 +118,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
       await serverClosed;
       // Interrupts any request fiber still in flight before the runtime goes.
       await Effect.runPromise(Scope.close(requestScope, Exit.void));
-      await closeUI();
       await rpcRuntime.dispose();
     })());
 
