@@ -107,6 +107,7 @@ const SessionServiceProvided = SessionServiceLayer.pipe(
   Layer.provide(HarnessAgentSessionPortProvided),
   Layer.provide(SessionManagerProvided),
   Layer.provide(EventBusLayer),
+  Layer.provide(PlatformLayer),
 );
 
 // RegistryLayer is merged in as well as provided into SessionServiceLayer;

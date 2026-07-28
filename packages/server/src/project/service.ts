@@ -1,7 +1,4 @@
-import crypto from "node:crypto";
-import path from "node:path";
-
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer, Path } from "effect";
 
 import { ProjectNotFound, type StoreReadError, type StoreWriteError } from "../errors";
 import type { Project } from "../types";
@@ -29,59 +26,67 @@ export class ProjectService extends Context.Service<
   }
 >()("ProjectService") {}
 
-export const ProjectServiceLayer: Layer.Layer<ProjectService, never, ProjectRepository> =
-  Layer.effect(
-    ProjectService,
-    Effect.gen(function* () {
-      const repo = yield* ProjectRepository;
+export const ProjectServiceLayer: Layer.Layer<
+  ProjectService,
+  never,
+  ProjectRepository | Path.Path | Crypto.Crypto
+> = Layer.effect(
+  ProjectService,
+  Effect.gen(function* () {
+    const repo = yield* ProjectRepository;
+    const { basename, resolve: resolvePath } = yield* Path.Path;
+    const crypto = yield* Crypto.Crypto;
+    // A platform RNG that cannot produce a uuid is a defect, not a domain
+    // failure — keep it out of the service's error channel.
+    const newId = crypto.randomUUIDv4.pipe(Effect.orDie);
 
-      return {
-        list: () => repo.list(),
+    return {
+      list: () => repo.list(),
 
-        findById: (id) =>
-          Effect.gen(function* () {
-            const projects = yield* repo.list();
-            const found = projects.find((p) => p.id === id);
-            if (found === undefined) {
-              return yield* Effect.fail(new ProjectNotFound({ projectId: id }));
-            }
-            return found;
-          }),
+      findById: (id) =>
+        Effect.gen(function* () {
+          const projects = yield* repo.list();
+          const found = projects.find((p) => p.id === id);
+          if (found === undefined) {
+            return yield* Effect.fail(new ProjectNotFound({ projectId: id }));
+          }
+          return found;
+        }),
 
-        findByPath: (targetPath) =>
-          Effect.gen(function* () {
-            const projects = yield* repo.list();
-            const target = path.resolve(targetPath);
-            return projects.find((p) => path.resolve(p.path) === target);
-          }),
+      findByPath: (path) =>
+        Effect.gen(function* () {
+          const projects = yield* repo.list();
+          const target = resolvePath(path);
+          return projects.find((p) => resolvePath(p.path) === target);
+        }),
 
-        create: (input) =>
-          Effect.gen(function* () {
-            const normalized = path.resolve(input.path);
-            const projects = yield* repo.list();
-            // Reuse an existing project pointing at the same path.
-            const existing = projects.find((p) => path.resolve(p.path) === normalized);
-            if (existing !== undefined) return existing;
+      create: (input) =>
+        Effect.gen(function* () {
+          const normalized = resolvePath(input.path);
+          const projects = yield* repo.list();
+          // Reuse an existing project pointing at the same path.
+          const existing = projects.find((p) => resolvePath(p.path) === normalized);
+          if (existing !== undefined) return existing;
 
-            const project: Project = {
-              id: crypto.randomUUID(),
-              name: input.name ?? path.basename(normalized),
-              path: normalized,
-              createdAt: new Date().toISOString(),
-            };
-            yield* repo.save([...projects, project]);
-            return project;
-          }),
+          const project: Project = {
+            id: yield* newId,
+            name: input.name ?? basename(normalized),
+            path: normalized,
+            createdAt: new Date().toISOString(),
+          };
+          yield* repo.save([...projects, project]);
+          return project;
+        }),
 
-        remove: (id) =>
-          Effect.gen(function* () {
-            const projects = yield* repo.list();
-            const target = projects.find((p) => p.id === id);
-            if (target === undefined) {
-              return yield* Effect.fail(new ProjectNotFound({ projectId: id }));
-            }
-            yield* repo.save(projects.filter((p) => p.id !== id));
-          }),
-      };
-    }),
-  );
+      remove: (id) =>
+        Effect.gen(function* () {
+          const projects = yield* repo.list();
+          const target = projects.find((p) => p.id === id);
+          if (target === undefined) {
+            return yield* Effect.fail(new ProjectNotFound({ projectId: id }));
+          }
+          yield* repo.save(projects.filter((p) => p.id !== id));
+        }),
+    };
+  }),
+);

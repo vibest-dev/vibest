@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import type {
   AgentResponse,
   PermissionMode,
@@ -10,7 +8,7 @@ import type {
   SessionStatus,
   SessionSummary,
 } from "@vibest/contract";
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
 
 import {
   type ProjectNotFound,
@@ -181,7 +179,12 @@ export class SessionService extends Context.Service<
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  ProjectService | SessionRepository | HarnessAgentSessionPort | SessionManager | EventBus
+  | ProjectService
+  | SessionRepository
+  | HarnessAgentSessionPort
+  | SessionManager
+  | EventBus
+  | Crypto.Crypto
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -190,6 +193,10 @@ export const SessionServiceLayer: Layer.Layer<
     const port = yield* HarnessAgentSessionPort;
     const manager = yield* SessionManager;
     const bus = yield* EventBus;
+    const crypto = yield* Crypto.Crypto;
+    // A platform RNG that cannot produce a uuid is a defect, not a domain
+    // failure — keep it out of the service's error channel.
+    const newSessionId = crypto.randomUUIDv4.pipe(Effect.orDie);
 
     const readChecked = (ref: SessionRef) =>
       repo
@@ -241,35 +248,29 @@ export const SessionServiceLayer: Layer.Layer<
 
     return {
       create: (projectId, harnessAgentId, config) =>
-        projects.findById(projectId).pipe(
-          Effect.flatMap((project) =>
-            port.create(harnessAgentId, project.path, config).pipe(
-              Effect.flatMap((harnessSessionId) => {
-                const sessionId = crypto.randomUUID();
-                const metadata: Session = {
-                  version: 1,
-                  sessionId,
-                  projectId,
-                  harnessAgentId,
-                  harnessSessionId,
-                  createdAt: new Date().toISOString(),
-                  // Our own floor field: the session's working directory. Stored
-                  // so an imported/rehomed session stays self-contained and a
-                  // resume has cwd before it can call getSessionInfo.
-                  cwd: project.path,
-                };
-                const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-                return repo.write(metadata).pipe(
-                  // A failed metadata write must not leak the native session.
-                  Effect.tapError(() => port.close(harnessSessionId)),
-                  Effect.andThen(startRuntime(ref, harnessSessionId)),
-                  Effect.andThen(bus.publish({ ref, type: "session.created" })),
-                  Effect.as(ref),
-                );
-              }),
-            ),
-          ),
-        ),
+        Effect.gen(function* () {
+          const project = yield* projects.findById(projectId);
+          const harnessSessionId = yield* port.create(harnessAgentId, project.path, config);
+          const sessionId = yield* newSessionId;
+          const metadata: Session = {
+            version: 1,
+            sessionId,
+            projectId,
+            harnessAgentId,
+            harnessSessionId,
+            createdAt: new Date().toISOString(),
+            // Our own floor field: the session's working directory. Stored
+            // so an imported/rehomed session stays self-contained and a
+            // resume has cwd before it can call getSessionInfo.
+            cwd: project.path,
+          };
+          const ref: SessionRef = { projectId, harnessAgentId, sessionId };
+          // A failed metadata write must not leak the native session.
+          yield* repo.write(metadata).pipe(Effect.tapError(() => port.close(harnessSessionId)));
+          yield* startRuntime(ref, harnessSessionId);
+          yield* bus.publish({ ref, type: "session.created" });
+          return ref;
+        }),
 
       resume: (ref) =>
         readChecked(ref).pipe(

@@ -93,6 +93,7 @@ async function setup() {
     Layer.provide(portLayer),
     Layer.provide(managerLayer),
     Layer.provide(EventBusLayer),
+    Layer.provide(NodeServices.layer),
   );
 
   const appLayer = Layer.mergeAll(
