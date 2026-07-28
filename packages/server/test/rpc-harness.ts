@@ -63,7 +63,7 @@ export async function makeRpcTestHarness(
       registryLayer,
       listLayer,
       probeLayer,
-      FileSystemServiceLayer,
+      FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
       NodePlatformLayer,
     ),
   );
