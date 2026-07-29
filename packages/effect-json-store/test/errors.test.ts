@@ -73,6 +73,22 @@ it.effect("fails with JsonStoreDecodeError when latest-version data fails its sc
   }),
 );
 
+it.effect("fails with JsonStoreWriteError when the encoded value is not JSON-serializable", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const AnyValue = Schema.Struct({ value: Schema.Unknown });
+      const store = yield* makeJsonDocument({
+        path: path.join(dir, "config.json"),
+        schema: AnyValue,
+        defaults: { value: 1 },
+      });
+      // BigInt slips through Schema.Unknown but JSON.stringify rejects it.
+      const error = yield* Effect.flip(store.set({ value: 1n }));
+      assert.equal(error._tag, "JsonStoreWriteError");
+    }),
+  ),
+);
+
 /** Real filesystem for reads, but every write fails — for write-error injection. */
 const failingWrites = Layer.effect(
   FileSystem.FileSystem,

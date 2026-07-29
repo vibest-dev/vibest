@@ -178,24 +178,29 @@ interface JsonCollection<A> {
   ) => Effect.Effect<void, JsonStoreEncodeError | JsonStoreWriteError>;
   /** 删除；缺失是 no-op */
   readonly remove: (id: string) => Effect.Effect<void, JsonStoreWriteError>;
-  /** 全部条目按 id 排序；目录不存在 = 空表；损坏条目 fail loud；有界并发（16） */
-  readonly list: (
-    filter?: (entry: JsonCollectionEntry<A>) => boolean,
-  ) => Effect.Effect<ReadonlyArray<JsonCollectionEntry<A>>, JsonStoreLoadError>;
+  /** 全部条目 id（可 `under` 限定子目录），已排序，不读条目内容；杂散非法文件名被跳过 */
+  readonly ids: (options?: {
+    readonly under?: string;
+  }) => Effect.Effect<ReadonlyArray<string>, JsonStoreReadError>;
+  /** 全部条目按 id 排序；目录不存在 = 空表；损坏条目 fail loud（用 `under` 收窄故障域）；有界并发（16） */
+  readonly list: (options?: {
+    readonly under?: string;
+    readonly filter?: (entry: JsonCollectionEntry<A>) => boolean;
+  }) => Effect.Effect<ReadonlyArray<JsonCollectionEntry<A>>, JsonStoreLoadError>;
 }
 ```
 
 与 document 的语义分野：
 
-| 维度         | document                       | collection                                        |
-| ------------ | ------------------------------ | ------------------------------------------------- |
-| 寻址         | 一个固定文件                   | `<dir>/<id>.json`，id 可含 `/` 嵌套（如 `p1/s1`） |
-| 缺失         | `defaults` 种子化写盘          | `Option.none`，绝不创建文件                       |
-| 加载时机     | 构造时急加载 + 缓存            | 每次 `get`/`list` 读盘，无缓存                    |
-| 写序         | Semaphore(1) 串行化            | 无（不同 id 天然无冲突；同 id 并发是消费方问题）  |
-| 构造失败通道 | `JsonStoreLoadError`（急加载） | `never`（构造纯粹，错误推迟到操作）               |
+| 维度         | document                       | collection                                                                                   |
+| ------------ | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| 寻址         | 一个固定文件                   | `<dir>/<id>.json`，id 可含 `/` 嵌套（如 `p1/s1`）                                            |
+| 缺失         | `defaults` 种子化写盘          | `Option.none`，绝不创建文件                                                                  |
+| 加载时机     | 构造时急加载 + 缓存            | 每次 `get`/`list` 读盘，无缓存                                                               |
+| 写序         | Semaphore(1) 串行化            | 同 id 互斥（每 id 一把锁；`get` 的迁移写回不会覆盖并发 `put`/复活 `remove`），不同 id 全并发 |
+| 构造失败通道 | `JsonStoreLoadError`（急加载） | `never`（构造纯粹，错误推迟到操作）                                                          |
 
-id 校验：空串、绝对路径、`.`/`..` 段一律 `Effect.die`（这是调用方 bug，不是可恢复错误）。迁移写回发生在 `get`（含 `list` 内部的 get），与 document 一致走原子写。
+id 校验：空串、绝对路径、`.`/`..` 段一律 `Effect.die`——**这是"调用方 bug"契约，外部（客户端）可控的 id 必须在进入 collection 前由消费方 sanitize 成 typed error**（见 server SessionRepository 的 `isSafeId`）。磁盘上衍生的名字不受此约束：`ids`/`list` 会跳过非法文件名（如杂散的 `.json`）而不是 die。迁移写回发生在 `get`（含 `list` 内部的 get），与 document 一致走原子写，且受同 id 锁保护。
 
 - 命名取自 Firestore 的 document/collection 对偶；错误类型保留 `JsonStore*` 前缀作为包级伞名。
 
@@ -314,3 +319,14 @@ server `storage/` 接入（2026-07-28）：
   留给 config.json（provider/mcp，本次范围外）。
 - 层构造现在含文件 I/O：测试 harness 的 `runtime.runSync(contextEffect)` 改为 `runPromise`
   （生产路径 `createRpcRuntime` 本就是 async，不受影响）。
+
+审查修复（2026-07-29，对抗审查后）：
+
+- collection 增加同 id 互斥锁（`get` 迁移写回不再与并发 `put`/`remove` 竞态）与
+  `ids()` / `list({ under })`（session 按项目收窄故障域，`findBySessionId` 只读一个文件体）。
+- `listIds` 跳过非法文件名；`JSON.stringify` 包进 `Effect.try`（不可序列化值 → `JsonStoreWriteError`）。
+- server：SessionRepository 对客户端可控 id 做 `isSafeId` 消毒（畸形 id → typed not-found 而非 defect）；
+  ProjectRepository 改为惰性打开 + 成功后缓存——损坏或超前版本的 projects.json 不再 `orDie` 砖死启动，
+  错误按调用以 `StoreReadError` 呈现，文件修好后下次调用自愈。
+- 明确暂不做：写回失败使读路径失败（只读文件系统场景）、KeyPath 的 nullable/带点属性名收紧、
+  ProjectRepository 改用 `document.update`（lost-update 是旧代码既有行为）。

@@ -75,9 +75,15 @@ export const makeFileCodec = (
     envelope: { readonly version: number; readonly data: unknown },
   ): Effect.Effect<void, JsonStoreWriteError> =>
     Effect.gen(function* () {
+      // Schema encoding cannot rule out values JSON.stringify rejects (BigInt,
+      // cycles behind Schema.Unknown), so the throw must stay a typed failure.
+      const text = yield* Effect.try({
+        try: () => `${JSON.stringify(envelope, null, 2)}\n`,
+        catch: (cause) => cause,
+      });
       yield* fs.makeDirectory(path.dirname(file), { recursive: true });
       const tmp = `${file}.${crypto.randomUUID()}.tmp`;
-      yield* fs.writeFileString(tmp, `${JSON.stringify(envelope, null, 2)}\n`);
+      yield* fs.writeFileString(tmp, text);
       yield* fs.rename(tmp, file);
     }).pipe(Effect.mapError((cause) => new JsonStoreWriteError({ file, cause })));
 

@@ -11,6 +11,7 @@ export type { AnySchema, MigrationStep } from "./codec";
 export {
   type JsonCollection,
   type JsonCollectionEntry,
+  type JsonCollectionListOptions,
   type JsonCollectionOptions,
   makeJsonCollection,
 } from "./collection";

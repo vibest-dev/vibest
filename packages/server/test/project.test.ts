@@ -98,6 +98,26 @@ describe("ProjectService", () => {
     expect(raw.data).toEqual([project]);
   });
 
+  it("a corrupt projects.json fails per call with StoreReadError and recovers once fixed", async () => {
+    const file = join(home, "storage", "projects.json");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "{ not json", "utf8");
+
+    // The layer must still build (no startup defect); the error is per call.
+    const result = await run(
+      Effect.gen(function* () {
+        const svc = yield* ProjectService;
+        const error = yield* Effect.flip(svc.list());
+        // Fix the file on disk; the next call retries the open and recovers.
+        yield* Effect.promise(() => writeFile(file, "[]", "utf8"));
+        const listed = yield* svc.list();
+        return { error, listed };
+      }),
+    );
+    expect(result.error._tag).toBe("StoreReadError");
+    expect(result.listed).toEqual([]);
+  });
+
   it("remove fails with ProjectNotFound for an unknown id", async () => {
     const err = await run(
       Effect.flip(

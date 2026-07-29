@@ -52,6 +52,15 @@ export class SessionRepository extends Context.Service<
   }
 >()("SessionRepository") {}
 
+/**
+ * Ids reach this repository from RPC input, so they must be sanitized before
+ * they become path segments: the collection treats an invalid id as a defect
+ * (caller bug), but here a malformed id is client data and means "no such
+ * session", not a crash.
+ */
+const isSafeId = (id: string): boolean =>
+  id.length > 0 && !/[/\\]/.test(id) && id !== "." && id !== "..";
+
 export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths> = Layer.effect(
   SessionRepository,
   Effect.gen(function* () {
@@ -70,35 +79,43 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
 
     return {
       list: (projectId) =>
-        sessions
-          .list((entry) => entry.data.projectId === projectId)
-          .pipe(
-            Effect.map((entries) => entries.map((entry) => entry.data)),
-            Effect.mapError(asReadError),
-          ),
+        // Scoped to the project's own subdirectory: a corrupt record in
+        // another project cannot fail this listing.
+        isSafeId(projectId)
+          ? sessions.list({ under: projectId }).pipe(
+              Effect.map((entries) => entries.map((entry) => entry.data)),
+              Effect.mapError(asReadError),
+            )
+          : Effect.succeed([]),
 
       read: (projectId, sessionId) =>
-        sessions.get(entryId(projectId, sessionId)).pipe(
-          Effect.mapError(asReadError),
-          Effect.flatMap((found) =>
-            Option.isSome(found)
-              ? Effect.succeed(found.value)
-              : Effect.fail(new SessionNotFound({ projectId, sessionId })),
-          ),
-        ),
+        !isSafeId(projectId) || !isSafeId(sessionId)
+          ? Effect.fail(new SessionNotFound({ projectId, sessionId }))
+          : sessions.get(entryId(projectId, sessionId)).pipe(
+              Effect.mapError(asReadError),
+              Effect.flatMap((found) =>
+                Option.isSome(found)
+                  ? Effect.succeed(found.value)
+                  : Effect.fail(new SessionNotFound({ projectId, sessionId })),
+              ),
+            ),
 
       findBySessionId: (sessionId) =>
-        sessions
-          .list((entry) => entry.data.sessionId === sessionId)
-          .pipe(
-            Effect.mapError(asReadError),
-            Effect.flatMap((hits) => {
-              const hit = hits[0];
-              return hit === undefined
-                ? Effect.fail(new SessionRefNotFound({ sessionId }))
-                : Effect.succeed(hit.data);
+        // Scan filenames only (no entry bodies), then read the single match.
+        !isSafeId(sessionId)
+          ? Effect.fail(new SessionRefNotFound({ sessionId }))
+          : Effect.gen(function* () {
+              const ids = yield* sessions.ids().pipe(Effect.mapError(asReadError));
+              const id = ids.find((candidate) => candidate.endsWith(`/${sessionId}`));
+              const found =
+                id === undefined
+                  ? Option.none<Session>()
+                  : yield* sessions.get(id).pipe(Effect.mapError(asReadError));
+              if (Option.isNone(found)) {
+                return yield* Effect.fail(new SessionRefNotFound({ sessionId }));
+              }
+              return found.value;
             }),
-          ),
 
       write: (metadata) =>
         sessions
@@ -106,7 +123,9 @@ export const SessionRepositoryLayer: Layer.Layer<SessionRepository, never, Paths
           .pipe(Effect.mapError(asWriteError)),
 
       remove: (projectId, sessionId) =>
-        sessions.remove(entryId(projectId, sessionId)).pipe(Effect.mapError(asWriteError)),
+        !isSafeId(projectId) || !isSafeId(sessionId)
+          ? Effect.void
+          : sessions.remove(entryId(projectId, sessionId)).pipe(Effect.mapError(asWriteError)),
     };
   }),
 ).pipe(Layer.provide(NodeFileSystem.layer));

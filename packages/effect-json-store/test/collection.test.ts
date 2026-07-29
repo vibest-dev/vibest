@@ -73,7 +73,7 @@ it.effect("list returns entries sorted by id, supports filter, and an absent dir
         ["p1/s1", "p1/s2", "p2/s1"],
       );
 
-      const starred = yield* sessions.list((entry) => entry.data.starred);
+      const starred = yield* sessions.list({ filter: (entry) => entry.data.starred });
       assert.deepEqual(
         starred.map((entry) => entry.id),
         ["p1/s2"],
@@ -100,6 +100,88 @@ it.effect("get migrates an old entry and writes the new version back", () =>
       assert.deepEqual(yield* sessions.get("p1/s1"), Option.some({ title: "old", starred: false }));
       const parsed: unknown = JSON.parse(yield* fs.readFileString(file));
       assert.deepEqual(parsed, { version: 2, data: { title: "old", starred: false } });
+    }),
+  ),
+);
+
+it.effect("ids lists sorted entry ids without reading bodies, and skips stray filenames", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const collectionDir = path.join(dir, "sessions");
+      const sessions = yield* makeJsonCollection({ dir: collectionDir, schema: V2 });
+
+      yield* sessions.put("p2/s1", { title: "b", starred: false });
+      yield* sessions.put("p1/s1", { title: "a", starred: true });
+      // Corrupt body and stray names: ids must not decode or die on them.
+      yield* fs.writeFileString(path.join(collectionDir, "p1", "s2.json"), "{ not json");
+      yield* fs.writeFileString(path.join(collectionDir, ".json"), "stray");
+
+      assert.deepEqual(yield* sessions.ids(), ["p1/s1", "p1/s2", "p2/s1"]);
+      assert.deepEqual(yield* sessions.ids({ under: "p1" }), ["p1/s1", "p1/s2"]);
+    }),
+  ),
+);
+
+it.effect("list scoped with `under` is unaffected by corruption in other subdirectories", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const collectionDir = path.join(dir, "sessions");
+      const sessions = yield* makeJsonCollection({ dir: collectionDir, schema: V2 });
+
+      yield* sessions.put("p1/s1", { title: "a", starred: false });
+      yield* fs.makeDirectory(path.join(collectionDir, "p2"), { recursive: true });
+      yield* fs.writeFileString(path.join(collectionDir, "p2", "bad.json"), "{ not json");
+
+      const scoped = yield* sessions.list({ under: "p1" });
+      assert.deepEqual(
+        scoped.map((entry) => entry.id),
+        ["p1/s1"],
+      );
+      // The unscoped list still fails loudly on the corrupt entry.
+      const error = yield* Effect.flip(sessions.list());
+      assert.equal(error._tag, "JsonStoreParseError");
+    }),
+  ),
+);
+
+it.effect("a stray '.json' filename does not break list", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const collectionDir = path.join(dir, "sessions");
+      yield* fs.makeDirectory(collectionDir, { recursive: true });
+      yield* fs.writeFileString(path.join(collectionDir, ".json"), "stray");
+
+      const sessions = yield* makeJsonCollection({ dir: collectionDir, schema: V2 });
+      assert.deepEqual(yield* sessions.list(), []);
+    }),
+  ),
+);
+
+it.effect("a migrating get racing a put on the same id never loses the put", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const collectionDir = path.join(dir, "sessions");
+      const file = path.join(collectionDir, "p1", "s1.json");
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+      yield* fs.writeFileString(file, JSON.stringify({ version: 1, data: { title: "old" } }));
+
+      const sessions = yield* makeJsonCollection({
+        dir: collectionDir,
+        schema: V2,
+        migrations: [{ schema: V1, migrate: (v1) => ({ ...v1, starred: false }) }],
+      });
+
+      // Whichever order the id lock serializes them in, the migration
+      // write-back must never overwrite the concurrent put.
+      const fresh = { title: "fresh", starred: true };
+      yield* Effect.all([sessions.get("p1/s1"), sessions.put("p1/s1", fresh)], {
+        concurrency: "unbounded",
+      });
+      assert.deepEqual(yield* sessions.get("p1/s1"), Option.some(fresh));
     }),
   ),
 );

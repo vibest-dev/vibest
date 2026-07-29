@@ -140,6 +140,41 @@ describe("SessionRepository", () => {
     expect(hit.harnessSessionId).toBe("u2");
   });
 
+  it("a corrupt record in another project does not break this project's list", async () => {
+    const badFile = join(home, "storage", "sessions", "proj-b", "bad.json");
+    await mkdir(dirname(badFile), { recursive: true });
+    await writeFile(badFile, "{ not json", "utf8");
+
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
+        const listedA = yield* repo.list("proj-a");
+        const errorB = yield* Effect.flip(repo.list("proj-b"));
+        return { listedA, errorB };
+      }),
+    );
+    expect(result.listedA.map((session) => session.sessionId)).toEqual(["sess-1"]);
+    expect(result.errorB._tag).toBe("StoreReadError");
+  });
+
+  it("malformed ids yield typed results, never defects", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
+        const readError = yield* Effect.flip(repo.read("..", "sess-1"));
+        const findError = yield* Effect.flip(repo.findBySessionId("a/../b"));
+        const listed = yield* repo.list("../proj-a");
+        yield* repo.remove("..", ".."); // no-op, must not die
+        return { readError, findError, listed };
+      }),
+    );
+    expect(result.readError._tag).toBe("SessionNotFound");
+    expect(result.findError._tag).toBe("SessionRefNotFound");
+    expect(result.listed).toEqual([]);
+  });
+
   it("findBySessionId fails with SessionRefNotFound for an unknown session", async () => {
     const err = await run(
       Effect.flip(
