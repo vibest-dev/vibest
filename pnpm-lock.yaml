@@ -475,9 +475,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.80.7
         version: 0.80.7(@modelcontextprotocol/sdk@1.29.0(supports-color@7.2.0)(zod@4.4.3))(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
-      '@opencode-ai/sdk':
-        specifier: 1.18.3
-        version: 1.18.3
       '@vibest/contract':
         specifier: workspace:*
         version: link:../contract
@@ -10520,6 +10517,7 @@ snapshots:
   '@opencode-ai/sdk@1.18.3':
     dependencies:
       cross-spawn: 7.0.6
+    optional: true
 
   '@opentelemetry/api-logs@0.220.0':
     dependencies:

@@ -35,5 +35,8 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
 - Port binding, auth, CORS, ticketing, static serving → `packages/server/src/http`,
   not the CLI. `resolveVibestHome` in `packages/server/src/config/paths.ts` is the
   only definition of `$VIBEST_HOME`; the one-daemon-per-home invariant rests on it.
-- `packages/harness/src/opencode/` is dormant: absent from `HarnessAgentIdSchema`,
-  no server adapter.
+- `HarnessAgentIdSchema` in `packages/contract/src/domain.ts` is the whitelist:
+  `claude-code`, `codex`, `pi` and nothing else. A fourth harness needs a literal
+  there, a `packages/harness/src/<agent>/` transform, and a server adapter
+  registered in `packages/server/src/harness/registry.ts` — all three, or it is
+  unreachable at runtime.

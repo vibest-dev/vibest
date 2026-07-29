@@ -10,7 +10,6 @@
     "./codex": "./src/codex/index.ts",
     "./codex/protocol": "./src/codex/protocol/index.ts",
     "./codex/protocol/v2": "./src/codex/protocol/v2/index.ts",
-    "./opencode": "./src/opencode/index.ts",
     "./pi": "./src/pi/index.ts",
     "./pi/protocol": "./src/pi/protocol.ts"
   },
@@ -23,7 +22,6 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@earendil-works/pi-coding-agent": "0.80.7",
-    "@opencode-ai/sdk": "1.18.3",
     "@vibest/contract": "workspace:*",
     "ai": "catalog:",
     "effect": "catalog:",

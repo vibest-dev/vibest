@@ -4,7 +4,6 @@
 // Import from specific agent implementations:
 // - @vibest/harness/claude-code
 // - @vibest/harness/codex
-// - @vibest/harness/opencode
 // - @vibest/harness/pi
 
 export * from "./schema/standard";
