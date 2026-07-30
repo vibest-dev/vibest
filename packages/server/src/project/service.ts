@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Context, Crypto, Effect, Layer } from "effect";
 
@@ -16,7 +16,7 @@ export class ProjectService extends Context.Service<
     readonly list: () => Effect.Effect<ReadonlyArray<Project>, StoreReadError>;
     readonly findById: (id: string) => Effect.Effect<Project, StoreReadError | ProjectNotFound>;
     /** The project registered at a workspace path, if any (paths are resolved). */
-    readonly findByPath: (path: string) => Effect.Effect<Project | undefined, StoreReadError>;
+    readonly findByPath: (workspace: string) => Effect.Effect<Project | undefined, StoreReadError>;
     /** `name` defaults to the folder's basename. */
     readonly create: (input: {
       readonly name?: string;
@@ -54,24 +54,24 @@ export const ProjectServiceLayer: Layer.Layer<
           return found;
         }),
 
-      findByPath: (path) =>
+      findByPath: (workspace) =>
         Effect.gen(function* () {
           const projects = yield* repo.list();
-          const target = nodePath.resolve(path);
-          return projects.find((p) => nodePath.resolve(p.path) === target);
+          const target = path.resolve(workspace);
+          return projects.find((p) => path.resolve(p.path) === target);
         }),
 
       create: (input) =>
         Effect.gen(function* () {
-          const normalized = nodePath.resolve(input.path);
+          const normalized = path.resolve(input.path);
           const projects = yield* repo.list();
           // Reuse an existing project pointing at the same path.
-          const existing = projects.find((p) => nodePath.resolve(p.path) === normalized);
+          const existing = projects.find((p) => path.resolve(p.path) === normalized);
           if (existing !== undefined) return existing;
 
           const project: Project = {
             id: yield* newId,
-            name: input.name ?? nodePath.basename(normalized),
+            name: input.name ?? path.basename(normalized),
             path: normalized,
             createdAt: new Date().toISOString(),
           };

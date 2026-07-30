@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Effect, FileSystem, type PlatformError } from "effect";
 
@@ -20,7 +20,7 @@ export type DaemonRecord = {
 };
 
 /** `$VIBEST_HOME/daemon.pid`. */
-export const recordPath = (home: string): string => nodePath.join(home, "daemon.pid");
+export const recordPath = (home: string): string => path.join(home, "daemon.pid");
 
 /** Read and validate the record, or `undefined` if missing/garbage. */
 export const readRecord = (

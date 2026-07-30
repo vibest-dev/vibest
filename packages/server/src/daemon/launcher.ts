@@ -1,6 +1,6 @@
 import childProcess from "node:child_process";
 import fs from "node:fs";
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Clock, Crypto, Effect, FileSystem, type PlatformError } from "effect";
 
@@ -263,7 +263,7 @@ const spawnDaemon = (
       signal(pid, "SIGTERM");
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${nodePath.join(home, "daemon.log")}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${path.join(home, "daemon.log")}`,
         }),
       );
     }
@@ -299,7 +299,7 @@ const hex = (bytes: Uint8Array): string =>
  */
 function spawnDetached(options: ResolveDaemonOptions, port: number, token: string): number {
   const { home } = options;
-  const logFd = fs.openSync(nodePath.join(home, "daemon.log"), "a", 0o600);
+  const logFd = fs.openSync(path.join(home, "daemon.log"), "a", 0o600);
   try {
     const [command, ...args] = options.serverArgv;
     if (command === undefined) throw new Error("serverArgv must not be empty");

@@ -1,7 +1,7 @@
 import childProcess from "node:child_process";
 import module from "node:module";
 import os from "node:os";
-import nodePath from "node:path";
+import path from "node:path";
 import util from "node:util";
 
 import { Data, Effect, FileSystem } from "effect";
@@ -25,8 +25,8 @@ const NOT_FOUND =
 /** Where the native installer and the common package managers put `claude`. */
 function extraInstallDirs(home: string): string[] {
   return [
-    nodePath.join(home, ".local", "bin"),
-    nodePath.join(home, ".bun", "bin"),
+    path.join(home, ".local", "bin"),
+    path.join(home, ".bun", "bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
   ];
@@ -48,7 +48,7 @@ function sdkBinary(binary: string): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
   try {
     const resolved = moduleRequire.resolve(`${pkg}/${binary}`);
-    return resolved.includes(`.asar${nodePath.sep}`) ? undefined : resolved;
+    return resolved.includes(`.asar${path.sep}`) ? undefined : resolved;
   } catch {
     return undefined;
   }
@@ -116,7 +116,7 @@ export const resolveClaudeExecutable = (
     const dirs = [...(env["PATH"] ?? "").split(pathDelimiter(platform)), ...extraInstallDirs(home)];
     for (const dir of dirs) {
       if (!dir) continue;
-      const candidate = nodePath.join(dir, binary);
+      const candidate = path.join(dir, binary);
       if (yield* isExecutable(candidate)) return candidate;
     }
 
@@ -133,7 +133,7 @@ export const requiredClaudeVersion = (): Effect.Effect<string, Error, FileSystem
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const main = yield* Effect.try(() => moduleRequire.resolve("@anthropic-ai/claude-agent-sdk"));
-    const raw = yield* fs.readFileString(nodePath.join(nodePath.dirname(main), "package.json"));
+    const raw = yield* fs.readFileString(path.join(path.dirname(main), "package.json"));
     const manifest = yield* Effect.try(() => JSON.parse(raw) as { claudeCodeVersion?: string });
     if (!manifest.claudeCodeVersion) {
       return yield* Effect.fail(
@@ -191,7 +191,7 @@ export const checkClaudeAvailability = (
 ): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const executable = yield* resolveClaudeExecutable(deps).pipe(
-      Effect.map((path) => ({ ok: true as const, path })),
+      Effect.map((resolved) => ({ ok: true as const, path: resolved })),
       Effect.catch((cause) => Effect.succeed({ ok: false as const, reason: cause.message })),
     );
     if (!executable.ok) return { available: false, reason: executable.reason };

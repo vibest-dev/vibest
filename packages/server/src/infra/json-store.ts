@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Crypto, Effect, FileSystem, type PlatformError } from "effect";
 
@@ -48,7 +48,7 @@ export const writeJsonAtomic = (
     const crypto = yield* Crypto.Crypto;
 
     const body = yield* Effect.try(() => `${JSON.stringify(data, null, 2)}\n`);
-    yield* fs.makeDirectory(nodePath.dirname(file), { recursive: true });
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
     const id = yield* crypto.randomUUIDv4;
     const tmp = `${file}.${id}.tmp`;
     yield* fs.writeFileString(tmp, body);

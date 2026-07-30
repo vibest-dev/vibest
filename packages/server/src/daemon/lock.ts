@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Effect, FileSystem, type PlatformError } from "effect";
 
@@ -10,7 +10,7 @@ import { Effect, FileSystem, type PlatformError } from "effect";
  * reclaimable. This is the file-state seam; the retry/wait orchestration lives
  * in the launcher.
  */
-const lockPath = (home: string): string => nodePath.join(home, "daemon.lock");
+const lockPath = (home: string): string => path.join(home, "daemon.lock");
 
 /**
  * Create the lock atomically. True when acquired; false when someone holds it.

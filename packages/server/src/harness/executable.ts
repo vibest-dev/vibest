@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Effect, FileSystem } from "effect";
 
@@ -72,12 +72,12 @@ export const findExecutable = (
     const fs = yield* FileSystem.FileSystem;
     const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
 
-    if (nodePath.isAbsolute(command)) {
+    if (path.isAbsolute(command)) {
       return (yield* isExecutable(command)) ? command : undefined;
     }
 
     const names =
-      platform !== "win32" || nodePath.extname(command)
+      platform !== "win32" || path.extname(command)
         ? [command]
         : WINDOWS_EXTENSIONS.map((extension) => `${command}${extension}`);
 
@@ -86,7 +86,7 @@ export const findExecutable = (
     for (const dir of (env["PATH"] ?? "").split(pathDelimiter(platform))) {
       if (!dir) continue;
       for (const name of names) {
-        const candidate = nodePath.join(dir, name);
+        const candidate = path.join(dir, name);
         if (yield* isExecutable(candidate)) return candidate;
       }
     }

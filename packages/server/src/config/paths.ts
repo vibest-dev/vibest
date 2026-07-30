@@ -1,5 +1,5 @@
 import os from "node:os";
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Context, Layer } from "effect";
 
@@ -23,9 +23,9 @@ export class Paths extends Context.Service<
 
 const resolve = (home: string) => ({
   home,
-  projectsFile: nodePath.join(home, "storage", "projects.json"),
-  configFile: nodePath.join(home, "config.json"),
-  sessionsDir: nodePath.join(home, "storage", "sessions"),
+  projectsFile: path.join(home, "storage", "projects.json"),
+  configFile: path.join(home, "config.json"),
+  sessionsDir: path.join(home, "storage", "sessions"),
 });
 
 /**
@@ -41,7 +41,7 @@ const resolve = (home: string) => ({
  * it is sync because there is nothing here to suspend.
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.VIBEST_HOME ?? nodePath.join(os.homedir(), ".vibest");
+  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */

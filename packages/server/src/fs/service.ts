@@ -1,4 +1,4 @@
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Context, Effect, FileSystem, Layer } from "effect";
 
@@ -22,11 +22,8 @@ const NUL = String.fromCharCode(0);
  * and t3code's `WorkspacePaths` use.)
  */
 const contains = (parent: string, child: string): boolean => {
-  const rel = nodePath.relative(parent, child);
-  return (
-    rel === "" ||
-    (!nodePath.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${nodePath.sep}`))
-  );
+  const rel = path.relative(parent, child);
+  return rel === "" || (!path.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${path.sep}`));
 };
 
 type ReadFileError =
@@ -66,10 +63,10 @@ export const FileSystemServiceLayer: Layer.Layer<FileSystemService, never, FileS
         Effect.gen(function* () {
           // `cwd` is the trusted root and must be absolute; `relPath` must be
           // relative to it (an absolute one would silently ignore `cwd`).
-          if (!nodePath.isAbsolute(cwd) || nodePath.isAbsolute(relPath)) {
+          if (!path.isAbsolute(cwd) || path.isAbsolute(relPath)) {
             return yield* new WorkspacePathEscape({ cwd, path: relPath });
           }
-          const absolute = nodePath.resolve(cwd, relPath);
+          const absolute = path.resolve(cwd, relPath);
           if (!contains(cwd, absolute)) {
             return yield* new WorkspacePathEscape({ cwd, path: relPath });
           }
