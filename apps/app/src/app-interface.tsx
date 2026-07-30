@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { useState, type ReactElement } from "react";
+import type { ReactGrabAPI } from "react-grab/core";
 import { Toaster } from "sonner";
 
 import "./index.css";
@@ -14,16 +15,30 @@ import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";
 import type { ServerConnection } from "./server-connection";
 
-// Dev only: hover any element and press Cmd/Ctrl+C to copy it with its React
-// component stack and source locations, for pasting into a coding agent. The
-// guard is statically false in production, so react-grab is dead-code-eliminated
-// from both the Vite and electron-vite builds. See https://react-grab.com.
+declare global {
+  interface Window {
+    /** react-grab's `init` result; its package root publishes this on auto-init. */
+    __REACT_GRAB__?: ReactGrabAPI;
+  }
+}
+
+// Dev only, dead-code-eliminated from both the Vite and electron-vite builds:
+// react-grab (hover an element, Cmd/Ctrl+C, paste it into a coding agent) and
+// react-scan (highlights re-renders). See react-grab.com and react-scan.com.
 //
-// The `/core` entry is the one that doesn't auto-init, which is what lets us
-// pass `telemetry: false` — the default init fires a version check at
-// react-grab.com that the Electron renderer's CSP blocks anyway.
+// Both would otherwise fetch react-grab.com/api/version at startup, which the
+// Electron renderer's CSP blocks with a console error. `react-grab/core` is the
+// entry that doesn't auto-init, so it takes `telemetry: false`; react-scan has
+// no such option but skips its own copy of the check when `window.__REACT_GRAB__`
+// is set — so publishing it here is what keeps react-scan quiet, and it has to
+// happen before react-scan loads.
 if (import.meta.env.DEV) {
-  void import("react-grab/core").then(({ init }) => init({ telemetry: false }));
+  void import("react-grab/core").then(async ({ init }) => {
+    // oxlint-disable-next-line no-underscore-dangle -- react-grab's own global name
+    window.__REACT_GRAB__ = init({ telemetry: false });
+    const { scan } = await import("react-scan");
+    scan();
+  });
 }
 
 /** Shared application entry. PlatformProvider is the host seam above it. */

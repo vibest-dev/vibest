@@ -26,6 +26,7 @@ catalog:
   react: ^19.2.7
   react-dom: ^19.2.7
   react-error-boundary: ^6.1.2
+  react-scan: ^0.5.7
   simple-git: ^3.36.0
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3
@@ -92,6 +93,9 @@ allowBuilds:
   msgpackr-extract: true
   node-pty: true
   protobufjs: false
+  # sharp is a transitive dep of react-scan (desktop devDependency) via next;
+  # it ships prebuilt binaries, so its build script is unnecessary — deny it.
+  sharp: false
   # The root `prepare` script installs the hooks (and sets core.hooksPath so it
   # works inside git worktrees); the package's own postinstall would just fail.
   simple-git-hooks: false
