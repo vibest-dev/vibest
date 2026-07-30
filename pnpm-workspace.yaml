@@ -99,3 +99,9 @@ allowBuilds:
   # The root `prepare` script installs the hooks (and sets core.hooksPath so it
   # works inside git worktrees); the package's own postinstall would just fail.
   simple-git-hooks: false
+patchedDependencies:
+  # react-scan fetches react-grab.com/api/version from `start()` with no way to
+  # opt out — the renderer CSP blocks it and logs an error on every launch. The
+  # patch makes that one function return early; nothing else. On a react-scan
+  # bump, re-check `dist/index.{js,mjs}` still define `checkReactGrabVersion`.
+  react-scan@0.5.7: patches/react-scan@0.5.7.patch

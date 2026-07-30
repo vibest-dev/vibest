@@ -1,0 +1,26 @@
+diff --git a/dist/index.js b/dist/index.js
+index 7514416b798e173501c586fb8dbc8ad19234f3a5..7e61c467b462a6556ec802d7b05a9cd34b2a9604 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -18679,7 +18679,7 @@ var createToolbar = (root) => {
+ // src/web/utils/check-react-grab-version.ts
+ var import_package = require("react-grab/package.json");
+ var didRunVersionCheck = false;
+-var checkReactGrabVersion = () => {
++var checkReactGrabVersion = () => { return; // vibest: no react-grab.com version check (renderer CSP allows no external hosts)
+   if (didRunVersionCheck) return;
+   didRunVersionCheck = true;
+   if (typeof window === "undefined") return;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 0c8d6cb1b06d1e9d034c8e59691638088fbee2b6..ad4a35ef728f7e67c1bdf4455e6dc211e5289a6c 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -18728,7 +18728,7 @@ var createToolbar = (root) => {
+ // src/web/utils/check-react-grab-version.ts
+ import { version as REACT_GRAB_VERSION } from "react-grab/package.json";
+ var didRunVersionCheck = false;
+-var checkReactGrabVersion = () => {
++var checkReactGrabVersion = () => { return; // vibest: no react-grab.com version check (renderer CSP allows no external hosts)
+   if (didRunVersionCheck) return;
+   didRunVersionCheck = true;
+   if (typeof window === "undefined") return;
