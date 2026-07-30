@@ -149,9 +149,11 @@ export const makeHarnessAgentSessionService = (
 ): Effect.Effect<HarnessAgentSessionServiceShape, never, Scope.Scope | FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
-    // An adapter's availability check is a PATH lookup; bind the platform
-    // services once here so the service's own methods stay R-free.
-    const platform = yield* Effect.context<FileSystem.FileSystem>();
+    // An adapter's availability check reads the filesystem; bind it once here
+    // so the service's own methods stay R-free. `provideService` rather than
+    // `provide(Effect.context())` — the latter captures the whole layer-build
+    // context, `ownerScope` included, and wins the merge over a caller's.
+    const fileSystem = yield* FileSystem.FileSystem;
     const state = yield* Ref.make<ServiceState>({
       active: new Map(),
       inFlight: new Map(),
@@ -193,7 +195,7 @@ export const makeHarnessAgentSessionService = (
             ),
           ),
         ),
-        Effect.provide(platform),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
       );
 
     const build = (

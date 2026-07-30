@@ -170,10 +170,17 @@ export const makeClaudeCodeAgent = ({
     // services once here so the agent's own methods stay R-free; a machine
     // with no Claude Code install is a defect at this point, since the
     // adapter's availability check has already gated on it.
-    const platform = yield* Effect.context<FileSystem.FileSystem>();
-    const claudeExecutable = resolveClaudeExecutable({ env }).pipe(
-      Effect.orDie,
-      Effect.provide(platform),
+    // `Effect.provideService`, not `Effect.provide(Effect.context())`: the
+    // latter captures the whole layer-build context — including the `Scope`
+    // above — and wins the merge, so it would override a caller's scope.
+    const fileSystem = yield* FileSystem.FileSystem;
+    // Cached: the answer is fixed for the process, and both `buildSession` and
+    // `listModels` ask, so an uncached Effect re-walks PATH on every session.
+    const claudeExecutable = yield* Effect.cached(
+      resolveClaudeExecutable({ env }).pipe(
+        Effect.orDie,
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      ),
     );
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(

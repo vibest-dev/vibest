@@ -69,6 +69,10 @@ export const createUIHandler = (): Effect.Effect<
 
     // `spa: true` is the old `sirv(dir, { single: true })`: an unknown path
     // falls back to index.html so the client router owns deep links.
+    // No `cacheControl` here, despite the hashed asset names: the option is
+    // global, and `HttpStaticServer` reuses `serveFile` for the SPA fallback
+    // (`HttpStaticServer.js:104`), so `immutable` would pin `index.html` too
+    // and strand clients on a stale app. Per-asset headers need a wrapper.
     const assets = yield* HttpStaticServer.make({ root: staticDir, spa: true }).pipe(Effect.orDie);
 
     // A path that matches no file is a 404; anything else went wrong on our

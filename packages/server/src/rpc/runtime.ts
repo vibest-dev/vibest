@@ -3,12 +3,13 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodePath from "@effect/platform-node/NodePath";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, type FileSystem, Layer } from "effect";
 
 import { PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
 import { FileSystemServiceLayer } from "../fs";
 import {
+  type HarnessAgentAdapter,
   HarnessAgentRegistry,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
@@ -58,19 +59,37 @@ export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
 
 const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
 
+/**
+ * Which CLI is installed, and whether it is new enough, is fixed for the life
+ * of the process — but `harness.list` is awaited before first paint and every
+ * `session.create` asks again, and claude-code's check spawns `claude
+ * --version` (~45ms) each time. Cache it here, at the one place that builds the
+ * registry, so the answer costs one spawn per server rather than one per call.
+ *
+ * The trade is that a CLI installed while the server is running is not noticed
+ * until it restarts.
+ */
+const cacheAvailability = (
+  adapter: HarnessAgentAdapter,
+): Effect.Effect<HarnessAgentAdapter, never, FileSystem.FileSystem> =>
+  Effect.map(Effect.cached(adapter.checkAvailability), (checkAvailability) => ({
+    ...adapter,
+    checkAvailability,
+  }));
+
 const RegistryLayer = Layer.effect(
   HarnessAgentRegistry,
   Effect.gen(function* () {
     const claudeCode = yield* ClaudeCode;
     const codex = yield* Codex;
     const pi = yield* Pi;
-    return makeHarnessAgentRegistry([
-      makeClaudeCodeAdapter(claudeCode),
-      makeCodexAdapter(codex),
-      makePiAdapter(pi),
-    ]);
+    const adapters = yield* Effect.forEach(
+      [makeClaudeCodeAdapter(claudeCode), makeCodexAdapter(codex), makePiAdapter(pi)],
+      cacheAvailability,
+    );
+    return makeHarnessAgentRegistry(adapters);
   }),
-).pipe(Layer.provide(ProvidersLayer));
+).pipe(Layer.provide(ProvidersLayer), Layer.provide(PlatformLayer));
 
 // Both harness routes read the same registry instance. It matters most for the
 // probe: one cache, shared by every connecting client, so N tabs on the same
