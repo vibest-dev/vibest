@@ -14,11 +14,16 @@ import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";
 import type { ServerConnection } from "./server-connection";
 
-// react-grab and react-scan, and the telemetry they need muzzled to stay inside
-// the Electron renderer's CSP. Statically false in production, so `dev-tools`
-// and both packages drop out of the Vite and electron-vite builds.
+// Dev only: hover any element and press Cmd/Ctrl+C to copy it with its React
+// component stack and source locations, for pasting into a coding agent. The
+// guard is statically false in production, so react-grab is dead-code-eliminated
+// from both the Vite and electron-vite builds. See https://react-grab.com.
+//
+// The `/core` entry is the one that doesn't auto-init, which is what lets us
+// pass `telemetry: false` — the default init fires a version check at
+// react-grab.com that the Electron renderer's CSP blocks anyway.
 if (import.meta.env.DEV) {
-  void import("./dev-tools").then(({ startDevTools }) => startDevTools());
+  void import("react-grab/core").then(({ init }) => init({ telemetry: false }));
 }
 
 /** Shared application entry. PlatformProvider is the host seam above it. */
