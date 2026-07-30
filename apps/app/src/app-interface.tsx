@@ -18,7 +18,7 @@ import type { ServerConnection } from "./server-connection";
 // the Electron renderer's CSP. Statically false in production, so `dev-tools`
 // and both packages drop out of the Vite and electron-vite builds.
 if (import.meta.env.DEV) {
-  void import("./dev-tools");
+  void import("./dev-tools").then(({ startDevTools }) => startDevTools());
 }
 
 /** Shared application entry. PlatformProvider is the host seam above it. */

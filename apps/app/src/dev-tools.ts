@@ -1,7 +1,7 @@
 /**
- * Dev-only inspectors, imported for side effects from `app-interface.tsx` behind
- * an `import.meta.env.DEV` guard — the guard is statically false in production,
- * so this whole module drops out of both the Vite and electron-vite builds.
+ * Dev-only inspectors, started from `app-interface.tsx` behind an
+ * `import.meta.env.DEV` guard — the guard is statically false in production, so
+ * this whole module drops out of both the Vite and electron-vite builds.
  *
  *   - react-grab (https://react-grab.com) — hover any element and press
  *     Cmd/Ctrl+C to copy it with its React component stack and source
@@ -24,7 +24,7 @@
  * below is load-bearing.
  */
 // oxlint-disable no-underscore-dangle -- react-grab's own global flag name
-void (async () => {
+export async function startDevTools(): Promise<void> {
   window.__REACT_GRAB_DISABLED__ = true;
   const { init, setGlobalApi } = await import("react-grab");
   delete window.__REACT_GRAB_DISABLED__;
@@ -37,4 +37,4 @@ void (async () => {
 
   const { scan } = await import("react-scan");
   scan();
-})();
+}
