@@ -25,12 +25,34 @@ These differ from what the library names suggest.
 
 ## Side effects go through Effect's platform services
 
-New disk, path, randomness, and child-process code uses `effect/FileSystem`,
-`effect/Path`, `effect/Crypto`, and `effect/unstable/process`'s
-`ChildProcessSpawner` — not `node:fs` / `node:path` / `node:crypto` /
-`node:child_process`. `packages/server` was migrated wholesale in
-`docs/2026-07-27-effect-platform-migration.md`; matching the surrounding style
-means matching this.
+New disk, randomness, and child-process code uses `effect/FileSystem`,
+`effect/Crypto`, and `effect/unstable/process`'s `ChildProcessSpawner` — not
+`node:fs` / `node:crypto` / `node:child_process`. `packages/server` was migrated
+wholesale in `docs/2026-07-27-effect-platform-migration.md`; matching the
+surrounding style means matching this.
+
+## Where the boundary is
+
+**Don't return `Effect` from a helper unless it actually performs effectful
+work. Synchronous parsing, validation, path math, and option building stay
+synchronous.** (Same rule opencode states in its `AGENTS.md`.)
+
+The test is _"is this an effect?"_ — does it touch the outside world, can it
+fail, is it non-deterministic — **not** _"did it come from a `node:` module?"_
+
+|                                                                           | goes through Effect   | stays plain `node:`              |
+| ------------------------------------------------------------------------- | --------------------- | -------------------------------- |
+| read/write, `stat`, `mkdir`, `rename`                                     | `FileSystem`          |                                  |
+| ids and tokens (non-deterministic, must be fakeable)                      | `Crypto`              |                                  |
+| spawning children                                                         | `ChildProcessSpawner` |                                  |
+| `join` / `dirname` / `relative` / `isAbsolute` / `sep` — pure string math |                       | `node:path`                      |
+| `homedir()`                                                               |                       | `node:os` (no Effect equivalent) |
+
+`effect/Path` is therefore reached for only when an Effect already has it in
+scope for other reasons; taking `Path.Path` as a _parameter_ to do string work,
+or turning a pure function into an `Effect` to reach it, is the thing this rule
+forbids. Reference points: opencode uses `Path.Path` in 2 files across its core
+and server, and `Crypto.Crypto` in none.
 
 - **The dependency rides the `R` channel.** A function that touches disk is
   `Effect<A, E, FileSystem.FileSystem | Path.Path>`. Don't seal a layer inside
@@ -71,4 +93,7 @@ already written" is not a reason to add to the list:
 | `node:module.createRequire` (`harness/claude-code/executable.ts`)         | no Effect equivalent                                                                                 |
 | `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no port-probe or process-signal service                                                   |
 
-Exempt files keep `node:path` too; migrated ones switch to the `Path` service.
+`node:path` is not on this list because it never needed an exemption — see
+"Where the boundary is" above. Path math is pure, so it stays `node:path`
+everywhere; the migration overshot on this one and `packages/server` still
+carries ~60 `Path.Path` references that predate the rule.
