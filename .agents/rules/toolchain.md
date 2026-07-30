@@ -20,3 +20,12 @@
   `harness` enable `test.typecheck`, so type errors fail the run.
   `apps/desktop/e2e/` is Playwright and not in CI. `tools/testing/fake-claude.mjs`
   is referenced by relative path from both server tests and desktop e2e.
+- **Assertions:** the runner is always vitest; only the assertion library splits.
+  Effect tests (`it.effect`, `layer`) use `node:assert/strict`, plain synchronous
+  `it` uses vitest `expect` — currently no exceptions either way. The `/strict`
+  suffix is load-bearing: bare `node:assert` is the legacy `==` mode, where
+  `assert.equal(1, "1")` passes silently. Under `/strict`, `deepEqual` _is_
+  `deepStrictEqual` and `equal` _is_ `strictEqual`, so always write the short
+  name. `@effect/vitest` re-exports all of vitest, so a test that touches no
+  Effect API can import `describe`/`expect`/`it` from it — import from `vitest`
+  instead, and keep `@effect/vitest` meaning "this test runs an Effect".

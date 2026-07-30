@@ -22,14 +22,14 @@ it.effect("communicates with Claude Agent SDK through a fake Claude executable",
     });
     const { sessionId } = yield* agent.session.create();
 
-    assert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
+    assert.deepEqual(yield* agent.session.getSupportedModels(sessionId), [
       {
         value: "fake-claude",
         displayName: "Fake Claude",
         description: "Deterministic Claude executable used by Vibest tests",
       },
     ]);
-    assert.deepStrictEqual(yield* agent.session.getMcpServers(sessionId), []);
+    assert.deepEqual(yield* agent.session.getMcpServers(sessionId), []);
 
     const turn = yield* agent.session.prompt({
       sessionId,
@@ -38,7 +38,7 @@ it.effect("communicates with Claude Agent SDK through a fake Claude executable",
     const output = yield* Stream.runCollect(turn.output);
     const assistant = Array.from(output).find((message) => message.type === "assistant");
 
-    assert.deepStrictEqual(assistant?.message.content, [
+    assert.deepEqual(assistant?.message.content, [
       { type: "text", text: "Fake Claude received: SDK integration" },
     ]);
   }),

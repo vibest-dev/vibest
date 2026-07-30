@@ -27,11 +27,11 @@ it.effect("terminates a slow consumer once its bounded queue overflows", () =>
       yield* bus.publish(started(3));
 
       const items = yield* Stream.runCollect(stream.pipe(Stream.take(3)));
-      assert.deepStrictEqual(
+      assert.deepEqual(
         items.map((item) => item.type),
         ["event", "event", "closed"],
       );
-      assert.deepStrictEqual(items[2], { type: "closed", reason: "slow_consumer" });
+      assert.deepEqual(items[2], { type: "closed", reason: "slow_consumer" });
     }),
   ),
 );
@@ -46,11 +46,11 @@ it.effect("closeSession ends a matching subscriber with its reason", () =>
       yield* bus.closeSession(ref, "session_closed");
 
       const items = yield* Stream.runCollect(stream);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         items.map((item) => item.type),
         ["event", "closed"],
       );
-      assert.deepStrictEqual(items.at(-1), { type: "closed", reason: "session_closed" });
+      assert.deepEqual(items.at(-1), { type: "closed", reason: "session_closed" });
     }),
   ),
 );

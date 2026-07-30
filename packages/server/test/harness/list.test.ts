@@ -35,7 +35,7 @@ it.effect("declares each harness's availability and permission subset", () =>
 
     const { harnessAgents } = yield* makeHarnessList(registry).list;
 
-    assert.deepStrictEqual(harnessAgents[0], {
+    assert.deepEqual(harnessAgents[0], {
       id: "claude-code",
       name: "claude-code",
       available: true,
@@ -71,7 +71,7 @@ it.effect("reports every registered harness, in registration order", () =>
 
     const { harnessAgents } = yield* makeHarnessList(registry).list;
 
-    assert.deepStrictEqual(
+    assert.deepEqual(
       harnessAgents.map((harnessAgent) => harnessAgent.id),
       ["claude-code", "codex", "pi"],
     );

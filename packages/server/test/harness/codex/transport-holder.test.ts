@@ -62,7 +62,7 @@ it.effect("Codex transport holder starts lazily and shares concurrent startup", 
     const firstTransport = yield* Fiber.join(first);
     const secondTransport = yield* Fiber.join(second);
 
-    assert.strictEqual(firstTransport, secondTransport);
+    assert.equal(firstTransport, secondTransport);
     assert.equal(yield* holder.status, "Running");
   }),
 );
@@ -171,7 +171,7 @@ it.effect("clears a crashed generation and starts a replacement", () =>
     );
 
     const second = yield* holder.ensure;
-    assert.notStrictEqual(second, first);
+    assert.notEqual(second, first);
     assert.equal(builds.length, 2);
   }),
 );

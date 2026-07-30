@@ -142,12 +142,8 @@ it.effect("exposes the raw per-session event stream and tears down on close", ()
     yield* fixture.service.close(created.sessionId);
     const events = yield* Fiber.join(collected);
 
-    assert.deepStrictEqual(receipt, { turnId: "turn-1" });
-    assert.deepStrictEqual(Array.from(events), [
-      "session.turn.started",
-      "start",
-      "session.turn.ended",
-    ]);
+    assert.deepEqual(receipt, { turnId: "turn-1" });
+    assert.deepEqual(Array.from(events), ["session.turn.started", "start", "session.turn.ended"]);
     assert.equal(yield* Ref.get(fixture.closeCalls), 1);
     assert.equal(yield* isActive(fixture, created.sessionId), false);
   }),

@@ -34,7 +34,7 @@ layer(EventBusLayer)("EventBus", (it) => {
       const seqs = items.flatMap((item) =>
         item.type === "event" && "seq" in item.event ? [item.event.seq] : [],
       );
-      assert.deepStrictEqual(seqs, [1, 2]);
+      assert.deepEqual(seqs, [1, 2]);
     }),
   );
 
@@ -49,7 +49,7 @@ layer(EventBusLayer)("EventBus", (it) => {
       yield* bus.publish({ ref: ref("a"), type: "session.created" } satisfies CollectionEvent);
 
       const items = yield* Fiber.join(collector);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         items.map((item) => (item.type === "event" ? item.event.type : item.type)),
         ["session.turn.started", "session.turn.started", "session.created"],
       );

@@ -93,7 +93,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       assert.equal(prompt.started, true);
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "text-end", "finish"],
       );
@@ -129,7 +129,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "tool" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "tool-input-available", "tool-output-available", "finish"],
       );
@@ -150,7 +150,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const request = yield* Fiber.join(requestFiber);
       assert.equal(request._tag, "Some");
       if (request._tag !== "Some") return;
-      assert.deepStrictEqual(request.value, {
+      assert.deepEqual(request.value, {
         harnessAgentId: "pi",
         type: "question",
         id: "ui1",
@@ -241,7 +241,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
 
       const prompt = yield* agent.session.prompt({ sessionId: doomed.sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "error"],
       );
@@ -285,7 +285,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const events = yield* Fiber.join(collected);
 
       assert.equal(typeof receipt.turnId, "string");
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(events, (event) => event.body.type),
         [
           "session.turn.started",
@@ -299,7 +299,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       );
 
       const capabilities = yield* session.getCapabilities;
-      assert.deepStrictEqual(capabilities, {
+      assert.deepEqual(capabilities, {
         supportsResume: true,
         supportsSteering: true,
         supportsPermissions: false,

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { AgentRequestSchema, AgentResponseSchema } from "../../src/types/request";
 

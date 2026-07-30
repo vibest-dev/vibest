@@ -38,7 +38,7 @@ it.effect("probes the directory it was asked about, grouped under the built-in p
 
     const result = yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
-    assert.deepStrictEqual(yield* Ref.get(seen), ["/work/app"]);
+    assert.deepEqual(yield* Ref.get(seen), ["/work/app"]);
     // Models never leave their provider: the built-in provider carries the
     // harness's own id, which is the other half of every providerId/modelId pair.
     assert.equal(result.providers[0]?.id, "claude-code");
@@ -80,7 +80,7 @@ it.effect("treats two directories as two probes, and does not serialise them", (
 
     // Both ran; if the registration lock covered the probes, the second would
     // have queued behind the first rather than interleaving.
-    assert.deepStrictEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
+    assert.deepEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
   }),
 );
 
@@ -136,7 +136,7 @@ it.effect("answers an empty provider list for a harness that has no probe", () =
 
     // Not a failure: pi genuinely has no models, and the client renders no
     // picker rather than an error.
-    assert.deepStrictEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
+    assert.deepEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
       providers: [],
     });
   }),

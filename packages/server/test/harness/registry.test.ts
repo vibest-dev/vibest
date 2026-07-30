@@ -20,7 +20,7 @@ it.effect("lists adapters and resolves them by harness agent id", () =>
   Effect.gen(function* () {
     const registry = makeHarnessAgentRegistry([claude]);
 
-    assert.deepStrictEqual(yield* registry.list, [claude.descriptor]);
+    assert.deepEqual(yield* registry.list, [claude.descriptor]);
     assert.equal(yield* registry.get("claude-code"), claude);
   }),
 );
