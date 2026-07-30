@@ -41,7 +41,7 @@ describe("daemon record", () => {
 
   it("writes daemon.pid at the expected path", async () => {
     await run(writeRecord(home, record));
-    expect(await run(recordPath(home))).toBe(path.join(home, "daemon.pid"));
+    expect(recordPath(home)).toBe(path.join(home, "daemon.pid"));
   });
 
   // Windows does not honor unix perms; the token is only a secret on posix.

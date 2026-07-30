@@ -1,6 +1,7 @@
+import path from "node:path";
 import url from "node:url";
 
-import { Effect, FileSystem, Path } from "effect";
+import { Effect, FileSystem, type Path } from "effect";
 import type { HttpPlatform } from "effect/unstable/http";
 import { HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/unstable/http";
 
@@ -24,14 +25,9 @@ const fromModuleUrl = (relative: string) => url.fileURLToPath(new URL(relative, 
  * bundle as `client/`, while running from monorepo source falls back to
  * `apps/app/dist`.
  */
-const resolveStaticDir = (): Effect.Effect<
-  string | undefined,
-  never,
-  FileSystem.FileSystem | Path.Path
-> =>
+const resolveStaticDir = (): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const candidates = [
       "./client/", // packaged: dist/client next to dist/cli.js
       "../../../../apps/app/dist/", // monorepo, from src/node
@@ -57,7 +53,9 @@ const resolveStaticDir = (): Effect.Effect<
 export const createUIHandler = (): Effect.Effect<
   UIApp,
   never,
-  FileSystem.FileSystem | Path.Path | HttpPlatform.HttpPlatform
+  // `Path` is not ours: `HttpStaticServer.make` asks for it. Our own path math
+  // below is pure and stays on `node:path`.
+  FileSystem.FileSystem | HttpPlatform.HttpPlatform | Path.Path
 > =>
   Effect.gen(function* () {
     const staticDir = yield* resolveStaticDir();
@@ -87,5 +85,4 @@ export const createUIHandler = (): Effect.Effect<
             ),
       ),
     );
-  });
   });

@@ -1,17 +1,6 @@
 import type { PermissionMode, ReasoningEffort } from "@vibest/contract";
 import type { AgentResponse, HarnessAgentId } from "@vibest/contract";
-import {
-  Context,
-  Deferred,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Path,
-  Ref,
-  Scope,
-  Stream,
-} from "effect";
+import { Context, Deferred, Effect, Exit, FileSystem, Layer, Ref, Scope, Stream } from "effect";
 
 import type {
   CreateSessionInput,
@@ -157,16 +146,12 @@ export class HarnessAgentSessionService extends Context.Service<
 
 export const makeHarnessAgentSessionService = (
   registry: HarnessAgentRegistryShape,
-): Effect.Effect<
-  HarnessAgentSessionServiceShape,
-  never,
-  Scope.Scope | FileSystem.FileSystem | Path.Path
-> =>
+): Effect.Effect<HarnessAgentSessionServiceShape, never, Scope.Scope | FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     // An adapter's availability check is a PATH lookup; bind the platform
     // services once here so the service's own methods stay R-free.
-    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+    const platform = yield* Effect.context<FileSystem.FileSystem>();
     const state = yield* Ref.make<ServiceState>({
       active: new Map(),
       inFlight: new Map(),

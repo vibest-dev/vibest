@@ -48,28 +48,30 @@ fail, is it non-deterministic — **not** _"did it come from a `node:` module?"_
 | `join` / `dirname` / `relative` / `isAbsolute` / `sep` — pure string math |                       | `node:path`                      |
 | `homedir()`                                                               |                       | `node:os` (no Effect equivalent) |
 
-`effect/Path` is therefore reached for only when an Effect already has it in
-scope for other reasons; taking `Path.Path` as a _parameter_ to do string work,
-or turning a pure function into an `Effect` to reach it, is the thing this rule
-forbids. Reference points: opencode uses `Path.Path` in 2 files across its core
-and server, and `Crypto.Crypto` in none.
+`effect/Path` is therefore reached for only when a library asks for it. Taking
+`Path.Path` as a _parameter_ to do string work, or turning a pure function into
+an `Effect` to reach it, is the thing this rule forbids. `packages/server` has
+exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
+`HttpStaticServer.make` requires it. (Reference point: opencode, also on Effect
+4.x beta, uses `Path.Path` in 2 files across its core and server and
+`Crypto.Crypto` in none.)
 
 - **The dependency rides the `R` channel.** A function that touches disk is
-  `Effect<A, E, FileSystem.FileSystem | Path.Path>`. Don't seal a layer inside
+  `Effect<A, E, FileSystem.FileSystem>`. Don't seal a layer inside
   the module and don't promote the need into a new service — the requirement
   bubbles to a composition root (`rpc/runtime.ts`, `apps/desktop`'s
   `desktop-runtime.ts`, the CLI), which is the only place `NodeFileSystem.layer`
   / `NodePath.layer` / `NodeCrypto.layer` appear.
 - **A service shape stays `R`-free.** Bind the platform once while building the
-  Layer — `const platform = yield* Effect.context<FileSystem | Path>()` — and
+  Layer — `const platform = yield* Effect.context<FileSystem | Crypto>()` — and
   `Effect.provide(platform)` each method. `infra/json-store.ts` plus the four
   repositories are the pattern to copy.
 - **Platform failures get mapped at the seam,** not propagated raw: the store's
   `StoreReadError` / `StoreWriteError` wrap them, and "file isn't there" is
   `error.reason._tag === "NotFound"` (`isNotFound`), never an errno string.
-- **Two gaps to route around.** `FileSystem.access` has no `X_OK` — test
+- **One gap to route around.** `FileSystem.access` has no `X_OK` — test
   executability with `stat` + `(info.mode & 0o111) !== 0`, as both executable
-  resolvers do. `Path` has no `delimiter` — derive it from the platform locally.
+  resolvers do.
 - **Tests:** real-fs + `mkdtemp` for behaviour, `FileSystem.makeNoop` (see
   `packages/server/test/fake-file-system.ts`) for failures a real disk won't
   produce on demand.
@@ -95,5 +97,5 @@ already written" is not a reason to add to the list:
 
 `node:path` is not on this list because it never needed an exemption — see
 "Where the boundary is" above. Path math is pure, so it stays `node:path`
-everywhere; the migration overshot on this one and `packages/server` still
-carries ~60 `Path.Path` references that predate the rule.
+everywhere, and thirteen files in `packages/server/src` import it for exactly
+that.

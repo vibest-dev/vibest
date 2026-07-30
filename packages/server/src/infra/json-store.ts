@@ -1,4 +1,6 @@
-import { Crypto, Effect, FileSystem, Path, type PlatformError } from "effect";
+import nodePath from "node:path";
+
+import { Crypto, Effect, FileSystem, type PlatformError } from "effect";
 
 import { StoreReadError, StoreWriteError } from "../errors";
 
@@ -7,7 +9,7 @@ import { StoreReadError, StoreWriteError } from "../errors";
  * construction so their own methods stay `R`-free; the requirement rides the
  * Layer's `R` up to the composition root, which provides the Node layers.
  */
-export type JsonStorePlatform = FileSystem.FileSystem | Path.Path | Crypto.Crypto;
+export type JsonStorePlatform = FileSystem.FileSystem | Crypto.Crypto;
 
 /**
  * "The file isn't there" in platform terms: the Node `FileSystem` normalises
@@ -43,11 +45,10 @@ export const writeJsonAtomic = (
 ): Effect.Effect<void, StoreWriteError, JsonStorePlatform> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
 
     const body = yield* Effect.try(() => `${JSON.stringify(data, null, 2)}\n`);
-    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+    yield* fs.makeDirectory(nodePath.dirname(file), { recursive: true });
     const id = yield* crypto.randomUUIDv4;
     const tmp = `${file}.${id}.tmp`;
     yield* fs.writeFileString(tmp, body);

@@ -10,7 +10,7 @@ export { ProjectService, ProjectServiceLayer } from "./service";
 
 /**
  * The project module fully wired — callers supply a `Paths` layer plus the
- * platform services the JSON store runs on.
+ * platform services the repository and id generation run on.
  */
 export const ProjectModuleLayer: Layer.Layer<ProjectService, never, Paths | JsonStorePlatform> =
   ProjectServiceLayer.pipe(Layer.provide(ProjectRepositoryLayer));

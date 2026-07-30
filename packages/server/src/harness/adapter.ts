@@ -8,7 +8,7 @@ import type {
   SessionCapabilities,
 } from "@vibest/contract";
 import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
-import { Effect, type FileSystem, type Path, type Scope, type Stream } from "effect";
+import { Effect, type FileSystem, type Scope, type Stream } from "effect";
 
 import { AgentOpenError } from "./errors";
 import type {
@@ -170,11 +170,7 @@ export interface HarnessAgentAdapter {
    * channel out to whoever builds the service that calls it (list, session
    * service), which binds the platform layers at its own construction.
    */
-  readonly checkAvailability: Effect.Effect<
-    AvailabilityResult,
-    never,
-    FileSystem.FileSystem | Path.Path
-  >;
+  readonly checkAvailability: Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem>;
   /**
    * The subset of vibest's permission vocabulary this harness can honour, and
    * which member to preselect. Plain values, not effects: they follow from the

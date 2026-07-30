@@ -1,12 +1,13 @@
 import childProcess from "node:child_process";
 import module from "node:module";
 import os from "node:os";
+import nodePath from "node:path";
 import util from "node:util";
 
-import { Data, Effect, FileSystem, Path } from "effect";
+import { Data, Effect, FileSystem } from "effect";
 
 const moduleRequire = module.createRequire(import.meta.url);
-const execFileAsync = util.promisify(execFile);
+const execFileAsync = util.promisify(childProcess.execFile);
 
 /** No `claude` binary anywhere we look — carries the user-facing remedy. */
 export class ClaudeExecutableNotFound extends Data.TaggedError("ClaudeExecutableNotFound")<{
@@ -22,10 +23,10 @@ const NOT_FOUND =
   "or set VIBEST_CLAUDE_EXECUTABLE to the path of the `claude` binary.";
 
 /** Where the native installer and the common package managers put `claude`. */
-function extraInstallDirs(path: Path.Path, home: string): string[] {
+function extraInstallDirs(home: string): string[] {
   return [
-    path.join(home, ".local", "bin"),
-    path.join(home, ".bun", "bin"),
+    nodePath.join(home, ".local", "bin"),
+    nodePath.join(home, ".bun", "bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
   ];
@@ -37,17 +38,17 @@ function extraInstallDirs(path: Path.Path, home: string): string[] {
  * desktop app, which excludes it (it is ~230 MB — the user's own Claude Code
  * install is used there instead).
  *
- * `createRequire` has no Effect equivalent, so module resolution stays raw.
+ * `module.createRequire` has no Effect equivalent, so module resolution stays raw.
  *
  * A path inside an asar archive is rejected: it resolves and stats fine, since
  * Electron's fs shim reads archives transparently — but an OS exec cannot
  * traverse one, and the SDK would fail late with a bare ENOTDIR.
  */
-function sdkBinary(path: Path.Path, binary: string): string | undefined {
+function sdkBinary(binary: string): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
   try {
     const resolved = moduleRequire.resolve(`${pkg}/${binary}`);
-    return resolved.includes(`.asar${path.sep}`) ? undefined : resolved;
+    return resolved.includes(`.asar${nodePath.sep}`) ? undefined : resolved;
   } catch {
     return undefined;
   }
@@ -57,11 +58,11 @@ export type ResolveDeps = {
   env?: NodeJS.ProcessEnv;
   home?: string;
   /** The SDK's own bundled binary, if it is really on disk. */
-  bundled?: (path: Path.Path, binary: string) => string | undefined;
+  bundled?: (binary: string) => string | undefined;
   platform?: NodeJS.Platform;
 };
 
-/** PATH's separator. `effect/Path` exposes `sep`, but not this one. */
+/** PATH's separator — `node:path.delimiter` is fixed to the host platform. */
 const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
 
 /**
@@ -90,7 +91,7 @@ const isExecutableFile = (
  */
 export const resolveClaudeExecutable = (
   deps: ResolveDeps = {},
-): Effect.Effect<string, ClaudeExecutableNotFound, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<string, ClaudeExecutableNotFound, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const {
       env = process.env,
@@ -99,7 +100,6 @@ export const resolveClaudeExecutable = (
       platform = process.platform,
     } = deps;
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
 
     const override =
@@ -110,16 +110,13 @@ export const resolveClaudeExecutable = (
 
     const binary = platform === "win32" ? "claude.exe" : "claude";
 
-    const fromSdk = bundled(path, binary);
+    const fromSdk = bundled(binary);
     if (fromSdk && (yield* isExecutable(fromSdk))) return fromSdk;
 
-    const dirs = [
-      ...(env["PATH"] ?? "").split(pathDelimiter(platform)),
-      ...extraInstallDirs(path, home),
-    ];
+    const dirs = [...(env["PATH"] ?? "").split(pathDelimiter(platform)), ...extraInstallDirs(home)];
     for (const dir of dirs) {
       if (!dir) continue;
-      const candidate = path.join(dir, binary);
+      const candidate = nodePath.join(dir, binary);
       if (yield* isExecutable(candidate)) return candidate;
     }
 
@@ -132,16 +129,11 @@ export const resolveClaudeExecutable = (
  * (no hand-maintained constant). In a checkout the resolved binary IS this
  * version, so the floor never trips; only a user's own (older) install can.
  */
-export const requiredClaudeVersion = (): Effect.Effect<
-  string,
-  Error,
-  FileSystem.FileSystem | Path.Path
-> =>
+export const requiredClaudeVersion = (): Effect.Effect<string, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const main = yield* Effect.try(() => moduleRequire.resolve("@anthropic-ai/claude-agent-sdk"));
-    const raw = yield* fs.readFileString(path.join(path.dirname(main), "package.json"));
+    const raw = yield* fs.readFileString(nodePath.join(nodePath.dirname(main), "package.json"));
     const manifest = yield* Effect.try(() => JSON.parse(raw) as { claudeCodeVersion?: string });
     if (!manifest.claudeCodeVersion) {
       return yield* Effect.fail(
@@ -185,7 +177,7 @@ export type AvailabilityDeps = ResolveDeps & {
   /** Reads the CLI's reported version; injectable for tests. */
   readVersion?: (executable: string) => Promise<string>;
   /** The version floor; injectable for tests. */
-  requiredVersion?: () => Effect.Effect<string, Error, FileSystem.FileSystem | Path.Path>;
+  requiredVersion?: () => Effect.Effect<string, Error, FileSystem.FileSystem>;
 };
 
 /**
@@ -196,7 +188,7 @@ export type AvailabilityDeps = ResolveDeps & {
  */
 export const checkClaudeAvailability = (
   deps: AvailabilityDeps = {},
-): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const executable = yield* resolveClaudeExecutable(deps).pipe(
       Effect.map((path) => ({ ok: true as const, path })),

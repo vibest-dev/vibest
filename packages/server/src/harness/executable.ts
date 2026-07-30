@@ -1,4 +1,6 @@
-import { Effect, FileSystem, Path } from "effect";
+import nodePath from "node:path";
+
+import { Effect, FileSystem } from "effect";
 
 /**
  * Locating the CLI a harness spawns. Claude Code has its own resolver (it
@@ -26,7 +28,7 @@ import { Effect, FileSystem, Path } from "effect";
  */
 const WINDOWS_EXTENSIONS = [".com", ".exe", ".bat", ".cmd"];
 
-/** PATH's separator. `effect/Path` exposes `sep`, but not this one. */
+/** PATH's separator — `node:path.delimiter` is fixed to the host platform. */
 const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
 
 export type FindExecutableDeps = {
@@ -64,19 +66,18 @@ const isExecutableFile = (
 export const findExecutable = (
   command: string,
   deps: FindExecutableDeps = {},
-): Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const { env = process.env, platform = process.platform } = deps;
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
 
-    if (path.isAbsolute(command)) {
+    if (nodePath.isAbsolute(command)) {
       return (yield* isExecutable(command)) ? command : undefined;
     }
 
     const names =
-      platform !== "win32" || path.extname(command)
+      platform !== "win32" || nodePath.extname(command)
         ? [command]
         : WINDOWS_EXTENSIONS.map((extension) => `${command}${extension}`);
 
@@ -85,7 +86,7 @@ export const findExecutable = (
     for (const dir of (env["PATH"] ?? "").split(pathDelimiter(platform))) {
       if (!dir) continue;
       for (const name of names) {
-        const candidate = path.join(dir, name);
+        const candidate = nodePath.join(dir, name);
         if (yield* isExecutable(candidate)) return candidate;
       }
     }

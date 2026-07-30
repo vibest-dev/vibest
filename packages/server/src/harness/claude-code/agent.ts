@@ -1,17 +1,6 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
-import {
-  Deferred,
-  Effect,
-  Exit,
-  FiberSet,
-  FileSystem,
-  Path,
-  Queue,
-  Ref,
-  Scope,
-  Stream,
-} from "effect";
+import { Deferred, Effect, Exit, FiberSet, FileSystem, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import { v7 as uuid } from "uuid";
 
@@ -173,7 +162,7 @@ export const makeClaudeCodeAgent = ({
 }: ClaudeCodeAgentOptions = {}): Effect.Effect<
   ClaudeCodeAgent,
   never,
-  Scope.Scope | FileSystem.FileSystem | Path.Path
+  Scope.Scope | FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
@@ -181,7 +170,7 @@ export const makeClaudeCodeAgent = ({
     // services once here so the agent's own methods stay R-free; a machine
     // with no Claude Code install is a defect at this point, since the
     // adapter's availability check has already gated on it.
-    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+    const platform = yield* Effect.context<FileSystem.FileSystem>();
     const claudeExecutable = resolveClaudeExecutable({ env }).pipe(
       Effect.orDie,
       Effect.provide(platform),

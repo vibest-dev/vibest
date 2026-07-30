@@ -2,7 +2,7 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import nodePath from "node:path";
 
-import { Clock, Crypto, Effect, FileSystem, Path, type PlatformError } from "effect";
+import { Clock, Crypto, Effect, FileSystem, type PlatformError } from "effect";
 
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
@@ -59,7 +59,7 @@ export type DaemonLauncherError = DaemonLaunchError | DaemonStoppedError;
  * The platform services the launcher's file state runs on. Provided at each
  * front door's composition root (CLI `NodeServices`, desktop runtime).
  */
-export type DaemonPlatform = FileSystem.FileSystem | Path.Path | Crypto.Crypto;
+export type DaemonPlatform = FileSystem.FileSystem | Crypto.Crypto;
 
 /**
  * The shared launcher (the local twin of the SSH launch script): read
@@ -115,7 +115,7 @@ export const statusDaemon = (
 ): Effect.Effect<
   { readonly running: boolean; readonly record?: DaemonRecord },
   never,
-  FileSystem.FileSystem | Path.Path
+  FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
     const record = yield* readRecord(home);
@@ -131,11 +131,7 @@ export const statusDaemon = (
  */
 export const stopDaemon = (
   home: string,
-): Effect.Effect<
-  "stopped" | "not-running",
-  PlatformError.PlatformError,
-  FileSystem.FileSystem | Path.Path
-> =>
+): Effect.Effect<"stopped" | "not-running", PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const record = yield* readRecord(home);
     if (!record || !pidAlive(record.pid)) {
@@ -226,7 +222,7 @@ const spawnLocked = (
 const waitForRecord = (
   home: string,
   timeoutMs: number,
-): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + timeoutMs;
     while ((yield* Clock.currentTimeMillis) < deadline) {
@@ -244,7 +240,6 @@ const spawnDaemon = (
   Effect.gen(function* () {
     const { home } = options;
     const crypto = yield* Crypto.Crypto;
-    const path = yield* Path.Path;
     const port = yield* reservePort(options.port ?? DEFAULT_PORT);
     const token = yield* crypto.randomBytes(32).pipe(
       Effect.map(hex),
@@ -268,7 +263,7 @@ const spawnDaemon = (
       signal(pid, "SIGTERM");
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${path.join(home, "daemon.log")}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${nodePath.join(home, "daemon.log")}`,
         }),
       );
     }

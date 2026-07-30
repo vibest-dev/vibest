@@ -1,4 +1,6 @@
-import { Effect, FileSystem, Path, type PlatformError } from "effect";
+import nodePath from "node:path";
+
+import { Effect, FileSystem, type PlatformError } from "effect";
 
 /**
  * The launch lock — an exclusive-create `$VIBEST_HOME/daemon.lock` holding the
@@ -8,7 +10,7 @@ import { Effect, FileSystem, Path, type PlatformError } from "effect";
  * reclaimable. This is the file-state seam; the retry/wait orchestration lives
  * in the launcher.
  */
-const lockPath = (path: Path.Path, home: string): string => path.join(home, "daemon.lock");
+const lockPath = (home: string): string => nodePath.join(home, "daemon.lock");
 
 /**
  * Create the lock atomically. True when acquired; false when someone holds it.
@@ -20,12 +22,11 @@ const lockPath = (path: Path.Path, home: string): string => path.join(home, "dae
  */
 export const tryAcquireLock = (
   home: string,
-): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     return yield* fs
-      .writeFileString(lockPath(path, home), String(process.pid), { flag: "wx", mode: 0o600 })
+      .writeFileString(lockPath(home), String(process.pid), { flag: "wx", mode: 0o600 })
       .pipe(
         Effect.as(true),
         Effect.catchIf(
@@ -38,31 +39,24 @@ export const tryAcquireLock = (
 /** The pid recorded in the lock, or `undefined` if missing/garbage. */
 export const readLockPid = (
   home: string,
-): Effect.Effect<number | undefined, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<number | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const raw = yield* fs.readFileString(lockPath(path, home)).pipe(Effect.orElseSucceed(() => ""));
+    const raw = yield* fs.readFileString(lockPath(home)).pipe(Effect.orElseSucceed(() => ""));
     const pid = Number.parseInt(raw, 10);
     return Number.isInteger(pid) && pid > 0 ? pid : undefined;
   });
 
 /** Whether the lock still exists (a concurrent launcher is still spawning). */
-export const lockExists = (
-  home: string,
-): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
+export const lockExists = (home: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    return yield* fs.exists(lockPath(path, home)).pipe(Effect.orElseSucceed(() => false));
+    return yield* fs.exists(lockPath(home)).pipe(Effect.orElseSucceed(() => false));
   });
 
 /** Release the lock; a missing lock (or a lost reclaim race) is not an error. */
-export const releaseLock = (
-  home: string,
-): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+export const releaseLock = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    yield* fs.remove(lockPath(path, home), { force: true }).pipe(Effect.ignore);
+    yield* fs.remove(lockPath(home), { force: true }).pipe(Effect.ignore);
   });

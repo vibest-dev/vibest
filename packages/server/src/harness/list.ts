@@ -1,5 +1,5 @@
 import type { HarnessAgentInfo, HarnessListOutput } from "@vibest/contract";
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Context, Effect, FileSystem, Layer } from "effect";
 
 import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry";
 
@@ -24,7 +24,7 @@ export type HarnessListShape = {
 
 /** What {@link makeHarnessList} returns before its layer binds the platform. */
 type UnboundHarnessList = {
-  readonly list: Effect.Effect<HarnessListOutput, never, FileSystem.FileSystem | Path.Path>;
+  readonly list: Effect.Effect<HarnessListOutput, never, FileSystem.FileSystem>;
 };
 
 export class HarnessListService extends Context.Service<HarnessListService, HarnessListShape>()(
@@ -62,14 +62,14 @@ export const makeHarnessList = (registry: HarnessAgentRegistryShape): UnboundHar
 export const HarnessListLayer: Layer.Layer<
   HarnessListService,
   never,
-  HarnessAgentRegistry | FileSystem.FileSystem | Path.Path
+  HarnessAgentRegistry | FileSystem.FileSystem
 > = Layer.effect(
   HarnessListService,
   Effect.gen(function* () {
     const registry = yield* HarnessAgentRegistry;
     // Availability is a PATH lookup, so it needs the filesystem. Bind it once
     // here and the service's `list` stays R-free for its RPC caller.
-    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+    const platform = yield* Effect.context<FileSystem.FileSystem>();
     const { list } = makeHarnessList(registry);
     return { list: list.pipe(Effect.provide(platform)) };
   }),

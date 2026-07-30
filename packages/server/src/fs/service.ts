@@ -1,4 +1,6 @@
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import nodePath from "node:path";
+
+import { Context, Effect, FileSystem, Layer } from "effect";
 
 import {
   WorkspaceBinaryFile,
@@ -19,9 +21,12 @@ const NUL = String.fromCharCode(0);
  * and absolute paths that point elsewhere. (Same check opencode's `FSUtil.contains`
  * and t3code's `WorkspacePaths` use.)
  */
-const contains = (path: Path.Path, parent: string, child: string): boolean => {
-  const rel = path.relative(parent, child);
-  return rel === "" || (!path.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${path.sep}`));
+const contains = (parent: string, child: string): boolean => {
+  const rel = nodePath.relative(parent, child);
+  return (
+    rel === "" ||
+    (!nodePath.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${nodePath.sep}`))
+  );
 };
 
 type ReadFileError =
@@ -46,62 +51,60 @@ export class FileSystemService extends Context.Service<
   }
 >()("FileSystemService") {}
 
-export const FileSystemServiceLayer: Layer.Layer<
-  FileSystemService,
-  never,
-  FileSystem.FileSystem | Path.Path
-> = Layer.effect(
-  FileSystemService,
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
+export const FileSystemServiceLayer: Layer.Layer<FileSystemService, never, FileSystem.FileSystem> =
+  Layer.effect(
+    FileSystemService,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
 
-    // `path` is the Path service here, so the caller-supplied relative path is
-    // `relPath` — it still reaches the errors under their `path` field.
-    const readErr = (relPath: string) => (cause: unknown) =>
-      new WorkspaceReadError({ path: relPath, cause });
+      const readErr = (relPath: string) => (cause: unknown) =>
+        new WorkspaceReadError({ path: relPath, cause });
 
-    // Resolve `relPath` against `cwd` and confine it there both lexically and
-    // after realpath — the first stops `..`, the second stops symlinks pointing out.
-    const resolveWithin = (cwd: string, relPath: string) =>
-      Effect.gen(function* () {
-        // `cwd` is the trusted root and must be absolute; `relPath` must be
-        // relative to it (an absolute one would silently ignore `cwd`).
-        if (!path.isAbsolute(cwd) || path.isAbsolute(relPath)) {
-          return yield* new WorkspacePathEscape({ cwd, path: relPath });
-        }
-        const absolute = path.resolve(cwd, relPath);
-        if (!contains(path, cwd, absolute)) {
-          return yield* new WorkspacePathEscape({ cwd, path: relPath });
-        }
-        const realRoot = yield* fs.realPath(cwd).pipe(Effect.mapError(readErr(relPath)));
-        const realTarget = yield* fs.realPath(absolute).pipe(Effect.mapError(readErr(relPath)));
-        if (!contains(path, realRoot, realTarget)) {
-          return yield* new WorkspacePathEscape({ cwd, path: relPath });
-        }
-        return absolute;
-      });
-
-    return {
-      readFileString: (cwd, relPath) =>
+      // Resolve `relPath` against `cwd` and confine it there both lexically and
+      // after realpath — the first stops `..`, the second stops symlinks pointing out.
+      const resolveWithin = (cwd: string, relPath: string) =>
         Effect.gen(function* () {
-          const absolute = yield* resolveWithin(cwd, relPath);
-          const info = yield* fs.stat(absolute).pipe(Effect.mapError(readErr(relPath)));
-          if (info.type !== "File") {
-            return yield* new WorkspaceNotFile({ path: relPath });
+          // `cwd` is the trusted root and must be absolute; `relPath` must be
+          // relative to it (an absolute one would silently ignore `cwd`).
+          if (!nodePath.isAbsolute(cwd) || nodePath.isAbsolute(relPath)) {
+            return yield* new WorkspacePathEscape({ cwd, path: relPath });
           }
-          const size = Number(info.size);
-          if (size > MAX_FILE_BYTES) {
-            return yield* new WorkspaceFileTooLarge({ path: relPath, size, limit: MAX_FILE_BYTES });
+          const absolute = nodePath.resolve(cwd, relPath);
+          if (!contains(cwd, absolute)) {
+            return yield* new WorkspacePathEscape({ cwd, path: relPath });
           }
-          const content = yield* fs
-            .readFileString(absolute)
-            .pipe(Effect.mapError(readErr(relPath)));
-          if (content.includes(NUL)) {
-            return yield* new WorkspaceBinaryFile({ path: relPath });
+          const realRoot = yield* fs.realPath(cwd).pipe(Effect.mapError(readErr(relPath)));
+          const realTarget = yield* fs.realPath(absolute).pipe(Effect.mapError(readErr(relPath)));
+          if (!contains(realRoot, realTarget)) {
+            return yield* new WorkspacePathEscape({ cwd, path: relPath });
           }
-          return content;
-        }),
-    };
-  }),
-);
+          return absolute;
+        });
+
+      return {
+        readFileString: (cwd, relPath) =>
+          Effect.gen(function* () {
+            const absolute = yield* resolveWithin(cwd, relPath);
+            const info = yield* fs.stat(absolute).pipe(Effect.mapError(readErr(relPath)));
+            if (info.type !== "File") {
+              return yield* new WorkspaceNotFile({ path: relPath });
+            }
+            const size = Number(info.size);
+            if (size > MAX_FILE_BYTES) {
+              return yield* new WorkspaceFileTooLarge({
+                path: relPath,
+                size,
+                limit: MAX_FILE_BYTES,
+              });
+            }
+            const content = yield* fs
+              .readFileString(absolute)
+              .pipe(Effect.mapError(readErr(relPath)));
+            if (content.includes(NUL)) {
+              return yield* new WorkspaceBinaryFile({ path: relPath });
+            }
+            return content;
+          }),
+      };
+    }),
+  );

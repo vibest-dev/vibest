@@ -1,7 +1,7 @@
 import os from "node:os";
 import nodePath from "node:path";
 
-import { Context, Effect, Layer, Path } from "effect";
+import { Context, Layer } from "effect";
 
 /**
  * Resolved filesystem locations the runtime persists to. Injected as a service
@@ -21,11 +21,11 @@ export class Paths extends Context.Service<
   }
 >()("Paths") {}
 
-const resolve = (path: Path.Path, home: string) => ({
+const resolve = (home: string) => ({
   home,
-  projectsFile: path.join(home, "storage", "projects.json"),
-  configFile: path.join(home, "config.json"),
-  sessionsDir: path.join(home, "storage", "sessions"),
+  projectsFile: nodePath.join(home, "storage", "projects.json"),
+  configFile: nodePath.join(home, "config.json"),
+  sessionsDir: nodePath.join(home, "storage", "sessions"),
 });
 
 /**
@@ -45,22 +45,12 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */
-export const layerPaths = (home: string): Layer.Layer<Paths, never, Path.Path> =>
-  Layer.effect(
-    Paths,
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      return resolve(path, home);
-    }),
-  );
+export const layerPaths = (home: string): Layer.Layer<Paths> => Layer.succeed(Paths, resolve(home));
 
 /** Default: `$VIBEST_HOME`, falling back to `~/.vibest`. */
-export const PathsLayer: Layer.Layer<Paths, never, Path.Path> = Layer.effect(
+export const PathsLayer: Layer.Layer<Paths> = Layer.sync(
   Paths,
   // Resolved when the layer is built, not when this module is imported — the
   // daemon sets `VIBEST_HOME` in the child's environment.
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    return resolve(path, resolveVibestHome());
-  }),
+  () => resolve(resolveVibestHome()),
 );

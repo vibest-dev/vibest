@@ -8,7 +8,7 @@ import type { JsonStorePlatform } from "../src/infra/json-store";
 /**
  * The real Node platform services, mirroring what `rpc/runtime.ts` provides.
  * Tests that exercise a repository against a temp `$VIBEST_HOME` provide this
- * so the JSON store's `FileSystem | Path | Crypto` requirement is satisfied.
+ * so the JSON store's `FileSystem | Crypto` requirement is satisfied.
  */
 export const NodePlatformLayer: Layer.Layer<JsonStorePlatform> = Layer.mergeAll(
   NodeFileSystem.layer,

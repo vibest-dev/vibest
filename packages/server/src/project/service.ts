@@ -1,4 +1,6 @@
-import { Context, Crypto, Effect, Layer, Path } from "effect";
+import nodePath from "node:path";
+
+import { Context, Crypto, Effect, Layer } from "effect";
 
 import { ProjectNotFound, type StoreReadError, type StoreWriteError } from "../errors";
 import type { Project } from "../types";
@@ -29,12 +31,11 @@ export class ProjectService extends Context.Service<
 export const ProjectServiceLayer: Layer.Layer<
   ProjectService,
   never,
-  ProjectRepository | Path.Path | Crypto.Crypto
+  ProjectRepository | Crypto.Crypto
 > = Layer.effect(
   ProjectService,
   Effect.gen(function* () {
     const repo = yield* ProjectRepository;
-    const { basename, resolve: resolvePath } = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
     // A platform RNG that cannot produce a uuid is a defect, not a domain
     // failure — keep it out of the service's error channel.
@@ -56,21 +57,21 @@ export const ProjectServiceLayer: Layer.Layer<
       findByPath: (path) =>
         Effect.gen(function* () {
           const projects = yield* repo.list();
-          const target = resolvePath(path);
-          return projects.find((p) => resolvePath(p.path) === target);
+          const target = nodePath.resolve(path);
+          return projects.find((p) => nodePath.resolve(p.path) === target);
         }),
 
       create: (input) =>
         Effect.gen(function* () {
-          const normalized = resolvePath(input.path);
+          const normalized = nodePath.resolve(input.path);
           const projects = yield* repo.list();
           // Reuse an existing project pointing at the same path.
-          const existing = projects.find((p) => resolvePath(p.path) === normalized);
+          const existing = projects.find((p) => nodePath.resolve(p.path) === normalized);
           if (existing !== undefined) return existing;
 
           const project: Project = {
             id: yield* newId,
-            name: input.name ?? basename(normalized),
+            name: input.name ?? nodePath.basename(normalized),
             path: normalized,
             createdAt: new Date().toISOString(),
           };
