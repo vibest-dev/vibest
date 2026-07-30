@@ -14,20 +14,35 @@ import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";
 import type { ServerConnection } from "./server-connection";
 
-// Dev only: hover any element and press Cmd/Ctrl+C to copy it with its React
-// component stack and source locations, for pasting into a coding agent. The
-// guard is statically false in production, so react-grab is dead-code-eliminated
-// from both the Vite and electron-vite builds. See https://react-grab.com.
+// Dev only, dead-code-eliminated from both the Vite and electron-vite builds:
+//   - react-grab (https://react-grab.com) — hover any element and press
+//     Cmd/Ctrl+C to copy it with its React component stack and source
+//     locations, for pasting into a coding agent.
+//   - react-scan (https://react-scan.com) — highlights components as they
+//     re-render so you can spot wasted renders. Loaded a tick later than its
+//     ideal "before React" position, so it may miss the very first render.
+//
+// Both ship the same version check against react-grab.com, which the Electron
+// renderer's CSP blocks — a console error each, on every startup. react-grab
+// only skips it when `init` runs with `telemetry: false`, and importing the
+// package auto-inits with the defaults, so `__REACT_GRAB_DISABLED__` (its
+// documented escape hatch) suppresses that and we init by hand. react-scan
+// skips its own copy of the check once `window.__REACT_GRAB__` is set, which is
+// what `setGlobalApi` does — hence react-grab has to go first.
 if (import.meta.env.DEV) {
-  void import("react-grab");
-}
-
-// Dev only: highlights components as they re-render so you can spot wasted
-// renders. Loaded just after React (a tick later than react-scan's ideal
-// "before React" position), so it may miss the very first render but catches
-// everything after. Dead-code-eliminated from production. See https://react-scan.com.
-if (import.meta.env.DEV) {
-  void import("react-scan").then(({ scan }) => scan());
+  void (async () => {
+    // oxlint-disable-next-line no-underscore-dangle -- react-grab's own flag name
+    window.__REACT_GRAB_DISABLED__ = true;
+    const { init, setGlobalApi } = await import("react-grab");
+    // oxlint-disable-next-line no-underscore-dangle -- react-grab's own flag name
+    delete window.__REACT_GRAB_DISABLED__;
+    const api = init({ telemetry: false });
+    setGlobalApi(api);
+    // What the auto-init path announces; devtools integrations watch for it.
+    window.dispatchEvent(new CustomEvent("react-grab:init", { detail: api }));
+    const { scan } = await import("react-scan");
+    scan();
+  })();
 }
 
 /** Shared application entry. PlatformProvider is the host seam above it. */
