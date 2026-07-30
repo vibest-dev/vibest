@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import type { SessionRef, SessionScopedEvent } from "@vibest/contract";
@@ -27,11 +27,11 @@ it.effect("terminates a slow consumer once its bounded queue overflows", () =>
       yield* bus.publish(started(3));
 
       const items = yield* Stream.runCollect(stream.pipe(Stream.take(3)));
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         items.map((item) => item.type),
         ["event", "event", "closed"],
       );
-      NodeAssert.deepStrictEqual(items[2], { type: "closed", reason: "slow_consumer" });
+      assert.deepStrictEqual(items[2], { type: "closed", reason: "slow_consumer" });
     }),
   ),
 );
@@ -46,11 +46,11 @@ it.effect("closeSession ends a matching subscriber with its reason", () =>
       yield* bus.closeSession(ref, "session_closed");
 
       const items = yield* Stream.runCollect(stream);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         items.map((item) => item.type),
         ["event", "closed"],
       );
-      NodeAssert.deepStrictEqual(items.at(-1), { type: "closed", reason: "session_closed" });
+      assert.deepStrictEqual(items.at(-1), { type: "closed", reason: "session_closed" });
     }),
   ),
 );

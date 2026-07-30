@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,15 +51,15 @@ layer(NodeServices.layer)("PiTransport", (it) => {
     Effect.gen(function* () {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
 
-      NodeAssert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "s1",
       });
 
       const error = yield* transport.command({ type: "compact" }).pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "PiRpcError");
+      assert.equal(error._tag, "PiRpcError");
       if (error._tag === "PiRpcError") {
-        NodeAssert.equal(error.command, "compact");
-        NodeAssert.equal(error.errorMessage, "nothing to compact");
+        assert.equal(error.command, "compact");
+        assert.equal(error.errorMessage, "nothing to compact");
       }
     }),
   );
@@ -69,7 +69,7 @@ layer(NodeServices.layer)("PiTransport", (it) => {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
       // The banner and setStatus arrive before this response; neither must
       // fail the frame reader nor surface as an event or a blocking request.
-      NodeAssert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "s1",
       });
     }),
@@ -85,20 +85,20 @@ layer(NodeServices.layer)("PiTransport", (it) => {
 
       const event = yield* Fiber.join(eventFiber);
       const request = yield* Fiber.join(requestFiber);
-      NodeAssert.equal(event._tag, "Some");
-      if (event._tag === "Some") NodeAssert.equal(event.value.type, "agent_start");
-      NodeAssert.equal(request._tag, "Some");
+      assert.equal(event._tag, "Some");
+      if (event._tag === "Some") assert.equal(event.value.type, "agent_start");
+      assert.equal(request._tag, "Some");
       if (request._tag === "Some") {
-        NodeAssert.equal(request.value.method, "confirm");
-        NodeAssert.equal(request.value.id, "c1");
+        assert.equal(request.value.method, "confirm");
+        assert.equal(request.value.id, "c1");
       }
 
       const echoFiber = yield* Stream.runHead(transport.events).pipe(Effect.forkChild);
       yield* transport.respondUi({ type: "extension_ui_response", id: "c1", confirmed: true });
       const echo = yield* Fiber.join(echoFiber);
-      NodeAssert.equal(echo._tag, "Some");
+      assert.equal(echo._tag, "Some");
       if (echo._tag === "Some") {
-        NodeAssert.match((echo.value as { name?: string }).name ?? "", /"confirmed":true/);
+        assert.match((echo.value as { name?: string }).name ?? "", /"confirmed":true/);
       }
     }),
   );
@@ -106,7 +106,7 @@ layer(NodeServices.layer)("PiTransport", (it) => {
   it.effect("drains child stderr without blocking protocol responses", () =>
     Effect.gen(function* () {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
-      NodeAssert.equal(yield* transport.command({ type: "bash", command: "x" }), "drained");
+      assert.equal(yield* transport.command({ type: "bash", command: "x" }), "drained");
     }),
   );
 
@@ -115,10 +115,10 @@ layer(NodeServices.layer)("PiTransport", (it) => {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
       const error = yield* transport.command({ type: "abort" }).pipe(Effect.flip);
 
-      NodeAssert.equal(error._tag, "AgentProcessExited");
+      assert.equal(error._tag, "AgentProcessExited");
       if (error._tag === "AgentProcessExited") {
-        NodeAssert.equal(error.code, 7);
-        NodeAssert.match(error.stderrTail ?? "", /pi fatal detail/);
+        assert.equal(error.code, 7);
+        assert.match(error.stderrTail ?? "", /pi fatal detail/);
       }
     }),
   );
@@ -141,7 +141,7 @@ rl.on("line", (line) => {
       );
       fs.chmodSync(file, 0o755);
       const transport = yield* makePiTransport({ executablePath: file, sessionId: "sid-42" });
-      NodeAssert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "sid-42",
       });
     }),

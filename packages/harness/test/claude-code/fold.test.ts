@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { it } from "@effect/vitest";
@@ -21,10 +21,10 @@ describe("foldToUIMessages", () => {
       ] as unknown as SDKMessage[];
 
       const messages = yield* foldToUIMessages(transcript);
-      NodeAssert.equal(messages.length, 1);
+      assert.equal(messages.length, 1);
       const parts = messages[0]!.parts as ReadonlyArray<{ type: string; text?: string }>;
-      NodeAssert.ok(parts.some((part) => part.type === "text" && part.text === "hello"));
-      NodeAssert.ok(!parts.some((part) => part.type.startsWith("data-")));
+      assert.ok(parts.some((part) => part.type === "text" && part.text === "hello"));
+      assert.ok(!parts.some((part) => part.type.startsWith("data-")));
     }),
   );
 
@@ -56,8 +56,8 @@ describe("foldToUIMessages", () => {
       const part = messages[0]!.parts.find(
         (candidate) => (candidate as { type: string }).type === "tool-Read",
       ) as { output?: unknown } | undefined;
-      NodeAssert.ok(part);
-      NodeAssert.deepStrictEqual(part.output, {
+      assert.ok(part);
+      assert.deepStrictEqual(part.output, {
         type: "text",
         file: { filePath: "/a", content: "hi" },
       });
@@ -91,9 +91,9 @@ describe("foldToUIMessages", () => {
       const part = messages[0]!.parts.find(
         (candidate) => (candidate as { type: string }).type === "dynamic-tool",
       ) as { toolName?: string; output?: unknown } | undefined;
-      NodeAssert.ok(part);
-      NodeAssert.equal(part.toolName, "mcp__foo__bar");
-      NodeAssert.equal(part.output, undefined);
+      assert.ok(part);
+      assert.equal(part.toolName, "mcp__foo__bar");
+      assert.equal(part.output, undefined);
     }),
   );
 });

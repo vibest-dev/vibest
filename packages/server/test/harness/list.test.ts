@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
@@ -35,7 +35,7 @@ it.effect("declares each harness's availability and permission subset", () =>
 
     const { harnessAgents } = yield* makeHarnessList(registry).list;
 
-    NodeAssert.deepStrictEqual(harnessAgents[0], {
+    assert.deepStrictEqual(harnessAgents[0], {
       id: "claude-code",
       name: "claude-code",
       available: true,
@@ -55,9 +55,9 @@ it.effect("keeps declaring settings for a harness whose CLI is missing", () =>
 
     // The picker greys it out and shows the reason — but what it *would* be
     // able to do has nothing to do with whether it is installed right now.
-    NodeAssert.equal(harnessAgents[0]?.available, false);
-    NodeAssert.equal(harnessAgents[0]?.reason, "Codex was not found on PATH.");
-    NodeAssert.equal(harnessAgents[0]?.defaultPermissionMode, "ask");
+    assert.equal(harnessAgents[0]?.available, false);
+    assert.equal(harnessAgents[0]?.reason, "Codex was not found on PATH.");
+    assert.equal(harnessAgents[0]?.defaultPermissionMode, "ask");
   }),
 );
 
@@ -71,7 +71,7 @@ it.effect("reports every registered harness, in registration order", () =>
 
     const { harnessAgents } = yield* makeHarnessList(registry).list;
 
-    NodeAssert.deepStrictEqual(
+    assert.deepStrictEqual(
       harnessAgents.map((harnessAgent) => harnessAgent.id),
       ["claude-code", "codex", "pi"],
     );

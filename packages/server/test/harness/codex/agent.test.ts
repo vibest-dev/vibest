@@ -1,7 +1,7 @@
-import NodeAssert from "node:assert/strict";
-import nodeFs from "node:fs";
+import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
-import nodePath from "node:path";
+import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -95,10 +95,10 @@ rl.on("line", (line) => {
 `;
 
 function makeFake(): string {
-  const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "fake-codex-"));
-  const file = nodePath.join(dir, "fake-codex.js");
-  nodeFs.writeFileSync(file, FAKE);
-  nodeFs.chmodSync(file, 0o755);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-codex-"));
+  const file = path.join(dir, "fake-codex.js");
+  fs.writeFileSync(file, FAKE);
+  fs.chmodSync(file, 0o755);
   return file;
 }
 
@@ -177,7 +177,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
 
       const prompt = yield* agent.session.prompt({ sessionId: second.sessionId, text: "ping" });
-      NodeAssert.equal(prompt.turnId, "turn_2");
+      assert.equal(prompt.turnId, "turn_2");
       yield* agent.session.abort(second.sessionId);
     }),
   );
@@ -186,11 +186,11 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
-      NodeAssert.equal(sessionId, "th_1");
+      assert.equal(sessionId, "th_1");
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "text-end", "finish"],
       );
@@ -203,7 +203,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       // Codex fixes a model at thread/start and has no set-model call, so a
       // create-time choice can only reach it as a turn override. If this
       // regresses, picking a model silently does nothing.
-      const workspace = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-model-"));
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const session = yield* makeCodexAdapter(agent).open({
         cwd: workspace,
@@ -212,16 +212,13 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
       yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
 
-      NodeAssert.equal(
-        nodeFs.readFileSync(nodePath.join(workspace, "turn-model"), "utf8"),
-        "gpt-5.6-luna",
-      );
+      assert.equal(fs.readFileSync(path.join(workspace, "turn-model"), "utf8"), "gpt-5.6-luna");
     }).pipe(Effect.scoped),
   );
 
   it.effect("leaves the model unset when nothing was chosen", () =>
     Effect.gen(function* () {
-      const workspace = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-model-"));
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
@@ -229,10 +226,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
       // Absent, not null or undefined: the key has to be missing entirely so
       // codex keeps the model from its own config.
-      NodeAssert.equal(
-        nodeFs.readFileSync(nodePath.join(workspace, "turn-model"), "utf8"),
-        "<absent>",
-      );
+      assert.equal(fs.readFileSync(path.join(workspace, "turn-model"), "utf8"), "<absent>");
     }).pipe(Effect.scoped),
   );
 
@@ -240,11 +234,11 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_1");
-      NodeAssert.equal(result._tag, "found");
+      assert.equal(result._tag, "found");
       if (result._tag === "found") {
-        NodeAssert.equal(result.info.title, "My Thread");
+        assert.equal(result.info.title, "My Thread");
         // Codex timestamps are seconds; the adapter reports milliseconds.
-        NodeAssert.equal(result.info.updatedAt, 1_700_000);
+        assert.equal(result.info.updatedAt, 1_700_000);
       }
     }),
   );
@@ -253,8 +247,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_untitled");
-      NodeAssert.equal(result._tag, "found");
-      if (result._tag === "found") NodeAssert.equal(result.info.title, "first message");
+      assert.equal(result._tag, "found");
+      if (result._tag === "found") assert.equal(result.info.title, "first message");
     }),
   );
 
@@ -262,7 +256,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_missing");
-      NodeAssert.equal(result._tag, "missing");
+      assert.equal(result._tag, "missing");
     }),
   );
 
@@ -293,7 +287,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
-      NodeAssert.equal(
+      assert.equal(
         yield* Deferred.isDone(crashSeen),
         true,
         "idle adapter session did not publish session.crashed",
@@ -303,7 +297,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts a turn requested while turn/start is still pending", () =>
     Effect.gen(function* () {
-      const cwd = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-starting-interrupt-"));
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "codex-starting-interrupt-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
@@ -311,7 +305,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-requested"))).pipe(
+        Effect.sync(() => fs.existsSync(path.join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -322,8 +316,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       yield* Fiber.join(prompt);
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
-      NodeAssert.equal(
-        nodeFs.existsSync(nodePath.join(cwd, "turn-interrupted")),
+      assert.equal(
+        fs.existsSync(path.join(cwd, "turn-interrupted")),
         true,
         "turn/start completed without the pending interrupt",
       );
@@ -333,7 +327,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts the native turn when the prompt caller cancels during turn/start", () =>
     Effect.gen(function* () {
-      const cwd = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-starting-cancel-"));
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "codex-starting-cancel-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
@@ -341,7 +335,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-requested"))).pipe(
+        Effect.sync(() => fs.existsSync(path.join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -350,7 +344,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Fiber.interrupt(prompt);
       yield* Effect.eventually(
-        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-replied"))).pipe(
+        Effect.sync(() => fs.existsSync(path.join(cwd, "turn-start-replied"))).pipe(
           Effect.filterOrFail(
             (replied) => replied,
             () => new Error("turn/start did not reply"),
@@ -359,8 +353,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
-      NodeAssert.equal(
-        nodeFs.existsSync(nodePath.join(cwd, "turn-interrupted")),
+      assert.equal(
+        fs.existsSync(path.join(cwd, "turn-interrupted")),
         true,
         "cancelled prompt left the native turn running",
       );
@@ -396,7 +390,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
-      NodeAssert.equal(
+      assert.equal(
         yield* Deferred.isDone(secondDone),
         true,
         "waiting prompt remained blocked on the crashed turn",
@@ -419,8 +413,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const receipt = yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
       const events = yield* Fiber.join(collected);
 
-      NodeAssert.equal(receipt.turnId, "turn_1");
-      NodeAssert.deepStrictEqual(
+      assert.equal(receipt.turnId, "turn_1");
+      assert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         [
           "session.turn.started",
@@ -443,8 +437,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const prompt = yield* agent.session.prompt({ sessionId, text: "retry" });
       const chunks = yield* Stream.runCollect(prompt.output);
 
-      NodeAssert.ok(Array.from(chunks).some((chunk) => chunk.type === "error"));
-      NodeAssert.equal(chunks.at(-1)?.type, "finish");
+      assert.ok(Array.from(chunks).some((chunk) => chunk.type === "error"));
+      assert.equal(chunks.at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -459,7 +453,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const replacement = yield* agent.session
         .create({ cwd: "/tmp" })
         .pipe(Effect.timeout("2 seconds"));
-      NodeAssert.equal(replacement.sessionId, "th_1");
+      assert.equal(replacement.sessionId, "th_1");
       yield* agent.session.abort(replacement.sessionId);
     }),
   );
@@ -470,7 +464,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "error"],
       );
@@ -481,7 +475,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
         text: "ping",
       });
       const replacementChunks = yield* Stream.runCollect(replacementPrompt.output);
-      NodeAssert.equal(replacementChunks.at(-1)?.type, "finish");
+      assert.equal(replacementChunks.at(-1)?.type, "finish");
       yield* agent.session.abort(replacement.sessionId);
     }),
   );

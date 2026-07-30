@@ -1,4 +1,4 @@
-import nodeFs from "node:fs/promises";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -32,10 +32,10 @@ const makeLayer = (home: string) => {
 describe("McpService", () => {
   let home: string;
   beforeEach(async () => {
-    home = await nodeFs.mkdtemp(path.join(os.tmpdir(), "vibest-mcp-"));
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-mcp-"));
   });
   afterEach(async () => {
-    await nodeFs.rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   const run = <A, E>(program: Effect.Effect<A, E, McpService | ProviderRepository>) =>

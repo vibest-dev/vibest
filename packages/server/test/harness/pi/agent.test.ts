@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -88,12 +88,12 @@ layer(NodeServices.layer)("PiAgent", (it) => {
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
-      NodeAssert.match(sessionId, /^[0-9a-f]{8}-[0-9a-f-]{27}$/);
+      assert.match(sessionId, /^[0-9a-f]{8}-[0-9a-f-]{27}$/);
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
-      NodeAssert.equal(prompt.started, true);
+      assert.equal(prompt.started, true);
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "text-end", "finish"],
       );
@@ -108,7 +108,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
         sessionId: "custom-id",
         cwd: "/tmp",
       });
-      NodeAssert.equal(sessionId, "custom-id");
+      assert.equal(sessionId, "custom-id");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -119,7 +119,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const error = yield* agent.session
         .resume({ sessionId: "missing-session", cwd: "/tmp" })
         .pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "AgentProcessExited");
+      assert.equal(error._tag, "AgentProcessExited");
     }),
   );
 
@@ -129,7 +129,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "tool" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "tool-input-available", "tool-output-available", "finish"],
       );
@@ -148,9 +148,9 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const collected = yield* Effect.forkChild(Stream.runCollect(prompt.output));
 
       const request = yield* Fiber.join(requestFiber);
-      NodeAssert.equal(request._tag, "Some");
+      assert.equal(request._tag, "Some");
       if (request._tag !== "Some") return;
-      NodeAssert.deepStrictEqual(request.value, {
+      assert.deepStrictEqual(request.value, {
         harnessAgentId: "pi",
         type: "question",
         id: "ui1",
@@ -176,11 +176,11 @@ layer(NodeServices.layer)("PiAgent", (it) => {
         type: "question",
         answers: [{ questionId: "ui1", values: ["Yes"] }],
       });
-      NodeAssert.equal(accepted, true);
+      assert.equal(accepted, true);
 
       const chunks = yield* Fiber.join(collected);
       const deltas = Array.from(chunks).filter((chunk) => chunk.type === "text-delta");
-      NodeAssert.ok(
+      assert.ok(
         deltas.some((chunk) => "delta" in chunk && chunk.delta === "confirmed:true"),
         "the confirm answer did not reach the pi child",
       );
@@ -193,14 +193,14 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const first = yield* agent.session.prompt({ sessionId, text: "hold" });
-      NodeAssert.equal(first.started, true);
+      assert.equal(first.started, true);
 
       const second = yield* agent.session.prompt({ sessionId, text: "also do this" });
-      NodeAssert.equal(second.started, false);
-      NodeAssert.equal(second.turnId, first.turnId);
+      assert.equal(second.started, false);
+      assert.equal(second.turnId, first.turnId);
 
       const chunks = yield* Stream.runCollect(first.output);
-      NodeAssert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -214,7 +214,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
 
       yield* agent.session.interrupt(sessionId);
       const chunks = yield* Fiber.join(collected);
-      NodeAssert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -224,11 +224,11 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const error = yield* agent.session.prompt({ sessionId, text: "fail" }).pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "PiRpcError");
+      assert.equal(error._tag, "PiRpcError");
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -241,7 +241,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
 
       const prompt = yield* agent.session.prompt({ sessionId: doomed.sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "error"],
       );
@@ -264,7 +264,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       // The sibling session's child is untouched.
       const sibling = yield* agent.session.prompt({ sessionId: healthy.sessionId, text: "ping" });
       const siblingChunks = yield* Stream.runCollect(sibling.output);
-      NodeAssert.equal(Array.from(siblingChunks).at(-1)?.type, "finish");
+      assert.equal(Array.from(siblingChunks).at(-1)?.type, "finish");
       yield* agent.session.abort(healthy.sessionId);
     }),
   );
@@ -284,8 +284,8 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const receipt = yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
       const events = yield* Fiber.join(collected);
 
-      NodeAssert.equal(typeof receipt.turnId, "string");
-      NodeAssert.deepStrictEqual(
+      assert.equal(typeof receipt.turnId, "string");
+      assert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         [
           "session.turn.started",
@@ -299,7 +299,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       );
 
       const capabilities = yield* session.getCapabilities;
-      NodeAssert.deepStrictEqual(capabilities, {
+      assert.deepStrictEqual(capabilities, {
         supportsResume: true,
         supportsSteering: true,
         supportsPermissions: false,

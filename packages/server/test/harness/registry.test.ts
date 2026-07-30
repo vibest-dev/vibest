@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import { Effect } from "effect";
@@ -20,8 +20,8 @@ it.effect("lists adapters and resolves them by harness agent id", () =>
   Effect.gen(function* () {
     const registry = makeHarnessAgentRegistry([claude]);
 
-    NodeAssert.deepStrictEqual(yield* registry.list, [claude.descriptor]);
-    NodeAssert.equal(yield* registry.get("claude-code"), claude);
+    assert.deepStrictEqual(yield* registry.list, [claude.descriptor]);
+    assert.equal(yield* registry.get("claude-code"), claude);
   }),
 );
 
@@ -30,7 +30,7 @@ it.effect("returns a typed error for an unregistered harness agent", () =>
     const registry = makeHarnessAgentRegistry([claude]);
     const error = yield* registry.get("codex").pipe(Effect.flip);
 
-    NodeAssert.equal(error._tag, "HarnessAgentNotFound");
-    NodeAssert.equal(error.harnessAgentId, "codex");
+    assert.equal(error._tag, "HarnessAgentNotFound");
+    assert.equal(error.harnessAgentId, "codex");
   }),
 );

@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import type { SessionRef } from "@vibest/contract";
@@ -72,19 +72,19 @@ it.effect("start is idempotent for a live runtime and stamps contiguous seqs", (
       });
       const snapshot = yield* awaitCursor(manager, 3);
 
-      NodeAssert.equal(snapshot.status.phase, "idle");
+      assert.equal(snapshot.status.phase, "idle");
       // The finished turn's buffer is retained, marked complete, for recovery.
-      NodeAssert.equal(snapshot.activeTurn?.complete, true);
-      NodeAssert.deepStrictEqual(
+      assert.equal(snapshot.activeTurn?.complete, true);
+      assert.deepStrictEqual(
         snapshot.activeTurn?.chunks.map((chunk) => chunk.seq),
         [2],
       );
-      NodeAssert.equal(snapshot.status.activeTurnId, undefined);
+      assert.equal(snapshot.status.activeTurnId, undefined);
       // The losing stream was never drained.
-      NodeAssert.equal(yield* Queue.size(second), 0);
+      assert.equal(yield* Queue.size(second), 0);
       yield* Queue.offer(second, { type: "start" });
       yield* Effect.yieldNow;
-      NodeAssert.equal(yield* Queue.size(second), 1);
+      assert.equal(yield* Queue.size(second), 1);
     }),
   ),
 );
@@ -117,9 +117,9 @@ it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
       const snapshot = yield* awaitCursor(manager, 3);
       // seq 3 (not 4) proves the straggler consumed no seq; the fresh turn's
       // empty buffer proves it was not appended anywhere.
-      NodeAssert.equal(snapshot.cursor, 3);
-      NodeAssert.equal(snapshot.activeTurn?.turnId, "turn-2");
-      NodeAssert.deepStrictEqual(snapshot.activeTurn?.chunks, []);
+      assert.equal(snapshot.cursor, 3);
+      assert.equal(snapshot.activeTurn?.turnId, "turn-2");
+      assert.deepStrictEqual(snapshot.activeTurn?.chunks, []);
     }),
   ),
 );
@@ -155,8 +155,8 @@ it.effect("a crashed stream keeps the projection queryable and runs onCrash once
       );
       // The projection stays queryable until close/delete/resume.
       const snapshot = yield* manager.snapshot(ref);
-      NodeAssert.equal(snapshot.status.phase, "crashed");
-      NodeAssert.equal(snapshot.activeTurn, null);
+      assert.equal(snapshot.status.phase, "crashed");
+      assert.equal(snapshot.activeTurn, null);
     }),
   ),
 );
@@ -181,10 +181,10 @@ it.effect("start replaces a crashed runtime with a fresh projection", () =>
         turnId: "turn-2",
       });
       const snapshot = yield* awaitCursor(manager, 1);
-      NodeAssert.equal(snapshot.status.phase, "running");
+      assert.equal(snapshot.status.phase, "running");
       // seq restarts with the replacement runtime.
-      NodeAssert.equal(snapshot.cursor, 1);
-      NodeAssert.equal(snapshot.activeTurn?.turnId, "turn-2");
+      assert.equal(snapshot.cursor, 1);
+      assert.equal(snapshot.activeTurn?.turnId, "turn-2");
     }),
   ),
 );
@@ -197,7 +197,7 @@ it.effect("stop removes the runtime", () =>
       yield* manager.start(ref, streamFromQueueOne(queue));
       yield* manager.stop(ref);
       const exit = yield* Effect.exit(manager.status(ref));
-      NodeAssert.equal(Exit.isFailure(exit), true);
+      assert.equal(Exit.isFailure(exit), true);
     }),
   ),
 );

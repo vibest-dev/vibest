@@ -1,5 +1,5 @@
 import path from "node:path";
-import nodeUrl from "node:url";
+import url from "node:url";
 
 import { is } from "@electron-toolkit/utils";
 import { Context, Effect, Layer, Scope } from "effect";
@@ -23,9 +23,9 @@ export type MainWindowOptions = {
   readonly connectRenderer: (webContents: WebContents) => () => Promise<void>;
 };
 
-function canOpenExternal(url: string): boolean {
+function canOpenExternal(href: string): boolean {
   try {
-    const protocol = new URL(url).protocol;
+    const protocol = new URL(href).protocol;
     return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
@@ -62,7 +62,7 @@ export function makeMainWindow(
         ...(process.platform === "linux" ? { icon } : {}),
         webPreferences: {
           preload: path.join(
-            path.dirname(nodeUrl.fileURLToPath(import.meta.url)),
+            path.dirname(url.fileURLToPath(import.meta.url)),
             "../preload/index.js",
           ),
           sandbox: true,
@@ -85,8 +85,8 @@ export function makeMainWindow(
         if (mainWindow === window) mainWindow = undefined;
       });
 
-      window.webContents.setWindowOpenHandler(({ url }) => {
-        if (canOpenExternal(url)) void shell.openExternal(url);
+      window.webContents.setWindowOpenHandler(({ url: href }) => {
+        if (canOpenExternal(href)) void shell.openExternal(href);
         return { action: "deny" };
       });
 
@@ -94,9 +94,9 @@ export function makeMainWindow(
         APP_ORIGIN,
         ...(options.devUrl ? [new URL(options.devUrl).origin] : []),
       ]);
-      window.webContents.on("will-navigate", (event, url) => {
+      window.webContents.on("will-navigate", (event, href) => {
         try {
-          if (allowedOrigins.has(new URL(url).origin)) return;
+          if (allowedOrigins.has(new URL(href).origin)) return;
         } catch {
           // Invalid navigation targets are denied below.
         }
@@ -139,7 +139,7 @@ export function makeMainWindow(
 }
 
 export function rendererRoot(): string {
-  return path.join(path.dirname(nodeUrl.fileURLToPath(import.meta.url)), "../renderer");
+  return path.join(path.dirname(url.fileURLToPath(import.meta.url)), "../renderer");
 }
 
 export const MainWindowLive = Layer.effect(

@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { layer } from "@effect/vitest";
 import type { CollectionEvent, SessionRef, SessionScopedEvent } from "@vibest/contract";
@@ -34,7 +34,7 @@ layer(EventBusLayer)("EventBus", (it) => {
       const seqs = items.flatMap((item) =>
         item.type === "event" && "seq" in item.event ? [item.event.seq] : [],
       );
-      NodeAssert.deepStrictEqual(seqs, [1, 2]);
+      assert.deepStrictEqual(seqs, [1, 2]);
     }),
   );
 
@@ -49,7 +49,7 @@ layer(EventBusLayer)("EventBus", (it) => {
       yield* bus.publish({ ref: ref("a"), type: "session.created" } satisfies CollectionEvent);
 
       const items = yield* Fiber.join(collector);
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         items.map((item) => (item.type === "event" ? item.event.type : item.type)),
         ["session.turn.started", "session.turn.started", "session.created"],
       );

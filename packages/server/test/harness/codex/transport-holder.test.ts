@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope, Stream } from "effect";
@@ -51,19 +51,19 @@ it.effect("Codex transport holder starts lazily and shares concurrent startup", 
         }),
     });
 
-    NodeAssert.equal(yield* Ref.get(buildCount), 0);
+    assert.equal(yield* Ref.get(buildCount), 0);
 
     const first = yield* holder.ensure.pipe(Effect.forkChild);
     const second = yield* holder.ensure.pipe(Effect.forkChild);
     yield* Deferred.await(buildStarted);
-    NodeAssert.equal(yield* Ref.get(buildCount), 1);
+    assert.equal(yield* Ref.get(buildCount), 1);
 
     yield* Deferred.succeed(releaseBuild, undefined);
     const firstTransport = yield* Fiber.join(first);
     const secondTransport = yield* Fiber.join(second);
 
-    NodeAssert.strictEqual(firstTransport, secondTransport);
-    NodeAssert.equal(yield* holder.status, "Running");
+    assert.strictEqual(firstTransport, secondTransport);
+    assert.equal(yield* holder.status, "Running");
   }),
 );
 
@@ -89,8 +89,8 @@ it.effect("canceling the first waiter does not cancel shared startup", () =>
     yield* Deferred.succeed(releaseBuild, undefined);
 
     yield* holder.ensure;
-    NodeAssert.equal(yield* Ref.get(buildCount), 1);
-    NodeAssert.equal(yield* holder.status, "Running");
+    assert.equal(yield* Ref.get(buildCount), 1);
+    assert.equal(yield* holder.status, "Running");
   }),
 );
 
@@ -108,7 +108,7 @@ it.effect("fails startup waiters when the owner scope closes", () =>
     yield* Scope.close(ownerScope, Exit.void);
 
     const result = yield* Fiber.await(waiter);
-    NodeAssert.equal(result._tag, "Failure");
+    assert.equal(result._tag, "Failure");
   }),
 );
 
@@ -132,12 +132,12 @@ it.effect("resets failed startup so a later call can retry", () =>
     });
 
     const firstError = yield* holder.ensure.pipe(Effect.flip);
-    NodeAssert.equal(firstError._tag, "CodexTransportError");
-    NodeAssert.equal(yield* holder.status, "Idle");
+    assert.equal(firstError._tag, "CodexTransportError");
+    assert.equal(yield* holder.status, "Idle");
 
     yield* holder.ensure;
-    NodeAssert.equal(yield* Ref.get(buildCount), 2);
-    NodeAssert.equal(yield* holder.status, "Running");
+    assert.equal(yield* Ref.get(buildCount), 2);
+    assert.equal(yield* holder.status, "Running");
   }),
 );
 
@@ -158,7 +158,7 @@ it.effect("clears a crashed generation and starts a replacement", () =>
 
     const first = yield* holder.ensure;
     const firstBuild = builds[0];
-    NodeAssert.ok(firstBuild);
+    assert.ok(firstBuild);
     yield* firstBuild!.crash(new AgentProcessExited({ harnessAgentId: "codex", code: 7 }));
 
     yield* Effect.eventually(
@@ -171,7 +171,7 @@ it.effect("clears a crashed generation and starts a replacement", () =>
     );
 
     const second = yield* holder.ensure;
-    NodeAssert.notStrictEqual(second, first);
-    NodeAssert.equal(builds.length, 2);
+    assert.notStrictEqual(second, first);
+    assert.equal(builds.length, 2);
   }),
 );

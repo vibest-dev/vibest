@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -19,8 +19,8 @@ layer(NodeServices.layer)("Effect child process integration", (it) => {
       );
       const exitCode = yield* handle.exitCode;
 
-      NodeAssert.equal(output, "ready\n");
-      NodeAssert.equal(exitCode, 0);
+      assert.equal(output, "ready\n");
+      assert.equal(exitCode, 0);
     }),
   );
 
@@ -36,11 +36,11 @@ layer(NodeServices.layer)("Effect child process integration", (it) => {
         )
         .pipe(Effect.provideService(Scope.Scope, childScope));
 
-      NodeAssert.equal(yield* handle.isRunning, true);
+      assert.equal(yield* handle.isRunning, true);
 
       yield* Scope.close(childScope, Exit.void);
 
-      NodeAssert.equal(yield* handle.isRunning, false);
+      assert.equal(yield* handle.isRunning, false);
     }),
   );
 });

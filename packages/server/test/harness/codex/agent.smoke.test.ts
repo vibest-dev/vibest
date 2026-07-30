@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -18,7 +18,7 @@ layer(NodeServices.layer)("codex live smoke", (it) => {
           text: "Reply with exactly: PONG",
         });
         const chunks = yield* Stream.runCollect(prompt.output);
-        NodeAssert.ok(Array.from(chunks).some((chunk) => chunk.type === "finish"));
+        assert.ok(Array.from(chunks).some((chunk) => chunk.type === "finish"));
         yield* agent.session.abort(sessionId);
       }),
     120_000,

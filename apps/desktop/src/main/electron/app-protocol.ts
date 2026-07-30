@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import nodeUrl from "node:url";
+import url from "node:url";
 
 import { Data, Effect, Scope } from "effect";
 import { net, protocol } from "electron";
@@ -47,10 +47,10 @@ export type FetchAsset = (url: string) => Promise<Response>;
 /** Serve renderer assets with SPA fallback. */
 export function createAppRequestHandler(rendererRoot: string, fetchAsset: FetchAsset = net.fetch) {
   return async (request: Request): Promise<Response> => {
-    const url = new URL(request.url);
-    if (url.host !== HOST) return new Response("Not found", { status: 404 });
+    const requestUrl = new URL(request.url);
+    if (requestUrl.host !== HOST) return new Response("Not found", { status: 404 });
 
-    const file = resolveAssetPath(rendererRoot, url.pathname);
+    const file = resolveAssetPath(rendererRoot, requestUrl.pathname);
     if (!file) return new Response("Not found", { status: 404 });
 
     const target =
@@ -58,7 +58,7 @@ export function createAppRequestHandler(rendererRoot: string, fetchAsset: FetchA
         ? file
         : path.join(rendererRoot, "index.html");
 
-    return fetchAsset(nodeUrl.pathToFileURL(target).toString());
+    return fetchAsset(url.pathToFileURL(target).toString());
   };
 }
 

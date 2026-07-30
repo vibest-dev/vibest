@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -57,13 +57,13 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
     Effect.gen(function* () {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
 
-      NodeAssert.deepStrictEqual(yield* transport.request("echo", { answer: 42 }), {
+      assert.deepStrictEqual(yield* transport.request("echo", { answer: 42 }), {
         answer: 42,
       });
 
       const error = yield* transport.request("boom").pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "CodexRpcError");
-      if (error._tag === "CodexRpcError") NodeAssert.equal(error.code, -1);
+      assert.equal(error._tag, "CodexRpcError");
+      if (error._tag === "CodexRpcError") assert.equal(error.code, -1);
     }),
   );
 
@@ -71,7 +71,7 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
     Effect.gen(function* () {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
 
-      NodeAssert.equal(yield* transport.request("stderrFlood"), "drained");
+      assert.equal(yield* transport.request("stderrFlood"), "drained");
     }),
   );
 
@@ -88,12 +88,12 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
 
       const notification = yield* Fiber.join(notificationFiber);
       const request = yield* Fiber.join(requestFiber);
-      NodeAssert.equal(notification._tag, "Some");
-      NodeAssert.equal(request._tag, "Some");
+      assert.equal(notification._tag, "Some");
+      assert.equal(request._tag, "Some");
       if (notification._tag === "Some") {
-        NodeAssert.equal(notification.value.method, "turn/started");
+        assert.equal(notification.value.method, "turn/started");
       }
-      if (request._tag === "Some") NodeAssert.equal(request.value.id, 999);
+      if (request._tag === "Some") assert.equal(request.value.id, 999);
     }),
   );
 
@@ -102,7 +102,7 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
       const error = yield* transport.request("invalid").pipe(Effect.flip);
 
-      NodeAssert.equal(error._tag, "AgentProtocolError");
+      assert.equal(error._tag, "AgentProtocolError");
     }),
   );
 
@@ -114,8 +114,8 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
         { concurrency: "unbounded" },
       ).pipe(Effect.timeout("2 seconds"));
 
-      NodeAssert.equal(exits.length, 128);
-      for (const exit of exits) NodeAssert.equal(exit._tag, "Failure");
+      assert.equal(exits.length, 128);
+      for (const exit of exits) assert.equal(exit._tag, "Failure");
     }),
   );
 
@@ -126,8 +126,8 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
         .request("exitWithInheritedStderr")
         .pipe(Effect.flip, Effect.timeout("750 millis"));
 
-      NodeAssert.equal(error._tag, "AgentProcessExited");
-      if (error._tag === "AgentProcessExited") NodeAssert.equal(error.code, 8);
+      assert.equal(error._tag, "AgentProcessExited");
+      if (error._tag === "AgentProcessExited") assert.equal(error.code, 8);
     }),
   );
 
@@ -136,10 +136,10 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
       const error = yield* transport.request("exit").pipe(Effect.flip);
 
-      NodeAssert.equal(error._tag, "AgentProcessExited");
+      assert.equal(error._tag, "AgentProcessExited");
       if (error._tag === "AgentProcessExited") {
-        NodeAssert.equal(error.code, 7);
-        NodeAssert.match(error.stderrTail ?? "", /fatal codex detail/);
+        assert.equal(error.code, 7);
+        assert.match(error.stderrTail ?? "", /fatal codex detail/);
       }
     }),
   );

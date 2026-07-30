@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { it } from "@effect/vitest";
@@ -101,7 +101,7 @@ describe("ClaudeCodeAgent", () => {
       });
       const { sessionId } = yield* agent.session.create();
 
-      NodeAssert.equal(lastOptions().env?.["HTTPS_PROXY"], "http://desktop-proxy.test:8443");
+      assert.equal(lastOptions().env?.["HTTPS_PROXY"], "http://desktop-proxy.test:8443");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -111,10 +111,10 @@ describe("ClaudeCodeAgent", () => {
       const agent = yield* makeClaudeCodeAgent();
       const { sessionId } = yield* agent.session.create();
 
-      NodeAssert.equal(lastOptions().permissionMode, undefined);
+      assert.equal(lastOptions().permissionMode, undefined);
       // The bypass capability is always enabled so a session can be switched to
       // "bypassPermissions" at runtime; the active mode stays the SDK default.
-      NodeAssert.equal(lastOptions().allowDangerouslySkipPermissions, true);
+      assert.equal(lastOptions().allowDangerouslySkipPermissions, true);
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -124,8 +124,8 @@ describe("ClaudeCodeAgent", () => {
       const agent = yield* makeClaudeCodeAgent({ permissionMode: "bypassPermissions" });
       const { sessionId } = yield* agent.session.create();
 
-      NodeAssert.equal(lastOptions().permissionMode, "bypassPermissions");
-      NodeAssert.equal(lastOptions().allowDangerouslySkipPermissions, true);
+      assert.equal(lastOptions().permissionMode, "bypassPermissions");
+      assert.equal(lastOptions().allowDangerouslySkipPermissions, true);
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -135,22 +135,22 @@ describe("ClaudeCodeAgent", () => {
       const agent = yield* makeClaudeCodeAgent();
       const { sessionId } = yield* agent.session.create();
 
-      NodeAssert.match(
+      assert.match(
         sessionId,
         /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
-      NodeAssert.equal(lastOptions().sessionId, sessionId);
-      NodeAssert.deepStrictEqual(yield* agent.session.getSupportedCommands(sessionId), [
+      assert.equal(lastOptions().sessionId, sessionId);
+      assert.deepStrictEqual(yield* agent.session.getSupportedCommands(sessionId), [
         { name: "read", description: "Read files", argumentHint: "<file>" },
       ]);
-      NodeAssert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
+      assert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
         { value: "sonnet", displayName: "Sonnet", description: "Fast" },
       ]);
-      NodeAssert.deepStrictEqual(yield* agent.session.getMcpServers(sessionId), [
+      assert.deepStrictEqual(yield* agent.session.getMcpServers(sessionId), [
         { name: "filesystem", status: "connected" },
       ]);
       yield* agent.session.abort(sessionId);
-      NodeAssert.equal(queryInstance.interrupt.mock.calls.length, 1);
+      assert.equal(queryInstance.interrupt.mock.calls.length, 1);
     }),
   );
 
@@ -170,11 +170,11 @@ describe("ClaudeCodeAgent", () => {
       });
       const output = yield* Stream.runCollect(prompt.output);
 
-      NodeAssert.deepStrictEqual(
+      assert.deepStrictEqual(
         Array.from(output, (message) => message.type),
         ["system", "result"],
       );
-      NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+      assert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
     }),
   );
 
@@ -200,7 +200,7 @@ describe("ClaudeCodeAgent", () => {
       yield* Effect.promise(() => nativeFailed);
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
-      NodeAssert.equal(
+      assert.equal(
         yield* Deferred.isDone(crashSeen),
         true,
         "idle Claude adapter session did not publish session.crashed",
@@ -232,12 +232,12 @@ describe("ClaudeCodeAgent", () => {
       });
       const events = yield* Fiber.join(collected);
 
-      NodeAssert.equal(typeof receipt.turnId, "string");
-      NodeAssert.deepStrictEqual(
+      assert.equal(typeof receipt.turnId, "string");
+      assert.deepStrictEqual(
         Array.from(events, (event) => event.body.type),
         ["session.turn.started", "start", "finish", "session.turn.ended"],
       );
-      NodeAssert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+      assert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
       yield* session.close;
     }),
   );
@@ -259,7 +259,7 @@ describe("ClaudeCodeAgent", () => {
           message: { role: "user", content: "second" },
         })
         .pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "TurnAlreadyRunning");
+      assert.equal(error._tag, "TurnAlreadyRunning");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -281,7 +281,7 @@ describe("ClaudeCodeAgent", () => {
         message: { role: "user", content: "fail" },
       });
       const firstExit = yield* Stream.runCollect(first.output).pipe(Effect.exit);
-      NodeAssert.equal(firstExit._tag, "Failure");
+      assert.equal(firstExit._tag, "Failure");
 
       yield* Effect.eventually(
         agent.session.getSupportedCommands(sessionId).pipe(
@@ -291,8 +291,8 @@ describe("ClaudeCodeAgent", () => {
           ),
         ),
       );
-      NodeAssert.equal(build, 2);
-      NodeAssert.equal(lastOptions().resume, sessionId);
+      assert.equal(build, 2);
+      assert.equal(lastOptions().resume, sessionId);
     }),
   );
 
@@ -309,17 +309,17 @@ describe("ClaudeCodeAgent", () => {
         ],
         { concurrency: "unbounded" },
       );
-      NodeAssert.equal(mockGetSessionInfo.mock.calls.length, 1);
-      NodeAssert.equal(mockQuery.mock.calls.length, 1);
-      NodeAssert.equal(lastOptions().resume, sessionId);
-      NodeAssert.equal(lastOptions().sessionId, undefined);
+      assert.equal(mockGetSessionInfo.mock.calls.length, 1);
+      assert.equal(mockQuery.mock.calls.length, 1);
+      assert.equal(lastOptions().resume, sessionId);
+      assert.equal(lastOptions().sessionId, undefined);
 
       mockGetSessionInfo.mockResolvedValue(undefined);
       const missing = yield* makeClaudeCodeAgent();
       const error = yield* missing.session
         .getSupportedCommands("019f6013-0000-7000-8000-000000000003")
         .pipe(Effect.flip);
-      NodeAssert.equal(error._tag, "SessionNotResumable");
+      assert.equal(error._tag, "SessionNotResumable");
     }),
   );
 
@@ -331,7 +331,7 @@ describe("ClaudeCodeAgent", () => {
         Effect.forkChild,
       );
       const canUseTool = lastOptions().canUseTool;
-      NodeAssert.ok(canUseTool);
+      assert.ok(canUseTool);
 
       const permission = canUseTool!(
         "Bash",
@@ -349,7 +349,7 @@ describe("ClaudeCodeAgent", () => {
       yield* Fiber.join(requestFiber);
       yield* agent.session.abort(sessionId);
 
-      NodeAssert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+      assert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
         behavior: "deny",
         message: "Request aborted due to session termination",
         interrupt: true,
@@ -365,7 +365,7 @@ describe("ClaudeCodeAgent", () => {
         Effect.forkChild,
       );
       const canUseTool = lastOptions().canUseTool;
-      NodeAssert.ok(canUseTool);
+      assert.ok(canUseTool);
 
       const permission = canUseTool!(
         "Bash",
@@ -381,7 +381,7 @@ describe("ClaudeCodeAgent", () => {
         },
       );
       const request = yield* Fiber.join(requestFiber);
-      NodeAssert.equal(request._tag, "Some");
+      assert.equal(request._tag, "Some");
       if (request._tag === "Some") {
         yield* agent.session.respondPermission(sessionId, request.value.requestId, {
           behavior: "allow",
@@ -389,7 +389,7 @@ describe("ClaudeCodeAgent", () => {
         });
       }
 
-      NodeAssert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+      assert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
         behavior: "allow",
         updatedInput: { command: "pwd" },
       });

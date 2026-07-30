@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -26,8 +26,8 @@ layer(NodeServices.layer)("pi live smoke", (it) => {
           .filter((chunk) => chunk.type === "text-delta")
           .map((chunk) => ("delta" in chunk ? chunk.delta : ""))
           .join("");
-        NodeAssert.match(text, /PONG/i);
-        NodeAssert.equal(chunks.at(-1)?.type, "finish");
+        assert.match(text, /PONG/i);
+        assert.equal(chunks.at(-1)?.type, "finish");
         yield* agent.session.abort(sessionId);
       }),
     120_000,

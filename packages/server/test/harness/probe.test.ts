@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
@@ -38,11 +38,11 @@ it.effect("probes the directory it was asked about, grouped under the built-in p
 
     const result = yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
-    NodeAssert.deepStrictEqual(yield* Ref.get(seen), ["/work/app"]);
+    assert.deepStrictEqual(yield* Ref.get(seen), ["/work/app"]);
     // Models never leave their provider: the built-in provider carries the
     // harness's own id, which is the other half of every providerId/modelId pair.
-    NodeAssert.equal(result.providers[0]?.id, "claude-code");
-    NodeAssert.equal(result.providers[0]?.models[0]?.id, "sonnet");
+    assert.equal(result.providers[0]?.id, "claude-code");
+    assert.equal(result.providers[0]?.models[0]?.id, "sonnet");
   }),
 );
 
@@ -57,9 +57,9 @@ it.effect("gives concurrent callers one probe, not one each", () =>
     // Two tabs on the same directory, arriving before the first probe settles.
     const [first, second] = yield* Effect.all([ask, ask], { concurrency: "unbounded" });
 
-    NodeAssert.equal((yield* Ref.get(seen)).length, 1);
-    NodeAssert.equal(first.providers[0]?.models[0]?.id, "sonnet");
-    NodeAssert.equal(second.providers[0]?.models[0]?.id, "sonnet");
+    assert.equal((yield* Ref.get(seen)).length, 1);
+    assert.equal(first.providers[0]?.models[0]?.id, "sonnet");
+    assert.equal(second.providers[0]?.models[0]?.id, "sonnet");
   }),
 );
 
@@ -80,7 +80,7 @@ it.effect("treats two directories as two probes, and does not serialise them", (
 
     // Both ran; if the registration lock covered the probes, the second would
     // have queued behind the first rather than interleaving.
-    NodeAssert.deepStrictEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
+    assert.deepStrictEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
   }),
 );
 
@@ -95,7 +95,7 @@ it.effect("normalises the directory, so one answer serves its aliases", () =>
     yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app/" });
     yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
 
-    NodeAssert.equal((yield* Ref.get(seen)).length, 1);
+    assert.equal((yield* Ref.get(seen)).length, 1);
   }),
 );
 
@@ -121,12 +121,12 @@ it.effect("caches a success but retries a failure", () =>
     // A cached failure would pin "no models" for the whole TTL, so the user
     // would have to wait it out after logging back in.
     yield* Effect.result(ask);
-    NodeAssert.equal((yield* ask).providers[0]?.models[0]?.id, "sonnet");
-    NodeAssert.equal(yield* Ref.get(calls), 2);
+    assert.equal((yield* ask).providers[0]?.models[0]?.id, "sonnet");
+    assert.equal(yield* Ref.get(calls), 2);
 
     // The success, on the other hand, is worth keeping: no second spawn.
     yield* ask;
-    NodeAssert.equal(yield* Ref.get(calls), 2);
+    assert.equal(yield* Ref.get(calls), 2);
   }),
 );
 
@@ -136,7 +136,7 @@ it.effect("answers an empty provider list for a harness that has no probe", () =
 
     // Not a failure: pi genuinely has no models, and the client renders no
     // picker rather than an error.
-    NodeAssert.deepStrictEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
+    assert.deepStrictEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
       providers: [],
     });
   }),

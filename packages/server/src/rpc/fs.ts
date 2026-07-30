@@ -1,6 +1,6 @@
 import "@orpc/experimental-effect/extensions/effect";
 import os from "node:os";
-import nodePath from "node:path";
+import path from "node:path";
 
 import { implement } from "@orpc/server";
 import { fsContract } from "@vibest/contract/fs";
@@ -36,19 +36,19 @@ export const fsRouter = orpc.router({
   }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;
-    const path = nodePath.resolve(input.path ?? os.homedir());
+    const root = path.resolve(input.path ?? os.homedir());
     // Folder-picker policy (owned here, not a shared fs service): directories
     // only, hide dotfolders and node_modules, sorted by name.
     const names = yield* fs
-      .readDirectory(path)
-      .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path } })));
+      .readDirectory(root)
+      .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path: root } })));
     const candidates = names.filter((name) => !name.startsWith(".") && !IGNORED_DIRS.has(name));
     // readDirectory yields names only, so stat each to keep just directories. A
     // failing stat (e.g. broken symlink) drops that entry rather than the list.
     const flagged = yield* Effect.forEach(
       candidates,
       (name) =>
-        fs.stat(nodePath.join(path, name)).pipe(
+        fs.stat(path.join(root, name)).pipe(
           Effect.map((info) => info.type === "Directory"),
           Effect.catch(() => Effect.succeed(false)),
           Effect.map((isDirectory) => ({ name, isDirectory })),
@@ -57,10 +57,10 @@ export const fsRouter = orpc.router({
     );
     const directories = flagged
       .filter((e) => e.isDirectory)
-      .map((e) => ({ name: e.name, path: nodePath.join(path, e.name) }));
+      .map((e) => ({ name: e.name, path: path.join(root, e.name) }));
     directories.sort((a, b) => a.name.localeCompare(b.name));
-    const parent = nodePath.dirname(path);
-    return { path, parent: parent === path ? null : parent, directories };
+    const parent = path.dirname(root);
+    return { path: root, parent: parent === root ? null : parent, directories };
   }),
 });
 

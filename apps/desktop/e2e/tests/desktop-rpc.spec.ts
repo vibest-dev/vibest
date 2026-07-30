@@ -1,6 +1,6 @@
 import childProcess from "node:child_process";
 import fs from "node:fs";
-import nodeHttp from "node:http";
+import http from "node:http";
 import path from "node:path";
 
 import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
@@ -152,7 +152,7 @@ test("gives a reloaded renderer document a new MessagePort", async ({ electronAp
 // oxlint-disable-next-line no-empty-pattern -- required by Playwright's fixture API
 test("boots the development HTTP renderer through MessagePort", async ({}, testInfo) => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
-  const server = nodeHttp.createServer((request, response) => {
+  const server = http.createServer((request, response) => {
     const requested = path.join(
       rendererRoot,
       new URL(request.url ?? "/", "http://localhost").pathname,

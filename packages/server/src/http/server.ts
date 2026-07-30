@@ -1,5 +1,5 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import nodeHttp from "node:http";
+import http from "node:http";
 
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
@@ -45,7 +45,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<M
   let serveUI: UIHandler;
   let closeUI = async () => {};
 
-  const server = nodeHttp.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     void handleRequest(req, res);
   });
 

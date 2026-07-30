@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
-import nodePath from "node:path";
+import path from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ const makeLayer = (home: string) =>
 describe("ProjectService", () => {
   let home: string;
   beforeEach(async () => {
-    home = await fs.mkdtemp(nodePath.join(os.tmpdir(), "vibest-proj-"));
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-proj-"));
   });
   afterEach(async () => {
     await fs.rm(home, { recursive: true, force: true });
@@ -80,9 +80,9 @@ describe("ProjectService", () => {
   });
 
   it("reads a pre-envelope projects.json and adopts it into envelope form", async () => {
-    const file = nodePath.join(home, "storage", "projects.json");
+    const file = path.join(home, "storage", "projects.json");
     const project = { id: "p1", name: "app", path: "/tmp/app", createdAt: "2026-07-16T00:00:00Z" };
-    await fs.mkdir(nodePath.dirname(file), { recursive: true });
+    await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, JSON.stringify([project]), "utf8");
 
     const listed = await run(
@@ -99,8 +99,8 @@ describe("ProjectService", () => {
   });
 
   it("a corrupt projects.json fails per call with StoreReadError and recovers once fixed", async () => {
-    const file = nodePath.join(home, "storage", "projects.json");
-    await fs.mkdir(nodePath.dirname(file), { recursive: true });
+    const file = path.join(home, "storage", "projects.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, "{ not json", "utf8");
 
     // The layer must still build (no startup defect); the error is per call.

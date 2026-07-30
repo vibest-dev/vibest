@@ -1,5 +1,5 @@
 import childProcess from "node:child_process";
-import nodeFs from "node:fs";
+import fs from "node:fs";
 import module from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +20,7 @@ function extraInstallDirs(home: string): string[] {
 
 function isExecutableFile(candidate: string): boolean {
   try {
-    nodeFs.accessSync(candidate, nodeFs.constants.X_OK);
+    fs.accessSync(candidate, fs.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -106,7 +106,7 @@ export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
 export function requiredClaudeVersion(): string {
   const main = moduleRequire.resolve("@anthropic-ai/claude-agent-sdk");
   const manifest = JSON.parse(
-    nodeFs.readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
+    fs.readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
   ) as { claudeCodeVersion?: string };
   if (!manifest.claudeCodeVersion) {
     throw new Error("Claude Agent SDK manifest is missing claudeCodeVersion.");

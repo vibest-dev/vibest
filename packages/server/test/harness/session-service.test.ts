@@ -1,4 +1,4 @@
-import NodeAssert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft, SessionEvent } from "@vibest/harness";
@@ -142,14 +142,14 @@ it.effect("exposes the raw per-session event stream and tears down on close", ()
     yield* fixture.service.close(created.sessionId);
     const events = yield* Fiber.join(collected);
 
-    NodeAssert.deepStrictEqual(receipt, { turnId: "turn-1" });
-    NodeAssert.deepStrictEqual(Array.from(events), [
+    assert.deepStrictEqual(receipt, { turnId: "turn-1" });
+    assert.deepStrictEqual(Array.from(events), [
       "session.turn.started",
       "start",
       "session.turn.ended",
     ]);
-    NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    NodeAssert.equal(yield* isActive(fixture, created.sessionId), false);
+    assert.equal(yield* Ref.get(fixture.closeCalls), 1);
+    assert.equal(yield* isActive(fixture, created.sessionId), false);
   }),
 );
 
@@ -172,8 +172,8 @@ it.effect("single-flights resume in owner scope when the first waiter cancels", 
     yield* Deferred.succeed(fixture.resumeGate, undefined);
     yield* Fiber.join(second);
 
-    NodeAssert.equal(yield* Ref.get(fixture.resumeCalls), 1);
-    NodeAssert.equal(yield* isActive(fixture, input.sessionId), true);
+    assert.equal(yield* Ref.get(fixture.resumeCalls), 1);
+    assert.equal(yield* isActive(fixture, input.sessionId), true);
     yield* fixture.service.close(input.sessionId);
   }),
 );
@@ -200,7 +200,7 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
     );
 
     yield* Effect.yieldNow;
-    NodeAssert.equal(yield* Ref.get(fixture.resumeCalls), 0);
+    assert.equal(yield* Ref.get(fixture.resumeCalls), 0);
     yield* Deferred.succeed(fixture.closeGate, undefined);
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(
@@ -214,7 +214,7 @@ it.effect("waits for an in-flight close before resuming the same session id", ()
     yield* Fiber.join(close);
     yield* Fiber.join(resume);
 
-    NodeAssert.equal(yield* isActive(fixture, created.sessionId), true);
+    assert.equal(yield* isActive(fixture, created.sessionId), true);
     yield* fixture.service.close(created.sessionId);
   }),
 );
@@ -238,8 +238,8 @@ it.effect("closes a session that is still being resumed", () =>
     yield* Fiber.join(resume);
     yield* Fiber.join(close);
 
-    NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    NodeAssert.equal(yield* isActive(fixture, input.sessionId), false);
+    assert.equal(yield* Ref.get(fixture.closeCalls), 1);
+    assert.equal(yield* isActive(fixture, input.sessionId), false);
   }),
 );
 
@@ -252,6 +252,6 @@ it.effect("shares one idempotent close operation", () =>
 
     yield* Fiber.join(first);
     yield* Fiber.join(second);
-    NodeAssert.equal(yield* Ref.get(fixture.closeCalls), 1);
+    assert.equal(yield* Ref.get(fixture.closeCalls), 1);
   }),
 );
