@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import url from "node:url";
 
 import sirv from "sirv";
 
@@ -24,7 +24,7 @@ function resolveStaticDir(): string | undefined {
     new URL("../../../apps/app/dist/", import.meta.url), // monorepo, from packages/vibest/dist
   ];
   for (const candidate of candidates) {
-    const dir = path.resolve(fileURLToPath(candidate));
+    const dir = path.resolve(url.fileURLToPath(candidate));
     if (fs.existsSync(path.join(dir, "index.html"))) {
       return dir;
     }
@@ -47,7 +47,7 @@ export async function createUIHandler(
     const { createServer: createViteDevServer } = await import("vite");
     const vite = await createViteDevServer({
       // Serve the standalone web app package (apps/app) through this server.
-      root: path.resolve(fileURLToPath(new URL("../../../../apps/app/", import.meta.url))),
+      root: path.resolve(url.fileURLToPath(new URL("../../../../apps/app/", import.meta.url))),
       server: {
         middlewareMode: true,
         hmr: { server },

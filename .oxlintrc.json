@@ -1,11 +1,14 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["react", "typescript", "unicorn", "oxc", "jsx-a11y", "vitest", "vue"],
+  "jsPlugins": ["./tools/oxlint/node-import-style.mjs"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
   },
   "rules": {
+    "unicorn/prefer-node-protocol": "error",
+    "vibest/node-import-style": "error",
     "react/exhaustive-deps": [
       "error",
       {

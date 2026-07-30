@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import nodePath from "node:path";
 
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Context, Effect, FileSystem, Layer } from "effect";
@@ -23,8 +23,11 @@ const NUL = String.fromCharCode(0);
  * and t3code's `WorkspacePaths` use.)
  */
 const contains = (parent: string, child: string): boolean => {
-  const rel = relative(parent, child);
-  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+  const rel = nodePath.relative(parent, child);
+  return (
+    rel === "" ||
+    (!nodePath.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${nodePath.sep}`))
+  );
 };
 
 type ReadFileError =
@@ -44,7 +47,7 @@ type ReadFileError =
 export class FileSystemService extends Context.Service<
   FileSystemService,
   {
-    /** Read `path` (relative to `cwd`) as UTF-8 text. */
+    /** Read `path` (nodePath.relative to `cwd`) as UTF-8 text. */
     readonly readFileString: (cwd: string, path: string) => Effect.Effect<string, ReadFileError>;
   }
 >()("FileSystemService") {}
@@ -62,10 +65,10 @@ export const FileSystemServiceLayer: Layer.Layer<FileSystemService> = Layer.effe
       Effect.gen(function* () {
         // `cwd` is the trusted root and must be absolute; `path` must be relative
         // to it (an absolute `path` would silently ignore `cwd`).
-        if (!isAbsolute(cwd) || isAbsolute(path)) {
+        if (!nodePath.isAbsolute(cwd) || nodePath.isAbsolute(path)) {
           return yield* new WorkspacePathEscape({ cwd, path });
         }
-        const absolute = resolve(cwd, path);
+        const absolute = nodePath.resolve(cwd, path);
         if (!contains(cwd, absolute)) {
           return yield* new WorkspacePathEscape({ cwd, path });
         }

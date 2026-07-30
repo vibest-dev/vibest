@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import url from "node:url";
 
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
@@ -9,15 +9,15 @@ import { defineConfig } from "vite";
 export default defineConfig({
   resolve: {
     tsconfigPaths: true,
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: { "@": url.fileURLToPath(new URL("./src", import.meta.url)) },
   },
   plugins: [
     codeInspectorPlugin({ bundler: "vite" }),
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
-      routesDirectory: fileURLToPath(new URL("./src/routes", import.meta.url)),
-      generatedRouteTree: fileURLToPath(new URL("./src/routeTree.gen.ts", import.meta.url)),
+      routesDirectory: url.fileURLToPath(new URL("./src/routes", import.meta.url)),
+      generatedRouteTree: url.fileURLToPath(new URL("./src/routeTree.gen.ts", import.meta.url)),
     }),
     react(),
     tailwindcss(),

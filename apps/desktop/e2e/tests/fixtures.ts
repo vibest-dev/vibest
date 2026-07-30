@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -23,12 +23,12 @@ export const test = base.extend<{
   // oxlint-disable-next-line no-empty-pattern -- required by Playwright's fixture API
   e2ePaths: async ({}, use, testInfo) => {
     const output = testInfo.outputPath();
-    mkdirSync(output, { recursive: true });
+    fs.mkdirSync(output, { recursive: true });
     // Per-test server storage: without this the spawned server resolves
     // $VIBEST_HOME to the developer's real ~/.vibest, so their projects and
     // sessions leak into the UI and test chats write into their history.
     const vibestHome = path.join(output, "vibest-home");
-    mkdirSync(vibestHome, { recursive: true });
+    fs.mkdirSync(vibestHome, { recursive: true });
     await use({
       fakeClaudeLog: path.join(output, "fake-claude.jsonl"),
       userData: path.join(output, "user-data"),

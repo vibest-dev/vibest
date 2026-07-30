@@ -275,8 +275,8 @@ export class GitService {
               newContents = await git.show([`:${file}`]);
             } else {
               // Get from working directory
-              const fs = await import("fs/promises");
-              const nodePath = await import("path");
+              const fs = await import("node:fs/promises");
+              const nodePath = await import("node:path");
               newContents = await fs.readFile(nodePath.join(path, file), "utf-8");
             }
           } catch {
@@ -305,8 +305,8 @@ export class GitService {
               newContents = await git.show([`:${file}`]);
             } else {
               // Get working directory version
-              const fs = await import("fs/promises");
-              const nodePath = await import("path");
+              const fs = await import("node:fs/promises");
+              const nodePath = await import("node:path");
               newContents = await fs.readFile(nodePath.join(path, file), "utf-8");
             }
           } catch {
@@ -349,8 +349,8 @@ export class GitService {
    */
   async getDiffStats(path: string): Promise<DiffStats> {
     const git = this.getGit(path);
-    const fs = await import("fs/promises");
-    const nodePath = await import("path");
+    const fs = await import("node:fs/promises");
+    const nodePath = await import("node:path");
 
     // Get status to determine file states
     const status = await git.status();
@@ -533,8 +533,8 @@ export class GitService {
    */
   async getFileDiff(repoPath: string, filePath: string, staged = false): Promise<FileDiffContent> {
     const git = this.getGit(repoPath);
-    const fs = await import("fs/promises");
-    const nodePath = await import("path");
+    const fs = await import("node:fs/promises");
+    const nodePath = await import("node:path");
 
     const MAX_SIZE = 1024 * 1024; // 1MB
 

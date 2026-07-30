@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import crypto from "node:crypto";
 
 /** How long an issued WebSocket ticket stays redeemable. */
 export const TICKET_TTL_MS = 10_000;
@@ -20,7 +20,7 @@ export function createTicketStore(now: () => number = Date.now): TicketStore {
 
   return {
     issue() {
-      const ticket = randomUUID();
+      const ticket = crypto.randomUUID();
       expiries.set(ticket, now() + TICKET_TTL_MS);
       return ticket;
     },

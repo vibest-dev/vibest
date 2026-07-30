@@ -1,7 +1,7 @@
-import * as NodeAssert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import NodeAssert from "node:assert/strict";
+import nodeFs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -95,10 +95,10 @@ rl.on("line", (line) => {
 `;
 
 function makeFake(): string {
-  const dir = mkdtempSync(join(tmpdir(), "fake-codex-"));
-  const file = join(dir, "fake-codex.js");
-  writeFileSync(file, FAKE);
-  chmodSync(file, 0o755);
+  const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "fake-codex-"));
+  const file = nodePath.join(dir, "fake-codex.js");
+  nodeFs.writeFileSync(file, FAKE);
+  nodeFs.chmodSync(file, 0o755);
   return file;
 }
 
@@ -203,7 +203,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       // Codex fixes a model at thread/start and has no set-model call, so a
       // create-time choice can only reach it as a turn override. If this
       // regresses, picking a model silently does nothing.
-      const workspace = mkdtempSync(join(tmpdir(), "codex-model-"));
+      const workspace = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-model-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const session = yield* makeCodexAdapter(agent).open({
         cwd: workspace,
@@ -212,13 +212,16 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
       yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
 
-      NodeAssert.equal(readFileSync(join(workspace, "turn-model"), "utf8"), "gpt-5.6-luna");
+      NodeAssert.equal(
+        nodeFs.readFileSync(nodePath.join(workspace, "turn-model"), "utf8"),
+        "gpt-5.6-luna",
+      );
     }).pipe(Effect.scoped),
   );
 
   it.effect("leaves the model unset when nothing was chosen", () =>
     Effect.gen(function* () {
-      const workspace = mkdtempSync(join(tmpdir(), "codex-model-"));
+      const workspace = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-model-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
@@ -226,7 +229,10 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
       // Absent, not null or undefined: the key has to be missing entirely so
       // codex keeps the model from its own config.
-      NodeAssert.equal(readFileSync(join(workspace, "turn-model"), "utf8"), "<absent>");
+      NodeAssert.equal(
+        nodeFs.readFileSync(nodePath.join(workspace, "turn-model"), "utf8"),
+        "<absent>",
+      );
     }).pipe(Effect.scoped),
   );
 
@@ -297,7 +303,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts a turn requested while turn/start is still pending", () =>
     Effect.gen(function* () {
-      const cwd = mkdtempSync(join(tmpdir(), "codex-starting-interrupt-"));
+      const cwd = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-starting-interrupt-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
@@ -305,7 +311,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(cwd, "turn-start-requested"))).pipe(
+        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -317,7 +323,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
       NodeAssert.equal(
-        existsSync(join(cwd, "turn-interrupted")),
+        nodeFs.existsSync(nodePath.join(cwd, "turn-interrupted")),
         true,
         "turn/start completed without the pending interrupt",
       );
@@ -327,7 +333,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts the native turn when the prompt caller cancels during turn/start", () =>
     Effect.gen(function* () {
-      const cwd = mkdtempSync(join(tmpdir(), "codex-starting-cancel-"));
+      const cwd = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), "codex-starting-cancel-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
@@ -335,7 +341,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
 
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(cwd, "turn-start-requested"))).pipe(
+        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-requested"))).pipe(
           Effect.filterOrFail(
             (requested) => requested,
             () => new Error("turn/start was not requested"),
@@ -344,7 +350,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       );
       yield* Fiber.interrupt(prompt);
       yield* Effect.eventually(
-        Effect.sync(() => existsSync(join(cwd, "turn-start-replied"))).pipe(
+        Effect.sync(() => nodeFs.existsSync(nodePath.join(cwd, "turn-start-replied"))).pipe(
           Effect.filterOrFail(
             (replied) => replied,
             () => new Error("turn/start did not reply"),
@@ -354,7 +360,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
 
       NodeAssert.equal(
-        existsSync(join(cwd, "turn-interrupted")),
+        nodeFs.existsSync(nodePath.join(cwd, "turn-interrupted")),
         true,
         "cancelled prompt left the native turn running",
       );

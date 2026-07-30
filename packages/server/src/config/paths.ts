@@ -1,5 +1,5 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
+import os from "node:os";
+import path from "node:path";
 
 import { Context, Layer } from "effect";
 
@@ -23,9 +23,9 @@ export class Paths extends Context.Service<
 
 const resolve = (home: string) => ({
   home,
-  projectsFile: join(home, "storage", "projects.json"),
-  configFile: join(home, "config.json"),
-  sessionsDir: join(home, "storage", "sessions"),
+  projectsFile: path.join(home, "storage", "projects.json"),
+  configFile: path.join(home, "config.json"),
+  sessionsDir: path.join(home, "storage", "sessions"),
 });
 
 /**
@@ -34,7 +34,7 @@ const resolve = (home: string) => ({
  * one-daemon-per-home invariant can never drift on a second definition.
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.VIBEST_HOME ?? join(homedir(), ".vibest");
+  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */

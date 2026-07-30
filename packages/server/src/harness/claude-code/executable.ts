@@ -1,12 +1,12 @@
-import { execFile } from "node:child_process";
-import { accessSync, constants, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import childProcess from "node:child_process";
+import nodeFs from "node:fs";
+import module from "node:module";
+import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import util from "node:util";
 
-const moduleRequire = createRequire(import.meta.url);
-const execFileAsync = promisify(execFile);
+const moduleRequire = module.createRequire(import.meta.url);
+const execFileAsync = util.promisify(childProcess.execFile);
 
 /** Where the native installer and the common package managers put `claude`. */
 function extraInstallDirs(home: string): string[] {
@@ -20,7 +20,7 @@ function extraInstallDirs(home: string): string[] {
 
 function isExecutableFile(candidate: string): boolean {
   try {
-    accessSync(candidate, constants.X_OK);
+    nodeFs.accessSync(candidate, nodeFs.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -67,7 +67,7 @@ export type ResolveDeps = {
 export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
   const {
     env = process.env,
-    home = homedir(),
+    home = os.homedir(),
     bundled = sdkBinary,
     isExecutable = isExecutableFile,
     platform = process.platform,
@@ -106,7 +106,7 @@ export function resolveClaudeExecutable(deps: ResolveDeps = {}): string {
 export function requiredClaudeVersion(): string {
   const main = moduleRequire.resolve("@anthropic-ai/claude-agent-sdk");
   const manifest = JSON.parse(
-    readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
+    nodeFs.readFileSync(path.join(path.dirname(main), "package.json"), "utf8"),
   ) as { claudeCodeVersion?: string };
   if (!manifest.claudeCodeVersion) {
     throw new Error("Claude Agent SDK manifest is missing claudeCodeVersion.");

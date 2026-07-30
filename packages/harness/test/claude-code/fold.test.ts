@@ -1,4 +1,4 @@
-import * as NodeAssert from "node:assert/strict";
+import NodeAssert from "node:assert/strict";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { it } from "@effect/vitest";

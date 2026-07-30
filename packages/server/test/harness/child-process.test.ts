@@ -1,4 +1,4 @@
-import * as NodeAssert from "node:assert/strict";
+import NodeAssert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";

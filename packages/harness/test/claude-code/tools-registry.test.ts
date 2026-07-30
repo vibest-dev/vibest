@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { createRequire } from "node:module";
+import module from "node:module";
 import path from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -38,7 +38,7 @@ const EXCLUDED: Record<string, string> = {
 const NON_SDK_KEYS = new Set(["Task"]); // Task is a registry alias of Agent
 
 function readSdkToolsSource(): string {
-  const require = createRequire(import.meta.url);
+  const require = module.createRequire(import.meta.url);
   const main = require.resolve("@anthropic-ai/claude-agent-sdk");
   return fs.readFileSync(path.join(path.dirname(main), "sdk-tools.d.ts"), "utf8");
 }

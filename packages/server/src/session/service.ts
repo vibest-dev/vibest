@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import crypto from "node:crypto";
 
 import type {
   AgentResponse,
@@ -245,7 +245,7 @@ export const SessionServiceLayer: Layer.Layer<
           Effect.flatMap((project) =>
             port.create(harnessAgentId, project.path, config).pipe(
               Effect.flatMap((harnessSessionId) => {
-                const sessionId = randomUUID();
+                const sessionId = crypto.randomUUID();
                 const metadata: Session = {
                   version: 1,
                   sessionId,

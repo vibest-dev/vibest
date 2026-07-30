@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -29,10 +29,10 @@ const openai: ProviderConfig = {
 describe("ProviderService", () => {
   let home: string;
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "vibest-prov-"));
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-prov-"));
   });
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   const run = <A, E>(program: Effect.Effect<A, E, ProviderService>) =>

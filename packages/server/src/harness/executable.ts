@@ -1,4 +1,4 @@
-import { accessSync, constants } from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 
 /**
@@ -35,7 +35,7 @@ function candidateNames(command: string, platform: NodeJS.Platform): string[] {
 
 function isExecutableFile(candidate: string): boolean {
   try {
-    accessSync(candidate, constants.X_OK);
+    fs.accessSync(candidate, fs.constants.X_OK);
     return true;
   } catch {
     return false;

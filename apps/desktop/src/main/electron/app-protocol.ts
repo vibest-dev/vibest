@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import nodeUrl from "node:url";
 
 import { Data, Effect, Scope } from "effect";
 import { net, protocol } from "electron";
@@ -58,7 +58,7 @@ export function createAppRequestHandler(rendererRoot: string, fetchAsset: FetchA
         ? file
         : path.join(rendererRoot, "index.html");
 
-    return fetchAsset(pathToFileURL(target).toString());
+    return fetchAsset(nodeUrl.pathToFileURL(target).toString());
   };
 }
 

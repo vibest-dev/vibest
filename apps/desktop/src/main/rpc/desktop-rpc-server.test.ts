@@ -1,4 +1,4 @@
-import { MessageChannel } from "node:worker_threads";
+import workerThreads from "node:worker_threads";
 
 import { consumeEventIterator, createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/message-port";
@@ -67,7 +67,7 @@ function makeHarness(
     }),
   });
   const rpcServer = makeDesktopRpcServer(override ? override(base) : base, rpcContext);
-  const { port1, port2 } = new MessageChannel();
+  const { port1, port2 } = new workerThreads.MessageChannel();
   const detach = rpcServer.attach(port1);
   port1.start();
   port2.start();

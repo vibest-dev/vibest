@@ -1,4 +1,4 @@
-import * as NodeAssert from "node:assert/strict";
+import NodeAssert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope, Stream } from "effect";

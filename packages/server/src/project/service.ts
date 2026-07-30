@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { basename, resolve as resolvePath } from "node:path";
+import crypto from "node:crypto";
+import nodePath from "node:path";
 
 import { Context, Effect, Layer } from "effect";
 
@@ -51,21 +51,21 @@ export const ProjectServiceLayer: Layer.Layer<ProjectService, never, ProjectRepo
         findByPath: (path) =>
           Effect.gen(function* () {
             const projects = yield* repo.list();
-            const target = resolvePath(path);
-            return projects.find((p) => resolvePath(p.path) === target);
+            const target = nodePath.resolve(path);
+            return projects.find((p) => nodePath.resolve(p.path) === target);
           }),
 
         create: (input) =>
           Effect.gen(function* () {
-            const normalized = resolvePath(input.path);
+            const normalized = nodePath.resolve(input.path);
             const projects = yield* repo.list();
             // Reuse an existing project pointing at the same path.
-            const existing = projects.find((p) => resolvePath(p.path) === normalized);
+            const existing = projects.find((p) => nodePath.resolve(p.path) === normalized);
             if (existing !== undefined) return existing;
 
             const project: Project = {
-              id: randomUUID(),
-              name: input.name ?? basename(normalized),
+              id: crypto.randomUUID(),
+              name: input.name ?? nodePath.basename(normalized),
               path: normalized,
               createdAt: new Date().toISOString(),
             };

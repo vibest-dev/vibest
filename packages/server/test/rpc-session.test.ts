@@ -1,6 +1,6 @@
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createRouterClient } from "@orpc/server";
@@ -51,16 +51,16 @@ rl.on("line", (line) => {
 `;
 
 function makeFake(): string {
-  const dir = mkdtempSync(join(tmpdir(), "fake-codex-"));
-  const file = join(dir, "fake-codex.js");
-  writeFileSync(file, FAKE);
-  chmodSync(file, 0o755);
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "fake-codex-"));
+  const file = nodePath.join(dir, "fake-codex.js");
+  fs.writeFileSync(file, FAKE);
+  fs.chmodSync(file, 0o755);
   return file;
 }
 
 async function setup() {
-  const home = mkdtempSync(join(tmpdir(), "vibest-home-"));
-  const workspace = mkdtempSync(join(tmpdir(), "vibest-ws-"));
+  const home = fs.mkdtempSync(nodePath.join(os.tmpdir(), "vibest-home-"));
+  const workspace = fs.mkdtempSync(nodePath.join(os.tmpdir(), "vibest-ws-"));
   const pathsLayer = layerPaths(home);
 
   // The fake path goes to the adapter too: `session.create` gates on

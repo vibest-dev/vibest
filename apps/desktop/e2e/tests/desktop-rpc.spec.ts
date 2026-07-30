@@ -1,14 +1,20 @@
-import { execFileSync } from "node:child_process";
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import nodeHttp from "node:http";
 import path from "node:path";
 
-import { _electron as electron, type Page } from "@playwright/test";
+import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
 
-import { expect, test } from "./fixtures";
+import { expect, test } from "./fixtures.js";
+
+function appPid(electronApp: ElectronApplication): number {
+  const pid = electronApp.process().pid;
+  if (pid === undefined) throw new Error("Electron process has no pid");
+  return pid;
+}
 
 function findServerPid(parentPid: number): number | undefined {
-  const processes = execFileSync("ps", ["-axo", "pid=,ppid=,command="], {
+  const processes = childProcess.execFileSync("ps", ["-axo", "pid=,ppid=,command="], {
     encoding: "utf8",
   });
   for (const line of processes.split("\n")) {
@@ -41,10 +47,16 @@ function processExists(pid: number): boolean {
 
 function frontmostApplicationPid(): number | undefined {
   if (process.platform !== "darwin") return undefined;
-  const application = execFileSync("/usr/bin/lsappinfo", ["front"], { encoding: "utf8" }).trim();
-  const info = execFileSync("/usr/bin/lsappinfo", ["info", "-only", "pid", application], {
-    encoding: "utf8",
-  });
+  const application = childProcess
+    .execFileSync("/usr/bin/lsappinfo", ["front"], { encoding: "utf8" })
+    .trim();
+  const info = childProcess.execFileSync(
+    "/usr/bin/lsappinfo",
+    ["info", "-only", "pid", application],
+    {
+      encoding: "utf8",
+    },
+  );
   const match = info.match(/"pid"=(\d+)/);
   return match ? Number(match[1]) : undefined;
 }
@@ -109,10 +121,11 @@ test("renders in the background without taking focus and connects to the server"
   });
   expect(renderSize.width).toBeGreaterThan(0);
   expect(renderSize.height).toBeGreaterThan(0);
-  expect(frontmostApplicationPid()).not.toBe(electronApp.process().pid);
+  expect(frontmostApplicationPid()).not.toBe(appPid(electronApp));
   await expect(
     window.evaluate(() => {
-      const globals = window as Window & {
+      // Runs in the renderer, where `window` is the DOM window, not the Page.
+      const globals = window as unknown as Window & {
         vibest?: unknown;
         require?: unknown;
         process?: unknown;
@@ -127,25 +140,25 @@ test("renders in the background without taking focus and connects to the server"
 });
 
 test("gives a reloaded renderer document a new MessagePort", async ({ electronApp, window }) => {
-  const pid = await waitForServer(electronApp.process().pid);
+  const pid = await waitForServer(appPid(electronApp));
 
   await window.reload();
   await expect(window).toHaveTitle("Vibest");
   await expect(window.locator("#root")).toBeVisible();
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
-  expect(serverPid(electronApp.process().pid)).toBe(pid);
+  expect(serverPid(appPid(electronApp))).toBe(pid);
 });
 
 // oxlint-disable-next-line no-empty-pattern -- required by Playwright's fixture API
 test("boots the development HTTP renderer through MessagePort", async ({}, testInfo) => {
   const rendererRoot = path.join(import.meta.dirname, "../../dist/renderer");
-  const server = createServer((request, response) => {
+  const server = nodeHttp.createServer((request, response) => {
     const requested = path.join(
       rendererRoot,
       new URL(request.url ?? "/", "http://localhost").pathname,
     );
     const target =
-      existsSync(requested) && statSync(requested).isFile()
+      fs.existsSync(requested) && fs.statSync(requested).isFile()
         ? requested
         : path.join(rendererRoot, "index.html");
     response.setHeader(
@@ -156,7 +169,7 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
           ? "text/css"
           : "text/html",
     );
-    createReadStream(target).pipe(response);
+    fs.createReadStream(target).pipe(response);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -165,10 +178,10 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
 
   // Own userData so its single-instance lock can't collide with a real `dev`.
   const userData = path.join(testInfo.outputPath(), "user-data");
-  mkdirSync(userData, { recursive: true });
+  fs.mkdirSync(userData, { recursive: true });
   // Own server storage so the developer's real ~/.vibest never leaks in.
   const vibestHome = path.join(testInfo.outputPath(), "vibest-home");
-  mkdirSync(vibestHome, { recursive: true });
+  fs.mkdirSync(vibestHome, { recursive: true });
 
   const app = await electron.launch({
     args: [
@@ -213,7 +226,7 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
   await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
   await expect
     .poll(() =>
-      existsSync(e2ePaths.fakeClaudeLog) ? readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
+      fs.existsSync(e2ePaths.fakeClaudeLog) ? fs.readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
     )
     .toContain('"type":"user","text":"Desktop SDK E2E"');
 });
@@ -223,21 +236,21 @@ test("reports a server crash and recovers on the pinned connection", async ({
   window,
 }) => {
   await waitForConnectedUi(window);
-  const initialPid = await waitForServer(electronApp.process().pid);
+  const initialPid = await waitForServer(appPid(electronApp));
   process.kill(initialPid, "SIGKILL");
 
   const reconnecting = window.getByText("Reconnecting…");
   await expect(reconnecting).toBeVisible({ timeout: 10_000 });
   await expect(reconnecting).toBeHidden({ timeout: 15_000 });
 
-  const restartedPid = serverPid(electronApp.process().pid);
+  const restartedPid = serverPid(appPid(electronApp));
   expect(restartedPid).not.toBe(initialPid);
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
 test("disposes the server process during Electron shutdown", async ({ electronApp, window }) => {
   await expect(window).toHaveTitle("Vibest");
-  const pid = await waitForServer(electronApp.process().pid);
+  const pid = await waitForServer(appPid(electronApp));
 
   await electronApp.close();
 
@@ -246,7 +259,7 @@ test("disposes the server process during Electron shutdown", async ({ electronAp
 
 test("offers Retry after repeated server failures", async ({ electronApp, window }) => {
   test.setTimeout(60_000);
-  const parentPid = electronApp.process().pid;
+  const parentPid = appPid(electronApp);
   await driveServerToFailed(window, parentPid);
 
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
@@ -264,7 +277,7 @@ test("quits through Desktop RPC from the terminal failure state", async ({
   window,
 }) => {
   test.setTimeout(60_000);
-  const parentPid = electronApp.process().pid;
+  const parentPid = appPid(electronApp);
   await driveServerToFailed(window, parentPid);
   await expect(window.getByText("The local server stopped")).toBeVisible({ timeout: 10_000 });
 

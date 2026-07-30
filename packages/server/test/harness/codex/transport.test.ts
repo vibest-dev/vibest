@@ -1,7 +1,7 @@
-import * as NodeAssert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import NodeAssert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -45,10 +45,10 @@ rl.on("line", (line) => {
 `;
 
 function makeFake(): string {
-  const dir = mkdtempSync(join(tmpdir(), "fake-effect-codex-"));
-  const file = join(dir, "fake-codex.js");
-  writeFileSync(file, FAKE);
-  chmodSync(file, 0o755);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-effect-codex-"));
+  const file = path.join(dir, "fake-codex.js");
+  fs.writeFileSync(file, FAKE);
+  fs.chmodSync(file, 0o755);
   return file;
 }
 

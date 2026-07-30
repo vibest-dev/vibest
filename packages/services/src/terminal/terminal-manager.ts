@@ -1,6 +1,6 @@
-import * as crypto from "node:crypto";
-import * as fs from "node:fs";
-import { StringDecoder } from "node:string_decoder";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import stringDecoder from "node:string_decoder";
 
 import type { IPty } from "node-pty";
 import * as pty from "node-pty";
@@ -29,7 +29,7 @@ export type TerminalEvents = {
  * Direct publisher without batching.
  */
 class DirectPublisher {
-  private decoder = new StringDecoder("utf8");
+  private decoder = new stringDecoder.StringDecoder("utf8");
 
   constructor(
     private readonly terminalId: string,

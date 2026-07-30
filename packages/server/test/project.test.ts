@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import fs from "node:fs/promises";
+import os from "node:os";
+import nodePath from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,10 +18,10 @@ const makeLayer = (home: string) =>
 describe("ProjectService", () => {
   let home: string;
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "vibest-proj-"));
+    home = await fs.mkdtemp(nodePath.join(os.tmpdir(), "vibest-proj-"));
   });
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   const run = <A, E>(program: Effect.Effect<A, E, ProjectService>) =>
@@ -80,10 +80,10 @@ describe("ProjectService", () => {
   });
 
   it("reads a pre-envelope projects.json and adopts it into envelope form", async () => {
-    const file = join(home, "storage", "projects.json");
+    const file = nodePath.join(home, "storage", "projects.json");
     const project = { id: "p1", name: "app", path: "/tmp/app", createdAt: "2026-07-16T00:00:00Z" };
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify([project]), "utf8");
+    await fs.mkdir(nodePath.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify([project]), "utf8");
 
     const listed = await run(
       Effect.gen(function* () {
@@ -93,15 +93,15 @@ describe("ProjectService", () => {
     );
     expect(listed).toEqual([project]);
 
-    const raw = JSON.parse(await readFile(file, "utf8"));
+    const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.version).toBe(1);
     expect(raw.data).toEqual([project]);
   });
 
   it("a corrupt projects.json fails per call with StoreReadError and recovers once fixed", async () => {
-    const file = join(home, "storage", "projects.json");
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, "{ not json", "utf8");
+    const file = nodePath.join(home, "storage", "projects.json");
+    await fs.mkdir(nodePath.dirname(file), { recursive: true });
+    await fs.writeFile(file, "{ not json", "utf8");
 
     // The layer must still build (no startup defect); the error is per call.
     const result = await run(
@@ -109,7 +109,7 @@ describe("ProjectService", () => {
         const svc = yield* ProjectService;
         const error = yield* Effect.flip(svc.list());
         // Fix the file on disk; the next call retries the open and recovers.
-        yield* Effect.promise(() => writeFile(file, "[]", "utf8"));
+        yield* Effect.promise(() => fs.writeFile(file, "[]", "utf8"));
         const listed = yield* svc.list();
         return { error, listed };
       }),

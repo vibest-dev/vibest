@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 import { Effect } from "effect";
 
@@ -18,7 +18,7 @@ export const readJson = <A>(file: string, fallback: A): Effect.Effect<A, StoreRe
     try: async () => {
       let raw: string;
       try {
-        raw = await readFile(file, "utf8");
+        raw = await fs.readFile(file, "utf8");
       } catch (cause) {
         if (isEnoent(cause)) return fallback;
         throw cause;
@@ -38,10 +38,10 @@ export const writeJsonAtomic = (
 ): Effect.Effect<void, StoreWriteError> =>
   Effect.tryPromise({
     try: async () => {
-      await mkdir(dirname(file), { recursive: true });
-      const tmp = `${file}.${randomUUID()}.tmp`;
-      await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-      await rename(tmp, file);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+      await fs.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+      await fs.rename(tmp, file);
     },
     catch: (cause) => new StoreWriteError({ file, cause }),
   });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import crypto from "node:crypto";
+import fs from "node:fs";
 
 const args = process.argv.slice(2);
 
@@ -10,13 +10,13 @@ function argument(name) {
   return index === -1 ? undefined : args[index + 1];
 }
 
-const sessionId = argument("--session-id") ?? argument("--resume") ?? randomUUID();
+const sessionId = argument("--session-id") ?? argument("--resume") ?? crypto.randomUUID();
 const logPath = process.env["VIBEST_E2E_CLAUDE_LOG"];
 const configuredResponse = process.env["VIBEST_E2E_CLAUDE_RESPONSE"];
 let messageSequence = 0;
 
 function log(value) {
-  if (logPath) appendFileSync(logPath, `${JSON.stringify(value)}\n`);
+  if (logPath) fs.appendFileSync(logPath, `${JSON.stringify(value)}\n`);
 }
 
 function send(value) {
@@ -59,7 +59,7 @@ function initialize(requestId) {
     output_style: "default",
     skills: [],
     plugins: [],
-    uuid: randomUUID(),
+    uuid: crypto.randomUUID(),
     session_id: sessionId,
   });
 }
@@ -117,7 +117,7 @@ function respondToUserMessage(message) {
       usage: { input_tokens: 1, output_tokens: 1 },
     },
     parent_tool_use_id: null,
-    uuid: randomUUID(),
+    uuid: crypto.randomUUID(),
     session_id: sessionId,
   });
   send({
@@ -140,7 +140,7 @@ function respondToUserMessage(message) {
     },
     modelUsage: {},
     permission_denials: [],
-    uuid: randomUUID(),
+    uuid: crypto.randomUUID(),
     session_id: sessionId,
   });
 }

@@ -1,7 +1,7 @@
-import * as NodeAssert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import NodeAssert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
@@ -39,10 +39,10 @@ rl.on("line", (line) => {
 `;
 
 function makeFake(): string {
-  const dir = mkdtempSync(join(tmpdir(), "fake-pi-transport-"));
-  const file = join(dir, "fake-pi.js");
-  writeFileSync(file, FAKE);
-  chmodSync(file, 0o755);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-pi-transport-"));
+  const file = path.join(dir, "fake-pi.js");
+  fs.writeFileSync(file, FAKE);
+  fs.chmodSync(file, 0o755);
   return file;
 }
 
@@ -125,9 +125,9 @@ layer(NodeServices.layer)("PiTransport", (it) => {
 
   it.effect("passes --session-id through to the child", () =>
     Effect.gen(function* () {
-      const dir = mkdtempSync(join(tmpdir(), "fake-pi-args-"));
-      const file = join(dir, "fake-pi.js");
-      writeFileSync(
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-pi-args-"));
+      const file = path.join(dir, "fake-pi.js");
+      fs.writeFileSync(
         file,
         `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -139,7 +139,7 @@ rl.on("line", (line) => {
 });
 `,
       );
-      chmodSync(file, 0o755);
+      fs.chmodSync(file, 0o755);
       const transport = yield* makePiTransport({ executablePath: file, sessionId: "sid-42" });
       NodeAssert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "sid-42",

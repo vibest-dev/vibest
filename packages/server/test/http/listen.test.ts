@@ -1,14 +1,14 @@
-import { createServer } from "node:http";
+import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { listenServer } from "../../src/http/listen";
 
-const servers = new Set<ReturnType<typeof createServer>>();
+const servers = new Set<ReturnType<typeof http.createServer>>();
 
 const makeServer = () => {
-  const server = createServer();
+  const server = http.createServer();
   servers.add(server);
   return server;
 };

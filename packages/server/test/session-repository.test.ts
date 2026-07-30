@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,10 +23,10 @@ const meta = (sessionId: string, projectId: string, harnessSessionId: string): S
 describe("SessionRepository", () => {
   let home: string;
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "vibest-sess-"));
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-sess-"));
   });
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   const run = <A, E>(program: Effect.Effect<A, E, SessionRepository>) =>
@@ -53,7 +53,7 @@ describe("SessionRepository", () => {
       }),
     );
     const raw = JSON.parse(
-      await readFile(join(home, "storage", "sessions", "proj-a", "sess-1.json"), "utf8"),
+      await fs.readFile(path.join(home, "storage", "sessions", "proj-a", "sess-1.json"), "utf8"),
     );
     expect(raw.version).toBe(1);
     expect(raw.data.sessionId).toBe("sess-1");
@@ -61,9 +61,9 @@ describe("SessionRepository", () => {
   });
 
   it("reads a pre-envelope record and adopts it into envelope form", async () => {
-    const file = join(home, "storage", "sessions", "proj-a", "sess-1.json");
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify(meta("sess-1", "proj-a", "claude-uuid-1")), "utf8");
+    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(meta("sess-1", "proj-a", "claude-uuid-1")), "utf8");
 
     const read = await run(
       Effect.gen(function* () {
@@ -73,7 +73,7 @@ describe("SessionRepository", () => {
     );
     expect(read.harnessSessionId).toBe("claude-uuid-1");
 
-    const raw = JSON.parse(await readFile(file, "utf8"));
+    const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.version).toBe(1);
     expect(raw.data.sessionId).toBe("sess-1");
   });
@@ -141,9 +141,9 @@ describe("SessionRepository", () => {
   });
 
   it("a corrupt record in another project does not break this project's list", async () => {
-    const badFile = join(home, "storage", "sessions", "proj-b", "bad.json");
-    await mkdir(dirname(badFile), { recursive: true });
-    await writeFile(badFile, "{ not json", "utf8");
+    const badFile = path.join(home, "storage", "sessions", "proj-b", "bad.json");
+    await fs.mkdir(path.dirname(badFile), { recursive: true });
+    await fs.writeFile(badFile, "{ not json", "utf8");
 
     const result = await run(
       Effect.gen(function* () {

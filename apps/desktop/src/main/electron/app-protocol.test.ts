@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import url from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,9 +37,9 @@ describe("resolveAssetPath", () => {
 
 describe("createAppRequestHandler", () => {
   it("serves a renderer asset without an RPC dispatch path", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "vibest-renderer-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-renderer-"));
     const asset = path.join(root, "asset.js");
-    writeFileSync(asset, "asset");
+    fs.writeFileSync(asset, "asset");
     const fetch = vi.fn<FetchAsset>(async () => new Response("asset"));
 
     const response = await createAppRequestHandler(
@@ -48,13 +48,13 @@ describe("createAppRequestHandler", () => {
     )(new Request("vibest://app/asset.js"));
 
     expect(await response.text()).toBe("asset");
-    expect(fetch).toHaveBeenCalledWith(pathToFileURL(asset).toString());
+    expect(fetch).toHaveBeenCalledWith(url.pathToFileURL(asset).toString());
   });
 
   it("falls back to the SPA entry for an unknown renderer path", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "vibest-renderer-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-renderer-"));
     const entry = path.join(root, "index.html");
-    writeFileSync(entry, "app");
+    fs.writeFileSync(entry, "app");
     const fetch = vi.fn<FetchAsset>(async () => new Response("app"));
 
     const response = await createAppRequestHandler(
@@ -63,7 +63,7 @@ describe("createAppRequestHandler", () => {
     )(new Request("vibest://app/chat/session"));
 
     expect(await response.text()).toBe("app");
-    expect(fetch).toHaveBeenCalledWith(pathToFileURL(entry).toString());
+    expect(fetch).toHaveBeenCalledWith(url.pathToFileURL(entry).toString());
   });
 
   it("rejects a different custom-protocol host", async () => {

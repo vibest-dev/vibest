@@ -1,5 +1,5 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import url from "node:url";
 
 import { Context, Layer } from "effect";
 
@@ -30,7 +30,7 @@ export function resolveServerEntry(isPackaged: boolean, resourcesPath: string): 
       "server.mjs",
     );
   }
-  return fileURLToPath(new URL("../../../../packages/server/dist/server.mjs", import.meta.url));
+  return url.fileURLToPath(new URL("../../../../packages/server/dist/server.mjs", import.meta.url));
 }
 
 export function buildDesktopConfig(inputs: DesktopConfigInputs): DesktopConfig["Service"] {

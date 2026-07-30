@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
+import fs from "node:fs/promises";
+import os from "node:os";
+import nodePath from "node:path";
 
 import { isSessionScopedEvent } from "@vibest/contract";
 import { Effect, Layer, Stream } from "effect";
@@ -66,10 +66,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 describe("SessionService", () => {
   let home: string;
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "vibest-svc-"));
+    home = await fs.mkdtemp(nodePath.join(os.tmpdir(), "vibest-svc-"));
   });
   afterEach(async () => {
-    await rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
   });
 
   const layers = (port: Layer.Layer<HarnessAgentSessionPort>) => {
@@ -111,7 +111,7 @@ describe("SessionService", () => {
     expect(result.ref.sessionId).toMatch(UUID_RE);
     // harness saw the resolved cwd, never a projectId
     expect(spy.create).toEqual([
-      { harnessAgentId: "claude-code", cwd: resolvePath("/tmp/vibest-app") },
+      { harnessAgentId: "claude-code", cwd: nodePath.resolve("/tmp/vibest-app") },
     ]);
     // metadata stores the native id, keyed by the server sessionId (filename)
     expect(result.stored.harnessSessionId).toBe("native-1");
@@ -169,7 +169,7 @@ describe("SessionService", () => {
       {
         harnessAgentId: "claude-code",
         harnessSessionId: "native-1",
-        cwd: resolvePath("/tmp/vibest-app"),
+        cwd: nodePath.resolve("/tmp/vibest-app"),
       },
     ]);
   });

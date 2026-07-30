@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import url from "node:url";
 
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
@@ -77,9 +77,9 @@ export default defineConfig({
     },
   },
   renderer: {
-    root: fileURLToPath(new URL("./src/renderer/", import.meta.url)),
+    root: url.fileURLToPath(new URL("./src/renderer/", import.meta.url)),
     resolve: {
-      alias: { "@": fileURLToPath(new URL("../app/src/", import.meta.url)) },
+      alias: { "@": url.fileURLToPath(new URL("../app/src/", import.meta.url)) },
     },
     plugins: [
       devOverlayCsp(),
@@ -87,8 +87,10 @@ export default defineConfig({
       tanstackRouter({
         target: "react",
         autoCodeSplitting: true,
-        routesDirectory: fileURLToPath(new URL("../app/src/routes/", import.meta.url)),
-        generatedRouteTree: fileURLToPath(new URL("../app/src/routeTree.gen.ts", import.meta.url)),
+        routesDirectory: url.fileURLToPath(new URL("../app/src/routes/", import.meta.url)),
+        generatedRouteTree: url.fileURLToPath(
+          new URL("../app/src/routeTree.gen.ts", import.meta.url),
+        ),
       }),
       react(),
       tailwindcss(),
@@ -97,7 +99,7 @@ export default defineConfig({
       outDir: "dist/renderer",
       rollupOptions: {
         input: {
-          index: fileURLToPath(new URL("./src/renderer/index.html", import.meta.url)),
+          index: url.fileURLToPath(new URL("./src/renderer/index.html", import.meta.url)),
         },
       },
     },
