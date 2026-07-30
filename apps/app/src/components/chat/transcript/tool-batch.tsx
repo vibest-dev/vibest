@@ -100,12 +100,11 @@ export function ToolBatch({
         )}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-2 pt-2">
-        {parts
-          .filter(({ part }) => part.type !== "reasoning")
-          .map(({ part }) => {
-            const toolPart = part as ToolUIPart;
-            return <ToolPart key={toolPart.toolCallId} message={message} part={toolPart} />;
-          })}
+        {parts.map(({ part }) => {
+          if (part.type === "reasoning") return null;
+          const toolPart = part as ToolUIPart;
+          return <ToolPart key={toolPart.toolCallId} message={message} part={toolPart} />;
+        })}
       </CollapsibleContent>
     </Collapsible>
   );

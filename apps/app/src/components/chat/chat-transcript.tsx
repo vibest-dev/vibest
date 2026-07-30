@@ -12,12 +12,12 @@ import type { ChatStoreState } from "@/core/chat/chat-state";
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";
 import { MessageView } from "./transcript/message-view";
-import { TranscriptRenderProvider } from "./transcript/transcript-render-context";
+import { TranscriptRenderProvider } from "./transcript/transcript-render-provider";
 
 // Pure view over a store snapshot: message stream, then the error line, then
 // pending agent request cards. Only the last message can be streaming, so only
 // it gets streaming affordances.
-export function ChatTranscriptView({
+function ChatTranscriptView({
   snapshot,
   onRespond,
 }: {

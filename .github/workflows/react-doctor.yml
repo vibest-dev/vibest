@@ -43,3 +43,14 @@ jobs:
         with:
           blocking: error
           scope: full
+          # Everything except @vibest/ui. Its base components are vendored
+          # wholesale from the coss registry via `shadcn add @coss/ui --overwrite`
+          # and local edits are discarded on the next refresh (docs/adr/0001), so
+          # diagnostics raised there are un-actionable here — the fix belongs
+          # upstream. Scan it deliberately with `cd packages/ui && react-doctor`,
+          # which picks up packages/ui/doctor.config.json.
+          # Note this is an allowlist: a new React workspace must be added here to
+          # be covered. It lives in the workflow rather than a root
+          # doctor.config.json because config is inherited by subdirectories, and
+          # a root `projects` field makes the per-project `pnpm doctor` run fail.
+          project: "@vibest/app,desktop"

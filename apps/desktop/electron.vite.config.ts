@@ -5,6 +5,47 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import { defineConfig } from "electron-vite";
+import type { Plugin } from "vite";
+
+// The dev overlays (react-grab, react-scan) reach outside the origin on boot,
+// which the shipped CSP rejects with console errors on every `electron-vite dev`.
+// Production builds eliminate both overlays, so index.html stays strict and the
+// origins they need are spliced in for the dev server only. Each entry is
+// [exact substring of the shipped policy, its dev replacement].
+const DEV_CSP_PATCHES: ReadonlyArray<readonly [string, string]> = [
+  // react-grab's overlay @imports Geist from Google Fonts inside its shadow root.
+  // The stylesheet's own @font-face points at gstatic, and the strict policy has
+  // no font-src at all, so that directive has to be spelled out — including
+  // 'self', which the bundled @fontsource faces rely on.
+  [
+    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com",
+  ],
+  // Deliberately NOT relaxed: both overlays fetch react-grab.com/api/version at
+  // startup to nag about outdated versions, and react-grab exposes no opt-out.
+  // `connect-src` blocking it is the opt-out, so its four console errors per dev
+  // boot are the accepted price of not phoning home. Do not add that origin.
+];
+
+/** `apply: "serve"` keeps the built index.html byte-identical to the source. */
+function devOverlayCsp(): Plugin {
+  return {
+    name: "vibest:dev-overlay-csp",
+    apply: "serve",
+    transformIndexHtml(html) {
+      return DEV_CSP_PATCHES.reduce((patched, [anchor, replacement]) => {
+        if (!patched.includes(anchor)) {
+          throw new Error(
+            `dev CSP relaxation found no \`${anchor}\` in the renderer HTML — reconcile ` +
+              "it with src/renderer/index.html, or drop the entry if the dev overlay " +
+              "no longer needs that origin.",
+          );
+        }
+        return patched.replace(anchor, replacement);
+      }, html);
+    },
+  };
+}
 
 export default defineConfig({
   main: {
@@ -41,6 +82,7 @@ export default defineConfig({
       alias: { "@": fileURLToPath(new URL("../app/src/", import.meta.url)) },
     },
     plugins: [
+      devOverlayCsp(),
       codeInspectorPlugin({ bundler: "vite" }),
       tanstackRouter({
         target: "react",

@@ -16,7 +16,6 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@ai-sdk/react": "^4.0.34",
     "@orpc/client": "catalog:orpc",
     "@orpc/tanstack-query": "catalog:orpc",
     "@tanstack/react-query": "catalog:",
@@ -52,7 +51,7 @@
     "@vibest/typescript": "workspace:*",
     "@vitejs/plugin-react": "catalog:",
     "code-inspector-plugin": "latest",
-    "react-doctor": "^0.7.8",
+    "react-doctor": "^0.9.2",
     "react-grab": "^0.1.48"
   }
 }

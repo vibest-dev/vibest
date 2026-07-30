@@ -20,13 +20,11 @@ import { toast } from "sonner";
 
 import { HarnessSelect } from "@/components/chat/harness-select";
 import { ChatInput } from "@/components/chat/input/chat-input";
-import {
-  ChatInputProvider,
-  useChatInputController,
-} from "@/components/chat/input/chat-input-provider";
+import { ChatInputProvider } from "@/components/chat/input/chat-input-provider";
 import { createChatBaseExtensions } from "@/components/chat/input/extensions/chat-base-extensions";
 import { createSubmitKeymap } from "@/components/chat/input/extensions/keymaps";
 import { hasChatContent } from "@/components/chat/input/serialize";
+import { useChatInputController } from "@/components/chat/input/use-chat-input-controller";
 import { ModelSelect } from "@/components/chat/model-select";
 import { PermissionModeSelect } from "@/components/chat/permission-mode-select";
 import Loader from "@/components/loader";
