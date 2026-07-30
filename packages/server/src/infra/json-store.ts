@@ -54,3 +54,23 @@ export const writeJsonAtomic = (
     yield* fs.writeFileString(tmp, body);
     yield* fs.rename(tmp, file);
   }).pipe(Effect.mapError((cause) => new StoreWriteError({ file, cause })));
+
+/**
+ * The store with the platform bound once. Repositories yield this while their
+ * Layer is being built, so their own methods stay `R`-free and the requirement
+ * rides the Layer's `R` up to the composition root.
+ */
+export const boundJsonStore: Effect.Effect<
+  {
+    readonly read: <A>(file: string, fallback: A) => Effect.Effect<A, StoreReadError>;
+    readonly write: (file: string, data: unknown) => Effect.Effect<void, StoreWriteError>;
+  },
+  never,
+  JsonStorePlatform
+> = Effect.gen(function* () {
+  const platform = yield* Effect.context<JsonStorePlatform>();
+  return {
+    read: (file, fallback) => readJson(file, fallback).pipe(Effect.provide(platform)),
+    write: (file, data) => writeJsonAtomic(file, data).pipe(Effect.provide(platform)),
+  };
+});

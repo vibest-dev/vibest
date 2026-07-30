@@ -1,5 +1,4 @@
-import * as NodePath from "@effect/platform-node/NodePath";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,9 +22,7 @@ function deps(overrides: ResolveDeps = {}): ResolveDeps {
 }
 
 const resolve = (overrides: ResolveDeps, ...installed: ReadonlyArray<string>) =>
-  resolveClaudeExecutable(deps(overrides)).pipe(
-    Effect.provide(Layer.merge(fakeExecutables(...installed), NodePath.layer)),
-  );
+  resolveClaudeExecutable(deps(overrides)).pipe(Effect.provide(fakeExecutables(...installed)));
 
 describe("resolveClaudeExecutable", () => {
   it("takes the explicit override ahead of everything else", () => {
@@ -123,7 +120,7 @@ describe("checkClaudeAvailability (version floor)", () => {
   const check = (overrides: AvailabilityDeps = {}, ...installed: ReadonlyArray<string>) =>
     Effect.runPromise(
       checkClaudeAvailability(availDeps(overrides)).pipe(
-        Effect.provide(Layer.merge(fakeExecutables(...installed), NodePath.layer)),
+        Effect.provide(fakeExecutables(...installed)),
       ),
     );
 

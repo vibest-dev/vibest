@@ -6,6 +6,8 @@ import util from "node:util";
 
 import { Data, Effect, FileSystem } from "effect";
 
+import { isExecutableFile, pathDelimiter } from "../executable";
+
 const moduleRequire = module.createRequire(import.meta.url);
 const execFileAsync = util.promisify(childProcess.execFile);
 
@@ -61,25 +63,6 @@ export type ResolveDeps = {
   bundled?: (binary: string) => string | undefined;
   platform?: NodeJS.Platform;
 };
-
-/** PATH's separator — `node:path.delimiter` is fixed to the host platform. */
-const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
-
-/**
- * Executability by mode bits — see the note on the shared `findExecutable`:
- * `effect/FileSystem.access` has no `X_OK`.
- */
-const isExecutableFile = (
-  fs: FileSystem.FileSystem,
-  candidate: string,
-  platform: NodeJS.Platform,
-): Effect.Effect<boolean> =>
-  fs.stat(candidate).pipe(
-    Effect.map(
-      (info) => info.type === "File" && (platform === "win32" || (info.mode & 0o111) !== 0),
-    ),
-    Effect.catch(() => Effect.succeed(false)),
-  );
 
 /**
  * The `claude` binary the SDK should exec.

@@ -1,5 +1,4 @@
-import * as NodePath from "@effect/platform-node/NodePath";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { expect, it } from "vitest";
 
 import { findExecutable, type FindExecutableDeps } from "../../src/harness/executable";
@@ -14,11 +13,7 @@ const resolve = (
   deps: FindExecutableDeps,
   ...installed: ReadonlyArray<string>
 ): string | undefined =>
-  Effect.runSync(
-    findExecutable(command, deps).pipe(
-      Effect.provide(Layer.merge(fakeExecutables(...installed), NodePath.layer)),
-    ),
-  );
+  Effect.runSync(findExecutable(command, deps).pipe(Effect.provide(fakeExecutables(...installed))));
 
 it("resolves a bare command against PATH, in PATH order", () => {
   const resolved = resolve(
@@ -49,8 +44,8 @@ it("takes an absolute command as an override and only checks it is runnable", ()
   expect(resolve("/opt/missing", deps, "/opt/codex")).toBeUndefined();
 });
 
-// Paths stay posix-shaped because the `Path` service follows the host running
-// the test, not the `platform` we pass in; only the extension probing is under
+// Paths stay posix-shaped because `node:path` follows the host running the
+// test, not the `platform` we pass in; only the extension probing is under
 // test here, and that is the part `platform` actually drives.
 it("finds the .cmd shim npm installs on Windows, not just .exe", () => {
   const resolved = resolve("codex", { env: { PATH: "/bin" }, platform: "win32" }, "/bin/codex.cmd");
@@ -67,9 +62,7 @@ it("reports a missing command as undefined rather than guessing a path", () => {
 it("ignores a directory that shares the command's name", () => {
   const resolved = Effect.runSync(
     findExecutable("codex", { env: { PATH: "/bin" }, platform: "darwin" }).pipe(
-      Effect.provide(
-        Layer.merge(fakeStats({ "/bin/codex": fileInfo("Directory", 0o755) }), NodePath.layer),
-      ),
+      Effect.provide(fakeStats({ "/bin/codex": fileInfo("Directory", 0o755) })),
     ),
   );
 

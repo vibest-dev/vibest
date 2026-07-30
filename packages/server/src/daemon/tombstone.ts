@@ -11,10 +11,9 @@ import { Clock, Effect, FileSystem, type PlatformError } from "effect";
 const tombstoneFile = (home: string): string => path.join(home, "daemon.stopped");
 
 export const hasTombstone = (home: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.exists(tombstoneFile(home)).pipe(Effect.orElseSucceed(() => false));
-  });
+  FileSystem.FileSystem.use((fs) => fs.exists(tombstoneFile(home))).pipe(
+    Effect.orElseSucceed(() => false),
+  );
 
 export const writeTombstone = (
   home: string,
@@ -27,7 +26,6 @@ export const writeTombstone = (
   });
 
 export const clearTombstone = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.remove(tombstoneFile(home), { force: true }).pipe(Effect.ignore);
-  });
+  FileSystem.FileSystem.use((fs) => fs.remove(tombstoneFile(home), { force: true })).pipe(
+    Effect.ignore,
+  );

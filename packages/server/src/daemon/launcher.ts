@@ -2,7 +2,7 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { Clock, Crypto, Effect, FileSystem, type PlatformError } from "effect";
+import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
@@ -242,7 +242,7 @@ const spawnDaemon = (
     const crypto = yield* Crypto.Crypto;
     const port = yield* reservePort(options.port ?? DEFAULT_PORT);
     const token = yield* crypto.randomBytes(32).pipe(
-      Effect.map(hex),
+      Effect.map(Encoding.encodeHex),
       Effect.mapError(
         (cause) => new DaemonLaunchError({ message: "Unable to generate a daemon token", cause }),
       ),
@@ -285,10 +285,6 @@ const spawnDaemon = (
     );
     return attach(record, false);
   });
-
-/** Hex, without reaching for Buffer — the token is a display/URL string. */
-const hex = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /**
  * The one seam Effect cannot model: a detached, unref'd child with stdio

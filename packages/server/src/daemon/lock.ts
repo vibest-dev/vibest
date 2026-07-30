@@ -23,40 +23,34 @@ const lockPath = (home: string): string => path.join(home, "daemon.lock");
 export const tryAcquireLock = (
   home: string,
 ): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs
-      .writeFileString(lockPath(home), String(process.pid), { flag: "wx", mode: 0o600 })
-      .pipe(
-        Effect.as(true),
-        Effect.catchIf(
-          (error) => error.reason._tag === "AlreadyExists",
-          () => Effect.succeed(false),
-        ),
-      );
-  });
+  FileSystem.FileSystem.use((fs) =>
+    fs.writeFileString(lockPath(home), String(process.pid), { flag: "wx", mode: 0o600 }),
+  ).pipe(
+    Effect.as(true),
+    Effect.catchIf(
+      (error) => error.reason._tag === "AlreadyExists",
+      () => Effect.succeed(false),
+    ),
+  );
 
 /** The pid recorded in the lock, or `undefined` if missing/garbage. */
 export const readLockPid = (
   home: string,
 ): Effect.Effect<number | undefined, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const raw = yield* fs.readFileString(lockPath(home)).pipe(Effect.orElseSucceed(() => ""));
-    const pid = Number.parseInt(raw, 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
-  });
+  FileSystem.FileSystem.use((fs) => fs.readFileString(lockPath(home))).pipe(
+    Effect.orElseSucceed(() => ""),
+    Effect.map((raw) => {
+      const pid = Number.parseInt(raw, 10);
+      return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+    }),
+  );
 
 /** Whether the lock still exists (a concurrent launcher is still spawning). */
 export const lockExists = (home: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.exists(lockPath(home)).pipe(Effect.orElseSucceed(() => false));
-  });
+  FileSystem.FileSystem.use((fs) => fs.exists(lockPath(home))).pipe(
+    Effect.orElseSucceed(() => false),
+  );
 
 /** Release the lock; a missing lock (or a lost reclaim race) is not an error. */
 export const releaseLock = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.remove(lockPath(home), { force: true }).pipe(Effect.ignore);
-  });
+  FileSystem.FileSystem.use((fs) => fs.remove(lockPath(home), { force: true })).pipe(Effect.ignore);

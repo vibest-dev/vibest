@@ -33,12 +33,10 @@ const resolve = (home: string) => ({
  * (server Paths, CLI, desktop, daemon launcher) resolves through, so the
  * one-daemon-per-home invariant can never drift on a second definition.
  *
- * Deliberately a plain function, not an Effect: an env lookup and a string join
- * perform no effectful work, so per `.agents/rules/stack.md` they stay
- * synchronous. (`node:os.homedir` has no Effect equivalent either way.) Every
- * caller today is already inside an `Effect.gen` with `Path` in scope — that is
- * not the reason this is sync, and making it an Effect would cost them nothing;
- * it is sync because there is nothing here to suspend.
+ * A plain function, not an Effect: an env lookup and a string join perform no
+ * effectful work (`.agents/rules/stack.md`, "Where the boundary is"). Not
+ * because callers lack a runtime — every one of them is inside an `Effect.gen`
+ * today — but because there is nothing here to suspend.
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");

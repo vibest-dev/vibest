@@ -1,6 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
-import * as NodePath from "@effect/platform-node/NodePath";
 import { Layer } from "effect";
 
 import type { JsonStorePlatform } from "../src/infra/json-store";
@@ -12,6 +11,5 @@ import type { JsonStorePlatform } from "../src/infra/json-store";
  */
 export const NodePlatformLayer: Layer.Layer<JsonStorePlatform> = Layer.mergeAll(
   NodeFileSystem.layer,
-  NodePath.layer,
   NodeCrypto.layer,
 );

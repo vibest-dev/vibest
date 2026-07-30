@@ -29,7 +29,7 @@ import { Effect, FileSystem } from "effect";
 const WINDOWS_EXTENSIONS = [".com", ".exe", ".bat", ".cmd"];
 
 /** PATH's separator — `node:path.delimiter` is fixed to the host platform. */
-const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
+export const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32" ? ";" : ":");
 
 export type FindExecutableDeps = {
   env?: NodeJS.ProcessEnv;
@@ -45,7 +45,7 @@ export type FindExecutableDeps = {
  * Windows has no execute bit at all, so there existence is the whole test —
  * which is also all `access(X_OK)` ever checked there.
  */
-const isExecutableFile = (
+export const isExecutableFile = (
   fs: FileSystem.FileSystem,
   candidate: string,
   platform: NodeJS.Platform,

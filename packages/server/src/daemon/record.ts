@@ -74,7 +74,6 @@ export const writeRecord = (
 
 /** Remove the record; a missing file is not an error. */
 export const removeRecord = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.remove(recordPath(home), { force: true }).pipe(Effect.ignore);
-  });
+  FileSystem.FileSystem.use((fs) => fs.remove(recordPath(home), { force: true })).pipe(
+    Effect.ignore,
+  );
