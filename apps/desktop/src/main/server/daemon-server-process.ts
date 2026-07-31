@@ -54,6 +54,7 @@ export function makeDaemonServerProcess(
         const handle = yield* resolveOrSpawnDaemon({
           home: resolveVibestHome(config.environment),
           serverArgv: [process.execPath, config.entry],
+          launchOwnerPath: process.execPath,
           // 0 means "no preference" on the first attempt; afterwards the
           // supervisor pins the port it saw, which we pass as preferred.
           port: port === 0 ? undefined : port,

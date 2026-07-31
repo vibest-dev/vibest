@@ -18,6 +18,7 @@ const record: DaemonRecord = {
   address: "http://127.0.0.1:41234",
   token: "sekret",
   startedAt: 1_700_000_000_000,
+  launchOwnerPath: "/tmp/vibest-owner",
 };
 
 layer(NodeServices.layer)("daemon record", (it) => {
@@ -53,6 +54,21 @@ layer(NodeServices.layer)("daemon record", (it) => {
       yield* writeRecord(home, record);
       const info = yield* fs.stat(recordPath(home));
       assert.equal((info.mode ?? 0) & 0o777, 0o600);
+    }),
+  );
+
+  it.effect("reads legacy records without a launch owner path", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
+      const legacy = {
+        pid: record.pid,
+        address: record.address,
+        token: record.token,
+        startedAt: record.startedAt,
+      };
+      yield* fs.writeFileString(recordPath(home), JSON.stringify(legacy));
+      assert.deepEqual(yield* readRecord(home), legacy);
     }),
   );
 

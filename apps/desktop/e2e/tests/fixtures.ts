@@ -1,12 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import {
   type ElectronApplication,
   type Page,
   _electron as electron,
+  expect,
   test as base,
 } from "@playwright/test";
+import { readRecord, stopDaemon } from "@vibest/server/daemon";
+import { Effect, FileSystem } from "effect";
+
+const provideFileSystem = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+  Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
+
+export function stopE2eDaemon(home: string): Promise<"stopped" | "not-running"> {
+  return provideFileSystem(stopDaemon(home));
+}
+
+export async function waitForE2eDaemon(home: string, timeoutMs = 30_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await provideFileSystem(readRecord(home))) !== undefined) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
 
 /**
  * Extended test fixtures for Electron testing
@@ -14,6 +34,7 @@ import {
 export const test = base.extend<{
   e2ePaths: {
     fakeClaudeLog: string;
+    projectId: string;
     userData: string;
     vibestHome: string;
   };
@@ -28,9 +49,24 @@ export const test = base.extend<{
     // $VIBEST_HOME to the developer's real ~/.vibest, so their projects and
     // sessions leak into the UI and test chats write into their history.
     const vibestHome = path.join(output, "vibest-home");
-    fs.mkdirSync(vibestHome, { recursive: true });
+    const projectId = "00000000-0000-4000-8000-000000000001";
+    const projectPath = path.join(output, "project");
+    fs.mkdirSync(path.join(vibestHome, "storage"), { recursive: true });
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(vibestHome, "storage", "projects.json"),
+      JSON.stringify([
+        {
+          id: projectId,
+          name: "E2E Project",
+          path: projectPath,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]),
+    );
     await use({
       fakeClaudeLog: path.join(output, "fake-claude.jsonl"),
+      projectId,
       userData: path.join(output, "user-data"),
       vibestHome,
     });
@@ -59,9 +95,19 @@ export const test = base.extend<{
       },
     });
 
-    await use(app);
-
-    await app.close();
+    try {
+      await use(app);
+    } finally {
+      try {
+        await waitForE2eDaemon(e2ePaths.vibestHome);
+      } finally {
+        try {
+          await app.close();
+        } finally {
+          await stopE2eDaemon(e2ePaths.vibestHome);
+        }
+      }
+    }
   },
 
   window: async ({ electronApp }, use) => {
@@ -71,9 +117,15 @@ export const test = base.extend<{
 
     await window.waitForLoadState("domcontentloaded");
     await window.setViewportSize({ width: 1440, height: 900 });
+    // The detached daemon record is written only after its readiness handshake.
+    // Waiting for the mounted app prevents teardown from killing Electron while
+    // the daemon is healthy but not discoverable yet.
+    await expect(window.getByRole("button", { name: "New chat", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
 
     await use(window);
   },
 });
 
-export { expect } from "@playwright/test";
+export { expect };

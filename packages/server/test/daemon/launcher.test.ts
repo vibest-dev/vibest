@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import path from "node:path";
 import url from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -15,6 +16,7 @@ import {
 } from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
 import { readRecord, writeRecord } from "../../src/daemon/record";
+import { hasTombstone, writeTombstone } from "../../src/daemon/tombstone";
 
 const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
 
@@ -23,8 +25,14 @@ const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", impo
 // booting the real runtime.
 const serverArgv = [process.execPath, FAKE_SERVER];
 
-const resolve = (options: Omit<ResolveDaemonOptions, "serverArgv">) =>
-  resolveOrSpawnDaemon({ serverArgv, ...options });
+const resolve = (
+  options: Omit<ResolveDaemonOptions, "launchOwnerPath" | "serverArgv"> & {
+    readonly launchOwnerPath?: string;
+  },
+) => {
+  const { launchOwnerPath = FAKE_SERVER, ...rest } = options;
+  return resolveOrSpawnDaemon({ serverArgv, launchOwnerPath, ...rest });
+};
 
 // `excludeTestServices` because the launcher polls a real daemon's health on a
 // real clock: under the default TestClock its retry schedule never advances.
@@ -57,11 +65,114 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         assert.equal(record?.pid, spawned.pid);
         assert.equal(record?.address, spawned.address);
         assert.equal(record?.token, spawned.token);
+        assert.equal(record?.launchOwnerPath, FAKE_SERVER);
 
         const attached = yield* resolve({ home, port: 0 });
         assert.equal(attached.reused, true);
         assert.equal(attached.pid, spawned.pid);
         assert.equal(attached.address, spawned.address);
+      }),
+    );
+
+    it.effect("replaces a healthy daemon whose launch owner disappeared", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const firstOwner = path.join(home, "first-owner");
+        const replacementOwner = path.join(home, "replacement-owner");
+        yield* fs.writeFileString(firstOwner, "owner");
+
+        const first = yield* resolve({
+          home,
+          port: 0,
+          readyTimeoutMs: 15_000,
+          launchOwnerPath: firstOwner,
+        });
+        yield* fs.remove(firstOwner);
+        yield* fs.writeFileString(replacementOwner, "owner");
+
+        const replacement = yield* resolve({
+          home,
+          port: 0,
+          readyTimeoutMs: 15_000,
+          launchOwnerPath: replacementOwner,
+        });
+        assert.equal(replacement.reused, false);
+        assert.notEqual(replacement.pid, first.pid);
+        assert.equal(pidAlive(first.pid), false);
+      }),
+    );
+
+    it.effect("serializes concurrent replacements of a stale launch owner", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const firstOwner = path.join(home, "first-owner");
+        const replacementOwner = path.join(home, "replacement-owner");
+        yield* fs.writeFileString(firstOwner, "owner");
+        yield* fs.writeFileString(replacementOwner, "owner");
+        const first = yield* resolve({
+          home,
+          port: 0,
+          readyTimeoutMs: 15_000,
+          launchOwnerPath: firstOwner,
+        });
+        yield* fs.remove(firstOwner);
+
+        const [a, b] = yield* Effect.all(
+          [
+            resolve({
+              home,
+              port: 0,
+              readyTimeoutMs: 15_000,
+              launchOwnerPath: replacementOwner,
+            }),
+            resolve({
+              home,
+              port: 0,
+              readyTimeoutMs: 15_000,
+              launchOwnerPath: replacementOwner,
+            }),
+          ],
+          { concurrency: 2 },
+        );
+        assert.equal(a.pid, b.pid);
+        assert.equal([a.reused, b.reused].filter((reused) => !reused).length, 1);
+        assert.equal(pidAlive(first.pid), false);
+      }),
+    );
+
+    it.effect("reuses a healthy daemon when a different caller owner also exists", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const otherOwner = path.join(home, "other-owner");
+        yield* fs.writeFileString(otherOwner, "owner");
+        const first = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+
+        const attached = yield* resolve({ home, port: 0, launchOwnerPath: otherOwner });
+        assert.equal(attached.reused, true);
+        assert.equal(attached.pid, first.pid);
+      }),
+    );
+
+    it.effect("replaces a healthy daemon recorded without a launch owner", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const first = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        const record = yield* readRecord(home);
+        assert.ok(record);
+        yield* writeRecord(home, {
+          pid: record.pid,
+          address: record.address,
+          token: record.token,
+          startedAt: record.startedAt,
+        });
+
+        const replacement = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(replacement.reused, false);
+        assert.notEqual(replacement.pid, first.pid);
+        assert.equal(pidAlive(first.pid), false);
       }),
     );
 
@@ -138,6 +249,19 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         assert.equal(handle.reused, false);
         assert.equal(pidAlive(wedgedPid), false);
         assert.notEqual(handle.pid, wedgedPid);
+      }),
+    );
+
+    it.effect("does not clear a stop tombstone while an old daemon is still alive", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const running = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        yield* writeTombstone(home);
+
+        const error = yield* Effect.flip(resolve({ home, port: 0, autoRespawn: true }));
+        assert.ok(error instanceof DaemonStoppedError);
+        assert.equal(pidAlive(running.pid), true);
+        assert.equal(yield* hasTombstone(home), true);
       }),
     );
 

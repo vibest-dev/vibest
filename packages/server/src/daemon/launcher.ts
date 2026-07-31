@@ -35,6 +35,8 @@ export type ResolveDaemonOptions = {
    * just this command spawned detached — the server stays daemon-unaware.
    */
   readonly serverArgv: readonly string[];
+  /** Absolute path whose disappearance means the launching installation was removed. */
+  readonly launchOwnerPath: string;
   /** Preferred port; falls back to an ephemeral one if taken. Default `4000`. */
   readonly port?: number;
   /**
@@ -63,8 +65,9 @@ export type DaemonPlatform = FileSystem.FileSystem | Crypto.Crypto;
 
 /**
  * The shared launcher (the local twin of the SSH launch script): read
- * `daemon.pid`; if a healthy daemon is there, attach; otherwise spawn the
- * foreground server detached, wait for it to answer health, and record it. Both
+ * `daemon.pid`; if a healthy daemon whose launch owner still exists is there,
+ * attach; otherwise spawn the foreground server detached, wait for it to answer
+ * health, and record it. Both
  * the CLI and the desktop go through here so there is exactly one daemon per
  * `$VIBEST_HOME` — concurrent launchers are serialized by an exclusive-create
  * launch lock, and the loser attaches to the winner's daemon.
@@ -82,13 +85,16 @@ export const resolveOrSpawnDaemon = (
 ): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
   Effect.gen(function* () {
     const existing = yield* readRecord(options.home);
+    const reused = yield* reuseExisting(options, existing);
+    if (reused !== undefined) return reused;
+    return yield* spawnLocked(options);
+  });
 
-    if (existing && (yield* daemonAlive(existing))) {
-      // A live daemon makes any tombstone stale (someone started it again).
-      yield* clearTombstone(options.home);
-      return attach(existing, true);
-    }
-
+const reuseExisting = (
+  options: ResolveDaemonOptions,
+  record: DaemonRecord | undefined,
+): Effect.Effect<DaemonHandle | undefined, DaemonStoppedError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
     if (options.autoRespawn === true && (yield* hasTombstone(options.home))) {
       return yield* Effect.fail(
         new DaemonStoppedError({
@@ -97,16 +103,35 @@ export const resolveOrSpawnDaemon = (
         }),
       );
     }
-    yield* clearTombstone(options.home);
+    if (
+      record === undefined ||
+      !(yield* daemonAlive(record)) ||
+      !(yield* launchOwnerExists(record))
+    ) {
+      return undefined;
+    }
+    // Only explicit front-doors clear tombstones. An auto-respawn racing a
+    // stop must leave a newly-written tombstone intact for its next attempt.
+    if (options.autoRespawn !== true) yield* clearTombstone(options.home);
+    return attach(record, true);
+  });
 
-    if (existing) {
-      // Wedged (pid alive but unhealthy) daemons must die before we replace
-      // them, or they leak as orphans still holding their port. A dead pid is
-      // a no-op here.
+const replaceOrSpawnDaemon = (
+  options: ResolveDaemonOptions,
+): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
+  Effect.gen(function* () {
+    const existing = yield* readRecord(options.home);
+    const reused = yield* reuseExisting(options, existing);
+    if (reused !== undefined) return reused;
+
+    if (options.autoRespawn !== true) yield* clearTombstone(options.home);
+    if (existing !== undefined) {
+      // This cleanup stays under the launch lock: two stale-record resolvers
+      // must not delete or replace the winner's newly-written record.
       yield* killPid(existing.pid);
       yield* removeRecord(options.home);
     }
-    return yield* spawnLocked(options);
+    return yield* spawnDaemon(options);
   });
 
 /** Read the current daemon's status without starting one. */
@@ -144,6 +169,16 @@ export const stopDaemon = (
     yield* removeRecord(home);
     return "stopped";
   });
+
+const launchOwnerExists = (
+  record: DaemonRecord,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> => {
+  const ownerPath = record.launchOwnerPath;
+  if (ownerPath === undefined || !path.isAbsolute(ownerPath)) return Effect.succeed(false);
+  return FileSystem.FileSystem.use((fileSystem) => fileSystem.exists(ownerPath)).pipe(
+    Effect.orElseSucceed(() => false),
+  );
+};
 
 /** SIGTERM, wait up to the grace period, escalate to SIGKILL. */
 const killPid = (pid: number): Effect.Effect<void> =>
@@ -211,7 +246,7 @@ const spawnLocked = (
         continue;
       }
 
-      return yield* spawnDaemon(options).pipe(Effect.ensuring(releaseLock(home)));
+      return yield* replaceOrSpawnDaemon(options).pipe(Effect.ensuring(releaseLock(home)));
     }
     return yield* Effect.fail(
       new DaemonLaunchError({ message: "Could not acquire the vibest daemon launch lock" }),
@@ -273,6 +308,7 @@ const spawnDaemon = (
       address,
       token,
       startedAt: yield* Clock.currentTimeMillis,
+      launchOwnerPath: options.launchOwnerPath,
     };
     yield* writeRecord(home, record).pipe(
       Effect.mapError(

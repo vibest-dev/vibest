@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
 
-import { expect, test } from "./fixtures.js";
+import { expect, stopE2eDaemon, test, waitForE2eDaemon } from "./fixtures.js";
 
 function appPid(electronApp: ElectronApplication): number {
   const pid = electronApp.process().pid;
@@ -183,29 +183,43 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
   const vibestHome = path.join(testInfo.outputPath(), "vibest-home");
   fs.mkdirSync(vibestHome, { recursive: true });
 
-  const app = await electron.launch({
-    args: [
-      path.join(import.meta.dirname, "../../dist/main/index.js"),
-      `--user-data-dir=${userData}`,
-    ],
-    env: {
-      ...process.env,
-      NODE_ENV: "development",
-      ELECTRON_RENDERER_URL: origin,
-      VIBEST_E2E: "1",
-      VIBEST_HOME: vibestHome,
-    },
-  });
-
+  let app: ElectronApplication | undefined;
   try {
+    app = await electron.launch({
+      args: [
+        path.join(import.meta.dirname, "../../dist/main/index.js"),
+        `--user-data-dir=${userData}`,
+      ],
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        ELECTRON_RENDERER_URL: origin,
+        VIBEST_E2E: "1",
+        VIBEST_HOME: vibestHome,
+      },
+    });
+
     const window = await app.firstWindow({ timeout: 30_000 });
     await expect(window).toHaveTitle("Vibest");
     await expect(window.getByText("Vibest could not start")).toHaveCount(0);
+    await expect(window.getByRole("button", { name: "New chat", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
   } finally {
-    await app.close();
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    try {
+      if (app !== undefined) {
+        await waitForE2eDaemon(vibestHome);
+        await app.close();
+      }
+    } finally {
+      try {
+        await stopE2eDaemon(vibestHome);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    }
   }
 });
 
@@ -216,14 +230,18 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
   // The app lands on /draft, the new-session surface: typing the first
   // message creates the session and navigates into it.
   await waitForConnectedUi(window);
+  await window.getByRole("combobox").first().click();
+  await window.getByRole("option", { name: /E2E Project/ }).click();
+  await expect(window).toHaveURL(new RegExp(`projectId=${e2ePaths.projectId}`));
 
   const input = window.locator("[contenteditable='true']");
   await input.fill("Desktop SDK E2E");
-  await input.press("Enter");
+  await window.locator("button[type='submit']").click();
 
   await expect(window).toHaveURL(/\/session\/[0-9a-f-]+/);
-  await expect(window.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
-  await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
+  const transcript = window.getByRole("log");
+  await expect(transcript.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
   await expect
     .poll(() =>
       fs.existsSync(e2ePaths.fakeClaudeLog) ? fs.readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
@@ -248,13 +266,17 @@ test("reports a server crash and recovers on the pinned connection", async ({
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
-test("disposes the server process during Electron shutdown", async ({ electronApp, window }) => {
+test("leaves the shared server daemon running during Electron shutdown", async ({
+  electronApp,
+  window,
+}) => {
   await expect(window).toHaveTitle("Vibest");
   const pid = await waitForServer(appPid(electronApp));
 
   await electronApp.close();
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
 
-  await expect.poll(() => processExists(pid), { timeout: 5_000 }).toBe(false);
+  expect(processExists(pid)).toBe(true);
 });
 
 test("offers Retry after repeated server failures", async ({ electronApp, window }) => {
