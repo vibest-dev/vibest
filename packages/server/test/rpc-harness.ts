@@ -2,66 +2,36 @@ import { createRouterClient } from "@orpc/server";
 import { Layer, ManagedRuntime } from "effect";
 
 import { layerPaths } from "../src/config/paths";
-import { EventBusLayer } from "../src/events";
-import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistry,
-  HarnessAgentSessionManagerLayer,
-  HarnessAgentSessionServiceLayer,
-  HarnessListLayer,
-  HarnessProbeLayer,
   makeHarnessAgentRegistry,
   type HarnessAgentAdapter,
 } from "../src/harness";
-import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
+import { makeAgentRuntimeLayer } from "../src/rpc/runtime";
 import { NodePlatformLayer } from "./platform";
 
 /**
- * A router client backed by the full `RpcContext`, with an adapterless session
- * service and project storage under `home`. Tests that need live adapters
- * (rpc-session) build their own layers instead.
+ * A router client backed by the full `RpcContext`, built through the
+ * production composition shape (`makeAgentRuntimeLayer`) with project storage
+ * under `home` — so every test that goes through here exercises the same
+ * one-bus / one-registry wiring the server runs. Pass `registry` to observe or
+ * instrument the registry layer itself (see runtime-composition.test.ts);
+ * otherwise `adapters` becomes a plain in-memory registry.
  */
 export async function makeRpcTestHarness(
   home: string,
   adapters: ReadonlyArray<HarnessAgentAdapter> = [],
+  registry?: Layer.Layer<HarnessAgentRegistry>,
 ) {
-  // Paths plus the platform services the repositories' JSON store runs on.
-  const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
-  const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
-  // EventBusLayer is one reference so publish (manager/service) and subscribe
-  // (RPC) share the single bus instance; same for registryLayer.
-  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
-    Layer.provide(
-      HarnessAgentSessionManagerLayer.pipe(
-        Layer.provide(registryLayer),
-        Layer.provide(EventBusLayer),
-        Layer.provide(NodePlatformLayer),
-      ),
-    ),
-    Layer.provide(registryLayer),
-    Layer.provide(EventBusLayer),
-    Layer.provide(paths),
-    Layer.provide(NodePlatformLayer),
-  );
-  const listLayer = HarnessListLayer.pipe(
-    Layer.provide(registryLayer),
-    Layer.provide(NodePlatformLayer),
-  );
-  const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
-  const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(
-      EventBusLayer,
-      harnessSessionLayer,
-      projectLayer,
-      registryLayer,
-      listLayer,
-      probeLayer,
-      FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
-      NodePlatformLayer,
-    ),
+    makeAgentRuntimeLayer({
+      registry:
+        registry ?? Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters)),
+      paths: layerPaths(home),
+      platform: NodePlatformLayer,
+    }),
   );
   // Layer construction does file I/O now (the project document loads eagerly),
   // so the context must be built asynchronously.

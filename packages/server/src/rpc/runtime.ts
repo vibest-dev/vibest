@@ -3,9 +3,9 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodePath from "@effect/platform-node/NodePath";
-import { Context, Effect, type FileSystem, Layer } from "effect";
+import { Context, type Crypto, Effect, type FileSystem, Layer } from "effect";
 
-import { PathsLayer } from "../config/paths";
+import { type Paths, PathsLayer } from "../config/paths";
 import { EventBusLayer } from "../events";
 import { FileSystemServiceLayer } from "../fs";
 import {
@@ -24,7 +24,7 @@ import {
 } from "../harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
-import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
+import { ProjectModuleLayer } from "../project";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -86,52 +86,83 @@ const RegistryLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ProvidersLayer), Layer.provide(PlatformLayer));
 
-// Both harness routes read the same registry instance. It matters most for the
-// probe: one cache, shared by every connecting client, so N tabs on the same
-// directory still cost one CLI spawn.
-const HarnessListProvided = HarnessListLayer.pipe(
-  Layer.provide(RegistryLayer),
-  Layer.provide(PlatformLayer),
-);
-const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
+/** What the shared composition needs from the host platform. */
+export type AgentRuntimePlatform = Crypto.Crypto | FileSystem.FileSystem;
 
-// The session stack: the manager owns all live state (instances + projections,
-// publishing wire events onto the bus); the outward façade on top does the
-// identity translation, metadata persistence, and collection events.
-// EventBusLayer is ONE const reference everywhere below — Effect memoizes
-// layers by reference, so publish (manager/service) and subscribe (RPC) share
-// the single bus instance. A second reference (or Layer.fresh) would split the
-// bus and silently drop events.
-const HarnessSessionManagerProvided = HarnessAgentSessionManagerLayer.pipe(
-  Layer.provide(RegistryLayer),
-  Layer.provide(EventBusLayer),
-  Layer.provide(PlatformLayer),
-);
-const HarnessSessionServiceProvided = HarnessAgentSessionServiceLayer.pipe(
-  Layer.provide(HarnessSessionManagerProvided),
-  Layer.provide(RegistryLayer),
-  Layer.provide(EventBusLayer),
-  Layer.provide(PathsLayer),
-  Layer.provide(PlatformLayer),
-);
+/**
+ * The one composition shape for the agent runtime — production and the test
+ * harnesses both build through here, so a wiring regression fails in tests
+ * before it ships.
+ *
+ * Layer equivalence is not instance identity: Effect memoizes layers by
+ * *reference*, so a structurally identical Layer value built elsewhere is a
+ * second instance. The stateful shared services each stay a single value
+ * inside this function — `EventBusLayer` (publish in the manager/service,
+ * subscribe in RPC), `options.registry` (list, probe, and the session stack
+ * share one availability cache), and the session manager (sole owner of live
+ * state). Reconstructing any of them inline — or wrapping one in
+ * `Layer.fresh` — would silently split that state; the behavioural tests in
+ * `test/runtime-composition.test.ts` are the regression gate.
+ *
+ * Stateless layers (platform, adapters) carry no such constraint and may be
+ * built independently where sharing is not required.
+ */
+export const makeAgentRuntimeLayer = (options: {
+  /** Fully provided — the single registry instance every consumer shares. */
+  readonly registry: Layer.Layer<HarnessAgentRegistry>;
+  readonly paths: Layer.Layer<Paths>;
+  readonly platform: Layer.Layer<AgentRuntimePlatform>;
+}) => {
+  const { registry, paths, platform } = options;
 
-const ProjectServiceProvided = ProjectServiceLayer.pipe(
-  Layer.provide(ProjectRepositoryLayer),
-  Layer.provide(PathsLayer),
-  Layer.provide(PlatformLayer),
-);
+  // The session stack: the manager owns all live state (instances +
+  // projections, publishing wire events onto the bus); the outward façade on
+  // top does the identity translation, metadata persistence, and collection
+  // events.
+  const sessionManager = HarnessAgentSessionManagerLayer.pipe(
+    Layer.provide(registry),
+    Layer.provide(EventBusLayer),
+    Layer.provide(platform),
+  );
+  const sessionService = HarnessAgentSessionServiceLayer.pipe(
+    Layer.provide(sessionManager),
+    Layer.provide(registry),
+    Layer.provide(EventBusLayer),
+    Layer.provide(paths),
+    Layer.provide(platform),
+  );
 
-// RegistryLayer is merged in as well as provided into the session stack;
-// Effect memoizes it by reference, so both see the one registry instance while
-// the harness route can resolve capabilities directly off it.
+  // Both harness routes read the same registry instance. It matters most for
+  // the probe: one cache, shared by every connecting client, so N tabs on the
+  // same directory still cost one CLI spawn.
+  const list = HarnessListLayer.pipe(Layer.provide(registry), Layer.provide(platform));
+  const probe = HarnessProbeLayer.pipe(Layer.provide(registry));
+
+  const project = ProjectModuleLayer.pipe(Layer.provide(paths), Layer.provide(platform));
+
+  // The registry is merged in as well as provided into the stacks above;
+  // memoization by reference means every consumer sees the one instance while
+  // the harness route can resolve capabilities directly off it.
+  return Layer.mergeAll(
+    EventBusLayer,
+    sessionService,
+    project,
+    registry,
+    list,
+    probe,
+    FileSystemServiceLayer.pipe(Layer.provide(platform)),
+    platform,
+  );
+};
+
 export const AgentRuntimeLayer = Layer.mergeAll(
-  EventBusLayer,
-  HarnessSessionServiceProvided,
-  ProjectServiceProvided,
-  RegistryLayer,
-  HarnessListProvided,
-  HarnessProbeProvided,
-  FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
+  makeAgentRuntimeLayer({
+    registry: RegistryLayer,
+    paths: PathsLayer,
+    platform: PlatformLayer,
+  }),
+  // `Path` for `HttpStaticServer` — same PlatformLayer reference as above, so
+  // merging it here widens the context without a second build.
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a
   // response. Sealed by the vendor layer, hence no `Layer.provide` here.

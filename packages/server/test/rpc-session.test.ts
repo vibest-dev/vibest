@@ -8,21 +8,11 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { layerPaths } from "../src/config/paths";
-import { EventBusLayer } from "../src/events";
-import { FileSystemServiceLayer } from "../src/fs";
-import {
-  HarnessAgentRegistry,
-  HarnessAgentSessionManagerLayer,
-  HarnessAgentSessionServiceLayer,
-  HarnessListLayer,
-  HarnessProbeLayer,
-  makeHarnessAgentRegistry,
-} from "../src/harness";
+import { HarnessAgentRegistry, makeHarnessAgentRegistry } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
-import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
-import { Codex } from "../src/rpc/runtime";
+import { Codex, makeAgentRuntimeLayer } from "../src/rpc/runtime";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -56,8 +46,6 @@ function makeFake(): string {
 async function setup() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-ws-"));
-  // Paths plus the platform services the repositories' JSON store runs on.
-  const pathsLayer = Layer.provideMerge(layerPaths(home), NodeServices.layer);
 
   // The fake path goes to the adapter too: `session.create` gates on
   // checkAvailability, which is a PATH lookup — without the override the test
@@ -74,37 +62,15 @@ async function setup() {
     }),
   ).pipe(Layer.provide(codexLayer));
 
-  // EventBusLayer is one reference so publish (manager/service) and subscribe
-  // (RPC) share the single bus instance.
-  const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
-    Layer.provide(
-      HarnessAgentSessionManagerLayer.pipe(
-        Layer.provide(registryLayer),
-        Layer.provide(EventBusLayer),
-        Layer.provide(NodeServices.layer),
-      ),
-    ),
-    Layer.provide(registryLayer),
-    Layer.provide(EventBusLayer),
-    Layer.provide(pathsLayer),
-    Layer.provide(NodeServices.layer),
+  // The production composition shape: one bus and one registry shared by the
+  // session stack and the RPC routes.
+  const runtime = ManagedRuntime.make(
+    makeAgentRuntimeLayer({
+      registry: registryLayer,
+      paths: layerPaths(home),
+      platform: NodeServices.layer,
+    }),
   );
-  const projectServiceLayer = ProjectServiceLayer.pipe(
-    Layer.provide(ProjectRepositoryLayer),
-    Layer.provide(pathsLayer),
-  );
-
-  const appLayer = Layer.mergeAll(
-    EventBusLayer,
-    harnessSessionLayer,
-    projectServiceLayer,
-    registryLayer,
-    HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
-    HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
-    FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
-    NodeServices.layer,
-  );
-  const runtime = ManagedRuntime.make(appLayer);
   // Layer construction does file I/O now (the project document loads eagerly),
   // so the context must be built asynchronously.
   const context: RpcContext = {
