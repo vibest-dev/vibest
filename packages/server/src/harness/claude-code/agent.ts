@@ -7,7 +7,7 @@ import { v7 as uuid } from "uuid";
 import {
   AgentRequestUnavailable,
   ClaudeSdkError,
-  SessionNotFound,
+  HarnessSessionNotFound,
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
@@ -25,7 +25,7 @@ export type ToolPermissionRequest = {
   readonly suggestions?: sdk.PermissionUpdate[];
 };
 
-export type ClaudeAgentFailure = SessionNotFound | SessionNotResumable | ClaudeSdkError;
+export type ClaudeAgentFailure = HarnessSessionNotFound | SessionNotResumable | ClaudeSdkError;
 type ClaudeSessionInfo = Awaited<ReturnType<typeof getSessionInfo>>;
 
 type PendingToolPermission = {
@@ -111,12 +111,12 @@ export interface ClaudeCodeAgent {
     ) => Stream.Stream<ToolPermissionRequest, ClaudeAgentFailure>;
     readonly awaitTermination: (
       sessionId: string,
-    ) => Effect.Effect<never, SessionNotFound | ClaudeSdkError>;
+    ) => Effect.Effect<never, HarnessSessionNotFound | ClaudeSdkError>;
     readonly respondPermission: (
       sessionId: string,
       requestId: string,
       result: sdk.PermissionResult,
-    ) => Effect.Effect<boolean, SessionNotFound | AgentRequestUnavailable>;
+    ) => Effect.Effect<boolean, HarnessSessionNotFound | AgentRequestUnavailable>;
     readonly setModel: (
       sessionId: string,
       model: string,
@@ -136,8 +136,8 @@ export interface ClaudeCodeAgent {
     ) => Effect.Effect<sdk.McpServerStatus[], ClaudeAgentFailure>;
     readonly interrupt: (
       sessionId: string,
-    ) => Effect.Effect<void, SessionNotFound | ClaudeSdkError>;
-    readonly abort: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+    ) => Effect.Effect<void, HarnessSessionNotFound | ClaudeSdkError>;
+    readonly abort: (sessionId: string) => Effect.Effect<void, HarnessSessionNotFound>;
   };
 }
 
@@ -193,7 +193,7 @@ export const makeClaudeCodeAgent = ({
           const session = current.get(sessionId);
           return session
             ? Effect.succeed(session)
-            : Effect.fail(new SessionNotFound({ sessionId }));
+            : Effect.fail(new HarnessSessionNotFound({ sessionId }));
         }),
       );
 

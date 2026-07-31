@@ -255,7 +255,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "SessionNotFound",
+              (error) => error._tag === "HarnessSessionNotFound",
               () => new Error("crashed session was not evicted"),
             ),
           ),

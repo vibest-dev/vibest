@@ -1,142 +1,248 @@
-import type { PermissionMode, ReasoningEffort } from "@vibest/contract";
-import type { AgentResponse, HarnessAgentId } from "@vibest/contract";
-import { Context, Deferred, Effect, Exit, FileSystem, Layer, Ref, Scope, Stream } from "effect";
-
 import type {
-  CreateSessionInput,
-  HarnessAgentSession,
-  PromptReceipt,
-  SessionCapabilities,
-  SessionInfoResult,
-  UserInput,
-} from "./adapter";
+  AgentResponse,
+  HarnessAgentId,
+  PermissionMode,
+  PromptInput,
+  ReasoningEffort,
+  SessionRef,
+  SessionRuntimeSnapshot,
+  SessionStatus,
+  SessionSummary,
+} from "@vibest/contract";
+import type { UIMessage } from "ai";
+import { Context, Crypto, Effect, FileSystem, Layer } from "effect";
+
+import { Paths } from "../config/paths";
 import {
-  AgentOpenError,
+  type SessionNotFound,
+  SessionRefMismatch,
+  type SessionRefNotFound,
+  type StoreReadError,
+  type StoreWriteError,
+  UnsupportedPromptPart,
+} from "../errors";
+import { EventBus, type EventBusShape } from "../events/event-bus";
+import type { Session } from "../types";
+import type { PromptReceipt, SessionCapabilities, SessionInfoResult, UserInput } from "./adapter";
+import type {
   AgentOperationError,
   AgentRequestUnavailable,
-  AgentUnavailable,
-  CapabilityUnsupported,
-  type CreateSessionError,
-  type HarnessAgentNotFound,
-  PermissionModeUnsupported,
-  type ResumeSessionError,
+  CreateSessionError,
+  HarnessAgentNotFound,
+  HarnessSessionNotFound,
+  ResumeSessionError,
   SessionClosed,
-  SessionNotFound,
-  SessionNotResumable,
   TurnAlreadyRunning,
 } from "./errors";
-import type { SessionEnvelopeDraft } from "./events/framework";
+import { CapabilityUnsupported, PermissionModeUnsupported } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
-import type { CreateManagedSessionResult, ResumeManagedSessionInput } from "./session-io";
+import type { HarnessAgentSessionManagerShape } from "./session-manager";
+import { HarnessAgentSessionManager } from "./session-manager";
+import {
+  type HarnessAgentSessionRepositoryShape,
+  makeHarnessAgentSessionRepository,
+} from "./session-repository";
+import type { SessionNotActive } from "./session-runtime";
 
 /**
- * Owns agent-native session lifecycle only. The server SessionRuntime owns the
- * projection, per-session `seq`, snapshot/status, and subscriber fan-out; this
- * service just opens/resumes/closes native sessions and hands the server the
- * raw per-session {@link SessionEnvelopeDraft} stream via {@link events}.
+ * The outward session service — everything the app's session control-plane
+ * goes through, addressed by {@link SessionRef}. It owns what the layers below
+ * must stay ignorant of: generating the server `sessionId`, persisting
+ * {@link Session} metadata (via its private repository), translating a
+ * `SessionRef` to the agent-native `harnessSessionId`, validating wire
+ * vocabulary (permission modes, prompt parts), and publishing the collection
+ * events that announce lifecycle changes. Live state — instances and
+ * projections — belongs to {@link HarnessAgentSessionManager}; this service
+ * holds none. The router above contributes only the resolved workspace path
+ * (`cwd`): a projectId is never accepted as a path.
  */
 
-type ManagedSession = {
-  readonly session: HarnessAgentSession;
-  readonly scope: Scope.Closeable;
+/**
+ * A session's title, derived from its first prompt's text — the crude but
+ * self-owned placeholder we show until (if ever) something better replaces it.
+ * Collapses whitespace and clamps length; no text part (e.g. inspector-only)
+ * yields no title.
+ */
+const MAX_TITLE_CHARS = 60;
+const deriveTitle = (parts: PromptInput["parts"]): string | undefined => {
+  const text = parts.find((part) => part.type === "text")?.text.trim();
+  if (!text) return undefined;
+  const collapsed = text.replace(/\s+/g, " ");
+  return collapsed.length > MAX_TITLE_CHARS ? collapsed.slice(0, MAX_TITLE_CHARS) : collapsed;
 };
 
-type ServiceState = {
-  readonly active: ReadonlyMap<string, ManagedSession>;
-  readonly inFlight: ReadonlyMap<string, Deferred.Deferred<ManagedSession, ResumeSessionError>>;
-  readonly closing: ReadonlyMap<string, Deferred.Deferred<void>>;
-};
-
-type ResumeDecision =
-  | { readonly _tag: "Active"; readonly managed: ManagedSession }
-  | { readonly _tag: "WaitForClose"; readonly deferred: Deferred.Deferred<void> }
-  | {
-      readonly _tag: "Start";
-      readonly deferred: Deferred.Deferred<ManagedSession, ResumeSessionError>;
-    }
-  | {
-      readonly _tag: "Wait";
-      readonly deferred: Deferred.Deferred<ManagedSession, ResumeSessionError>;
-    };
-
-type CloseDecision =
-  | { readonly _tag: "Done" }
-  | { readonly _tag: "Wait"; readonly deferred: Deferred.Deferred<void> }
-  | {
-      readonly _tag: "Start";
-      readonly managed: ManagedSession;
-      readonly deferred: Deferred.Deferred<void>;
-    }
-  | {
-      readonly _tag: "StartAfterBuild";
-      readonly build: Deferred.Deferred<ManagedSession, ResumeSessionError>;
-      readonly deferred: Deferred.Deferred<void>;
-    };
-
-export type CreateSessionResult = CreateManagedSessionResult;
-export type { ResumeManagedSessionInput } from "./session-io";
+/** Wire prompt parts → HarnessAgent UserInput; `file` parts are rejected, never dropped. */
+const toUserInput = (
+  parts: PromptInput["parts"],
+): Effect.Effect<UserInput, UnsupportedPromptPart> =>
+  Effect.forEach(parts, (part) =>
+    part.type === "file"
+      ? Effect.fail(new UnsupportedPromptPart({ kind: "file" }))
+      : Effect.succeed(part),
+  ).pipe(Effect.map((userParts) => ({ parts: userParts })));
 
 export type HarnessAgentSessionServiceShape = {
   readonly create: (
+    projectId: string,
     harnessAgentId: HarnessAgentId,
-    input: CreateSessionInput,
-  ) => Effect.Effect<CreateSessionResult, CreateSessionError>;
-  readonly resume: (input: ResumeManagedSessionInput) => Effect.Effect<void, ResumeSessionError>;
-  readonly prompt: (
-    sessionId: string,
-    input: UserInput,
-  ) => Effect.Effect<
-    PromptReceipt,
-    SessionNotFound | SessionClosed | TurnAlreadyRunning | AgentOperationError
-  >;
-  readonly interrupt: (
-    sessionId: string,
-  ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
-  readonly setModel: (
-    sessionId: string,
-    model: string,
-  ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
-  readonly setReasoningEffort: (
-    sessionId: string,
-    reasoningEffort: ReasoningEffort,
-  ) => Effect.Effect<void, SessionNotFound | SessionClosed | AgentOperationError>;
-  readonly setPermissionMode: (
-    sessionId: string,
-    mode: PermissionMode,
+    cwd: string,
+    config?: {
+      readonly model?: string;
+      readonly reasoningEffort?: ReasoningEffort;
+      readonly permissionMode?: PermissionMode;
+    },
+  ) => Effect.Effect<SessionRef, CreateSessionError | StoreWriteError>;
+  readonly resume: (
+    ref: SessionRef,
+    cwd: string,
   ) => Effect.Effect<
     void,
-    SessionNotFound | PermissionModeUnsupported | SessionClosed | AgentOperationError
+    SessionNotFound | SessionRefMismatch | StoreReadError | ResumeSessionError
+  >;
+  readonly close: (
+    ref: SessionRef,
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
+  /** Close the native session, discard its projection, and delete its metadata. */
+  readonly delete: (
+    ref: SessionRef,
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError>;
+  readonly rename: (
+    ref: SessionRef,
+    name: string,
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
+  readonly list: (
+    projectId: string,
+  ) => Effect.Effect<ReadonlyArray<SessionSummary>, StoreReadError>;
+  /**
+   * The session's native history as final-form UIMessages. Ensures the
+   * session is open (idempotent resume via the manager), reads through the
+   * live instance's optional `getMessages` (absence = the harness has no
+   * history read → {@link CapabilityUnsupported}), then trims the active
+   * turn's tail so history never duplicates the live stream.
+   */
+  readonly getMessages: (
+    ref: SessionRef,
+    cwd: string,
+  ) => Effect.Effect<
+    ReadonlyArray<UIMessage>,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | ResumeSessionError
+    | CapabilityUnsupported
+    | SessionClosed
+    | AgentOperationError
+  >;
+  readonly prompt: (
+    input: PromptInput,
+  ) => Effect.Effect<
+    PromptReceipt,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | UnsupportedPromptPart
+    | HarnessSessionNotFound
+    | SessionClosed
+    | TurnAlreadyRunning
+    | AgentOperationError
+  >;
+  readonly interrupt: (
+    ref: SessionRef,
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | SessionClosed
+    | AgentOperationError
+  >;
+  // Session-scoped config setters. `model` is the provider-local model id —
+  // the RPC boundary unpacked and validated the providerId/modelId pair already.
+  readonly setModel: (
+    ref: SessionRef,
+    model: string,
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | SessionClosed
+    | AgentOperationError
+  >;
+  readonly setReasoningEffort: (
+    ref: SessionRef,
+    reasoningEffort: ReasoningEffort,
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | SessionClosed
+    | AgentOperationError
+  >;
+  readonly setPermissionMode: (
+    ref: SessionRef,
+    permissionMode: PermissionMode,
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | PermissionModeUnsupported
+    | SessionClosed
+    | AgentOperationError
   >;
   readonly respondToAgentRequest: (
-    sessionId: string,
+    ref: SessionRef,
     requestId: string,
     response: AgentResponse,
-  ) => Effect.Effect<void, SessionNotFound | AgentRequestUnavailable | AgentOperationError>;
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | AgentRequestUnavailable
+    | AgentOperationError
+  >;
   readonly getCapabilities: (
-    sessionId: string,
+    ref: SessionRef,
   ) => Effect.Effect<
     SessionCapabilities,
-    SessionNotFound | CapabilityUnsupported | AgentOperationError
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessSessionNotFound
+    | CapabilityUnsupported
+    | AgentOperationError
   >;
   /**
-   * Look up display info (title, recency) for a persisted session by its native
-   * id, without opening it — used at list time. Never requires an active
-   * session; goes straight to the adapter via the registry.
+   * Best-effort display info (title, recency, existence) for a persisted
+   * session, without opening it — a cold read straight off the adapter.
    */
   readonly getSessionInfo: (
-    harnessAgentId: HarnessAgentId,
-    harnessSessionId: string,
-    cwd?: string,
-  ) => Effect.Effect<SessionInfoResult, HarnessAgentNotFound | AgentOperationError>;
-  /**
-   * The raw per-session event stream, drained by the server SessionRuntime. The
-   * harness never numbers or projects it; drafts are native-`sessionId`-keyed.
-   */
-  readonly events: (
+    ref: SessionRef,
+  ) => Effect.Effect<
+    SessionInfoResult,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | HarnessAgentNotFound
+    | AgentOperationError
+  >;
+  readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
+  readonly getSnapshot: (
+    ref: SessionRef,
+  ) => Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
+  /** Reverse a bare sessionId back into its full SessionRef. */
+  readonly resolveRef: (
     sessionId: string,
-  ) => Effect.Effect<Stream.Stream<SessionEnvelopeDraft, AgentOperationError>, SessionNotFound>;
-  readonly close: (sessionId: string) => Effect.Effect<void>;
+  ) => Effect.Effect<SessionRef, StoreReadError | SessionRefNotFound>;
 };
 
 export class HarnessAgentSessionService extends Context.Service<
@@ -144,295 +250,348 @@ export class HarnessAgentSessionService extends Context.Service<
   HarnessAgentSessionServiceShape
 >()("HarnessAgentSessionService") {}
 
-export const makeHarnessAgentSessionService = (
-  registry: HarnessAgentRegistryShape,
-): Effect.Effect<HarnessAgentSessionServiceShape, never, Scope.Scope | FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const ownerScope = yield* Scope.Scope;
-    // An adapter's availability check reads the filesystem; bind it once here
-    // so the service's own methods stay R-free. `provideService` rather than
-    // `provide(Effect.context())` — the latter captures the whole layer-build
-    // context, `ownerScope` included, and wins the merge over a caller's.
-    const fileSystem = yield* FileSystem.FileSystem;
-    const state = yield* Ref.make<ServiceState>({
-      active: new Map(),
-      inFlight: new Map(),
-      closing: new Map(),
-    });
+export const makeHarnessAgentSessionService = (deps: {
+  readonly manager: HarnessAgentSessionManagerShape;
+  readonly registry: HarnessAgentRegistryShape;
+  readonly repo: HarnessAgentSessionRepositoryShape;
+  readonly bus: EventBusShape;
+  /** Mints a session id; RNG failure is a defect, so the effect never fails. */
+  readonly newSessionId: Effect.Effect<string>;
+}): HarnessAgentSessionServiceShape => {
+  const { manager, registry, repo, bus, newSessionId } = deps;
 
-    const register = (candidate: ManagedSession) =>
-      Ref.modify(state, (current) => {
-        const existing = current.active.get(candidate.session.sessionId);
-        if (existing) return [existing, current] as const;
-        return [
-          candidate,
-          {
-            ...current,
-            active: new Map(current.active).set(candidate.session.sessionId, candidate),
-          },
-        ] as const;
-      }).pipe(
-        Effect.tap((registered) =>
-          registered === candidate
-            ? Effect.void
-            : candidate.session.close.pipe(Effect.andThen(Scope.close(candidate.scope, Exit.void))),
+  // The permission mode is our closed vocabulary, so membership in the
+  // harness's declared subset is checked here — the boundary between the
+  // wire and the adapters — and rejected loudly. Opaque values (model) get
+  // no such check: their lists go stale legitimately, so adapters treat
+  // misses as best-effort instead.
+  const checkPermissionMode = (harnessAgentId: HarnessAgentId, mode: PermissionMode | undefined) =>
+    mode === undefined
+      ? Effect.void
+      : registry
+          .get(harnessAgentId)
+          .pipe(
+            Effect.flatMap((adapter) =>
+              adapter.permissionModes.includes(mode)
+                ? Effect.void
+                : Effect.fail(new PermissionModeUnsupported({ harnessAgentId, mode })),
+            ),
+          );
+
+  const readChecked = (ref: SessionRef) =>
+    repo
+      .read(ref.projectId, ref.sessionId)
+      .pipe(
+        Effect.flatMap((metadata) =>
+          metadata.harnessAgentId === ref.harnessAgentId
+            ? Effect.succeed(metadata)
+            : Effect.fail(
+                new SessionRefMismatch({ projectId: ref.projectId, sessionId: ref.sessionId }),
+              ),
         ),
       );
 
-    const checkAvailable = (harnessAgentId: HarnessAgentId) =>
-      registry.get(harnessAgentId).pipe(
-        Effect.tap((adapter) =>
-          adapter.checkAvailability.pipe(
-            Effect.flatMap((availability) =>
-              availability.available
-                ? Effect.void
-                : Effect.fail(
-                    new AgentUnavailable({
-                      harnessAgentId,
-                      reason: availability.reason ?? "Unavailable",
+  const resolveHarnessSessionId = (ref: SessionRef) =>
+    readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
+
+  const withSession = (ref: SessionRef) =>
+    resolveHarnessSessionId(ref).pipe(Effect.flatMap((id) => manager.get(id)));
+
+  // The first prompt establishes the session title. Best-effort: a failed
+  // title write must never block the prompt itself. A record that already has
+  // a title (any later prompt) is left alone. On a real write we publish
+  // `session.updated` so every client patches the row — the specific event
+  // that reconciles the optimistic title, in place of any timer.
+  const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
+    if (metadata.title !== undefined) return Effect.void;
+    const title = deriveTitle(parts);
+    if (title === undefined) return Effect.void;
+    const ref: SessionRef = {
+      projectId: metadata.projectId,
+      harnessAgentId: metadata.harnessAgentId,
+      sessionId: metadata.sessionId,
+    };
+    return repo.write({ ...metadata, title }).pipe(
+      Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
+      Effect.catchTag("StoreWriteError", () => Effect.void),
+    );
+  };
+
+  return {
+    create: (projectId, harnessAgentId, cwd, config) =>
+      checkPermissionMode(harnessAgentId, config?.permissionMode).pipe(
+        Effect.andThen(newSessionId),
+        Effect.flatMap((sessionId) => {
+          const ref: SessionRef = { projectId, harnessAgentId, sessionId };
+          return manager
+            .open(
+              harnessAgentId,
+              {
+                cwd,
+                ...(config?.model !== undefined ? { model: config.model } : {}),
+                ...(config?.reasoningEffort !== undefined
+                  ? { reasoningEffort: config.reasoningEffort }
+                  : {}),
+                ...(config?.permissionMode !== undefined
+                  ? { permissionMode: config.permissionMode }
+                  : {}),
+              },
+              ref,
+            )
+            .pipe(
+              Effect.flatMap((session) => {
+                const metadata: Session = {
+                  version: 1,
+                  sessionId,
+                  projectId,
+                  harnessAgentId,
+                  harnessSessionId: session.sessionId,
+                  createdAt: new Date().toISOString(),
+                  // Our own floor field: the session's working directory. Stored
+                  // so an imported/rehomed session stays self-contained and a
+                  // resume has cwd before it can call getSessionInfo.
+                  cwd,
+                };
+                return repo.write(metadata).pipe(
+                  // A failed metadata write must not leak the native session.
+                  Effect.tapError(() => manager.close(session.sessionId)),
+                  Effect.andThen(bus.publish({ ref, type: "session.created" })),
+                  Effect.as(ref),
+                );
+              }),
+            );
+        }),
+      ),
+
+    resume: (ref, cwd) =>
+      readChecked(ref).pipe(
+        Effect.flatMap((metadata) =>
+          manager.ensure(
+            {
+              sessionId: metadata.harnessSessionId,
+              harnessAgentId: ref.harnessAgentId,
+              cwd,
+            },
+            ref,
+          ),
+        ),
+      ),
+
+    close: (ref) =>
+      resolveHarnessSessionId(ref).pipe(
+        Effect.flatMap((harnessSessionId) =>
+          manager
+            .close(harnessSessionId)
+            .pipe(Effect.andThen(bus.closeSession(ref, "session_closed"))),
+        ),
+      ),
+
+    delete: (ref) =>
+      readChecked(ref).pipe(
+        Effect.flatMap((metadata) =>
+          manager
+            .close(metadata.harnessSessionId)
+            .pipe(
+              Effect.andThen(bus.closeSession(ref, "session_deleted")),
+              Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
+              Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+            ),
+        ),
+      ),
+
+    rename: (ref, name) =>
+      resolveHarnessSessionId(ref).pipe(
+        Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
+      ),
+
+    // A pure read of our own records — display data is self-owned (title from
+    // the first prompt, createdAt/cwd from create), so no per-session backend
+    // lookup. `status` is the one overlay, and it comes from the manager's
+    // projection, not the harness index.
+    list: (projectId) =>
+      repo.list(projectId).pipe(
+        Effect.flatMap((sessions) =>
+          Effect.forEach(sessions, (metadata) =>
+            manager
+              .status({
+                projectId: metadata.projectId,
+                harnessAgentId: metadata.harnessAgentId,
+                sessionId: metadata.sessionId,
+              })
+              .pipe(
+                Effect.map((s): SessionStatus | null => s),
+                Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+                Effect.map(
+                  (status) =>
+                    ({
+                      projectId: metadata.projectId,
+                      harnessAgentId: metadata.harnessAgentId,
+                      sessionId: metadata.sessionId,
+                      createdAt: metadata.createdAt,
+                      // We own the record, so the session exists as far as we
+                      // know; a resume (or a getMessages read) proves
+                      // otherwise reactively.
+                      historyAvailable: metadata.historyAvailable ?? true,
+                      ...(metadata.title !== undefined ? { title: metadata.title } : {}),
+                      ...(metadata.updatedAt !== undefined
+                        ? { updatedAt: metadata.updatedAt }
+                        : {}),
+                      ...(status !== null ? { status } : {}),
+                    }) satisfies SessionSummary,
+                ),
+              ),
+          ),
+        ),
+      ),
+
+    getMessages: (ref, cwd) =>
+      readChecked(ref).pipe(
+        Effect.flatMap((metadata) =>
+          manager
+            .ensure(
+              { sessionId: metadata.harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
+              ref,
+            )
+            .pipe(
+              Effect.andThen(manager.get(metadata.harnessSessionId)),
+              Effect.flatMap(
+                (
+                  session,
+                ): Effect.Effect<
+                  ReadonlyArray<UIMessage>,
+                  CapabilityUnsupported | SessionClosed | AgentOperationError
+                > =>
+                  session.getMessages ??
+                  Effect.fail(
+                    new CapabilityUnsupported({
+                      harnessAgentId: ref.harnessAgentId,
+                      capability: "getMessages",
                     }),
                   ),
+              ),
+              Effect.flatMap((messages) =>
+                // History includes the in-flight turn's user entry; the live
+                // stream replays that turn, so drop the last user segment while
+                // a turn runs. A finished turn's buffer is retained
+                // (complete: true) until the next turn starts — that is
+                // settled history, not an in-flight turn, so it must not trim.
+                // A missing projection degrades to no trimming.
+                manager.snapshot(ref).pipe(
+                  Effect.map((snapshot) => {
+                    if (snapshot.activeTurn === null || snapshot.activeTurn.complete) {
+                      return messages;
+                    }
+                    for (let index = messages.length - 1; index >= 0; index -= 1) {
+                      if (messages[index]?.role === "user") return messages.slice(0, index);
+                    }
+                    return messages;
+                  }),
+                  Effect.catchTag("SessionNotActive", () => Effect.succeed(messages)),
+                ),
+              ),
+            ),
+        ),
+      ),
+
+    prompt: (input) =>
+      readChecked(input.ref).pipe(
+        Effect.flatMap((metadata) =>
+          toUserInput(input.parts).pipe(
+            Effect.flatMap((userInput) =>
+              // The first prompt names the session before it reaches the harness.
+              stampTitleFromFirstPrompt(metadata, input.parts).pipe(
+                Effect.andThen(manager.get(metadata.harnessSessionId)),
+                Effect.flatMap((session) => session.prompt(userInput)),
+              ),
             ),
           ),
         ),
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-      );
+      ),
 
-    const build = (
-      mode:
-        | {
-            readonly _tag: "Open";
-            readonly harnessAgentId: HarnessAgentId;
-            readonly input: CreateSessionInput;
-          }
-        | { readonly _tag: "Resume"; readonly input: ResumeManagedSessionInput },
-    ) =>
-      Effect.gen(function* () {
-        const harnessAgentId =
-          mode._tag === "Open" ? mode.harnessAgentId : mode.input.harnessAgentId;
-        const adapter = yield* checkAvailable(harnessAgentId);
-        const sessionScope = yield* Scope.fork(ownerScope, "sequential");
-        return yield* Effect.gen(function* () {
-          const session = yield* (
-            mode._tag === "Open"
-              ? adapter.open(mode.input)
-              : adapter.resume({
-                  sessionId: mode.input.sessionId,
-                  cwd: mode.input.cwd,
-                })
-          ).pipe(Effect.provideService(Scope.Scope, sessionScope));
-          return yield* register({ session, scope: sessionScope });
-        }).pipe(Effect.onError(() => Scope.close(sessionScope, Exit.void)));
-      });
+    interrupt: (ref) => withSession(ref).pipe(Effect.flatMap((session) => session.interrupt)),
 
-    const getManaged = (sessionId: string): Effect.Effect<ManagedSession, SessionNotFound> =>
-      Ref.get(state).pipe(
-        Effect.flatMap((current) => {
-          const managed = current.active.get(sessionId);
-          return managed
-            ? Effect.succeed(managed)
-            : Effect.fail(new SessionNotFound({ sessionId }));
-        }),
-      );
+    setModel: (ref, model) =>
+      withSession(ref).pipe(Effect.flatMap((session) => session.setModel(model))),
 
-    const closeManaged = (managed: ManagedSession) =>
-      managed.session.close.pipe(
-        Effect.ensuring(Scope.close(managed.scope, Exit.void)),
-        Effect.asVoid,
-      );
+    setReasoningEffort: (ref, reasoningEffort) =>
+      withSession(ref).pipe(
+        Effect.flatMap((session) => session.setReasoningEffort(reasoningEffort)),
+      ),
 
-    const close = (sessionId: string): Effect.Effect<void> =>
-      Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const candidate = yield* Deferred.make<void>();
-          const decision = yield* Ref.modify<ServiceState, CloseDecision>(state, (current) => {
-            const inProgress = current.closing.get(sessionId);
-            if (inProgress) return [{ _tag: "Wait", deferred: inProgress }, current];
-            const managed = current.active.get(sessionId);
-            const inFlightBuild = current.inFlight.get(sessionId);
-            if (!managed) {
-              if (!inFlightBuild) return [{ _tag: "Done" }, current];
-              return [
-                { _tag: "StartAfterBuild", build: inFlightBuild, deferred: candidate },
-                {
-                  ...current,
-                  closing: new Map(current.closing).set(sessionId, candidate),
-                },
-              ];
-            }
-            const closing = new Map(current.closing).set(sessionId, candidate);
-            const active = new Map(current.active);
-            active.delete(sessionId);
-            return [
-              { _tag: "Start", managed, deferred: candidate },
-              { ...current, active, closing },
-            ];
-          });
-          if (decision._tag === "Done") return;
-          if (decision._tag === "Start" || decision._tag === "StartAfterBuild") {
-            const finish = Deferred.succeed(decision.deferred, undefined).pipe(
-              Effect.andThen(
-                Ref.update(state, (current) => {
-                  if (current.closing.get(sessionId) !== decision.deferred) return current;
-                  const closing = new Map(current.closing);
-                  closing.delete(sessionId);
-                  return { ...current, closing };
-                }),
+    setPermissionMode: (ref, permissionMode) =>
+      withSession(ref).pipe(
+        Effect.flatMap((session) =>
+          // The session is open, so its adapter is registered by construction.
+          checkPermissionMode(session.harnessAgentId, permissionMode).pipe(
+            Effect.catchTag("HarnessAgentNotFound", (cause) => Effect.die(cause)),
+            Effect.andThen(session.setPermissionMode(permissionMode)),
+          ),
+        ),
+      ),
+
+    respondToAgentRequest: (ref, requestId, response) =>
+      withSession(ref).pipe(
+        Effect.flatMap((session) => session.respondToAgentRequest(requestId, response)),
+      ),
+
+    getCapabilities: (ref) =>
+      withSession(ref).pipe(Effect.flatMap((session) => session.getCapabilities)),
+
+    getSessionInfo: (ref) =>
+      readChecked(ref).pipe(
+        Effect.flatMap((metadata) =>
+          registry
+            .get(metadata.harnessAgentId)
+            .pipe(
+              Effect.flatMap((adapter) =>
+                adapter.getSessionInfo(metadata.harnessSessionId, metadata.cwd),
               ),
-            );
-            const worker =
-              decision._tag === "Start"
-                ? closeManaged(decision.managed)
-                : Deferred.await(decision.build).pipe(
-                    Effect.flatMap((managed) =>
-                      Ref.update(state, (current) => {
-                        if (current.active.get(sessionId) !== managed) return current;
-                        const active = new Map(current.active);
-                        active.delete(sessionId);
-                        return { ...current, active };
-                      }).pipe(Effect.andThen(closeManaged(managed))),
-                    ),
-                    Effect.catch(() => Effect.void),
-                  );
-            yield* Effect.forkIn(worker.pipe(Effect.ensuring(finish)), ownerScope);
-          }
-          yield* restore(Deferred.await(decision.deferred));
-        }),
-      );
+            ),
+        ),
+      ),
 
-    const resume = (input: ResumeManagedSessionInput): Effect.Effect<void, ResumeSessionError> =>
-      Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const candidate = yield* Deferred.make<ManagedSession, ResumeSessionError>();
-          const decision = yield* Ref.modify<ServiceState, ResumeDecision>(state, (current) => {
-            const closing = current.closing.get(input.sessionId);
-            if (closing) return [{ _tag: "WaitForClose", deferred: closing }, current];
-            const active = current.active.get(input.sessionId);
-            if (active) return [{ _tag: "Active", managed: active }, current];
-            const inFlight = current.inFlight.get(input.sessionId);
-            if (inFlight) return [{ _tag: "Wait", deferred: inFlight }, current];
-            return [
-              { _tag: "Start", deferred: candidate },
-              {
-                ...current,
-                inFlight: new Map(current.inFlight).set(input.sessionId, candidate),
-              },
-            ];
-          });
-          if (decision._tag === "Active") return;
-          if (decision._tag === "WaitForClose") {
-            yield* restore(Deferred.await(decision.deferred));
-            return yield* resume(input);
-          }
-          if (decision._tag === "Start") {
-            yield* Effect.forkIn(
-              build({ _tag: "Resume", input }).pipe(
-                Effect.exit,
-                Effect.flatMap((exit) => Deferred.done(decision.deferred, exit)),
-                Effect.ensuring(
-                  Ref.update(state, (current) => {
-                    if (current.inFlight.get(input.sessionId) !== decision.deferred) return current;
-                    const inFlight = new Map(current.inFlight);
-                    inFlight.delete(input.sessionId);
-                    return { ...current, inFlight };
-                  }),
-                ),
-              ),
-              ownerScope,
-            );
-          }
-          yield* restore(Deferred.await(decision.deferred));
-        }),
-      );
+    getStatus: (ref) => manager.status(ref),
+    getSnapshot: (ref) => manager.snapshot(ref),
 
-    yield* Scope.addFinalizer(
-      ownerScope,
-      Ref.get(state).pipe(
-        Effect.flatMap((current) =>
-          Effect.forEach(current.active.values(), closeManaged, {
-            concurrency: "unbounded",
-            discard: true,
+    resolveRef: (sessionId) =>
+      repo.findBySessionId(sessionId).pipe(
+        Effect.map(
+          (metadata): SessionRef => ({
+            projectId: metadata.projectId,
+            harnessAgentId: metadata.harnessAgentId,
+            sessionId: metadata.sessionId,
           }),
         ),
       ),
-    );
+  } satisfies HarnessAgentSessionServiceShape;
+};
 
-    // The permission mode is our closed vocabulary, so membership in the
-    // harness's declared subset is checked here — the boundary between the
-    // wire and the adapters — and rejected loudly. Opaque values (model) get
-    // no such check: their lists go stale legitimately, so adapters treat
-    // misses as best-effort instead.
-    const checkPermissionMode = (
-      harnessAgentId: HarnessAgentId,
-      mode: PermissionMode | undefined,
-    ) =>
-      mode === undefined
-        ? Effect.void
-        : registry
-            .get(harnessAgentId)
-            .pipe(
-              Effect.flatMap((adapter) =>
-                adapter.permissionModes.includes(mode)
-                  ? Effect.void
-                  : Effect.fail(new PermissionModeUnsupported({ harnessAgentId, mode })),
-              ),
-            );
-
-    return {
-      create: (harnessAgentId, input) =>
-        checkPermissionMode(harnessAgentId, input.permissionMode).pipe(
-          Effect.andThen(build({ _tag: "Open", harnessAgentId, input })),
-          Effect.map((managed) => ({
-            sessionId: managed.session.sessionId,
-            harnessAgentId: managed.session.harnessAgentId,
-          })),
-          Effect.mapError((error) =>
-            error instanceof SessionNotResumable
-              ? new AgentOpenError({ harnessAgentId, cause: error })
-              : error,
-          ),
-        ),
-      resume,
-      prompt: (sessionId, input) =>
-        getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.prompt(input))),
-      interrupt: (sessionId) =>
-        getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.interrupt)),
-      setModel: (sessionId, model) =>
-        getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.setModel(model))),
-      setReasoningEffort: (sessionId, reasoningEffort) =>
-        getManaged(sessionId).pipe(
-          Effect.flatMap((managed) => managed.session.setReasoningEffort(reasoningEffort)),
-        ),
-      setPermissionMode: (sessionId, mode) =>
-        getManaged(sessionId).pipe(
-          Effect.flatMap((managed) =>
-            // The session is open, so its adapter is registered by construction.
-            checkPermissionMode(managed.session.harnessAgentId, mode).pipe(
-              Effect.catchTag("HarnessAgentNotFound", (cause) => Effect.die(cause)),
-              Effect.andThen(managed.session.setPermissionMode(mode)),
-            ),
-          ),
-        ),
-      respondToAgentRequest: (sessionId, requestId, response) =>
-        getManaged(sessionId).pipe(
-          Effect.flatMap((managed) => managed.session.respondToAgentRequest(requestId, response)),
-        ),
-      getCapabilities: (sessionId) =>
-        getManaged(sessionId).pipe(Effect.flatMap((managed) => managed.session.getCapabilities)),
-      getSessionInfo: (harnessAgentId, harnessSessionId, cwd) =>
-        registry
-          .get(harnessAgentId)
-          .pipe(Effect.flatMap((adapter) => adapter.getSessionInfo(harnessSessionId, cwd))),
-      events: (sessionId) =>
-        getManaged(sessionId).pipe(Effect.map((managed) => managed.session.events)),
-      close,
-    } satisfies HarnessAgentSessionServiceShape;
-  });
-
-export const HarnessAgentSessionServiceLayer = Layer.effect(
+export const HarnessAgentSessionServiceLayer: Layer.Layer<
+  HarnessAgentSessionService,
+  never,
+  | HarnessAgentSessionManager
+  | HarnessAgentRegistry
+  | EventBus
+  | Paths
+  | Crypto.Crypto
+  | FileSystem.FileSystem
+> = Layer.effect(
   HarnessAgentSessionService,
   Effect.gen(function* () {
+    const manager = yield* HarnessAgentSessionManager;
     const registry = yield* HarnessAgentRegistry;
-    return yield* makeHarnessAgentSessionService(registry);
+    const bus = yield* EventBus;
+    const paths = yield* Paths;
+    const crypto = yield* Crypto.Crypto;
+    const repo = yield* makeHarnessAgentSessionRepository(paths.sessionsDir);
+    return makeHarnessAgentSessionService({
+      manager,
+      registry,
+      repo,
+      bus,
+      // A platform RNG that cannot produce a uuid is a defect, not a domain
+      // failure — keep it out of the service's error channel.
+      newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
+    });
   }),
 );

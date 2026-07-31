@@ -8,6 +8,7 @@ import type {
   SessionCapabilities,
 } from "@vibest/contract";
 import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
+import type { UIMessage } from "ai";
 import { Effect, type FileSystem, type Scope, type Stream } from "effect";
 
 import { AgentOpenError } from "./errors";
@@ -111,6 +112,17 @@ export interface HarnessAgentSession {
   readonly getCapabilities: Effect.Effect<
     SessionCapabilities,
     CapabilityUnsupported | AgentOperationError
+  >;
+  /**
+   * The session's native transcript folded into final-form UIMessages —
+   * everything up to and including the active turn; trimming the in-flight
+   * tail is the facade's job. Optional = capability absence (same convention
+   * as `probeModels?`): pi implements it, claude-code/codex don't yet, and
+   * the facade turns absence into `CapabilityUnsupported`.
+   */
+  readonly getMessages?: Effect.Effect<
+    ReadonlyArray<UIMessage>,
+    SessionClosed | AgentOperationError
   >;
   readonly close: Effect.Effect<void>;
 }

@@ -3,6 +3,17 @@ import { Schema } from "effect";
 
 export { ClaudeSdkError } from "./claude-code/errors";
 
+// A cause's one-line story, for error messages that would otherwise swallow
+// it. These messages end up in daemon logs and RPC INTERNAL responses — a
+// bare "failed to open" with the cause dropped is undiagnosable in the field.
+const causeSummary = (cause: unknown): string => {
+  if (typeof cause === "object" && cause !== null && "message" in cause) {
+    const message = (cause as { message: unknown }).message;
+    if (typeof message === "string" && message.length > 0) return message;
+  }
+  return String(cause);
+};
+
 export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNotFound>()(
   "HarnessAgentNotFound",
   { harnessAgentId: HarnessAgentIdSchema },
@@ -41,13 +52,22 @@ export class AgentOpenError extends Schema.TaggedErrorClass<AgentOpenError>()("A
   cause: Schema.Defect(),
 }) {
   override get message() {
-    return `Failed to open a '${this.harnessAgentId}' session.`;
+    return `Failed to open a '${this.harnessAgentId}' session: ${causeSummary(this.cause)}`;
   }
 }
 
-export class SessionNotFound extends Schema.TaggedErrorClass<SessionNotFound>()("SessionNotFound", {
-  sessionId: Schema.String,
-}) {
+/**
+ * The native session is not open in this process. Named with the Harness
+ * prefix (unlike its neighbours) because the session domain has its own
+ * `SessionNotFound` — metadata missing from storage — and the two used to
+ * share a tag, forcing structural sniffing at the RPC error mapping.
+ */
+export class HarnessSessionNotFound extends Schema.TaggedErrorClass<HarnessSessionNotFound>()(
+  "HarnessSessionNotFound",
+  {
+    sessionId: Schema.String,
+  },
+) {
   override get message() {
     return `Session '${this.sessionId}' was not found.`;
   }
@@ -110,7 +130,7 @@ export class AgentOperationError extends Schema.TaggedErrorClass<AgentOperationE
   },
 ) {
   override get message() {
-    return `Agent operation '${this.operation}' failed for session '${this.sessionId}'.`;
+    return `Agent operation '${this.operation}' failed for session '${this.sessionId}': ${causeSummary(this.cause)}`;
   }
 }
 
@@ -122,7 +142,7 @@ export class CodexTransportError extends Schema.TaggedErrorClass<CodexTransportE
   },
 ) {
   override get message() {
-    return `Codex transport operation '${this.operation}' failed.`;
+    return `Codex transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
   }
 }
 
@@ -145,7 +165,7 @@ export class PiTransportError extends Schema.TaggedErrorClass<PiTransportError>(
   },
 ) {
   override get message() {
-    return `Pi transport operation '${this.operation}' failed.`;
+    return `Pi transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
   }
 }
 
@@ -216,7 +236,7 @@ export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityPro
   },
 ) {
   override get message() {
-    return `Failed to probe '${this.harnessAgentId}' capabilities.`;
+    return `Failed to probe '${this.harnessAgentId}' capabilities: ${causeSummary(this.cause)}`;
   }
 }
 
@@ -241,7 +261,7 @@ export type CreateSessionError =
 
 export type ResumeSessionError =
   | HarnessAgentNotFound
-  | SessionNotFound
+  | HarnessSessionNotFound
   | SessionNotResumable
   | AgentUnavailable
   | ExecutableNotFound

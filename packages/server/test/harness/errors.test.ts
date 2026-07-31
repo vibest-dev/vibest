@@ -5,7 +5,7 @@ import {
   AgentProcessExited,
   CodexRpcError,
   HarnessAgentNotFound,
-  SessionNotFound,
+  HarnessSessionNotFound,
 } from "../../src/harness/errors";
 
 const isHarnessAgentNotFound = Schema.is(HarnessAgentNotFound);
@@ -26,7 +26,7 @@ describe("runtime errors", () => {
       errorMessage: "internal error",
     });
     const exited = new AgentProcessExited({ harnessAgentId: "codex", code: 1 });
-    const missing = new SessionNotFound({ sessionId: "session-1" });
+    const missing = new HarnessSessionNotFound({ sessionId: "session-1" });
 
     expect(rpcError.message).toContain("turn/start");
     expect(exited.message).toContain("code 1");

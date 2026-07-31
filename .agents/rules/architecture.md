@@ -20,10 +20,22 @@
   The browser-shared half of each agent — tool schemas + UI-message types — lives
   in `packages/contract/src/<agent>/` because the SPA renders against it; keep
   those pure and diskless.
-- `packages/server/src/session/port.ts` is the single seam onto a HarnessAgent —
-  `SessionService` talks only to this port, never to the harness adapters
-  directly. Adapters see `cwd`, never `projectId`; resolving one to the other is
-  `ProjectService`'s job.
+- **The session domain lives in `packages/server/src/harness/` with exactly five
+  public roles**: `HarnessAgentRegistry` (who exists), `HarnessAgentAdapter` (how
+  to get in), `HarnessAgentSessionManager` (sole owner of live state — instances
+  _and_ projections; the only caller of `adapter.open`/`adapter.resume`),
+  `HarnessAgentSession` (what one live session can do), and
+  `HarnessAgentSessionService` (the outward face: SessionRef ↔ native-id
+  translation, metadata persistence, wire-vocabulary validation, collection
+  events). `session-runtime.ts` and `session-repository.ts` are private
+  collaborators of the manager and the service — no Context tags, don't wire
+  them directly. The RPC router contributes only `projectId → workspace path`
+  (via `ProjectService`) and error-code mapping. Adapters see `cwd`, never
+  `projectId`; the manager receives a `SessionRef` but only carries it (event
+  stamping), never interprets it.
+- `EventBusLayer` must stay a single Layer reference across publish and
+  subscribe wiring — Effect memoizes layers by reference, and a second
+  reference (or `Layer.fresh`) silently splits the bus.
 - `packages/contract/src/codex/protocol/**` is ts-rs–generated (`codex
 app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit.
 - `packages/ui/src/components/*` is vendored from the coss registry and refreshed

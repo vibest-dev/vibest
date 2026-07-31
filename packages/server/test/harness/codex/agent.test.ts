@@ -170,7 +170,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "SessionNotFound",
+              (error) => error._tag === "HarnessSessionNotFound",
               () => new Error("old generation session has not been cleaned up"),
             ),
           ),
@@ -280,7 +280,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "SessionNotFound",
+              (error) => error._tag === "HarnessSessionNotFound",
               () => new Error("native session has not crashed"),
             ),
           ),
@@ -383,7 +383,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "SessionNotFound",
+              (error) => error._tag === "HarnessSessionNotFound",
               () => new Error("transport crash has not evicted the native session"),
             ),
           ),

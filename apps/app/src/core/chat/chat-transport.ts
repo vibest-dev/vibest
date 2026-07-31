@@ -1,4 +1,4 @@
-import { eventIteratorToStream } from "@orpc/client";
+import { eventIteratorToStream, ORPCError } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
 import type {
   PermissionMode,
@@ -63,6 +63,7 @@ type SessionClient = Pick<
   | "setModel"
   | "setPermissionMode"
   | "getSnapshot"
+  | "getMessages"
 > & {
   subscribe: (
     ...args: Parameters<VibestSessionClient["subscribe"]>
@@ -348,5 +349,18 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
 
   async setPermissionMode(permissionMode: PermissionMode): Promise<void> {
     await this.client.session.setPermissionMode({ ref: this.#ref, permissionMode });
+  }
+
+  // UNSUPPORTED is the server saying "this harness serves no history" — a
+  // capability fact, not a failure; it maps to `null` so the oRPC error
+  // vocabulary stays on this side of the port.
+  async getMessages(): Promise<readonly UIMessage[] | null> {
+    try {
+      const result = await this.client.session.getMessages({ ref: this.#ref });
+      return result.messages;
+    } catch (error) {
+      if (error instanceof ORPCError && error.code === "UNSUPPORTED") return null;
+      throw error;
+    }
   }
 }

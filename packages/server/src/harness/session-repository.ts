@@ -1,7 +1,6 @@
 import { type JsonStoreLoadError, makeJsonCollection } from "@vibest/effect-json-store";
-import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
-import { Paths } from "../config/paths";
 import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
 import type { Session } from "../types";
 
@@ -27,29 +26,27 @@ const SessionSchema = Schema.Struct({
  * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The filename
  * mirrors {@link Session.sessionId}, which the body also carries. No business
  * rules — orchestration (id generation, projectId resolution) lives in
- * SessionService.
+ * {@link HarnessAgentSessionService}, whose internal collaborator this is; it
+ * has no Context tag of its own.
  */
-export class SessionRepository extends Context.Service<
-  SessionRepository,
-  {
-    /** All session metadata under a project; empty if the project dir is absent. */
-    readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<Session>, StoreReadError>;
-    readonly read: (
-      projectId: string,
-      sessionId: string,
-    ) => Effect.Effect<Session, StoreReadError | SessionNotFound>;
-    /**
-     * Reverse lookup: find a session by its (globally unique) sessionId alone,
-     * scanning every project directory. The record carries its own projectId.
-     */
-    readonly findBySessionId: (
-      sessionId: string,
-    ) => Effect.Effect<Session, StoreReadError | SessionRefNotFound>;
-    readonly write: (metadata: Session) => Effect.Effect<void, StoreWriteError>;
-    /** Idempotent: removing an absent file succeeds. */
-    readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void, StoreWriteError>;
-  }
->()("SessionRepository") {}
+export type HarnessAgentSessionRepositoryShape = {
+  /** All session metadata under a project; empty if the project dir is absent. */
+  readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<Session>, StoreReadError>;
+  readonly read: (
+    projectId: string,
+    sessionId: string,
+  ) => Effect.Effect<Session, StoreReadError | SessionNotFound>;
+  /**
+   * Reverse lookup: find a session by its (globally unique) sessionId alone,
+   * scanning every project directory. The record carries its own projectId.
+   */
+  readonly findBySessionId: (
+    sessionId: string,
+  ) => Effect.Effect<Session, StoreReadError | SessionRefNotFound>;
+  readonly write: (metadata: Session) => Effect.Effect<void, StoreWriteError>;
+  /** Idempotent: removing an absent file succeeds. */
+  readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void, StoreWriteError>;
+};
 
 /**
  * Ids reach this repository from RPC input, so they must be sanitized before
@@ -60,16 +57,10 @@ export class SessionRepository extends Context.Service<
 const isSafeId = (id: string): boolean =>
   id.length > 0 && !/[/\\]/.test(id) && id !== "." && id !== "..";
 
-export const SessionRepositoryLayer: Layer.Layer<
-  SessionRepository,
-  never,
-  Paths | FileSystem.FileSystem
-> = Layer.effect(
-  SessionRepository,
+export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
   Effect.gen(function* () {
-    const paths = yield* Paths;
     const sessions = yield* makeJsonCollection({
-      dir: paths.sessionsDir,
+      dir: sessionsDir,
       schema: SessionSchema,
       // Pre-envelope records are the bare body, already in the v1 shape.
       legacy: { schema: SessionSchema, migrate: (session) => session },
@@ -129,6 +120,5 @@ export const SessionRepositoryLayer: Layer.Layer<
         !isSafeId(projectId) || !isSafeId(sessionId)
           ? Effect.void
           : sessions.remove(entryId(projectId, sessionId)).pipe(Effect.mapError(asWriteError)),
-    };
-  }),
-);
+    } satisfies HarnessAgentSessionRepositoryShape;
+  });

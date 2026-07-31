@@ -88,6 +88,7 @@ describe("OrpcChatSessionTransport agent requests", () => {
       setModel: unexpectedCall,
       setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
+      getMessages: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
         subscriptionCalls += 1;
@@ -151,6 +152,7 @@ describe("OrpcChatSessionTransport agent requests", () => {
       setModel: unexpectedCall,
       setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
+      getMessages: unexpectedCall,
       respondToAgentRequest: async () => automaticResponse,
       subscribe: async () => asyncIterableOf(items, finishStream),
     };
@@ -237,6 +239,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       setModel: unexpectedCall,
       setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
+      getMessages: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
         subscribeCalls += 1;
@@ -306,6 +309,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       setModel: unexpectedCall,
       setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
+      getMessages: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () => {
         subscribeCalls += 1;
@@ -332,6 +336,7 @@ describe("OrpcChatSessionTransport sendMessages recovery", () => {
       setModel: unexpectedCall,
       setReasoningEffort: unexpectedCall,
       setPermissionMode: unexpectedCall,
+      getMessages: unexpectedCall,
       respondToAgentRequest: unexpectedCall,
       subscribe: async () =>
         hangingIterableOf([

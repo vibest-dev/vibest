@@ -8,11 +8,11 @@ import {
   AgentOperationError,
   AgentRequestUnavailable,
   PiTransportError,
-  SessionNotFound,
+  HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
-import type { RpcExtensionUIResponse, RpcSessionState } from "./protocol";
+import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
 import { createPiTransform } from "./transform";
 import { makePiTransport, type PiTransport, type PiTransportFailure } from "./transport";
@@ -100,19 +100,29 @@ export interface PiAgent {
         readonly started: boolean;
         readonly output: Stream.Stream<PiUIMessageChunk, AgentOperationError>;
       },
-      SessionNotFound | PiTransportFailure | AgentOperationError | TurnAlreadyRunning
+      HarnessSessionNotFound | PiTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
-    readonly requestPermission: (sessionId: string) => Stream.Stream<AgentRequest, SessionNotFound>;
+    /**
+     * Read the session's whole entry tree off the live child (`get_entries`).
+     * No spawn: the caller (the manager, via ensure) guarantees the session is
+     * already open — an unknown id fails, it does not open a process.
+     */
+    readonly getEntries: (
+      sessionId: string,
+    ) => Effect.Effect<SessionEntries, HarnessSessionNotFound | PiTransportFailure>;
+    readonly requestPermission: (
+      sessionId: string,
+    ) => Stream.Stream<AgentRequest, HarnessSessionNotFound>;
     readonly awaitTermination: (
       sessionId: string,
-    ) => Effect.Effect<never, SessionNotFound | PiSessionFailure>;
+    ) => Effect.Effect<never, HarnessSessionNotFound | PiSessionFailure>;
     readonly respondPermission: (
       sessionId: string,
       requestId: string,
       response: AgentResponse,
-    ) => Effect.Effect<boolean, SessionNotFound | AgentRequestUnavailable>;
-    readonly interrupt: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
-    readonly abort: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+    ) => Effect.Effect<boolean, HarnessSessionNotFound | AgentRequestUnavailable>;
+    readonly interrupt: (sessionId: string) => Effect.Effect<void, HarnessSessionNotFound>;
+    readonly abort: (sessionId: string) => Effect.Effect<void, HarnessSessionNotFound>;
   };
 }
 
@@ -125,13 +135,13 @@ export const makePiAgentWithDependencies = <R>(
     const buildContext = yield* Effect.context<R>();
     const sessions = yield* Ref.make(new Map<string, SessionState>());
 
-    const getSession = (sessionId: string): Effect.Effect<SessionState, SessionNotFound> =>
+    const getSession = (sessionId: string): Effect.Effect<SessionState, HarnessSessionNotFound> =>
       Ref.get(sessions).pipe(
         Effect.flatMap((current) => {
           const session = current.get(sessionId);
           return session
             ? Effect.succeed(session)
-            : Effect.fail(new SessionNotFound({ sessionId }));
+            : Effect.fail(new HarnessSessionNotFound({ sessionId }));
         }),
       );
 
@@ -366,7 +376,7 @@ export const makePiAgentWithDependencies = <R>(
         );
       });
 
-    const interrupt = (sessionId: string): Effect.Effect<void, SessionNotFound> =>
+    const interrupt = (sessionId: string): Effect.Effect<void, HarnessSessionNotFound> =>
       Effect.gen(function* () {
         const session = yield* getSession(sessionId);
         const turn = yield* Ref.get(session.turnState);
@@ -374,7 +384,7 @@ export const makePiAgentWithDependencies = <R>(
         yield* session.transport.command({ type: "abort" }).pipe(Effect.catch(() => Effect.void));
       });
 
-    const abort = (sessionId: string): Effect.Effect<void, SessionNotFound> =>
+    const abort = (sessionId: string): Effect.Effect<void, HarnessSessionNotFound> =>
       getSession(sessionId).pipe(
         Effect.flatMap((session) =>
           unregister(session).pipe(
@@ -533,6 +543,12 @@ export const makePiAgentWithDependencies = <R>(
               ),
             );
           }),
+        getEntries: (sessionId) =>
+          getSession(sessionId).pipe(
+            Effect.flatMap((session) =>
+              session.transport.command<SessionEntries>({ type: "get_entries" }),
+            ),
+          ),
         requestPermission: (sessionId) =>
           Stream.unwrap(
             getSession(sessionId).pipe(

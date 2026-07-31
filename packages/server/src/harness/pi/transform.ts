@@ -27,7 +27,7 @@ type AssistantMessage = Extract<
 >;
 
 /** A tool result's display text: the concatenated text blocks of its content. */
-function toolResultText(result: unknown): string {
+export function toolResultText(result: unknown): string {
   const content = (result as { content?: unknown } | undefined)?.content;
   if (!Array.isArray(content)) return "";
   return content

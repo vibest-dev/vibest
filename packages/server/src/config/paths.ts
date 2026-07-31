@@ -26,9 +26,12 @@ const resolve = (home: string) => ({
 });
 
 /**
- * `$VIBEST_HOME`, falling back to `~/.vibest` — the single home every client
- * (server Paths, CLI, desktop, daemon launcher) resolves through, so the
- * one-daemon-per-home invariant can never drift on a second definition.
+ * `$VIBEST_HOME`, falling back to `~/.vibest-dev` under
+ * `NODE_ENV=development` and `~/.vibest` otherwise — the single home every
+ * client (server Paths, CLI, desktop, daemon launcher) resolves through, so
+ * the one-daemon-per-home invariant can never drift on a second definition.
+ * The dev split keeps `pnpm dev` / `electron-vite dev` sessions from sharing
+ * storage (and a daemon) with the production install.
  *
  * A plain function, not an Effect: an env lookup and a string join perform no
  * effectful work (`.agents/rules/stack.md`, "Where the boundary is"). Not
@@ -36,13 +39,16 @@ const resolve = (home: string) => ({
  * today — but because there is nothing here to suspend.
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest");
+  return (
+    env.VIBEST_HOME ??
+    path.join(os.homedir(), env.NODE_ENV === "development" ? ".vibest-dev" : ".vibest")
+  );
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */
 export const layerPaths = (home: string): Layer.Layer<Paths> => Layer.succeed(Paths, resolve(home));
 
-/** Default: `$VIBEST_HOME`, falling back to `~/.vibest`. */
+/** Default: `$VIBEST_HOME`, falling back to `~/.vibest-dev` (dev) / `~/.vibest`. */
 export const PathsLayer: Layer.Layer<Paths> = Layer.sync(
   Paths,
   // Resolved when the layer is built, not when this module is imported — the

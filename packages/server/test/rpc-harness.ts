@@ -6,6 +6,7 @@ import { EventBusLayer } from "../src/events";
 import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistry,
+  HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
   HarnessProbeLayer,
@@ -15,12 +16,6 @@ import {
 import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
-import {
-  HarnessAgentSessionPortLayer,
-  SessionManagerLayer,
-  SessionRepositoryLayer,
-  SessionServiceLayer,
-} from "../src/session";
 import { NodePlatformLayer } from "./platform";
 
 /**
@@ -35,8 +30,19 @@ export async function makeRpcTestHarness(
   // Paths plus the platform services the repositories' JSON store runs on.
   const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
+  // EventBusLayer is one reference so publish (manager/service) and subscribe
+  // (RPC) share the single bus instance; same for registryLayer.
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
+    Layer.provide(
+      HarnessAgentSessionManagerLayer.pipe(
+        Layer.provide(registryLayer),
+        Layer.provide(EventBusLayer),
+        Layer.provide(NodePlatformLayer),
+      ),
+    ),
     Layer.provide(registryLayer),
+    Layer.provide(EventBusLayer),
+    Layer.provide(paths),
     Layer.provide(NodePlatformLayer),
   );
   const listLayer = HarnessListLayer.pipe(
@@ -45,20 +51,10 @@ export async function makeRpcTestHarness(
   );
   const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
-  const sessionServiceLayer = SessionServiceLayer.pipe(
-    Layer.provide(projectLayer),
-    Layer.provide(SessionRepositoryLayer.pipe(Layer.provide(paths))),
-    Layer.provide(HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer))),
-    Layer.provide(SessionManagerLayer.pipe(Layer.provide(EventBusLayer))),
-    Layer.provide(EventBusLayer),
-    Layer.provide(NodePlatformLayer),
-  );
-  // registryLayer is merged in as well as provided into the session service;
-  // Layer memoization (same reference) keeps it one registry instance.
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       EventBusLayer,
-      sessionServiceLayer,
+      harnessSessionLayer,
       projectLayer,
       registryLayer,
       listLayer,

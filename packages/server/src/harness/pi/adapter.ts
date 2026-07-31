@@ -19,6 +19,7 @@ import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
+import { entriesToUIMessages } from "./history";
 import type { PiUIMessageChunk } from "./ui-message";
 
 const EVENT_QUEUE_CAPACITY = 1024;
@@ -214,6 +215,15 @@ const makeSession = (
         // Pi has no native tool gating — tools run unguarded; agent requests
         // only surface when a pi extension asks via ctx.ui.*.
         supportsPermissions: false,
+      }),
+      // Native history read: the live child returns its whole entry tree and
+      // the fold rebuilds the current branch. SessionEntry never leaves here.
+      getMessages: Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        const { entries, leafId } = yield* agent.session
+          .getEntries(sessionId)
+          .pipe(Effect.mapError((cause) => operationError(sessionId, "get-messages", cause)));
+        return entriesToUIMessages(entries, leafId, sessionId);
       }),
       close,
     } satisfies HarnessAgentSession;

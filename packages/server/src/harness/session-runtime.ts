@@ -8,26 +8,25 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Context, Data, Deferred, Effect, Fiber, Layer, Ref, Scope, Stream } from "effect";
+import { Data, Deferred, Effect, Fiber, Ref, Scope, Stream } from "effect";
 
-import { EventBus, type EventBusShape } from "../events/event-bus";
-import {
-  type AgentOperationError,
-  isSessionEvent,
-  type SessionEnvelopeBody,
-  type SessionEvent,
-} from "../harness";
+import type { EventBusShape } from "../events/event-bus";
+import type { AgentOperationError } from "./errors";
+import { isSessionEvent, type SessionEnvelopeBody, type SessionEvent } from "./events/framework";
 
 /** The AI-SDK UI chunk type, sourced from the contract to avoid an `ai` dependency. */
 type WireChunk = SessionMessageChunkEvent["chunk"];
 
 /**
- * A per-session runtime. The harness streams native-`sessionId`-keyed drafts;
- * this owns the server-side truth the harness sheds: it stamps a per-session,
- * contiguous `seq`, folds the projection (phase machine, active-turn buffer,
- * pending requests, cursor), translates drafts into the wire
- * {@link SessionScopedEvent} (attaching the {@link SessionRef}), and publishes
- * onto the {@link EventBus}. Snapshot/status read the projection.
+ * The live projection over a session's native event stream. The harness agents
+ * stream native-`sessionId`-keyed drafts; this owns the server-side truth they
+ * shed: it stamps a per-session, contiguous `seq`, folds the projection (phase
+ * machine, active-turn buffer, pending requests, cursor), translates drafts
+ * into the wire {@link SessionScopedEvent} (attaching the {@link SessionRef}),
+ * and publishes onto the EventBus. Snapshot/status read the projection. It is
+ * an internal collaborator of {@link HarnessAgentSessionService} — no Context
+ * tag — and never touches processes; instance lifecycle is
+ * {@link HarnessAgentSessionManager}'s job.
  */
 
 export class SessionNotActive extends Data.TaggedError("SessionNotActive")<{
@@ -175,20 +174,20 @@ const toStatus = (projection: Projection): SessionStatus => ({
 });
 
 // One live in-memory session (ours): projection + seq + the fiber draining the
-// HarnessAgent's native event stream. The SessionManager owns a map of these.
+// HarnessAgent's native event stream. The runtime owns a map of these.
 type SessionRuntime = {
   readonly ref: SessionRef;
   readonly projection: Ref.Ref<Projection>;
   readonly fiber: Fiber.Fiber<void>;
 };
 
-export type SessionManagerShape = {
+export type HarnessAgentSessionRuntimeShape = {
   /**
    * Begin draining a session's native draft stream: stamp, fold, and fan out.
    * Idempotent: a live runtime for the ref makes this a no-op, so concurrent
    * resumes can never split the single-consumer native stream across two drain
    * fibers. A crashed runtime is replaced. `onCrash` runs once if the native
-   * stream fails (the service closes the native session there).
+   * stream fails (the façade closes the native session there).
    */
   readonly start: (
     ref: SessionRef,
@@ -200,13 +199,9 @@ export type SessionManagerShape = {
   readonly status: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
 };
 
-export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
-  "SessionManager",
-) {}
-
-export const makeSessionManager = (
+export const makeHarnessAgentSessionRuntime = (
   bus: EventBusShape,
-): Effect.Effect<SessionManagerShape, never, Scope.Scope> =>
+): Effect.Effect<HarnessAgentSessionRuntimeShape, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const runtimes = yield* Ref.make<ReadonlyMap<string, SessionRuntime>>(new Map());
@@ -232,7 +227,7 @@ export const makeSessionManager = (
         }),
       );
 
-    const start: SessionManagerShape["start"] = (ref, events, options) =>
+    const start: HarnessAgentSessionRuntimeShape["start"] = (ref, events, options) =>
       Effect.gen(function* () {
         // A live runtime keeps draining; only a crashed one is replaced (its
         // fiber is already dead — interrupt is a harmless formality).
@@ -292,7 +287,7 @@ export const makeSessionManager = (
         yield* Deferred.succeed(registered, undefined);
       });
 
-    const stop: SessionManagerShape["stop"] = (ref) =>
+    const stop: HarnessAgentSessionRuntimeShape["stop"] = (ref) =>
       Ref.get(runtimes).pipe(
         Effect.flatMap((current) => {
           const runtime = current.get(ref.sessionId);
@@ -319,11 +314,3 @@ export const makeSessionManager = (
         ),
     };
   });
-
-export const SessionManagerLayer: Layer.Layer<SessionManager, never, EventBus> = Layer.effect(
-  SessionManager,
-  Effect.gen(function* () {
-    const bus = yield* EventBus;
-    return yield* makeSessionManager(bus);
-  }),
-);

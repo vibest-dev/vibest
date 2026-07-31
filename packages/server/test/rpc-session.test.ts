@@ -12,6 +12,7 @@ import { EventBusLayer } from "../src/events";
 import { FileSystemServiceLayer } from "../src/fs";
 import {
   HarnessAgentRegistry,
+  HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
   HarnessProbeLayer,
@@ -22,12 +23,6 @@ import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
-import {
-  HarnessAgentSessionPortLayer,
-  SessionManagerLayer,
-  SessionRepositoryLayer,
-  SessionServiceLayer,
-} from "../src/session";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -79,29 +74,29 @@ async function setup() {
     }),
   ).pipe(Layer.provide(codexLayer));
 
+  // EventBusLayer is one reference so publish (manager/service) and subscribe
+  // (RPC) share the single bus instance.
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
+    Layer.provide(
+      HarnessAgentSessionManagerLayer.pipe(
+        Layer.provide(registryLayer),
+        Layer.provide(EventBusLayer),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
     Layer.provide(registryLayer),
+    Layer.provide(EventBusLayer),
+    Layer.provide(pathsLayer),
     Layer.provide(NodeServices.layer),
   );
   const projectServiceLayer = ProjectServiceLayer.pipe(
     Layer.provide(ProjectRepositoryLayer),
     Layer.provide(pathsLayer),
   );
-  const metadataLayer = SessionRepositoryLayer.pipe(Layer.provide(pathsLayer));
-  const portLayer = HarnessAgentSessionPortLayer.pipe(Layer.provide(harnessSessionLayer));
-  const managerLayer = SessionManagerLayer.pipe(Layer.provide(EventBusLayer));
-  const sessionServiceLayer = SessionServiceLayer.pipe(
-    Layer.provide(projectServiceLayer),
-    Layer.provide(metadataLayer),
-    Layer.provide(portLayer),
-    Layer.provide(managerLayer),
-    Layer.provide(EventBusLayer),
-    Layer.provide(NodeServices.layer),
-  );
 
   const appLayer = Layer.mergeAll(
     EventBusLayer,
-    sessionServiceLayer,
+    harnessSessionLayer,
     projectServiceLayer,
     registryLayer,
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),

@@ -47,3 +47,6 @@ yarn-error.log*
 # Node.js V8 compile cache
 node-compile-cache/
 **/node-compile-cache/
+
+# pi steering-subagent artifacts (created when pi sessions run in this repo)
+.pi-subagents/

@@ -33,6 +33,10 @@ export class ChatManager implements ChatManagerApi {
       transport: this.createTransport(sessionRef),
     });
     this.#chats.set(sessionRef.sessionId, chat);
+    // First attach of a session this app instance hasn't streamed: backfill
+    // the transcript from native history. Fire-and-forget — the Chat guards
+    // against racing an optimistic prompt, and an empty result is a no-op.
+    void chat.hydrateHistory();
     return chat;
   }
 }

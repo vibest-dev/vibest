@@ -11,6 +11,7 @@ import { FileSystemServiceLayer } from "../fs";
 import {
   type HarnessAgentAdapter,
   HarnessAgentRegistry,
+  HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
   HarnessProbeLayer,
@@ -24,12 +25,6 @@ import {
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
-import {
-  HarnessAgentSessionPortLayer,
-  SessionManagerLayer,
-  SessionRepositoryLayer,
-  SessionServiceLayer,
-} from "../session";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -100,46 +95,38 @@ const HarnessListProvided = HarnessListLayer.pipe(
 );
 const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
 
-// Harness session lifecycle (agent-native ids only); shared by the port and RPC.
-const HarnessSessionServiceLayer = HarnessAgentSessionServiceLayer.pipe(
+// The session stack: the manager owns all live state (instances + projections,
+// publishing wire events onto the bus); the outward façade on top does the
+// identity translation, metadata persistence, and collection events.
+// EventBusLayer is ONE const reference everywhere below — Effect memoizes
+// layers by reference, so publish (manager/service) and subscribe (RPC) share
+// the single bus instance. A second reference (or Layer.fresh) would split the
+// bus and silently drop events.
+const HarnessSessionManagerProvided = HarnessAgentSessionManagerLayer.pipe(
   Layer.provide(RegistryLayer),
+  Layer.provide(EventBusLayer),
+  Layer.provide(PlatformLayer),
+);
+const HarnessSessionServiceProvided = HarnessAgentSessionServiceLayer.pipe(
+  Layer.provide(HarnessSessionManagerProvided),
+  Layer.provide(RegistryLayer),
+  Layer.provide(EventBusLayer),
+  Layer.provide(PathsLayer),
   Layer.provide(PlatformLayer),
 );
 
-// Server-owned services. Each shared dependency (EventBus, harness service,
-// ProjectService) is a single Layer reference, so Effect memoizes it to one
-// instance across every consumer below.
 const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(ProjectRepositoryLayer),
   Layer.provide(PathsLayer),
   Layer.provide(PlatformLayer),
 );
-const SessionRepositoryProvided = SessionRepositoryLayer.pipe(
-  Layer.provide(PathsLayer),
-  Layer.provide(PlatformLayer),
-);
-const HarnessAgentSessionPortProvided = HarnessAgentSessionPortLayer.pipe(
-  Layer.provide(HarnessSessionServiceLayer),
-);
-// The manager and the bus are internal collaborators of SessionService now, so
-// the façade composes them here. EventBusLayer is one reference, so publish
-// (SessionService), fan-out (SessionManager), and subscribe (RPC) share it.
-const SessionManagerProvided = SessionManagerLayer.pipe(Layer.provide(EventBusLayer));
-const SessionServiceProvided = SessionServiceLayer.pipe(
-  Layer.provide(ProjectServiceProvided),
-  Layer.provide(SessionRepositoryProvided),
-  Layer.provide(HarnessAgentSessionPortProvided),
-  Layer.provide(SessionManagerProvided),
-  Layer.provide(EventBusLayer),
-  Layer.provide(PlatformLayer),
-);
 
-// RegistryLayer is merged in as well as provided into SessionServiceLayer;
+// RegistryLayer is merged in as well as provided into the session stack;
 // Effect memoizes it by reference, so both see the one registry instance while
 // the harness route can resolve capabilities directly off it.
 export const AgentRuntimeLayer = Layer.mergeAll(
   EventBusLayer,
-  SessionServiceProvided,
+  HarnessSessionServiceProvided,
   ProjectServiceProvided,
   RegistryLayer,
   HarnessListProvided,

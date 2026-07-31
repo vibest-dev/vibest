@@ -21,7 +21,7 @@ import {
   AgentOperationError,
   AgentRequestUnavailable,
   CodexTransportError,
-  SessionNotFound,
+  HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
@@ -154,19 +154,21 @@ export interface CodexAgent {
         readonly started: boolean;
         readonly output: Stream.Stream<CodexUIMessageChunk, AgentOperationError>;
       },
-      SessionNotFound | CodexTransportFailure | AgentOperationError | TurnAlreadyRunning
+      HarnessSessionNotFound | CodexTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
-    readonly requestPermission: (sessionId: string) => Stream.Stream<AgentRequest, SessionNotFound>;
+    readonly requestPermission: (
+      sessionId: string,
+    ) => Stream.Stream<AgentRequest, HarnessSessionNotFound>;
     readonly awaitTermination: (
       sessionId: string,
-    ) => Effect.Effect<never, SessionNotFound | CodexSessionFailure>;
+    ) => Effect.Effect<never, HarnessSessionNotFound | CodexSessionFailure>;
     readonly respondPermission: (
       sessionId: string,
       requestId: string,
       response: AgentResponse,
-    ) => Effect.Effect<boolean, SessionNotFound | AgentRequestUnavailable>;
-    readonly interrupt: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
-    readonly abort: (sessionId: string) => Effect.Effect<void, SessionNotFound>;
+    ) => Effect.Effect<boolean, HarnessSessionNotFound | AgentRequestUnavailable>;
+    readonly interrupt: (sessionId: string) => Effect.Effect<void, HarnessSessionNotFound>;
+    readonly abort: (sessionId: string) => Effect.Effect<void, HarnessSessionNotFound>;
   };
 }
 
@@ -180,13 +182,13 @@ export const makeCodexAgentWithDependencies = <R>(
     const nextTransportGeneration = yield* Ref.make(1);
     const transportGenerations = new WeakMap<CodexTransport, number>();
 
-    const getSession = (sessionId: string): Effect.Effect<SessionState, SessionNotFound> =>
+    const getSession = (sessionId: string): Effect.Effect<SessionState, HarnessSessionNotFound> =>
       Ref.get(sessions).pipe(
         Effect.flatMap((current) => {
           const session = current.get(sessionId);
           return session
             ? Effect.succeed(session)
-            : Effect.fail(new SessionNotFound({ sessionId }));
+            : Effect.fail(new HarnessSessionNotFound({ sessionId }));
         }),
       );
 
@@ -473,7 +475,7 @@ export const makeCodexAgentWithDependencies = <R>(
         });
       });
 
-    const interrupt = (sessionId: string): Effect.Effect<void, SessionNotFound> =>
+    const interrupt = (sessionId: string): Effect.Effect<void, HarnessSessionNotFound> =>
       Effect.gen(function* () {
         const session = yield* getSession(sessionId);
         const decision = yield* Ref.modify<CodexTurnState, InterruptDecision>(
@@ -499,7 +501,7 @@ export const makeCodexAgentWithDependencies = <R>(
           .pipe(Effect.catch(() => Effect.void));
       });
 
-    const abort = (sessionId: string): Effect.Effect<void, SessionNotFound> =>
+    const abort = (sessionId: string): Effect.Effect<void, HarnessSessionNotFound> =>
       getSession(sessionId).pipe(
         Effect.flatMap((session) =>
           Effect.gen(function* () {

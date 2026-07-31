@@ -23,6 +23,12 @@ export interface ChatSessionTransport extends AiChatTransport<UIMessage> {
   setModel(providerId: string, modelId: string): Promise<void>;
   setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  /**
+   * The session's native history as final-form UIMessages, or `null` when this
+   * harness serves no history (only pi does today) — capability absence is a
+   * normal outcome here, not an error.
+   */
+  getMessages(): Promise<readonly UIMessage[] | null>;
 }
 
 // Binds a SessionRef to a transport. ChatManager holds one of these instead of

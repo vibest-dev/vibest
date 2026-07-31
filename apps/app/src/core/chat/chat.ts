@@ -49,6 +49,24 @@ export class Chat extends AbstractChat<UIMessage> {
     await this.sendMessage({ text });
   };
 
+  // Fill an empty transcript from the session's native history (pi only for
+  // now; harnesses without a history read resolve `null`). Guarded so a
+  // late-arriving read never clobbers an optimistic user message or a
+  // streaming turn — those transcripts are already ahead of the disk.
+  hydrateHistory = async (): Promise<void> => {
+    try {
+      const history = await this.#transport.getMessages();
+      if (!history || history.length === 0) return;
+      const current = this.store.getState();
+      if (current.messages.length > 0 || current.status !== "ready") return;
+      this.messages = Array.from(history);
+    } catch (historyError) {
+      // Best-effort: the empty transcript stays, and the console keeps the
+      // trail. The agent's own context is intact either way.
+      console.error("Failed to hydrate session history", historyError);
+    }
+  };
+
   // Model / reasoningEffort / permission are session config, changed via their own
   // calls — never bundled into a prompt turn.
   setModel = async (providerId: string, modelId: string): Promise<void> => {

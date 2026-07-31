@@ -55,6 +55,9 @@ labels: [wayfinder:map]
 
 - JSON-RPC 2.0 协议更换——用户明确否决，保留 oRPC。
 - setModel、配置目录（get/setConfigOption）、元数据 config 持久化与 resume 配置重放——单独立项。
-- steer（turn 进行中 prompt 追加输入）——现状 `TurnAlreadyRunning` 拒绝行为保留。
+- steer（turn 进行中 prompt 追加输入）——**勘误（2026-07-31）**：本条写下时为「现状
+  `TurnAlreadyRunning` 拒绝」，但 pi 已实现 steer（`harness/pi/agent.ts` 的 prompt 在
+  Active 态下走 `steer` 命令）；claude-code / codex 仍拒绝。历史读的分段影响见
+  ADR 0003。
 - fs / git / provider / mcp 模块挂载——已建成未挂载的部分不在本图动。
 - Project 维度订阅——用户明确否决。

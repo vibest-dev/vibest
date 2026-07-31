@@ -26,9 +26,10 @@ function ChatTranscriptView({
 }) {
   const lastIndex = snapshot.messages.length - 1;
   const turnInProgress = snapshot.status === "submitted" || snapshot.status === "streaming";
-  // A session opened from the sidebar starts empty: `session.getMessages` is
-  // still UNSUPPORTED, so past turns cannot be replayed. The agent itself
-  // resumes with its own context, so the conversation can continue regardless.
+  // A reopened session hydrates its transcript from native history where the
+  // harness supports it (pi today) — then this notice never shows. It remains
+  // for the harnesses without a history read: the agent still resumes with its
+  // own context, so the conversation continues regardless.
   const showEmptyNotice = snapshot.messages.length === 0 && snapshot.status === "ready";
   return (
     <Conversation>
