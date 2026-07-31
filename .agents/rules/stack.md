@@ -74,7 +74,12 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
   resolvers do.
 - **Tests:** real-fs + `mkdtemp` for behaviour, `FileSystem.makeNoop` (see
   `packages/server/test/fake-file-system.ts`) for failures a real disk won't
-  produce on demand.
+  produce on demand. Providing the platform has two spellings and no third:
+  `@effect/vitest`'s `layer(...)` + `it.effect` when the whole file is effects
+  (`test/harness/child-process.test.ts`), and `runNode` from
+  `packages/server/test/platform.ts` when the bodies are Promise-shaped around
+  `beforeEach`/`afterEach`. Don't re-declare a local `Effect.provide(NodeServices.layer)`
+  wrapper per file.
 - **The HTTP seam is `NodeHttpServer.makeHandler`,** not `HttpServer.serve`:
   `serve` registers its own `upgrade` listener, and that event belongs to oRPC
   and Vite's HMR socket. `makeHandler` yields a plain node `request` listener,

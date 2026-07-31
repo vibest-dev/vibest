@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import url from "node:url";
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -17,6 +16,7 @@ import {
 } from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
 import { readRecord, writeRecord } from "../../src/daemon/record";
+import { runNode } from "../platform";
 
 const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
 
@@ -25,13 +25,8 @@ const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", impo
 // booting the real runtime.
 const serverArgv = [process.execPath, FAKE_SERVER];
 
-// The launcher's file state runs on the platform services; the real ones here,
-// exactly as the CLI and the desktop provide them.
-const run = <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));
-
 const resolve = (options: Omit<ResolveDaemonOptions, "serverArgv">) =>
-  run(resolveOrSpawnDaemon({ serverArgv, ...options }));
+  runNode(resolveOrSpawnDaemon({ serverArgv, ...options }));
 
 describe("resolveOrSpawnDaemon", () => {
   let home: string;
@@ -40,7 +35,7 @@ describe("resolveOrSpawnDaemon", () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-"));
   });
   afterEach(async () => {
-    await run(stopDaemon(home));
+    await runNode(stopDaemon(home));
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -50,7 +45,7 @@ describe("resolveOrSpawnDaemon", () => {
     expect(spawned.address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(pidAlive(spawned.pid)).toBe(true);
 
-    const record = await run(readRecord(home));
+    const record = await runNode(readRecord(home));
     expect(record?.pid).toBe(spawned.pid);
     expect(record?.address).toBe(spawned.address);
     expect(record?.token).toBe(spawned.token);
@@ -64,19 +59,19 @@ describe("resolveOrSpawnDaemon", () => {
   it("reports status and stops the daemon", async () => {
     const spawned = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
 
-    const running = await run(statusDaemon(home));
+    const running = await runNode(statusDaemon(home));
     expect(running.running).toBe(true);
     expect(running.record?.pid).toBe(spawned.pid);
 
-    expect(await run(stopDaemon(home))).toBe("stopped");
+    expect(await runNode(stopDaemon(home))).toBe("stopped");
     expect(pidAlive(spawned.pid)).toBe(false);
-    expect(await run(readRecord(home))).toBeUndefined();
-    expect((await run(statusDaemon(home))).running).toBe(false);
+    expect(await runNode(readRecord(home))).toBeUndefined();
+    expect((await runNode(statusDaemon(home))).running).toBe(false);
   });
 
   it("respawns when the recorded daemon is dead", async () => {
     const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    await run(stopDaemon(home));
+    await runNode(stopDaemon(home));
     expect(pidAlive(first.pid)).toBe(false);
 
     const second = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
@@ -86,7 +81,7 @@ describe("resolveOrSpawnDaemon", () => {
   });
 
   it("reports not-running when stopping with no daemon", async () => {
-    expect(await run(stopDaemon(home))).toBe("not-running");
+    expect(await runNode(stopDaemon(home))).toBe("not-running");
   });
 
   it("respawns after a crash that left the record behind", async () => {
@@ -107,7 +102,7 @@ describe("resolveOrSpawnDaemon", () => {
     // A live process that is not a server: pid answers signals, health fails.
     const wedged = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
     const wedgedPid = wedged.pid!;
-    await run(
+    await runNode(
       writeRecord(home, {
         pid: wedgedPid,
         address: "http://127.0.0.1:1",
@@ -124,9 +119,9 @@ describe("resolveOrSpawnDaemon", () => {
 
   it("refuses to auto-respawn a daemon the user explicitly stopped", async () => {
     await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    await run(stopDaemon(home));
+    await runNode(stopDaemon(home));
 
-    const error = await run(
+    const error = await runNode(
       Effect.flip(resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true })),
     );
     expect(error).toBeInstanceOf(DaemonStoppedError);
