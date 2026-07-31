@@ -1,76 +1,83 @@
-import fs from "node:fs/promises";
-import os from "node:os";
+import assert from "node:assert/strict";
 import path from "node:path";
 
-import { Effect, Layer } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { layer } from "@effect/vitest";
+import { Effect, FileSystem, Layer } from "effect";
 
 import { FileSystemService, FileSystemServiceLayer } from "../src/index";
 import { NodePlatformLayer } from "./platform";
 
-const fsServiceLayer = FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer));
-
-describe("FileSystemService", () => {
-  let cwd: string;
-  let outside: string;
-  beforeEach(async () => {
-    cwd = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-fs-"));
-    outside = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-out-"));
-    await fs.writeFile(path.join(cwd, "a.txt"), "hello\nworld");
-    await fs.mkdir(path.join(cwd, "sub"), { recursive: true });
-    await fs.writeFile(path.join(outside, "secret.txt"), "top secret");
-    await fs.symlink(path.join(outside, "secret.txt"), path.join(cwd, "link"));
-    await fs.writeFile(path.join(cwd, "bin"), Buffer.from([104, 0, 105])); // "h\0i"
-  });
-  afterEach(async () => {
-    await fs.rm(cwd, { recursive: true, force: true });
-    await fs.rm(outside, { recursive: true, force: true });
-  });
-
-  const run = <A, E>(program: Effect.Effect<A, E, FileSystemService>) =>
-    Effect.runPromise(Effect.provide(program, fsServiceLayer));
-
-  // Run a program expected to fail and surface the error's `_tag` (or a sentinel
-  // if it unexpectedly succeeds).
-  const errorTag = <A, E extends { readonly _tag: string }>(
-    program: Effect.Effect<A, E, FileSystemService>,
-  ) =>
-    run(
-      program.pipe(
-        Effect.match({
-          onFailure: (e) => e._tag,
-          onSuccess: () => "no-error",
-        }),
-      ),
-    );
-
-  const readFile = (relPath: string) =>
-    Effect.gen(function* () {
-      const service = yield* FileSystemService;
-      return yield* service.readFileString(cwd, relPath);
+layer(FileSystemServiceLayer.pipe(Layer.provideMerge(NodePlatformLayer)))(
+  "FileSystemService",
+  (it) => {
+    /**
+     * A workspace and a directory outside it, both removed with the test. `link`
+     * points across the boundary — the escape every read has to refuse.
+     */
+    const workspace = Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-fs-" });
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-out-" });
+      yield* fs.writeFileString(path.join(cwd, "a.txt"), "hello\nworld");
+      yield* fs.makeDirectory(path.join(cwd, "sub"), { recursive: true });
+      yield* fs.writeFileString(path.join(outside, "secret.txt"), "top secret");
+      yield* fs.symlink(path.join(outside, "secret.txt"), path.join(cwd, "link"));
+      yield* fs.writeFile(path.join(cwd, "bin"), new Uint8Array([104, 0, 105])); // "h\0i"
+      return { cwd, outside };
     });
 
-  it("reads a file relative to cwd", async () => {
-    expect(await run(readFile("a.txt"))).toBe("hello\nworld");
-  });
+    const readFile = (cwd: string, relPath: string) =>
+      FileSystemService.use((service) => service.readFileString(cwd, relPath));
 
-  it("rejects an absolute path", async () => {
-    expect(await errorTag(readFile(path.join(outside, "secret.txt")))).toBe("WorkspacePathEscape");
-  });
+    /** The `_tag` of the refusal, or a sentinel if the read unexpectedly worked. */
+    const readError = (cwd: string, relPath: string) =>
+      readFile(cwd, relPath).pipe(
+        Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "no-error" }),
+      );
 
-  it("rejects a `..` escape", async () => {
-    expect(await errorTag(readFile("../escape.txt"))).toBe("WorkspacePathEscape");
-  });
+    it.effect("reads a file relative to cwd", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* workspace;
+        assert.equal(yield* readFile(cwd, "a.txt"), "hello\nworld");
+      }),
+    );
 
-  it("rejects a symlink pointing outside cwd", async () => {
-    expect(await errorTag(readFile("link"))).toBe("WorkspacePathEscape");
-  });
+    it.effect("rejects an absolute path", () =>
+      Effect.gen(function* () {
+        const { cwd, outside } = yield* workspace;
+        assert.equal(
+          yield* readError(cwd, path.join(outside, "secret.txt")),
+          "WorkspacePathEscape",
+        );
+      }),
+    );
 
-  it("rejects a directory read as a file", async () => {
-    expect(await errorTag(readFile("sub"))).toBe("WorkspaceNotFile");
-  });
+    it.effect("rejects a `..` escape", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* workspace;
+        assert.equal(yield* readError(cwd, "../escape.txt"), "WorkspacePathEscape");
+      }),
+    );
 
-  it("rejects a binary file", async () => {
-    expect(await errorTag(readFile("bin"))).toBe("WorkspaceBinaryFile");
-  });
-});
+    it.effect("rejects a symlink pointing outside cwd", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* workspace;
+        assert.equal(yield* readError(cwd, "link"), "WorkspacePathEscape");
+      }),
+    );
+
+    it.effect("rejects a directory read as a file", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* workspace;
+        assert.equal(yield* readError(cwd, "sub"), "WorkspaceNotFile");
+      }),
+    );
+
+    it.effect("rejects a binary file", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* workspace;
+        assert.equal(yield* readError(cwd, "bin"), "WorkspaceBinaryFile");
+      }),
+    );
+  },
+);

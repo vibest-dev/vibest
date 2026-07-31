@@ -77,10 +77,19 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
   produce on demand. A test that needs the real Node platform gets it from
   `@effect/vitest`'s `layer(...)` and writes `it.effect` bodies — never a local
   `run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(...)))`
-  wrapper, which re-runs the layer per test and turns every assertion into an
-  `await`. `layer(...)` builds it once for the block and scopes each test, so
+  wrapper. That wrapper rebuilds its layer on every call, so two `run`s in one
+  test silently get two service instances; it also forces every assertion out
+  of the effect and into an `await`.
+- **Per-test isolation is `Layer.build` inside the body,** not a second
+  `layer(...)`: `layer(...)` memoizes per block, so anything stateful (a temp
+  `$VIBEST_HOME`, an EventBus) would leak between tests. Put the platform in
+  `layer(NodePlatformLayer)`, then build the service graph per test —
+  `Context.get(yield* Layer.build(...), Tag)`. `it.effect` bodies are scoped, so
   `fs.makeTempDirectoryScoped` and `Effect.addFinalizer` replace
-  `beforeEach`/`afterEach` (`test/daemon/launcher.test.ts`).
+  `beforeEach`/`afterEach` and fire on the failure path too
+  (`test/session-service.test.ts`, `test/daemon/launcher.test.ts`).
+  `layer(..., { excludeTestServices: true })` when the code under test polls a
+  real clock — the default `TestClock` never advances a retry schedule.
 - **The HTTP seam is `NodeHttpServer.makeHandler`,** not `HttpServer.serve`:
   `serve` registers its own `upgrade` listener, and that event belongs to oRPC
   and Vite's HMR socket. `makeHandler` yields a plain node `request` listener,

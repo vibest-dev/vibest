@@ -1,9 +1,7 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import assert from "node:assert/strict";
 
-import { Effect, Layer } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { layer } from "@effect/vitest";
+import { Context, Effect, FileSystem, Layer } from "effect";
 
 import {
   layerPaths,
@@ -23,80 +21,66 @@ const stdioServer: McpServerConfig = {
   args: ["--root", "/tmp"],
 };
 
-const makeLayer = (home: string) => {
-  const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
-  const mcpRepo = McpRepositoryLayer.pipe(Layer.provide(paths));
-  const provRepo = ProviderRepositoryLayer.pipe(Layer.provide(paths));
-  return Layer.mergeAll(provRepo, McpServiceLayer.pipe(Layer.provide(mcpRepo)));
-};
-
-describe("McpService", () => {
-  let home: string;
-  beforeEach(async () => {
-    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-mcp-"));
-  });
-  afterEach(async () => {
-    await fs.rm(home, { recursive: true, force: true });
-  });
-
-  const run = <A, E>(program: Effect.Effect<A, E, McpService | ProviderRepository>) =>
-    Effect.runPromise(Effect.provide(program, makeLayer(home)));
-
-  it("creates and lists an MCP server", async () => {
-    const list = await run(
-      Effect.gen(function* () {
-        const svc = yield* McpService;
-        yield* svc.create(stdioServer);
-        return yield* svc.list();
-      }),
-    );
-    expect(list).toHaveLength(1);
-    expect(list[0]?.id).toBe("fs");
-  });
-
-  it("enable/disable toggles enabledFor", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const svc = yield* McpService;
-        yield* svc.create(stdioServer);
-        yield* svc.enable("fs", "claude-code");
-        yield* svc.enable("fs", "claude-code"); // idempotent
-        const afterEnable = yield* svc.list();
-        yield* svc.disable("fs", "claude-code");
-        const afterDisable = yield* svc.list();
-        return {
-          enabled: afterEnable[0]?.enabledFor ?? [],
-          disabled: afterDisable[0]?.enabledFor ?? [],
-        };
-      }),
-    );
-    expect(result.enabled).toEqual(["claude-code"]);
-    expect(result.disabled).toEqual([]);
-  });
-
-  it("enable fails with McpServerNotFound for unknown id", async () => {
-    const err = await run(
-      Effect.flip(
-        Effect.gen(function* () {
-          const svc = yield* McpService;
-          return yield* svc.enable("ghost", "codex");
-        }),
+layer(NodePlatformLayer)("McpService", (it) => {
+  /** Both services over one fresh `$VIBEST_HOME`, so they share its config.json. */
+  const services = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-mcp-" });
+    const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        ProviderRepositoryLayer.pipe(Layer.provide(paths)),
+        McpServiceLayer.pipe(Layer.provide(McpRepositoryLayer.pipe(Layer.provide(paths)))),
       ),
     );
-    expect(err._tag).toBe("McpServerNotFound");
+    return {
+      mcp: Context.get(context, McpService),
+      providers: Context.get(context, ProviderRepository),
+    };
   });
 
-  it("writing mcp does not clobber the provider field in config.json", async () => {
-    const providers = await run(
-      Effect.gen(function* () {
-        const provRepo = yield* ProviderRepository;
-        yield* provRepo.save([{ id: "openai", enabled: true }]);
-        const svc = yield* McpService;
-        yield* svc.create(stdioServer); // rewrites config.json
-        return yield* provRepo.list();
-      }),
-    );
-    expect(providers).toHaveLength(1);
-    expect(providers[0]?.id).toBe("openai");
-  });
+  it.effect("creates and lists an MCP server", () =>
+    Effect.gen(function* () {
+      const { mcp } = yield* services;
+      yield* mcp.create(stdioServer);
+
+      const list = yield* mcp.list();
+      assert.equal(list.length, 1);
+      assert.equal(list[0]?.id, "fs");
+    }),
+  );
+
+  it.effect("enable/disable toggles enabledFor", () =>
+    Effect.gen(function* () {
+      const { mcp } = yield* services;
+      yield* mcp.create(stdioServer);
+
+      yield* mcp.enable("fs", "claude-code");
+      yield* mcp.enable("fs", "claude-code"); // idempotent
+      assert.deepEqual((yield* mcp.list())[0]?.enabledFor ?? [], ["claude-code"]);
+
+      yield* mcp.disable("fs", "claude-code");
+      assert.deepEqual((yield* mcp.list())[0]?.enabledFor ?? [], []);
+    }),
+  );
+
+  it.effect("enable fails with McpServerNotFound for unknown id", () =>
+    Effect.gen(function* () {
+      const { mcp } = yield* services;
+      const error = yield* Effect.flip(mcp.enable("ghost", "codex"));
+      assert.equal(error._tag, "McpServerNotFound");
+    }),
+  );
+
+  it.effect("writing mcp does not clobber the provider field in config.json", () =>
+    Effect.gen(function* () {
+      const { mcp, providers } = yield* services;
+      yield* providers.save([{ id: "openai", enabled: true }]);
+      yield* mcp.create(stdioServer); // rewrites config.json
+
+      const list = yield* providers.list();
+      assert.equal(list.length, 1);
+      assert.equal(list[0]?.id, "openai");
+    }),
+  );
 });

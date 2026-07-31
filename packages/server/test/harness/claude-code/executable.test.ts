@@ -1,5 +1,8 @@
+import assert from "node:assert/strict";
+
+import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 
 import {
   type AvailabilityDeps,
@@ -118,66 +121,81 @@ describe("checkClaudeAvailability (version floor)", () => {
 
   /** The check reads the platform only through the resolver; a bare fake will do. */
   const check = (overrides: AvailabilityDeps = {}, ...installed: ReadonlyArray<string>) =>
-    Effect.runPromise(
-      checkClaudeAvailability(availDeps(overrides)).pipe(
-        Effect.provide(fakeExecutables(...installed)),
-      ),
+    checkClaudeAvailability(availDeps(overrides)).pipe(
+      Effect.provide(fakeExecutables(...installed)),
     );
 
   /** Unconditional reason extractor so assertions never sit behind an `if`. */
   const reasonOf = (result: AvailabilityResult): string => (result.available ? "" : result.reason);
 
-  it("is available when the CLI matches the floor", async () => {
-    expect(await check()).toEqual({ available: true });
-  });
+  it.effect("is available when the CLI matches the floor", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* check(), { available: true });
+    }),
+  );
 
-  it("is available when the CLI is newer than the floor", async () => {
-    expect(await check({ readVersion: async () => "2.1.218 (Claude Code)" })).toEqual({
-      available: true,
-    });
-  });
+  it.effect("is available when the CLI is newer than the floor", () =>
+    Effect.gen(function* () {
+      const result = yield* check({ readVersion: async () => "2.1.218 (Claude Code)" });
+      assert.deepEqual(result, { available: true });
+    }),
+  );
 
-  it("is unavailable with an actionable reason when the CLI is too old", async () => {
-    const result = await check({ readVersion: async () => "2.1.215 (Claude Code)" });
-    expect(result.available).toBe(false);
-    expect(reasonOf(result)).toMatch(/2\.1\.215 is too old/);
-    expect(reasonOf(result)).toMatch(/2\.1\.216 or newer/);
-    expect(reasonOf(result)).toContain("claude.com/claude-code");
-  });
+  it.effect("is unavailable with an actionable reason when the CLI is too old", () =>
+    Effect.gen(function* () {
+      const result = yield* check({ readVersion: async () => "2.1.215 (Claude Code)" });
+      assert.equal(result.available, false);
+      assert.match(reasonOf(result), /2\.1\.215 is too old/);
+      assert.match(reasonOf(result), /2\.1\.216 or newer/);
+      assert.ok(reasonOf(result).includes("claude.com/claude-code"));
+    }),
+  );
 
-  it("compares numerically, not lexically (2.1.9 < 2.1.216)", async () => {
-    const result = await check({ readVersion: async () => "2.1.9 (Claude Code)" });
-    expect(result.available).toBe(false);
-  });
+  it.effect("compares numerically, not lexically (2.1.9 < 2.1.216)", () =>
+    Effect.gen(function* () {
+      const result = yield* check({ readVersion: async () => "2.1.9 (Claude Code)" });
+      assert.equal(result.available, false);
+    }),
+  );
 
-  it("fails OPEN when the version cannot be read", async () => {
-    const result = await check({
-      readVersion: async () => {
-        throw new Error("spawn failed");
-      },
-    });
-    expect(result).toEqual({ available: true });
-  });
+  it.effect("fails OPEN when the version cannot be read", () =>
+    Effect.gen(function* () {
+      const result = yield* check({
+        readVersion: async () => {
+          throw new Error("spawn failed");
+        },
+      });
+      assert.deepEqual(result, { available: true });
+    }),
+  );
 
-  it("fails OPEN when the version string is unparseable", async () => {
-    expect(await check({ readVersion: async () => "unknown build" })).toEqual({ available: true });
-  });
+  it.effect("fails OPEN when the version string is unparseable", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* check({ readVersion: async () => "unknown build" }), {
+        available: true,
+      });
+    }),
+  );
 
-  it("fails OPEN when the floor itself cannot be read", async () => {
-    const result = await check({
-      requiredVersion: () => Effect.fail(new Error("manifest missing claudeCodeVersion")),
-      readVersion: async () => "1.0.0 (Claude Code)",
-    });
-    expect(result).toEqual({ available: true });
-  });
+  it.effect("fails OPEN when the floor itself cannot be read", () =>
+    Effect.gen(function* () {
+      const result = yield* check({
+        requiredVersion: () => Effect.fail(new Error("manifest missing claudeCodeVersion")),
+        readVersion: async () => "1.0.0 (Claude Code)",
+      });
+      assert.deepEqual(result, { available: true });
+    }),
+  );
 
-  it("is unavailable with the resolve error when no binary is found", async () => {
-    const result = await check({
-      env: { PATH: "/usr/bin" },
-      home: "/home/din",
-      bundled: () => undefined,
-    });
-    expect(result.available).toBe(false);
-    expect(reasonOf(result)).toMatch(/Claude Code was not found/);
-  });
+  it.effect("is unavailable with the resolve error when no binary is found", () =>
+    Effect.gen(function* () {
+      const result = yield* check({
+        env: { PATH: "/usr/bin" },
+        home: "/home/din",
+        bundled: () => undefined,
+      });
+      assert.equal(result.available, false);
+      assert.match(reasonOf(result), /Claude Code was not found/);
+    }),
+  );
 });

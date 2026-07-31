@@ -1,9 +1,7 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import assert from "node:assert/strict";
 
-import { Effect, Layer } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { layer } from "@effect/vitest";
+import { Context, Effect, FileSystem, Layer } from "effect";
 
 import {
   layerPaths,
@@ -14,13 +12,6 @@ import {
 } from "../src/index";
 import { NodePlatformLayer } from "./platform";
 
-const makeLayer = (home: string) =>
-  ProviderServiceLayer.pipe(
-    Layer.provide(ProviderRepositoryLayer),
-    Layer.provide(layerPaths(home)),
-    Layer.provide(NodePlatformLayer),
-  );
-
 const openai: ProviderConfig = {
   id: "openai",
   enabled: true,
@@ -28,42 +19,44 @@ const openai: ProviderConfig = {
   models: [{ id: "gpt-5" }, { id: "gpt-5-mini" }],
 };
 
-describe("ProviderService", () => {
-  let home: string;
-  beforeEach(async () => {
-    home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-prov-"));
-  });
-  afterEach(async () => {
-    await fs.rm(home, { recursive: true, force: true });
-  });
-
-  const run = <A, E>(program: Effect.Effect<A, E, ProviderService>) =>
-    Effect.runPromise(Effect.provide(program, makeLayer(home)));
-
-  it("configures (upsert) and lists providers", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const svc = yield* ProviderService;
-        yield* svc.configure(openai);
-        yield* svc.configure({ ...openai, apiKey: "sk-updated" });
-        return yield* svc.list();
-      }),
+layer(NodePlatformLayer)("ProviderService", (it) => {
+  /**
+   * A service over its own `$VIBEST_HOME`. Built inside the test, so each one
+   * gets a fresh instance and a fresh temp dir, and the test's scope removes
+   * both — no `beforeEach`, no mutable `home` for a wrapper to close over.
+   */
+  const providers = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-prov-" });
+    const context = yield* Layer.build(
+      ProviderServiceLayer.pipe(
+        Layer.provide(ProviderRepositoryLayer),
+        Layer.provide(layerPaths(home)),
+        Layer.provide(NodePlatformLayer),
+      ),
     );
-    expect(result).toHaveLength(1);
-    expect(result[0]?.apiKey).toBe("sk-updated");
+    return Context.get(context, ProviderService);
   });
 
-  it("lists models across / within providers", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const svc = yield* ProviderService;
-        yield* svc.configure(openai);
-        const all = yield* svc.listModels();
-        const scoped = yield* svc.listModels("openai");
-        return { all: all.length, scoped: scoped.length };
-      }),
-    );
-    expect(result.all).toBe(2);
-    expect(result.scoped).toBe(2);
-  });
+  it.effect("configures (upsert) and lists providers", () =>
+    Effect.gen(function* () {
+      const svc = yield* providers;
+      yield* svc.configure(openai);
+      yield* svc.configure({ ...openai, apiKey: "sk-updated" });
+
+      const list = yield* svc.list();
+      assert.equal(list.length, 1);
+      assert.equal(list[0]?.apiKey, "sk-updated");
+    }),
+  );
+
+  it.effect("lists models across / within providers", () =>
+    Effect.gen(function* () {
+      const svc = yield* providers;
+      yield* svc.configure(openai);
+
+      assert.equal((yield* svc.listModels()).length, 2);
+      assert.equal((yield* svc.listModels("openai")).length, 2);
+    }),
+  );
 });
