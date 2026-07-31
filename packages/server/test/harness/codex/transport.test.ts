@@ -57,7 +57,7 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
     Effect.gen(function* () {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
 
-      assert.deepStrictEqual(yield* transport.request("echo", { answer: 42 }), {
+      assert.deepEqual(yield* transport.request("echo", { answer: 42 }), {
         answer: 42,
       });
 

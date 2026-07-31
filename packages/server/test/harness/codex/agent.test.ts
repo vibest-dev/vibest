@@ -190,7 +190,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "text-end", "finish"],
       );
@@ -414,7 +414,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const events = yield* Fiber.join(collected);
 
       assert.equal(receipt.turnId, "turn_1");
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(events, (event) => event.body.type),
         [
           "session.turn.started",
@@ -464,7 +464,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const prompt = yield* agent.session.prompt({ sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(chunks, (chunk) => chunk.type),
         ["start", "text-start", "text-delta", "error"],
       );

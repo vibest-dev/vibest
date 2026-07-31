@@ -1,6 +1,6 @@
-import { describe, expect, it } from "@effect/vitest";
 import { AgentRequestSchema, AgentResponseSchema } from "@vibest/contract";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 const decodeAgentRequest = Schema.decodeUnknownSync(AgentRequestSchema);
 const decodeAgentResponse = Schema.decodeUnknownSync(AgentResponseSchema);

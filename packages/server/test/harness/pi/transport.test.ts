@@ -51,7 +51,7 @@ layer(NodeServices.layer)("PiTransport", (it) => {
     Effect.gen(function* () {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
 
-      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "s1",
       });
 
@@ -69,7 +69,7 @@ layer(NodeServices.layer)("PiTransport", (it) => {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
       // The banner and setStatus arrive before this response; neither must
       // fail the frame reader nor surface as an event or a blocking request.
-      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "s1",
       });
     }),
@@ -141,7 +141,7 @@ rl.on("line", (line) => {
       );
       fs.chmodSync(file, 0o755);
       const transport = yield* makePiTransport({ executablePath: file, sessionId: "sid-42" });
-      assert.deepStrictEqual(yield* transport.command({ type: "get_state" }), {
+      assert.deepEqual(yield* transport.command({ type: "get_state" }), {
         sessionId: "sid-42",
       });
     }),

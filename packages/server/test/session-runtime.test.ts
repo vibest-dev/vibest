@@ -75,7 +75,7 @@ it.effect("start is idempotent for a live runtime and stamps contiguous seqs", (
       assert.equal(snapshot.status.phase, "idle");
       // The finished turn's buffer is retained, marked complete, for recovery.
       assert.equal(snapshot.activeTurn?.complete, true);
-      assert.deepStrictEqual(
+      assert.deepEqual(
         snapshot.activeTurn?.chunks.map((chunk) => chunk.seq),
         [2],
       );
@@ -119,7 +119,7 @@ it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
       // empty buffer proves it was not appended anywhere.
       assert.equal(snapshot.cursor, 3);
       assert.equal(snapshot.activeTurn?.turnId, "turn-2");
-      assert.deepStrictEqual(snapshot.activeTurn?.chunks, []);
+      assert.deepEqual(snapshot.activeTurn?.chunks, []);
     }),
   ),
 );

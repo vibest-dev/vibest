@@ -1,8 +1,8 @@
-import { describe, expect, it } from "@effect/vitest";
 import { eventIterator, oc } from "@orpc/contract";
 import { toStandardSchema } from "@vibest/contract";
 import { tool } from "ai";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 const GreetingInput = Schema.Struct({

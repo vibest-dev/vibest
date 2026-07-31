@@ -1,6 +1,6 @@
-import { describe, expect, it } from "@effect/vitest";
 import { TokenUsageSchema, TurnErrorSchema } from "@vibest/contract";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
 import { defineEvent } from "../../../src/harness/events/framework";
 

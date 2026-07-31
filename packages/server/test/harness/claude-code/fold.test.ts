@@ -57,7 +57,7 @@ describe("foldToUIMessages", () => {
         (candidate) => (candidate as { type: string }).type === "tool-Read",
       ) as { output?: unknown } | undefined;
       assert.ok(part);
-      assert.deepStrictEqual(part.output, {
+      assert.deepEqual(part.output, {
         type: "text",
         file: { filePath: "/a", content: "hi" },
       });

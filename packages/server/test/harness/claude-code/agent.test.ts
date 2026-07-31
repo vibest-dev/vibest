@@ -140,13 +140,13 @@ describe("ClaudeCodeAgent", () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
       assert.equal(lastOptions().sessionId, sessionId);
-      assert.deepStrictEqual(yield* agent.session.getSupportedCommands(sessionId), [
+      assert.deepEqual(yield* agent.session.getSupportedCommands(sessionId), [
         { name: "read", description: "Read files", argumentHint: "<file>" },
       ]);
-      assert.deepStrictEqual(yield* agent.session.getSupportedModels(sessionId), [
+      assert.deepEqual(yield* agent.session.getSupportedModels(sessionId), [
         { value: "sonnet", displayName: "Sonnet", description: "Fast" },
       ]);
-      assert.deepStrictEqual(yield* agent.session.getMcpServers(sessionId), [
+      assert.deepEqual(yield* agent.session.getMcpServers(sessionId), [
         { name: "filesystem", status: "connected" },
       ]);
       yield* agent.session.abort(sessionId);
@@ -170,11 +170,11 @@ describe("ClaudeCodeAgent", () => {
       });
       const output = yield* Stream.runCollect(prompt.output);
 
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(output, (message) => message.type),
         ["system", "result"],
       );
-      assert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+      assert.deepEqual(queryInstance.setModel.mock.calls, [["opus"]]);
     }),
   );
 
@@ -233,11 +233,11 @@ describe("ClaudeCodeAgent", () => {
       const events = yield* Fiber.join(collected);
 
       assert.equal(typeof receipt.turnId, "string");
-      assert.deepStrictEqual(
+      assert.deepEqual(
         Array.from(events, (event) => event.body.type),
         ["session.turn.started", "start", "finish", "session.turn.ended"],
       );
-      assert.deepStrictEqual(queryInstance.setModel.mock.calls, [["opus"]]);
+      assert.deepEqual(queryInstance.setModel.mock.calls, [["opus"]]);
       yield* session.close;
     }),
   );
@@ -349,7 +349,7 @@ describe("ClaudeCodeAgent", () => {
       yield* Fiber.join(requestFiber);
       yield* agent.session.abort(sessionId);
 
-      assert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+      assert.deepEqual(yield* Effect.tryPromise(() => permission), {
         behavior: "deny",
         message: "Request aborted due to session termination",
         interrupt: true,
@@ -389,7 +389,7 @@ describe("ClaudeCodeAgent", () => {
         });
       }
 
-      assert.deepStrictEqual(yield* Effect.tryPromise(() => permission), {
+      assert.deepEqual(yield* Effect.tryPromise(() => permission), {
         behavior: "allow",
         updatedInput: { command: "pwd" },
       });
