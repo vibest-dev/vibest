@@ -15,6 +15,15 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@vibest/ui/components/empty";
+import { FolderPlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -239,11 +248,22 @@ function DraftRoute() {
   // rather than showing a composer that can't submit.
   if (projects.data.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
-        <p className="text-muted-foreground text-sm">Import a project to start a session.</p>
-        <Button onClick={() => setImportOpen(true)} size="sm">
-          Import project
-        </Button>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FolderPlusIcon aria-hidden="true" />
+          </EmptyMedia>
+          <EmptyTitle>
+            <h1>Import your first project</h1>
+          </EmptyTitle>
+          <EmptyDescription>
+            Choose a local folder for your coding agent to work in. You can start a chat right after
+            importing.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button onClick={() => setImportOpen(true)}>Import project</Button>
+        </EmptyContent>
         {importOpen && (
           <ImportProjectDialog
             // The first project is the only one there is — land on a composer
@@ -254,7 +274,7 @@ function DraftRoute() {
             }
           />
         )}
-      </div>
+      </Empty>
     );
   }
 
