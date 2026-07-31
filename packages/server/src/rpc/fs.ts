@@ -9,6 +9,7 @@ import { FileSystem } from "effect/FileSystem";
 
 import { FileSystemService } from "../fs";
 import type { RpcContext } from "./context";
+import { translateErrors } from "./error-translation";
 
 const orpc = implement(fsContract).$context<RpcContext>();
 
@@ -20,19 +21,17 @@ export const fsRouter = orpc.router({
     const fs = yield* FileSystemService;
     // Map the service's typed effect errors onto the contract's declared errors,
     // so the client gets a code + data instead of a generic 500.
-    return yield* fs.readFileString(input.cwd, input.path).pipe(
-      Effect.catchTags({
-        WorkspacePathEscape: (e) =>
-          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
-        WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
-        WorkspaceFileTooLarge: (e) =>
-          Effect.fail(
-            errors.FILE_TOO_LARGE({ data: { path: e.path, size: e.size, limit: e.limit } }),
-          ),
-        WorkspaceBinaryFile: (e) => Effect.fail(errors.BINARY_FILE({ data: { path: e.path } })),
-        WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
-      }),
-    );
+    return yield* translateErrors(fs.readFileString(input.cwd, input.path), {
+      WorkspacePathEscape: (e) =>
+        Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+      WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
+      WorkspaceFileTooLarge: (e) =>
+        Effect.fail(
+          errors.FILE_TOO_LARGE({ data: { path: e.path, size: e.size, limit: e.limit } }),
+        ),
+      WorkspaceBinaryFile: (e) => Effect.fail(errors.BINARY_FILE({ data: { path: e.path } })),
+      WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+    });
   }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;

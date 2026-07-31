@@ -177,4 +177,47 @@ describe("session router", () => {
       await dispose();
     }
   });
+
+  it("maps typed service failures onto declared protocol error codes", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ghost = {
+        projectId: project.id,
+        harnessAgentId: "codex",
+        sessionId: "missing",
+      } as const;
+
+      // Repository SessionNotFound (metadata gone) → NOT_FOUND.
+      await expect(
+        client.session.prompt({ ref: ghost, parts: [{ type: "text", text: "hi" }] }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+      // No live runtime for the ref → SESSION_NOT_ACTIVE.
+      await expect(client.session.getStatus({ ref: ghost })).rejects.toMatchObject({
+        code: "SESSION_NOT_ACTIVE",
+      });
+
+      // Unknown project (well-formed id, no record) → NOT_FOUND.
+      await expect(
+        client.session.create({
+          projectId: "00000000-0000-4000-8000-000000000000",
+          harnessAgentId: "codex",
+        }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+      // A ref whose harnessAgentId disagrees with the stored record is a
+      // client bug → INVALID_ARGUMENT.
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+      await expect(
+        client.session.prompt({
+          ref: { ...ref, harnessAgentId: "pi" },
+          parts: [{ type: "text", text: "hi" }],
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+      await client.session.close({ ref });
+    } finally {
+      await dispose();
+    }
+  });
 });

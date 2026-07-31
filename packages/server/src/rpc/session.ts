@@ -7,6 +7,15 @@ import { EventBus } from "../events";
 import { HarnessAgentSessionService } from "../harness";
 import { ProjectService } from "../project";
 import type { RpcContext } from "./context";
+import {
+  activeSessionTranslation,
+  agentAvailabilityTranslation,
+  internalWithMessage,
+  projectRefTranslation,
+  resumeInternalTranslation,
+  sessionRefTranslation,
+  translateErrors,
+} from "./error-translation";
 import { openScopedSubscription } from "./session-stream";
 import { streamToAsyncGenerator } from "./stream";
 
@@ -16,9 +25,11 @@ const orpc = implement(sessionContract).$context<RpcContext>();
 // workspace path (the one thing the session service must never do itself) and
 // mapping typed effect errors onto the contract's declared codes — clients
 // branch on the code, never on the message. Everything else is a one-liner
-// onto the HarnessAgentSessionService façade. Unmapped errors (store I/O)
-// intentionally surface as INTERNAL. Only `subscribe` reaches the EventBus
-// directly — it is the event plane, distinct from the session control plane.
+// onto the HarnessAgentSessionService façade. Every operation's translation
+// table is exhaustive over its error channel (`translateErrors`): store I/O
+// stays `"internal"` by decision, never by omission. Only `subscribe` reaches
+// the EventBus directly — it is the event plane, distinct from the session
+// control plane.
 export const sessionRouter = orpc.router({
   // lifecycle -----------------------------------------------------------------
   create: orpc.create.effect(function* ({ input, errors }) {
@@ -43,105 +54,72 @@ export const sessionRouter = orpc.router({
         }),
       );
     }
-    return yield* projects.findById(input.projectId).pipe(
-      Effect.flatMap((project) =>
-        sessions.create(input.projectId, input.harnessAgentId, project.path, {
-          ...(input.modelId !== undefined ? { model: input.modelId } : {}),
-          ...(input.reasoningEffort !== undefined
-            ? { reasoningEffort: input.reasoningEffort }
-            : {}),
-          ...(input.permissionMode !== undefined ? { permissionMode: input.permissionMode } : {}),
-        }),
+    return yield* translateErrors(
+      projects.findById(input.projectId).pipe(
+        Effect.flatMap((project) =>
+          sessions.create(input.projectId, input.harnessAgentId, project.path, {
+            ...(input.modelId !== undefined ? { model: input.modelId } : {}),
+            ...(input.reasoningEffort !== undefined
+              ? { reasoningEffort: input.reasoningEffort }
+              : {}),
+            ...(input.permissionMode !== undefined ? { permissionMode: input.permissionMode } : {}),
+          }),
+        ),
       ),
-      Effect.catchTags({
-        ProjectNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
-        HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        AgentUnavailable: (e) =>
-          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
-        ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
+      {
+        ...projectRefTranslation(errors),
+        ...agentAvailabilityTranslation(errors),
         PermissionModeUnsupported: (e) =>
           Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
-        AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
+        AgentOpenError: internalWithMessage(errors),
+        StoreReadError: "internal",
+        StoreWriteError: "internal",
+      },
     );
   }),
   resume: orpc.resume.effect(function* ({ input, errors }) {
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
-    return yield* projects.findById(input.ref.projectId).pipe(
-      Effect.flatMap((project) => sessions.resume(input.ref, project.path)),
-      Effect.as(input.ref),
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        ProjectNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
-        HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        AgentUnavailable: (e) =>
-          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
-        ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        HarnessSessionNotFound: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-        SessionNotResumable: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-        AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
+    return yield* translateErrors(
+      projects.findById(input.ref.projectId).pipe(
+        Effect.flatMap((project) => sessions.resume(input.ref, project.path)),
+        Effect.as(input.ref),
+      ),
+      {
+        ...projectRefTranslation(errors),
+        ...sessionRefTranslation(errors),
+        ...agentAvailabilityTranslation(errors),
+        ...resumeInternalTranslation(errors),
+      },
     );
   }),
   close: orpc.close.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.close(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-      }),
-    );
+    yield* translateErrors(sessions.close(input.ref), sessionRefTranslation(errors));
   }),
 
   // history / index -----------------------------------------------------------
   list: orpc.list.effect(function* ({ input, errors }) {
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
-    return yield* projects.findById(input.projectId).pipe(
-      Effect.andThen(sessions.list(input.projectId)),
-      Effect.catchTags({
-        ProjectNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
-      }),
+    return yield* translateErrors(
+      projects.findById(input.projectId).pipe(Effect.andThen(sessions.list(input.projectId))),
+      {
+        ...projectRefTranslation(errors),
+        StoreReadError: "internal",
+      },
     );
   }),
   rename: orpc.rename.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.rename(input.ref, input.name).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-      }),
-    );
+    yield* translateErrors(sessions.rename(input.ref, input.name), sessionRefTranslation(errors));
   }),
   delete: orpc.delete.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.delete(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-      }),
-    );
+    yield* translateErrors(sessions.delete(input.ref), {
+      ...sessionRefTranslation(errors),
+      StoreWriteError: "internal",
+    });
   }),
   getMessages: orpc.getMessages.effect(function* ({ input, errors }) {
     // Scope gate: only pi serves native history today (tickets 10/11 widen
@@ -156,91 +134,52 @@ export const sessionRouter = orpc.router({
     }
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
-    return yield* projects.findById(input.ref.projectId).pipe(
-      Effect.flatMap((project) => sessions.getMessages(input.ref, project.path)),
-      Effect.map((messages) => ({ messages })),
-      Effect.catchTags({
-        ProjectNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        AgentUnavailable: (e) =>
-          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
-        ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
+    return yield* translateErrors(
+      projects.findById(input.ref.projectId).pipe(
+        Effect.flatMap((project) => sessions.getMessages(input.ref, project.path)),
+        Effect.map((messages) => ({ messages })),
+      ),
+      {
+        ...projectRefTranslation(errors),
+        ...sessionRefTranslation(errors),
+        ...agentAvailabilityTranslation(errors),
+        ...resumeInternalTranslation(errors),
         CapabilityUnsupported: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        HarnessSessionNotFound: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-        SessionNotResumable: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-        AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
+        AgentOperationError: internalWithMessage(errors),
+      },
     );
   }),
   resolveRef: orpc.resolveRef.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.resolveRef(input.sessionId).pipe(
-      Effect.catchTags({
-        SessionRefNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-      }),
-    );
+    return yield* translateErrors(sessions.resolveRef(input.sessionId), {
+      SessionRefNotFound: (e) =>
+        Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+      StoreReadError: "internal",
+    });
   }),
 
   // active instance -----------------------------------------------------------
   prompt: orpc.prompt.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.prompt(input).pipe(
-      Effect.catchTags({
-        // The repository's SessionNotFound means the metadata is gone →
-        // NOT_FOUND; the harness's HarnessSessionNotFound means the native
-        // session is not open → SESSION_NOT_ACTIVE.
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        UnsupportedPromptPart: (e) =>
-          Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
-        SessionClosed: (e) =>
-          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        TurnAlreadyRunning: (e) =>
-          Effect.fail(
-            errors.CONFLICT({ message: `a turn is already running in session ${e.sessionId}` }),
-          ),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
-    );
+    return yield* translateErrors(sessions.prompt(input), {
+      ...sessionRefTranslation(errors),
+      ...activeSessionTranslation(errors),
+      UnsupportedPromptPart: (e) =>
+        Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
+      TurnAlreadyRunning: (e) =>
+        Effect.fail(
+          errors.CONFLICT({ message: `a turn is already running in session ${e.sessionId}` }),
+        ),
+    });
   }),
   interrupt: orpc.interrupt.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.interrupt(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        SessionClosed: (e) =>
-          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
-    );
+    yield* translateErrors(sessions.interrupt(input.ref), {
+      ...sessionRefTranslation(errors),
+      ...activeSessionTranslation(errors),
+    });
   }),
   setModel: orpc.setModel.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
@@ -253,109 +192,60 @@ export const sessionRouter = orpc.router({
         }),
       );
     }
-    yield* sessions.setModel(input.ref, input.modelId).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        SessionClosed: (e) =>
-          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
-    );
+    yield* translateErrors(sessions.setModel(input.ref, input.modelId), {
+      ...sessionRefTranslation(errors),
+      ...activeSessionTranslation(errors),
+    });
   }),
   setReasoningEffort: orpc.setReasoningEffort.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.setReasoningEffort(input.ref, input.reasoningEffort).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        SessionClosed: (e) =>
-          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
-    );
+    yield* translateErrors(sessions.setReasoningEffort(input.ref, input.reasoningEffort), {
+      ...sessionRefTranslation(errors),
+      ...activeSessionTranslation(errors),
+    });
   }),
   setPermissionMode: orpc.setPermissionMode.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.setPermissionMode(input.ref, input.permissionMode).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
-        // Our closed vocabulary, but outside this harness's declared subset —
-        // a client bug (the subset is fully known client-side), never ignored.
-        PermissionModeUnsupported: (e) =>
-          Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
-        SessionClosed: (e) =>
-          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
-    );
+    yield* translateErrors(sessions.setPermissionMode(input.ref, input.permissionMode), {
+      ...sessionRefTranslation(errors),
+      ...activeSessionTranslation(errors),
+      // Our closed vocabulary, but outside this harness's declared subset —
+      // a client bug (the subset is fully known client-side), never ignored.
+      PermissionModeUnsupported: (e) =>
+        Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
+    });
   }),
   respondToAgentRequest: orpc.respondToAgentRequest.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.respondToAgentRequest(input.ref, input.requestId, input.response).pipe(
-      Effect.catchTags({
-        SessionNotFound: (e) =>
-          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+    // No SessionClosed here: responding to a request of a session that closed
+    // meanwhile surfaces as the request itself being gone.
+    yield* translateErrors(
+      sessions.respondToAgentRequest(input.ref, input.requestId, input.response),
+      {
+        ...sessionRefTranslation(errors),
         HarnessSessionNotFound: (e) =>
           Effect.fail(
             errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
           ),
-        SessionRefMismatch: (e) =>
-          Effect.fail(
-            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
-          ),
         AgentRequestUnavailable: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `request ${e.requestId} is not pending` })),
-        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-      }),
+        AgentOperationError: internalWithMessage(errors),
+      },
     );
   }),
   getStatus: orpc.getStatus.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getStatus(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotActive: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-      }),
-    );
+    return yield* translateErrors(sessions.getStatus(input.ref), {
+      SessionNotActive: (e) =>
+        Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` })),
+    });
   }),
   getSnapshot: orpc.getSnapshot.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getSnapshot(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotActive: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-      }),
-    );
+    return yield* translateErrors(sessions.getSnapshot(input.ref), {
+      SessionNotActive: (e) =>
+        Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` })),
+    });
   }),
 
   // events --------------------------------------------------------------------

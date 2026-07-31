@@ -4,6 +4,7 @@ import { harnessContract } from "@vibest/contract/harness";
 
 import { HarnessListService, HarnessProbeService } from "../harness";
 import type { RpcContext } from "./context";
+import { translateErrors } from "./error-translation";
 
 const orpc = implement(harnessContract).$context<RpcContext>();
 
@@ -18,10 +19,11 @@ export const harnessRouter = orpc.router({
   // Probed data, per directory: costs a CLI spawn, so caching, in-flight
   // de-duplication and the timeout all live in the service — this route is just
   // the wire. A failed probe fails the call; collapsing it into an empty result
-  // would cache "no models" over what is actually "login expired".
+  // would cache "no models" over what is actually "login expired". The contract
+  // declares no error vocabulary, so the failure stays internal by decision.
   probe: orpc.probe.effect(function* ({ input }) {
     const probe = yield* HarnessProbeService;
-    return yield* probe.probe(input);
+    return yield* translateErrors(probe.probe(input), { CapabilityProbeFailed: "internal" });
   }),
 });
 
