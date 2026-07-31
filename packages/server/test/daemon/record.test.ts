@@ -1,8 +1,9 @@
-import fs from "node:fs";
-import os from "node:os";
+import assert from "node:assert/strict";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { layer } from "@effect/vitest";
+import { Effect, FileSystem } from "effect";
 
 import {
   type DaemonRecord,
@@ -11,7 +12,6 @@ import {
   removeRecord,
   writeRecord,
 } from "../../src/daemon/record";
-import { runNode } from "../platform";
 
 const record: DaemonRecord = {
   pid: 4321,
@@ -20,49 +20,69 @@ const record: DaemonRecord = {
   startedAt: 1_700_000_000_000,
 };
 
-describe("daemon record", () => {
-  let home: string;
+layer(NodeServices.layer)("daemon record", (it) => {
+  // `it.effect` bodies are scoped, so the temp home is removed when the test
+  // ends however it ends — no afterEach.
+  const tempHome = FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "vibest-daemon-" })),
+  );
 
-  beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-"));
-  });
-  afterEach(() => {
-    fs.rmSync(home, { recursive: true, force: true });
-  });
+  it.effect("round-trips through daemon.pid", () =>
+    Effect.gen(function* () {
+      const home = yield* tempHome;
+      yield* writeRecord(home, record);
+      assert.deepEqual(yield* readRecord(home), record);
+    }),
+  );
 
-  it("round-trips through daemon.pid", async () => {
-    await runNode(writeRecord(home, record));
-    expect(await runNode(readRecord(home))).toEqual(record);
-  });
-
-  it("writes daemon.pid at the expected path", async () => {
-    await runNode(writeRecord(home, record));
-    expect(recordPath(home)).toBe(path.join(home, "daemon.pid"));
-  });
+  it.effect("writes daemon.pid at the expected path", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
+      yield* writeRecord(home, record);
+      assert.equal(recordPath(home), path.join(home, "daemon.pid"));
+      assert.ok(yield* fs.exists(recordPath(home)));
+    }),
+  );
 
   // Windows does not honor unix perms; the token is only a secret on posix.
-  it.skipIf(process.platform === "win32")("writes daemon.pid with 0600 perms", async () => {
-    await runNode(writeRecord(home, record));
-    expect(fs.statSync(path.join(home, "daemon.pid")).mode & 0o777).toBe(0o600);
-  });
+  it.effect.skipIf(process.platform === "win32")("writes daemon.pid with 0600 perms", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
+      yield* writeRecord(home, record);
+      const info = yield* fs.stat(recordPath(home));
+      assert.equal((info.mode ?? 0) & 0o777, 0o600);
+    }),
+  );
 
-  it("returns undefined when the record is missing", async () => {
-    expect(await runNode(readRecord(home))).toBeUndefined();
-  });
+  it.effect("returns undefined when the record is missing", () =>
+    Effect.gen(function* () {
+      const home = yield* tempHome;
+      assert.equal(yield* readRecord(home), undefined);
+    }),
+  );
 
-  it("returns undefined for a garbage or incomplete record", async () => {
-    const file = path.join(home, "daemon.pid");
-    fs.writeFileSync(file, "not json");
-    expect(await runNode(readRecord(home))).toBeUndefined();
+  it.effect("returns undefined for a garbage or incomplete record", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
 
-    fs.writeFileSync(file, JSON.stringify({ pid: 1 }));
-    expect(await runNode(readRecord(home))).toBeUndefined();
-  });
+      yield* fs.writeFileString(recordPath(home), "not json");
+      assert.equal(yield* readRecord(home), undefined);
 
-  it("removeRecord is a no-op when the file is already gone", async () => {
-    await expect(runNode(removeRecord(home))).resolves.toBeUndefined();
-    await runNode(writeRecord(home, record));
-    await runNode(removeRecord(home));
-    expect(await runNode(readRecord(home))).toBeUndefined();
-  });
+      yield* fs.writeFileString(recordPath(home), JSON.stringify({ pid: 1 }));
+      assert.equal(yield* readRecord(home), undefined);
+    }),
+  );
+
+  it.effect("removeRecord is a no-op when the file is already gone", () =>
+    Effect.gen(function* () {
+      const home = yield* tempHome;
+      yield* removeRecord(home);
+      yield* writeRecord(home, record);
+      yield* removeRecord(home);
+      assert.equal(yield* readRecord(home), undefined);
+    }),
+  );
 });

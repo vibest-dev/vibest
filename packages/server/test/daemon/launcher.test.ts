@@ -1,11 +1,10 @@
+import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import url from "node:url";
 
-import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { layer } from "@effect/vitest";
+import { Effect, FileSystem } from "effect";
 
 import { DaemonStoppedError } from "../../src/daemon/errors";
 import {
@@ -16,7 +15,6 @@ import {
 } from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
 import { readRecord, writeRecord } from "../../src/daemon/record";
-import { runNode } from "../platform";
 
 const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
 
@@ -26,120 +24,154 @@ const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", impo
 const serverArgv = [process.execPath, FAKE_SERVER];
 
 const resolve = (options: Omit<ResolveDaemonOptions, "serverArgv">) =>
-  runNode(resolveOrSpawnDaemon({ serverArgv, ...options }));
+  resolveOrSpawnDaemon({ serverArgv, ...options });
 
-describe("resolveOrSpawnDaemon", () => {
-  let home: string;
+// `excludeTestServices` because the launcher polls a real daemon's health on a
+// real clock: under the default TestClock its retry schedule never advances.
+// The timeout covers a spawn + readiness handshake, not a unit assertion.
+layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
+  "resolveOrSpawnDaemon",
+  (it) => {
+    /**
+     * A temp `$VIBEST_HOME` bound to the test's scope. Finalizers run LIFO, so
+     * the daemon is stopped before the directory holding its record goes away —
+     * and both happen however the test ends, which is what the old
+     * `afterEach` could only do on the happy path.
+     */
+    const tempHome = Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-daemon-" });
+      yield* Effect.addFinalizer(() => Effect.ignore(stopDaemon(home)));
+      return home;
+    });
 
-  beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-"));
-  });
-  afterEach(async () => {
-    await runNode(stopDaemon(home));
-    fs.rmSync(home, { recursive: true, force: true });
-  });
+    it.effect("spawns a daemon, records it, then attaches on the next call", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const spawned = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(spawned.reused, false);
+        assert.match(spawned.address, /^http:\/\/127\.0\.0\.1:\d+$/);
+        assert.ok(pidAlive(spawned.pid));
 
-  it("spawns a daemon, records it, then attaches on the next call", async () => {
-    const spawned = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    expect(spawned.reused).toBe(false);
-    expect(spawned.address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    expect(pidAlive(spawned.pid)).toBe(true);
+        const record = yield* readRecord(home);
+        assert.equal(record?.pid, spawned.pid);
+        assert.equal(record?.address, spawned.address);
+        assert.equal(record?.token, spawned.token);
 
-    const record = await runNode(readRecord(home));
-    expect(record?.pid).toBe(spawned.pid);
-    expect(record?.address).toBe(spawned.address);
-    expect(record?.token).toBe(spawned.token);
-
-    const attached = await resolve({ home, port: 0 });
-    expect(attached.reused).toBe(true);
-    expect(attached.pid).toBe(spawned.pid);
-    expect(attached.address).toBe(spawned.address);
-  });
-
-  it("reports status and stops the daemon", async () => {
-    const spawned = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-
-    const running = await runNode(statusDaemon(home));
-    expect(running.running).toBe(true);
-    expect(running.record?.pid).toBe(spawned.pid);
-
-    expect(await runNode(stopDaemon(home))).toBe("stopped");
-    expect(pidAlive(spawned.pid)).toBe(false);
-    expect(await runNode(readRecord(home))).toBeUndefined();
-    expect((await runNode(statusDaemon(home))).running).toBe(false);
-  });
-
-  it("respawns when the recorded daemon is dead", async () => {
-    const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    await runNode(stopDaemon(home));
-    expect(pidAlive(first.pid)).toBe(false);
-
-    const second = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    expect(second.reused).toBe(false);
-    expect(second.pid).not.toBe(first.pid);
-    expect(pidAlive(second.pid)).toBe(true);
-  });
-
-  it("reports not-running when stopping with no daemon", async () => {
-    expect(await runNode(stopDaemon(home))).toBe("not-running");
-  });
-
-  it("respawns after a crash that left the record behind", async () => {
-    const first = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-
-    // Simulate a crash: kill the process without stopDaemon, so the stale
-    // record (pid dead) stays and must be replaced, not attached to.
-    process.kill(first.pid, "SIGKILL");
-    while (pidAlive(first.pid)) await new Promise((done) => setTimeout(done, 20));
-
-    const second = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    expect(second.reused).toBe(false);
-    expect(second.pid).not.toBe(first.pid);
-    expect(pidAlive(second.pid)).toBe(true);
-  });
-
-  it("kills a wedged daemon (pid alive, health failing) before respawning", async () => {
-    // A live process that is not a server: pid answers signals, health fails.
-    const wedged = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
-    const wedgedPid = wedged.pid!;
-    await runNode(
-      writeRecord(home, {
-        pid: wedgedPid,
-        address: "http://127.0.0.1:1",
-        token: "stale",
-        startedAt: 0,
+        const attached = yield* resolve({ home, port: 0 });
+        assert.equal(attached.reused, true);
+        assert.equal(attached.pid, spawned.pid);
+        assert.equal(attached.address, spawned.address);
       }),
     );
 
-    const handle = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    expect(handle.reused).toBe(false);
-    expect(pidAlive(wedgedPid)).toBe(false);
-    expect(handle.pid).not.toBe(wedgedPid);
-  });
+    it.effect("reports status and stops the daemon", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const spawned = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
 
-  it("refuses to auto-respawn a daemon the user explicitly stopped", async () => {
-    await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    await runNode(stopDaemon(home));
+        const running = yield* statusDaemon(home);
+        assert.equal(running.running, true);
+        assert.equal(running.record?.pid, spawned.pid);
 
-    const error = await runNode(
-      Effect.flip(resolveOrSpawnDaemon({ home, serverArgv, port: 0, autoRespawn: true })),
+        assert.equal(yield* stopDaemon(home), "stopped");
+        assert.equal(pidAlive(spawned.pid), false);
+        assert.equal(yield* readRecord(home), undefined);
+        assert.equal((yield* statusDaemon(home)).running, false);
+      }),
     );
-    expect(error).toBeInstanceOf(DaemonStoppedError);
 
-    // An explicit start clears the tombstone; auto-respawn works again after.
-    const restarted = await resolve({ home, port: 0, readyTimeoutMs: 15_000 });
-    expect(restarted.reused).toBe(false);
-    const attached = await resolve({ home, port: 0, autoRespawn: true });
-    expect(attached.pid).toBe(restarted.pid);
-  });
+    it.effect("respawns when the recorded daemon is dead", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const first = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        yield* stopDaemon(home);
+        assert.equal(pidAlive(first.pid), false);
 
-  it("serializes concurrent launchers onto a single daemon", async () => {
-    const [a, b] = await Promise.all([
-      resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
-      resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
-    ]);
-    expect(a.pid).toBe(b.pid);
-    expect(a.address).toBe(b.address);
-    expect([a.reused, b.reused].filter((reused) => !reused)).toHaveLength(1);
-  });
-});
+        const second = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(second.reused, false);
+        assert.notEqual(second.pid, first.pid);
+        assert.ok(pidAlive(second.pid));
+      }),
+    );
+
+    it.effect("reports not-running when stopping with no daemon", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        assert.equal(yield* stopDaemon(home), "not-running");
+      }),
+    );
+
+    it.effect("respawns after a crash that left the record behind", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const first = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+
+        // Simulate a crash: kill the process without stopDaemon, so the stale
+        // record (pid dead) stays and must be replaced, not attached to.
+        process.kill(first.pid, "SIGKILL");
+        yield* Effect.sleep("20 millis").pipe(Effect.repeat({ while: () => pidAlive(first.pid) }));
+
+        const second = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(second.reused, false);
+        assert.notEqual(second.pid, first.pid);
+        assert.ok(pidAlive(second.pid));
+      }),
+    );
+
+    it.effect("kills a wedged daemon (pid alive, health failing) before respawning", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        // A live process that is not a server: pid answers signals, health fails.
+        // Deliberately not `ChildProcessSpawner` — the launcher killing it is the
+        // assertion, so it must not be tied to the test's scope.
+        const wedged = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+        const wedgedPid = wedged.pid!;
+        yield* writeRecord(home, {
+          pid: wedgedPid,
+          address: "http://127.0.0.1:1",
+          token: "stale",
+          startedAt: 0,
+        });
+
+        const handle = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(handle.reused, false);
+        assert.equal(pidAlive(wedgedPid), false);
+        assert.notEqual(handle.pid, wedgedPid);
+      }),
+    );
+
+    it.effect("refuses to auto-respawn a daemon the user explicitly stopped", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        yield* stopDaemon(home);
+
+        const error = yield* Effect.flip(resolve({ home, port: 0, autoRespawn: true }));
+        assert.ok(error instanceof DaemonStoppedError);
+
+        // An explicit start clears the tombstone; auto-respawn works again after.
+        const restarted = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(restarted.reused, false);
+        const attached = yield* resolve({ home, port: 0, autoRespawn: true });
+        assert.equal(attached.pid, restarted.pid);
+      }),
+    );
+
+    it.effect("serializes concurrent launchers onto a single daemon", () =>
+      Effect.gen(function* () {
+        const home = yield* tempHome;
+        const [a, b] = yield* Effect.all(
+          [
+            resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
+            resolve({ home, port: 0, readyTimeoutMs: 15_000 }),
+          ],
+          { concurrency: 2 },
+        );
+        assert.equal(a.pid, b.pid);
+        assert.equal(a.address, b.address);
+        assert.equal([a.reused, b.reused].filter((reused) => !reused).length, 1);
+      }),
+    );
+  },
+);
