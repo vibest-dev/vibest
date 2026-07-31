@@ -44,6 +44,6 @@
     ".conductor",
     "**/dist/**",
     "**/node_modules/**",
-    "packages/harness/src/codex/protocol/**"
+    "packages/contract/src/codex/protocol/**"
   ]
 }

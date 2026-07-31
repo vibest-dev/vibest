@@ -26,17 +26,19 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@earendil-works/pi-coding-agent": "0.80.7",
     "@effect/platform-node": "catalog:",
     "@orpc/experimental-effect": "catalog:orpc",
     "@orpc/server": "catalog:orpc",
     "@vibest/contract": "workspace:*",
     "@vibest/effect-json-store": "workspace:*",
-    "@vibest/harness": "workspace:*",
+    "ai": "catalog:",
     "effect": "catalog:",
     "simple-git": "catalog:",
     "sirv": "^3.0.2",
     "uuid": "catalog:",
-    "ws": "catalog:"
+    "ws": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

@@ -1,4 +1,4 @@
-import type { ReadUIToolInvocation } from "@vibest/harness/claude-code";
+import type { ReadUIToolInvocation } from "@vibest/contract/claude-code";
 import { CodeBlock, CodeBlockCopyButton } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { FileTextIcon } from "lucide-react";

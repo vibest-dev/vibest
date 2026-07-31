@@ -1,14 +1,14 @@
+import { Deferred, type Duration, Effect, Queue, Ref, Stream, type Scope } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+
+import { AgentProcessExited, PiRpcError, PiTransportError } from "../errors";
 import {
   isBlockingUiRequest,
   type AgentSessionEvent,
   type PiUiRequest,
   type RpcCommand,
   type RpcExtensionUIResponse,
-} from "@vibest/harness/pi/protocol";
-import { Deferred, type Duration, Effect, Queue, Ref, Stream, type Scope } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-
-import { AgentProcessExited, PiRpcError, PiTransportError } from "../errors";
+} from "./protocol";
 
 const DEFAULT_QUEUE_CAPACITY = 256;
 const DEFAULT_FORCE_KILL_AFTER = "2 seconds";

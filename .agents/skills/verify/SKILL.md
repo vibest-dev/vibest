@@ -9,7 +9,7 @@ description: Build/launch/drive recipe for verifying vibest web changes at runti
 
 ```bash
 # Start the dev server (run_in_background) — no prebuild needed:
-# @vibest/harness exports src/*.ts directly and tsx resolves it.
+# workspace packages export src/*.ts directly and tsx resolves them.
 # Pin the port so the URL is deterministic (dev otherwise picks a random one):
 cd packages/vibest && VIBEST_PORT=4000 pnpm dev
 ```

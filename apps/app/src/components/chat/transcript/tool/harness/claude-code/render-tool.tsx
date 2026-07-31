@@ -1,4 +1,4 @@
-import type { ClaudeCodeTools } from "@vibest/harness/claude-code";
+import type { ClaudeCodeTools } from "@vibest/contract/claude-code";
 import type { DynamicToolUIPart, ToolUIPart, UIDataTypes, UIMessage } from "ai";
 import type { ReactNode } from "react";
 

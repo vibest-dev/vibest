@@ -1,5 +1,5 @@
 import type { PermissionMode, ReasoningEffort } from "@vibest/contract";
-import type { AgentResponse, HarnessAgentId, SessionEnvelopeDraft } from "@vibest/harness";
+import type { AgentResponse, HarnessAgentId } from "@vibest/contract";
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect";
 
 import type {
@@ -25,6 +25,7 @@ import {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "./errors";
+import type { SessionEnvelopeDraft } from "./events/framework";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
 import type { CreateManagedSessionResult, ResumeManagedSessionInput } from "./session-io";

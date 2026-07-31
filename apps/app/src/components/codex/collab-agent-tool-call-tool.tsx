@@ -1,4 +1,4 @@
-import type { CollabAgentToolCallUIToolInvocation } from "@vibest/harness/codex";
+import type { CollabAgentToolCallUIToolInvocation } from "@vibest/contract/codex";
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { UsersIcon } from "lucide-react";

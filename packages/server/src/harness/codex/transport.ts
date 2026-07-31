@@ -1,4 +1,4 @@
-import type { ServerNotification, ServerRequest } from "@vibest/harness/codex/protocol";
+import type { ServerNotification, ServerRequest } from "@vibest/contract/codex/protocol";
 import { Deferred, type Duration, Effect, Queue, Ref, Schema, Stream, type Scope } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 

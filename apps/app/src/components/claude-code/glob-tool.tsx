@@ -1,4 +1,4 @@
-import type { GlobUIToolInvocation } from "@vibest/harness/claude-code";
+import type { GlobUIToolInvocation } from "@vibest/contract/claude-code";
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { FolderSearchIcon } from "lucide-react";

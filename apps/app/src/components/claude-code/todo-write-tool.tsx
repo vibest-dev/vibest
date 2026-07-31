@@ -1,4 +1,4 @@
-import type { TodoWriteUIToolInvocation } from "@vibest/harness/claude-code";
+import type { TodoWriteUIToolInvocation } from "@vibest/contract/claude-code";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { cn } from "@vibest/ui/lib/utils";
 import {

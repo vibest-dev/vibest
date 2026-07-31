@@ -10,7 +10,11 @@
     "./harness": "./src/harness.ts",
     "./project": "./src/project.ts",
     "./session": "./src/session.ts",
-    "./session-events": "./src/session-events.ts"
+    "./session-events": "./src/session-events.ts",
+    "./claude-code": "./src/claude-code/index.ts",
+    "./codex": "./src/codex/index.ts",
+    "./codex/protocol": "./src/codex/protocol/index.ts",
+    "./codex/protocol/v2": "./src/codex/protocol/v2/index.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -19,11 +23,14 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@orpc/contract": "catalog:orpc",
     "ai": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@vibest/typescript": "workspace:*",
     "typescript": "^7.0.2",
     "vitest": "catalog:"

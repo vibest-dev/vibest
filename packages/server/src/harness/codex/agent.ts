@@ -1,18 +1,6 @@
-import type { AgentRequest, AgentResponse } from "@vibest/harness";
-import {
-  approvalSourceOf,
-  buildApprovalRequest,
-  buildUserInputRequest,
-  declineResult,
-  emptyUserInputResponse,
-  isApprovalRequest,
-  isUserInputRequest,
-  mapApprovalResponse,
-  mapUserInputResponse,
-} from "@vibest/harness/codex";
-import { createCodexTransform } from "@vibest/harness/codex";
-import type { CodexUIMessageChunk } from "@vibest/harness/codex";
-import type { ServerNotification, ServerRequest } from "@vibest/harness/codex/protocol";
+import type { AgentRequest, AgentResponse } from "@vibest/contract";
+import type { CodexUIMessageChunk } from "@vibest/contract/codex";
+import type { ServerNotification, ServerRequest } from "@vibest/contract/codex/protocol";
 import type {
   AskForApproval,
   Model,
@@ -24,7 +12,7 @@ import type {
   TurnStartResponse,
   TurnSteerResponse,
   UserInput,
-} from "@vibest/harness/codex/protocol/v2";
+} from "@vibest/contract/codex/protocol/v2";
 import { Deferred, Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -37,6 +25,18 @@ import {
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import {
+  approvalSourceOf,
+  buildApprovalRequest,
+  buildUserInputRequest,
+  declineResult,
+  emptyUserInputResponse,
+  isApprovalRequest,
+  isUserInputRequest,
+  mapApprovalResponse,
+  mapUserInputResponse,
+} from "./request";
+import { createCodexTransform } from "./transform";
 import { makeCodexTransport, type CodexTransport, type CodexTransportFailure } from "./transport";
 import { makeCodexTransportHolder } from "./transport-holder";
 

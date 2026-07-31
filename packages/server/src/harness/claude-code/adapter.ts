@@ -1,10 +1,7 @@
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import type { PermissionMode } from "@vibest/contract";
-import type { SessionEvent } from "@vibest/harness";
-import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft } from "@vibest/harness";
-import type { AgentRequest, AgentResponse } from "@vibest/harness";
-import { toSessionEvent } from "@vibest/harness/claude-code";
-import { createTransform } from "@vibest/harness/claude-code";
+import type { AgentRequest, AgentResponse } from "@vibest/contract";
+import type { ClaudeCodeUIMessageChunk } from "@vibest/contract/claude-code";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -25,9 +22,12 @@ import {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
+import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { streamFromQueueOne } from "../queue-stream";
 import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
 import { checkClaudeAvailability } from "./executable";
+import { toSessionEvent } from "./to-session-event";
+import { createTransform } from "./transform";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 

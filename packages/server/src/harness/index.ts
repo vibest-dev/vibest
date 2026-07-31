@@ -4,7 +4,8 @@ export {
   type SessionEnvelopeBody,
   type SessionEnvelopeDraft,
   type SessionEvent,
-} from "@vibest/harness";
+} from "./events/framework";
+export * from "./event-manifest";
 export * from "./adapter";
 export * from "./errors";
 export * from "./executable";

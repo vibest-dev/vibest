@@ -8,7 +8,6 @@ import type {
   SessionCapabilities,
 } from "@vibest/contract";
 import { InspectorTargetSchema, SessionCapabilitiesSchema } from "@vibest/contract";
-import type { SessionEnvelopeDraft } from "@vibest/harness";
 import { Effect, type Scope, type Stream } from "effect";
 
 import { AgentOpenError } from "./errors";
@@ -23,6 +22,7 @@ import type {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "./errors";
+import type { SessionEnvelopeDraft } from "./events/framework";
 import {
   CreateSessionInputSchema,
   PromptReceiptSchema,

@@ -1,8 +1,0 @@
-{
-  "extends": "@vibest/typescript/base.json",
-  "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "Bundler"
-  },
-  "include": ["src", "test"]
-}

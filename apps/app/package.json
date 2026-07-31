@@ -30,7 +30,6 @@
     "@tiptap/react": "catalog:tiptap",
     "@vibest/client": "workspace:*",
     "@vibest/contract": "workspace:*",
-    "@vibest/harness": "workspace:*",
     "@vibest/ui": "workspace:*",
     "ai": "catalog:",
     "lucide-react": "catalog:",

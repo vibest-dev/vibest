@@ -1,4 +1,4 @@
-import type { WebSearchUIToolInvocation } from "@vibest/harness/codex";
+import type { WebSearchUIToolInvocation } from "@vibest/contract/codex";
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { SearchIcon } from "lucide-react";

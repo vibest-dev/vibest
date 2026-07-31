@@ -1,8 +1,7 @@
 import type { InputModality, PermissionMode, ModelInfo, ReasoningEffort } from "@vibest/contract";
 import { InputModalitySchema, ReasoningEffortSchema } from "@vibest/contract";
-import type { SessionEvent } from "@vibest/harness";
-import type { CodexUIMessageChunk, SessionEnvelopeDraft } from "@vibest/harness";
-import type { AskForApproval, Model, SandboxPolicy } from "@vibest/harness/codex/protocol/v2";
+import type { CodexUIMessageChunk } from "@vibest/contract/codex";
+import type { AskForApproval, Model, SandboxPolicy } from "@vibest/contract/codex/protocol/v2";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -23,6 +22,7 @@ import {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
+import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { CodexAgent } from "./agent";

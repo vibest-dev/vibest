@@ -1,6 +1,3 @@
-import type { SessionEvent } from "@vibest/harness";
-import type { SessionEnvelopeDraft } from "@vibest/harness";
-import type { PiUIMessageChunk } from "@vibest/harness/pi";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -18,9 +15,11 @@ import {
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
+import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
+import type { PiUIMessageChunk } from "./ui-message";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 

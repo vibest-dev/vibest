@@ -1,8 +1,4 @@
-import type { AgentRequest, AgentResponse } from "@vibest/harness";
-import { buildUiRequest, declineUiResponse, mapUiResponse } from "@vibest/harness/pi";
-import { createPiTransform } from "@vibest/harness/pi";
-import type { PiUIMessageChunk } from "@vibest/harness/pi";
-import type { RpcExtensionUIResponse, RpcSessionState } from "@vibest/harness/pi/protocol";
+import type { AgentRequest, AgentResponse } from "@vibest/contract";
 import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -16,7 +12,11 @@ import {
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import type { RpcExtensionUIResponse, RpcSessionState } from "./protocol";
+import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
+import { createPiTransform } from "./transform";
 import { makePiTransport, type PiTransport, type PiTransportFailure } from "./transport";
+import type { PiUIMessageChunk } from "./ui-message";
 
 // Pi facade: one `pi --mode rpc` child per session (pi's RPC mode hosts a
 // single session), unlike codex's shared app-server with thread demuxing.

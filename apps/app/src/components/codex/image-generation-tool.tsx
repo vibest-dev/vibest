@@ -1,4 +1,4 @@
-import type { ImageGenerationUIToolInvocation } from "@vibest/harness/codex";
+import type { ImageGenerationUIToolInvocation } from "@vibest/contract/codex";
 import { CodeBlock } from "@vibest/ui/ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
 import { ImageIcon } from "lucide-react";

@@ -1,4 +1,4 @@
-import { codexTools, type CodexTools } from "@vibest/harness/codex";
+import { codexTools, type CodexTools } from "@vibest/contract/codex";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 

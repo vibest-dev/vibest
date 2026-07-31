@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
-import type { ClaudeCodeUIMessageChunk, SessionEnvelopeDraft, SessionEvent } from "@vibest/harness";
+import type { ClaudeCodeUIMessageChunk } from "@vibest/contract/claude-code";
 import { Deferred, Effect, Exit, Fiber, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -12,6 +12,7 @@ import type {
   UserInput,
 } from "../../src/harness/adapter";
 import { AgentOperationError } from "../../src/harness/errors";
+import type { SessionEnvelopeDraft, SessionEvent } from "../../src/harness/events/framework";
 import { streamFromQueueOne } from "../../src/harness/queue-stream";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 import { makeHarnessAgentSessionService } from "../../src/harness/session-service";

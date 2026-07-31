@@ -36,7 +36,7 @@ export type HarnessRespondError =
 
 /**
  * The single seam onto the HarnessAgent we depend on. `SessionService` talks
- * only to this port, never to `@vibest/harness` directly, so the orchestration
+ * only to this port, never to the harness adapters directly, so the orchestration
  * (projectId resolution, id translation, metadata, runtime fan-out) can be
  * built and tested against a fake. The port speaks the agent-native session id
  * and a resolved `cwd` only — it never sees a projectId or a server

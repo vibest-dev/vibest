@@ -1,7 +1,7 @@
-import { HarnessAgentIdSchema } from "@vibest/harness";
+import { HarnessAgentIdSchema } from "@vibest/contract";
 import { Schema } from "effect";
 
-export { ClaudeSdkError } from "@vibest/harness/claude-code";
+export { ClaudeSdkError } from "./claude-code/errors";
 
 export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNotFound>()(
   "HarnessAgentNotFound",
