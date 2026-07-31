@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { writeFileAtomic } from "@vibest/effect-json-store";
 import { Effect, FileSystem, type PlatformError } from "effect";
 
 /**
@@ -52,25 +53,18 @@ export const readRecord = (
   });
 
 /**
- * Atomically write the record with `0600` perms (token is a secret): write a
- * sibling temp file, chmod, then rename over the target so a concurrent reader
- * never sees a half-written file.
+ * Atomically write the record with `0600` perms (token is a secret). The
+ * shared writer renames a sibling temp file over the target so a concurrent
+ * reader never sees a half-written file, and removes the temp file when the
+ * write fails or is interrupted.
  */
 export const writeRecord = (
   home: string,
   record: DaemonRecord,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(home, { recursive: true });
-    const target = recordPath(home);
-    const tmp = `${target}.${process.pid}.tmp`;
-    yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
-    // `mode` only applies when the write creates the file, so a leftover temp
-    // from a crashed launcher would otherwise keep its old perms.
-    yield* fs.chmod(tmp, 0o600);
-    yield* fs.rename(tmp, target);
-  });
+  FileSystem.FileSystem.use((fs) =>
+    writeFileAtomic(fs, recordPath(home), JSON.stringify(record), { mode: 0o600 }),
+  );
 
 /** Remove the record; a missing file is not an error. */
 export const removeRecord = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>

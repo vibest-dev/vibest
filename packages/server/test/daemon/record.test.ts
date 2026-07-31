@@ -3,7 +3,7 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, PlatformError } from "effect";
 
 import {
   type DaemonRecord,
@@ -73,6 +73,34 @@ layer(NodeServices.layer)("daemon record", (it) => {
 
       yield* fs.writeFileString(recordPath(home), JSON.stringify({ pid: 1 }));
       assert.equal(yield* readRecord(home), undefined);
+    }),
+  );
+
+  it.effect("a failed rename keeps the old record and leaves no temp file", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
+      yield* writeRecord(home, record);
+      const original = yield* fs.readFileString(recordPath(home));
+      const failingRename: FileSystem.FileSystem = {
+        ...fs,
+        rename: () =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "rename",
+            }),
+          ),
+      };
+      const error = yield* Effect.flip(
+        writeRecord(home, { ...record, pid: 9999 }).pipe(
+          Effect.provideService(FileSystem.FileSystem, failingRename),
+        ),
+      );
+      assert.equal(error.reason._tag, "PermissionDenied");
+      assert.equal(yield* fs.readFileString(recordPath(home)), original);
+      assert.deepEqual(yield* fs.readDirectory(home), ["daemon.pid"]);
     }),
   );
 
