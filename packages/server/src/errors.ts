@@ -6,10 +6,6 @@ export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{
   readonly projectId: string;
 }> {}
 
-export class McpServerNotFound extends Data.TaggedError("McpServerNotFound")<{
-  readonly serverId: string;
-}> {}
-
 export class StoreReadError extends Data.TaggedError("StoreReadError")<{
   readonly file: string;
   readonly cause: unknown;

@@ -11,7 +11,6 @@
 | `apps/app`          | `@vibest/app`                | The SPA — **also a library**: Desktop mounts `PlatformProvider` + `AppInterface` from the root export only.                                                                                                                                                       |
 | `apps/desktop`      | `desktop` (unscoped)         | Electron shell supervising a forked server over MessagePort oRPC.                                                                                                                                                                                                 |
 | `packages/vibest`   | `@vibest/cli` (bin `vibest`) | Thin CLI over `@vibest/server/{daemon,http}`.                                                                                                                                                                                                                     |
-| `packages/services` | `@vibest/services`           | Dormant, zero consumers. Live git code is `packages/server/src/git/service.ts`.                                                                                                                                                                                   |
 
 ## Boundaries
 

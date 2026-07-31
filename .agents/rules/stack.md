@@ -64,11 +64,11 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
   / `NodePath.layer` / `NodeCrypto.layer` appear.
 - **A service shape stays `R`-free.** Bind the platform once while building the
   Layer — `const platform = yield* Effect.context<FileSystem | Crypto>()` — and
-  `Effect.provide(platform)` each method. `infra/json-store.ts` plus the four
+  `Effect.provide(platform)` each method. The `project` and `session`
   repositories are the pattern to copy.
-- **Platform failures get mapped at the seam,** not propagated raw: the store's
-  `StoreReadError` / `StoreWriteError` wrap them, and "file isn't there" is
-  `error.reason._tag === "NotFound"` (`isNotFound`), never an errno string.
+- **Platform failures get mapped at the seam,** not propagated raw: the
+  repositories' `StoreReadError` / `StoreWriteError` wrap them, and "file isn't
+  there" is `error.reason._tag === "NotFound"`, never an errno string.
 - **One gap to route around.** `FileSystem.access` has no `X_OK` — test
   executability with `stat` + `(info.mode & 0o111) !== 0`, as both executable
   resolvers do.

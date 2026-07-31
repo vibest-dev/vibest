@@ -7,15 +7,13 @@ import { Context, Layer } from "effect";
  * Resolved filesystem locations the runtime persists to. Injected as a service
  * so tests can point it at a temp dir instead of `~/.vibest`.
  *
- * - `projects.json` lives under `storage/` (a data collection)
- * - `config.json` lives directly under the home root (single config file)
+ * `projects.json` lives under `storage/` (a data collection).
  */
 export class Paths extends Context.Service<
   Paths,
   {
     readonly home: string;
     readonly projectsFile: string;
-    readonly configFile: string;
     /** `storage/sessions/` — one `<projectId>/` subdir per project. */
     readonly sessionsDir: string;
   }
@@ -24,7 +22,6 @@ export class Paths extends Context.Service<
 const resolve = (home: string) => ({
   home,
   projectsFile: path.join(home, "storage", "projects.json"),
-  configFile: path.join(home, "config.json"),
   sessionsDir: path.join(home, "storage", "sessions"),
 });
 
