@@ -113,7 +113,9 @@ export const makeFileCodec = (
       const toVersion = fromVersion + 1;
       const next = versionSchema(toVersion);
       if (next === undefined) {
-        return yield* Effect.die(new Error(`missing schema for v${toVersion}`));
+        return yield* Effect.die(
+          new Error(`invariant: missing schema for v${toVersion} while migrating ${file}`),
+        );
       }
       const output = yield* Effect.try({
         try: () => step.migrate(input),
@@ -179,13 +181,19 @@ export const makeFileCodec = (
         );
         value = yield* migrateStep(file, legacy, legacyValue, 0);
       } else {
-        return yield* Effect.die(new Error("unreachable: none implies legacy"));
+        return yield* Effect.die(
+          new Error(
+            `invariant: ${file} missed the envelope decode with no legacy schema configured`,
+          ),
+        );
       }
 
       for (let from = Math.max(version, 1); from < latestVersion; from++) {
         const step = migrations[from - 1];
         if (step === undefined) {
-          return yield* Effect.die(new Error(`missing migration for v${from}`));
+          return yield* Effect.die(
+            new Error(`invariant: missing migration for v${from} while migrating ${file}`),
+          );
         }
         value = yield* migrateStep(file, step, value, from);
       }

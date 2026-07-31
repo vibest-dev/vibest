@@ -73,7 +73,17 @@ export const createUIHandler = (): Effect.Effect<
     // global, and `HttpStaticServer` reuses `serveFile` for the SPA fallback
     // (`HttpStaticServer.js:104`), so `immutable` would pin `index.html` too
     // and strand clients on a stale app. Per-asset headers need a wrapper.
-    const assets = yield* HttpStaticServer.make({ root: staticDir, spa: true }).pipe(Effect.orDie);
+    const assets = yield* HttpStaticServer.make({ root: staticDir, spa: true }).pipe(
+      // `resolveStaticDir` just proved `index.html` exists here, so a platform
+      // failure opening the same directory is a defect, not a served error.
+      Effect.catchTag("PlatformError", (cause) =>
+        Effect.die(
+          new Error(`invariant: static server could not open verified UI bundle at ${staticDir}`, {
+            cause,
+          }),
+        ),
+      ),
+    );
 
     // A path that matches no file is a 404; anything else went wrong on our
     // side. `RouteNotFound` covers both a missing asset and a deep link the

@@ -523,7 +523,14 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.flatMap((session) =>
           // The session is open, so its adapter is registered by construction.
           checkPermissionMode(session.harnessAgentId, permissionMode).pipe(
-            Effect.catchTag("HarnessAgentNotFound", (cause) => Effect.die(cause)),
+            Effect.catchTag("HarnessAgentNotFound", (cause) =>
+              Effect.die(
+                new Error(
+                  `invariant: open session '${session.sessionId}' has an unregistered adapter '${session.harnessAgentId}'`,
+                  { cause },
+                ),
+              ),
+            ),
             Effect.andThen(session.setPermissionMode(permissionMode)),
           ),
         ),
@@ -590,8 +597,13 @@ export const HarnessAgentSessionServiceLayer: Layer.Layer<
       repo,
       bus,
       // A platform RNG that cannot produce a uuid is a defect, not a domain
-      // failure — keep it out of the service's error channel.
-      newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
+      // failure — keep it out of the service's error channel. Tag-specific so
+      // a future recoverable error on this channel stays typed instead of dying.
+      newSessionId: crypto.randomUUIDv4.pipe(
+        Effect.catchTag("PlatformError", (cause) =>
+          Effect.die(new Error("invariant: platform RNG failed minting a session id", { cause })),
+        ),
+      ),
     });
   }),
 );
