@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import path from "node:path";
 import url from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -14,7 +15,7 @@ import {
   stopDaemon,
 } from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
-import { readRecord, writeRecord } from "../../src/daemon/record";
+import { readRecord, recordPath, writeRecord } from "../../src/daemon/record";
 
 const FAKE_SERVER = url.fileURLToPath(new URL("./fixtures/fake-server.mjs", import.meta.url));
 
@@ -47,11 +48,13 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
 
     it.effect("spawns a daemon, records it, then attaches on the next call", () =>
       Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const home = yield* tempHome;
         const spawned = yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
         assert.equal(spawned.reused, false);
         assert.match(spawned.address, /^http:\/\/127\.0\.0\.1:\d+$/);
         assert.ok(pidAlive(spawned.pid));
+        assert.ok(yield* fs.exists(path.join(home, "daemon", "daemon.log")));
 
         const record = yield* readRecord(home);
         assert.equal(record?.pid, spawned.pid);
@@ -141,11 +144,57 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
       }),
     );
 
+    it.effect("stops every process recorded during a mixed-version conflict", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const a = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+        const b = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+        const pidA = a.pid!;
+        const pidB = b.pid!;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            for (const pid of [pidA, pidB]) {
+              if (pidAlive(pid)) process.kill(pid, "SIGKILL");
+            }
+          }),
+        );
+        yield* fs.makeDirectory(path.dirname(recordPath(home)), { recursive: true });
+        yield* fs.writeFileString(
+          recordPath(home),
+          JSON.stringify({
+            pid: pidA,
+            address: "http://127.0.0.1:1",
+            token: "nested",
+            startedAt: 1,
+          }),
+          { mode: 0o600 },
+        );
+        yield* fs.writeFileString(
+          path.join(home, "daemon.pid"),
+          JSON.stringify({
+            pid: pidB,
+            address: "http://127.0.0.1:2",
+            token: "legacy",
+            startedAt: 2,
+          }),
+          { mode: 0o600 },
+        );
+
+        assert.equal(yield* stopDaemon(home), "stopped");
+        assert.equal(pidAlive(pidA), false);
+        assert.equal(pidAlive(pidB), false);
+      }),
+    );
+
     it.effect("refuses to auto-respawn a daemon the user explicitly stopped", () =>
       Effect.gen(function* () {
         const home = yield* tempHome;
+        const fs = yield* FileSystem.FileSystem;
         yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
         yield* stopDaemon(home);
+        assert.ok(yield* fs.exists(path.join(home, "daemon", "daemon.stopped")));
+        assert.ok(yield* fs.exists(path.join(home, "daemon.stopped")));
 
         const error = yield* Effect.flip(resolve({ home, port: 0, autoRespawn: true }));
         assert.ok(error instanceof DaemonStoppedError);
@@ -155,6 +204,21 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         assert.equal(restarted.reused, false);
         const attached = yield* resolve({ home, port: 0, autoRespawn: true });
         assert.equal(attached.pid, restarted.pid);
+      }),
+    );
+
+    it.effect("honors and clears a legacy root-level tombstone", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const legacyTombstone = path.join(home, "daemon.stopped");
+        yield* fs.writeFileString(legacyTombstone, "0", { mode: 0o600 });
+
+        const error = yield* Effect.flip(resolve({ home, port: 0, autoRespawn: true }));
+        assert.ok(error instanceof DaemonStoppedError);
+
+        yield* resolve({ home, port: 0, readyTimeoutMs: 15_000 });
+        assert.equal(yield* fs.exists(legacyTombstone), false);
       }),
     );
 

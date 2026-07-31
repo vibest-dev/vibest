@@ -1,14 +1,14 @@
 import childProcess from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
+import { daemonDirectory, logPath } from "./paths";
 import { reservePort } from "./port";
-import { type DaemonRecord, readRecord, removeRecord, writeRecord } from "./record";
+import { type DaemonRecord, readRecords, removeRecord, writeRecord } from "./record";
 import { clearTombstone, hasTombstone, writeTombstone } from "./tombstone";
 
 const DEFAULT_PORT = 4000;
@@ -27,7 +27,7 @@ export type DaemonHandle = {
 };
 
 export type ResolveDaemonOptions = {
-  /** `$VIBEST_HOME` — owns `daemon.pid`, `daemon.log`, and the launch lock. */
+  /** `$VIBEST_HOME` — owns storage plus lifecycle state under `daemon/`. */
   readonly home: string;
   /**
    * argv that launches the plain foreground server, e.g.
@@ -63,7 +63,7 @@ export type DaemonPlatform = FileSystem.FileSystem | Crypto.Crypto;
 
 /**
  * The shared launcher (the local twin of the SSH launch script): read
- * `daemon.pid`; if a healthy daemon is there, attach; otherwise spawn the
+ * `daemon/daemon.pid`; if a healthy daemon is there, attach; otherwise spawn the
  * foreground server detached, wait for it to answer health, and record it. Both
  * the CLI and the desktop go through here so there is exactly one daemon per
  * `$VIBEST_HOME` — concurrent launchers are serialized by an exclusive-create
@@ -81,11 +81,33 @@ export const resolveOrSpawnDaemon = (
   options: ResolveDaemonOptions,
 ): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
   Effect.gen(function* () {
-    const existing = yield* readRecord(options.home);
+    const records = yield* readRecords(options.home);
+    const healthyRecords: DaemonRecord[] = [];
+    for (const record of records) {
+      if (yield* daemonAlive(record)) healthyRecords.push(record);
+    }
 
-    if (existing && (yield* daemonAlive(existing))) {
+    if (healthyRecords.length > 1) {
+      return yield* Effect.fail(
+        new DaemonLaunchError({
+          message: `Multiple vibest daemons are running for the same home (${healthyRecords.map((record) => record.pid).join(", ")}); stop them before starting another`,
+        }),
+      );
+    }
+
+    const existing = healthyRecords[0];
+    if (existing !== undefined) {
+      if (records.length > 1) {
+        return yield* Effect.fail(
+          new DaemonLaunchError({
+            message: `Conflicting vibest daemon records exist for the same home (${records.map((record) => record.pid).join(", ")}); run \`vibest daemon stop\` before starting another`,
+          }),
+        );
+      }
       // A live daemon makes any tombstone stale (someone started it again).
       yield* clearTombstone(options.home);
+      // Do not migrate a live legacy record in place: an older launcher could
+      // race that repair. The next spawn publishes root-first to both paths.
       return attach(existing, true);
     }
 
@@ -99,11 +121,11 @@ export const resolveOrSpawnDaemon = (
     }
     yield* clearTombstone(options.home);
 
-    if (existing) {
+    if (records.length > 0) {
       // Wedged (pid alive but unhealthy) daemons must die before we replace
-      // them, or they leak as orphans still holding their port. A dead pid is
-      // a no-op here.
-      yield* killPid(existing.pid);
+      // them, or they leak as orphans still holding their port. Dead pids are
+      // no-ops here.
+      for (const record of records) yield* killPid(record.pid);
       yield* removeRecord(options.home);
     }
     return yield* spawnLocked(options);
@@ -113,14 +135,23 @@ export const resolveOrSpawnDaemon = (
 export const statusDaemon = (
   home: string,
 ): Effect.Effect<
-  { readonly running: boolean; readonly record?: DaemonRecord },
+  | { readonly running: false }
+  | { readonly running: true; readonly record: DaemonRecord }
+  | { readonly running: false; readonly conflict: ReadonlyArray<DaemonRecord> },
   never,
   FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
-    const record = yield* readRecord(home);
-    if (record && (yield* daemonAlive(record))) return { running: true, record };
-    return { running: false };
+    const records = yield* readRecords(home);
+    const healthyRecords: DaemonRecord[] = [];
+    for (const record of records) {
+      if (yield* daemonAlive(record)) healthyRecords.push(record);
+    }
+    if (healthyRecords.length > 1 || (healthyRecords.length === 1 && records.length > 1)) {
+      return { running: false, conflict: records };
+    }
+    const record = healthyRecords[0];
+    return record === undefined ? { running: false } : { running: true, record };
   });
 
 /**
@@ -133,14 +164,15 @@ export const stopDaemon = (
   home: string,
 ): Effect.Effect<"stopped" | "not-running", PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const record = yield* readRecord(home);
-    if (!record || !pidAlive(record.pid)) {
+    const records = yield* readRecords(home);
+    const running = records.filter((record) => pidAlive(record.pid));
+    if (running.length === 0) {
       yield* removeRecord(home);
       return "not-running";
     }
 
     yield* writeTombstone(home);
-    yield* killPid(record.pid);
+    for (const record of running) yield* killPid(record.pid);
     yield* removeRecord(home);
     return "stopped";
   });
@@ -170,14 +202,16 @@ const spawnLocked = (
   Effect.gen(function* () {
     const { home } = options;
     const fileSystem = yield* FileSystem.FileSystem;
-    yield* fileSystem
-      .makeDirectory(home, { recursive: true })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new DaemonLaunchError({ message: `Unable to create ${home}: ${cause.message}`, cause }),
-        ),
-      );
+    const directory = daemonDirectory(home);
+    yield* fileSystem.makeDirectory(directory, { recursive: true }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DaemonLaunchError({
+            message: `Unable to create ${directory}: ${cause.message}`,
+            cause,
+          }),
+      ),
+    );
     const timeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
 
     for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
@@ -226,8 +260,10 @@ const waitForRecord = (
   Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + timeoutMs;
     while ((yield* Clock.currentTimeMillis) < deadline) {
-      const record = yield* readRecord(home);
-      if (record && (yield* daemonAlive(record))) return record;
+      const records = yield* readRecords(home);
+      for (const record of records) {
+        if (yield* daemonAlive(record)) return record;
+      }
       if (!(yield* lockExists(home))) return undefined;
       yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
     }
@@ -263,7 +299,7 @@ const spawnDaemon = (
       signal(pid, "SIGTERM");
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${path.join(home, "daemon.log")}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${logPath(home)}`,
         }),
       );
     }
@@ -282,6 +318,7 @@ const spawnDaemon = (
             cause,
           }),
       ),
+      Effect.tapError(() => Effect.andThen(killPid(pid), removeRecord(home))),
     );
     return attach(record, false);
   });
@@ -295,7 +332,7 @@ const spawnDaemon = (
  */
 function spawnDetached(options: ResolveDaemonOptions, port: number, token: string): number {
   const { home } = options;
-  const logFd = fs.openSync(path.join(home, "daemon.log"), "a", 0o600);
+  const logFd = fs.openSync(logPath(home), "a", 0o600);
   try {
     const [command, ...args] = options.serverArgv;
     if (command === undefined) throw new Error("serverArgv must not be empty");

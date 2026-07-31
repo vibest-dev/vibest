@@ -63,7 +63,15 @@ const stopHandler = () =>
 const statusHandler = () =>
   Effect.gen(function* () {
     const status = yield* statusDaemon(resolveVibestHome());
-    if (!status.running || status.record === undefined) {
+    if ("conflict" in status) {
+      console.log(
+        `multiple vibest daemons are running for this home: ${status.conflict
+          .map((record) => `${record.address} (pid ${record.pid})`)
+          .join(", ")}`,
+      );
+      return;
+    }
+    if (!status.running) {
       console.log("vibest daemon is not running");
       return;
     }
