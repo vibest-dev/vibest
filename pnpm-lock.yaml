@@ -331,6 +331,9 @@ importers:
         specifier: 'catalog:'
         version: 6.1.2(react@19.2.7)
     devDependencies:
+      '@effect/vitest':
+        specifier: 4.0.0-beta.97
+        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@24.13.3)

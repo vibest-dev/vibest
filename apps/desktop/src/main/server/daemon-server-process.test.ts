@@ -1,11 +1,10 @@
-import fs from "node:fs";
-import os from "node:os";
+import assert from "node:assert/strict";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { layer } from "@effect/vitest";
 import { readRecord, stopDaemon } from "@vibest/server/daemon";
-import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Effect, FileSystem } from "effect";
 
 import { makeDaemonServerProcess } from "./daemon-server-process";
 import type { ServerProcessConfig } from "./local-server";
@@ -23,74 +22,78 @@ server.listen(Number(process.env.VIBEST_PORT ?? 0), "127.0.0.1");
 `;
 
 // The launcher's file state runs on the platform services; the real ones here,
-// exactly as the desktop runtime provides them.
-const run = <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));
-
-describe("DaemonServerProcess", () => {
-  let home: string;
-  let entry: string;
-
-  beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-daemon-desktop-"));
-    entry = path.join(home, "fake-server.mjs");
-    fs.writeFileSync(entry, FAKE_SERVER);
-  });
-  afterEach(async () => {
-    await run(stopDaemon(home));
-    fs.rmSync(home, { recursive: true, force: true });
-  });
-
-  const config = (): ServerProcessConfig => ({
-    entry,
-    environment: { ...process.env, VIBEST_HOME: home },
-  });
-
-  it("spawns the shared daemon and reports its endpoint, then attaches on respawn", async () => {
-    const endpoint = await run(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
-          const running = yield* spawn(config(), 0);
-          return yield* running.ready;
-        }),
-      ),
-    );
-
-    const record = await run(readRecord(home));
-    expect(record).toBeDefined();
-    // The endpoint carries the daemon's own minted token, read from the record.
-    expect(endpoint).toEqual({
-      port: Number(new URL(record!.address).port),
-      token: record!.token,
+// exactly as the desktop runtime provides them. `excludeTestServices` because
+// readiness and liveness poll on a real clock, which the default TestClock
+// never advances.
+layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
+  "DaemonServerProcess",
+  (it) => {
+    /**
+     * A temp `$VIBEST_HOME` holding the fake server's entry point. Finalizers
+     * run LIFO, so the daemon is stopped before the directory holding its
+     * record goes away — on the failure path too.
+     */
+    const workspace = Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-daemon-desktop-" });
+      const entry = path.join(home, "fake-server.mjs");
+      yield* fs.writeFileString(entry, FAKE_SERVER);
+      yield* Effect.addFinalizer(() => Effect.ignore(stopDaemon(home)));
+      const config: ServerProcessConfig = {
+        entry,
+        environment: { ...process.env, VIBEST_HOME: home },
+      };
+      return { home, config };
     });
 
-    const again = await run(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
-          const running = yield* spawn(config(), endpoint.port);
-          return yield* running.ready;
-        }),
-      ),
-    );
-    expect(again).toEqual(endpoint);
-    expect((await run(readRecord(home)))?.pid).toBe(record!.pid);
-  });
+    it.effect("spawns the shared daemon and reports its endpoint, then attaches on respawn", () =>
+      Effect.gen(function* () {
+        const { home, config } = yield* workspace;
 
-  it("resolves awaitExit when the daemon dies", async () => {
-    const exit = await run(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 50 });
-          const running = yield* spawn(config(), 0);
-          yield* running.ready;
-          yield* stopDaemon(home);
-          return yield* running.awaitExit;
-        }),
-      ),
+        const endpoint = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
+            const running = yield* spawn(config, 0);
+            return yield* running.ready;
+          }),
+        );
+
+        const record = yield* readRecord(home);
+        assert.ok(record);
+        // The endpoint carries the daemon's own minted token, read from the record.
+        assert.deepEqual(endpoint, {
+          port: Number(new URL(record.address).port),
+          token: record.token,
+        });
+
+        const again = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 100 });
+            const running = yield* spawn(config, endpoint.port);
+            return yield* running.ready;
+          }),
+        );
+        assert.deepEqual(again, endpoint);
+        assert.equal((yield* readRecord(home))?.pid, record.pid);
+      }),
     );
 
-    expect(exit).toEqual({ exitCode: null });
-  });
-});
+    it.effect("resolves awaitExit when the daemon dies", () =>
+      Effect.gen(function* () {
+        const { home, config } = yield* workspace;
+
+        const exit = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const spawn = yield* makeDaemonServerProcess({ pollIntervalMs: 50 });
+            const running = yield* spawn(config, 0);
+            yield* running.ready;
+            yield* stopDaemon(home);
+            return yield* running.awaitExit;
+          }),
+        );
+
+        assert.deepEqual(exit, { exitCode: null });
+      }),
+    );
+  },
+);
