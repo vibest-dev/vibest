@@ -105,7 +105,6 @@ already written" is not a reason to add to the list:
 | `http/server.ts`'s `upgrade` path                                         | oRPC owns that event; Effect's own websocket handler would fight it for the listener                 |
 | Call sites inside an exempt file                                          | e.g. `http/auth.ts`'s ticket `randomUUID`, called synchronously from Promise-shaped `http/server.ts` |
 | `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle      |
-| `packages/services`' terminal-manager                                     | node-pty has no Effect equivalent (and the package is dormant)                                       |
 | `node:os.homedir` (`config/paths.ts`, `rpc/fs.ts`)                        | Effect has no OS/home-directory service                                                              |
 | `node:module.createRequire` (`harness/claude-code/executable.ts`)         | no Effect equivalent                                                                                 |
 | `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no port-probe or process-signal service                                                   |
