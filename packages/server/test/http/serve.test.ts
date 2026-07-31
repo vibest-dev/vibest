@@ -1,7 +1,11 @@
-import { Option } from "effect";
+import net from "node:net";
+import type { AddressInfo } from "node:net";
+
+import { Cause, Effect, Exit, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { resolveServeConfig } from "../../src/http/serve";
+import { resolveServeConfig, runServe } from "../../src/http/serve";
+import { ServerStartupError } from "../../src/http/server";
 
 const ENV_KEYS = ["VIBEST_PORT", "VIBEST_CORS_ORIGINS", "NODE_ENV"] as const;
 
@@ -51,5 +55,26 @@ describe("resolveServeConfig", () => {
       "https://a.test",
       "https://b.test",
     ]);
+  });
+});
+
+describe("runServe", () => {
+  it("fails with a typed startup error when binding the port fails", async () => {
+    // Occupy a port so runServe's listen stage fails after the server (and its
+    // runtime) has been built; the scope then releases what was acquired.
+    const blocker = net.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+    const { port } = blocker.address() as AddressInfo;
+
+    try {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [] })),
+      );
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+      expect(error).toBeInstanceOf(ServerStartupError);
+      expect((error as ServerStartupError).phase).toBe("listen");
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
   });
 });

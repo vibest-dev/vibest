@@ -1,10 +1,14 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { Context, Effect, Scope } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
 import { createServer, type ManagedServer } from "../../src/http/server";
+import type { UIApp } from "../../src/http/ui";
+import type { RpcRuntime } from "../../src/rpc";
 
 const TOKEN = "test-token-0000";
 
@@ -169,5 +173,86 @@ describe("createServer WebSocket ticket", () => {
   it("rejects a browser Origin outside the allowlist, even in browser mode", async () => {
     const base = await start({});
     expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
+  });
+});
+
+describe("createServer staged startup", () => {
+  const ui: UIApp = Effect.succeed(HttpServerResponse.text("ok"));
+
+  /** Records its disposal so a test can assert it ran, and ran exactly once. */
+  function fakeRuntime(released: string[]): RpcRuntime {
+    return {
+      context: { "effect/context": Context.empty() } as unknown as RpcRuntime["context"],
+      run: () => Promise.reject(new Error("fake runtime cannot run effects")),
+      dispose: async () => {
+        released.push("rpcRuntime");
+      },
+    };
+  }
+
+  it("disposes the RPC runtime exactly once when UI creation fails", async () => {
+    const released: string[] = [];
+    await expect(
+      createServer(
+        {},
+        {
+          createRpcRuntime: async () => fakeRuntime(released),
+          createUI: () => Promise.reject(new Error("ui failed")),
+          createRequestHandler: () => Promise.reject(new Error("unreachable")),
+        },
+      ),
+    ).rejects.toThrow("ui failed");
+    expect(released).toEqual(["rpcRuntime"]);
+  });
+
+  it("closes the request scope and the runtime when the request handler fails", async () => {
+    const released: string[] = [];
+    await expect(
+      createServer(
+        {},
+        {
+          createRpcRuntime: async () => fakeRuntime(released),
+          createUI: async () => ui,
+          createRequestHandler: async (_runtime, _app, requestScope) => {
+            await Effect.runPromise(
+              Scope.addFinalizer(
+                requestScope,
+                Effect.sync(() => released.push("requestScope")),
+              ),
+            );
+            throw new Error("handler failed");
+          },
+        },
+      ),
+    ).rejects.toThrow("handler failed");
+    expect(released).toEqual(["requestScope", "rpcRuntime"]);
+  });
+
+  it("releases the stages in reverse acquisition order, exactly once, on dispose", async () => {
+    const released: string[] = [];
+    const managed = await createServer(
+      {},
+      {
+        createRpcRuntime: async () => fakeRuntime(released),
+        createUI: async () => ui,
+        createRequestHandler: async (_runtime, _app, requestScope) => {
+          await Effect.runPromise(
+            Scope.addFinalizer(
+              requestScope,
+              Effect.sync(() => released.push("requestScope")),
+            ),
+          );
+          return () => {};
+        },
+      },
+    );
+    await new Promise<void>((resolve) => managed.listen(0, "127.0.0.1", resolve));
+    managed.once("close", () => released.push("http"));
+
+    await managed.dispose();
+    await managed.dispose();
+
+    expect(managed.listening).toBe(false);
+    expect(released).toEqual(["http", "requestScope", "rpcRuntime"]);
   });
 });
