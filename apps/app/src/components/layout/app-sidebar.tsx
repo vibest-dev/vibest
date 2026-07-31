@@ -8,7 +8,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@vibest/ui/components/sidebar";
-import { Blocks, FolderPlus, Search, SquarePen } from "lucide-react";
+import { FolderPlus, SquarePen } from "lucide-react";
 import { useState } from "react";
 
 import { ImportProjectDialog } from "@/components/projects/import-project-dialog";
@@ -23,7 +23,6 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
       <SidebarHeader className="h-10 [-webkit-app-region:drag]" />
 
       <SidebarContent className="[-webkit-app-region:no-drag]">
-        {/* New chat and Import project are wired; the rest are placeholders. */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -37,18 +36,6 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
                 <SidebarMenuButton onClick={() => setImportOpen(true)}>
                   <FolderPlus />
                   <span>Import project</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton>
-                  <Search />
-                  <span>Search</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton>
-                  <Blocks />
-                  <span>Skills &amp; plugins</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
