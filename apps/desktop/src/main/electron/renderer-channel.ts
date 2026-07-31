@@ -1,39 +1,42 @@
-import { Context } from "effect";
-import { MessageChannelMain, type MessagePortMain, type WebContents } from "electron";
+import { Context, Effect } from "effect";
+import { MessageChannelMain, type MessagePortMain } from "electron";
 
 import { DESKTOP_PORT_CHANNEL } from "../../shared/desktop-channel";
+import type { ConnectRenderer } from "./renderer-lifecycle";
 
 export type AttachMessagePort = (port: MessagePortMain) => () => Promise<void>;
 
 export class RendererChannel extends Context.Service<
   RendererChannel,
   {
-    readonly connect: (webContents: WebContents) => () => Promise<void>;
+    readonly connect: ConnectRenderer;
   }
 >()("desktop/RendererChannel") {}
 
+// Establishing a peer is a scoped acquisition: the release awaits the oRPC
+// detach promise before closing the port, so closing the Scope observes the
+// peer's full cleanup instead of firing it off untracked.
 export function makeRendererChannel(attachPort: AttachMessagePort): RendererChannel["Service"] {
   return {
-    connect: (webContents) => {
-      const { port1, port2 } = new MessageChannelMain();
-      const detach = attachPort(port1);
-      port1.start();
-
-      try {
-        webContents.postMessage(DESKTOP_PORT_CHANNEL, undefined, [port2]);
-      } catch (error) {
-        void detach();
-        port1.close();
-        throw error;
-      }
-
-      let closed = false;
-      return async () => {
-        if (closed) return;
-        closed = true;
-        await detach();
-        port1.close();
-      };
-    },
+    connect: (webContents) =>
+      Effect.gen(function* () {
+        const peer = yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const { port1, port2 } = new MessageChannelMain();
+            const detach = attachPort(port1);
+            port1.start();
+            return { port1, port2, detach };
+          }),
+          (acquired) =>
+            Effect.promise(() => acquired.detach()).pipe(
+              Effect.ensuring(Effect.sync(() => acquired.port1.close())),
+            ),
+        );
+        // A failed handoff (e.g. destroyed webContents) fails the surrounding
+        // Scope, which runs the release above.
+        yield* Effect.try(() =>
+          webContents.postMessage(DESKTOP_PORT_CHANNEL, undefined, [peer.port2]),
+        );
+      }),
   };
 }

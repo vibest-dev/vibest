@@ -3,12 +3,13 @@ import url from "node:url";
 
 import { is } from "@electron-toolkit/utils";
 import { Context, Effect, Layer, Scope } from "effect";
-import { BrowserWindow, shell, type WebContents } from "electron";
+import { BrowserWindow, shell } from "electron";
 
 import icon from "../../../resources/icon.png?asset";
 import { DesktopConfig } from "../desktop-config";
 import { APP_ORIGIN, registerAppProtocol } from "./app-protocol";
 import { RendererChannel } from "./renderer-channel";
+import { type ConnectRenderer, makeRendererLifecycle } from "./renderer-lifecycle";
 
 export class MainWindow extends Context.Service<
   MainWindow,
@@ -20,7 +21,7 @@ export class MainWindow extends Context.Service<
 
 export type MainWindowOptions = {
   readonly devUrl: string | undefined;
-  readonly connectRenderer: (webContents: WebContents) => () => Promise<void>;
+  readonly connectRenderer: ConnectRenderer;
 };
 
 function canOpenExternal(href: string): boolean {
@@ -37,13 +38,17 @@ export function makeMainWindow(
 ): Effect.Effect<MainWindow["Service"], never, Scope.Scope> {
   return Effect.gen(function* () {
     let mainWindow: BrowserWindow | undefined;
-    let disconnectRenderer: (() => Promise<void>) | undefined;
     const isE2E = process.env["VIBEST_E2E"] === "1";
 
-    const disconnectCurrentRenderer = (): void => {
-      const disconnect = disconnectRenderer;
-      disconnectRenderer = undefined;
-      if (disconnect) void disconnect();
+    const renderer = yield* makeRendererLifecycle(options.connectRenderer);
+    // Electron event callbacks are synchronous, so lifecycle transitions run
+    // on forked fibers carrying this Layer's context (for the logger). The
+    // lifecycle serializes them internally, and the shutdown finalizer below
+    // refuses late attachments, so a straggling fiber cannot attach a peer
+    // after disposal.
+    const context = yield* Effect.context<never>();
+    const forkRendererTransition = (transition: Effect.Effect<void>): void => {
+      Effect.runFork(Effect.provideContext(transition, context));
     };
 
     const target = is.dev && options.devUrl ? options.devUrl : `${APP_ORIGIN}/`;
@@ -77,11 +82,10 @@ export function makeMainWindow(
         if (!isE2E) window.show();
       });
       window.webContents.on("did-finish-load", () => {
-        disconnectCurrentRenderer();
-        disconnectRenderer = options.connectRenderer(window.webContents);
+        forkRendererTransition(renderer.replace(window.webContents));
       });
       window.on("closed", () => {
-        disconnectCurrentRenderer();
+        forkRendererTransition(renderer.detach);
         if (mainWindow === window) mainWindow = undefined;
       });
 
@@ -107,11 +111,14 @@ export function makeMainWindow(
     };
 
     yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        disconnectCurrentRenderer();
-        mainWindow?.destroy();
-        mainWindow = undefined;
-      }),
+      renderer.shutdown.pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            mainWindow?.destroy();
+            mainWindow = undefined;
+          }),
+        ),
+      ),
     );
 
     // Detached so ensureOpen stays fire-and-forget; the load outcome is only
