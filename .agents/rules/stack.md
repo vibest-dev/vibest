@@ -91,8 +91,8 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
   `layer(..., { excludeTestServices: true })` when the code under test polls a
   real clock — the default `TestClock` never advances a retry schedule.
 - **The HTTP seam is `NodeHttpServer.makeHandler`,** not `HttpServer.serve`:
-  `serve` registers its own `upgrade` listener, and that event belongs to oRPC
-  and Vite's HMR socket. `makeHandler` yields a plain node `request` listener,
+  `serve` registers its own `upgrade` listener, and that event belongs to oRPC.
+  `makeHandler` yields a plain node `request` listener,
   so `http/app.ts` is an ordinary Effect while `http/server.ts` keeps the raw
   upgrade block.
 
@@ -102,7 +102,7 @@ already written" is not a reason to add to the list:
 | Location                                                                  | Why                                                                                                  |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `daemon/launcher.ts`'s `spawnDetached`                                    | detached + unref + stdio to a log fd is the opposite of `ChildProcessSpawner`'s supervised semantics |
-| `http/server.ts`'s `upgrade` path                                         | oRPC and Vite HMR share that event; Effect's own websocket handler would fight them for the listener |
+| `http/server.ts`'s `upgrade` path                                         | oRPC owns that event; Effect's own websocket handler would fight it for the listener                 |
 | Call sites inside an exempt file                                          | e.g. `http/auth.ts`'s ticket `randomUUID`, called synchronously from Promise-shaped `http/server.ts` |
 | `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle      |
 | `packages/services`' terminal-manager                                     | node-pty has no Effect equivalent (and the package is dormant)                                       |
