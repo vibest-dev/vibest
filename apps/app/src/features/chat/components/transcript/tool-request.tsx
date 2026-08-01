@@ -5,7 +5,7 @@ import {
   type AgentRequest,
   type AgentRequestAction,
   type AgentResponse,
-} from "@/core/chat/agent-requests";
+} from "@/features/chat/runtime/agent-requests";
 
 type ToolRequest = Extract<AgentRequest, { type: "tool" }>;
 

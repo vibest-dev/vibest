@@ -1,5 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -13,22 +11,12 @@ import {
 } from "@vibest/ui/components/sidebar";
 import { ChevronRight, FolderPlus } from "lucide-react";
 
-import { ProjectSessionsGroup } from "@/components/projects/project-sessions-group";
+import { ProjectSessionsGroup } from "@/features/projects/project-sessions-group";
+import { useProjects } from "@/features/projects/use-projects";
 
-/**
- * Every imported project, each rendering its own session list. Projects are
- * ordered oldest-first so importing one appends to the bottom instead of
- * pushing the whole tree down.
- */
+/** Every imported project, each rendering its own session list. */
 export function ProjectList({ onImport }: { onImport: () => void }) {
-  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
-
-  // The only writer is the import dialog's create mutation, which invalidates on success.
-  const projects = useQuery({
-    ...orpcQueryUtils.project.list.queryOptions(),
-    staleTime: Infinity,
-    select: (list) => Array.from(list).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-  });
+  const projects = useProjects();
 
   return (
     <Collapsible defaultOpen>

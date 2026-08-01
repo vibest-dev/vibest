@@ -1,4 +1,4 @@
-import type { AgentRequest, AgentResponse } from "@/core/chat/agent-requests";
+import type { AgentRequest, AgentResponse } from "@/features/chat/runtime/agent-requests";
 
 import { PlanRequestView } from "./plan-request";
 import { QuestionRequestView } from "./question-request";

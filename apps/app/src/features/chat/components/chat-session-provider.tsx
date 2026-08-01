@@ -2,16 +2,15 @@ import type { PermissionMode, ProviderInfo, ReasoningEffort, SessionRef } from "
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
-import { selectTurnInProgress, useChatHandle } from "@/core/chat/use-chat-handle";
-import { orderPermissionModes } from "@/core/harness/permission-modes";
+import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
 import {
   findModelInfo,
   resolveReasoningEffort,
   resolveModel,
   resolvePermissionMode,
-} from "@/core/harness/session-config";
-import { useHarnessAgent, useHarnessProbe } from "@/core/harness/use-harness";
-import { useProjectPath } from "@/core/harness/use-project-path";
+} from "@/features/chat/harness/session-config";
+import { useHarnessAgent, useHarnessProbe } from "@/features/chat/harness/use-harness";
+import { selectTurnInProgress, useChatHandle } from "@/features/chat/runtime/use-chat-handle";
 
 import { ChatSessionContext, type ChatSessionValue } from "./chat-session-context";
 
@@ -26,9 +25,12 @@ const NO_REASONING_EFFORTS: ReadonlyArray<ReasoningEffort> = [];
 // state lives in the per-Chat store, not in React — it survives unmounts.
 export function ChatSessionProvider({
   sessionRef,
+  cwd,
   children,
 }: {
   sessionRef: SessionRef;
+  /** The session's working directory — resolved by the caller, see `Chat`. */
+  cwd: string | undefined;
   children: ReactNode;
 }) {
   const chat = useChatHandle(sessionRef);
@@ -47,7 +49,10 @@ export function ChatSessionProvider({
   // What this harness offers *in this session's directory* — a project's own
   // settings can remap what a model id resolves to, so the providers have to
   // be probed per project, not once per harness.
-  const cwd = useProjectPath(sessionRef.projectId);
+  //
+  // `cwd` arrives as a prop rather than being fetched here: resolving a
+  // projectId to a path is the projects feature's job, and reaching across to
+  // it would make chat depend on a sibling feature. The route owns that join.
   const probe = useHarnessProbe(chat.harnessAgentId, cwd);
   const providers = probe.data?.providers ?? NO_PROVIDERS;
   // Each dimension resolves on its own; reasoningEffort cascades from the resolved model.

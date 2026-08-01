@@ -4,7 +4,11 @@ import { Label } from "@vibest/ui/components/label";
 import { Radio, RadioGroup } from "@vibest/ui/components/radio-group";
 import { useState } from "react";
 
-import type { AgentRequest, AgentResponse, AgentResponseAnswer } from "@/core/chat/agent-requests";
+import type {
+  AgentRequest,
+  AgentResponse,
+  AgentResponseAnswer,
+} from "@/features/chat/runtime/agent-requests";
 
 type QuestionRequest = Extract<AgentRequest, { type: "question" }>;
 

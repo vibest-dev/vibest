@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEditorState } from "@tiptap/react";
 import type { ListSessionsOutput, SessionSummary } from "@vibest/contract";
@@ -27,26 +27,31 @@ import { FolderPlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { HarnessSelect } from "@/components/chat/harness-select";
-import { ChatInput } from "@/components/chat/input/chat-input";
-import { ChatInputProvider } from "@/components/chat/input/chat-input-provider";
-import { createChatBaseExtensions } from "@/components/chat/input/extensions/chat-base-extensions";
-import { createSubmitKeymap } from "@/components/chat/input/extensions/keymaps";
-import { hasChatContent } from "@/components/chat/input/serialize";
-import { useChatInputController } from "@/components/chat/input/use-chat-input-controller";
-import { ModelSelect } from "@/components/chat/model-select";
-import { PermissionModeSelect } from "@/components/chat/permission-mode-select";
 import Loader from "@/components/loader";
-import { ImportProjectDialog } from "@/components/projects/import-project-dialog";
-import { ProjectSelect } from "@/components/projects/project-select";
-import { useChatManager } from "@/core/chat/chat-context";
-import { orderPermissionModes } from "@/core/harness/permission-modes";
+import { HarnessSelect } from "@/features/chat/components/harness-select";
+import { ChatInput } from "@/features/chat/components/input/chat-input";
+import { ChatInputProvider } from "@/features/chat/components/input/chat-input-provider";
+import { createChatBaseExtensions } from "@/features/chat/components/input/extensions/chat-base-extensions";
+import { createSubmitKeymap } from "@/features/chat/components/input/extensions/keymaps";
+import { hasChatContent } from "@/features/chat/components/input/serialize";
+import { useChatInputController } from "@/features/chat/components/input/use-chat-input-controller";
+import { ModelSelect } from "@/features/chat/components/model-select";
+import { PermissionModeSelect } from "@/features/chat/components/permission-mode-select";
+import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
 import {
   pickDefaultHarnessAgentId,
   resolveModel,
   resolvePermissionMode,
-} from "@/core/harness/session-config";
-import { useHarnessAgent, useHarnessAgents, useHarnessProbe } from "@/core/harness/use-harness";
+} from "@/features/chat/harness/session-config";
+import {
+  useHarnessAgent,
+  useHarnessAgents,
+  useHarnessProbe,
+} from "@/features/chat/harness/use-harness";
+import { useChatManager } from "@/features/chat/runtime/chat-context";
+import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
+import { ProjectSelect } from "@/features/projects/project-select";
+import { useProject, useProjects } from "@/features/projects/use-projects";
 
 // Until the user picks one. Every other config default is declared by the
 // harness itself; which harness to start from is the one thing no harness can
@@ -113,14 +118,10 @@ function DraftRoute() {
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
 
-  const projects = useQuery({
-    ...orpcQueryUtils.project.list.queryOptions(),
-    staleTime: Infinity,
-  });
-
+  const projects = useProjects();
   // Derived, never synced: a projectId the URL still carries but the server no
   // longer knows reads as "nothing selected", not as a stale selection.
-  const selected = projects.data?.find((project) => project.id === search.projectId) ?? null;
+  const selected = useProject(search.projectId) ?? null;
 
   const harnessAgents = useHarnessAgents();
   const harnessAgentId =
@@ -185,7 +186,13 @@ function DraftRoute() {
         return [...(prev ?? []), optimistic];
       });
 
-      navigate({ to: "/session/$sessionId", params: { sessionId: ref.sessionId } });
+      navigate({
+        to: "/session/$sessionId",
+        params: { sessionId: ref.sessionId },
+        // We just created the session, so the whole ref is in hand — hand it to
+        // the route rather than making it look the rest up again.
+        search: { projectId: ref.projectId, harness: ref.harnessAgentId },
+      });
     },
     onError: (error) => {
       toast.error(`Failed to start session: ${error.message}`);

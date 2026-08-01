@@ -11,8 +11,8 @@ import {
 import { Blocks, Search, SquarePen } from "lucide-react";
 import { useState } from "react";
 
-import { ImportProjectDialog } from "@/components/projects/import-project-dialog";
-import { ProjectList } from "@/components/projects/project-list";
+import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
+import { ProjectList } from "@/features/projects/project-list";
 
 export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   const [importOpen, setImportOpen] = useState(false);

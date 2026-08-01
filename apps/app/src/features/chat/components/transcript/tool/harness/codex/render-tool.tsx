@@ -2,12 +2,12 @@ import { codexTools, type CodexTools } from "@vibest/contract/codex";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 
-import { CodexCollabAgentToolCallTool } from "@/components/codex/collab-agent-tool-call-tool";
-import { CodexCommandExecutionTool } from "@/components/codex/command-execution-tool";
-import { CodexFileChangeTool } from "@/components/codex/file-change-tool";
-import { CodexImageGenerationTool } from "@/components/codex/image-generation-tool";
-import { CodexImageViewTool } from "@/components/codex/image-view-tool";
-import { CodexWebSearchTool } from "@/components/codex/web-search-tool";
+import { CodexCollabAgentToolCallTool } from "@/features/chat/codex/collab-agent-tool-call-tool";
+import { CodexCommandExecutionTool } from "@/features/chat/codex/command-execution-tool";
+import { CodexFileChangeTool } from "@/features/chat/codex/file-change-tool";
+import { CodexImageGenerationTool } from "@/features/chat/codex/image-generation-tool";
+import { CodexImageViewTool } from "@/features/chat/codex/image-view-tool";
+import { CodexWebSearchTool } from "@/features/chat/codex/web-search-tool";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 

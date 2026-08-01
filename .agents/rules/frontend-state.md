@@ -15,6 +15,35 @@ into `useState`. An effect the rules genuinely misread — an editor's lifetime,
 say — gets an `eslint-disable-next-line` on the line the rule anchors to (the
 `setState` call, not always the `useEffect`) plus a sentence saying why.
 
+## Where a file goes
+
+`apps/app/src/features/<feature>/` holds everything one feature needs —
+components, hooks, and its own non-React runtime alike. `features/chat/` is the
+shape to copy: `components/` for its UI, `runtime/` for the Chat/ChatManager
+machinery, `harness/` for the pure config resolvers, `claude-code/` + `codex/`
+for per-agent tool rendering.
+
+- **Features never import each other.** `@/features/a/…` inside `features/b/`
+  is the one import this app forbids; `grep -rn 'from "@/features/' features`
+  should never show a name crossing to a different one. When two features have
+  to meet, the need travels up as a prop: the session route resolves `cwd`
+  through `useProject` and hands it to `Chat`, rather than chat reaching into
+  projects.
+- **Only composition roots may combine features**: `routes/`,
+  `app-interface.tsx`, and the app shell in `components/layout/`. Those four
+  files are the whole allow-list today.
+- **`components/` is for what no single feature owns** — the shell
+  (`layout/`) and generic pieces (`loader.tsx`). Base and composite UI belongs
+  in `@vibest/ui`, not here.
+- **The root export (`index.ts`) is the desktop seam.** `AppInterface`,
+  `PlatformProvider`, `ServerStatusOverlay` and the platform types live at
+  `src/` top level because `apps/desktop` mounts them; they are not features and
+  must not be moved into one.
+- There is no `core/`. It existed without a written rule, accumulated both pure
+  runtime and `.tsx` components, and was dissolved into the above — don't
+  reintroduce it as a home for "shared" code. A hook used by exactly one
+  component sits next to that component.
+
 - **Query keys come from `orpcQueryUtils.<router>.<proc>`.** Write cache with
   `queryOptions({input}).queryKey`; `.key()` omits the `type:"query"` segment, so
   using it for `setQueryData` silently writes a cache the UI never reads. `.key()`

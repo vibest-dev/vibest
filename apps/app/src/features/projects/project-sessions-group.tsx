@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams, useRouteContext } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import type { Project } from "@vibest/contract";
 import {
   SidebarGroupAction,
@@ -11,23 +10,18 @@ import {
 } from "@vibest/ui/components/sidebar";
 import { SquarePen } from "lucide-react";
 
+import { useProjectSessions } from "@/features/projects/use-project-sessions";
+
 /**
- * One project and the sessions under it, newest first. Titles come from the
- * harness's own session index, which fills them in after the fact (claude
- * summarizes a session once it has something to summarize), so a just-created
- * session shows the "New chat" fallback until a later refetch picks its title up.
+ * One project and the sessions under it, as a sidebar group. Fetching lives in
+ * `useProjectSessions`; presenting them — the untitled label, which row reads
+ * as current, where a click goes — is this component's own business.
  */
 export function ProjectSessionsGroup({ project }: { project: Project }) {
-  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   const navigate = useNavigate();
   // strict: false — the sidebar renders on every route, and most have no sessionId.
   const { sessionId: activeSessionId } = useParams({ strict: false });
-
-  const sessions = useQuery({
-    ...orpcQueryUtils.session.list.queryOptions({ input: { projectId: project.id } }),
-    staleTime: 30_000,
-    select: (list) => Array.from(list).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-  });
+  const sessions = useProjectSessions(project.id);
 
   return (
     <section className="relative min-w-0" aria-labelledby={`project-${project.id}`}>
@@ -52,14 +46,17 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
       </SidebarGroupAction>
       <SidebarGroupContent>
         <SidebarMenu>
-          {(sessions.data ?? []).map((session) => (
+          {sessions.map((session) => (
             <SidebarMenuItem key={session.sessionId}>
               <SidebarMenuButton
                 isActive={session.sessionId === activeSessionId}
+                // The whole SessionRef rides along, so the session route resumes
+                // without first buying its projectId back off the server.
                 onClick={() =>
                   navigate({
                     to: "/session/$sessionId",
                     params: { sessionId: session.sessionId },
+                    search: { projectId: session.projectId, harness: session.harnessAgentId },
                   })
                 }
               >

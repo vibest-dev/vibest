@@ -2,17 +2,17 @@ import type { ClaudeCodeTools } from "@vibest/contract/claude-code";
 import type { DynamicToolUIPart, ToolUIPart, UIDataTypes, UIMessage } from "ai";
 import type { ReactNode } from "react";
 
-import { ClaudeCodeBashTool } from "@/components/claude-code/bash-tool";
-import { ClaudeCodeEditTool } from "@/components/claude-code/edit-tool";
-import { ClaudeCodeGlobTool } from "@/components/claude-code/glob-tool";
-import { ClaudeCodeGrepTool } from "@/components/claude-code/grep-tool";
-import { ClaudeCodeReadTool } from "@/components/claude-code/read-tool";
-import { ClaudeCodeTaskOutputTool } from "@/components/claude-code/task-output-tool";
-import { ClaudeCodeTaskTool } from "@/components/claude-code/task-tool";
-import { ClaudeCodeTodoWriteTool } from "@/components/claude-code/todo-write-tool";
-import { ClaudeCodeWebFetchTool } from "@/components/claude-code/web-fetch-tool";
-import { ClaudeCodeWebSearchTool } from "@/components/claude-code/web-search-tool";
-import { ClaudeCodeWriteTool } from "@/components/claude-code/write-tool";
+import { ClaudeCodeBashTool } from "@/features/chat/claude-code/bash-tool";
+import { ClaudeCodeEditTool } from "@/features/chat/claude-code/edit-tool";
+import { ClaudeCodeGlobTool } from "@/features/chat/claude-code/glob-tool";
+import { ClaudeCodeGrepTool } from "@/features/chat/claude-code/grep-tool";
+import { ClaudeCodeReadTool } from "@/features/chat/claude-code/read-tool";
+import { ClaudeCodeTaskOutputTool } from "@/features/chat/claude-code/task-output-tool";
+import { ClaudeCodeTaskTool } from "@/features/chat/claude-code/task-tool";
+import { ClaudeCodeTodoWriteTool } from "@/features/chat/claude-code/todo-write-tool";
+import { ClaudeCodeWebFetchTool } from "@/features/chat/claude-code/web-fetch-tool";
+import { ClaudeCodeWebSearchTool } from "@/features/chat/claude-code/web-search-tool";
+import { ClaudeCodeWriteTool } from "@/features/chat/claude-code/write-tool";
 
 import { DynamicToolPart } from "../../dynamic-tool-part";
 import { claudeCodeDynamicToolName } from "./dynamic-name";

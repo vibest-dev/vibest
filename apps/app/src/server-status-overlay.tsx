@@ -2,8 +2,8 @@ import { Button } from "@vibest/ui/components/button";
 import { Spinner } from "@vibest/ui/components/spinner";
 import { type ReactElement, useSyncExternalStore } from "react";
 
-import { usePlatform } from "../../platform-context";
-import type { ServerStatusFeed } from "../../server-status";
+import { usePlatform } from "./platform-context";
+import type { ServerStatusFeed } from "./server-status";
 
 /**
  * Covers the UI while the host restarts a crashed server. The oRPC client

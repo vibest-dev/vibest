@@ -7,7 +7,7 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import { PERMISSION_MODES } from "@/core/harness/permission-modes";
+import { PERMISSION_MODES } from "@/features/chat/harness/permission-modes";
 
 // Presentational permission-mode picker: value/onChange driven so it composes
 // both inside a session (ChatPermissionModeSelect binds it to ChatSession

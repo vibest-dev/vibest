@@ -5,10 +5,10 @@ import { Toaster } from "sonner";
 
 import "./index.css";
 
-import { ChatManager } from "./core/chat/chat-manager";
-import { ChatManagerProvider } from "./core/chat/chat-manager-provider";
-import { OrpcChatSessionTransport } from "./core/chat/chat-transport";
-import { SessionEventsSync } from "./core/session/session-events-sync";
+import { ChatManager } from "./features/chat/runtime/chat-manager";
+import { ChatManagerProvider } from "./features/chat/runtime/chat-manager-provider";
+import { OrpcChatSessionTransport } from "./features/chat/runtime/chat-transport";
+import { SessionEventsSync } from "./features/projects/session-events-sync";
 import { createAppClients, type AppClients } from "./lib/orpc";
 import { usePlatform } from "./platform-context";
 import { createRouter } from "./router";

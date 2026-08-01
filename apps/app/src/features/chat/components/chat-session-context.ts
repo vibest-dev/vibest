@@ -7,8 +7,8 @@ import type {
 import { createContext, useContext } from "react";
 import type { StoreApi } from "zustand/vanilla";
 
-import type { AgentResponse } from "@/core/chat/agent-requests";
-import type { ChatStoreState } from "@/core/chat/chat-state";
+import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
+import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
 
 export interface ChatSessionValue {
   sessionId: string;

@@ -7,7 +7,10 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import { REASONING_EFFORT_LABELS, orderReasoningEfforts } from "@/core/harness/reasoning-efforts";
+import {
+  REASONING_EFFORT_LABELS,
+  orderReasoningEfforts,
+} from "@/features/chat/harness/reasoning-efforts";
 
 // Presentational reasoning-reasoningEffort picker. Its candidates cascade from the
 // selected model's probed traits — not from the harness — so the caller passes

@@ -6,8 +6,8 @@ import {
 import { Loader } from "@vibest/ui/ai-elements/loader";
 import { useStore } from "zustand";
 
-import type { AgentResponse } from "@/core/chat/agent-requests";
-import type { ChatStoreState } from "@/core/chat/chat-state";
+import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
+import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
 
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";

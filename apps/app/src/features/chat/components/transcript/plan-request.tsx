@@ -4,7 +4,11 @@ import { Radio, RadioGroup } from "@vibest/ui/components/radio-group";
 import { Textarea } from "@vibest/ui/components/textarea";
 import { useState } from "react";
 
-import type { AgentRequest, AgentResponse, PlanApprovalMode } from "@/core/chat/agent-requests";
+import type {
+  AgentRequest,
+  AgentResponse,
+  PlanApprovalMode,
+} from "@/features/chat/runtime/agent-requests";
 
 type PlanRequest = Extract<AgentRequest, { type: "plan" }>;
 

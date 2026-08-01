@@ -7,7 +7,7 @@ import {
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
 
-import { useHarnessAgents } from "@/core/harness/use-harness";
+import { useHarnessAgents } from "@/features/chat/harness/use-harness";
 
 // Which agent runs the session. Only offered before the session exists: the
 // harness is part of the SessionRef, so it is fixed at create time (see
