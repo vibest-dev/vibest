@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouteContext } from "@tanstack/react-router";
 import type { Project } from "@vibest/contract";
 import {
-  SidebarGroup,
   SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -31,12 +30,17 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
   });
 
   return (
-    <SidebarGroup>
+    <section className="relative min-w-0" aria-labelledby={`project-${project.id}`}>
       {/* pe-8 keeps a long name from running under the absolutely positioned action. */}
-      <SidebarGroupLabel className="min-w-0 pe-8" title={project.path}>
+      <SidebarGroupLabel
+        className="text-sidebar-accent-foreground h-7 min-w-0 pe-8 text-sm"
+        id={`project-${project.id}`}
+        title={project.path}
+      >
         <span className="truncate">{project.name}</span>
       </SidebarGroupLabel>
       <SidebarGroupAction
+        className="top-1 right-1"
         onClick={() => navigate({ to: "/draft", search: { projectId: project.id } })}
         title={`New chat in ${project.name}`}
       >
@@ -65,6 +69,6 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
           ))}
         </SidebarMenu>
       </SidebarGroupContent>
-    </SidebarGroup>
+    </section>
   );
 }
