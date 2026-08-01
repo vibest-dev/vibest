@@ -10,11 +10,10 @@ import type { Plugin } from "vite";
 
 const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
 
-// When enabled, the dev overlays (react-grab, react-scan) reach outside the
-// origin on boot, which the shipped CSP rejects. Production eliminates both;
-// agent-run dev leaves index.html strict because neither overlay loads. Their
-// required origins are spliced in only for an interactive dev server. Each entry
-// is [exact substring of the shipped policy, its dev replacement].
+// The dev overlays (react-grab, react-scan) reach outside the origin on boot,
+// which the shipped CSP rejects. Production eliminates both overlays, so the
+// origins they need are spliced in for the dev server only. Each entry is [exact
+// substring of the shipped policy, its dev replacement].
 const DEV_CSP_PATCHES: ReadonlyArray<readonly [string, string]> = [
   // react-grab's overlay @imports Geist from Google Fonts inside its shadow root.
   // The stylesheet's own @font-face points at gstatic, and the strict policy has
@@ -88,7 +87,7 @@ export default defineConfig({
       alias: { "@": url.fileURLToPath(new URL("../app/src/", import.meta.url)) },
     },
     plugins: [
-      ...(RUNNING_IN_AGENT ? [] : [devOverlayCsp()]),
+      devOverlayCsp(),
       codeInspectorPlugin({ bundler: "vite" }),
       tanstackRouter({
         target: "react",
