@@ -8,7 +8,6 @@ import { Effect, FileSystem } from "effect";
 import {
   type DaemonRecord,
   readRecord,
-  readRecords,
   recordPath,
   removeRecord,
   writeRecord,
@@ -43,7 +42,7 @@ layer(NodeServices.layer)("daemon record", (it) => {
       yield* writeRecord(home, record);
       assert.equal(recordPath(home), path.join(home, "daemon", "daemon.pid"));
       assert.ok(yield* fs.exists(recordPath(home)));
-      assert.ok(yield* fs.exists(path.join(home, "daemon.pid")));
+      assert.equal(yield* fs.exists(path.join(home, "daemon.pid")), false);
     }),
   );
 
@@ -71,46 +70,11 @@ layer(NodeServices.layer)("daemon record", (it) => {
       const home = yield* tempHome;
       yield* writeRecord(home, record);
 
-      for (const file of [recordPath(home), path.join(home, "daemon.pid")]) {
-        yield* fs.writeFileString(file, "not json");
-      }
+      yield* fs.writeFileString(recordPath(home), "not json");
       assert.equal(yield* readRecord(home), undefined);
 
-      for (const file of [recordPath(home), path.join(home, "daemon.pid")]) {
-        yield* fs.writeFileString(file, JSON.stringify({ pid: 1 }));
-      }
+      yield* fs.writeFileString(recordPath(home), JSON.stringify({ pid: 1 }));
       assert.equal(yield* readRecord(home), undefined);
-    }),
-  );
-
-  it.effect("returns divergent current and legacy records for conflict handling", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const home = yield* tempHome;
-      yield* writeRecord(home, record);
-      const legacyRecord: DaemonRecord = {
-        ...record,
-        pid: 9876,
-        address: "http://127.0.0.1:49876",
-      };
-      yield* fs.writeFileString(path.join(home, "daemon.pid"), JSON.stringify(legacyRecord), {
-        mode: 0o600,
-      });
-
-      assert.deepEqual(yield* readRecords(home), [record, legacyRecord]);
-    }),
-  );
-
-  it.effect("reads and removes a legacy root-level daemon.pid", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const home = yield* tempHome;
-      const legacyPath = path.join(home, "daemon.pid");
-      yield* fs.writeFileString(legacyPath, JSON.stringify(record), { mode: 0o600 });
-
-      assert.deepEqual(yield* readRecord(home), record);
-      yield* removeRecord(home);
-      assert.equal(yield* fs.exists(legacyPath), false);
     }),
   );
 

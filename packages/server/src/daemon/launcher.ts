@@ -8,7 +8,7 @@ import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
 import { daemonDirectory, daemonLogPath } from "./paths";
 import { reservePort } from "./port";
-import { type DaemonRecord, readRecords, removeRecord, writeRecord } from "./record";
+import { type DaemonRecord, readRecord, removeRecord, writeRecord } from "./record";
 import { clearTombstone, hasTombstone, writeTombstone } from "./tombstone";
 
 const DEFAULT_PORT = 4000;
@@ -83,33 +83,10 @@ export const resolveOrSpawnDaemon = (
   options: ResolveDaemonOptions,
 ): Effect.Effect<DaemonHandle, DaemonLauncherError, DaemonPlatform> =>
   Effect.gen(function* () {
-    const records = yield* readRecords(options.home, options.daemonDir);
-    const healthyRecords: DaemonRecord[] = [];
-    for (const record of records) {
-      if (yield* daemonAlive(record)) healthyRecords.push(record);
-    }
-
-    if (healthyRecords.length > 1) {
-      return yield* Effect.fail(
-        new DaemonLaunchError({
-          message: `Multiple vibest daemons are running for the same daemon directory (${healthyRecords.map((record) => record.pid).join(", ")}); stop them before starting another`,
-        }),
-      );
-    }
-
-    const existing = healthyRecords[0];
-    if (existing !== undefined) {
-      if (records.length > 1) {
-        return yield* Effect.fail(
-          new DaemonLaunchError({
-            message: `Conflicting vibest daemon records exist for the same daemon directory (${records.map((record) => record.pid).join(", ")}); run \`vibest daemon stop\` before starting another`,
-          }),
-        );
-      }
+    const existing = yield* readRecord(options.home, options.daemonDir);
+    if (existing !== undefined && (yield* daemonAlive(existing))) {
       // A live daemon makes any tombstone stale (someone started it again).
       yield* clearTombstone(options.home, options.daemonDir);
-      // Do not migrate a live legacy record in place: an older launcher could
-      // race that repair. The next spawn publishes root-first to both paths.
       return attach(existing, true);
     }
 
@@ -123,11 +100,11 @@ export const resolveOrSpawnDaemon = (
     }
     yield* clearTombstone(options.home, options.daemonDir);
 
-    if (records.length > 0) {
+    if (existing !== undefined) {
       // Wedged (pid alive but unhealthy) daemons must die before we replace
-      // them, or they leak as orphans still holding their port. Dead pids are
-      // no-ops here.
-      for (const record of records) yield* killPid(record.pid);
+      // them, or they leak as orphans still holding their port. A dead pid is
+      // a no-op here.
+      yield* killPid(existing.pid);
       yield* removeRecord(options.home, options.daemonDir);
     }
     return yield* spawnLocked(options);
@@ -138,23 +115,15 @@ export const statusDaemon = (
   home: string,
   daemonDir?: string,
 ): Effect.Effect<
-  | { readonly running: false }
-  | { readonly running: true; readonly record: DaemonRecord }
-  | { readonly running: false; readonly conflict: ReadonlyArray<DaemonRecord> },
+  { readonly running: false } | { readonly running: true; readonly record: DaemonRecord },
   never,
   FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
-    const records = yield* readRecords(home, daemonDir);
-    const healthyRecords: DaemonRecord[] = [];
-    for (const record of records) {
-      if (yield* daemonAlive(record)) healthyRecords.push(record);
-    }
-    if (healthyRecords.length > 1 || (healthyRecords.length === 1 && records.length > 1)) {
-      return { running: false, conflict: records };
-    }
-    const record = healthyRecords[0];
-    return record === undefined ? { running: false } : { running: true, record };
+    const record = yield* readRecord(home, daemonDir);
+    return record === undefined || !(yield* daemonAlive(record))
+      ? { running: false }
+      : { running: true, record };
   });
 
 /**
@@ -168,15 +137,14 @@ export const stopDaemon = (
   daemonDir?: string,
 ): Effect.Effect<"stopped" | "not-running", PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const records = yield* readRecords(home, daemonDir);
-    const running = records.filter((record) => pidAlive(record.pid));
-    if (running.length === 0) {
+    const record = yield* readRecord(home, daemonDir);
+    if (record === undefined || !pidAlive(record.pid)) {
       yield* removeRecord(home, daemonDir);
       return "not-running";
     }
 
     yield* writeTombstone(home, daemonDir);
-    for (const record of running) yield* killPid(record.pid);
+    yield* killPid(record.pid);
     yield* removeRecord(home, daemonDir);
     return "stopped";
   });
@@ -267,10 +235,8 @@ const waitForRecord = (
   Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + timeoutMs;
     while ((yield* Clock.currentTimeMillis) < deadline) {
-      const records = yield* readRecords(home, daemonDir);
-      for (const record of records) {
-        if (yield* daemonAlive(record)) return record;
-      }
+      const record = yield* readRecord(home, daemonDir);
+      if (record !== undefined && (yield* daemonAlive(record))) return record;
       if (!(yield* lockExists(home, daemonDir))) return undefined;
       yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
     }

@@ -107,18 +107,16 @@ The daemon binds `127.0.0.1:<port>` and atomically writes
 ```
 
 Daemon lifecycle files live together under `$VIBEST_DAEMON_DIR`. When the
-variable is absent, the default `$VIBEST_HOME/daemon/` layout also mirrors the
-discovery record, launch lock, and stop tombstone at their former root-level
-paths during the mixed-version migration. An explicit `VIBEST_DAEMON_DIR` is an
-isolated namespace and never writes those `$VIBEST_HOME` mirrors.
+variable is absent, the directory defaults to `$VIBEST_HOME/daemon/`. No daemon
+lifecycle files are written directly under `$VIBEST_HOME`.
 
 The override is primarily a development escape hatch. Pointing multiple daemon
 directories at the same `$VIBEST_HOME` preserves Projects and Sessions, but the
 current JSON repositories do not provide cross-process transactions; concurrent
 mutations remain the caller's responsibility.
 
-It holds a single-instance lock keyed on `$VIBEST_DAEMON_DIR`. Every local front-door
-runs the same `resolveOrSpawnServer()`:
+It holds a single-instance lock keyed on `$VIBEST_DAEMON_DIR`. Every local
+front-door runs the same `resolveOrSpawnServer()`:
 
 1. Read `daemon.pid` → health-check `address`.
 2. Alive → **attach** (use its `address` + `token`).

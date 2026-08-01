@@ -71,14 +71,6 @@ const statusHandler = () =>
   Effect.gen(function* () {
     const { home, daemonDir } = daemonLocation();
     const status = yield* statusDaemon(home, daemonDir);
-    if ("conflict" in status) {
-      console.log(
-        `multiple vibest daemons are running for this daemon directory: ${status.conflict
-          .map((record) => `${record.address} (pid ${record.pid})`)
-          .join(", ")}`,
-      );
-      return;
-    }
     if (!status.running) {
       console.log("vibest daemon is not running");
       return;

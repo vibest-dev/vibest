@@ -1,11 +1,11 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 
-import { daemonDirectory, daemonRecordPath, legacyRecordPath } from "./paths";
+import { daemonDirectory, daemonRecordPath } from "./paths";
 
 /**
- * The discovery record the launcher writes to `$VIBEST_HOME/daemon/daemon.pid` — the
- * local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`. It
- * is the single-instance marker: staleness is decided by "is the pid alive",
+ * The discovery record the launcher writes to `$VIBEST_DAEMON_DIR/daemon.pid` —
+ * the local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`.
+ * It is the single-instance marker: staleness is decided by "is the pid alive",
  * never a lock the server holds. The server itself never reads or writes it.
  */
 export type DaemonRecord = {
@@ -20,21 +20,28 @@ export type DaemonRecord = {
 };
 
 /** Discovery record under the configured daemon directory. */
-export const recordPath = (home: string, daemonHome?: string): string =>
-  daemonRecordPath(daemonHome ?? daemonDirectory(home));
+export const recordPath = (home: string, daemonDir?: string): string =>
+  daemonRecordPath(daemonDir ?? daemonDirectory(home));
 
-const recordPaths = (home: string, daemonHome?: string): ReadonlyArray<string> => [
-  recordPath(home, daemonHome),
-  ...(daemonHome === undefined ? [legacyRecordPath(home)] : []),
-];
+/** Read and validate the record, or `undefined` if missing/garbage. */
+export const readRecord = (
+  home: string,
+  daemonDir?: string,
+): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const raw = yield* fs
+      .readFileString(recordPath(home, daemonDir))
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (raw === undefined) return undefined;
 
-const parseRecord = (raw: string): DaemonRecord | undefined => {
-  try {
-    const parsed = JSON.parse(raw) as Partial<DaemonRecord>;
+    const parsed = yield* Effect.try(() => JSON.parse(raw) as Partial<DaemonRecord>).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
     if (
-      typeof parsed.pid === "number" &&
-      typeof parsed.address === "string" &&
-      typeof parsed.token === "string"
+      typeof parsed?.pid === "number" &&
+      typeof parsed?.address === "string" &&
+      typeof parsed?.token === "string"
     ) {
       return {
         pid: parsed.pid,
@@ -43,42 +50,8 @@ const parseRecord = (raw: string): DaemonRecord | undefined => {
         startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : 0,
       };
     }
-  } catch {
-    // Missing/garbage discovery state is the same as no discoverable daemon.
-  }
-  return undefined;
-};
-
-/** Read every distinct current or legacy record that still parses. */
-export const readRecords = (
-  home: string,
-  daemonHome?: string,
-): Effect.Effect<ReadonlyArray<DaemonRecord>, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const records: DaemonRecord[] = [];
-    for (const file of recordPaths(home, daemonHome)) {
-      const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined));
-      if (raw === undefined) continue;
-      const record = parseRecord(raw);
-      if (
-        record !== undefined &&
-        !records.some(
-          (candidate) => candidate.pid === record.pid && candidate.address === record.address,
-        )
-      ) {
-        records.push(record);
-      }
-    }
-    return records;
+    return undefined;
   });
-
-/** Read the preferred current record, or the legacy record during migration. */
-export const readRecord = (
-  home: string,
-  daemonHome?: string,
-): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
-  readRecords(home, daemonHome).pipe(Effect.map((records) => records[0]));
 
 /**
  * Atomically write the record with `0600` perms (token is a secret): write a
@@ -88,35 +61,25 @@ export const readRecord = (
 export const writeRecord = (
   home: string,
   record: DaemonRecord,
-  daemonHome?: string,
+  daemonDir?: string,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(daemonHome ?? daemonDirectory(home), { recursive: true });
-    // The default layout mirrors root-first for mixed-version clients. An
-    // explicit daemon home is isolated and never writes into `$VIBEST_HOME`.
-    const targets =
-      daemonHome === undefined
-        ? [legacyRecordPath(home), recordPath(home)]
-        : [recordPath(home, daemonHome)];
-    for (const target of targets) {
-      const tmp = `${target}.${process.pid}.tmp`;
-      yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
-      // `mode` only applies when the write creates the file, so a leftover temp
-      // from a crashed launcher would otherwise keep its old perms.
-      yield* fs.chmod(tmp, 0o600);
-      yield* fs.rename(tmp, target);
-    }
+    yield* fs.makeDirectory(daemonDir ?? daemonDirectory(home), { recursive: true });
+    const target = recordPath(home, daemonDir);
+    const tmp = `${target}.${process.pid}.tmp`;
+    yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
+    // `mode` only applies when the write creates the file, so a leftover temp
+    // from a crashed launcher would otherwise keep its old perms.
+    yield* fs.chmod(tmp, 0o600);
+    yield* fs.rename(tmp, target);
   });
 
-/** Remove configured and compatibility records; missing files are not errors. */
+/** Remove the record; a missing file is not an error. */
 export const removeRecord = (
   home: string,
-  daemonHome?: string,
+  daemonDir?: string,
 ): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  FileSystem.FileSystem.use((fs) =>
-    Effect.all(
-      recordPaths(home, daemonHome).map((file) => fs.remove(file, { force: true })),
-      { discard: true },
-    ),
-  ).pipe(Effect.ignore);
+  FileSystem.FileSystem.use((fs) => fs.remove(recordPath(home, daemonDir), { force: true })).pipe(
+    Effect.ignore,
+  );
