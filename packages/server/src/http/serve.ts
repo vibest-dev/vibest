@@ -3,7 +3,7 @@ import { Command, Flag } from "effect/unstable/cli";
 
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
-import { createServer } from "./server";
+import { createServer, ServerStartupError } from "./server";
 
 const DEFAULT_PORT = 4000;
 
@@ -76,11 +76,22 @@ export const runServe = (input: ServeInput) =>
     const { port: requestedPort, corsOrigins } = resolveServeConfig(input);
 
     const server = yield* Effect.acquireRelease(
-      Effect.promise(() => createServer({ authToken, corsOrigins })),
-      (managed) => Effect.promise(() => managed.dispose()),
+      Effect.tryPromise({
+        try: () => createServer({ authToken, corsOrigins }),
+        catch: (cause) => new ServerStartupError({ phase: "create", cause }),
+      }),
+      // A shutdown failure is logged, not thrown: the process is exiting, and
+      // a defect here would mask whatever caused the exit in the first place.
+      (managed) =>
+        Effect.tryPromise(() => managed.dispose()).pipe(
+          Effect.catch((error) => Effect.logWarning("server shutdown failed", error)),
+        ),
     );
 
-    const port = yield* Effect.tryPromise(() => listenServer(server, requestedPort));
+    const port = yield* Effect.tryPromise({
+      try: () => listenServer(server, requestedPort),
+      catch: (cause) => new ServerStartupError({ phase: "listen", cause }),
+    });
 
     // Machine-readable first, for the desktop supervisor; human-readable second.
     // Both go to stdout — Effect's logger writes to stderr, so it never mixes in.

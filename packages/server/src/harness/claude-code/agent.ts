@@ -178,7 +178,14 @@ export const makeClaudeCodeAgent = ({
     // `listModels` ask, so an uncached Effect re-walks PATH on every session.
     const claudeExecutable = yield* Effect.cached(
       resolveClaudeExecutable({ env }).pipe(
-        Effect.orDie,
+        Effect.catchTag("ClaudeExecutableNotFound", (cause) =>
+          Effect.die(
+            new Error(
+              "invariant: the claude executable vanished after the availability check gated on it",
+              { cause },
+            ),
+          ),
+        ),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
       ),
     );

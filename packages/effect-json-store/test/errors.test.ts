@@ -89,6 +89,36 @@ it.effect("fails with JsonStoreWriteError when the encoded value is not JSON-ser
   ),
 );
 
+it.effect("fails with JsonStoreWriteError on rename failure, leaving no temp file", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const real = yield* FileSystem.FileSystem;
+      const file = path.join(dir, "config.json");
+      const original = JSON.stringify({ version: 1, data: { theme: "dark" } });
+      yield* real.writeFileString(file, original);
+      const failingRename: FileSystem.FileSystem = {
+        ...real,
+        rename: () =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "FileSystem",
+              method: "rename",
+            }),
+          ),
+      };
+      const store = yield* makeJsonDocument({ path: file, schema, defaults }).pipe(
+        Effect.provideService(FileSystem.FileSystem, failingRename),
+      );
+      const error = yield* Effect.flip(store.set({ theme: "light" }));
+      assert.equal(error._tag, "JsonStoreWriteError");
+      // The original document is untouched and the failed write's temp file is gone.
+      assert.equal(yield* real.readFileString(file), original);
+      assert.deepEqual(yield* real.readDirectory(dir), ["config.json"]);
+    }),
+  ),
+);
+
 /** Real filesystem for reads, but every write fails — for write-error injection. */
 const failingWrites = Layer.effect(
   FileSystem.FileSystem,

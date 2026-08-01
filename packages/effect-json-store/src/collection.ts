@@ -122,7 +122,7 @@ export const makeJsonCollection = <
     const fileOf = (id: string): Effect.Effect<string> =>
       isValidId(id)
         ? Effect.succeed(path.join(dir, `${id}.json`))
-        : Effect.die(new Error(`invalid collection id: ${JSON.stringify(id)}`));
+        : Effect.die(new Error(`invariant: invalid collection id ${JSON.stringify(id)}`));
 
     // One mutex per id, created on first touch. Grows with the number of
     // distinct ids used over the instance's lifetime — fine for file-backed
@@ -152,7 +152,9 @@ export const makeJsonCollection = <
       Effect.suspend(() => {
         const under = listOptions?.under;
         if (under !== undefined && !isValidId(under)) {
-          return Effect.die(new Error(`invalid collection id prefix: ${JSON.stringify(under)}`));
+          return Effect.die(
+            new Error(`invariant: invalid collection id prefix ${JSON.stringify(under)}`),
+          );
         }
         const root = under === undefined ? dir : path.join(dir, under);
         return fs.readDirectory(root, { recursive: true }).pipe(

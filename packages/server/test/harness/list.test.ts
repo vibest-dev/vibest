@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
+import { HarnessAgentNotFound } from "../../src/harness/errors";
 import { makeHarnessList } from "../../src/harness/list";
-import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import {
+  makeHarnessAgentRegistry,
+  type HarnessAgentRegistryShape,
+} from "../../src/harness/registry";
 import { NodePlatformLayer } from "../platform";
 
 const adapter = (over: {
@@ -82,5 +86,26 @@ it.effect("reports every registered harness, in registration order", () =>
       harnessAgents.map((harnessAgent) => harnessAgent.id),
       ["claude-code", "codex", "pi"],
     );
+  }),
+);
+
+it.effect("a registry get that misses a listed id dies with the id in the defect", () =>
+  Effect.gen(function* () {
+    // A registry violating its own invariant: `list` announces an id that
+    // `get` cannot resolve. Listing must die naming the id — never drop the
+    // harness silently or surface the miss as a recoverable failure.
+    const broken: HarnessAgentRegistryShape = {
+      list: Effect.succeed([{ id: "claude-code", name: "claude-code" }]),
+      get: (harnessAgentId) => Effect.fail(new HarnessAgentNotFound({ harnessAgentId })),
+    };
+
+    const exit = yield* makeHarnessList(broken).list.pipe(
+      Effect.provide(NodePlatformLayer),
+      Effect.exit,
+    );
+    assert.equal(Exit.isFailure(exit) && Cause.hasDies(exit.cause), true);
+    assert.equal(Exit.isFailure(exit) && Cause.hasFails(exit.cause), false);
+    const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+    assert.ok(defect instanceof Error && defect.message.includes("claude-code"));
   }),
 );
