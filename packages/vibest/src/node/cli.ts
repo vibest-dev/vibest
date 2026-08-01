@@ -4,8 +4,8 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   resolveDaemonDirectory,
+  resolveDaemonLocation,
   resolveOrSpawnDaemon,
-  resolveVibestHome,
   statusDaemon,
   stopDaemon,
 } from "@vibest/server/daemon";
@@ -29,13 +29,11 @@ type DaemonStartInput = {
   readonly corsOrigin: ReadonlyArray<string>;
 };
 
-const daemonLocation = () => ({
-  home: resolveVibestHome(),
-  ...(process.env.VIBEST_DAEMON_DIR === undefined ? {} : { daemonDir: resolveDaemonDirectory() }),
-});
-
 // Default startup is the daemon: a short-lived `vibest` command must operate a
 // backend that outlives it, so it attaches to the running daemon or spawns one.
+// Both directories come from the ambient environment through the shared
+// resolver, which is also what `stop`/`status` and a desktop app inheriting the
+// same `VIBEST_DAEMON_DIR` use — that is what makes them address one daemon.
 const startDaemon = (input: DaemonStartInput) =>
   Effect.gen(function* () {
     // Same flag > env > default port precedence as `vibest serve`. CORS is not
@@ -43,7 +41,7 @@ const startDaemon = (input: DaemonStartInput) =>
     // inherited from the ambient VIBEST_CORS_ORIGINS by the spawned daemon.
     const { port } = resolveServeConfig(input);
     const handle = yield* resolveOrSpawnDaemon({
-      ...daemonLocation(),
+      ...resolveDaemonLocation(),
       serverArgv: serverArgv(),
       port,
     });
@@ -62,15 +60,13 @@ const startDaemon = (input: DaemonStartInput) =>
 
 const stopHandler = () =>
   Effect.gen(function* () {
-    const { home, daemonDir } = daemonLocation();
-    const result = yield* stopDaemon(home, daemonDir);
+    const result = yield* stopDaemon(resolveDaemonDirectory());
     console.log(result === "stopped" ? "vibest daemon stopped" : "vibest daemon is not running");
   });
 
 const statusHandler = () =>
   Effect.gen(function* () {
-    const { home, daemonDir } = daemonLocation();
-    const status = yield* statusDaemon(home, daemonDir);
+    const status = yield* statusDaemon(resolveDaemonDirectory());
     if (!status.running) {
       console.log("vibest daemon is not running");
       return;

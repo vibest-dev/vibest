@@ -253,6 +253,12 @@ function DraftRoute() {
           <EmptyMedia variant="icon">
             <FolderPlusIcon aria-hidden="true" />
           </EmptyMedia>
+          {/*
+            The nested `h1` is deliberate: `EmptyTitle` is vendored from the coss
+            registry (docs/adr/0001), renders a plain `div`, and takes no `render`
+            prop — so this is the only way to keep both its `data-slot` styling
+            hook and a real page heading. Don't flatten it.
+          */}
           <EmptyTitle>
             <h1>Import your first project</h1>
           </EmptyTitle>

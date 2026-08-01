@@ -1,7 +1,7 @@
 import { writeFileAtomic } from "@vibest/effect-json-store";
 import { Effect, FileSystem, type PlatformError } from "effect";
 
-import { daemonDirectory, daemonRecordPath } from "./paths";
+import { daemonRecordPath } from "./paths";
 
 /**
  * The discovery record the launcher writes to `$VIBEST_DAEMON_DIR/daemon.pid` —
@@ -20,19 +20,14 @@ export type DaemonRecord = {
   readonly startedAt: number;
 };
 
-/** Discovery record under the configured daemon directory. */
-export const recordPath = (home: string, daemonDir?: string): string =>
-  daemonRecordPath(daemonDir ?? daemonDirectory(home));
-
 /** Read and validate the record, or `undefined` if missing/garbage. */
 export const readRecord = (
-  home: string,
-  daemonDir?: string,
+  daemonDir: string,
 ): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs
-      .readFileString(recordPath(home, daemonDir))
+      .readFileString(daemonRecordPath(daemonDir))
       .pipe(Effect.orElseSucceed(() => undefined));
     if (raw === undefined) return undefined;
 
@@ -61,19 +56,17 @@ export const readRecord = (
  * write fails or is interrupted.
  */
 export const writeRecord = (
-  home: string,
+  daemonDir: string,
   record: DaemonRecord,
-  daemonDir?: string,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
-    writeFileAtomic(fs, recordPath(home, daemonDir), JSON.stringify(record), { mode: 0o600 }),
+    writeFileAtomic(fs, daemonRecordPath(daemonDir), JSON.stringify(record), { mode: 0o600 }),
   );
 
 /** Remove the record; a missing file is not an error. */
 export const removeRecord = (
-  home: string,
-  daemonDir?: string,
+  daemonDir: string,
 ): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  FileSystem.FileSystem.use((fs) => fs.remove(recordPath(home, daemonDir), { force: true })).pipe(
+  FileSystem.FileSystem.use((fs) => fs.remove(daemonRecordPath(daemonDir), { force: true })).pipe(
     Effect.ignore,
   );

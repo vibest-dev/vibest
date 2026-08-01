@@ -22,6 +22,11 @@ describe("resolveVibestHome", () => {
       path.join(os.homedir(), ".vibest-dev"),
     );
   });
+
+  it("treats an empty VIBEST_HOME as unset", () => {
+    expect(resolveVibestHome({ VIBEST_HOME: "" })).toBe(path.join(os.homedir(), ".vibest"));
+    expect(resolveVibestHome({ VIBEST_HOME: "   " })).toBe(path.join(os.homedir(), ".vibest"));
+  });
 });
 
 describe("resolveDaemonDirectory", () => {
@@ -43,6 +48,15 @@ describe("resolveDaemonDirectory", () => {
   it("follows the development VIBEST_HOME default", () => {
     expect(resolveDaemonDirectory({ NODE_ENV: "development" })).toBe(
       path.join(os.homedir(), ".vibest-dev", "daemon"),
+    );
+  });
+
+  it("treats an empty VIBEST_DAEMON_DIR as unset", () => {
+    expect(resolveDaemonDirectory({ VIBEST_HOME: "/tmp/data", VIBEST_DAEMON_DIR: "" })).toBe(
+      path.join("/tmp/data", "daemon"),
+    );
+    expect(resolveDaemonDirectory({ VIBEST_HOME: "/tmp/data", VIBEST_DAEMON_DIR: "  " })).toBe(
+      path.join("/tmp/data", "daemon"),
     );
   });
 });
