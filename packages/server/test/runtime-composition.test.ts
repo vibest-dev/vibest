@@ -2,15 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
-import {
-  HarnessAgentRegistry,
-  makeHarnessAgentRegistry,
-  type HarnessAgentAdapter,
-  type HarnessAgentSession,
-} from "../src/harness";
+import { HarnessAgentRegistry, makeHarnessAgentRegistry } from "../src/harness";
+import { makeFakeAdapter, makeFakeSession } from "./fake-adapter";
 import { makeRpcTestHarness } from "./rpc-harness";
 
 // The composition invariant under test: Effect memoizes layers by reference,
@@ -21,37 +17,18 @@ import { makeRpcTestHarness } from "./rpc-harness";
 // `Layer.fresh`) of a stateful layer fails here instead of silently splitting
 // state in production.
 
-/** An in-memory session that stays open and streams nothing. */
-const fakeSession = (sessionId: string): HarnessAgentSession => ({
-  sessionId,
-  harnessAgentId: "pi",
-  events: Stream.never,
-  prompt: () => Effect.die("prompt is not exercised by composition tests"),
-  setModel: () => Effect.void,
-  setReasoningEffort: () => Effect.void,
-  setPermissionMode: () => Effect.void,
-  interrupt: Effect.void,
-  respondToAgentRequest: () => Effect.die("requests are not exercised by composition tests"),
-  getCapabilities: Effect.die("capabilities are not exercised by composition tests"),
-  close: Effect.void,
-});
-
 /** An always-available in-memory adapter that can open sessions. */
-const fakeAdapter = (): HarnessAgentAdapter => {
+const openableAdapter = () => {
   let opens = 0;
-  return {
+  return makeFakeAdapter({
     id: "pi",
-    descriptor: { id: "pi", name: "Pi (fake)" },
-    checkAvailability: Effect.succeed({ available: true }),
-    permissionModes: [],
+    name: "Pi (fake)",
     open: () =>
       Effect.sync(() => {
         opens += 1;
-        return fakeSession(`native-${opens}`);
+        return makeFakeSession({ sessionId: `native-${opens}`, harnessAgentId: "pi" });
       }),
-    resume: () => Effect.die("resume is not exercised by composition tests"),
-    getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
-  };
+  });
 };
 
 async function withTempDirs<A>(run: (home: string, workspace: string) => Promise<A>): Promise<A> {
@@ -68,7 +45,7 @@ async function withTempDirs<A>(run: (home: string, workspace: string) => Promise
 describe("agent runtime composition", () => {
   it("delivers a session-service publish to an RPC subscriber — one bus, not two", async () => {
     await withTempDirs(async (home, workspace) => {
-      const { client, dispose } = await makeRpcTestHarness(home, [fakeAdapter()]);
+      const { client, dispose } = await makeRpcTestHarness(home, [openableAdapter()]);
       try {
         // Subscribe through the RPC route first (the bus has no replay), then
         // publish by creating a session through the session service. The event
@@ -84,12 +61,16 @@ describe("agent runtime composition", () => {
         const project = await client.project.create({ path: workspace });
         const ref = await client.session.create({ projectId: project.id, harnessAgentId: "pi" });
 
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const received = await Promise.race([
           firstCreated,
-          new Promise<"split bus: publish never reached the subscriber">((resolve) =>
-            setTimeout(() => resolve("split bus: publish never reached the subscriber"), 5_000),
-          ),
-        ]);
+          new Promise<"split bus: publish never reached the subscriber">((resolve) => {
+            timer = setTimeout(
+              () => resolve("split bus: publish never reached the subscriber"),
+              5_000,
+            );
+          }),
+        ]).finally(() => clearTimeout(timer));
         expect(received).toMatchObject({ type: "session.created", ref });
       } finally {
         await dispose();
@@ -100,14 +81,11 @@ describe("agent runtime composition", () => {
   it("serves list, probe, and session create from one registry instance", async () => {
     await withTempDirs(async (home, workspace) => {
       let registryBuilds = 0;
-      const registry = Layer.effect(
-        HarnessAgentRegistry,
-        Effect.sync(() => {
-          registryBuilds += 1;
-          return makeHarnessAgentRegistry([fakeAdapter()]);
-        }),
-      );
-      const { client, dispose } = await makeRpcTestHarness(home, [], registry);
+      const registry = Layer.sync(HarnessAgentRegistry, () => {
+        registryBuilds += 1;
+        return makeHarnessAgentRegistry([openableAdapter()]);
+      });
+      const { client, dispose } = await makeRpcTestHarness(home, registry);
       try {
         const { harnessAgents } = await client.harness.list({});
         expect(harnessAgents.map((agent) => agent.id)).toEqual(["pi"]);
