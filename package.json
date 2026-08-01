@@ -24,6 +24,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@types/node": "catalog:",
+    "agent-cli-detector": "^0.1.4",
     "lint-staged": "^17.1.0",
     "oxfmt": "^0.58.0",
     "oxlint": "^1.74.0",

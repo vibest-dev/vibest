@@ -3,15 +3,18 @@ import url from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
+import { isRunningFromAgent } from "agent-cli-detector";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import { defineConfig } from "electron-vite";
 import type { Plugin } from "vite";
 
-// The dev overlays (react-grab, react-scan) reach outside the origin on boot,
-// which the shipped CSP rejects with console errors on every `electron-vite dev`.
-// Production builds eliminate both overlays, so index.html stays strict and the
-// origins they need are spliced in for the dev server only. Each entry is
-// [exact substring of the shipped policy, its dev replacement].
+const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
+
+// When enabled, the dev overlays (react-grab, react-scan) reach outside the
+// origin on boot, which the shipped CSP rejects. Production eliminates both;
+// agent-run dev leaves index.html strict because neither overlay loads. Their
+// required origins are spliced in only for an interactive dev server. Each entry
+// is [exact substring of the shipped policy, its dev replacement].
 const DEV_CSP_PATCHES: ReadonlyArray<readonly [string, string]> = [
   // react-grab's overlay @imports Geist from Google Fonts inside its shadow root.
   // The stylesheet's own @font-face points at gstatic, and the strict policy has
@@ -78,11 +81,14 @@ export default defineConfig({
   },
   renderer: {
     root: url.fileURLToPath(new URL("./src/renderer/", import.meta.url)),
+    define: {
+      "import.meta.env.VIBEST_RUN_IN_AGENT": JSON.stringify(RUNNING_IN_AGENT),
+    },
     resolve: {
       alias: { "@": url.fileURLToPath(new URL("../app/src/", import.meta.url)) },
     },
     plugins: [
-      devOverlayCsp(),
+      ...(RUNNING_IN_AGENT ? [] : [devOverlayCsp()]),
       codeInspectorPlugin({ bundler: "vite" }),
       tanstackRouter({
         target: "react",

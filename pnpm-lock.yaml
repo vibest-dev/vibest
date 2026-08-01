@@ -152,6 +152,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      agent-cli-detector:
+        specifier: ^0.1.4
+        version: 0.1.4
       lint-staged:
         specifier: ^17.1.0
         version: 17.1.0
@@ -4431,6 +4434,11 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
+
+  agent-cli-detector@0.1.4:
+    resolution: {integrity: sha512-qPgevFvpaQoBaRJVKzr8R7h1WPvV3DtbgRIQlne4le66KBzXx5hNBwo/+NTw67LgkKBlhCzksrdautpUdlls0Q==}
+    engines: {node: '>=18.18'}
+    hasBin: true
 
   agent-install@0.0.5:
     resolution: {integrity: sha512-nHlms9BkP8ZiY79HrwCGiA2DcNaXrAaJrCM/BEqQ7MEsSKyCk+2A76xPGylIfASZSZE0SaU3T0bNSg4rBPIJAQ==}
@@ -12404,6 +12412,8 @@ snapshots:
   acorn@8.17.0: {}
 
   agent-base@7.1.4: {}
+
+  agent-cli-detector@0.1.4: {}
 
   agent-install@0.0.5:
     dependencies:
