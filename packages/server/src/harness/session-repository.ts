@@ -5,13 +5,20 @@ import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } 
 import type { Session } from "../types";
 
 /**
- * Persistence schema for {@link Session}. Compatibility with the interface is
- * enforced structurally: `write` checks Session → schema Type, the readers
- * check schema Type → Session.
+ * Persistence schema for {@link Session} — everything *except* `sessionId`,
+ * which is the filename and is put back by {@link toSession} on read.
+ *
+ * Storing it in the body too would be a second copy of an address the path
+ * already holds, free to drift from it and never consulted when it does: every
+ * lookup here goes through the path. It is also what made the oldest records
+ * unreadable — they predate the field, which until then lived only in the
+ * filename, so requiring it in the body rejected them outright.
+ *
+ * Compatibility with the interface is enforced structurally: `write` checks
+ * Session → schema Type, {@link toSession} checks schema Type → Session.
  */
-const SessionSchema = Schema.Struct({
+const SessionBodySchema = Schema.Struct({
   version: Schema.Literal(1),
-  sessionId: Schema.String,
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
   harnessSessionId: Schema.String,
@@ -22,10 +29,16 @@ const SessionSchema = Schema.Struct({
   historyAvailable: Schema.optionalKey(Schema.Boolean),
 });
 
+/** Rejoin a stored body with the `sessionId` its filename carried. */
+const toSession = (sessionId: string, body: typeof SessionBodySchema.Type): Session => ({
+  ...body,
+  sessionId,
+});
+
 /**
  * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The filename
- * mirrors {@link Session.sessionId}, which the body also carries. No business
- * rules — orchestration (id generation, projectId resolution) lives in
+ * is the sole home of {@link Session.sessionId}. No business rules —
+ * orchestration (id generation, projectId resolution) lives in
  * {@link HarnessAgentSessionService}, whose internal collaborator this is; it
  * has no Context tag of its own.
  */
@@ -61,11 +74,14 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
   Effect.gen(function* () {
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
-      schema: SessionSchema,
-      // Pre-envelope records are the bare body, already in the v1 shape.
-      legacy: { schema: SessionSchema, migrate: (session) => session },
+      schema: SessionBodySchema,
+      // Pre-envelope records are the bare body, already in the v1 shape — which
+      // holds only because the body schema stops at what those records had.
+      legacy: { schema: SessionBodySchema, migrate: (body) => body },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
+    // Entry ids are `<projectId>/<sessionId>`; only `list` has to take one apart.
+    const sessionIdOf = (id: string) => id.slice(id.lastIndexOf("/") + 1);
     const asReadError = (error: JsonStoreLoadError) =>
       new StoreReadError({ file: error.file, cause: error });
     const asWriteError = (error: { readonly file: string }) =>
@@ -77,7 +93,9 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         // another project cannot fail this listing.
         isSafeId(projectId)
           ? sessions.list({ under: projectId }).pipe(
-              Effect.map((entries) => entries.map((entry) => entry.data)),
+              Effect.map((entries) =>
+                entries.map((entry) => toSession(sessionIdOf(entry.id), entry.data)),
+              ),
               Effect.mapError(asReadError),
             )
           : Effect.succeed([]),
@@ -89,7 +107,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               Effect.mapError(asReadError),
               Effect.flatMap((found) =>
                 Option.isSome(found)
-                  ? Effect.succeed(found.value)
+                  ? Effect.succeed(toSession(sessionId, found.value))
                   : Effect.fail(new SessionNotFound({ projectId, sessionId })),
               ),
             ),
@@ -103,18 +121,19 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               const id = ids.find((candidate) => candidate.endsWith(`/${sessionId}`));
               const found =
                 id === undefined
-                  ? Option.none<Session>()
+                  ? Option.none<typeof SessionBodySchema.Type>()
                   : yield* sessions.get(id).pipe(Effect.mapError(asReadError));
               if (Option.isNone(found)) {
                 return yield* Effect.fail(new SessionRefNotFound({ sessionId }));
               }
-              return found.value;
+              return toSession(sessionId, found.value);
             }),
 
-      write: (metadata) =>
-        sessions
-          .put(entryId(metadata.projectId, metadata.sessionId), metadata)
-          .pipe(Effect.mapError(asWriteError)),
+      // Split explicitly rather than letting the encoder drop the extra key:
+      // this is the one place the id leaves the body for the path, and it
+      // should fail to compile — not silently strip — if that ever changes.
+      write: ({ sessionId, ...body }) =>
+        sessions.put(entryId(body.projectId, sessionId), body).pipe(Effect.mapError(asWriteError)),
 
       remove: (projectId, sessionId) =>
         !isSafeId(projectId) || !isSafeId(sessionId)

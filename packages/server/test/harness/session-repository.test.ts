@@ -59,7 +59,7 @@ describe("SessionRepository", () => {
     expect(read.version).toBe(1);
   });
 
-  it("persists at storage/sessions/<projectId>/<sessionId>.json, sessionId in the body too", async () => {
+  it("persists at storage/sessions/<projectId>/<sessionId>.json, the filename being the only sessionId", async () => {
     await run(
       Effect.gen(function* () {
         const repo = yield* SessionRepository;
@@ -70,14 +70,20 @@ describe("SessionRepository", () => {
       await fs.readFile(path.join(home, "storage", "sessions", "proj-a", "sess-1.json"), "utf8"),
     );
     expect(raw.version).toBe(1);
-    expect(raw.data.sessionId).toBe("sess-1");
     expect(raw.data.projectId).toBe("proj-a");
+    expect(raw.data).not.toHaveProperty("sessionId");
   });
 
-  it("reads a pre-envelope record and adopts it into envelope form", async () => {
+  // Verbatim bytes from a real ~/.vibest record written before the body carried
+  // a sessionId at all. Fabricating this input from the current Session type is
+  // what let the missing field go unnoticed: it produced a record no historical
+  // install ever wrote, and the schema then rejected every one that they did.
+  const PRE_ENVELOPE_RECORD = `{"version":1,"projectId":"proj-a","harnessAgentId":"pi","harnessSessionId":"019fa463-cf81-73bd-999f-ffe6c5310d2e","createdAt":"2026-07-27T16:23:54.641Z"}`;
+
+  it("reads a pre-envelope record with no sessionId in the body", async () => {
     const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(meta("sess-1", "proj-a", "claude-uuid-1")), "utf8");
+    await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
 
     const read = await run(
       Effect.gen(function* () {
@@ -85,11 +91,35 @@ describe("SessionRepository", () => {
         return yield* repo.read("proj-a", "sess-1");
       }),
     );
-    expect(read.harnessSessionId).toBe("claude-uuid-1");
+    // Recovered from the filename, which is where it lived back then.
+    expect(read.sessionId).toBe("sess-1");
+    expect(read.harnessSessionId).toBe("019fa463-cf81-73bd-999f-ffe6c5310d2e");
 
+    // Adopted into envelope form on that first read.
     const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.version).toBe(1);
-    expect(raw.data.sessionId).toBe("sess-1");
+    expect(raw.data.harnessAgentId).toBe("pi");
+  });
+
+  it("a record that does carry sessionId in the body still reads, filename winning", async () => {
+    // The intermediate generation: post-sessionId, pre-envelope. The body's
+    // copy is ignored rather than trusted, so a drifted one cannot mislead.
+    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...meta("stale-id", "proj-a", "claude-uuid-1") }),
+      "utf8",
+    );
+
+    const read = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        return yield* repo.read("proj-a", "sess-1");
+      }),
+    );
+    expect(read.sessionId).toBe("sess-1");
+    expect(read.harnessSessionId).toBe("claude-uuid-1");
   });
 
   it("lists all sessions of a project", async () => {
