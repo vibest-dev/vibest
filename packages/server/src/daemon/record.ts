@@ -1,14 +1,13 @@
-import path from "node:path";
-
 import { writeFileAtomic } from "@vibest/effect-json-store";
 import { Effect, FileSystem, type PlatformError } from "effect";
 
+import { daemonRecordPath } from "./paths";
+
 /**
- * The discovery record the launcher writes to `$VIBEST_HOME/daemon.pid` — the
- * local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`. It
- * is the single-instance marker: reuse requires a live process, a healthy
- * endpoint, and a launch owner path that still exists. The server itself never
- * reads or writes it.
+ * The discovery record the launcher writes to `$VIBEST_DAEMON_DIR/daemon.pid` —
+ * the local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`.
+ * Reuse requires a live process, a healthy endpoint, and a launch owner path
+ * that still exists. The server itself never reads or writes it.
  */
 export type DaemonRecord = {
   /** The detached server process's pid. */
@@ -23,17 +22,14 @@ export type DaemonRecord = {
   readonly launchOwnerPath?: string;
 };
 
-/** `$VIBEST_HOME/daemon.pid`. */
-export const recordPath = (home: string): string => path.join(home, "daemon.pid");
-
 /** Read and validate the record, or `undefined` if missing/garbage. */
 export const readRecord = (
-  home: string,
+  daemonDir: string,
 ): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs
-      .readFileString(recordPath(home))
+      .readFileString(daemonRecordPath(daemonDir))
       .pipe(Effect.orElseSucceed(() => undefined));
     if (raw === undefined) return undefined;
 
@@ -65,15 +61,17 @@ export const readRecord = (
  * write fails or is interrupted.
  */
 export const writeRecord = (
-  home: string,
+  daemonDir: string,
   record: DaemonRecord,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
-    writeFileAtomic(fs, recordPath(home), JSON.stringify(record), { mode: 0o600 }),
+    writeFileAtomic(fs, daemonRecordPath(daemonDir), JSON.stringify(record), { mode: 0o600 }),
   );
 
 /** Remove the record; a missing file is not an error. */
-export const removeRecord = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  FileSystem.FileSystem.use((fs) => fs.remove(recordPath(home), { force: true })).pipe(
+export const removeRecord = (
+  daemonDir: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.use((fs) => fs.remove(daemonRecordPath(daemonDir), { force: true })).pipe(
     Effect.ignore,
   );

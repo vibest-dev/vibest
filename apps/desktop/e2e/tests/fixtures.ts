@@ -9,20 +9,32 @@ import {
   expect,
   test as base,
 } from "@playwright/test";
-import { readRecord, stopDaemon } from "@vibest/server/daemon";
+import { readRecord, resolveDaemonLocation, stopDaemon } from "@vibest/server/daemon";
 import { Effect, FileSystem } from "effect";
 
 const provideFileSystem = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
 
+function e2eDaemonLocation(home: string) {
+  return resolveDaemonLocation({ VIBEST_HOME: home });
+}
+
 export function stopE2eDaemon(home: string): Promise<"stopped" | "not-running"> {
-  return provideFileSystem(stopDaemon(home));
+  const { daemonDir, legacyDaemonDir } = e2eDaemonLocation(home);
+  return provideFileSystem(stopDaemon(daemonDir, legacyDaemonDir));
 }
 
 export async function waitForE2eDaemon(home: string, timeoutMs = 30_000): Promise<boolean> {
+  const { daemonDir, legacyDaemonDir } = e2eDaemonLocation(home);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if ((await provideFileSystem(readRecord(home))) !== undefined) return true;
+    if (
+      (await provideFileSystem(readRecord(daemonDir))) !== undefined ||
+      (legacyDaemonDir !== undefined &&
+        (await provideFileSystem(readRecord(legacyDaemonDir))) !== undefined)
+    ) {
+      return true;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;

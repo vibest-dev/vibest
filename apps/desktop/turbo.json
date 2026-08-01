@@ -23,7 +23,9 @@
         "NODE_EXTRA_CA_CERTS",
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
-        "VIBEST_CLAUDE_EXECUTABLE"
+        "VIBEST_CLAUDE_EXECUTABLE",
+        "VIBEST_HOME",
+        "VIBEST_DAEMON_DIR"
       ]
     },
     "build:unpack": {

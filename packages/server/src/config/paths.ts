@@ -26,12 +26,21 @@ const resolve = (home: string) => ({
 });
 
 /**
+ * An unset variable and one set to the empty string mean the same thing here.
+ * Without this, `VIBEST_DAEMON_DIR=""` resolves every lifecycle file to a bare
+ * relative path under whatever cwd the process happens to have — `stop` and
+ * `status` would silently read the wrong daemon instead of failing.
+ */
+const explicitPath = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value;
+
+/**
  * `$VIBEST_HOME`, falling back to `~/.vibest-dev` under
  * `NODE_ENV=development` and `~/.vibest` otherwise — the single home every
  * client (server Paths, CLI, desktop, daemon launcher) resolves through, so
- * the one-daemon-per-home invariant can never drift on a second definition.
+ * Project and Session storage can never drift on a second definition.
  * The dev split keeps `pnpm dev` / `electron-vite dev` sessions from sharing
- * storage (and a daemon) with the production install.
+ * storage (and, by default, a daemon) with the production install.
  *
  * A plain function, not an Effect: an env lookup and a string join perform no
  * effectful work (`.agents/rules/stack.md`, "Where the boundary is"). Not
@@ -40,9 +49,50 @@ const resolve = (home: string) => ({
  */
 export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string {
   return (
-    env.VIBEST_HOME ??
+    explicitPath(env.VIBEST_HOME) ??
     path.join(os.homedir(), env.NODE_ENV === "development" ? ".vibest-dev" : ".vibest")
   );
+}
+
+/** The two directories a daemon front door needs, resolved together. */
+export type DaemonLocation = {
+  /** `$VIBEST_HOME` — Projects and Sessions. Handed to the daemon process. */
+  readonly home: string;
+  /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.log`, `.stopped`. */
+  readonly daemonDir: string;
+  /**
+   * Pre-nested lifecycle directory. Present only for the default layout so
+   * upgraded launchers can converge with older worktrees that still use
+   * `$VIBEST_HOME/daemon.pid`; explicit daemon-directory overrides stay isolated.
+   */
+  readonly legacyDaemonDir?: string;
+};
+
+/**
+ * Where a daemon keeps its data and its lifecycle files. Every front door (CLI,
+ * desktop, and any future one) resolves the pair here rather than pairing them
+ * itself: `stop` must find what `start` wrote, and the desktop must find what
+ * the CLI started, which only holds while there is one pairing rule.
+ *
+ * An explicit `$VIBEST_DAEMON_DIR` lets multiple daemon processes use separate
+ * lifecycle state while keeping their server data under the same
+ * `$VIBEST_HOME`; unset, it is `$VIBEST_HOME/daemon` (`~/.vibest/daemon` in
+ * production). This is the one place that default is spelled — the
+ * single-instance invariant is keyed on the daemon directory, so a second
+ * definition would be a second daemon. `daemon/paths.ts` names files inside a
+ * directory it is handed and never re-derives the directory itself.
+ */
+export function resolveDaemonLocation(env: NodeJS.ProcessEnv = process.env): DaemonLocation {
+  const home = resolveVibestHome(env);
+  const daemonDir = explicitPath(env.VIBEST_DAEMON_DIR);
+  return daemonDir === undefined
+    ? { home, daemonDir: path.join(home, "daemon"), legacyDaemonDir: home }
+    : { home, daemonDir };
+}
+
+/** `resolveDaemonLocation().daemonDir`, for callers that need only the directory. */
+export function resolveDaemonDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  return resolveDaemonLocation(env).daemonDir;
 }
 
 /** Point the runtime at an explicit home directory (used in tests). */

@@ -15,8 +15,8 @@ export const LocalServerLive = Layer.effect(
       ? resolveLoginShellEnvironmentWith(spawner)
       : Effect.sync(() => ({ ...process.env }));
 
-    // Attach the shared $VIBEST_HOME daemon (the same one the CLI uses)
-    // instead of forking a private die-with-app child — one backend per home.
+    // Attach the daemon selected by VIBEST_DAEMON_DIR (the same one the CLI
+    // uses) instead of forking a private die-with-app child.
     return yield* makeLocalServer(
       {
         entry: config.serverEntry,
