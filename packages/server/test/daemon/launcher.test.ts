@@ -68,6 +68,26 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
       }),
     );
 
+    it.effect("isolates lifecycle state in an explicit daemon directory", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* tempHome;
+        const daemonDir = path.join(home, "isolated-daemon");
+        yield* Effect.addFinalizer(() => Effect.ignore(stopDaemon(home, daemonDir)));
+
+        const spawned = yield* resolve({
+          home,
+          daemonDir,
+          port: 0,
+          readyTimeoutMs: 15_000,
+        });
+        assert.equal((yield* readRecord(home, daemonDir))?.pid, spawned.pid);
+        assert.equal(yield* readRecord(home), undefined);
+        assert.ok(yield* fs.exists(path.join(daemonDir, "daemon.log")));
+        assert.equal(yield* fs.exists(path.join(home, "daemon.pid")), false);
+      }),
+    );
+
     it.effect("reports status and stops the daemon", () =>
       Effect.gen(function* () {
         const home = yield* tempHome;

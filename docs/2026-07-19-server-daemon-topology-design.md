@@ -47,9 +47,10 @@ So the topology principle is not new — it is **already implemented remotely** 
 merely missing locally:
 
 > **Every vibest server — local or remote — is a single-instance daemon per
-> `$VIBEST_HOME`, discovered through a file, and attached-to rather than
-> re-spawned.** "Reach" is a separate concern layered on top: loopback for local,
-> `ssh -L` for remote.
+> daemon directory, discovered through a file, and attached-to rather than
+> re-spawned.** Locally that directory is `$VIBEST_DAEMON_DIR`, defaulting to
+> `$VIBEST_HOME/daemon`. "Reach" is a separate concern layered on top: loopback
+> for local, `ssh -L` for remote.
 
 The local plane is the one that's behind. This design brings desktop and CLI up to
 the discipline the remote path already has, and unifies the launch seam so
@@ -62,7 +63,7 @@ remote server" are the same shape.
                          one oRPC/WS handler + harness runtime per server
                          ┌───────────────────────────────────────────┐
                          │            @vibest/server (daemon)          │
-   local reach           │  single-instance lock on $VIBEST_HOME       │   remote reach
+   local reach           │  lock on $VIBEST_DAEMON_DIR                 │   remote reach
  127.0.0.1:<port> ─────▶ │  writes discovery file (pid/addr/token)     │ ◀───── ssh -L
    discovery: daemon.pid│  auth token + CORS + WS ticket (existing)   │        (existing
                          └───────────────────────────────────────────┘         SSH design)
@@ -97,21 +98,26 @@ as just another `RunningServerProcess` to the same supervisor.
 ### Discovery and single-instance (local plane)
 
 The daemon binds `127.0.0.1:<port>` and atomically writes
-`$VIBEST_HOME/daemon/daemon.pid` (`0600`) — the local mirror of the remote
+`$VIBEST_DAEMON_DIR/daemon.pid` (`0600`) — by default
+`$VIBEST_HOME/daemon/daemon.pid` — the local mirror of the remote
 `ssh-launch/<stateKey>/{pid,port,token}`:
 
 ```jsonc
 { "pid": 12345, "address": "http://127.0.0.1:41234", "token": "…", "startedAt": … }
 ```
 
-Daemon lifecycle files live together under `$VIBEST_HOME/daemon/`. During the
-mixed-version migration, the launcher also mirrors the discovery record,
-launch lock, and stop tombstone at their former root-level paths so older CLI
-and Desktop processes still converge on the same daemon. The nested files are
-the long-term layout; the root mirrors can be removed after old launchers are
-no longer supported.
+Daemon lifecycle files live together under `$VIBEST_DAEMON_DIR`. When the
+variable is absent, the default `$VIBEST_HOME/daemon/` layout also mirrors the
+discovery record, launch lock, and stop tombstone at their former root-level
+paths during the mixed-version migration. An explicit `VIBEST_DAEMON_DIR` is an
+isolated namespace and never writes those `$VIBEST_HOME` mirrors.
 
-It holds a single-instance lock keyed on `$VIBEST_HOME`. Every local front-door
+The override is primarily a development escape hatch. Pointing multiple daemon
+directories at the same `$VIBEST_HOME` preserves Projects and Sessions, but the
+current JSON repositories do not provide cross-process transactions; concurrent
+mutations remain the caller's responsibility.
+
+It holds a single-instance lock keyed on `$VIBEST_DAEMON_DIR`. Every local front-door
 runs the same `resolveOrSpawnServer()`:
 
 1. Read `daemon.pid` → health-check `address`.
@@ -147,8 +153,9 @@ instead of over SSH.
   and containers (systemd, Docker), for the SSH remote runner
   (`nohup vibest serve`), and for debugging. Interactive local use just never runs it
   directly — the launcher does.
-- **Desktop must attach the same daemon**, not spawn a die-with-app child, or the
-  `$VIBEST_HOME` split-brain returns the moment the CLI is used alongside it.
+- **Desktop must attach the same daemon directory as the CLI** for the normal
+  topology, rather than spawning a die-with-app child. An explicit
+  `VIBEST_DAEMON_DIR` deliberately selects a separate daemon namespace.
   Consequence: **the local server survives quitting the desktop app** (agents keep
   running) — consistent with the remote/CLI semantics, but a behavior change from
   today's managed child.
@@ -250,9 +257,10 @@ _additional plane_, added when wanted, with no rework of the current work.
    electron-builder asar path — needs a packaged-build check.**
 2. **✅ Landed (CLI) — Add the daemon launcher (a layer above the server, not inside
    it).** A shared `resolveOrSpawnDaemon` (`@vibest/server/daemon`) that reads/writes
-   `$VIBEST_HOME/daemon/daemon.pid`, does the pid-alive + health-check reuse,
+   `$VIBEST_DAEMON_DIR/daemon.pid` (default
+   `$VIBEST_HOME/daemon/daemon.pid`), does the pid-alive + health-check reuse,
    spawns the foreground server detached (streamed to
-   `$VIBEST_HOME/daemon/daemon.log`), and applies two-signal
+   `$VIBEST_DAEMON_DIR/daemon.log`), and applies two-signal
    readiness (pid alive + `/api/health`) and the `:4000 → :0` fallback. The local twin
    of the SSH launch script; the server itself is untouched. The daemon process is
    `vibest serve` re-launched from this same CLI argv — no second bundle. Bare `vibest`

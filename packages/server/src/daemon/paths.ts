@@ -1,20 +1,20 @@
 import path from "node:path";
 
-/** `$VIBEST_HOME/daemon/` — lifecycle state for the one daemon owning this home. */
+/** Default daemon state directory for a `$VIBEST_HOME`. */
 export const daemonDirectory = (home: string): string => path.join(home, "daemon");
 
-export const recordPath = (home: string): string => path.join(daemonDirectory(home), "daemon.pid");
+export const daemonRecordPath = (daemonHome: string): string => path.join(daemonHome, "daemon.pid");
 
-export const lockPath = (home: string): string => path.join(daemonDirectory(home), "daemon.lock");
+export const daemonLockPath = (daemonHome: string): string => path.join(daemonHome, "daemon.lock");
 
-export const logPath = (home: string): string => path.join(daemonDirectory(home), "daemon.log");
+export const daemonLogPath = (daemonHome: string): string => path.join(daemonHome, "daemon.log");
 
-export const tombstonePath = (home: string): string =>
-  path.join(daemonDirectory(home), "daemon.stopped");
+export const daemonTombstonePath = (daemonHome: string): string =>
+  path.join(daemonHome, "daemon.stopped");
 
 // Compatibility with homes created before daemon lifecycle files moved under
-// `$VIBEST_HOME/daemon/`. Discovery, locking, and stop signals are mirrored at
-// these paths so mixed old/new launchers still converge on one daemon.
+// the default `$VIBEST_HOME/daemon/` directory. These mirrors are used only
+// when VIBEST_DAEMON_DIR is absent.
 export const legacyRecordPath = (home: string): string => path.join(home, "daemon.pid");
 export const legacyLockPath = (home: string): string => path.join(home, "daemon.lock");
 export const legacyTombstonePath = (home: string): string => path.join(home, "daemon.stopped");

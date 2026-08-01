@@ -45,6 +45,16 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
   );
 }
 
+/**
+ * Daemon discovery, lock, log, and tombstone directory. An explicit
+ * `$VIBEST_DAEMON_DIR` lets multiple daemon processes use separate lifecycle
+ * state while keeping their server data under the same `$VIBEST_HOME`.
+ * Defaults to `$VIBEST_HOME/daemon` (`~/.vibest/daemon` in production).
+ */
+export function resolveDaemonDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  return env.VIBEST_DAEMON_DIR ?? path.join(resolveVibestHome(env), "daemon");
+}
+
 /** Point the runtime at an explicit home directory (used in tests). */
 export const layerPaths = (home: string): Layer.Layer<Paths> => Layer.succeed(Paths, resolve(home));
 

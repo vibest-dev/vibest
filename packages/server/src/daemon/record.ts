@@ -1,6 +1,6 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 
-import { daemonDirectory, legacyRecordPath, recordPath } from "./paths";
+import { daemonDirectory, daemonRecordPath, legacyRecordPath } from "./paths";
 
 /**
  * The discovery record the launcher writes to `$VIBEST_HOME/daemon/daemon.pid` — the
@@ -19,8 +19,14 @@ export type DaemonRecord = {
   readonly startedAt: number;
 };
 
-/** `$VIBEST_HOME/daemon/daemon.pid`. */
-export { recordPath } from "./paths";
+/** Discovery record under the configured daemon directory. */
+export const recordPath = (home: string, daemonHome?: string): string =>
+  daemonRecordPath(daemonHome ?? daemonDirectory(home));
+
+const recordPaths = (home: string, daemonHome?: string): ReadonlyArray<string> => [
+  recordPath(home, daemonHome),
+  ...(daemonHome === undefined ? [legacyRecordPath(home)] : []),
+];
 
 const parseRecord = (raw: string): DaemonRecord | undefined => {
   try {
@@ -46,11 +52,12 @@ const parseRecord = (raw: string): DaemonRecord | undefined => {
 /** Read every distinct current or legacy record that still parses. */
 export const readRecords = (
   home: string,
+  daemonHome?: string,
 ): Effect.Effect<ReadonlyArray<DaemonRecord>, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const records: DaemonRecord[] = [];
-    for (const file of [recordPath(home), legacyRecordPath(home)]) {
+    for (const file of recordPaths(home, daemonHome)) {
       const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined));
       if (raw === undefined) continue;
       const record = parseRecord(raw);
@@ -69,8 +76,9 @@ export const readRecords = (
 /** Read the preferred current record, or the legacy record during migration. */
 export const readRecord = (
   home: string,
+  daemonHome?: string,
 ): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
-  readRecords(home).pipe(Effect.map((records) => records[0]));
+  readRecords(home, daemonHome).pipe(Effect.map((records) => records[0]));
 
 /**
  * Atomically write the record with `0600` perms (token is a secret): write a
@@ -80,13 +88,18 @@ export const readRecord = (
 export const writeRecord = (
   home: string,
   record: DaemonRecord,
+  daemonHome?: string,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(daemonDirectory(home), { recursive: true });
-    // Publish the legacy/root mirror first: old launchers use it as canonical
-    // discovery, so they can never miss a daemon that new code has published.
-    for (const target of [legacyRecordPath(home), recordPath(home)]) {
+    yield* fs.makeDirectory(daemonHome ?? daemonDirectory(home), { recursive: true });
+    // The default layout mirrors root-first for mixed-version clients. An
+    // explicit daemon home is isolated and never writes into `$VIBEST_HOME`.
+    const targets =
+      daemonHome === undefined
+        ? [legacyRecordPath(home), recordPath(home)]
+        : [recordPath(home, daemonHome)];
+    for (const target of targets) {
       const tmp = `${target}.${process.pid}.tmp`;
       yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
       // `mode` only applies when the write creates the file, so a leftover temp
@@ -96,11 +109,14 @@ export const writeRecord = (
     }
   });
 
-/** Remove current and legacy records; missing files are not errors. */
-export const removeRecord = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
+/** Remove configured and compatibility records; missing files are not errors. */
+export const removeRecord = (
+  home: string,
+  daemonHome?: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
     Effect.all(
-      [recordPath(home), legacyRecordPath(home)].map((file) => fs.remove(file, { force: true })),
+      recordPaths(home, daemonHome).map((file) => fs.remove(file, { force: true })),
       { discard: true },
     ),
   ).pipe(Effect.ignore);

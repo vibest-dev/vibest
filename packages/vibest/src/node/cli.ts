@@ -3,6 +3,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  resolveDaemonDirectory,
   resolveOrSpawnDaemon,
   resolveVibestHome,
   statusDaemon,
@@ -28,6 +29,11 @@ type DaemonStartInput = {
   readonly corsOrigin: ReadonlyArray<string>;
 };
 
+const daemonLocation = () => ({
+  home: resolveVibestHome(),
+  ...(process.env.VIBEST_DAEMON_DIR === undefined ? {} : { daemonDir: resolveDaemonDirectory() }),
+});
+
 // Default startup is the daemon: a short-lived `vibest` command must operate a
 // backend that outlives it, so it attaches to the running daemon or spawns one.
 const startDaemon = (input: DaemonStartInput) =>
@@ -37,7 +43,7 @@ const startDaemon = (input: DaemonStartInput) =>
     // inherited from the ambient VIBEST_CORS_ORIGINS by the spawned daemon.
     const { port } = resolveServeConfig(input);
     const handle = yield* resolveOrSpawnDaemon({
-      home: resolveVibestHome(),
+      ...daemonLocation(),
       serverArgv: serverArgv(),
       port,
     });
@@ -56,16 +62,18 @@ const startDaemon = (input: DaemonStartInput) =>
 
 const stopHandler = () =>
   Effect.gen(function* () {
-    const result = yield* stopDaemon(resolveVibestHome());
+    const { home, daemonDir } = daemonLocation();
+    const result = yield* stopDaemon(home, daemonDir);
     console.log(result === "stopped" ? "vibest daemon stopped" : "vibest daemon is not running");
   });
 
 const statusHandler = () =>
   Effect.gen(function* () {
-    const status = yield* statusDaemon(resolveVibestHome());
+    const { home, daemonDir } = daemonLocation();
+    const status = yield* statusDaemon(home, daemonDir);
     if ("conflict" in status) {
       console.log(
-        `multiple vibest daemons are running for this home: ${status.conflict
+        `multiple vibest daemons are running for this daemon directory: ${status.conflict
           .map((record) => `${record.address} (pid ${record.pid})`)
           .join(", ")}`,
       );

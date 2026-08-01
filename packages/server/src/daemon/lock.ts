@@ -1,6 +1,6 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 
-import { legacyLockPath, lockPath } from "./paths";
+import { daemonDirectory, daemonLockPath, legacyLockPath } from "./paths";
 
 /**
  * The launch lock — an exclusive-create `$VIBEST_HOME/daemon/daemon.lock` holding the
@@ -21,16 +21,14 @@ import { legacyLockPath, lockPath } from "./paths";
  */
 export const tryAcquireLock = (
   home: string,
+  daemonHome?: string,
 ): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
     Effect.gen(function* () {
-      // The root-level lock remains canonical during the compatibility window:
-      // old launchers see it, so mixed old/new clients cannot spawn twice.
+      const configuredLock = daemonLockPath(daemonHome ?? daemonDirectory(home));
+      const canonicalLock = daemonHome === undefined ? legacyLockPath(home) : configuredLock;
       const acquired = yield* fs
-        .writeFileString(legacyLockPath(home), String(process.pid), {
-          flag: "wx",
-          mode: 0o600,
-        })
+        .writeFileString(canonicalLock, String(process.pid), { flag: "wx", mode: 0o600 })
         .pipe(
           Effect.as(true),
           Effect.catchIf(
@@ -39,12 +37,13 @@ export const tryAcquireLock = (
           ),
         );
       if (!acquired) return false;
+      if (daemonHome !== undefined) return true;
 
-      // Nested copy is diagnostic state only; the root lock owns exclusivity.
-      // If it cannot be written, give the canonical lock back before failing.
+      // Default layout: mirror the canonical root lock for diagnostics. If the
+      // mirror fails, give the compatibility lock back before failing.
       yield* fs
-        .writeFileString(lockPath(home), String(process.pid), { mode: 0o600 })
-        .pipe(Effect.tapError(() => fs.remove(legacyLockPath(home), { force: true })));
+        .writeFileString(configuredLock, String(process.pid), { mode: 0o600 })
+        .pipe(Effect.tapError(() => fs.remove(canonicalLock, { force: true })));
       return true;
     }),
   );
@@ -52,10 +51,14 @@ export const tryAcquireLock = (
 /** The pid recorded in the lock, or `undefined` if missing/garbage. */
 export const readLockPid = (
   home: string,
+  daemonHome?: string,
 ): Effect.Effect<number | undefined, never, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
     Effect.gen(function* () {
-      for (const file of [legacyLockPath(home), lockPath(home)]) {
+      const configuredLock = daemonLockPath(daemonHome ?? daemonDirectory(home));
+      const files =
+        daemonHome === undefined ? [legacyLockPath(home), configuredLock] : [configuredLock];
+      for (const file of files) {
         const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""));
         const pid = Number.parseInt(raw, 10);
         if (Number.isInteger(pid) && pid > 0) return pid;
@@ -65,19 +68,29 @@ export const readLockPid = (
   );
 
 /** Whether the lock still exists (a concurrent launcher is still spawning). */
-export const lockExists = (home: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+export const lockExists = (
+  home: string,
+  daemonHome?: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
   FileSystem.FileSystem.use((fs) =>
     Effect.gen(function* () {
-      if (yield* fs.exists(legacyLockPath(home))) return true;
-      return yield* fs.exists(lockPath(home));
+      const configuredLock = daemonLockPath(daemonHome ?? daemonDirectory(home));
+      if (daemonHome === undefined && (yield* fs.exists(legacyLockPath(home)))) return true;
+      return yield* fs.exists(configuredLock);
     }),
   ).pipe(Effect.orElseSucceed(() => false));
 
-/** Release current and legacy locks; missing files are not errors. */
-export const releaseLock = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  FileSystem.FileSystem.use((fs) =>
-    Effect.all(
-      [lockPath(home), legacyLockPath(home)].map((file) => fs.remove(file, { force: true })),
+/** Release configured and compatibility locks; missing files are not errors. */
+export const releaseLock = (
+  home: string,
+  daemonHome?: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.use((fs) => {
+    const configuredLock = daemonLockPath(daemonHome ?? daemonDirectory(home));
+    const files =
+      daemonHome === undefined ? [configuredLock, legacyLockPath(home)] : [configuredLock];
+    return Effect.all(
+      files.map((file) => fs.remove(file, { force: true })),
       { discard: true },
-    ),
-  ).pipe(Effect.ignore);
+    );
+  }).pipe(Effect.ignore);

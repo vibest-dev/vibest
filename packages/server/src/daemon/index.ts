@@ -1,4 +1,4 @@
-export { resolveVibestHome } from "../config/paths";
+export { resolveDaemonDirectory, resolveVibestHome } from "../config/paths";
 export { DaemonLaunchError, DaemonStoppedError } from "./errors";
 export {
   type DaemonHandle,
