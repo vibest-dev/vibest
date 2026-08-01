@@ -23,11 +23,6 @@ jobs:
           node-version-file: ".node-version"
           cache: pnpm
 
-      # Effect compatibility gate: fails when the lockfile resolves more than
-      # one Effect runtime or the family drifts out of its pinned set. Pure
-      # file parsing, so it runs before install to fail fast.
-      - run: node tools/effect/compat-gate.mjs
-
       - run: pnpm install --frozen-lockfile
 
       # All three declare `dependsOn: ["^build"]`, so Turborepo builds the

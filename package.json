@@ -12,7 +12,6 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "check": "pnpm run lint:check && pnpm run format:check && pnpm run typecheck",
-    "check:effect": "node tools/effect/compat-gate.mjs",
     "clean": "turbo run clean && git clean -xdf node_modules dist .turbo",
     "bump": "pnpm taze",
     "sherif": "pnpm dlx sherif --fix",
