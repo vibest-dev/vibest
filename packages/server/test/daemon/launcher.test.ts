@@ -8,7 +8,7 @@ import { layer } from "@effect/vitest";
 import { Effect, Fiber, FileSystem } from "effect";
 
 import { resolveDaemonLocation } from "../../src/config/paths";
-import { DaemonStoppedError } from "../../src/daemon/errors";
+import { DaemonLaunchError, DaemonStopError, DaemonStoppedError } from "../../src/daemon/errors";
 import {
   type ResolveDaemonOptions,
   resolveOrSpawnDaemon,
@@ -16,7 +16,7 @@ import {
   stopDaemon,
 } from "../../src/daemon/launcher";
 import { pidAlive } from "../../src/daemon/liveness";
-import { releaseLock, tryAcquireLock } from "../../src/daemon/lock";
+import { lockExists, releaseLock, tryAcquireLock } from "../../src/daemon/lock";
 import { readRecord, writeRecord } from "../../src/daemon/record";
 import { clearTombstone, hasTombstone, writeTombstone } from "../../src/daemon/tombstone";
 
@@ -509,6 +509,100 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
       Effect.gen(function* () {
         const { daemonDir } = yield* tempHome;
         assert.equal(yield* stopDaemon(daemonDir), "not-running");
+      }),
+    );
+
+    it.effect("leaves no tombstone behind when there was nothing to stop", () =>
+      Effect.gen(function* () {
+        const { home, daemonDir, legacyDaemonDir } = yield* tempHome;
+        assert.equal(yield* stopDaemon(daemonDir, legacyDaemonDir), "not-running");
+        assert.equal(yield* hasTombstone(daemonDir), false);
+        if (legacyDaemonDir !== undefined) {
+          assert.equal(yield* hasTombstone(legacyDaemonDir), false);
+        }
+
+        // Vetoing auto-heal is the consequence of stopping a *running* daemon.
+        // A no-op stop that tombstoned the home would refuse every later
+        // respawn until someone ran an explicit start.
+        const respawned = yield* resolve({
+          home,
+          daemonDir,
+          legacyDaemonDir,
+          port: 0,
+          autoRespawn: true,
+          readyTimeoutMs: 15_000,
+        });
+        assert.equal(respawned.reused, false);
+      }),
+    );
+
+    it.effect("fails instead of hanging when another launcher holds the locks", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { daemonDir, legacyDaemonDir } = yield* tempHome;
+        yield* fs.makeDirectory(daemonDir, { recursive: true });
+        // Held by this very much alive process, so it is not reclaimable and
+        // the wait can only end on its deadline.
+        assert.equal(yield* tryAcquireLock(daemonDir), true);
+        yield* Effect.addFinalizer(() => releaseLock(daemonDir));
+
+        const error = yield* Effect.flip(stopDaemon(daemonDir, legacyDaemonDir, 300));
+        assert.ok(error instanceof DaemonStopError);
+        // The stop intent outlives the failure, so retrying is the whole recovery.
+        assert.equal(yield* hasTombstone(daemonDir), true);
+      }),
+    );
+
+    it.effect("keeps a healthy daemon whose launch owner path cannot be read", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { home, daemonDir } = yield* tempHome;
+        const vault = path.join(home, "vault");
+        yield* fs.makeDirectory(vault, { recursive: true });
+        const launchOwnerPath = path.join(vault, "entry.mjs");
+        yield* fs.writeFileString(launchOwnerPath, "");
+        const running = yield* resolve({
+          home,
+          daemonDir,
+          port: 0,
+          launchOwnerPath,
+          readyTimeoutMs: 15_000,
+        });
+
+        // EACCES on the owner path is "we could not tell", not "the
+        // installation is gone" — answering `false` here would SIGKILL a
+        // perfectly healthy daemon over a transient permission error.
+        yield* fs.chmod(vault, 0o000);
+        yield* Effect.addFinalizer(() => Effect.ignore(fs.chmod(vault, 0o700)));
+
+        const attached = yield* resolve({ home, daemonDir, port: 0, launchOwnerPath });
+        assert.equal(attached.reused, true);
+        assert.equal(attached.pid, running.pid);
+      }),
+    );
+
+    it.effect("releases every lifecycle lock when a launch fails", () =>
+      Effect.gen(function* () {
+        const { home, daemonDir, legacyDaemonDir } = yield* tempHome;
+        const error = yield* Effect.flip(
+          resolveOrSpawnDaemon({
+            home,
+            daemonDir,
+            legacyDaemonDir,
+            // A "server" that exits immediately: the readiness wait
+            // short-circuits on the dead pid, so this fails fast and leaves no
+            // process behind.
+            serverArgv: [process.execPath, "-e", "process.exit(1)"],
+            launchOwnerPath: FAKE_SERVER,
+            port: 0,
+            readyTimeoutMs: 2_000,
+          }),
+        );
+        assert.ok(error instanceof DaemonLaunchError);
+        assert.equal(yield* lockExists(daemonDir), false);
+        if (legacyDaemonDir !== undefined) {
+          assert.equal(yield* lockExists(legacyDaemonDir), false);
+        }
       }),
     );
 

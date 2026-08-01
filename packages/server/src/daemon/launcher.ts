@@ -4,10 +4,10 @@ import path from "node:path";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
-import { DaemonLaunchError, DaemonStoppedError } from "./errors";
+import { DaemonLaunchError, DaemonStopError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
-import { daemonLogPath } from "./paths";
+import { daemonLockPath, daemonLogPath } from "./paths";
 import { reservePort } from "./port";
 import { type DaemonRecord, readRecord, removeRecord, writeRecord } from "./record";
 import { clearTombstone, hasTombstone, writeTombstone } from "./tombstone";
@@ -17,6 +17,8 @@ const READY_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_INTERVAL_MS = 150;
 const STOP_GRACE_MS = 5_000;
 const LOCK_ATTEMPTS = 10;
+/** How long `stopDaemon` waits for another launcher to release its locks. */
+const STOP_LOCK_TIMEOUT_MS = 30_000;
 
 export type DaemonHandle = {
   readonly address: string;
@@ -297,9 +299,14 @@ export const statusDaemon = (
 export const stopDaemon = (
   daemonDir: string,
   legacyDaemonDir?: string,
-): Effect.Effect<"stopped" | "not-running", PlatformError.PlatformError, FileSystem.FileSystem> =>
+  /** How long to wait for another launcher's locks. Tests shorten it. */
+  lockTimeoutMs: number = STOP_LOCK_TIMEOUT_MS,
+): Effect.Effect<
+  "stopped" | "not-running",
+  PlatformError.PlatformError | DaemonStopError,
+  FileSystem.FileSystem
+> =>
   Effect.gen(function* () {
-    const directories = daemonDirectories(daemonDir, legacyDaemonDir);
     const lockDirectories = lifecycleLockDirectories(daemonDir, legacyDaemonDir);
     const fileSystem = yield* FileSystem.FileSystem;
     for (const directory of lockDirectories) {
@@ -309,47 +316,44 @@ export const stopDaemon = (
     // Signal intent before waiting: an automatic respawn holding either lock
     // observes the tombstone, while an explicit start is stopped after it
     // publishes and releases its locks.
-    yield* Effect.forEach(directories, (directory) => writeTombstone(directory), {
-      discard: true,
+    yield* writeTombstones(daemonDir, legacyDaemonDir);
+
+    const stop = Effect.gen(function* () {
+      // A compatible explicit launcher may have cleared the early signal while
+      // holding a lock. Reassert it inside the critical section so no
+      // supervision loop can resurrect the daemon after this stop completes.
+      yield* writeTombstones(daemonDir, legacyDaemonDir);
+      const records = yield* readRecords(daemonDir, legacyDaemonDir);
+      const running = records.filter(({ record }) => pidAlive(record.pid));
+      yield* killRecords(running);
+      yield* removeRecords(daemonDir, legacyDaemonDir);
+      if (running.length > 0) return "stopped" as const;
+
+      // Nothing was stopped, so leave nothing behind. Suppressing a
+      // supervisor's auto-heal is the consequence of stopping a *running*
+      // daemon; a no-op stop that tombstoned the home would refuse every later
+      // respawn until someone ran an explicit start. The early write above only
+      // had to hold a respawn off while we waited for the locks.
+      yield* clearTombstones(daemonDir, legacyDaemonDir);
+      return "not-running" as const;
     });
 
+    // Bounded, unlike the spawn path's attempt counter: a launcher wedged
+    // mid-publish holds its lock indefinitely, and an unbounded wait here turns
+    // `vibest daemon stop` into a hang with no diagnostic.
+    const deadline = (yield* Clock.currentTimeMillis) + lockTimeoutMs;
     while (true) {
-      const acquiredDirectories: string[] = [];
-      let blocked = false;
-      for (const directory of lockDirectories) {
-        const acquired = yield* tryAcquireLock(directory).pipe(
-          Effect.tapError(() => releaseLocks(acquiredDirectories)),
+      const outcome = yield* withLocks(lockDirectories, stop);
+      if (outcome !== undefined) return outcome;
+      if ((yield* Clock.currentTimeMillis) >= deadline) {
+        const locks = lockDirectories.map((directory) => daemonLockPath(directory)).join(" and ");
+        return yield* Effect.fail(
+          new DaemonStopError({
+            message: `Another launcher has held the vibest daemon lock for ${lockTimeoutMs}ms. The stop tombstone is already in place, so retry once it releases (or remove ${locks} if no launcher is running).`,
+          }),
         );
-        if (acquired) {
-          acquiredDirectories.push(directory);
-          continue;
-        }
-
-        const holder = yield* readLockPid(directory);
-        if (holder !== undefined && !pidAlive(holder)) yield* releaseLock(directory);
-        blocked = true;
-        break;
       }
-
-      if (blocked) {
-        yield* releaseLocks(acquiredDirectories);
-        yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
-        continue;
-      }
-
-      return yield* Effect.gen(function* () {
-        // A compatible explicit launcher may have cleared the early signal
-        // while holding a lock. Reassert it inside the critical section so no
-        // supervision loop can resurrect the daemon after this stop completes.
-        yield* Effect.forEach(directories, (directory) => writeTombstone(directory), {
-          discard: true,
-        });
-        const records = yield* readRecords(daemonDir, legacyDaemonDir);
-        const running = records.filter(({ record }) => pidAlive(record.pid));
-        yield* killRecords(running);
-        yield* removeRecords(daemonDir, legacyDaemonDir);
-        return running.length === 0 ? "not-running" : "stopped";
-      }).pipe(Effect.ensuring(releaseLocks(acquiredDirectories)));
+      yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
     }
   });
 
@@ -359,7 +363,12 @@ const launchOwnerExists = (
   const ownerPath = record.launchOwnerPath;
   if (ownerPath === undefined || !path.isAbsolute(ownerPath)) return Effect.succeed(false);
   return FileSystem.FileSystem.use((fileSystem) => fileSystem.exists(ownerPath)).pipe(
-    Effect.orElseSucceed(() => false),
+    // `exists` already answers `false` for NotFound, so the only failures left
+    // here are EACCES/EIO/ELOOP — "we could not tell", not "it is gone". A
+    // `false` from this helper kills a healthy daemon, so an unreadable path
+    // must resolve the other way: only a definitive absence is a removed
+    // installation.
+    Effect.orElseSucceed(() => true),
   );
 };
 
@@ -391,13 +400,76 @@ const lifecycleLockDirectories = (
 const launchLockDirectories = (options: ResolveDaemonOptions): ReadonlyArray<string> =>
   lifecycleLockDirectories(options.daemonDir, options.legacyDaemonDir);
 
+/**
+ * Release order is free, unlike acquisition: each lock is its own file and
+ * `releaseLock` treats a missing one as success, so nothing here can deadlock
+ * or half-release.
+ */
 const releaseLocks = (
   directories: ReadonlyArray<string>,
 ): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    for (let index = directories.length - 1; index >= 0; index -= 1) {
-      yield* releaseLock(directories[index]!);
+  Effect.forEach(directories, (directory) => releaseLock(directory), { discard: true });
+
+/**
+ * Take every lifecycle lock in `directories` (already in a stable order), run
+ * `use`, and release on every exit path — success, failure, *and interruption*.
+ *
+ * `Effect.ensuring` rather than a `tapError` on each acquisition: `tapError`
+ * only fires on the error channel, so an interrupt landing between the first
+ * and second acquisition leaked a lock whose holder pid is still alive — and a
+ * live holder is exactly the case `pidAlive` reclamation refuses to clear, so
+ * that lock never came back.
+ *
+ * Returns `undefined` without running `use` when another launcher holds one of
+ * the locks; a dead holder's lock is reclaimed first so the next attempt wins.
+ * Both callers' `use` values are non-`undefined`, which is what makes that
+ * sentinel unambiguous.
+ */
+const withLocks = <A, E, R>(
+  directories: ReadonlyArray<string>,
+  use: Effect.Effect<A, E, R>,
+): Effect.Effect<A | undefined, E | PlatformError.PlatformError, R | FileSystem.FileSystem> => {
+  const held: string[] = [];
+  return Effect.gen(function* () {
+    for (const directory of directories) {
+      if (yield* tryAcquireLock(directory)) {
+        held.push(directory);
+        continue;
+      }
+      const holder = yield* readLockPid(directory);
+      if (holder !== undefined && !pidAlive(holder)) yield* releaseLock(directory);
+      return undefined;
     }
+    return yield* use;
+  }).pipe(
+    // `splice` empties the list as it hands it over, so a finalizer that somehow
+    // runs twice cannot delete a lock another launcher has since acquired.
+    Effect.ensuring(Effect.suspend(() => releaseLocks(held.splice(0)))),
+  );
+};
+
+/**
+ * Write the stop tombstone to every layout, attempting all of them before
+ * re-raising the first failure. A fail-fast `Effect.forEach` wrote the nested
+ * directory first, so one unwritable directory aborted `stopDaemon` before it
+ * killed anything *and* before the root tombstone existed — the two halves of
+ * "leaves tombstones in both layouts" failed together.
+ */
+const writeTombstones = (
+  daemonDir: string,
+  legacyDaemonDir?: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    let failure: PlatformError.PlatformError | undefined;
+    for (const directory of daemonDirectories(daemonDir, legacyDaemonDir)) {
+      yield* writeTombstone(directory).pipe(
+        Effect.catch((error) => {
+          failure ??= error;
+          return Effect.void;
+        }),
+      );
+    }
+    if (failure !== undefined) return yield* Effect.fail(failure);
   });
 
 /**
@@ -425,38 +497,18 @@ const spawnLocked = (
     const timeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
 
     for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
-      const acquiredDirectories: string[] = [];
-      let blocked = false;
-
-      for (const directory of directories) {
-        const acquired = yield* tryAcquireLock(directory).pipe(
-          Effect.tapError(() => releaseLocks(acquiredDirectories)),
-          Effect.mapError(
-            (cause) =>
-              new DaemonLaunchError({
+      const handle = yield* withLocks(directories, replaceOrSpawnDaemon(options)).pipe(
+        Effect.mapError((cause) =>
+          cause._tag === "DaemonLaunchError" || cause._tag === "DaemonStoppedError"
+            ? cause
+            : new DaemonLaunchError({
                 message: `Unable to acquire the vibest daemon launch lock: ${cause.message}`,
                 cause,
               }),
-          ),
-        );
-        if (acquired) {
-          acquiredDirectories.push(directory);
-          continue;
-        }
+        ),
+      );
+      if (handle !== undefined) return handle;
 
-        const holder = yield* readLockPid(directory);
-        if (holder !== undefined && !pidAlive(holder)) yield* releaseLock(directory);
-        blocked = true;
-        break;
-      }
-
-      if (!blocked) {
-        return yield* replaceOrSpawnDaemon(options).pipe(
-          Effect.ensuring(releaseLocks(acquiredDirectories)),
-        );
-      }
-
-      yield* releaseLocks(acquiredDirectories);
       // Another old or current launcher is publishing state. Wait until it
       // records a healthy daemon or releases every relevant lock, then resolve
       // again so compatibility records are reconciled under our locks.
