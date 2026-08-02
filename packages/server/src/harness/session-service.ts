@@ -341,7 +341,6 @@ export const makeHarnessAgentSessionService = (deps: {
             .pipe(
               Effect.flatMap((session) => {
                 const metadata: Session = {
-                  version: 1,
                   sessionId,
                   projectId,
                   harnessAgentId,

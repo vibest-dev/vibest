@@ -10,7 +10,6 @@ import type { Session } from "../types";
  * check schema Type → Session.
  */
 const SessionSchema = Schema.Struct({
-  version: Schema.Literal(1),
   sessionId: Schema.String,
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
@@ -62,10 +61,8 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
       schema: SessionSchema,
-      // Pre-envelope records are the bare body, already in the v1 shape —
-      // except ones older than `sessionId` itself (it lived only in the
-      // filename then), which fail here with `Missing key` and take the whole
-      // project's `list` down with them. Those are bad data; delete the file.
+      // Pre-envelope records are the bare body with the version inlined, from
+      // before the envelope existed to hold it; decoding drops that key.
       legacy: { schema: SessionSchema, migrate: (session) => session },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
