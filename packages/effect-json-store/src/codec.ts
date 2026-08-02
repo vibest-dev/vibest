@@ -20,16 +20,6 @@ import {
 export type AnySchema = Schema.Codec<unknown, unknown, never, never>;
 
 /**
- * Where a record being migrated came from. Reach for it only when the record's
- * identity lives outside its body — a collection's filename is its id, so a
- * body that predates carrying its own id can recover it from here.
- */
-export interface MigrationContext {
-  /** Absolute path of the file this record was read from. */
-  readonly file: string;
-}
-
-/**
  * One superseded version: its schema, plus the migration out of it. `migrate`
  * receives data valid under this entry's own schema — pairing the two in one
  * object is what lets TypeScript infer `data` without annotations — and
@@ -38,7 +28,7 @@ export interface MigrationContext {
  */
 export interface MigrationStep<S extends AnySchema> {
   readonly schema: S;
-  readonly migrate: (data: S["Type"], context: MigrationContext) => unknown;
+  readonly migrate: (data: S["Type"]) => unknown;
 }
 
 /**
@@ -124,7 +114,7 @@ export const makeFileCodec = (
         );
       }
       const output = yield* Effect.try({
-        try: () => step.migrate(input, { file }),
+        try: () => step.migrate(input),
         catch: (cause) => new JsonStoreMigrationError({ file, fromVersion, toVersion, cause }),
       });
       // A migration must produce a value valid under the next version's schema;

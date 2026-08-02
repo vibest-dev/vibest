@@ -8,7 +8,7 @@
  * - `makeJsonCollection` — a directory of keyed entries: get/put/remove/list.
  */
 export { writeFileAtomic } from "./atomic";
-export type { AnySchema, MigrationContext, MigrationStep } from "./codec";
+export type { AnySchema, MigrationStep } from "./codec";
 export {
   type JsonCollection,
   type JsonCollectionEntry,

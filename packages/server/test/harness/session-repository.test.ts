@@ -80,7 +80,7 @@ describe("SessionRepository", () => {
   // install ever wrote, and the schema then rejected every one that they did.
   const PRE_ENVELOPE_RECORD = `{"version":1,"projectId":"proj-a","harnessAgentId":"pi","harnessSessionId":"019fa463-cf81-73bd-999f-ffe6c5310d2e","createdAt":"2026-07-27T16:23:54.641Z"}`;
 
-  it("adopts a pre-envelope record that predates sessionId, filling it from the filename", async () => {
+  it("reads a pre-envelope record that predates sessionId, filling it from the filename", async () => {
     const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
@@ -95,12 +95,51 @@ describe("SessionRepository", () => {
     expect(read.sessionId).toBe("sess-1");
     expect(read.harnessSessionId).toBe("019fa463-cf81-73bd-999f-ffe6c5310d2e");
 
-    // And made permanent: the adopted envelope carries it, so the recovery
-    // runs once per old record rather than on every read.
+    // Adopted into envelope form, still without the field it never had — the
+    // next write is what puts it in the body, and every write does.
     const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.version).toBe(1);
-    expect(raw.data.sessionId).toBe("sess-1");
     expect(raw.data.harnessAgentId).toBe("pi");
+  });
+
+  it("a rewrite gives an old record the sessionId its body was missing", async () => {
+    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
+
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        const loaded = yield* repo.read("proj-a", "sess-1");
+        yield* repo.write({ ...loaded, title: "renamed" });
+      }),
+    );
+    const raw = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(raw.data.sessionId).toBe("sess-1");
+    expect(raw.data.title).toBe("renamed");
+  });
+
+  it("the filename wins over a stored sessionId that drifted from it", async () => {
+    await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        yield* repo.write(meta("sess-1", "proj-a", "u1"));
+      }),
+    );
+    // Hand-edited or hand-copied: the body claims an id nothing can address it
+    // by. Reads answer with the one that works.
+    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
+    const envelope = JSON.parse(await fs.readFile(file, "utf8"));
+    envelope.data.sessionId = "drifted";
+    await fs.writeFile(file, JSON.stringify(envelope), "utf8");
+
+    const read = await run(
+      Effect.gen(function* () {
+        const repo = yield* SessionRepository;
+        return yield* repo.read("proj-a", "sess-1");
+      }),
+    );
+    expect(read.sessionId).toBe("sess-1");
   });
 
   it("still lists a project whose only record is a pre-envelope one", async () => {
