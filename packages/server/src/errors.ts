@@ -6,16 +6,6 @@ export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{
   readonly projectId: string;
 }> {}
 
-export class StoreReadError extends Data.TaggedError("StoreReadError")<{
-  readonly file: string;
-  readonly cause: unknown;
-}> {}
-
-export class StoreWriteError extends Data.TaggedError("StoreWriteError")<{
-  readonly file: string;
-  readonly cause: unknown;
-}> {}
-
 export class GitError extends Data.TaggedError("GitError")<{
   readonly cause: unknown;
 }> {}

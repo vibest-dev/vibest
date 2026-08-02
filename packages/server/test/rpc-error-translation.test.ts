@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { SessionNotFound, SessionRefMismatch, StoreReadError } from "../src/errors";
+import { SessionNotFound, SessionRefMismatch, SessionRefNotFound } from "../src/errors";
 import { AgentOperationError, HarnessSessionNotFound, SessionClosed } from "../src/harness";
 import {
   activeSessionTranslation,
@@ -23,10 +23,10 @@ const errors = {
     code: "SESSION_NOT_ACTIVE",
     ...input,
   }),
-  INTERNAL: (input: { readonly message: string }) => ({ code: "INTERNAL", ...input }),
 };
 
-type AddressingError = SessionNotFound | SessionRefMismatch | StoreReadError;
+type AddressingError = SessionNotFound | SessionRefMismatch;
+type ActiveError = HarnessSessionNotFound | SessionClosed | AgentOperationError;
 
 describe("translateErrors", () => {
   it.effect("translates a mapped tag onto its declared protocol failure", () =>
@@ -43,13 +43,18 @@ describe("translateErrors", () => {
 
   it.effect("keeps an 'internal' tag failing with the original error", () =>
     Effect.gen(function* () {
-      const program: Effect.Effect<never, AddressingError> = Effect.fail(
-        new StoreReadError({ file: "sessions.json", cause: "boom" }),
-      );
-      const failure = yield* translateErrors(program, sessionRefTranslation(errors)).pipe(
+      const operation = new AgentOperationError({
+        sessionId: "s1",
+        operation: "prompt",
+        cause: "exploded",
+      });
+      const program: Effect.Effect<never, ActiveError> = Effect.fail(operation);
+      const failure = yield* translateErrors(program, activeSessionTranslation(errors)).pipe(
         Effect.flip,
       );
-      assert.ok(failure instanceof StoreReadError);
+      // The original failure travels on to the defect boundary untouched —
+      // nothing protocol-shaped is minted here.
+      assert.equal(failure, operation);
     }),
   );
 
@@ -61,33 +66,21 @@ describe("translateErrors", () => {
     }),
   );
 
-  it.effect("maps the shared active-session group, INTERNAL keeping the message", () =>
+  it.effect("maps the shared active-session group onto SESSION_NOT_ACTIVE", () =>
     Effect.gen(function* () {
-      type ActiveError = HarnessSessionNotFound | SessionClosed | AgentOperationError;
       const closed = yield* translateErrors(
         Effect.fail(new SessionClosed({ sessionId: "s1" })) as Effect.Effect<never, ActiveError>,
         activeSessionTranslation(errors),
       ).pipe(Effect.flip);
       assert.deepEqual(closed, { code: "SESSION_NOT_ACTIVE", message: "session s1 is closed" });
-
-      const operation = new AgentOperationError({
-        sessionId: "s1",
-        operation: "prompt",
-        cause: "exploded",
-      });
-      const internal = yield* translateErrors(
-        Effect.fail(operation) as Effect.Effect<never, ActiveError>,
-        activeSessionTranslation(errors),
-      ).pipe(Effect.flip);
-      assert.deepEqual(internal, { code: "INTERNAL", message: operation.message });
     }),
   );
 
   it("forces a decision for every tag at compile time", () => {
-    const program: Effect.Effect<void, SessionNotFound | StoreReadError> = Effect.void;
+    const program: Effect.Effect<void, SessionNotFound | SessionRefNotFound> = Effect.void;
     // A tag without a decision fails typecheck until it is mapped or
     // explicitly classified as internal.
-    // @ts-expect-error — StoreReadError has no decision yet
+    // @ts-expect-error — SessionRefNotFound has no decision yet
     const incomplete = translateErrors(program, {
       SessionNotFound: () => Effect.fail(errors.NOT_FOUND({ message: "session gone" })),
     });
@@ -95,7 +88,7 @@ describe("translateErrors", () => {
     // stale instead of silently ignored.
     const stale = translateErrors(program, {
       SessionNotFound: () => Effect.fail(errors.NOT_FOUND({ message: "session gone" })),
-      StoreReadError: "internal",
+      SessionRefNotFound: "internal",
       // @ts-expect-error — SessionClosed is not in this operation's error channel
       SessionClosed: "internal",
     });

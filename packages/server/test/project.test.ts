@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { layer } from "@effect/vitest";
-import { Context, Effect, FileSystem, Layer } from "effect";
+import { Cause, Context, Effect, Exit, FileSystem, Layer } from "effect";
 
 import {
   layerPaths,
@@ -93,25 +93,24 @@ layer(NodePlatformLayer)("ProjectService", (it) => {
     }),
   );
 
-  it.effect(
-    "a corrupt projects.json fails per call with StoreReadError and recovers once fixed",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const home = yield* tempHome;
-        const file = path.join(home, "storage", "projects.json");
-        yield* fs.makeDirectory(path.dirname(file), { recursive: true });
-        yield* fs.writeFileString(file, "{ not json");
+  it.effect("a corrupt projects.json dies per call and recovers once fixed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* tempHome;
+      const file = path.join(home, "storage", "projects.json");
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+      yield* fs.writeFileString(file, "{ not json");
 
-        // The layer must still build (no startup defect); the error is per call.
-        const svc = yield* serviceIn(home);
-        const error = yield* Effect.flip(svc.list());
-        assert.equal(error._tag, "StoreReadError");
+      // The layer must still build (no startup defect); the store failure is
+      // a per-call defect — no caller can act on it — not a channel error.
+      const svc = yield* serviceIn(home);
+      const exit = yield* Effect.exit(svc.list());
+      assert.ok(Exit.isFailure(exit) && Cause.hasDies(exit.cause));
 
-        // Fix the file on disk; the next call retries the open and recovers.
-        yield* fs.writeFileString(file, "[]");
-        assert.deepEqual(yield* svc.list(), []);
-      }),
+      // Fix the file on disk; the next call retries the open and recovers.
+      yield* fs.writeFileString(file, "[]");
+      assert.deepEqual(yield* svc.list(), []);
+    }),
   );
 
   it.effect("remove fails with ProjectNotFound for an unknown id", () =>

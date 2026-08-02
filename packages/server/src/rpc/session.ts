@@ -10,7 +10,6 @@ import type { RpcContext } from "./context";
 import {
   activeSessionTranslation,
   agentAvailabilityTranslation,
-  internalWithMessage,
   projectRefTranslation,
   resumeInternalTranslation,
   sessionRefTranslation,
@@ -26,8 +25,9 @@ const orpc = implement(sessionContract).$context<RpcContext>();
 // mapping typed effect errors onto the contract's declared codes — clients
 // branch on the code, never on the message. Everything else is a one-liner
 // onto the HarnessAgentSessionService façade. Every operation's translation
-// table is exhaustive over its error channel (`translateErrors`): store I/O
-// stays `"internal"` by decision, never by omission. Only `subscribe` reaches
+// table is exhaustive over its error channel (`translateErrors`): a failure
+// kept off the public vocabulary is an explicit `"internal"` decision and is
+// reported by the defect boundary in rpc/wrap.ts. Only `subscribe` reaches
 // the EventBus directly — it is the event plane, distinct from the session
 // control plane.
 export const sessionRouter = orpc.router({
@@ -71,9 +71,7 @@ export const sessionRouter = orpc.router({
         ...agentAvailabilityTranslation(errors),
         PermissionModeUnsupported: (e) =>
           Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
-        AgentOpenError: internalWithMessage(errors),
-        StoreReadError: "internal",
-        StoreWriteError: "internal",
+        AgentOpenError: "internal",
       },
     );
   }),
@@ -89,7 +87,7 @@ export const sessionRouter = orpc.router({
         ...projectRefTranslation(errors),
         ...sessionRefTranslation(errors),
         ...agentAvailabilityTranslation(errors),
-        ...resumeInternalTranslation(errors),
+        ...resumeInternalTranslation,
       },
     );
   }),
@@ -104,10 +102,7 @@ export const sessionRouter = orpc.router({
     const sessions = yield* HarnessAgentSessionService;
     return yield* translateErrors(
       projects.findById(input.projectId).pipe(Effect.andThen(sessions.list(input.projectId))),
-      {
-        ...projectRefTranslation(errors),
-        StoreReadError: "internal",
-      },
+      projectRefTranslation(errors),
     );
   }),
   rename: orpc.rename.effect(function* ({ input, errors }) {
@@ -116,10 +111,7 @@ export const sessionRouter = orpc.router({
   }),
   delete: orpc.delete.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* translateErrors(sessions.delete(input.ref), {
-      ...sessionRefTranslation(errors),
-      StoreWriteError: "internal",
-    });
+    yield* translateErrors(sessions.delete(input.ref), sessionRefTranslation(errors));
   }),
   getMessages: orpc.getMessages.effect(function* ({ input, errors }) {
     // Scope gate: only pi serves native history today (tickets 10/11 widen
@@ -143,11 +135,11 @@ export const sessionRouter = orpc.router({
         ...projectRefTranslation(errors),
         ...sessionRefTranslation(errors),
         ...agentAvailabilityTranslation(errors),
-        ...resumeInternalTranslation(errors),
+        ...resumeInternalTranslation,
         CapabilityUnsupported: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
-        AgentOperationError: internalWithMessage(errors),
+        AgentOperationError: "internal",
       },
     );
   }),
@@ -156,7 +148,6 @@ export const sessionRouter = orpc.router({
     return yield* translateErrors(sessions.resolveRef(input.sessionId), {
       SessionRefNotFound: (e) =>
         Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-      StoreReadError: "internal",
     });
   }),
 
@@ -229,7 +220,7 @@ export const sessionRouter = orpc.router({
           ),
         AgentRequestUnavailable: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `request ${e.requestId} is not pending` })),
-        AgentOperationError: internalWithMessage(errors),
+        AgentOperationError: "internal",
       },
     );
   }),

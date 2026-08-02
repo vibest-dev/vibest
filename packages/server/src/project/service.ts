@@ -2,29 +2,28 @@ import path from "node:path";
 
 import { Context, Crypto, Effect, Layer } from "effect";
 
-import { ProjectNotFound, type StoreReadError, type StoreWriteError } from "../errors";
+import { ProjectNotFound } from "../errors";
 import type { Project } from "../types";
 import { ProjectRepository } from "./repository";
 
 /**
  * `project` module: list / create (path-dedup) / remove / findById. Business
- * rules live here; persistence is delegated to the repo.
+ * rules live here; persistence is delegated to the repo, whose store failures
+ * are defects — only domain failures appear in these channels.
  */
 export class ProjectService extends Context.Service<
   ProjectService,
   {
-    readonly list: () => Effect.Effect<ReadonlyArray<Project>, StoreReadError>;
-    readonly findById: (id: string) => Effect.Effect<Project, StoreReadError | ProjectNotFound>;
+    readonly list: () => Effect.Effect<ReadonlyArray<Project>>;
+    readonly findById: (id: string) => Effect.Effect<Project, ProjectNotFound>;
     /** The project registered at a workspace path, if any (paths are resolved). */
-    readonly findByPath: (workspace: string) => Effect.Effect<Project | undefined, StoreReadError>;
+    readonly findByPath: (workspace: string) => Effect.Effect<Project | undefined>;
     /** `name` defaults to the folder's basename. */
     readonly create: (input: {
       readonly name?: string;
       readonly path: string;
-    }) => Effect.Effect<Project, StoreReadError | StoreWriteError>;
-    readonly remove: (
-      id: string,
-    ) => Effect.Effect<void, StoreReadError | StoreWriteError | ProjectNotFound>;
+    }) => Effect.Effect<Project>;
+    readonly remove: (id: string) => Effect.Effect<void, ProjectNotFound>;
   }
 >()("ProjectService") {}
 

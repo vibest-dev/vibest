@@ -66,9 +66,14 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
   Layer — `const platform = yield* Effect.context<FileSystem | Crypto>()` — and
   `Effect.provide(platform)` each method. The `project` and `session`
   repositories are the pattern to copy.
-- **Platform failures get mapped at the seam,** not propagated raw: the
-  repositories' `StoreReadError` / `StoreWriteError` wrap them, and "file isn't
-  there" is `error.reason._tag === "NotFound"`, never an errno string.
+- **Platform failures get decided at the seam,** not propagated raw. The one
+  recoverable case — "the record isn't there" — becomes a domain error
+  (`SessionNotFound`, checked via `error.reason._tag === "NotFound"`, never an
+  errno string). Everything else a store or platform call can throw offers a
+  caller no recovery, so the repositories `orDie` it on the spot: service
+  error channels carry only domain failures, and store defects surface at the
+  RPC defect boundary (`rpc/wrap.ts`) as a logged ref + generic internal
+  error. Don't reintroduce infrastructure errors into service signatures.
 - **One gap to route around.** `FileSystem.access` has no `X_OK` — test
   executability with `stat` + `(info.mode & 0o111) !== 0`, as both executable
   resolvers do.

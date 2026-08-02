@@ -3,7 +3,6 @@ import { type JsonDocument, makeJsonDocument } from "@vibest/effect-json-store";
 import { Context, Effect, FileSystem, Layer, Option, Ref, Schema, Semaphore } from "effect";
 
 import { Paths } from "../config/paths";
-import { StoreReadError, StoreWriteError } from "../errors";
 import type { Project } from "../types";
 
 const ProjectsSchema = Schema.Array(ProjectSchema);
@@ -12,16 +11,17 @@ const ProjectsSchema = Schema.Array(ProjectSchema);
  * Data access for `$VIBEST_HOME/storage/projects.json` — plain read/write of
  * `Project[]`, no business rules (those live in ProjectService).
  *
- * The document opens lazily on first use and is cached once open. A corrupt
- * file — or one written by a newer version — must not brick the daemon, so an
- * open failure surfaces per call as a typed error and the next call retries,
- * recovering as soon as the file is fixed.
+ * The document opens lazily on first use and is cached once open. Store
+ * failures (corrupt file, newer version, disk trouble) offer a caller no
+ * recovery, so they are defects: the failing call dies and is reported by the
+ * RPC defect boundary, the daemon stays up, and the next call retries the
+ * open — recovering as soon as the file is fixed.
  */
 export class ProjectRepository extends Context.Service<
   ProjectRepository,
   {
-    readonly list: () => Effect.Effect<ReadonlyArray<Project>, StoreReadError>;
-    readonly save: (projects: ReadonlyArray<Project>) => Effect.Effect<void, StoreWriteError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<Project>>;
+    readonly save: (projects: ReadonlyArray<Project>) => Effect.Effect<void>;
   }
 >()("ProjectRepository") {}
 
@@ -38,10 +38,7 @@ export const ProjectRepositoryLayer: Layer.Layer<
     const opened = yield* Ref.make(Option.none<JsonDocument<ReadonlyArray<Project>>>());
     // Serializes the first open so concurrent calls cannot seed/adopt twice.
     const openGate = yield* Semaphore.make(1);
-    const document: Effect.Effect<
-      JsonDocument<ReadonlyArray<Project>>,
-      StoreReadError
-    > = openGate.withPermit(
+    const document: Effect.Effect<JsonDocument<ReadonlyArray<Project>>> = openGate.withPermit(
       Effect.gen(function* () {
         const cached = yield* Ref.get(opened);
         if (Option.isSome(cached)) {
@@ -53,12 +50,7 @@ export const ProjectRepositoryLayer: Layer.Layer<
           // Pre-envelope files are the bare Project[] array.
           legacy: { schema: ProjectsSchema, migrate: (projects) => projects },
           defaults: [],
-        }).pipe(
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.mapError(
-            (error) => new StoreReadError({ file: paths.projectsFile, cause: error }),
-          ),
-        );
+        }).pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.orDie);
         yield* Ref.set(opened, Option.some(doc));
         return doc;
       }),
@@ -67,15 +59,8 @@ export const ProjectRepositoryLayer: Layer.Layer<
       list: () => document.pipe(Effect.flatMap((doc) => doc.get)),
       save: (projects) =>
         document.pipe(
-          // An unopenable file also means it cannot be safely overwritten.
-          Effect.mapError((error) => new StoreWriteError({ file: error.file, cause: error })),
-          Effect.flatMap((doc) =>
-            doc
-              .set(projects)
-              .pipe(
-                Effect.mapError((error) => new StoreWriteError({ file: error.file, cause: error })),
-              ),
-          ),
+          Effect.flatMap((doc) => doc.set(projects)),
+          Effect.orDie,
         ),
     };
   }),

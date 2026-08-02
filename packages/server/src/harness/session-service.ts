@@ -10,15 +10,13 @@ import type {
   SessionSummary,
 } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Context, Crypto, Effect, FileSystem, Layer } from "effect";
+import { Cause, Context, Crypto, Effect, FileSystem, Layer } from "effect";
 
 import { Paths } from "../config/paths";
 import {
   type SessionNotFound,
   SessionRefMismatch,
   type SessionRefNotFound,
-  type StoreReadError,
-  type StoreWriteError,
   UnsupportedPromptPart,
 } from "../errors";
 import { EventBus, type EventBusShape } from "../events/event-bus";
@@ -92,28 +90,19 @@ export type HarnessAgentSessionServiceShape = {
       readonly reasoningEffort?: ReasoningEffort;
       readonly permissionMode?: PermissionMode;
     },
-  ) => Effect.Effect<SessionRef, CreateSessionError | StoreWriteError>;
+  ) => Effect.Effect<SessionRef, CreateSessionError>;
   readonly resume: (
     ref: SessionRef,
     cwd: string,
-  ) => Effect.Effect<
-    void,
-    SessionNotFound | SessionRefMismatch | StoreReadError | ResumeSessionError
-  >;
-  readonly close: (
-    ref: SessionRef,
-  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | ResumeSessionError>;
+  readonly close: (ref: SessionRef) => Effect.Effect<void, SessionNotFound | SessionRefMismatch>;
   /** Close the native session, discard its projection, and delete its metadata. */
-  readonly delete: (
-    ref: SessionRef,
-  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError>;
+  readonly delete: (ref: SessionRef) => Effect.Effect<void, SessionNotFound | SessionRefMismatch>;
   readonly rename: (
     ref: SessionRef,
     name: string,
-  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
-  readonly list: (
-    projectId: string,
-  ) => Effect.Effect<ReadonlyArray<SessionSummary>, StoreReadError>;
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch>;
+  readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<SessionSummary>>;
   /**
    * The session's native history as final-form UIMessages. Ensures the
    * session is open (idempotent resume via the manager), reads through the
@@ -128,7 +117,6 @@ export type HarnessAgentSessionServiceShape = {
     ReadonlyArray<UIMessage>,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | ResumeSessionError
     | CapabilityUnsupported
     | SessionClosed
@@ -140,7 +128,6 @@ export type HarnessAgentSessionServiceShape = {
     PromptReceipt,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | UnsupportedPromptPart
     | HarnessSessionNotFound
     | SessionClosed
@@ -153,7 +140,6 @@ export type HarnessAgentSessionServiceShape = {
     void,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | SessionClosed
     | AgentOperationError
@@ -167,7 +153,6 @@ export type HarnessAgentSessionServiceShape = {
     void,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | SessionClosed
     | AgentOperationError
@@ -179,7 +164,6 @@ export type HarnessAgentSessionServiceShape = {
     void,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | SessionClosed
     | AgentOperationError
@@ -191,7 +175,6 @@ export type HarnessAgentSessionServiceShape = {
     void,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | PermissionModeUnsupported
     | SessionClosed
@@ -205,7 +188,6 @@ export type HarnessAgentSessionServiceShape = {
     void,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | AgentRequestUnavailable
     | AgentOperationError
@@ -216,7 +198,6 @@ export type HarnessAgentSessionServiceShape = {
     SessionCapabilities,
     | SessionNotFound
     | SessionRefMismatch
-    | StoreReadError
     | HarnessSessionNotFound
     | CapabilityUnsupported
     | AgentOperationError
@@ -229,20 +210,14 @@ export type HarnessAgentSessionServiceShape = {
     ref: SessionRef,
   ) => Effect.Effect<
     SessionInfoResult,
-    | SessionNotFound
-    | SessionRefMismatch
-    | StoreReadError
-    | HarnessAgentNotFound
-    | AgentOperationError
+    SessionNotFound | SessionRefMismatch | HarnessAgentNotFound | AgentOperationError
   >;
   readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
   readonly getSnapshot: (
     ref: SessionRef,
   ) => Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
   /** Reverse a bare sessionId back into its full SessionRef. */
-  readonly resolveRef: (
-    sessionId: string,
-  ) => Effect.Effect<SessionRef, StoreReadError | SessionRefNotFound>;
+  readonly resolveRef: (sessionId: string) => Effect.Effect<SessionRef, SessionRefNotFound>;
 };
 
 export class HarnessAgentSessionService extends Context.Service<
@@ -298,10 +273,12 @@ export const makeHarnessAgentSessionService = (deps: {
     resolveHarnessSessionId(ref).pipe(Effect.flatMap((id) => manager.get(id)));
 
   // The first prompt establishes the session title. Best-effort: a failed
-  // title write must never block the prompt itself. A record that already has
-  // a title (any later prompt) is left alone. On a real write we publish
-  // `session.updated` so every client patches the row — the specific event
-  // that reconciles the optimistic title, in place of any timer.
+  // title write must never block the prompt itself — even a store defect is
+  // logged and swallowed here, because the title is decoration and the prompt
+  // is the point. A record that already has a title (any later prompt) is
+  // left alone. On a real write we publish `session.updated` so every client
+  // patches the row — the specific event that reconciles the optimistic
+  // title, in place of any timer.
   const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
     if (metadata.title !== undefined) return Effect.void;
     const title = deriveTitle(parts);
@@ -313,7 +290,11 @@ export const makeHarnessAgentSessionService = (deps: {
     };
     return repo.write({ ...metadata, title }).pipe(
       Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
-      Effect.catchTag("StoreWriteError", () => Effect.void),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("failed to stamp session title from first prompt", cause),
+      ),
     );
   };
 
@@ -353,8 +334,9 @@ export const makeHarnessAgentSessionService = (deps: {
                   cwd,
                 };
                 return repo.write(metadata).pipe(
-                  // A failed metadata write must not leak the native session.
-                  Effect.tapError(() => manager.close(session.sessionId)),
+                  // A failed metadata write (a defect now) must not leak the
+                  // native session.
+                  Effect.tapCause(() => manager.close(session.sessionId)),
                   Effect.andThen(bus.publish({ ref, type: "session.created" })),
                   Effect.as(ref),
                 );

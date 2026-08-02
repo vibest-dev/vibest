@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { Context, Effect, Layer } from "effect";
+import { Cause, Context, Effect, Exit, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -164,12 +164,14 @@ describe("SessionRepository", () => {
         const repo = yield* SessionRepository;
         yield* repo.write(meta("sess-1", "proj-a", "u1"));
         const listedA = yield* repo.list("proj-a");
-        const errorB = yield* Effect.flip(repo.list("proj-b"));
-        return { listedA, errorB };
+        // The corrupt project's own listing dies — store failures are
+        // defects, not channel errors.
+        const exitB = yield* Effect.exit(repo.list("proj-b"));
+        return { listedA, exitB };
       }),
     );
     expect(result.listedA.map((session) => session.sessionId)).toEqual(["sess-1"]);
-    expect(result.errorB._tag).toBe("StoreReadError");
+    expect(Exit.isFailure(result.exitB) && Cause.hasDies(result.exitB.cause)).toBe(true);
   });
 
   it("malformed ids yield typed results, never defects", async () => {

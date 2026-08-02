@@ -1,7 +1,7 @@
-import { type JsonStoreLoadError, makeJsonCollection } from "@vibest/effect-json-store";
+import { makeJsonCollection } from "@vibest/effect-json-store";
 import { Effect, Option, Schema } from "effect";
 
-import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
+import { SessionNotFound, SessionRefNotFound } from "../errors";
 import type { Session } from "../types";
 
 /**
@@ -28,24 +28,23 @@ const SessionSchema = Schema.Struct({
  * rules — orchestration (id generation, projectId resolution) lives in
  * {@link HarnessAgentSessionService}, whose internal collaborator this is; it
  * has no Context tag of its own.
+ *
+ * Only the domain-meaningful absence of a record is a channel error. Store
+ * failures (corrupt entry, disk trouble) offer no recovery to any caller, so
+ * they are defects, surfaced by the RPC defect boundary.
  */
 export type HarnessAgentSessionRepositoryShape = {
   /** All session metadata under a project; empty if the project dir is absent. */
-  readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<Session>, StoreReadError>;
-  readonly read: (
-    projectId: string,
-    sessionId: string,
-  ) => Effect.Effect<Session, StoreReadError | SessionNotFound>;
+  readonly list: (projectId: string) => Effect.Effect<ReadonlyArray<Session>>;
+  readonly read: (projectId: string, sessionId: string) => Effect.Effect<Session, SessionNotFound>;
   /**
    * Reverse lookup: find a session by its (globally unique) sessionId alone,
    * scanning every project directory. The record carries its own projectId.
    */
-  readonly findBySessionId: (
-    sessionId: string,
-  ) => Effect.Effect<Session, StoreReadError | SessionRefNotFound>;
-  readonly write: (metadata: Session) => Effect.Effect<void, StoreWriteError>;
+  readonly findBySessionId: (sessionId: string) => Effect.Effect<Session, SessionRefNotFound>;
+  readonly write: (metadata: Session) => Effect.Effect<void>;
   /** Idempotent: removing an absent file succeeds. */
-  readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void, StoreWriteError>;
+  readonly remove: (projectId: string, sessionId: string) => Effect.Effect<void>;
 };
 
 /**
@@ -66,10 +65,6 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
       legacy: { schema: SessionSchema, migrate: (session) => session },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
-    const asReadError = (error: JsonStoreLoadError) =>
-      new StoreReadError({ file: error.file, cause: error });
-    const asWriteError = (error: { readonly file: string }) =>
-      new StoreWriteError({ file: error.file, cause: error });
 
     return {
       list: (projectId) =>
@@ -78,7 +73,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         isSafeId(projectId)
           ? sessions.list({ under: projectId }).pipe(
               Effect.map((entries) => entries.map((entry) => entry.data)),
-              Effect.mapError(asReadError),
+              Effect.orDie,
             )
           : Effect.succeed([]),
 
@@ -86,7 +81,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         !isSafeId(projectId) || !isSafeId(sessionId)
           ? Effect.fail(new SessionNotFound({ projectId, sessionId }))
           : sessions.get(entryId(projectId, sessionId)).pipe(
-              Effect.mapError(asReadError),
+              Effect.orDie,
               Effect.flatMap((found) =>
                 Option.isSome(found)
                   ? Effect.succeed(found.value)
@@ -99,12 +94,12 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         !isSafeId(sessionId)
           ? Effect.fail(new SessionRefNotFound({ sessionId }))
           : Effect.gen(function* () {
-              const ids = yield* sessions.ids().pipe(Effect.mapError(asReadError));
+              const ids = yield* sessions.ids().pipe(Effect.orDie);
               const id = ids.find((candidate) => candidate.endsWith(`/${sessionId}`));
               const found =
                 id === undefined
                   ? Option.none<Session>()
-                  : yield* sessions.get(id).pipe(Effect.mapError(asReadError));
+                  : yield* sessions.get(id).pipe(Effect.orDie);
               if (Option.isNone(found)) {
                 return yield* Effect.fail(new SessionRefNotFound({ sessionId }));
               }
@@ -112,13 +107,11 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
             }),
 
       write: (metadata) =>
-        sessions
-          .put(entryId(metadata.projectId, metadata.sessionId), metadata)
-          .pipe(Effect.mapError(asWriteError)),
+        sessions.put(entryId(metadata.projectId, metadata.sessionId), metadata).pipe(Effect.orDie),
 
       remove: (projectId, sessionId) =>
         !isSafeId(projectId) || !isSafeId(sessionId)
           ? Effect.void
-          : sessions.remove(entryId(projectId, sessionId)).pipe(Effect.mapError(asWriteError)),
+          : sessions.remove(entryId(projectId, sessionId)).pipe(Effect.orDie),
     } satisfies HarnessAgentSessionRepositoryShape;
   });
