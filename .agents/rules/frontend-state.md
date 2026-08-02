@@ -4,6 +4,15 @@ Derive, don't sync: no `useEffect` mirroring state between sources — compute i
 at render with `useMemo`. Server state stays in TanStack Query, client state in
 Zustand, and selections store an id, not the object.
 
+`eslint-plugin-react-you-might-not-need-an-effect` enforces this, loaded as an
+oxlint JS plugin (`jsPlugins` in `.oxlintrc.json`) with all nine rules at
+`error`. `packages/ui/src/{components,hooks,ai-elements}/**` is exempt: those
+files are vendored or ported from upstream (`docs/adr/0001`), so a fix there is
+discarded on the next refresh and belongs upstream instead. An effect the rules
+misread — a host-pushed subscription, an editor's lifetime — gets an
+`eslint-disable-next-line` on the line the rule anchors to (the `setState` call,
+not always the `useEffect`) plus a sentence saying why.
+
 - **Query keys come from `orpcQueryUtils.<router>.<proc>`.** Write cache with
   `queryOptions({input}).queryKey`; `.key()` omits the `type:"query"` segment, so
   using it for `setQueryData` silently writes a cache the UI never reads. `.key()`

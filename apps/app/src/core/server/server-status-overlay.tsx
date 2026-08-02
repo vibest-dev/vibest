@@ -15,6 +15,10 @@ export function ServerStatusOverlay({ feed }: { feed: ServerStatusFeed }): React
   const [status, setStatus] = useState<ServerStatus>(feed.initial);
 
   // `subscribe` returns its own unsubscribe, so this doubles as the cleanup.
+  // The rule reads `feed` as a parent-owned fetch; it is a host-pushed feed with
+  // no snapshot getter, so `useSyncExternalStore` isn't available without
+  // widening `ServerStatusFeed`.
+  // eslint-disable-next-line react-you-might-not-need-an-effect/no-pass-data-to-parent
   useEffect(() => feed.subscribe(setStatus), [feed]);
 
   // Initial startup is owned by the host's branded sequence. This overlay

@@ -18,6 +18,10 @@ export function useChatInputController(
       extensions: (self) => optsRef.current.extensions(self),
       onSubmit: (text) => optsRef.current.onSubmit(text),
     });
+    // Not an external-store subscription: the effect owns the controller's
+    // lifetime (a ProseMirror editor can't be constructed during render, and
+    // its teardown must run on unmount), so there is nothing to snapshot.
+    // eslint-disable-next-line react-you-might-not-need-an-effect/no-external-store-subscription
     setController(created);
     return () => {
       setController(null);
