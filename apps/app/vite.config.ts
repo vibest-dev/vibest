@@ -3,6 +3,7 @@ import url from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
+import { isRunningFromAgent } from "agent-cli-detector";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import { defineConfig } from "vite";
 
@@ -21,8 +22,12 @@ import { defineConfig } from "vite";
  */
 const SERVER_PORT = Number(process.env.VIBEST_PORT ?? 4180);
 const serverTarget = `http://127.0.0.1:${SERVER_PORT}`;
+const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VIBEST_RUN_IN_AGENT": JSON.stringify(RUNNING_IN_AGENT),
+  },
   server: {
     // Strict, so a taken port fails the boot instead of silently drifting to
     // the next one — that drift is how you end up reading someone else's dev

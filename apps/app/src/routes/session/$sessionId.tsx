@@ -42,5 +42,8 @@ function Component() {
   const sessionRef = Route.useLoaderData();
 
   // The shell lives in the root route; this is just the chat filling the card.
-  return <Chat className="mx-auto w-full max-w-4xl min-w-80" sessionRef={sessionRef} />;
+  // Full width on purpose: the transcript's scroll container must span the
+  // panel so its scrollbar sits at the panel edge — the reading column is
+  // centered inside the scroller, not around it.
+  return <Chat sessionRef={sessionRef} />;
 }
