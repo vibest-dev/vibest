@@ -408,7 +408,6 @@ export const makeHarnessAgentSessionService = (deps: {
           return manager.open(harnessAgentId, { cwd }, config ?? {}, ref).pipe(
             Effect.flatMap((session) => {
               const metadata: Session = {
-                version: 1,
                 sessionId,
                 projectId,
                 harnessAgentId,
