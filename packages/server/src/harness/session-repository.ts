@@ -62,13 +62,10 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
       schema: SessionSchema,
-      // Pre-envelope records are the bare body, already in the v1 shape — with
-      // one exception, deliberately not accommodated. Records written before
-      // the body carried `sessionId` at all (it lived only in the filename
-      // then) fail this decode with `Missing key at ["sessionId"]`, and since
-      // `list` fails whole-project, one of them empties a project's sidebar
-      // group. `sessionId` is required on both sides on purpose: such a record
-      // is bad data, so delete the file rather than loosening the schema.
+      // Pre-envelope records are the bare body, already in the v1 shape —
+      // except ones older than `sessionId` itself (it lived only in the
+      // filename then), which fail here with `Missing key` and take the whole
+      // project's `list` down with them. Those are bad data; delete the file.
       legacy: { schema: SessionSchema, migrate: (session) => session },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
