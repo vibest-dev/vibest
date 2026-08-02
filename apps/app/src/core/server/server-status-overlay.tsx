@@ -1,9 +1,9 @@
 import { Button } from "@vibest/ui/components/button";
 import { Spinner } from "@vibest/ui/components/spinner";
-import { type ReactElement, useEffect, useState } from "react";
+import { type ReactElement, useSyncExternalStore } from "react";
 
 import { usePlatform } from "../../platform-context";
-import type { ServerStatus, ServerStatusFeed } from "../../server-status";
+import type { ServerStatusFeed } from "../../server-status";
 
 /**
  * Covers the UI while the host restarts a crashed server. The oRPC client
@@ -12,14 +12,9 @@ import type { ServerStatus, ServerStatusFeed } from "../../server-status";
  */
 export function ServerStatusOverlay({ feed }: { feed: ServerStatusFeed }): ReactElement | null {
   const platform = usePlatform();
-  const [status, setStatus] = useState<ServerStatus>(feed.initial);
-
-  // `subscribe` returns its own unsubscribe, so this doubles as the cleanup.
-  // The rule reads `feed` as a parent-owned fetch; it is a host-pushed feed with
-  // no snapshot getter, so `useSyncExternalStore` isn't available without
-  // widening `ServerStatusFeed`.
-  // eslint-disable-next-line react-you-might-not-need-an-effect/no-pass-data-to-parent
-  useEffect(() => feed.subscribe(setStatus), [feed]);
+  // The host owns this status; React only reads it. `feed` is a host singleton,
+  // so both methods are referentially stable.
+  const status = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
 
   // Initial startup is owned by the host's branded sequence. This overlay
   // only handles reconnecting or terminal failure.

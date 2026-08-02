@@ -8,10 +8,12 @@ Zustand, and selections store an id, not the object.
 oxlint JS plugin (`jsPlugins` in `.oxlintrc.json`) with all nine rules at
 `error`. `packages/ui/src/{components,hooks,ai-elements}/**` is exempt: those
 files are vendored or ported from upstream (`docs/adr/0001`), so a fix there is
-discarded on the next refresh and belongs upstream instead. An effect the rules
-misread — a host-pushed subscription, an editor's lifetime — gets an
-`eslint-disable-next-line` on the line the rule anchors to (the `setState` call,
-not always the `useEffect`) plus a sentence saying why.
+discarded on the next refresh and belongs upstream instead. A host-pushed value
+is a `useSyncExternalStore` source, not an effect — give the feed a
+`getSnapshot` (`ServerStatusFeed` is the shape to copy) rather than mirroring it
+into `useState`. An effect the rules genuinely misread — an editor's lifetime,
+say — gets an `eslint-disable-next-line` on the line the rule anchors to (the
+`setState` call, not always the `useEffect`) plus a sentence saying why.
 
 - **Query keys come from `orpcQueryUtils.<router>.<proc>`.** Write cache with
   `queryOptions({input}).queryKey`; `.key()` omits the `type:"query"` segment, so
