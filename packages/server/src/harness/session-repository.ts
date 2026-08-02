@@ -1,23 +1,12 @@
+import path from "node:path";
+
 import { type JsonStoreLoadError, makeJsonCollection } from "@vibest/effect-json-store";
 import { Effect, Option, Schema } from "effect";
 
 import { SessionNotFound, SessionRefNotFound, StoreReadError, StoreWriteError } from "../errors";
 import type { Session } from "../types";
 
-/**
- * Persistence schema for {@link Session} — everything *except* `sessionId`,
- * which is the filename and is put back by {@link toSession} on read.
- *
- * Storing it in the body too would be a second copy of an address the path
- * already holds, free to drift from it and never consulted when it does: every
- * lookup here goes through the path. It is also what made the oldest records
- * unreadable — they predate the field, which until then lived only in the
- * filename, so requiring it in the body rejected them outright.
- *
- * Compatibility with the interface is enforced structurally: `write` checks
- * Session → schema Type, {@link toSession} checks schema Type → Session.
- */
-const SessionBodySchema = Schema.Struct({
+const SessionFields = {
   version: Schema.Literal(1),
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
@@ -27,18 +16,34 @@ const SessionBodySchema = Schema.Struct({
   title: Schema.optionalKey(Schema.String),
   updatedAt: Schema.optionalKey(Schema.String),
   historyAvailable: Schema.optionalKey(Schema.Boolean),
-});
+};
 
-/** Rejoin a stored body with the `sessionId` its filename carried. */
-const toSession = (sessionId: string, body: typeof SessionBodySchema.Type): Session => ({
-  ...body,
-  sessionId,
-});
+/**
+ * Persistence schema for {@link Session}. Compatibility with the interface is
+ * enforced structurally: `write` checks Session → schema Type, the readers
+ * check schema Type → Session.
+ *
+ * A stored record carries its own `sessionId` even though the filename already
+ * is one, so that a record loaded on its own is complete — nothing here has to
+ * be handed its address alongside its contents to make sense of it.
+ */
+const SessionSchema = Schema.Struct({ ...SessionFields, sessionId: Schema.String });
+
+/**
+ * The pre-envelope shape, which is {@link SessionSchema} *before* the body
+ * carried its own `sessionId` — back then the filename was the only copy.
+ *
+ * This is why the legacy step cannot be the identity: those records are a
+ * field short of the v1 shape, and reusing `SessionSchema` here (as this once
+ * did, on the strength of a comment claiming they matched) rejected every one
+ * of them at decode, which failed the whole project's `list`.
+ */
+const PreEnvelopeSessionSchema = Schema.Struct(SessionFields);
 
 /**
  * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The filename
- * is the sole home of {@link Session.sessionId}. No business rules —
- * orchestration (id generation, projectId resolution) lives in
+ * mirrors {@link Session.sessionId}, which the body also carries. No business
+ * rules — orchestration (id generation, projectId resolution) lives in
  * {@link HarnessAgentSessionService}, whose internal collaborator this is; it
  * has no Context tag of its own.
  */
@@ -74,14 +79,16 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
   Effect.gen(function* () {
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
-      schema: SessionBodySchema,
-      // Pre-envelope records are the bare body, already in the v1 shape — which
-      // holds only because the body schema stops at what those records had.
-      legacy: { schema: SessionBodySchema, migrate: (body) => body },
+      schema: SessionSchema,
+      legacy: {
+        schema: PreEnvelopeSessionSchema,
+        // Adoption fills in the field those records never had, from the only
+        // place that held it: `<projectId>/<sessionId>.json`. The write-back
+        // is what makes it permanent, so this runs once per old record.
+        migrate: (body, { file }) => ({ ...body, sessionId: path.basename(file, ".json") }),
+      },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
-    // Entry ids are `<projectId>/<sessionId>`; only `list` has to take one apart.
-    const sessionIdOf = (id: string) => id.slice(id.lastIndexOf("/") + 1);
     const asReadError = (error: JsonStoreLoadError) =>
       new StoreReadError({ file: error.file, cause: error });
     const asWriteError = (error: { readonly file: string }) =>
@@ -93,9 +100,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         // another project cannot fail this listing.
         isSafeId(projectId)
           ? sessions.list({ under: projectId }).pipe(
-              Effect.map((entries) =>
-                entries.map((entry) => toSession(sessionIdOf(entry.id), entry.data)),
-              ),
+              Effect.map((entries) => entries.map((entry) => entry.data)),
               Effect.mapError(asReadError),
             )
           : Effect.succeed([]),
@@ -107,7 +112,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               Effect.mapError(asReadError),
               Effect.flatMap((found) =>
                 Option.isSome(found)
-                  ? Effect.succeed(toSession(sessionId, found.value))
+                  ? Effect.succeed(found.value)
                   : Effect.fail(new SessionNotFound({ projectId, sessionId })),
               ),
             ),
@@ -121,19 +126,18 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               const id = ids.find((candidate) => candidate.endsWith(`/${sessionId}`));
               const found =
                 id === undefined
-                  ? Option.none<typeof SessionBodySchema.Type>()
+                  ? Option.none<Session>()
                   : yield* sessions.get(id).pipe(Effect.mapError(asReadError));
               if (Option.isNone(found)) {
                 return yield* Effect.fail(new SessionRefNotFound({ sessionId }));
               }
-              return toSession(sessionId, found.value);
+              return found.value;
             }),
 
-      // Split explicitly rather than letting the encoder drop the extra key:
-      // this is the one place the id leaves the body for the path, and it
-      // should fail to compile — not silently strip — if that ever changes.
-      write: ({ sessionId, ...body }) =>
-        sessions.put(entryId(body.projectId, sessionId), body).pipe(Effect.mapError(asWriteError)),
+      write: (metadata) =>
+        sessions
+          .put(entryId(metadata.projectId, metadata.sessionId), metadata)
+          .pipe(Effect.mapError(asWriteError)),
 
       remove: (projectId, sessionId) =>
         !isSafeId(projectId) || !isSafeId(sessionId)

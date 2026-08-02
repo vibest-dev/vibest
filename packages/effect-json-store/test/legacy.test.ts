@@ -65,6 +65,33 @@ it.effect("a legacy body carrying an integer `version` field still takes the leg
   ),
 );
 
+it.effect("migrate can recover an id the body never had from the file it came from", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      // A collection whose filename is the entry id, holding records written
+      // before the body carried that id — the only copy is in the path.
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.makeDirectory(path.join(dir, "p1"), { recursive: true });
+      yield* fs.writeFileString(path.join(dir, "p1", "e1.json"), JSON.stringify({ theme: "dark" }));
+
+      const Identified = Schema.Struct({ id: Schema.String, theme: Schema.String });
+      const store = yield* makeJsonCollection({
+        dir,
+        schema: Identified,
+        legacy: {
+          schema: V1,
+          migrate: (body, { file }) => ({ ...body, id: path.basename(file, ".json") }),
+        },
+      });
+      assert.deepEqual(yield* store.get("p1/e1"), Option.some({ id: "e1", theme: "dark" }));
+
+      // Written back, so the recovery happens once rather than on every read.
+      const parsed: unknown = JSON.parse(yield* fs.readFileString(path.join(dir, "p1", "e1.json")));
+      assert.deepEqual(parsed, { version: 1, data: { id: "e1", theme: "dark" } });
+    }),
+  ),
+);
+
 it.effect("a legacy file runs through the whole migration chain after adoption", () =>
   withTmp((dir) =>
     Effect.gen(function* () {
