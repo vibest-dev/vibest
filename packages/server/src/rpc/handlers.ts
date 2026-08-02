@@ -11,7 +11,7 @@ import { makeWrapRpcEffect } from "./wrap";
 
 // Backstop for failures that never enter an effect handler (transport and
 // stream plumbing). Anything from a handler is an ORPCError by now — expected
-// protocol errors, or the wrap boundary's already-logged INTERNAL — so those
+// protocol errors, or the wrap boundary's already-logged internal error — so those
 // stay quiet here. Generic in the result so it types against every handler's
 // own client-interceptor signature.
 async function logNonProtocolErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {

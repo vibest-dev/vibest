@@ -1,4 +1,4 @@
-import { eventIteratorToStream, ORPCError } from "@orpc/client";
+import { eventIteratorToStream, safe } from "@orpc/client";
 import type { VibestClient } from "@vibest/client";
 import type {
   PermissionMode,
@@ -355,12 +355,13 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
   // capability fact, not a failure; it maps to `null` so the oRPC error
   // vocabulary stays on this side of the port.
   async getMessages(): Promise<readonly UIMessage[] | null> {
-    try {
-      const result = await this.client.session.getMessages({ ref: this.#ref });
-      return result.messages;
-    } catch (error) {
-      if (error instanceof ORPCError && error.code === "UNSUPPORTED") return null;
+    const { error, data, inferableError } = await safe(
+      this.client.session.getMessages({ ref: this.#ref }),
+    );
+    if (error) {
+      if (inferableError?.code === "UNSUPPORTED") return null;
       throw error;
     }
+    return data.messages;
   }
 }

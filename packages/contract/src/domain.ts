@@ -628,23 +628,21 @@ export type RespondToAgentRequestInput = typeof RespondToAgentRequestInputSchema
 
 export const ServerErrorCodes = [
   "INVALID_ARGUMENT",
-  "FORBIDDEN",
   "NOT_FOUND",
   "SESSION_NOT_ACTIVE",
-  "SESSION_CRASHED",
   "CONFLICT",
   "UNSUPPORTED",
-  "INTERNAL",
 ] as const;
 export type ServerErrorCode = (typeof ServerErrorCodes)[number];
 
+// Every code here is produced by at least one procedure and branched on (or
+// deliberately branchable) by the client. Unexpected failures are not part of
+// this vocabulary: they surface as the transport's generic internal error,
+// minted at the defect boundary with a log correlation ref.
 export const serverErrors = {
   INVALID_ARGUMENT: {},
-  FORBIDDEN: {},
   NOT_FOUND: {},
   SESSION_NOT_ACTIVE: {},
-  SESSION_CRASHED: {},
   CONFLICT: {},
   UNSUPPORTED: {},
-  INTERNAL: {},
 } as const;
