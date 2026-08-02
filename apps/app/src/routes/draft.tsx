@@ -189,8 +189,7 @@ function DraftRoute() {
       navigate({
         to: "/session/$sessionId",
         params: { sessionId: ref.sessionId },
-        // We just created the session, so the whole ref is in hand — hand it to
-        // the route rather than making it look the rest up again.
+        // We just created it, so the whole ref is in hand — pass it along.
         search: { projectId: ref.projectId, harness: ref.harnessAgentId },
       });
     },

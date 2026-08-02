@@ -14,8 +14,8 @@ import { useProjectSessions } from "@/features/projects/use-project-sessions";
 
 /**
  * One project and the sessions under it, as a sidebar group. Fetching lives in
- * `useProjectSessions`; presenting them — the untitled label, which row reads
- * as current, where a click goes — is this component's own business.
+ * `useProjectSessions`; how a row looks and what a click does are this
+ * component's own business.
  */
 export function ProjectSessionsGroup({ project }: { project: Project }) {
   const navigate = useNavigate();
@@ -50,8 +50,7 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
             <SidebarMenuItem key={session.sessionId}>
               <SidebarMenuButton
                 isActive={session.sessionId === activeSessionId}
-                // The whole SessionRef rides along, so the session route resumes
-                // without first buying its projectId back off the server.
+                // The whole ref rides along so the route can resume directly.
                 onClick={() =>
                   navigate({
                     to: "/session/$sessionId",

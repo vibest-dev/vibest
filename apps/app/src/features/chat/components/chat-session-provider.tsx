@@ -29,7 +29,7 @@ export function ChatSessionProvider({
   children,
 }: {
   sessionRef: SessionRef;
-  /** The session's working directory — resolved by the caller, see `Chat`. */
+  /** The session's working directory — resolved by the route, see `Chat`. */
   cwd: string | undefined;
   children: ReactNode;
 }) {
@@ -49,10 +49,6 @@ export function ChatSessionProvider({
   // What this harness offers *in this session's directory* — a project's own
   // settings can remap what a model id resolves to, so the providers have to
   // be probed per project, not once per harness.
-  //
-  // `cwd` arrives as a prop rather than being fetched here: resolving a
-  // projectId to a path is the projects feature's job, and reaching across to
-  // it would make chat depend on a sibling feature. The route owns that join.
   const probe = useHarnessProbe(chat.harnessAgentId, cwd);
   const providers = probe.data?.providers ?? NO_PROVIDERS;
   // Each dimension resolves on its own; reasoningEffort cascades from the resolved model.

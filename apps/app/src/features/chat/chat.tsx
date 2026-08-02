@@ -20,11 +20,9 @@ export function Chat({
   className?: string;
   sessionRef: SessionRef;
   /**
-   * The session's working directory, resolved by the caller. Passed in rather
-   * than looked up here because that lookup belongs to the projects feature,
-   * and features don't reach sideways into each other — the route composes the
-   * two. Undefined until the project list lands, which only delays the model
-   * probe; see ChatSessionProvider.
+   * The session's working directory. Resolved by the route, not here: that
+   * lookup belongs to the projects feature, and features don't reach sideways.
+   * Undefined until the project list lands, which only delays the model probe.
    */
   cwd: string | undefined;
 }) {
