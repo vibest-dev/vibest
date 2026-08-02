@@ -23,7 +23,9 @@ export const harnessRouter = orpc.router({
   // declares no error vocabulary, so the failure stays internal by decision.
   probe: orpc.probe.effect(function* ({ input }) {
     const probe = yield* HarnessProbeService;
-    return yield* translateErrors(probe.probe(input), { CapabilityProbeFailed: "internal" });
+    return yield* translateErrors(probe.probe(input), {
+      "Harness.CapabilityProbeFailed": "internal",
+    });
   }),
 });
 

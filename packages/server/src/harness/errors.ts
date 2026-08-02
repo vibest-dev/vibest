@@ -1,12 +1,10 @@
 import { HarnessAgentIdSchema } from "@vibest/contract";
 import { Schema } from "effect";
 
-export { ClaudeSdkError } from "./claude-code/errors";
-
 // A cause's one-line story, for error messages that would otherwise swallow
-// it. These messages end up in daemon logs and RPC INTERNAL responses — a
-// bare "failed to open" with the cause dropped is undiagnosable in the field.
-const causeSummary = (cause: unknown): string => {
+// it. These messages end up in daemon logs — a bare "failed to open" with the
+// cause dropped is undiagnosable in the field.
+export const causeSummary = (cause: unknown): string => {
   if (typeof cause === "object" && cause !== null && "message" in cause) {
     const message = (cause as { message: unknown }).message;
     if (typeof message === "string" && message.length > 0) return message;
@@ -14,8 +12,68 @@ const causeSummary = (cause: unknown): string => {
   return String(cause);
 };
 
+// ---------------------------------------------------------------------------
+// Session addressing — our own records. Tags are namespaced `Session.*`; the
+// harness's view of a native session lives under `Harness.*` below, so the
+// two "not found" meanings can never be confused again.
+// ---------------------------------------------------------------------------
+
+/** The session metadata record is missing from storage. */
+export class SessionNotFound extends Schema.TaggedErrorClass<SessionNotFound>()(
+  "Session.NotFound",
+  {
+    projectId: Schema.String,
+    sessionId: Schema.String,
+  },
+) {
+  override get message() {
+    return `Session '${this.sessionId}' not found in project '${this.projectId}'.`;
+  }
+}
+
+/** A SessionRef's harnessAgentId disagrees with the stored session metadata. */
+export class SessionRefMismatch extends Schema.TaggedErrorClass<SessionRefMismatch>()(
+  "Session.RefMismatch",
+  {
+    projectId: Schema.String,
+    sessionId: Schema.String,
+  },
+) {
+  override get message() {
+    return `Ref mismatch for session '${this.sessionId}' in project '${this.projectId}'.`;
+  }
+}
+
+/** No stored session matches a bare sessionId during reverse lookup. */
+export class SessionRefNotFound extends Schema.TaggedErrorClass<SessionRefNotFound>()(
+  "Session.RefNotFound",
+  {
+    sessionId: Schema.String,
+  },
+) {
+  override get message() {
+    return `No stored session matches '${this.sessionId}'.`;
+  }
+}
+
+/** A prompt carried a part type this server cannot yet forward (e.g. `file`). */
+export class UnsupportedPromptPart extends Schema.TaggedErrorClass<UnsupportedPromptPart>()(
+  "Session.UnsupportedPromptPart",
+  {
+    kind: Schema.String,
+  },
+) {
+  override get message() {
+    return `Prompt part kind '${this.kind}' is not supported.`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The harness domain: adapters, native sessions, capabilities.
+// ---------------------------------------------------------------------------
+
 export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNotFound>()(
-  "HarnessAgentNotFound",
+  "Harness.AgentNotFound",
   { harnessAgentId: HarnessAgentIdSchema },
 ) {
   override get message() {
@@ -24,7 +82,7 @@ export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNo
 }
 
 export class AgentUnavailable extends Schema.TaggedErrorClass<AgentUnavailable>()(
-  "AgentUnavailable",
+  "Harness.AgentUnavailable",
   {
     harnessAgentId: HarnessAgentIdSchema,
     reason: Schema.String,
@@ -36,7 +94,7 @@ export class AgentUnavailable extends Schema.TaggedErrorClass<AgentUnavailable>(
 }
 
 export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFound>()(
-  "ExecutableNotFound",
+  "Harness.ExecutableNotFound",
   {
     harnessAgentId: HarnessAgentIdSchema,
     executable: Schema.String,
@@ -47,23 +105,21 @@ export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFou
   }
 }
 
-export class AgentOpenError extends Schema.TaggedErrorClass<AgentOpenError>()("AgentOpenError", {
-  harnessAgentId: HarnessAgentIdSchema,
-  cause: Schema.Defect(),
-}) {
+export class AgentOpenError extends Schema.TaggedErrorClass<AgentOpenError>()(
+  "Harness.AgentOpenError",
+  {
+    harnessAgentId: HarnessAgentIdSchema,
+    cause: Schema.Defect(),
+  },
+) {
   override get message() {
     return `Failed to open a '${this.harnessAgentId}' session: ${causeSummary(this.cause)}`;
   }
 }
 
-/**
- * The native session is not open in this process. Named with the Harness
- * prefix (unlike its neighbours) because the session domain has its own
- * `SessionNotFound` — metadata missing from storage — and the two used to
- * share a tag, forcing structural sniffing at the RPC error mapping.
- */
+/** The native session is not open in this process (cf. `Session.NotFound`, which is about our own records). */
 export class HarnessSessionNotFound extends Schema.TaggedErrorClass<HarnessSessionNotFound>()(
-  "HarnessSessionNotFound",
+  "Harness.SessionNotFound",
   {
     sessionId: Schema.String,
   },
@@ -74,7 +130,7 @@ export class HarnessSessionNotFound extends Schema.TaggedErrorClass<HarnessSessi
 }
 
 export class SessionNotResumable extends Schema.TaggedErrorClass<SessionNotResumable>()(
-  "SessionNotResumable",
+  "Harness.SessionNotResumable",
   {
     sessionId: Schema.String,
     reason: Schema.optionalKey(Schema.String),
@@ -87,16 +143,19 @@ export class SessionNotResumable extends Schema.TaggedErrorClass<SessionNotResum
   }
 }
 
-export class SessionClosed extends Schema.TaggedErrorClass<SessionClosed>()("SessionClosed", {
-  sessionId: Schema.String,
-}) {
+export class SessionClosed extends Schema.TaggedErrorClass<SessionClosed>()(
+  "Harness.SessionClosed",
+  {
+    sessionId: Schema.String,
+  },
+) {
   override get message() {
     return `Session '${this.sessionId}' is closed.`;
   }
 }
 
 export class TurnAlreadyRunning extends Schema.TaggedErrorClass<TurnAlreadyRunning>()(
-  "TurnAlreadyRunning",
+  "Harness.TurnAlreadyRunning",
   {
     sessionId: Schema.String,
     turnId: Schema.optionalKey(Schema.String),
@@ -110,7 +169,7 @@ export class TurnAlreadyRunning extends Schema.TaggedErrorClass<TurnAlreadyRunni
 }
 
 export class AgentRequestUnavailable extends Schema.TaggedErrorClass<AgentRequestUnavailable>()(
-  "AgentRequestUnavailable",
+  "Harness.AgentRequestUnavailable",
   {
     sessionId: Schema.String,
     requestId: Schema.String,
@@ -122,7 +181,7 @@ export class AgentRequestUnavailable extends Schema.TaggedErrorClass<AgentReques
 }
 
 export class AgentOperationError extends Schema.TaggedErrorClass<AgentOperationError>()(
-  "AgentOperationError",
+  "Harness.AgentOperationError",
   {
     sessionId: Schema.String,
     operation: Schema.String,
@@ -134,52 +193,8 @@ export class AgentOperationError extends Schema.TaggedErrorClass<AgentOperationE
   }
 }
 
-export class CodexTransportError extends Schema.TaggedErrorClass<CodexTransportError>()(
-  "CodexTransportError",
-  {
-    operation: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message() {
-    return `Codex transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
-  }
-}
-
-export class CodexRpcError extends Schema.TaggedErrorClass<CodexRpcError>()("CodexRpcError", {
-  method: Schema.String,
-  code: Schema.Number,
-  errorMessage: Schema.String,
-  data: Schema.optionalKey(Schema.Unknown),
-}) {
-  override get message() {
-    return `Codex RPC '${this.method}' failed (${this.code}): ${this.errorMessage}`;
-  }
-}
-
-export class PiTransportError extends Schema.TaggedErrorClass<PiTransportError>()(
-  "PiTransportError",
-  {
-    operation: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message() {
-    return `Pi transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
-  }
-}
-
-export class PiRpcError extends Schema.TaggedErrorClass<PiRpcError>()("PiRpcError", {
-  command: Schema.String,
-  errorMessage: Schema.String,
-}) {
-  override get message() {
-    return `Pi RPC command '${this.command}' failed: ${this.errorMessage}`;
-  }
-}
-
 export class AgentProcessExited extends Schema.TaggedErrorClass<AgentProcessExited>()(
-  "AgentProcessExited",
+  "Harness.AgentProcessExited",
   {
     harnessAgentId: HarnessAgentIdSchema,
     code: Schema.optionalKey(Schema.Number),
@@ -200,7 +215,7 @@ export class AgentProcessExited extends Schema.TaggedErrorClass<AgentProcessExit
 }
 
 export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolError>()(
-  "AgentProtocolError",
+  "Harness.AgentProtocolError",
   {
     harnessAgentId: HarnessAgentIdSchema,
     reason: Schema.String,
@@ -217,7 +232,7 @@ export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolErr
 // closed and fully known to the client), so it maps to INVALID_ARGUMENT at the
 // RPC boundary rather than being silently ignored or half-applied.
 export class PermissionModeUnsupported extends Schema.TaggedErrorClass<PermissionModeUnsupported>()(
-  "PermissionModeUnsupported",
+  "Harness.PermissionModeUnsupported",
   {
     harnessAgentId: HarnessAgentIdSchema,
     mode: Schema.String,
@@ -229,7 +244,7 @@ export class PermissionModeUnsupported extends Schema.TaggedErrorClass<Permissio
 }
 
 export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
-  "CapabilityProbeFailed",
+  "Harness.CapabilityProbeFailed",
   {
     harnessAgentId: HarnessAgentIdSchema,
     cause: Schema.Defect(),
@@ -241,7 +256,7 @@ export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityPro
 }
 
 export class CapabilityUnsupported extends Schema.TaggedErrorClass<CapabilityUnsupported>()(
-  "CapabilityUnsupported",
+  "Harness.CapabilityUnsupported",
   {
     harnessAgentId: HarnessAgentIdSchema,
     capability: Schema.String,

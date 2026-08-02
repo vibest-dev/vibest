@@ -1,10 +1,20 @@
 import path from "node:path";
 
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer, Schema } from "effect";
 
-import { ProjectNotFound } from "../errors";
 import type { Project } from "../types";
 import { ProjectRepository } from "./repository";
+
+export class ProjectNotFound extends Schema.TaggedErrorClass<ProjectNotFound>()(
+  "Project.NotFound",
+  {
+    projectId: Schema.String,
+  },
+) {
+  override get message() {
+    return `Project '${this.projectId}' not found.`;
+  }
+}
 
 /**
  * `project` module: list / create (path-dedup) / remove / findById. Business

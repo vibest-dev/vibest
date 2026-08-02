@@ -6,12 +6,12 @@ import { v7 as uuid } from "uuid";
 
 import {
   AgentRequestUnavailable,
-  ClaudeSdkError,
   HarnessSessionNotFound,
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { ClaudeSdkError } from "./errors";
 import { resolveClaudeExecutable } from "./executable";
 
 const SESSION_QUEUE_CAPACITY = 1024;

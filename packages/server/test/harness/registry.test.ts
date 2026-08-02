@@ -30,7 +30,7 @@ it.effect("returns a typed error for an unregistered harness agent", () =>
     const registry = makeHarnessAgentRegistry([claude]);
     const error = yield* registry.get("codex").pipe(Effect.flip);
 
-    assert.equal(error._tag, "HarnessAgentNotFound");
+    assert.equal(error._tag, "Harness.AgentNotFound");
     assert.equal(error.harnessAgentId, "codex");
   }),
 );

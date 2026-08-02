@@ -119,7 +119,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const error = yield* agent.session
         .resume({ sessionId: "missing-session", cwd: "/tmp" })
         .pipe(Effect.flip);
-      assert.equal(error._tag, "AgentProcessExited");
+      assert.equal(error._tag, "Harness.AgentProcessExited");
     }),
   );
 
@@ -224,7 +224,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const error = yield* agent.session.prompt({ sessionId, text: "fail" }).pipe(Effect.flip);
-      assert.equal(error._tag, "PiRpcError");
+      assert.equal(error._tag, "Pi.RpcError");
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       const chunks = yield* Stream.runCollect(prompt.output);
@@ -255,7 +255,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "HarnessSessionNotFound",
+              (error) => error._tag === "Harness.SessionNotFound",
               () => new Error("crashed session was not evicted"),
             ),
           ),

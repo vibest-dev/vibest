@@ -1,7 +1,8 @@
 import { Deferred, type Duration, Effect, Queue, Ref, Stream, type Scope } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { AgentProcessExited, PiRpcError, PiTransportError } from "../errors";
+import { AgentProcessExited } from "../errors";
+import { PiRpcError, PiTransportError } from "./errors";
 import {
   isBlockingUiRequest,
   type AgentSessionEvent,
@@ -53,9 +54,9 @@ const transportError = (operation: string, cause: unknown) =>
 const normalizeFailure = (operation: string, error: unknown): PiTransportFailure => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     switch (error._tag) {
-      case "PiTransportError":
-      case "PiRpcError":
-      case "AgentProcessExited":
+      case "Pi.TransportError":
+      case "Pi.RpcError":
+      case "Harness.AgentProcessExited":
         return error as PiTransportFailure;
     }
   }

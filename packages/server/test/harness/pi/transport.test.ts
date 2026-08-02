@@ -56,8 +56,8 @@ layer(NodeServices.layer)("PiTransport", (it) => {
       });
 
       const error = yield* transport.command({ type: "compact" }).pipe(Effect.flip);
-      assert.equal(error._tag, "PiRpcError");
-      if (error._tag === "PiRpcError") {
+      assert.equal(error._tag, "Pi.RpcError");
+      if (error._tag === "Pi.RpcError") {
         assert.equal(error.command, "compact");
         assert.equal(error.errorMessage, "nothing to compact");
       }
@@ -115,8 +115,8 @@ layer(NodeServices.layer)("PiTransport", (it) => {
       const transport = yield* makePiTransport({ executablePath: makeFake() });
       const error = yield* transport.command({ type: "abort" }).pipe(Effect.flip);
 
-      assert.equal(error._tag, "AgentProcessExited");
-      if (error._tag === "AgentProcessExited") {
+      assert.equal(error._tag, "Harness.AgentProcessExited");
+      if (error._tag === "Harness.AgentProcessExited") {
         assert.equal(error.code, 7);
         assert.match(error.stderrTail ?? "", /pi fatal detail/);
       }

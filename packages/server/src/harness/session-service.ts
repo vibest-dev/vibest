@@ -13,12 +13,6 @@ import type { UIMessage } from "ai";
 import { Cause, Context, Crypto, Effect, FileSystem, Layer } from "effect";
 
 import { Paths } from "../config/paths";
-import {
-  type SessionNotFound,
-  SessionRefMismatch,
-  type SessionRefNotFound,
-  UnsupportedPromptPart,
-} from "../errors";
 import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { Session } from "../types";
 import type { PromptReceipt, SessionCapabilities, SessionInfoResult, UserInput } from "./adapter";
@@ -30,9 +24,16 @@ import type {
   HarnessSessionNotFound,
   ResumeSessionError,
   SessionClosed,
+  SessionNotFound,
+  SessionRefNotFound,
   TurnAlreadyRunning,
 } from "./errors";
-import { CapabilityUnsupported, PermissionModeUnsupported } from "./errors";
+import {
+  CapabilityUnsupported,
+  PermissionModeUnsupported,
+  SessionRefMismatch,
+  UnsupportedPromptPart,
+} from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
@@ -402,7 +403,7 @@ export const makeHarnessAgentSessionService = (deps: {
               })
               .pipe(
                 Effect.map((s): SessionStatus | null => s),
-                Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+                Effect.catchTag("Session.NotActive", () => Effect.succeed(null)),
                 Effect.map(
                   (status) =>
                     ({
@@ -468,7 +469,7 @@ export const makeHarnessAgentSessionService = (deps: {
                     }
                     return messages;
                   }),
-                  Effect.catchTag("SessionNotActive", () => Effect.succeed(messages)),
+                  Effect.catchTag("Session.NotActive", () => Effect.succeed(messages)),
                 ),
               ),
             ),
@@ -505,7 +506,7 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.flatMap((session) =>
           // The session is open, so its adapter is registered by construction.
           checkPermissionMode(session.harnessAgentId, permissionMode).pipe(
-            Effect.catchTag("HarnessAgentNotFound", (cause) => Effect.die(cause)),
+            Effect.catchTag("Harness.AgentNotFound", (cause) => Effect.die(cause)),
             Effect.andThen(session.setPermissionMode(permissionMode)),
           ),
         ),

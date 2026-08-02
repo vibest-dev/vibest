@@ -1,13 +1,15 @@
 import { Effect } from "effect";
 
-import type { ProjectNotFound, SessionNotFound, SessionRefMismatch } from "../errors";
 import type {
   AgentUnavailable,
   ExecutableNotFound,
   HarnessAgentNotFound,
   HarnessSessionNotFound,
   SessionClosed,
+  SessionNotFound,
+  SessionRefMismatch,
 } from "../harness";
+import type { ProjectNotFound } from "../project";
 
 /**
  * Exhaustive RPC error translation.
@@ -73,7 +75,7 @@ export const projectRefTranslation = <NotFound>(errors: {
   readonly NOT_FOUND: (input: MessageInput) => NotFound;
 }) =>
   ({
-    ProjectNotFound: (e: ProjectNotFound) =>
+    "Project.NotFound": (e: ProjectNotFound) =>
       Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
   }) as const;
 
@@ -88,9 +90,9 @@ export const sessionRefTranslation = <NotFound, InvalidArgument>(errors: {
   readonly INVALID_ARGUMENT: (input: MessageInput) => InvalidArgument;
 }) =>
   ({
-    SessionNotFound: (e: SessionNotFound) =>
+    "Session.NotFound": (e: SessionNotFound) =>
       Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-    SessionRefMismatch: (e: SessionRefMismatch) =>
+    "Session.RefMismatch": (e: SessionRefMismatch) =>
       Effect.fail(errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` })),
   }) as const;
 
@@ -99,13 +101,13 @@ export const activeSessionTranslation = <SessionNotActive>(errors: {
   readonly SESSION_NOT_ACTIVE: (input: MessageInput) => SessionNotActive;
 }) =>
   ({
-    HarnessSessionNotFound: (e: HarnessSessionNotFound) =>
+    "Harness.SessionNotFound": (e: HarnessSessionNotFound) =>
       Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` })),
-    SessionClosed: (e: SessionClosed) =>
+    "Harness.SessionClosed": (e: SessionClosed) =>
       Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
     // The adapter failing mid-operation carries harness internals the wire
     // must not see — the defect boundary logs it with a ref instead.
-    AgentOperationError: "internal",
+    "Harness.AgentOperationError": "internal",
   }) as const;
 
 /** Opening a session: the harness itself is missing, unavailable, or has no executable. */
@@ -113,11 +115,11 @@ export const agentAvailabilityTranslation = <Unsupported>(errors: {
   readonly UNSUPPORTED: (input: MessageInput) => Unsupported;
 }) =>
   ({
-    HarnessAgentNotFound: (e: HarnessAgentNotFound) =>
+    "Harness.AgentNotFound": (e: HarnessAgentNotFound) =>
       Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-    AgentUnavailable: (e: AgentUnavailable) =>
+    "Harness.AgentUnavailable": (e: AgentUnavailable) =>
       Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
-    ExecutableNotFound: (e: ExecutableNotFound) =>
+    "Harness.ExecutableNotFound": (e: ExecutableNotFound) =>
       Effect.fail(errors.UNSUPPORTED({ message: e.message })),
   }) as const;
 
@@ -128,7 +130,7 @@ export const agentAvailabilityTranslation = <Unsupported>(errors: {
  * them with a ref while the wire stays generic.
  */
 export const resumeInternalTranslation = {
-  HarnessSessionNotFound: "internal",
-  SessionNotResumable: "internal",
-  AgentOpenError: "internal",
+  "Harness.SessionNotFound": "internal",
+  "Harness.SessionNotResumable": "internal",
+  "Harness.AgentOpenError": "internal",
 } as const;

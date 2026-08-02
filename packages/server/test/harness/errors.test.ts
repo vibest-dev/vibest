@@ -1,9 +1,9 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { CodexRpcError } from "../../src/harness/codex/errors";
 import {
   AgentProcessExited,
-  CodexRpcError,
   HarnessAgentNotFound,
   HarnessSessionNotFound,
 } from "../../src/harness/errors";
@@ -14,7 +14,7 @@ describe("runtime errors", () => {
   it("preserves routing fields on tagged errors", () => {
     const error = new HarnessAgentNotFound({ harnessAgentId: "codex" });
 
-    expect(error._tag).toBe("HarnessAgentNotFound");
+    expect(error._tag).toBe("Harness.AgentNotFound");
     expect(error.harnessAgentId).toBe("codex");
     expect(isHarnessAgentNotFound(error)).toBe(true);
   });

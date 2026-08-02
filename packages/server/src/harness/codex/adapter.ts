@@ -17,7 +17,6 @@ import {
   AgentOperationError,
   AgentRequestUnavailable,
   CapabilityProbeFailed,
-  CodexRpcError,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -26,6 +25,7 @@ import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { CodexAgent } from "./agent";
+import { CodexRpcError } from "./errors";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 

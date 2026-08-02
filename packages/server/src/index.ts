@@ -6,7 +6,6 @@ import { GitServiceLayer } from "./git";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "./project";
 
 export * from "./types";
-export * from "./errors";
 export { Paths, PathsLayer, layerPaths } from "./config/paths";
 export * from "./project";
 export * from "./events";

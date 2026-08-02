@@ -1,7 +1,9 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { type BranchSummary, simpleGit, type StatusResult } from "simple-git";
 
-import { GitError } from "../errors";
+export class GitError extends Schema.TaggedErrorClass<GitError>()("Git.Error", {
+  cause: Schema.Defect(),
+}) {}
 
 /**
  * `git` module — read-only, delegating to the `git` CLI via simple-git. Returns

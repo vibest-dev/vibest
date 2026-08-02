@@ -5,7 +5,7 @@ import { ProjectRepositoryLayer } from "./repository";
 import { ProjectService, ProjectServiceLayer } from "./service";
 
 export { ProjectRepository, ProjectRepositoryLayer } from "./repository";
-export { ProjectService, ProjectServiceLayer } from "./service";
+export { ProjectNotFound, ProjectService, ProjectServiceLayer } from "./service";
 
 /**
  * The project module fully wired — callers supply a `Paths` layer plus the

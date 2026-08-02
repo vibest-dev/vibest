@@ -8,7 +8,7 @@ import {
   WorkspaceNotFile,
   WorkspacePathEscape,
   WorkspaceReadError,
-} from "../errors";
+} from "./errors";
 
 /** Largest file we will read as text; larger files are rejected, not truncated. */
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MiB

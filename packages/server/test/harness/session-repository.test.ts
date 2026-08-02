@@ -124,7 +124,7 @@ describe("SessionRepository", () => {
         }),
       ),
     );
-    expect(err._tag).toBe("SessionNotFound");
+    expect(err._tag).toBe("Session.NotFound");
   });
 
   it("remove is idempotent and deletes the file", async () => {
@@ -186,8 +186,8 @@ describe("SessionRepository", () => {
         return { readError, findError, listed };
       }),
     );
-    expect(result.readError._tag).toBe("SessionNotFound");
-    expect(result.findError._tag).toBe("SessionRefNotFound");
+    expect(result.readError._tag).toBe("Session.NotFound");
+    expect(result.findError._tag).toBe("Session.RefNotFound");
     expect(result.listed).toEqual([]);
   });
 
@@ -201,6 +201,6 @@ describe("SessionRepository", () => {
         }),
       ),
     );
-    expect(err._tag).toBe("SessionRefNotFound");
+    expect(err._tag).toBe("Session.RefNotFound");
   });
 });

@@ -183,7 +183,7 @@ describe("HarnessAgentSessionService", () => {
         return { err, listed };
       }),
     );
-    expect(result.err._tag).toBe("AgentUnavailable");
+    expect(result.err._tag).toBe("Harness.AgentUnavailable");
     expect(result.listed).toHaveLength(0);
   });
 
@@ -208,7 +208,7 @@ describe("HarnessAgentSessionService", () => {
         ),
       ),
     );
-    expect(err._tag).toBe("SessionNotFound");
+    expect(err._tag).toBe("Session.NotFound");
   });
 
   it("resume fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {
@@ -220,7 +220,7 @@ describe("HarnessAgentSessionService", () => {
         );
       }),
     );
-    expect(err._tag).toBe("SessionRefMismatch");
+    expect(err._tag).toBe("Session.RefMismatch");
   });
 
   it("close translates the ref to the native id", async () => {
@@ -296,7 +296,7 @@ describe("HarnessAgentSessionService", () => {
       while (true) {
         const turn = yield* fixture.service.getSnapshot(ref).pipe(
           Effect.map((snapshot) => snapshot.activeTurn),
-          Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
+          Effect.catchTag("Session.NotActive", () => Effect.succeed(null)),
         );
         if (done(turn)) return;
         yield* Effect.sleep("10 millis");
@@ -332,7 +332,7 @@ describe("HarnessAgentSessionService", () => {
         return yield* Effect.flip(fixture.service.getMessages(ref, "/tmp/vibest-app"));
       }),
     );
-    expect(err._tag).toBe("CapabilityUnsupported");
+    expect(err._tag).toBe("Harness.CapabilityUnsupported");
   });
 
   it("titles a session from its first prompt, collapsing whitespace", async () => {

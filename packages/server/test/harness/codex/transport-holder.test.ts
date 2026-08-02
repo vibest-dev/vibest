@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope, Stream } from "effect";
 
-import { AgentProcessExited, CodexTransportError } from "../../../src/harness";
+import { AgentProcessExited } from "../../../src/harness";
 import {
   makeCodexTransportHolder,
   type CodexTransport,
   type CodexTransportFailure,
 } from "../../../src/harness/codex";
+import { CodexTransportError } from "../../../src/harness/codex/errors";
 
 type FakeTransportControl = {
   readonly transport: CodexTransport;
@@ -132,7 +133,7 @@ it.effect("resets failed startup so a later call can retry", () =>
     });
 
     const firstError = yield* holder.ensure.pipe(Effect.flip);
-    assert.equal(firstError._tag, "CodexTransportError");
+    assert.equal(firstError._tag, "Codex.TransportError");
     assert.equal(yield* holder.status, "Idle");
 
     yield* holder.ensure;

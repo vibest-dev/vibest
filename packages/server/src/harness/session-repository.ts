@@ -1,8 +1,8 @@
 import { makeJsonCollection } from "@vibest/effect-json-store";
 import { Effect, Option, Schema } from "effect";
 
-import { SessionNotFound, SessionRefNotFound } from "../errors";
 import type { Session } from "../types";
+import { SessionNotFound, SessionRefNotFound } from "./errors";
 
 /**
  * Persistence schema for {@link Session}. Compatibility with the interface is

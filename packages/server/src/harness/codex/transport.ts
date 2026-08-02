@@ -2,12 +2,8 @@ import type { ServerNotification, ServerRequest } from "@vibest/contract/codex/p
 import { Deferred, type Duration, Effect, Queue, Ref, Schema, Stream, type Scope } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import {
-  AgentProcessExited,
-  AgentProtocolError,
-  CodexRpcError,
-  CodexTransportError,
-} from "../errors";
+import { AgentProcessExited, AgentProtocolError } from "../errors";
+import { CodexRpcError, CodexTransportError } from "./errors";
 
 const DEFAULT_QUEUE_CAPACITY = 256;
 const DEFAULT_FORCE_KILL_AFTER = "2 seconds";
@@ -87,10 +83,10 @@ const transportError = (operation: string, cause: unknown) =>
 const normalizeFailure = (operation: string, error: unknown): CodexTransportFailure => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     switch (error._tag) {
-      case "CodexTransportError":
-      case "CodexRpcError":
-      case "AgentProcessExited":
-      case "AgentProtocolError":
+      case "Codex.TransportError":
+      case "Codex.RpcError":
+      case "Harness.AgentProcessExited":
+      case "Harness.AgentProtocolError":
         return error as CodexTransportFailure;
     }
   }

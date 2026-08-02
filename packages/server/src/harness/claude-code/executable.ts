@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import util from "node:util";
 
-import { Data, Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 
 import { isExecutableFile, pathDelimiter } from "../executable";
 
@@ -12,9 +12,12 @@ const moduleRequire = module.createRequire(import.meta.url);
 const execFileAsync = util.promisify(childProcess.execFile);
 
 /** No `claude` binary anywhere we look — carries the user-facing remedy. */
-export class ClaudeExecutableNotFound extends Data.TaggedError("ClaudeExecutableNotFound")<{
-  readonly reason: string;
-}> {
+export class ClaudeExecutableNotFound extends Schema.TaggedErrorClass<ClaudeExecutableNotFound>()(
+  "ClaudeCode.ExecutableNotFound",
+  {
+    reason: Schema.String,
+  },
+) {
   override get message() {
     return this.reason;
   }

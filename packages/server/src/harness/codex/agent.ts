@@ -20,11 +20,11 @@ import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessS
 import {
   AgentOperationError,
   AgentRequestUnavailable,
-  CodexTransportError,
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { CodexTransportError } from "./errors";
 import {
   approvalSourceOf,
   buildApprovalRequest,

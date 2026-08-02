@@ -8,7 +8,7 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Data, Deferred, Effect, Fiber, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Fiber, Ref, Schema, Scope, Stream } from "effect";
 
 import type { EventBusShape } from "../events/event-bus";
 import type { AgentOperationError } from "./errors";
@@ -29,9 +29,16 @@ type WireChunk = SessionMessageChunkEvent["chunk"];
  * {@link HarnessAgentSessionManager}'s job.
  */
 
-export class SessionNotActive extends Data.TaggedError("SessionNotActive")<{
-  readonly sessionId: string;
-}> {}
+export class SessionNotActive extends Schema.TaggedErrorClass<SessionNotActive>()(
+  "Session.NotActive",
+  {
+    sessionId: Schema.String,
+  },
+) {
+  override get message() {
+    return `Session '${this.sessionId}' is not active.`;
+  }
+}
 
 type ActiveTurn = {
   readonly turnId: string;

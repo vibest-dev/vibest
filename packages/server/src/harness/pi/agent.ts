@@ -7,11 +7,11 @@ import { v7 as uuid } from "uuid";
 import {
   AgentOperationError,
   AgentRequestUnavailable,
-  PiTransportError,
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { PiTransportError } from "./errors";
 import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
 import { createPiTransform } from "./transform";

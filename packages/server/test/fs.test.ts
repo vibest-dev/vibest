@@ -47,7 +47,7 @@ layer(FileSystemServiceLayer.pipe(Layer.provideMerge(NodePlatformLayer)))(
         const { cwd, outside } = yield* workspace;
         assert.equal(
           yield* readError(cwd, path.join(outside, "secret.txt")),
-          "WorkspacePathEscape",
+          "Workspace.PathEscape",
         );
       }),
     );
@@ -55,28 +55,28 @@ layer(FileSystemServiceLayer.pipe(Layer.provideMerge(NodePlatformLayer)))(
     it.effect("rejects a `..` escape", () =>
       Effect.gen(function* () {
         const { cwd } = yield* workspace;
-        assert.equal(yield* readError(cwd, "../escape.txt"), "WorkspacePathEscape");
+        assert.equal(yield* readError(cwd, "../escape.txt"), "Workspace.PathEscape");
       }),
     );
 
     it.effect("rejects a symlink pointing outside cwd", () =>
       Effect.gen(function* () {
         const { cwd } = yield* workspace;
-        assert.equal(yield* readError(cwd, "link"), "WorkspacePathEscape");
+        assert.equal(yield* readError(cwd, "link"), "Workspace.PathEscape");
       }),
     );
 
     it.effect("rejects a directory read as a file", () =>
       Effect.gen(function* () {
         const { cwd } = yield* workspace;
-        assert.equal(yield* readError(cwd, "sub"), "WorkspaceNotFile");
+        assert.equal(yield* readError(cwd, "sub"), "Workspace.NotFile");
       }),
     );
 
     it.effect("rejects a binary file", () =>
       Effect.gen(function* () {
         const { cwd } = yield* workspace;
-        assert.equal(yield* readError(cwd, "bin"), "WorkspaceBinaryFile");
+        assert.equal(yield* readError(cwd, "bin"), "Workspace.BinaryFile");
       }),
     );
   },

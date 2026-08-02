@@ -10,7 +10,7 @@ import { Deferred, Effect, Fiber, Ref, Stream } from "effect";
 import type { CodexTransport } from "../../../src/harness/codex";
 import { makeCodexAdapter } from "../../../src/harness/codex/adapter";
 import { makeCodexAgent, makeCodexAgentWithDependencies } from "../../../src/harness/codex/agent";
-import { CodexTransportError } from "../../../src/harness/errors";
+import { CodexTransportError } from "../../../src/harness/codex/errors";
 
 const FAKE = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -170,7 +170,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "HarnessSessionNotFound",
+              (error) => error._tag === "Harness.SessionNotFound",
               () => new Error("old generation session has not been cleaned up"),
             ),
           ),
@@ -280,7 +280,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "HarnessSessionNotFound",
+              (error) => error._tag === "Harness.SessionNotFound",
               () => new Error("native session has not crashed"),
             ),
           ),
@@ -383,7 +383,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
           .pipe(
             Effect.flip,
             Effect.filterOrFail(
-              (error) => error._tag === "HarnessSessionNotFound",
+              (error) => error._tag === "Harness.SessionNotFound",
               () => new Error("transport crash has not evicted the native session"),
             ),
           ),

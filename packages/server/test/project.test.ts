@@ -57,7 +57,7 @@ layer(NodePlatformLayer)("ProjectService", (it) => {
     Effect.gen(function* () {
       const svc = yield* projects;
       const error = yield* Effect.flip(svc.findById("nope"));
-      assert.equal(error._tag, "ProjectNotFound");
+      assert.equal(error._tag, "Project.NotFound");
     }),
   );
 
@@ -117,7 +117,7 @@ layer(NodePlatformLayer)("ProjectService", (it) => {
     Effect.gen(function* () {
       const svc = yield* projects;
       const error = yield* Effect.flip(svc.remove("nope"));
-      assert.equal(error._tag, "ProjectNotFound");
+      assert.equal(error._tag, "Project.NotFound");
     }),
   );
 });

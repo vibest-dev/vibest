@@ -265,7 +265,7 @@ describe("ClaudeCodeAgent", () => {
           message: { role: "user", content: "second" },
         })
         .pipe(Effect.flip);
-      assert.equal(error._tag, "TurnAlreadyRunning");
+      assert.equal(error._tag, "Harness.TurnAlreadyRunning");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -325,7 +325,7 @@ describe("ClaudeCodeAgent", () => {
       const error = yield* missing.session
         .getSupportedCommands("019f6013-0000-7000-8000-000000000003")
         .pipe(Effect.flip);
-      assert.equal(error._tag, "SessionNotResumable");
+      assert.equal(error._tag, "Harness.SessionNotResumable");
     }),
   );
 

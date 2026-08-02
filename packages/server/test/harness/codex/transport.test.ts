@@ -62,8 +62,8 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
       });
 
       const error = yield* transport.request("boom").pipe(Effect.flip);
-      assert.equal(error._tag, "CodexRpcError");
-      if (error._tag === "CodexRpcError") assert.equal(error.code, -1);
+      assert.equal(error._tag, "Codex.RpcError");
+      if (error._tag === "Codex.RpcError") assert.equal(error.code, -1);
     }),
   );
 
@@ -102,7 +102,7 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
       const error = yield* transport.request("invalid").pipe(Effect.flip);
 
-      assert.equal(error._tag, "AgentProtocolError");
+      assert.equal(error._tag, "Harness.AgentProtocolError");
     }),
   );
 
@@ -126,8 +126,8 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
         .request("exitWithInheritedStderr")
         .pipe(Effect.flip, Effect.timeout("750 millis"));
 
-      assert.equal(error._tag, "AgentProcessExited");
-      if (error._tag === "AgentProcessExited") assert.equal(error.code, 8);
+      assert.equal(error._tag, "Harness.AgentProcessExited");
+      if (error._tag === "Harness.AgentProcessExited") assert.equal(error.code, 8);
     }),
   );
 
@@ -136,8 +136,8 @@ layer(NodeServices.layer)("CodexTransport", (it) => {
       const transport = yield* makeCodexTransport({ executablePath: makeFake() });
       const error = yield* transport.request("exit").pipe(Effect.flip);
 
-      assert.equal(error._tag, "AgentProcessExited");
-      if (error._tag === "AgentProcessExited") {
+      assert.equal(error._tag, "Harness.AgentProcessExited");
+      if (error._tag === "Harness.AgentProcessExited") {
         assert.equal(error.code, 7);
         assert.match(error.stderrTail ?? "", /fatal codex detail/);
       }

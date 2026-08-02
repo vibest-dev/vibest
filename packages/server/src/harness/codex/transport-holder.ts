@@ -1,6 +1,6 @@
 import { Cause, Deferred, Effect, Exit, Scope, SynchronizedRef } from "effect";
 
-import { CodexTransportError } from "../errors";
+import { CodexTransportError } from "./errors";
 import type { CodexTransport } from "./transport";
 
 export type ManagedCodexTransport = {
