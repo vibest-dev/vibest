@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
 import type { Effect, Layer } from "effect";
 import { ManagedRuntime } from "effect";
@@ -6,16 +7,18 @@ import type { WebSocket } from "ws";
 import type { RpcContext } from "./context";
 import { router } from "./router";
 import { AgentRuntimeLayer } from "./runtime";
+import { makeWrapRpcEffect } from "./wrap";
 
-// Without this, a procedure that throws becomes a bare 500 with no trace of the
-// cause anywhere — the client sees "Internal Server Error" and the server says
-// nothing at all. Generic in the result so it types against every handler's
+// Backstop for failures that never enter an effect handler (transport and
+// stream plumbing). Anything from a handler is an ORPCError by now — expected
+// protocol errors, or the wrap boundary's already-logged INTERNAL — so those
+// stay quiet here. Generic in the result so it types against every handler's
 // own client-interceptor signature.
-async function logErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
+async function logNonProtocolErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
   try {
     return await next();
   } catch (error) {
-    console.error("[rpc]", error);
+    if (!(error instanceof ORPCError)) console.error("[rpc]", error);
     throw error;
   }
 }
@@ -37,8 +40,10 @@ type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 
 export async function createRpcRuntime(): Promise<RpcRuntime> {
   const runtime = ManagedRuntime.make(AgentRuntimeLayer);
+  const effectContext = await runtime.runPromise(runtime.contextEffect);
   const context: RpcContext = {
-    "effect/context": await runtime.runPromise(runtime.contextEffect),
+    "effect/context": effectContext,
+    "effect/wrap": makeWrapRpcEffect(effectContext),
   };
   let disposing: Promise<void> | undefined;
   return {
@@ -49,7 +54,9 @@ export async function createRpcRuntime(): Promise<RpcRuntime> {
 }
 
 export function createWsRPCHandler(rpcContext: RpcContext) {
-  const wsHandler = new WsRPCHandler<RpcContext>(router, { clientInterceptors: [logErrors] });
+  const wsHandler = new WsRPCHandler<RpcContext>(router, {
+    clientInterceptors: [logNonProtocolErrors],
+  });
 
   return function upgrade(ws: WebSocket) {
     wsHandler.upgrade(ws, {

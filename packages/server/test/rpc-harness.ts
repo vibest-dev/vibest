@@ -16,6 +16,7 @@ import {
 import { ProjectModuleLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
+import { makeWrapRpcEffect } from "../src/rpc/wrap";
 import { NodePlatformLayer } from "./platform";
 
 /**
@@ -64,9 +65,12 @@ export async function makeRpcTestHarness(
     ),
   );
   // Layer construction does file I/O now (the project document loads eagerly),
-  // so the context must be built asynchronously.
+  // so the context must be built asynchronously. The wrap mirrors production:
+  // unexpected causes become logged INTERNAL_SERVER_ERRORs with a ref.
+  const effectContext = await runtime.runPromise(runtime.contextEffect);
   const context: RpcContext = {
-    "effect/context": await runtime.runPromise(runtime.contextEffect),
+    "effect/context": effectContext,
+    "effect/wrap": makeWrapRpcEffect(effectContext),
   };
   return {
     client: createRouterClient(router, { context }),

@@ -23,6 +23,7 @@ import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
+import { makeWrapRpcEffect } from "../src/rpc/wrap";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -107,8 +108,10 @@ async function setup() {
   const runtime = ManagedRuntime.make(appLayer);
   // Layer construction does file I/O now (the project document loads eagerly),
   // so the context must be built asynchronously.
+  const effectContext = await runtime.runPromise(runtime.contextEffect);
   const context: RpcContext = {
-    "effect/context": await runtime.runPromise(runtime.contextEffect),
+    "effect/context": effectContext,
+    "effect/wrap": makeWrapRpcEffect(effectContext),
   };
   const client = createRouterClient(router, { context });
   return { client, workspace, dispose: () => runtime.dispose() };
