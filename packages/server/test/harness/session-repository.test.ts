@@ -74,16 +74,10 @@ describe("SessionRepository", () => {
     expect(raw.data.projectId).toBe("proj-a");
   });
 
-  // Verbatim bytes from a real ~/.vibest record written before the body carried
-  // a sessionId at all. Fabricating this input from the current Session type is
-  // what let the missing field go unnoticed: it produced a record no historical
-  // install ever wrote, and the schema then rejected every one that they did.
-  const PRE_ENVELOPE_RECORD = `{"version":1,"projectId":"proj-a","harnessAgentId":"pi","harnessSessionId":"019fa463-cf81-73bd-999f-ffe6c5310d2e","createdAt":"2026-07-27T16:23:54.641Z"}`;
-
-  it("reads a pre-envelope record that predates sessionId, filling it from the filename", async () => {
+  it("reads a pre-envelope record and adopts it into envelope form", async () => {
     const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
+    await fs.writeFile(file, JSON.stringify(meta("sess-1", "proj-a", "claude-uuid-1")), "utf8");
 
     const read = await run(
       Effect.gen(function* () {
@@ -91,71 +85,11 @@ describe("SessionRepository", () => {
         return yield* repo.read("proj-a", "sess-1");
       }),
     );
-    // Recovered from the filename, which is where it lived back then.
-    expect(read.sessionId).toBe("sess-1");
-    expect(read.harnessSessionId).toBe("019fa463-cf81-73bd-999f-ffe6c5310d2e");
+    expect(read.harnessSessionId).toBe("claude-uuid-1");
 
-    // Adopted into envelope form, still without the field it never had — the
-    // next write is what puts it in the body, and every write does.
     const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.version).toBe(1);
-    expect(raw.data.harnessAgentId).toBe("pi");
-  });
-
-  it("a rewrite gives an old record the sessionId its body was missing", async () => {
-    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
-
-    await run(
-      Effect.gen(function* () {
-        const repo = yield* SessionRepository;
-        const loaded = yield* repo.read("proj-a", "sess-1");
-        yield* repo.write({ ...loaded, title: "renamed" });
-      }),
-    );
-    const raw = JSON.parse(await fs.readFile(file, "utf8"));
     expect(raw.data.sessionId).toBe("sess-1");
-    expect(raw.data.title).toBe("renamed");
-  });
-
-  it("the filename wins over a stored sessionId that drifted from it", async () => {
-    await run(
-      Effect.gen(function* () {
-        const repo = yield* SessionRepository;
-        yield* repo.write(meta("sess-1", "proj-a", "u1"));
-      }),
-    );
-    // Hand-edited or hand-copied: the body claims an id nothing can address it
-    // by. Reads answer with the one that works.
-    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
-    const envelope = JSON.parse(await fs.readFile(file, "utf8"));
-    envelope.data.sessionId = "drifted";
-    await fs.writeFile(file, JSON.stringify(envelope), "utf8");
-
-    const read = await run(
-      Effect.gen(function* () {
-        const repo = yield* SessionRepository;
-        return yield* repo.read("proj-a", "sess-1");
-      }),
-    );
-    expect(read.sessionId).toBe("sess-1");
-  });
-
-  it("still lists a project whose only record is a pre-envelope one", async () => {
-    // The user-visible failure: `list` fails whole-project on a record it
-    // cannot decode, so one old session emptied the whole sidebar group.
-    const file = path.join(home, "storage", "sessions", "proj-a", "sess-1.json");
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, PRE_ENVELOPE_RECORD, "utf8");
-
-    const listed = await run(
-      Effect.gen(function* () {
-        const repo = yield* SessionRepository;
-        return yield* repo.list("proj-a");
-      }),
-    );
-    expect(listed.map((session) => session.sessionId)).toEqual(["sess-1"]);
   });
 
   it("lists all sessions of a project", async () => {

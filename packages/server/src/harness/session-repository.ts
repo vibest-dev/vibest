@@ -6,18 +6,12 @@ import type { Session } from "../types";
 
 /**
  * Persistence schema for {@link Session}. Compatibility with the interface is
- * enforced structurally: `write` checks Session → schema Type, {@link toSession}
- * checks schema Type → Session.
- *
- * `sessionId` is written into every record — a stored record is meant to be
- * complete on its own — but is *optional to read back*, because the oldest
- * records predate the field: it lived only in the filename then. Requiring it
- * here is what made those records undecodable, which failed the whole
- * project's `list` and emptied its sidebar group.
+ * enforced structurally: `write` checks Session → schema Type, the readers
+ * check schema Type → Session.
  */
 const SessionSchema = Schema.Struct({
   version: Schema.Literal(1),
-  sessionId: Schema.optionalKey(Schema.String),
+  sessionId: Schema.String,
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
   harnessSessionId: Schema.String,
@@ -26,20 +20,6 @@ const SessionSchema = Schema.Struct({
   title: Schema.optionalKey(Schema.String),
   updatedAt: Schema.optionalKey(Schema.String),
   historyAvailable: Schema.optionalKey(Schema.Boolean),
-});
-
-/**
- * Complete a stored body with the id it was addressed by.
- *
- * Every read here already knows that id — `read` and `findBySessionId` take it
- * as an argument, `list` has it in the entry id — so an old record missing the
- * field costs nothing to serve, and a record whose stored copy has drifted from
- * its own filename resolves to the filename rather than to a value nothing can
- * look it up by. The optional field never reaches a caller.
- */
-const toSession = (sessionId: string, body: typeof SessionSchema.Type): Session => ({
-  ...body,
-  sessionId,
 });
 
 /**
@@ -82,13 +62,16 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
       schema: SessionSchema,
-      // Pre-envelope records are the bare body, already in the v1 shape — true
-      // now that the schema stops requiring the one field they can lack.
+      // Pre-envelope records are the bare body, already in the v1 shape — with
+      // one exception, deliberately not accommodated. Records written before
+      // the body carried `sessionId` at all (it lived only in the filename
+      // then) fail this decode with `Missing key at ["sessionId"]`, and since
+      // `list` fails whole-project, one of them empties a project's sidebar
+      // group. `sessionId` is required on both sides on purpose: such a record
+      // is bad data, so delete the file rather than loosening the schema.
       legacy: { schema: SessionSchema, migrate: (session) => session },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;
-    // Entry ids are `<projectId>/<sessionId>`; only `list` has to take one apart.
-    const sessionIdOf = (id: string) => id.slice(id.lastIndexOf("/") + 1);
     const asReadError = (error: JsonStoreLoadError) =>
       new StoreReadError({ file: error.file, cause: error });
     const asWriteError = (error: { readonly file: string }) =>
@@ -100,9 +83,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
         // another project cannot fail this listing.
         isSafeId(projectId)
           ? sessions.list({ under: projectId }).pipe(
-              Effect.map((entries) =>
-                entries.map((entry) => toSession(sessionIdOf(entry.id), entry.data)),
-              ),
+              Effect.map((entries) => entries.map((entry) => entry.data)),
               Effect.mapError(asReadError),
             )
           : Effect.succeed([]),
@@ -114,7 +95,7 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               Effect.mapError(asReadError),
               Effect.flatMap((found) =>
                 Option.isSome(found)
-                  ? Effect.succeed(toSession(sessionId, found.value))
+                  ? Effect.succeed(found.value)
                   : Effect.fail(new SessionNotFound({ projectId, sessionId })),
               ),
             ),
@@ -128,12 +109,12 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
               const id = ids.find((candidate) => candidate.endsWith(`/${sessionId}`));
               const found =
                 id === undefined
-                  ? Option.none<typeof SessionSchema.Type>()
+                  ? Option.none<Session>()
                   : yield* sessions.get(id).pipe(Effect.mapError(asReadError));
               if (Option.isNone(found)) {
                 return yield* Effect.fail(new SessionRefNotFound({ sessionId }));
               }
-              return toSession(sessionId, found.value);
+              return found.value;
             }),
 
       write: (metadata) =>
