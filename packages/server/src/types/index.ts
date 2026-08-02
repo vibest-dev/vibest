@@ -18,9 +18,10 @@ export type { Project } from "@vibest/contract";
 
 /**
  * Server-owned recovery record for one session, persisted at
- * `storage/sessions/<projectId>/<sessionId>.json`. The filename mirrors
- * `sessionId`, which is also stored in the body so a loaded record is
- * self-contained; `harnessSessionId` is the agent-native id (claude session
+ * `storage/sessions/<projectId>/<sessionId>.json`. The filename is the only
+ * place `sessionId` is stored — the repository rejoins it on read, so this
+ * record is always complete in memory and never carries a second copy of its
+ * own address on disk; `harnessSessionId` is the agent-native id (claude session
  * uuid / codex thread id) the server translates to when calling the harness.
  *
  * Display data is self-owned — `list` reads this record and never queries the
