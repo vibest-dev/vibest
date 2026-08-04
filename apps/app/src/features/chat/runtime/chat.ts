@@ -274,6 +274,17 @@ export class Chat {
     options?: { readonly skipGapCheck?: boolean },
   ): void {
     if (this.#terminated) return;
+    // A snapshot below our cursor means the server's seq counter restarted —
+    // its in-memory session was rebuilt (a server restart, or a close and
+    // reopen). Nothing else can produce it: within one incarnation the counter
+    // only grows, and an attach applies its snapshot before folding any live
+    // event of that cycle. Keeping the old cursor would silently discard the
+    // whole next turn as "already applied", so rejoin as a newcomer and let
+    // the settled transcript supply what came before.
+    if (snapshot.cursor < this.#cursor) {
+      this.#cursor = 0;
+      this.#needsReconcile = true;
+    }
     // Pending requests are server state: replace wholesale, no diffing.
     this.#state.setPendingRequests([]);
     for (const request of snapshot.pendingRequests) this.#handleRequest(request);

@@ -129,6 +129,30 @@ const toolRequest: AgentRequest = {
 };
 
 describe("Chat hydration", () => {
+  // Reattaching across a server restart: the session's seq counter is rebuilt
+  // from scratch, so the next turn's events all land below the cursor we were
+  // holding. Keeping that cursor drops the entire turn and the page sits on a
+  // spinner forever — the exact failure a live restart produced.
+  it("rejoins from scratch when the server's seq counter has restarted", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+    expect(chat.store.getState().messages).toHaveLength(1);
+
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 0 });
+
+    const [start, delta, end] = textChunks("t", "after the restart");
+    for (const [seq, chunk] of [start!, delta!, end!].entries()) {
+      live(seq + 1, { type: "session.message.chunk", turnId: "turn-1", chunk });
+    }
+    await settle();
+
+    const last = chat.store.getState().messages.at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(assistantText(last)).toBe("after the restart");
+  });
+
   it("lays the history floor before folding buffered or live chunks", async () => {
     const { chat, transport, attach, live } = makeChat();
     transport.history = [userMessage("user-1", "hello")];
