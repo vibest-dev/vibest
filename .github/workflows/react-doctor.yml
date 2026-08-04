@@ -27,7 +27,12 @@ concurrency:
 
 jobs:
   react-doctor:
-    runs-on: ubuntu-latest
+    # Pull request events still appear in Actions for other authors, but the job
+    # is skipped before GitHub assigns it to the self-hosted runner.
+    if: >-
+      github.event_name == 'push' ||
+      contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
+    runs-on: [self-hosted, Linux, X64, rn, vibest]
     steps:
       # fetch-depth: 0 gives React Doctor the full git history it needs to find the merge base with the target branch. Without it a shallow checkout has no merge base, so PR runs can't compare against the base and fall back to reporting every issue in the changed files (pre-existing ones included) instead of only the ones the PR introduced.
       - uses: actions/checkout@v5

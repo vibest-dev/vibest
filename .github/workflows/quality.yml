@@ -6,10 +6,18 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    # Pull request events still appear in Actions for other authors, but the job
+    # is skipped before GitHub assigns it to the self-hosted runner.
+    if: >-
+      github.event_name == 'push' ||
+      contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
+    runs-on: [self-hosted, Linux, X64, rn, vibest]
     steps:
       - uses: actions/checkout@v4
 
