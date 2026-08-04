@@ -14,14 +14,14 @@ import {
   CommandPanel,
 } from "@vibest/ui/components/command";
 import { CornerLeftUpIcon, FolderIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-interface Entry {
-  value: string;
-  label: string;
-  kind: "up" | "dir";
-}
+import {
+  isProjectDirectoryEntryVisible,
+  type ProjectDirectoryEntry,
+  projectDirectoryEntryMatches,
+} from "./project-directory-filter";
 
 /**
  * Command-palette folder browser: drill into a folder, then import it.
@@ -37,12 +37,13 @@ export function ImportProjectDialog({
 }) {
   // null = the server's default starting point (the home directory).
   const [path, setPath] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
 
   const listing = useQuery({
     ...orpcQueryUtils.fs.browse.queryOptions({
-      input: path === null ? {} : { path },
+      input: path === null ? { includeHidden: true } : { path, includeHidden: true },
     }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
@@ -55,10 +56,14 @@ export function ImportProjectDialog({
           label: d.name,
           kind: "dir" as const,
         })),
-      ] satisfies Entry[],
+      ] satisfies ProjectDirectoryEntry[],
     }),
   });
   const current = listing.data;
+  const entries = useMemo(
+    () => current?.entries.filter((entry) => isProjectDirectoryEntryVisible(entry, search)) ?? [],
+    [current?.entries, search],
+  );
 
   const importProject = useMutation({
     mutationFn: (target: string) => orpcQueryUtils.project.create.call({ path: target }),
@@ -76,16 +81,25 @@ export function ImportProjectDialog({
     <CommandDialog open onOpenChange={(open) => !open && onClose()}>
       <CommandDialogPopup>
         {/* Remount on navigation so the search text and highlight reset. */}
-        <Command items={current?.entries ?? []} key={current?.path ?? "loading"}>
-          <CommandInput placeholder="Search folders..." />
+        <Command
+          filter={projectDirectoryEntryMatches}
+          items={entries}
+          key={current?.path ?? "loading"}
+          onValueChange={setSearch}
+          value={search}
+        >
+          <CommandInput placeholder="Search folders or enter a full path..." />
           <CommandPanel>
             <CommandEmpty>{listing.isPending ? "Loading..." : "No folders found."}</CommandEmpty>
             <CommandList>
-              {(item: Entry) => (
+              {(item: ProjectDirectoryEntry) => (
                 <CommandItem
                   className="gap-2"
                   key={item.value}
-                  onClick={() => setPath(item.value)}
+                  onClick={() => {
+                    setPath(item.value);
+                    setSearch("");
+                  }}
                   value={item.value}
                 >
                   {item.kind === "up" ? (

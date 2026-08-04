@@ -575,6 +575,7 @@ export type DirectoryEntry = typeof DirectoryEntrySchema.Type;
 
 export const BrowseInputSchema = Schema.Struct({
   path: Schema.optionalKey(Schema.String),
+  includeHidden: Schema.optionalKey(Schema.Boolean),
 });
 export const BrowseResultSchema = Schema.Struct({
   path: Schema.String,

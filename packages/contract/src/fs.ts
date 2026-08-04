@@ -36,7 +36,7 @@ export const fsContract = {
     .input(toStandardSchema(CwdPathInput))
     .errors(readErrors)
     .output(type<string>()),
-  /** Browse immediate subdirectories of `path` (default: the home directory). */
+  /** Browse immediate subdirectories of `path` (default: the home directory). Hidden directories are opt-in. */
   browse: oc
     .input(toStandardSchema(BrowseInputSchema))
     .errors({ READ_FAILED: { data: pathData } })
