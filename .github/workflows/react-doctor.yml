@@ -20,6 +20,9 @@ permissions:
   issues: write
   statuses: write
 
+env:
+  CI: "true"
+
 # Cancels any in-flight scan for the same PR (or branch, on push) the moment a new commit arrives, so reviewers only ever see the latest run.
 concurrency:
   group: react-doctor-${{ github.event.pull_request.number || github.ref }}
@@ -32,20 +35,27 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
-    runs-on: [self-hosted, Linux, X64, rn, vibest]
+    runs-on: [self-hosted, Linux, X64, ubuntu-24.04, rn, vibest]
     steps:
       # fetch-depth: 0 gives React Doctor the full git history it needs to find the merge base with the target branch. Without it a shallow checkout has no merge base, so PR runs can't compare against the base and fall back to reporting every issue in the changed files (pre-existing ones included) instead of only the ones the PR introduced.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: millionco/react-doctor@v2
+      - name: Read project Node version
+        id: project-node
+        run: echo "version=$(tr -d '[:space:]' < .node-version)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - uses: millionco/react-doctor@01820bb4fd4d0a4aebcd8df2b2a143a098649cb2 # v2.2.8
         # The repo is error-clean as of the react-doctor integration, so the gate
         # is armed: any new error-severity finding fails the check. Warnings stay
         # advisory — there are ~115 of them left to work through, and blocking on
         # them today would red-X every PR.
         # Full reference: https://www.react.doctor/ci
         with:
+          node-version: ${{ steps.project-node.outputs.version }}
           blocking: error
           scope: full
           # Everything except @vibest/ui. Its base components are vendored

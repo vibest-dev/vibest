@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CI: "true"
+
 jobs:
   check:
     name: Check
@@ -17,19 +20,49 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
-    runs-on: [self-hosted, Linux, X64, rn, vibest]
+    runs-on: [self-hosted, Linux, X64, ubuntu-24.04, rn, vibest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Enable corepack
-        run: corepack enable
-        shell: bash
-
-      - name: Setup Node & Pnpm
-        uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
-          cache: pnpm
+          architecture: x64
+          package-manager-cache: false
+
+      # Activate the exact pnpm release (including its integrity hash) declared
+      # by package.json, after setup-node has selected the project's Node 24.
+      - name: Activate project package manager
+        run: |
+          corepack enable
+          corepack install
+        shell: bash
+
+      - name: Verify CI environment
+        run: |
+          source /etc/os-release
+          test "$ID" = "ubuntu"
+          test "$VERSION_ID" = "24.04"
+          test "$(uname -m)" = "x86_64"
+
+          expected_node="$(tr -d '[:space:]' < .node-version)"
+          actual_node="$(node --version)"
+          actual_node="${actual_node#v}"
+          case "$actual_node" in
+            "$expected_node" | "$expected_node".*) ;;
+            *) echo "Expected Node $expected_node.x, got $actual_node" >&2; exit 1 ;;
+          esac
+
+          expected_pnpm="$(node -p "require('./package.json').packageManager.match(/^pnpm@([^+]+)/)[1]")"
+          actual_pnpm="$(pnpm --version)"
+          test "$actual_pnpm" = "$expected_pnpm"
+
+          printf 'Ubuntu %s, Node %s, pnpm %s, %s\n' \
+            "$VERSION_ID" "$actual_node" "$actual_pnpm" "$(uname -m)"
+        shell: bash
 
       - run: pnpm install --frozen-lockfile
 
