@@ -11,10 +11,12 @@ import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
 import {
   AgentOpenError,
+  type AgentOperationError,
   AgentUnavailable,
   type CreateSessionError,
   HarnessSessionNotFound,
   type ResumeSessionError,
+  SessionClosed,
   SessionNotResumable,
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
@@ -25,7 +27,7 @@ import {
   makeHarnessAgentSession,
 } from "./session";
 import { initialSessionState, toSnapshot, toStatus } from "./session-fold";
-import type { ResumeManagedSessionInput } from "./session-io";
+import type { ResumeManagedSessionInput, SessionConfig } from "./session-io";
 
 /**
  * The sole owner of live session state: one {@link HarnessAgentSession} per
@@ -74,6 +76,16 @@ export type HarnessAgentSessionManagerShape = {
   /** The same lookup as {@link get}, for callers that have something else to do
    * when nothing is running rather than an error to raise. */
   readonly peek: (ref: SessionRef) => Effect.Effect<HarnessAgentRuntime | undefined>;
+  /**
+   * Record what a session's config should be, and push it to its runtime if one
+   * is live. A write, so it materializes the session: choosing a model for a
+   * session that isn't running is a legitimate thing to do, and every runtime
+   * the session acquires afterwards is seeded with the choice.
+   */
+  readonly setConfig: (
+    ref: SessionRef,
+    patch: SessionConfig,
+  ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
   /**
    * Close and forget a session — runtime and session state alike; idempotent.
    * This is the only path that discards a crashed session (a crash alone
@@ -293,17 +305,37 @@ export const makeHarnessAgentSessionManager = (
 
     return {
       open: (harnessAgentId, input, ref) =>
-        acquireVia(ref, acquireOpen(harnessAgentId, input)).pipe(
-          // `AcquireRuntime` carries the resume union; the two members only a
-          // resume can raise are unreachable here, so a sighting is an adapter
-          // misbehaving and folds into AgentOpenError.
-          Effect.mapError(
-            (error): CreateSessionError =>
-              error instanceof SessionNotResumable || error instanceof HarnessSessionNotFound
-                ? new AgentOpenError({ harnessAgentId, cause: error })
-                : error,
+        // The create-time choice becomes the session's config before anything
+        // is opened, so seeding on acquisition is the only path that applies
+        // it — including on every runtime the session takes after this one.
+        sessionFor(ref)
+          .pipe(
+            Effect.flatMap((session) =>
+              session.setConfig({
+                ...(input.model !== undefined ? { model: input.model } : {}),
+                ...(input.reasoningEffort !== undefined
+                  ? { reasoningEffort: input.reasoningEffort }
+                  : {}),
+                ...(input.permissionMode !== undefined
+                  ? { permissionMode: input.permissionMode }
+                  : {}),
+              }),
+            ),
+            // Nothing is running yet, so recording the choice cannot fail.
+            Effect.orDie,
+            Effect.andThen(acquireVia(ref, acquireOpen(harnessAgentId, input))),
+          )
+          .pipe(
+            // `AcquireRuntime` carries the resume union; the two members only a
+            // resume can raise are unreachable here, so a sighting is an adapter
+            // misbehaving and folds into AgentOpenError.
+            Effect.mapError(
+              (error): CreateSessionError =>
+                error instanceof SessionNotResumable || error instanceof HarnessSessionNotFound
+                  ? new AgentOpenError({ harnessAgentId, cause: error })
+                  : error,
+            ),
           ),
-        ),
       ensureRuntime: (input, ref) => acquireVia(ref, acquireResume(input)),
       get: (ref) =>
         peek(ref).pipe(
@@ -314,6 +346,8 @@ export const makeHarnessAgentSessionManager = (
           ),
         ),
       peek,
+      setConfig: (ref, patch) =>
+        sessionFor(ref).pipe(Effect.flatMap((session) => session.setConfig(patch))),
       close,
       status: (ref) => withSession(ref, (session) => session.status, toStatus(initialSessionState)),
       snapshot: (ref) =>

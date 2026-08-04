@@ -198,18 +198,17 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     }),
   );
 
-  it.effect("carries the model chosen at create time on the very first turn", () =>
+  it.effect("carries a model chosen before the first prompt onto that very turn", () =>
     Effect.gen(function* () {
       // Codex fixes a model at thread/start and has no set-model call, so a
-      // create-time choice can only reach it as a turn override. If this
-      // regresses, picking a model silently does nothing.
+      // model chosen before the first prompt — which is when a session seeds a
+      // runtime it has just acquired — can only reach it as a turn override.
+      // If this regresses, picking a model silently does nothing.
       const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-"));
       const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const session = yield* makeCodexAdapter(agent).open({
-        cwd: workspace,
-        model: "gpt-5.6-luna",
-      });
+      const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
+      yield* session.setModel("gpt-5.6-luna");
       yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
 
       assert.equal(fs.readFileSync(path.join(workspace, "turn-model"), "utf8"), "gpt-5.6-luna");

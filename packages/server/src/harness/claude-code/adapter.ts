@@ -6,7 +6,6 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import {
-  applyInitialSessionConfig,
   type HarnessAgentAdapter,
   type HarnessAgentRuntime,
   type SessionCapabilities,
@@ -445,7 +444,6 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
       Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
-      Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(

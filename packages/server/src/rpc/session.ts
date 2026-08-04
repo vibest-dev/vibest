@@ -255,10 +255,6 @@ export const sessionRouter = orpc.router({
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
         SessionRefMismatch: (e) =>
           Effect.fail(
             errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
@@ -275,10 +271,6 @@ export const sessionRouter = orpc.router({
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
         SessionRefMismatch: (e) =>
           Effect.fail(
             errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
@@ -295,10 +287,6 @@ export const sessionRouter = orpc.router({
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
-        HarnessSessionNotFound: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
         SessionRefMismatch: (e) =>
           Effect.fail(
             errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),

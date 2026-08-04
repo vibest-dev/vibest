@@ -166,31 +166,24 @@ export type HarnessAgentSessionServiceShape = {
     | SessionClosed
     | AgentOperationError
   >;
-  // Session-scoped config setters. `model` is the provider-local model id —
-  // the RPC boundary unpacked and validated the providerId/modelId pair already.
+  // Session-scoped config setters. They record the choice on the session and
+  // push it to the runtime only if one is live: picking a model for a session
+  // that isn't running succeeds, and the choice is seeded onto whatever runtime
+  // the session acquires next. `model` is the provider-local model id — the RPC
+  // boundary unpacked and validated the providerId/modelId pair already.
   readonly setModel: (
     ref: SessionRef,
     model: string,
   ) => Effect.Effect<
     void,
-    | SessionNotFound
-    | SessionRefMismatch
-    | StoreReadError
-    | HarnessSessionNotFound
-    | SessionClosed
-    | AgentOperationError
+    SessionNotFound | SessionRefMismatch | StoreReadError | SessionClosed | AgentOperationError
   >;
   readonly setReasoningEffort: (
     ref: SessionRef,
     reasoningEffort: ReasoningEffort,
   ) => Effect.Effect<
     void,
-    | SessionNotFound
-    | SessionRefMismatch
-    | StoreReadError
-    | HarnessSessionNotFound
-    | SessionClosed
-    | AgentOperationError
+    SessionNotFound | SessionRefMismatch | StoreReadError | SessionClosed | AgentOperationError
   >;
   readonly setPermissionMode: (
     ref: SessionRef,
@@ -200,7 +193,6 @@ export type HarnessAgentSessionServiceShape = {
     | SessionNotFound
     | SessionRefMismatch
     | StoreReadError
-    | HarnessSessionNotFound
     | PermissionModeUnsupported
     | SessionClosed
     | AgentOperationError
@@ -571,29 +563,27 @@ export const makeHarnessAgentSessionService = (deps: {
     interrupt: (ref) => withSession(ref).pipe(Effect.flatMap((session) => session.interrupt)),
 
     setModel: (ref, model) =>
-      withSession(ref).pipe(Effect.flatMap((session) => session.setModel(model))),
+      readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { model }))),
 
     setReasoningEffort: (ref, reasoningEffort) =>
-      withSession(ref).pipe(
-        Effect.flatMap((session) => session.setReasoningEffort(reasoningEffort)),
-      ),
+      readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { reasoningEffort }))),
 
     setPermissionMode: (ref, permissionMode) =>
-      withSession(ref).pipe(
-        Effect.flatMap((session) =>
-          // The session is open, so its adapter is registered by construction.
-          checkPermissionMode(session.harnessAgentId, permissionMode).pipe(
+      readChecked(ref).pipe(
+        Effect.andThen(
+          // The ref checked out, so its harness is one of ours by construction.
+          checkPermissionMode(ref.harnessAgentId, permissionMode).pipe(
             Effect.catchTag("HarnessAgentNotFound", (cause) =>
               Effect.die(
                 new Error(
-                  `invariant: open session '${session.sessionId}' has an unregistered adapter '${session.harnessAgentId}'`,
+                  `invariant: session '${ref.sessionId}' names an unregistered adapter '${ref.harnessAgentId}'`,
                   { cause },
                 ),
               ),
             ),
-            Effect.andThen(session.setPermissionMode(permissionMode)),
           ),
         ),
+        Effect.andThen(manager.setConfig(ref, { permissionMode })),
       ),
 
     respondToAgentRequest: (ref, requestId, response) =>

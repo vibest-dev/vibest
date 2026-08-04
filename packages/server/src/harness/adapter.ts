@@ -142,54 +142,6 @@ export interface HarnessAgentRuntime {
   readonly close: Effect.Effect<void>;
 }
 
-// Seed a runtime with the session's config, using the same setters the UI
-// drives mid-session. Runs before the first prompt on that runtime, so the
-// config is live by its opening turn — and runs again on every runtime the
-// session acquires, so a config choice outlives a restart or a crash.
-//
-// The two channels fail differently on purpose (harness-concept-ownership §3.3):
-// `permissionMode` was validated at the RPC boundary, so failing to apply it is
-// a real fault and the acquisition fails with it. `model`/`reasoningEffort` come
-// from probed lists that go stale (an old URL, a re-mapped alias), so they are
-// best-effort: a miss is logged and the session runs on the harness default
-// rather than turning "the list was a bit old" into "the session cannot start".
-export const applyInitialSessionConfig = (
-  runtime: HarnessAgentRuntime,
-  config: SessionConfig,
-): Effect.Effect<void, AgentOpenError> =>
-  Effect.gen(function* () {
-    if (config.permissionMode) {
-      yield* runtime
-        .setPermissionMode(config.permissionMode)
-        .pipe(
-          Effect.mapError(
-            (cause) => new AgentOpenError({ harnessAgentId: runtime.harnessAgentId, cause }),
-          ),
-        );
-    }
-    if (config.model) {
-      yield* runtime
-        .setModel(config.model)
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("session model apply failed; using the harness default", cause),
-          ),
-        );
-    }
-    if (config.reasoningEffort) {
-      yield* runtime
-        .setReasoningEffort(config.reasoningEffort)
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning(
-              "session reasoningEffort apply failed; using the model default",
-              cause,
-            ),
-          ),
-        );
-    }
-  });
-
 export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly descriptor: AgentDescriptor;

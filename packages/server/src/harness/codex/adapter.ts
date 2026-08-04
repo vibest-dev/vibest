@@ -6,7 +6,6 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import {
-  applyInitialSessionConfig,
   type HarnessAgentAdapter,
   type HarnessAgentRuntime,
   type SessionInfoResult,
@@ -123,8 +122,9 @@ const makeRuntime = (
     const permissionMode = yield* Ref.make<CodexPermission | undefined>(undefined);
     // Same story for the model: `thread/start` fixes one, but `turn/start`
     // overrides it for that turn and every turn after. Holding it here is what
-    // lets create-time selection work at all — applyInitialSessionConfig calls
-    // setModel before the first prompt, and that first turn carries it.
+    // lets create-time selection work at all — the session seeds a runtime it
+    // has just acquired, so setModel lands before the first prompt and that
+    // first turn carries it.
     const model = yield* Ref.make<string | undefined>(undefined);
     // ReasoningEffort rides `turn/start` the same way. Cleared on setModel: an reasoningEffort
     // picked for one model must not survive onto another — no override means
@@ -360,7 +360,6 @@ export const makeCodexAdapter = (
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),
       Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
-      Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(

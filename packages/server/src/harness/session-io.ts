@@ -16,10 +16,11 @@ import { Schema } from "effect";
 export const CreateSessionInputSchema = Schema.Struct({
   cwd: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
-  // Session config chosen at create time, applied via the session's own
-  // setters before the first prompt (applyInitialSessionConfig). `model` is
-  // the provider-local model id — the server unpacked and validated the
-  // providerId/modelId pair before the harness layer ever sees it.
+  // Session config chosen at create time. It becomes the session's config and
+  // is seeded onto every runtime the session acquires, this one included, so it
+  // is live before the first prompt. `model` is the provider-local model id —
+  // the server unpacked and validated the providerId/modelId pair before the
+  // harness layer ever sees it.
   model: Schema.optionalKey(Schema.String),
   reasoningEffort: Schema.optionalKey(ReasoningEffortSchema),
   // Vibest's own permission vocabulary; membership in this harness's declared
@@ -31,7 +32,7 @@ export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 /**
  * The session-scoped config knobs on their own. `CreateSessionInput` is
  * structurally one of these plus a `cwd`; naming the shape separately is what
- * lets {@link applyInitialSessionConfig} seed a runtime from either the
+ * lets a session seed a runtime from either the
  * create-time choice or a session's later, accumulated one.
  */
 export const SessionConfigSchema = Schema.Struct({

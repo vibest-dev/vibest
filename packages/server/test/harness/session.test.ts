@@ -44,7 +44,7 @@ type EventQueue = Effect.Success<typeof makeQueue>;
  * session under test never calls anything else on it. */
 const runtimeFrom = (
   queue: EventQueue,
-  options: { readonly closes?: Ref.Ref<number> } = {},
+  options: { readonly closes?: Ref.Ref<number>; readonly models?: Ref.Ref<Array<string>> } = {},
 ): HarnessAgentRuntime => ({
   sessionId: nativeId,
   harnessAgentId: "claude-code",
@@ -52,7 +52,8 @@ const runtimeFrom = (
     Stream.map((body) => ({ harnessAgentId: "claude-code" as const, sessionId: nativeId, body })),
   ),
   prompt: () => Effect.succeed({ turnId: "turn-1" }),
-  setModel: () => Effect.void,
+  setModel: (model) =>
+    options.models ? Ref.update(options.models, (seen) => [...seen, model]) : Effect.void,
   setReasoningEffort: () => Effect.void,
   setPermissionMode: () => Effect.void,
   interrupt: Effect.void,
@@ -110,6 +111,37 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
       assert.equal(snapshot.activeTurn, null);
       assert.equal(snapshot.activePrompt, null);
       assert.deepEqual(snapshot.pendingRequests, []);
+    }),
+  ),
+);
+
+it.effect("seeds every runtime it acquires with the config it was told to keep", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const models = yield* Ref.make<Array<string>>([]);
+      // Nothing is running, so this only records — and it must still succeed:
+      // picking a model for a session you have not written to yet is ordinary.
+      yield* session.setConfig({ model: "opus" });
+      assert.deepEqual(yield* Ref.get(models), []);
+
+      const first = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(first, { models })));
+      assert.deepEqual(yield* Ref.get(models), ["opus"]);
+
+      // A live runtime takes the change immediately …
+      yield* session.setConfig({ model: "sonnet" });
+      assert.deepEqual(yield* Ref.get(models), ["opus", "sonnet"]);
+
+      // … and the accumulated choice — not the create-time one — is what the
+      // replacement is seeded with, so a crash does not quietly revert the
+      // session to the harness default.
+      yield* crashQueue(first);
+      yield* awaitPhase(session, "crashed");
+      const replacement = yield* Ref.make<Array<string>>([]);
+      const second = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(second, { models: replacement })));
+      assert.deepEqual(yield* Ref.get(replacement), ["sonnet"]);
     }),
   ),
 );

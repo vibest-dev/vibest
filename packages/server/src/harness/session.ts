@@ -9,7 +9,12 @@ import { Deferred, Effect, Exit, Fiber, Ref, Scope, Semaphore, Stream } from "ef
 
 import type { EventBusShape } from "../events/event-bus";
 import type { HarnessAgentRuntime } from "./adapter";
-import type { ResumeSessionError } from "./errors";
+import {
+  AgentOpenError,
+  type AgentOperationError,
+  type ResumeSessionError,
+  type SessionClosed,
+} from "./errors";
 import {
   foldSessionEvent,
   initialSessionState,
@@ -18,6 +23,7 @@ import {
   toStatus,
   toWireBody,
 } from "./session-fold";
+import type { SessionConfig } from "./session-io";
 
 /**
  * One session as this server sees it — the owner of everything observable
@@ -83,6 +89,70 @@ type AcquireDecision =
   | { readonly _tag: "Await"; readonly ticket: Ticket }
   | { readonly _tag: "Sealed" };
 
+// Seed a freshly acquired runtime with the session's config, using the same
+// setters the UI drives mid-session. Runs before the first prompt on that
+// runtime, so the config is live by its opening turn — and runs again on every
+// runtime the session acquires, so a config choice outlives a restart, a crash,
+// or a server that was not running when the client came back.
+//
+// The two channels fail differently on purpose (harness-concept-ownership §3.3):
+// `permissionMode` was validated at the RPC boundary, so failing to apply it is
+// a real fault and the acquisition fails with it. `model`/`reasoningEffort` come
+// from probed lists that go stale (an old URL, a re-mapped alias), so they are
+// best-effort: a miss is logged and the session runs on the harness default
+// rather than turning "the list was a bit old" into "the session cannot start".
+const seedConfig = (
+  runtime: HarnessAgentRuntime,
+  config: SessionConfig,
+): Effect.Effect<void, AgentOpenError> =>
+  Effect.gen(function* () {
+    if (config.permissionMode) {
+      yield* runtime
+        .setPermissionMode(config.permissionMode)
+        .pipe(
+          Effect.mapError(
+            (cause) => new AgentOpenError({ harnessAgentId: runtime.harnessAgentId, cause }),
+          ),
+        );
+    }
+    if (config.model) {
+      yield* runtime
+        .setModel(config.model)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("session model apply failed; using the harness default", cause),
+          ),
+        );
+    }
+    if (config.reasoningEffort) {
+      yield* runtime
+        .setReasoningEffort(config.reasoningEffort)
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning(
+              "session reasoningEffort apply failed; using the model default",
+              cause,
+            ),
+          ),
+        );
+    }
+  });
+
+// The same knobs, pushed to a runtime because the user just turned one. Every
+// failure surfaces: they are watching the control they touched, so "the model
+// list was stale" is news here, not something to log and swallow. Model before
+// reasoning effort — codex clears the effort when the model changes, so the
+// other order would drop it.
+const pushConfig = (
+  runtime: HarnessAgentRuntime,
+  patch: SessionConfig,
+): Effect.Effect<void, SessionClosed | AgentOperationError> =>
+  Effect.gen(function* () {
+    if (patch.permissionMode) yield* runtime.setPermissionMode(patch.permissionMode);
+    if (patch.model) yield* runtime.setModel(patch.model);
+    if (patch.reasoningEffort) yield* runtime.setReasoningEffort(patch.reasoningEffort);
+  });
+
 export type HarnessAgentSessionShape = {
   readonly ref: SessionRef;
   /**
@@ -98,6 +168,15 @@ export type HarnessAgentSessionShape = {
    * Independent of any runtime — the seq counter is the session's own.
    */
   readonly emit: (body: SessionScopedEventBody) => Effect.Effect<void>;
+  /**
+   * Record what this session's config should be, and push it to the runtime if
+   * one is live. Recording is the point: a session with nothing running still
+   * accepts a model change, and every runtime it acquires afterwards is seeded
+   * with it — which is also how a create-time choice reaches the first turn.
+   */
+  readonly setConfig: (
+    patch: SessionConfig,
+  ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
   /** The runtime this session holds, or `undefined`. Never acquires one. */
   readonly peekRuntime: Effect.Effect<HarnessAgentRuntime | undefined>;
   /**
@@ -130,6 +209,7 @@ export const makeHarnessAgentSession = (
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const state = yield* Ref.make(initialSessionState);
+    const config = yield* Ref.make<SessionConfig>({});
     const lifecycle = yield* Ref.make<Lifecycle>({
       held: undefined,
       acquiring: undefined,
@@ -222,8 +302,13 @@ export const makeHarnessAgentSession = (
     const runAcquire = (acquire: AcquireRuntime, ticket: Ticket): Effect.Effect<void> =>
       Effect.gen(function* () {
         const scope = yield* Scope.fork(ownerScope, "sequential");
+        const desired = yield* Ref.get(config);
         const outcome = yield* acquire.pipe(
           Effect.provideService(Scope.Scope, scope),
+          // Seeded as part of the acquisition, so a runtime whose config can't
+          // be applied never becomes this session's — closing the scope takes
+          // it back down the same way a failed open does.
+          Effect.tap((runtime) => seedConfig(runtime, desired)),
           Effect.onError(() => Scope.close(scope, Exit.void)),
           Effect.exit,
         );
@@ -318,11 +403,20 @@ export const makeHarnessAgentSession = (
       Effect.uninterruptible,
     );
 
+    const setConfig: HarnessAgentSessionShape["setConfig"] = (patch) =>
+      Ref.update(config, (current) => ({ ...current, ...patch })).pipe(
+        Effect.andThen(Ref.get(lifecycle)),
+        Effect.flatMap((current) =>
+          current.held ? pushConfig(current.held.runtime, patch) : Effect.void,
+        ),
+      );
+
     return {
       ref,
       snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
       status: Ref.get(state).pipe(Effect.map(toStatus)),
       emit: (body) => applyWith(() => body),
+      setConfig,
       peekRuntime: Ref.get(lifecycle).pipe(Effect.map((current) => current.held?.runtime)),
       ensureRuntime,
       releaseRuntime,
