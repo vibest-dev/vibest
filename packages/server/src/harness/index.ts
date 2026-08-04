@@ -17,5 +17,5 @@ export * from "./session-io";
 export * from "./session-manager";
 // The runtime and repository modules are private collaborators (of the manager
 // and the service respectively); only the runtime's error type is public.
-export { SessionNotActive } from "./session-runtime";
+export { SessionNotActive } from "./session";
 export * from "./session-service";

@@ -38,13 +38,13 @@ import type {
 import { CapabilityUnsupported, PermissionModeUnsupported } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
+import type { SessionNotActive } from "./session";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
 import { HarnessAgentSessionManager } from "./session-manager";
 import {
   type HarnessAgentSessionRepositoryShape,
   makeHarnessAgentSessionRepository,
 } from "./session-repository";
-import type { SessionNotActive } from "./session-runtime";
 
 /**
  * The outward session service — everything the app's session control-plane

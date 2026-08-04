@@ -19,27 +19,26 @@ import {
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
-import type { ResumeManagedSessionInput } from "./session-io";
 import {
-  type HarnessAgentSessionRuntimeShape,
-  makeHarnessAgentSessionRuntime,
-  type SessionNotActive,
-} from "./session-runtime";
+  type HarnessAgentSessionShape,
+  makeHarnessAgentSession,
+  SessionNotActive,
+} from "./session";
+import type { ResumeManagedSessionInput } from "./session-io";
 
 /**
- * The sole owner of live session state: which sessions are open, which are
- * mid-open, which are closing (the instance table), and what each one is
- * currently doing (the projection, delegated to the private
- * {@link makeHarnessAgentSessionRuntime} module). It is the single caller of
- * `adapter.open` / `adapter.resume`, so per-sessionId single-flighting lives
- * here and nowhere else — adapters may assume they are never asked to open the
- * same session twice concurrently — and a built instance always has a draining
- * projection, by construction rather than by caller discipline.
+ * The sole owner of live session state: the {@link HarnessAgentSession} per
+ * ref, and the native runtime table behind it — which runtimes are open, which
+ * are mid-open, which are closing. It is the single caller of `adapter.open` /
+ * `adapter.resume`, so per-sessionId single-flighting lives here and nowhere
+ * else — adapters may assume they are never asked to open the same session
+ * twice concurrently — and a built runtime is always draining into its
+ * session, by construction rather than by caller discipline.
  *
- * Vocabulary: lifecycle addressing (`get`/`close`) speaks the agent-native
+ * Vocabulary: runtime addressing (`get`/`close`) speaks the agent-native
  * session id; the {@link SessionRef} received by `open`/`ensure` is carried
- * opaquely — stamped onto projected wire events and used as the projection
- * key — never interpreted. Adapters never see it.
+ * opaquely — stamped onto wire events and used as the session key — never
+ * interpreted. Adapters never see it.
  */
 
 type ManagedRuntime = {
@@ -137,17 +136,53 @@ export const makeHarnessAgentSessionManager = (
     // `provide(Effect.context())` — the latter captures the whole layer-build
     // context, `ownerScope` included, and wins the merge over a caller's.
     const fileSystem = yield* FileSystem.FileSystem;
-    const live: HarnessAgentSessionRuntimeShape = yield* makeHarnessAgentSessionRuntime(bus);
     const state = yield* Ref.make<ManagerState>({
       active: new Map(),
       inFlight: new Map(),
       closing: new Map(),
     });
-    // native sessionId → the ref its projection lives under. Deliberately
-    // outlives a crashed instance (the projection does too); only an explicit
+    // Our sessionId → the session that owns its observable state.
+    const sessions = yield* Ref.make<ReadonlyMap<string, HarnessAgentSessionShape>>(new Map());
+    // native sessionId → the ref its session lives under. Deliberately
+    // outlives a crashed runtime (the session does too); only an explicit
     // `close` clears it, so a late close can still find and stop the crashed
-    // projection.
+    // session.
     const refs = yield* Ref.make<ReadonlyMap<string, SessionRef>>(new Map());
+
+    // Sessions are two Refs and a pair of semaphores, so losing the race and
+    // discarding one costs nothing — cheaper than serializing every lookup.
+    const sessionFor = (ref: SessionRef): Effect.Effect<HarnessAgentSessionShape> =>
+      Ref.get(sessions).pipe(
+        Effect.flatMap((current) => {
+          const existing = current.get(ref.sessionId);
+          if (existing) return Effect.succeed(existing);
+          return makeHarnessAgentSession(ref, bus).pipe(
+            Effect.provideService(Scope.Scope, ownerScope),
+            Effect.flatMap((candidate) =>
+              Ref.modify(sessions, (latest) => {
+                const raced = latest.get(ref.sessionId);
+                if (raced) return [raced, latest] as const;
+                return [candidate, new Map(latest).set(ref.sessionId, candidate)] as const;
+              }),
+            ),
+          );
+        }),
+      );
+
+    const notActive = <A>(ref: SessionRef): Effect.Effect<A, SessionNotActive> =>
+      Effect.fail(new SessionNotActive({ sessionId: ref.sessionId }));
+
+    const withSession = <A, E>(
+      ref: SessionRef,
+      use: (session: HarnessAgentSessionShape) => Effect.Effect<A, E>,
+      absent: Effect.Effect<A, E | SessionNotActive>,
+    ): Effect.Effect<A, E | SessionNotActive> =>
+      Ref.get(sessions).pipe(
+        Effect.flatMap((current) => {
+          const session = current.get(ref.sessionId);
+          return session ? use(session) : absent;
+        }),
+      );
 
     const register = (candidate: ManagedRuntime) =>
       Ref.modify(state, (current) => {
@@ -263,11 +298,15 @@ export const makeHarnessAgentSessionManager = (
         }),
       );
 
-    // A crash releases the instance but keeps projection + index (see `close`).
+    // A crash releases the runtime but keeps the session + index (see `close`).
     const startDrain = (managed: ManagedRuntime, ref: SessionRef) =>
-      live.start(ref, managed.runtime.events.pipe(Stream.map((draft) => draft.body)), {
-        onCrash: closeInstance(managed.runtime.sessionId),
-      });
+      sessionFor(ref).pipe(
+        Effect.flatMap((session) =>
+          session.attach(managed.runtime.events.pipe(Stream.map((draft) => draft.body)), {
+            onCrash: closeInstance(managed.runtime.sessionId),
+          }),
+        ),
+      );
 
     const build = (
       mode:
@@ -305,11 +344,20 @@ export const makeHarnessAgentSessionManager = (
         }).pipe(Effect.onError(() => Scope.close(sessionScope, Exit.void)));
       });
 
+    const dropSession = (ref: SessionRef): Effect.Effect<void> =>
+      Ref.modify(sessions, (current) => {
+        const session = current.get(ref.sessionId);
+        if (!session) return [undefined, current] as const;
+        const next = new Map(current);
+        next.delete(ref.sessionId);
+        return [session, next] as const;
+      }).pipe(Effect.flatMap((session) => session?.detach ?? Effect.void));
+
     const close = (sessionId: string): Effect.Effect<void> =>
       Ref.get(refs).pipe(
         Effect.flatMap((current) => {
           const ref = current.get(sessionId);
-          return ref === undefined ? Effect.void : live.stop(ref);
+          return ref === undefined ? Effect.void : dropSession(ref);
         }),
         Effect.andThen(closeInstance(sessionId)),
         Effect.andThen(
@@ -403,9 +451,9 @@ export const makeHarnessAgentSessionManager = (
       ensure,
       get: (sessionId) => getManaged(sessionId).pipe(Effect.map((managed) => managed.runtime)),
       close,
-      status: (ref) => live.status(ref),
-      emit: (ref, body) => live.emit(ref, body),
-      snapshot: (ref) => live.snapshot(ref),
+      status: (ref) => withSession(ref, (session) => session.status, notActive(ref)),
+      emit: (ref, body) => withSession(ref, (session) => session.emit(body), notActive(ref)),
+      snapshot: (ref) => withSession(ref, (session) => session.snapshot, notActive(ref)),
     } satisfies HarnessAgentSessionManagerShape;
   });
 

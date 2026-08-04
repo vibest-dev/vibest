@@ -8,25 +8,7 @@ import type * as Cause from "effect/Cause";
 import { EventBus, EventBusLayer } from "../../src/events";
 import { AgentOperationError, type SessionEnvelopeBody } from "../../src/harness";
 import { streamFromQueueOne } from "../../src/harness/queue-stream";
-import {
-  type HarnessAgentSessionRuntimeShape,
-  makeHarnessAgentSessionRuntime,
-} from "../../src/harness/session-runtime";
-
-// The runtime is a private collaborator of the session manager (no Context tag
-// in production); the test wraps the factory in a local tag for wiring.
-class SessionRuntimeService extends Context.Service<
-  SessionRuntimeService,
-  HarnessAgentSessionRuntimeShape
->()("test/SessionRuntimeService") {}
-
-const SessionRuntimeServiceLayer = Layer.effect(
-  SessionRuntimeService,
-  Effect.gen(function* () {
-    const bus = yield* EventBus;
-    return yield* makeHarnessAgentSessionRuntime(bus);
-  }),
-);
+import { type HarnessAgentSessionShape, makeHarnessAgentSession } from "../../src/harness/session";
 
 const ref: SessionRef = {
   projectId: "project-1",
@@ -34,20 +16,34 @@ const ref: SessionRef = {
   sessionId: "session-1",
 };
 
-// The native id the harness stamps on its own events; the runtime must strip
+// A session is a private collaborator of the manager (no Context tag in
+// production); the test wraps the factory in a local tag for wiring.
+class SessionService extends Context.Service<SessionService, HarnessAgentSessionShape>()(
+  "test/SessionService",
+) {}
+
+const SessionServiceLayer = Layer.effect(
+  SessionService,
+  Effect.gen(function* () {
+    const bus = yield* EventBus;
+    return yield* makeHarnessAgentSession(ref, bus);
+  }),
+);
+
+// The native id the harness stamps on its own events; the session must strip
 // it and key everything by the server-side ref instead.
 const nativeId = "native-1";
 
 const makeQueue = Queue.bounded<SessionEnvelopeBody, Cause.Done | AgentOperationError>(32);
 
-const layer = SessionRuntimeServiceLayer.pipe(Layer.provide(EventBusLayer));
+const layer = SessionServiceLayer.pipe(Layer.provide(EventBusLayer));
 
-const run = <A, E>(program: Effect.Effect<A, E, SessionRuntimeService>) =>
+const run = <A, E>(program: Effect.Effect<A, E, SessionService>) =>
   program.pipe(Effect.provide(layer));
 
-const awaitCursor = (manager: SessionRuntimeService["Service"], at: number) =>
+const awaitCursor = (session: HarnessAgentSessionShape, at: number) =>
   Effect.eventually(
-    manager.snapshot(ref).pipe(
+    session.snapshot.pipe(
       Effect.filterOrFail(
         (snapshot) => snapshot.cursor >= at,
         () => new Error(`cursor did not reach ${at}`),
@@ -55,9 +51,9 @@ const awaitCursor = (manager: SessionRuntimeService["Service"], at: number) =>
     ),
   );
 
-const awaitPhase = (manager: SessionRuntimeService["Service"], phase: string) =>
+const awaitPhase = (session: HarnessAgentSessionShape, phase: string) =>
   Effect.eventually(
-    manager.status(ref).pipe(
+    session.status.pipe(
       Effect.filterOrFail(
         (status) => status.phase === phase,
         () => new Error(`phase did not reach ${phase}`),
@@ -65,16 +61,16 @@ const awaitPhase = (manager: SessionRuntimeService["Service"], phase: string) =>
     ),
   );
 
-it.effect("start is idempotent for a live runtime and stamps contiguous seqs", () =>
+it.effect("attach is idempotent for a live drain and stamps contiguous seqs", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const first = yield* makeQueue;
       const second = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(first));
-      // A live runtime makes the second start a no-op — the second stream must
+      yield* session.attach(streamFromQueueOne(first));
+      // A live drain makes the second attach a no-op — the second stream must
       // never be consumed, or the single-consumer native stream would split.
-      yield* manager.start(ref, streamFromQueueOne(second));
+      yield* session.attach(streamFromQueueOne(second));
 
       yield* Queue.offer(first, {
         type: "session.turn.started",
@@ -88,7 +84,7 @@ it.effect("start is idempotent for a live runtime and stamps contiguous seqs", (
         turnId: "turn-1",
         outcome: "completed",
       });
-      const snapshot = yield* awaitCursor(manager, 3);
+      const snapshot = yield* awaitCursor(session, 3);
 
       assert.equal(snapshot.status.phase, "idle");
       // The finished turn's buffer is retained, marked complete, for recovery.
@@ -110,9 +106,9 @@ it.effect("start is idempotent for a live runtime and stamps contiguous seqs", (
 it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(queue));
+      yield* session.attach(streamFromQueueOne(queue));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -132,7 +128,7 @@ it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
         sessionId: nativeId,
         turnId: "turn-2",
       });
-      const snapshot = yield* awaitCursor(manager, 3);
+      const snapshot = yield* awaitCursor(session, 3);
       // seq 3 (not 4) proves the straggler consumed no seq; the fresh turn's
       // empty buffer proves it was not appended anywhere.
       assert.equal(snapshot.cursor, 3);
@@ -142,13 +138,13 @@ it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
   ),
 );
 
-it.effect("a crashed stream keeps the projection queryable and runs onCrash once", () =>
+it.effect("a crashed stream keeps the session queryable and runs onCrash once", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const queue = yield* makeQueue;
       const closed = yield* Ref.make(0);
-      yield* manager.start(ref, streamFromQueueOne(queue), {
+      yield* session.attach(streamFromQueueOne(queue), {
         onCrash: Ref.update(closed, (count) => count + 1),
       });
       yield* Queue.offer(queue, {
@@ -156,13 +152,13 @@ it.effect("a crashed stream keeps the projection queryable and runs onCrash once
         sessionId: nativeId,
         turnId: "turn-1",
       });
-      yield* awaitPhase(manager, "running");
+      yield* awaitPhase(session, "running");
 
       yield* Queue.fail(
         queue,
         new AgentOperationError({ sessionId: nativeId, operation: "events", cause: "boom" }),
       );
-      yield* awaitPhase(manager, "crashed");
+      yield* awaitPhase(session, "crashed");
       yield* Effect.eventually(
         Ref.get(closed).pipe(
           Effect.filterOrFail(
@@ -171,63 +167,63 @@ it.effect("a crashed stream keeps the projection queryable and runs onCrash once
           ),
         ),
       );
-      // The projection stays queryable until close/delete/resume.
-      const snapshot = yield* manager.snapshot(ref);
+      // The session stays queryable until close/delete/re-attach.
+      const snapshot = yield* session.snapshot;
       assert.equal(snapshot.status.phase, "crashed");
       assert.equal(snapshot.activeTurn, null);
     }),
   ),
 );
 
-it.effect("start replaces a crashed runtime with a fresh projection", () =>
+it.effect("attach replaces a crashed drain with fresh state", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const crashing = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(crashing));
+      yield* session.attach(streamFromQueueOne(crashing));
       yield* Queue.fail(
         crashing,
         new AgentOperationError({ sessionId: nativeId, operation: "events", cause: "boom" }),
       );
-      yield* awaitPhase(manager, "crashed");
+      yield* awaitPhase(session, "crashed");
 
       const replacement = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(replacement));
+      yield* session.attach(streamFromQueueOne(replacement));
       yield* Queue.offer(replacement, {
         type: "session.turn.started",
         sessionId: nativeId,
         turnId: "turn-2",
       });
-      const snapshot = yield* awaitCursor(manager, 1);
+      const snapshot = yield* awaitCursor(session, 1);
       assert.equal(snapshot.status.phase, "running");
-      // seq restarts with the replacement runtime.
+      // seq restarts with the replacement drain.
       assert.equal(snapshot.cursor, 1);
       assert.equal(snapshot.activeTurn?.turnId, "turn-2");
     }),
   ),
 );
 
-it.effect("stop removes the runtime", () =>
+it.effect("detach stops the drain", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(queue));
-      yield* manager.stop(ref);
-      const exit = yield* Effect.exit(manager.status(ref));
+      yield* session.attach(streamFromQueueOne(queue));
+      yield* session.detach;
+      const exit = yield* Effect.exit(session.status);
       assert.equal(Exit.isFailure(exit), true);
     }),
   ),
 );
 
-it.effect("a naturally ending stream removes its runtime", () =>
+it.effect("a naturally ending stream drops the drain", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
-      yield* manager.start(ref, Stream.empty);
+      const session = yield* SessionService;
+      yield* session.attach(Stream.empty);
       yield* Effect.eventually(
-        Effect.exit(manager.status(ref)).pipe(
-          Effect.filterOrFail(Exit.isFailure, () => new Error("runtime was not removed")),
+        Effect.exit(session.status).pipe(
+          Effect.filterOrFail(Exit.isFailure, () => new Error("drain was not dropped")),
         ),
       );
     }),
@@ -237,9 +233,9 @@ it.effect("a naturally ending stream removes its runtime", () =>
 it.effect("bounds the active turn buffer and marks it truncated on overflow", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(queue));
+      yield* session.attach(streamFromQueueOne(queue));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -251,7 +247,7 @@ it.effect("bounds the active turn buffer and marks it truncated on overflow", ()
       for (let index = 0; index < 3; index += 1) {
         yield* Queue.offer(queue, { type: "text-delta", id: "t", delta: big });
       }
-      const snapshot = yield* awaitCursor(manager, 4);
+      const snapshot = yield* awaitCursor(session, 4);
       assert.equal(snapshot.activeTurn?.truncated, true);
       // The retained tail stays within the cap and keeps the newest chunks.
       assert.equal((snapshot.activeTurn?.chunks.length ?? 0) < 3, true);
@@ -263,16 +259,16 @@ it.effect("bounds the active turn buffer and marks it truncated on overflow", ()
 it.effect("a turn under the buffer caps is not marked truncated", () =>
   run(
     Effect.gen(function* () {
-      const manager = yield* SessionRuntimeService;
+      const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* manager.start(ref, streamFromQueueOne(queue));
+      yield* session.attach(streamFromQueueOne(queue));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
         turnId: "turn-1",
       });
       yield* Queue.offer(queue, { type: "text-delta", id: "t", delta: "hello" });
-      const snapshot = yield* awaitCursor(manager, 2);
+      const snapshot = yield* awaitCursor(session, 2);
       assert.equal(snapshot.activeTurn?.truncated, false);
       assert.equal(snapshot.activeTurn?.chunks.length, 1);
     }),
