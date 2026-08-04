@@ -7,6 +7,8 @@ import type * as Cause from "effect/Cause";
 
 import { EventBus, EventBusLayer } from "../../src/events";
 import { AgentOperationError, type SessionEnvelopeBody } from "../../src/harness";
+import type { HarnessAgentRuntime } from "../../src/harness/adapter";
+import { AgentUnavailable } from "../../src/harness/errors";
 import { streamFromQueueOne } from "../../src/harness/queue-stream";
 import { type HarnessAgentSessionShape, makeHarnessAgentSession } from "../../src/harness/session";
 
@@ -36,6 +38,33 @@ const nativeId = "native-1";
 
 const makeQueue = Queue.bounded<SessionEnvelopeBody, Cause.Done | AgentOperationError>(32);
 
+type EventQueue = Effect.Success<typeof makeQueue>;
+
+/** A runtime that is nothing but its event stream and a close counter — the
+ * session under test never calls anything else on it. */
+const runtimeFrom = (
+  queue: EventQueue,
+  options: { readonly closes?: Ref.Ref<number> } = {},
+): HarnessAgentRuntime => ({
+  sessionId: nativeId,
+  harnessAgentId: "claude-code",
+  events: streamFromQueueOne(queue).pipe(
+    Stream.map((body) => ({ harnessAgentId: "claude-code" as const, sessionId: nativeId, body })),
+  ),
+  prompt: () => Effect.succeed({ turnId: "turn-1" }),
+  setModel: () => Effect.void,
+  setReasoningEffort: () => Effect.void,
+  setPermissionMode: () => Effect.void,
+  interrupt: Effect.void,
+  respondToAgentRequest: () => Effect.void,
+  getCapabilities: Effect.succeed({
+    supportsResume: true,
+    supportsSteering: false,
+    supportsPermissions: false,
+  }),
+  close: options.closes ? Ref.update(options.closes, (count) => count + 1) : Effect.void,
+});
+
 const layer = SessionServiceLayer.pipe(Layer.provide(EventBusLayer));
 
 const run = <A, E>(program: Effect.Effect<A, E, SessionService>) =>
@@ -61,6 +90,12 @@ const awaitPhase = (session: HarnessAgentSessionShape, phase: string) =>
     ),
   );
 
+const crashQueue = (queue: EventQueue) =>
+  Queue.fail(
+    queue,
+    new AgentOperationError({ sessionId: nativeId, operation: "events", cause: "boom" }),
+  );
+
 // The reason snapshot/status are total: after a restart every persisted
 // session is in exactly this state, and a client must be able to attach,
 // snapshot, and subscribe to it without anything starting a process.
@@ -68,6 +103,7 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
+      assert.equal(yield* session.peekRuntime, undefined);
       const snapshot = yield* session.snapshot;
       assert.equal(snapshot.status.phase, "idle");
       assert.equal(snapshot.cursor, 0);
@@ -78,16 +114,18 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
   ),
 );
 
-it.effect("attach is idempotent for a live drain and stamps contiguous seqs", () =>
+it.effect("ensureRuntime keeps the runtime it holds and stamps contiguous seqs", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const first = yield* makeQueue;
       const second = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(first));
-      // A live drain makes the second attach a no-op — the second stream must
-      // never be consumed, or the single-consumer native stream would split.
-      yield* session.attach(streamFromQueueOne(second));
+      const held = yield* session.ensureRuntime(Effect.succeed(runtimeFrom(first)));
+      // A session that already holds a runtime acquires nothing — the second
+      // stream must never be consumed, or the single-consumer native stream
+      // would split across two drain fibers.
+      const again = yield* session.ensureRuntime(Effect.succeed(runtimeFrom(second)));
+      assert.equal(again, held);
 
       yield* Queue.offer(first, {
         type: "session.turn.started",
@@ -120,12 +158,59 @@ it.effect("attach is idempotent for a live drain and stamps contiguous seqs", ()
   ),
 );
 
+it.effect("concurrent acquisitions run the acquire exactly once", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const queue = yield* makeQueue;
+      const acquisitions = yield* Ref.make(0);
+      const acquire = Ref.update(acquisitions, (count) => count + 1).pipe(
+        Effect.andThen(Effect.yieldNow),
+        Effect.as(runtimeFrom(queue)),
+      );
+
+      const runtimes = yield* Effect.all(
+        Array.from({ length: 8 }, () => session.ensureRuntime(acquire)),
+        { concurrency: "unbounded" },
+      );
+
+      // Adapters may assume they are never asked to open the same session
+      // twice at once; pi's openSession blind-writes its table and would leak
+      // a child otherwise.
+      assert.equal(yield* Ref.get(acquisitions), 1);
+      assert.equal(new Set(runtimes).size, 1);
+    }),
+  ),
+);
+
+it.effect("a failed acquisition holds nothing and lets a later one retry", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const failed = yield* Effect.exit(
+        session.ensureRuntime(
+          Effect.fail(new AgentUnavailable({ harnessAgentId: "claude-code", reason: "not today" })),
+        ),
+      );
+      assert.equal(failed._tag, "Failure");
+      // Still observable, still holding nothing …
+      assert.equal(yield* session.peekRuntime, undefined);
+      assert.equal((yield* session.status).phase, "idle");
+
+      // … and the next attempt is free to succeed.
+      const queue = yield* makeQueue;
+      const runtime = yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
+      assert.equal(yield* session.peekRuntime, runtime);
+    }),
+  ),
+);
+
 it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(queue));
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -155,15 +240,13 @@ it.effect("a chunk after turn.ended is dropped without consuming a seq", () =>
   ),
 );
 
-it.effect("a crashed stream keeps the session queryable and runs onCrash once", () =>
+it.effect("a crashed runtime is released but the session survives it", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
-      const closed = yield* Ref.make(0);
-      yield* session.attach(streamFromQueueOne(queue), {
-        onCrash: Ref.update(closed, (count) => count + 1),
-      });
+      const closes = yield* Ref.make(0);
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue, { closes })));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -171,20 +254,19 @@ it.effect("a crashed stream keeps the session queryable and runs onCrash once", 
       });
       yield* awaitPhase(session, "running");
 
-      yield* Queue.fail(
-        queue,
-        new AgentOperationError({ sessionId: nativeId, operation: "events", cause: "boom" }),
-      );
+      yield* crashQueue(queue);
       yield* awaitPhase(session, "crashed");
+      // The dead runtime is disowned and closed …
       yield* Effect.eventually(
-        Ref.get(closed).pipe(
+        Ref.get(closes).pipe(
           Effect.filterOrFail(
             (count) => count === 1,
-            () => new Error("onCrash did not run"),
+            () => new Error("the crashed runtime was not released"),
           ),
         ),
       );
-      // The session stays queryable until close/delete/re-attach.
+      assert.equal(yield* session.peekRuntime, undefined);
+      // … while the session it belonged to is still queryable.
       const snapshot = yield* session.snapshot;
       assert.equal(snapshot.status.phase, "crashed");
       assert.equal(snapshot.activeTurn, null);
@@ -192,40 +274,59 @@ it.effect("a crashed stream keeps the session queryable and runs onCrash once", 
   ),
 );
 
-it.effect("attach replaces a crashed drain with fresh state", () =>
+it.effect("acquiring after a crash starts over without rewinding seq", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const crashing = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(crashing));
-      yield* Queue.fail(
-        crashing,
-        new AgentOperationError({ sessionId: nativeId, operation: "events", cause: "boom" }),
-      );
-      yield* awaitPhase(session, "crashed");
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(crashing)));
+      yield* Queue.offer(crashing, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      yield* awaitCursor(session, 1);
+      yield* crashQueue(crashing);
+      // turn.started (1) then session.crashed (2).
+      yield* awaitCursor(session, 2);
 
-      const replacement = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(replacement));
-      yield* Queue.offer(replacement, {
+      const queue = yield* makeQueue;
+      const replacement = runtimeFrom(queue);
+      // Retried: the crashed runtime disowns itself asynchronously.
+      yield* Effect.eventually(
+        session.ensureRuntime(Effect.succeed(replacement)).pipe(
+          Effect.filterOrFail(
+            (runtime) => runtime === replacement,
+            () => new Error("still holding the crashed runtime"),
+          ),
+        ),
+      );
+      // The crash was the runtime ending, not the session: it is idle again.
+      assert.equal((yield* session.status).phase, "idle");
+
+      yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
         turnId: "turn-2",
       });
-      const snapshot = yield* awaitCursor(session, 1);
+      const snapshot = yield* awaitCursor(session, 3);
       assert.equal(snapshot.status.phase, "running");
-      // seq restarts with the replacement drain.
-      assert.equal(snapshot.cursor, 1);
+      // seq carries across the replacement. Restarting it at 0 would put every
+      // later event at or below the cursor clients are still holding, and they
+      // would discard the lot as already applied.
+      assert.equal(snapshot.cursor, 3);
       assert.equal(snapshot.activeTurn?.turnId, "turn-2");
     }),
   ),
 );
 
-it.effect("detach stops the drain and leaves the session readable", () =>
+it.effect("releaseRuntime stops the drain and leaves the session readable", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(queue));
+      const closes = yield* Ref.make(0);
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue, { closes })));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -233,7 +334,9 @@ it.effect("detach stops the drain and leaves the session readable", () =>
       });
       yield* awaitPhase(session, "running");
 
-      yield* session.detach;
+      yield* session.releaseRuntime;
+      assert.equal(yield* Ref.get(closes), 1);
+      assert.equal(yield* session.peekRuntime, undefined);
       // What the session had folded is still readable — losing a runtime is
       // not losing the session.
       assert.equal((yield* session.status).phase, "running");
@@ -250,27 +353,23 @@ it.effect("detach stops the drain and leaves the session readable", () =>
   ),
 );
 
-it.effect("a naturally ending stream frees the session for a fresh attach", () =>
+it.effect("a naturally ending stream frees the session for a fresh runtime", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
-      yield* session.attach(Stream.empty);
+      const ending = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(ending)));
+      yield* Queue.end(ending);
 
       const queue = yield* makeQueue;
-      yield* Queue.offer(queue, {
-        type: "session.turn.started",
-        sessionId: nativeId,
-        turnId: "turn-1",
-      });
-      // A drain that ended cleanly must stop counting as live, or a session
-      // whose runtime exited could never take another one. Retried because
-      // the ended fiber clears itself asynchronously.
+      const replacement = runtimeFrom(queue);
+      // A runtime that exited cleanly must stop counting as held, or a session
+      // whose agent quit could never start another one.
       yield* Effect.eventually(
-        session.attach(streamFromQueueOne(queue)).pipe(
-          Effect.andThen(session.status),
+        session.ensureRuntime(Effect.succeed(replacement)).pipe(
           Effect.filterOrFail(
-            (status) => status.phase === "running",
-            () => new Error("the ended drain still blocks a fresh attach"),
+            (runtime) => runtime === replacement,
+            () => new Error("the ended runtime is still held"),
           ),
         ),
       );
@@ -283,7 +382,7 @@ it.effect("bounds the active turn buffer and marks it truncated on overflow", ()
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(queue));
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,
@@ -309,7 +408,7 @@ it.effect("a turn under the buffer caps is not marked truncated", () =>
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
-      yield* session.attach(streamFromQueueOne(queue));
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
       yield* Queue.offer(queue, {
         type: "session.turn.started",
         sessionId: nativeId,

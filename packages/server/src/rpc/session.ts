@@ -202,6 +202,14 @@ export const sessionRouter = orpc.router({
           ),
         UnsupportedPromptPart: (e) =>
           Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
+        // A prompt is what starts an agent, so it is also where starting one
+        // can fail. Same mapping the create path uses.
+        HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
+        AgentUnavailable: (e) =>
+          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
+        ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
+        SessionNotResumable: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+        AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         TurnAlreadyRunning: (e) =>

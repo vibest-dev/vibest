@@ -51,10 +51,10 @@ import {
  * {@link Session} metadata (via its private repository), translating a
  * `SessionRef` to the agent-native `harnessSessionId`, validating wire
  * vocabulary (permission modes, prompt parts), and publishing the collection
- * events that announce lifecycle changes. Live state — instances and
- * projections — belongs to {@link HarnessAgentSessionManager}; this service
- * holds none. The router above contributes only the resolved workspace path
- * (`cwd`): a projectId is never accepted as a path.
+ * events that announce lifecycle changes. Live state — sessions and the
+ * runtimes they hold — belongs to {@link HarnessAgentSessionManager}; this
+ * service holds none. The router above contributes only the resolved workspace
+ * path (`cwd`): a projectId is never accepted as a path.
  */
 
 /**
@@ -102,7 +102,7 @@ export type HarnessAgentSessionServiceShape = {
   readonly close: (
     ref: SessionRef,
   ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
-  /** Close the native session, discard its projection, and delete its metadata. */
+  /** Close the native session, discard its live state, and delete its metadata. */
   readonly delete: (
     ref: SessionRef,
   ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError>;
@@ -115,8 +115,8 @@ export type HarnessAgentSessionServiceShape = {
   ) => Effect.Effect<ReadonlyArray<SessionSummary>, StoreReadError>;
   /**
    * The session's native history as final-form UIMessages. Ensures the
-   * session is open (idempotent resume via the manager), reads through the
-   * live instance's optional `getMessages` (absence = the harness has no
+   * session has a runtime (single-flight acquisition via the manager), reads
+   * through the runtime's optional `getMessages` (absence = the harness has no
    * history read → {@link CapabilityUnsupported}), then trims the active
    * turn's tail so history never duplicates the live stream.
    */
@@ -133,6 +133,11 @@ export type HarnessAgentSessionServiceShape = {
     | SessionClosed
     | AgentOperationError
   >;
+  /**
+   * Submit a user message. The one operation allowed to start an agent: a
+   * session with no runtime acquires exactly one here, single-flighted, so
+   * concurrent prompts share it.
+   */
   readonly prompt: (
     input: PromptInput,
   ) => Effect.Effect<
@@ -141,7 +146,7 @@ export type HarnessAgentSessionServiceShape = {
     | SessionRefMismatch
     | StoreReadError
     | UnsupportedPromptPart
-    | HarnessSessionNotFound
+    | ResumeSessionError
     | SessionClosed
     | TurnAlreadyRunning
     | AgentOperationError
@@ -370,7 +375,7 @@ export const makeHarnessAgentSessionService = (deps: {
     resume: (ref, cwd) =>
       readChecked(ref).pipe(
         Effect.flatMap((metadata) =>
-          manager.ensure(
+          manager.ensureRuntime(
             {
               sessionId: metadata.harnessSessionId,
               harnessAgentId: ref.harnessAgentId,
@@ -379,6 +384,7 @@ export const makeHarnessAgentSessionService = (deps: {
             ref,
           ),
         ),
+        Effect.asVoid,
       ),
 
     close: (ref) =>
@@ -443,20 +449,19 @@ export const makeHarnessAgentSessionService = (deps: {
       readChecked(ref).pipe(
         Effect.flatMap((metadata) =>
           manager
-            .ensure(
+            .ensureRuntime(
               { sessionId: metadata.harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
               ref,
             )
             .pipe(
-              Effect.andThen(manager.get(ref)),
               Effect.flatMap(
                 (
-                  session,
+                  runtime,
                 ): Effect.Effect<
                   ReadonlyArray<UIMessage>,
                   CapabilityUnsupported | SessionClosed | AgentOperationError
                 > =>
-                  session.getMessages ??
+                  runtime.getMessages ??
                   Effect.fail(
                     new CapabilityUnsupported({
                       harnessAgentId: ref.harnessAgentId,
@@ -470,7 +475,7 @@ export const makeHarnessAgentSessionService = (deps: {
                 // a turn runs. A finished turn's buffer is retained
                 // (complete: true) until the next turn starts — that is
                 // settled history, not an in-flight turn, so it must not trim.
-                // A missing projection degrades to no trimming.
+                // An untouched session reads as idle, so it never trims.
                 manager.snapshot(ref).pipe(
                   Effect.map((snapshot) => {
                     if (snapshot.activeTurn === null || snapshot.activeTurn.complete) {
@@ -493,7 +498,6 @@ export const makeHarnessAgentSessionService = (deps: {
         const userInput = yield* toUserInput(input.parts);
         // The first prompt names the session before it reaches the harness.
         yield* stampTitleFromFirstPrompt(metadata, input.parts);
-        const session = yield* manager.get(input.ref);
         const messageId = input.messageId ?? (yield* newSessionId);
 
         // Broadcast the accepted prompt *before* the harness call so it always
@@ -506,7 +510,19 @@ export const makeHarnessAgentSessionService = (deps: {
           messageId,
           parts: input.parts,
         });
-        return yield* session.prompt(userInput).pipe(
+        // A user message is the one thing that justifies starting an agent, so
+        // this is where a runtime is acquired if the session has none — after
+        // the submitted event, so a failed acquisition is compensated by the
+        // same `prompt.rejected` that a harness-side rejection uses.
+        const runtime = yield* manager.ensureRuntime(
+          {
+            sessionId: metadata.harnessSessionId,
+            harnessAgentId: input.ref.harnessAgentId,
+            ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
+          },
+          input.ref,
+        );
+        return yield* runtime.prompt(userInput).pipe(
           Effect.tapError((promptError) =>
             manager.emit(input.ref, {
               type: "session.prompt.rejected",

@@ -5,11 +5,11 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Deferred, Effect, Fiber, Ref, Scope, Semaphore, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Ref, Scope, Semaphore, Stream } from "effect";
 
 import type { EventBusShape } from "../events/event-bus";
-import type { AgentOperationError } from "./errors";
-import type { SessionEnvelopeBody } from "./events/framework";
+import type { HarnessAgentRuntime } from "./adapter";
+import type { ResumeSessionError } from "./errors";
 import {
   foldSessionEvent,
   initialSessionState,
@@ -28,38 +28,63 @@ import {
  * {@link SessionScopedEvent}s (attaching the {@link SessionRef}), and publishes
  * onto the EventBus.
  *
- * What it deliberately is *not* is a process. The live execution resource is a
- * {@link HarnessAgentRuntime}, which a session drains from and — from the
- * commit that makes acquisition lazy — optionally owns. Keeping the two apart
- * is what lets a session outlive its runtime crashing or never having started.
+ * It *optionally owns* a {@link HarnessAgentRuntime} — the live execution
+ * resource: a pi child, a Claude SDK handle, a Codex thread. Optional is the
+ * whole point. A session exists as soon as anything writes to it and outlives
+ * every runtime it ever holds, so observing one costs no process, and a
+ * crashed runtime leaves a session that is still queryable and can start over.
  *
- * A private collaborator of {@link HarnessAgentSessionManager}: no Context tag,
- * and it never opens, resumes, or closes a native session itself.
+ * A private collaborator of {@link HarnessAgentSessionManager}: no Context tag.
+ * It does not know how to open a native session — the manager hands it an
+ * `acquire` — but it is the only thing that decides *when* one is opened, so
+ * single-flighting lives here and adapters keep their single-caller invariant.
  */
 
-/** The live drain: the fiber consuming a runtime's native stream, plus the
- * token that lets only its own cleanup evict it. */
-type Drain = {
+/** What it takes to produce a runtime: an adapter open/resume, already bound to
+ * its inputs by the manager. The `Scope` is the runtime's, forked per
+ * acquisition and closed when the runtime is released. */
+export type AcquireRuntime = Effect.Effect<HarnessAgentRuntime, ResumeSessionError, Scope.Scope>;
+
+/** The runtime a session currently holds, its scope, and the fiber draining
+ * its events. The token is what lets only this holding's own cleanup clear the
+ * slot, so a dead runtime's crash handler can never evict its replacement. */
+type Held = {
   readonly token: object;
+  readonly runtime: HarnessAgentRuntime;
+  readonly scope: Scope.Closeable;
   readonly fiber: Fiber.Fiber<void>;
 };
 
+/** The promise of a runtime that an acquisition is on its way to producing. */
+type Ticket = Deferred.Deferred<HarnessAgentRuntime, ResumeSessionError>;
+
+/**
+ * Whether this session has a runtime, is getting one, or will never take
+ * another — one Ref because the three have to be decided in a single step.
+ * Deliberately private: callers see `peekRuntime` / `ensureRuntime` /
+ * `releaseRuntime` and nothing of the states in between.
+ *
+ * `acquiring` is what makes acquisition single-flight, and it is a ticket
+ * rather than a lock because the acquiring fiber is the session's own: a
+ * caller that gives up (a cancelled request) neither aborts the acquisition
+ * nor strands the callers still waiting on it. `sealed` is set the moment a
+ * release begins, so a session on its way out can never take a runtime that
+ * would then outlive it.
+ */
+type Lifecycle = {
+  readonly held: Held | undefined;
+  readonly acquiring: Ticket | undefined;
+  readonly sealed: boolean;
+};
+
+type AcquireDecision =
+  | { readonly _tag: "Held"; readonly runtime: HarnessAgentRuntime }
+  | { readonly _tag: "Start"; readonly ticket: Ticket }
+  | { readonly _tag: "Await"; readonly ticket: Ticket }
+  | { readonly _tag: "Sealed" };
+
 export type HarnessAgentSessionShape = {
   readonly ref: SessionRef;
-  /**
-   * Begin draining a runtime's native draft stream into this session: stamp,
-   * fold, and fan out. Idempotent — a session already draining ignores the
-   * call, so concurrent resumes can never split the single-consumer native
-   * stream across two fibers. A crashed session is reset and re-drained.
-   * `onCrash` runs once if the native stream fails; the manager releases the
-   * native session there.
-   */
-  readonly attach: (
-    events: Stream.Stream<SessionEnvelopeBody, AgentOperationError>,
-    options?: { readonly onCrash?: Effect.Effect<void> },
-  ) => Effect.Effect<void>;
-  /** Stop draining. The session and its folded state survive. */
-  readonly detach: Effect.Effect<void>;
   /**
    * What this session is doing, always answerable. A session that has never
    * had a runtime reads as idle at cursor 0 — which is the truth, not a
@@ -73,6 +98,29 @@ export type HarnessAgentSessionShape = {
    * Independent of any runtime — the seq counter is the session's own.
    */
   readonly emit: (body: SessionScopedEventBody) => Effect.Effect<void>;
+  /** The runtime this session holds, or `undefined`. Never acquires one. */
+  readonly peekRuntime: Effect.Effect<HarnessAgentRuntime | undefined>;
+  /**
+   * The session's runtime, acquiring one if it has none. Single-flight:
+   * concurrent callers share one acquisition, so an adapter is never asked to
+   * open the same session twice at once, and a caller that gives up does not
+   * take the others down with it. A failed acquisition holds nothing, so the
+   * session stays observable and a later call retries.
+   *
+   * `undefined` means this session was released out from under the call and
+   * will never take another runtime; the caller must ask the manager again,
+   * which is where waiting for the release and starting a fresh session live.
+   */
+  readonly ensureRuntime: (
+    acquire: AcquireRuntime,
+  ) => Effect.Effect<HarnessAgentRuntime | undefined, ResumeSessionError>;
+  /**
+   * Release the runtime and seal the session against taking another. The
+   * observable state survives — the manager decides when to stop answering for
+   * this ref. Idempotent, and waits for an acquisition already in flight
+   * rather than racing it.
+   */
+  readonly releaseRuntime: Effect.Effect<void>;
 };
 
 export const makeHarnessAgentSession = (
@@ -82,15 +130,16 @@ export const makeHarnessAgentSession = (
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const state = yield* Ref.make(initialSessionState);
-    const drain = yield* Ref.make<Drain | undefined>(undefined);
+    const lifecycle = yield* Ref.make<Lifecycle>({
+      held: undefined,
+      acquiring: undefined,
+      sealed: false,
+    });
 
     // Serializes stamp+publish across the drain fiber and `emit` callers:
     // without it two fibers could stamp seqs n/n+1 but publish n+1 first, and
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
-    // Serializes attach/detach against each other, so a fiber is always stored
-    // before its own stream can end and try to evict it.
-    const lifecycleLock = Semaphore.makeUnsafe(1);
 
     // The body builder runs under the same permit as the fold+publish so both
     // read one consistent state — deriving the active turn from a read outside
@@ -117,7 +166,7 @@ export const makeHarnessAgentSession = (
         ),
       );
 
-    const apply = (body: SessionEnvelopeBody) =>
+    const apply = (body: Parameters<typeof toWireBody>[0]) =>
       applyWith((current) =>
         toWireBody(
           body,
@@ -130,56 +179,152 @@ export const makeHarnessAgentSession = (
     const crash = (reason: string) =>
       apply({ type: "session.crashed", sessionId: ref.sessionId, reason });
 
-    const attach: HarnessAgentSessionShape["attach"] = (events, options) =>
-      lifecycleLock.withPermit(
-        Effect.gen(function* () {
-          const existing = yield* Ref.get(drain);
-          if (existing) {
-            // A live drain keeps going; only a crashed one is replaced (its
-            // fiber is already dead — interrupt is a harmless formality).
-            const phase = (yield* Ref.get(state)).phase;
-            if (phase !== "crashed") return;
-            yield* Fiber.interrupt(existing.fiber);
-            yield* Ref.set(state, initialSessionState);
-          }
+    // A session that starts over is idle again — the crash was the *runtime*
+    // ending, not the session. seq and cursor carry across on purpose: clients
+    // hold a cursor from before the crash, and restarting the count at 0 would
+    // make every later event look like one they had already applied.
+    const clearCrash = applyLock.withPermit(
+      Ref.update(state, (current) =>
+        current.phase === "crashed"
+          ? {
+              ...current,
+              phase: "idle" as const,
+              activeTurn: null,
+              activePrompt: null,
+              pendingRequests: new Map(),
+            }
+          : current,
+      ),
+    );
 
-          const token = {};
-          // Identity-guarded: only the drain that owns the entry may clear it,
-          // so a superseded fiber's cleanup can never evict its replacement.
-          const clearOwned = Ref.update(drain, (current) =>
-            current?.token === token ? undefined : current,
+    /** Identity-guarded, so a dying runtime disowns itself and only itself —
+     * it can never evict the replacement that came after it. */
+    const clearHeld = (token: object): Effect.Effect<Held | undefined> =>
+      Ref.modify(lifecycle, (current) =>
+        current.held?.token === token
+          ? [current.held, { ...current, held: undefined }]
+          : [undefined, current],
+      );
+
+    const takeHeld: Effect.Effect<Held | undefined> = Ref.modify(lifecycle, (current) => [
+      current.held,
+      { ...current, held: undefined },
+    ]);
+
+    const dispose = (current: Held): Effect.Effect<void> =>
+      current.runtime.close.pipe(Effect.ensuring(Scope.close(current.scope, Exit.void)));
+
+    const shutDown = (current: Held | undefined): Effect.Effect<void> =>
+      current ? Fiber.interrupt(current.fiber).pipe(Effect.andThen(dispose(current))) : Effect.void;
+
+    /** Runs in a fiber of the session's own scope, never the caller's, so the
+     * acquisition survives whoever asked for it losing interest. */
+    const runAcquire = (acquire: AcquireRuntime, ticket: Ticket): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.fork(ownerScope, "sequential");
+        const outcome = yield* acquire.pipe(
+          Effect.provideService(Scope.Scope, scope),
+          Effect.onError(() => Scope.close(scope, Exit.void)),
+          Effect.exit,
+        );
+        if (Exit.isFailure(outcome)) {
+          // Nothing is held on failure: the session stays observable and the
+          // next call gets to try again.
+          yield* Ref.update(lifecycle, (current) =>
+            current.acquiring === ticket ? { ...current, acquiring: undefined } : current,
           );
-          // A natural end drops the drain; a crash keeps it, so the state
-          // stays queryable at phase "crashed" until close/delete/re-attach —
-          // after `onCrash` has released the native session.
-          const registered = yield* Deferred.make<void>();
-          const body = Deferred.await(registered).pipe(
-            Effect.andThen(Stream.runForEach(events, apply)),
-            Effect.andThen(clearOwned),
-            Effect.catch((error) =>
-              crash(error.message).pipe(Effect.andThen(options?.onCrash ?? Effect.void)),
-            ),
-          );
-          const fiber = yield* Effect.forkIn(body, ownerScope);
-          // Storing before releasing the fiber is what makes an instantly
-          // ending stream safe: its cleanup cannot run ahead of registration.
-          yield* Ref.set(drain, { token, fiber });
-          yield* Deferred.succeed(registered, undefined);
+          yield* Deferred.done(ticket, outcome);
+          return;
+        }
+        const runtime = outcome.value;
+        yield* clearCrash;
+
+        const token = {};
+        const release = clearHeld(token).pipe(
+          Effect.flatMap((owned) => (owned ? dispose(owned) : Effect.void)),
+        );
+        // Either ending releases the runtime; only a failing stream is a
+        // crash. The drain waits to be stored first, so an instantly ending
+        // stream cannot clear a slot that was never filled.
+        const registered = yield* Deferred.make<void>();
+        const drain = Deferred.await(registered).pipe(
+          Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
+          Effect.andThen(release),
+          Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
+        );
+        const fiber = yield* Effect.forkIn(drain, ownerScope);
+        // A release that started while this was in flight leaves `acquiring`
+        // in place precisely so the runtime lands here first — it then takes
+        // it back out and shuts it down, instead of losing track of it.
+        yield* Ref.update(lifecycle, (current) =>
+          current.acquiring === ticket
+            ? { ...current, acquiring: undefined, held: { token, runtime, scope, fiber } }
+            : current,
+        );
+        yield* Deferred.succeed(ticket, runtime);
+        yield* Deferred.succeed(registered, undefined);
+      });
+
+    const ensureRuntime: HarnessAgentSessionShape["ensureRuntime"] = (acquire) =>
+      Ref.modify(lifecycle, (current): readonly [AcquireDecision, Lifecycle] => {
+        if (current.sealed) return [{ _tag: "Sealed" }, current];
+        if (current.held) return [{ _tag: "Held", runtime: current.held.runtime }, current];
+        if (current.acquiring) return [{ _tag: "Await", ticket: current.acquiring }, current];
+        const ticket = Deferred.makeUnsafe<HarnessAgentRuntime, ResumeSessionError>();
+        return [
+          { _tag: "Start", ticket },
+          { ...current, acquiring: ticket },
+        ];
+      }).pipe(
+        // Publishing the ticket and forking the fiber that completes it have
+        // to land together — an interrupt in between would leave every waiter
+        // parked on a ticket nobody owns.
+        Effect.tap((decision) =>
+          decision._tag === "Start"
+            ? Effect.forkIn(runAcquire(acquire, decision.ticket), ownerScope)
+            : Effect.void,
+        ),
+        Effect.uninterruptible,
+        Effect.flatMap((decision) => {
+          switch (decision._tag) {
+            case "Sealed":
+              return Effect.succeed(undefined);
+            case "Held":
+              return Effect.succeed(decision.runtime);
+            case "Start":
+            case "Await":
+              return Deferred.await(decision.ticket);
+          }
         }),
       );
 
-    const detach: HarnessAgentSessionShape["detach"] = lifecycleLock.withPermit(
-      Ref.getAndSet(drain, undefined).pipe(
-        Effect.flatMap((current) => (current ? Fiber.interrupt(current.fiber) : Effect.void)),
+    const releaseRuntime: HarnessAgentSessionShape["releaseRuntime"] = Ref.modify(
+      lifecycle,
+      (current) =>
+        [current, { held: undefined, acquiring: current.acquiring, sealed: true }] as const,
+    ).pipe(
+      Effect.flatMap((previous) =>
+        previous.acquiring
+          ? // An acquisition already in flight owns a runtime it is about to
+            // store; wait for it and take that one, or the process it started
+            // would outlive the session that asked for it.
+            Deferred.await(previous.acquiring).pipe(
+              Effect.exit,
+              Effect.andThen(takeHeld),
+              Effect.flatMap(shutDown),
+            )
+          : shutDown(previous.held),
       ),
+      Effect.uninterruptible,
     );
 
     return {
       ref,
-      attach,
-      detach,
       snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
       status: Ref.get(state).pipe(Effect.map(toStatus)),
       emit: (body) => applyWith(() => body),
+      peekRuntime: Ref.get(lifecycle).pipe(Effect.map((current) => current.held?.runtime)),
+      ensureRuntime,
+      releaseRuntime,
     } satisfies HarnessAgentSessionShape;
   });

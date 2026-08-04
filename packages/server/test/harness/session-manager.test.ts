@@ -177,8 +177,8 @@ it.effect("single-flights ensure in owner scope when the first waiter cancels", 
     const fixture = yield* makeFixture;
     const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
     const ref = refFor("resumed");
-    const first = yield* Effect.forkChild(fixture.manager.ensure(input, ref));
-    const second = yield* Effect.forkChild(fixture.manager.ensure(input, ref));
+    const first = yield* Effect.forkChild(fixture.manager.ensureRuntime(input, ref));
+    const second = yield* Effect.forkChild(fixture.manager.ensureRuntime(input, ref));
 
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(
@@ -214,7 +214,10 @@ it.effect("waits for an in-flight close before reopening the same session id", (
       ),
     );
     const resume = yield* Effect.forkChild(
-      fixture.manager.ensure({ sessionId: session.sessionId, harnessAgentId: "claude-code" }, ref),
+      fixture.manager.ensureRuntime(
+        { sessionId: session.sessionId, harnessAgentId: "claude-code" },
+        ref,
+      ),
     );
 
     yield* Effect.yieldNow;
@@ -242,7 +245,7 @@ it.effect("closes a session that is still being resumed", () =>
     const fixture = yield* makeFixture;
     const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
     const ref = refFor("resumed");
-    const resume = yield* Effect.forkChild(fixture.manager.ensure(input, ref));
+    const resume = yield* Effect.forkChild(fixture.manager.ensureRuntime(input, ref));
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(
         Effect.filterOrFail(
