@@ -31,24 +31,31 @@ export const ConversationScrollButton = ({
   className,
   ...props
 }: ConversationScrollButtonProps) => {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  const { isAtBottom, escapedFromLock, scrollToBottom } = useStickToBottomContext();
 
   const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
+    scrollToBottom("smooth");
   }, [scrollToBottom]);
 
+  if (isAtBottom) {
+    return null;
+  }
+
+  // `escapedFromLock` means the user actively scrolled away from the
+  // auto-follow lock, so newer content has likely arrived below — surface the
+  // button a little more strongly than the resting outline style.
+  const variant = escapedFromLock ? "secondary" : "outline";
+
   return (
-    !isAtBottom && (
-      <Button
-        className={cn("absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full", className)}
-        onClick={handleScrollToBottom}
-        size="icon"
-        type="button"
-        variant="outline"
-        {...props}
-      >
-        <ArrowDownIcon className="size-4" />
-      </Button>
-    )
+    <Button
+      className={cn("absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full", className)}
+      onClick={handleScrollToBottom}
+      size="icon"
+      type="button"
+      variant={variant}
+      {...props}
+    >
+      <ArrowDownIcon className="size-4" />
+    </Button>
   );
 };

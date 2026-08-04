@@ -1,11 +1,11 @@
+import { Loader } from "@vibest/ui/ai-elements/loader";
+import { useStore } from "zustand";
+
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-} from "@vibest/ui/ai-elements/conversation";
-import { Loader } from "@vibest/ui/ai-elements/loader";
-import { useStore } from "zustand";
-
+} from "@/components/conversation";
 import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
 import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
 
@@ -35,7 +35,10 @@ function ChatTranscriptView({
     <Conversation>
       {/* Width cap lives here, inside the scroller, so the scrollbar stays at
           the panel edge instead of hugging the centered column. */}
-      <ConversationContent className="mx-auto w-full max-w-4xl min-w-80">
+      <ConversationContent
+        scrollClassName="scrollbar-thin"
+        className="mx-auto w-full max-w-4xl min-w-80"
+      >
         {showEmptyNotice && (
           <div className="text-muted-foreground mx-auto max-w-md py-12 text-center text-sm">
             Past messages can&apos;t be replayed yet. The agent still has its own context, so you
