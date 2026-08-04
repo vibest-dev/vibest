@@ -28,11 +28,13 @@ import {
   CreateSessionInputSchema,
   PromptReceiptSchema,
   ResumeSessionInputSchema,
+  SessionConfigSchema,
   UserInputPartSchema,
   UserInputSchema,
   type CreateSessionInput,
   type PromptReceipt,
   type ResumeSessionInput,
+  type SessionConfig,
   type UserInput,
   type UserInputPart,
 } from "./session-io";
@@ -43,6 +45,7 @@ export {
   PromptReceiptSchema,
   ResumeSessionInputSchema,
   SessionCapabilitiesSchema,
+  SessionConfigSchema,
   UserInputPartSchema,
   UserInputSchema,
 };
@@ -52,6 +55,7 @@ export type {
   PromptReceipt,
   ResumeSessionInput,
   SessionCapabilities,
+  SessionConfig,
   UserInput,
   UserInputPart,
 };
@@ -83,7 +87,16 @@ export type SessionInfoResult =
   | { readonly _tag: "missing" }
   | { readonly _tag: "unsupported" };
 
-export interface HarnessAgentSession {
+/**
+ * One session's live execution resource: a pi RPC child, a Claude SDK
+ * execution handle, a Codex thread on the shared app-server. It owns native
+ * events, prompt, interrupt, request responses, the config knobs, and close —
+ * and nothing else. A session's *observable* state (phase, active turn,
+ * pending requests, seq/cursor, snapshots) belongs to the
+ * `HarnessAgentSession` that optionally holds one of these, so a session
+ * survives its runtime crashing, closing, or never having been started.
+ */
+export interface HarnessAgentRuntime {
   readonly sessionId: string;
   readonly harnessAgentId: HarnessAgentId;
   readonly events: Stream.Stream<SessionEnvelopeDraft, AgentOperationError>;
@@ -116,9 +129,11 @@ export interface HarnessAgentSession {
   /**
    * The session's native transcript folded into final-form UIMessages —
    * everything up to and including the active turn; trimming the in-flight
-   * tail is the facade's job. Optional = capability absence (same convention
-   * as `probeModels?`): pi implements it, claude-code/codex don't yet, and
-   * the facade turns absence into `CapabilityUnsupported`.
+   * tail is the facade's job. This is the *warm* read, the one that needs a
+   * live runtime. Its presence alongside an absent {@link
+   * HarnessAgentAdapter.getMessages} is what tells the facade that reading
+   * this harness's history is itself a reason to acquire a runtime — pi is
+   * that shape today.
    */
   readonly getMessages?: Effect.Effect<
     ReadonlyArray<UIMessage>,
@@ -127,46 +142,47 @@ export interface HarnessAgentSession {
   readonly close: Effect.Effect<void>;
 }
 
-// Seed a freshly opened session with the config chosen at create time, using
-// the same session setters the UI drives mid-session. Runs before the first
-// prompt, so the config is live by the opening turn.
+// Seed a runtime with the session's config, using the same setters the UI
+// drives mid-session. Runs before the first prompt on that runtime, so the
+// config is live by its opening turn — and runs again on every runtime the
+// session acquires, so a config choice outlives a restart or a crash.
 //
 // The two channels fail differently on purpose (harness-concept-ownership §3.3):
 // `permissionMode` was validated at the RPC boundary, so failing to apply it is
-// a real fault and the open fails with it. `model`/`reasoningEffort` come from probed
-// lists that go stale (an old URL, a re-mapped alias), so they are best-effort:
-// a miss is logged and the session opens on the harness default rather than
-// turning "the list was a bit old" into "the session cannot be created".
+// a real fault and the acquisition fails with it. `model`/`reasoningEffort` come
+// from probed lists that go stale (an old URL, a re-mapped alias), so they are
+// best-effort: a miss is logged and the session runs on the harness default
+// rather than turning "the list was a bit old" into "the session cannot start".
 export const applyInitialSessionConfig = (
-  session: HarnessAgentSession,
-  input: CreateSessionInput,
+  runtime: HarnessAgentRuntime,
+  config: SessionConfig,
 ): Effect.Effect<void, AgentOpenError> =>
   Effect.gen(function* () {
-    if (input.permissionMode) {
-      yield* session
-        .setPermissionMode(input.permissionMode)
+    if (config.permissionMode) {
+      yield* runtime
+        .setPermissionMode(config.permissionMode)
         .pipe(
           Effect.mapError(
-            (cause) => new AgentOpenError({ harnessAgentId: session.harnessAgentId, cause }),
+            (cause) => new AgentOpenError({ harnessAgentId: runtime.harnessAgentId, cause }),
           ),
         );
     }
-    if (input.model) {
-      yield* session
-        .setModel(input.model)
+    if (config.model) {
+      yield* runtime
+        .setModel(config.model)
         .pipe(
           Effect.catch((cause) =>
-            Effect.logWarning("create-time model apply failed; using the harness default", cause),
+            Effect.logWarning("session model apply failed; using the harness default", cause),
           ),
         );
     }
-    if (input.reasoningEffort) {
-      yield* session
-        .setReasoningEffort(input.reasoningEffort)
+    if (config.reasoningEffort) {
+      yield* runtime
+        .setReasoningEffort(config.reasoningEffort)
         .pipe(
           Effect.catch((cause) =>
             Effect.logWarning(
-              "create-time reasoningEffort apply failed; using the model default",
+              "session reasoningEffort apply failed; using the model default",
               cause,
             ),
           ),
@@ -215,17 +231,31 @@ export interface HarnessAgentAdapter {
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<
-    HarnessAgentSession,
+    HarnessAgentRuntime,
     AgentUnavailable | ExecutableNotFound | AgentOpenError,
     Scope.Scope
   >;
   readonly resume: (
     input: ResumeSessionInput,
   ) => Effect.Effect<
-    HarnessAgentSession,
+    HarnessAgentRuntime,
     SessionNotResumable | AgentUnavailable | ExecutableNotFound | AgentOpenError,
     Scope.Scope
   >;
+  /**
+   * The *cold* history read: a persisted session's transcript as final-form
+   * UIMessages, without opening it and without costing a process of its own.
+   * claude-code parses the CLI's own transcript files; codex asks the shared
+   * app-server. Absent means this harness has no diskless read — pi's
+   * `get_entries` only answers from a live child — and the facade then falls
+   * back to {@link HarnessAgentRuntime.getMessages}, acquiring a runtime if it
+   * has to. Which of the two an adapter implements *is* its history policy;
+   * there is no separate flag.
+   */
+  readonly getMessages?: (
+    harnessSessionId: string,
+    cwd?: string,
+  ) => Effect.Effect<ReadonlyArray<UIMessage>, AgentOperationError>;
   /**
    * Look up live display info for a persisted session by backend id, without
    * opening it. `cwd` (the session's cwd) narrows the backend search.

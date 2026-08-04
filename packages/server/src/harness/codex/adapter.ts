@@ -8,7 +8,7 @@ import type * as Cause from "effect/Cause";
 import {
   applyInitialSessionConfig,
   type HarnessAgentAdapter,
-  type HarnessAgentSession,
+  type HarnessAgentRuntime,
   type SessionInfoResult,
   type UserInput,
 } from "../adapter";
@@ -106,10 +106,10 @@ const toModelInfo = (model: Model): ModelInfo => {
   };
 };
 
-const makeSession = (
+const makeRuntime = (
   agent: CodexAgent,
   sessionId: string,
-): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
+): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
@@ -196,7 +196,7 @@ const makeSession = (
       ),
     );
 
-    const interrupt: HarnessAgentSession["interrupt"] = Effect.gen(function* () {
+    const interrupt: HarnessAgentRuntime["interrupt"] = Effect.gen(function* () {
       if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
       yield* agent.session
         .interrupt(sessionId)
@@ -330,7 +330,7 @@ const makeSession = (
         return turnsToUIMessages(thread.turns);
       }),
       close,
-    } satisfies HarnessAgentSession;
+    } satisfies HarnessAgentRuntime;
   });
 
 export const makeCodexAdapter = (
@@ -367,7 +367,7 @@ export const makeCodexAdapter = (
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
       Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
@@ -377,7 +377,7 @@ export const makeCodexAdapter = (
           ? cause
           : new AgentOpenError({ harnessAgentId: "codex", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
   getSessionInfo: (harnessSessionId) =>
     agent.session.read({ sessionId: harnessSessionId }).pipe(

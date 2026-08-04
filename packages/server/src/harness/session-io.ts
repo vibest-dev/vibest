@@ -28,6 +28,19 @@ export const CreateSessionInputSchema = Schema.Struct({
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
+/**
+ * The session-scoped config knobs on their own. `CreateSessionInput` is
+ * structurally one of these plus a `cwd`; naming the shape separately is what
+ * lets {@link applyInitialSessionConfig} seed a runtime from either the
+ * create-time choice or a session's later, accumulated one.
+ */
+export const SessionConfigSchema = Schema.Struct({
+  model: Schema.optionalKey(Schema.String),
+  reasoningEffort: Schema.optionalKey(ReasoningEffortSchema),
+  permissionMode: Schema.optionalKey(PermissionModeSchema),
+});
+export type SessionConfig = typeof SessionConfigSchema.Type;
+
 export const ResumeSessionInputSchema = Schema.Struct({
   sessionId: Schema.String,
   cwd: Schema.optionalKey(Schema.String),

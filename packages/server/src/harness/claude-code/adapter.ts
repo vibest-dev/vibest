@@ -8,7 +8,7 @@ import type * as Cause from "effect/Cause";
 import {
   applyInitialSessionConfig,
   type HarnessAgentAdapter,
-  type HarnessAgentSession,
+  type HarnessAgentRuntime,
   type SessionCapabilities,
   type SessionInfoResult,
   type UserInput,
@@ -164,11 +164,11 @@ const toPermissionResult = (
   return result;
 };
 
-const makeSession = (
+const makeRuntime = (
   agent: ClaudeCodeAgent,
   sessionId: string,
   cwd: string | undefined,
-): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
+): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
@@ -265,14 +265,14 @@ const makeSession = (
       ),
     ).pipe(Effect.catch(crash), Effect.forkIn(scope));
 
-    const interrupt: HarnessAgentSession["interrupt"] = Effect.gen(function* () {
+    const interrupt: HarnessAgentRuntime["interrupt"] = Effect.gen(function* () {
       if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
       yield* agent.session
         .interrupt(sessionId)
         .pipe(Effect.mapError((cause) => operationError(sessionId, "interrupt", cause)));
     });
 
-    const setModel: HarnessAgentSession["setModel"] = (model) =>
+    const setModel: HarnessAgentRuntime["setModel"] = (model) =>
       Effect.gen(function* () {
         if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
         yield* agent.session
@@ -280,7 +280,7 @@ const makeSession = (
           .pipe(Effect.mapError((cause) => operationError(sessionId, "set-model", cause)));
       });
 
-    const setPermissionMode: HarnessAgentSession["setPermissionMode"] = (mode) =>
+    const setPermissionMode: HarnessAgentRuntime["setPermissionMode"] = (mode) =>
       Effect.gen(function* () {
         if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
         const native = toClaudePermissionMode(mode);
@@ -299,7 +299,7 @@ const makeSession = (
           );
       });
 
-    const getCapabilities: HarnessAgentSession["getCapabilities"] = Effect.gen(function* () {
+    const getCapabilities: HarnessAgentRuntime["getCapabilities"] = Effect.gen(function* () {
       const [commands, models, mcpServers] = yield* Effect.all(
         [
           agent.session.getSupportedCommands(sessionId),
@@ -325,7 +325,7 @@ const makeSession = (
     // The SDK has no runtime reasoningEffort control (only a query-start option), so
     // this adapter declares no `reasoningEfforts` traits on its models and the setter
     // is a defensive no-op — the client renders no reasoningEffort control for it.
-    const setReasoningEffort: HarnessAgentSession["setReasoningEffort"] = () => Effect.void;
+    const setReasoningEffort: HarnessAgentRuntime["setReasoningEffort"] = () => Effect.void;
 
     return {
       sessionId,
@@ -420,7 +420,7 @@ const makeSession = (
         return sessionMessagesToUIMessages(records);
       }),
       close,
-    } satisfies HarnessAgentSession;
+    } satisfies HarnessAgentRuntime;
   });
 
 export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapter => ({
@@ -454,7 +454,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId, input.cwd)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId, input.cwd)),
       Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
@@ -464,7 +464,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
           ? cause
           : new AgentOpenError({ harnessAgentId: "claude-code", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId, input.cwd)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId, input.cwd)),
     ),
   getSessionInfo: (harnessSessionId, cwd) =>
     agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(

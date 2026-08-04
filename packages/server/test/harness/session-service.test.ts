@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
 import type {
   HarnessAgentAdapter,
-  HarnessAgentSession,
+  HarnessAgentRuntime,
   SessionInfoResult,
 } from "../../src/harness/adapter";
 import { TurnAlreadyRunning } from "../../src/harness/errors";
@@ -95,7 +95,7 @@ describe("HarnessAgentSessionService", () => {
           };
           // Sessions drain an empty native stream by default — enough to
           // exercise the orchestration without any live projection state.
-          const makeSession = (sessionId: string): HarnessAgentSession => ({
+          const makeSession = (sessionId: string): HarnessAgentRuntime => ({
             sessionId,
             harnessAgentId: "claude-code",
             events: turnEvents(sessionId),

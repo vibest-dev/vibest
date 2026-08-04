@@ -9,7 +9,7 @@ import type * as Cause from "effect/Cause";
 import { makeEventBus } from "../../src/events/event-bus";
 import type {
   HarnessAgentAdapter,
-  HarnessAgentSession,
+  HarnessAgentRuntime,
   SessionInfoResult,
   UserInput,
 } from "../../src/harness/adapter";
@@ -34,7 +34,7 @@ const makeFixture = Effect.gen(function* () {
   const closeGate = yield* Deferred.make<void>();
   const crashGate = yield* Deferred.make<void>();
 
-  const makeSession = (sessionId: string): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
+  const makeSession = (sessionId: string): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
     Effect.gen(function* () {
       const scope = yield* Scope.Scope;
       const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
@@ -102,7 +102,7 @@ const makeFixture = Effect.gen(function* () {
           supportsPermissions: false,
         }),
         close,
-      } satisfies HarnessAgentSession;
+      } satisfies HarnessAgentRuntime;
     });
 
   const adapter = {

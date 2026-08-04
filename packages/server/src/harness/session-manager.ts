@@ -8,7 +8,7 @@ import type {
 import { Context, Deferred, Effect, Exit, FileSystem, Layer, Ref, Scope, Stream } from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
-import type { CreateSessionInput, HarnessAgentSession } from "./adapter";
+import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
 import {
   AgentOpenError,
   AgentUnavailable,
@@ -42,27 +42,27 @@ import {
  * key — never interpreted. Adapters never see it.
  */
 
-type ManagedSession = {
-  readonly session: HarnessAgentSession;
+type ManagedRuntime = {
+  readonly runtime: HarnessAgentRuntime;
   readonly scope: Scope.Closeable;
 };
 
 type ManagerState = {
-  readonly active: ReadonlyMap<string, ManagedSession>;
-  readonly inFlight: ReadonlyMap<string, Deferred.Deferred<ManagedSession, ResumeSessionError>>;
+  readonly active: ReadonlyMap<string, ManagedRuntime>;
+  readonly inFlight: ReadonlyMap<string, Deferred.Deferred<ManagedRuntime, ResumeSessionError>>;
   readonly closing: ReadonlyMap<string, Deferred.Deferred<void>>;
 };
 
 type EnsureDecision =
-  | { readonly _tag: "Active"; readonly managed: ManagedSession }
+  | { readonly _tag: "Active"; readonly managed: ManagedRuntime }
   | { readonly _tag: "WaitForClose"; readonly deferred: Deferred.Deferred<void> }
   | {
       readonly _tag: "Start";
-      readonly deferred: Deferred.Deferred<ManagedSession, ResumeSessionError>;
+      readonly deferred: Deferred.Deferred<ManagedRuntime, ResumeSessionError>;
     }
   | {
       readonly _tag: "Wait";
-      readonly deferred: Deferred.Deferred<ManagedSession, ResumeSessionError>;
+      readonly deferred: Deferred.Deferred<ManagedRuntime, ResumeSessionError>;
     };
 
 type CloseDecision =
@@ -70,12 +70,12 @@ type CloseDecision =
   | { readonly _tag: "Wait"; readonly deferred: Deferred.Deferred<void> }
   | {
       readonly _tag: "Start";
-      readonly managed: ManagedSession;
+      readonly managed: ManagedRuntime;
       readonly deferred: Deferred.Deferred<void>;
     }
   | {
       readonly _tag: "StartAfterBuild";
-      readonly build: Deferred.Deferred<ManagedSession, ResumeSessionError>;
+      readonly build: Deferred.Deferred<ManagedRuntime, ResumeSessionError>;
       readonly deferred: Deferred.Deferred<void>;
     };
 
@@ -88,7 +88,7 @@ export type HarnessAgentSessionManagerShape = {
     harnessAgentId: HarnessAgentId,
     input: CreateSessionInput,
     ref: SessionRef,
-  ) => Effect.Effect<HarnessAgentSession, CreateSessionError>;
+  ) => Effect.Effect<HarnessAgentRuntime, CreateSessionError>;
   /**
    * Idempotently make sure a native session is open and draining: an active
    * one returns immediately, a concurrent ensure joins the in-flight build,
@@ -100,7 +100,7 @@ export type HarnessAgentSessionManagerShape = {
     ref: SessionRef,
   ) => Effect.Effect<void, ResumeSessionError>;
   /** The live session for a native id; fails when it is not open. */
-  readonly get: (sessionId: string) => Effect.Effect<HarnessAgentSession, HarnessSessionNotFound>;
+  readonly get: (sessionId: string) => Effect.Effect<HarnessAgentRuntime, HarnessSessionNotFound>;
   /**
    * Close and forget a session — instance, projection, and index; idempotent,
    * concurrent closes share one run. This is the only path that discards a
@@ -137,7 +137,7 @@ export const makeHarnessAgentSessionManager = (
     // `provide(Effect.context())` — the latter captures the whole layer-build
     // context, `ownerScope` included, and wins the merge over a caller's.
     const fileSystem = yield* FileSystem.FileSystem;
-    const runtime: HarnessAgentSessionRuntimeShape = yield* makeHarnessAgentSessionRuntime(bus);
+    const live: HarnessAgentSessionRuntimeShape = yield* makeHarnessAgentSessionRuntime(bus);
     const state = yield* Ref.make<ManagerState>({
       active: new Map(),
       inFlight: new Map(),
@@ -149,22 +149,22 @@ export const makeHarnessAgentSessionManager = (
     // projection.
     const refs = yield* Ref.make<ReadonlyMap<string, SessionRef>>(new Map());
 
-    const register = (candidate: ManagedSession) =>
+    const register = (candidate: ManagedRuntime) =>
       Ref.modify(state, (current) => {
-        const existing = current.active.get(candidate.session.sessionId);
+        const existing = current.active.get(candidate.runtime.sessionId);
         if (existing) return [existing, current] as const;
         return [
           candidate,
           {
             ...current,
-            active: new Map(current.active).set(candidate.session.sessionId, candidate),
+            active: new Map(current.active).set(candidate.runtime.sessionId, candidate),
           },
         ] as const;
       }).pipe(
         Effect.tap((registered) =>
           registered === candidate
             ? Effect.void
-            : candidate.session.close.pipe(Effect.andThen(Scope.close(candidate.scope, Exit.void))),
+            : candidate.runtime.close.pipe(Effect.andThen(Scope.close(candidate.scope, Exit.void))),
         ),
       );
 
@@ -187,7 +187,7 @@ export const makeHarnessAgentSessionManager = (
         ),
       );
 
-    const getManaged = (sessionId: string): Effect.Effect<ManagedSession, HarnessSessionNotFound> =>
+    const getManaged = (sessionId: string): Effect.Effect<ManagedRuntime, HarnessSessionNotFound> =>
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
           const managed = current.active.get(sessionId);
@@ -197,8 +197,8 @@ export const makeHarnessAgentSessionManager = (
         }),
       );
 
-    const closeManaged = (managed: ManagedSession) =>
-      managed.session.close.pipe(
+    const closeManaged = (managed: ManagedRuntime) =>
+      managed.runtime.close.pipe(
         Effect.ensuring(Scope.close(managed.scope, Exit.void)),
         Effect.asVoid,
       );
@@ -264,9 +264,9 @@ export const makeHarnessAgentSessionManager = (
       );
 
     // A crash releases the instance but keeps projection + index (see `close`).
-    const startDrain = (managed: ManagedSession, ref: SessionRef) =>
-      runtime.start(ref, managed.session.events.pipe(Stream.map((draft) => draft.body)), {
-        onCrash: closeInstance(managed.session.sessionId),
+    const startDrain = (managed: ManagedRuntime, ref: SessionRef) =>
+      live.start(ref, managed.runtime.events.pipe(Stream.map((draft) => draft.body)), {
+        onCrash: closeInstance(managed.runtime.sessionId),
       });
 
     const build = (
@@ -285,7 +285,7 @@ export const makeHarnessAgentSessionManager = (
         const adapter = yield* checkAvailable(harnessAgentId);
         const sessionScope = yield* Scope.fork(ownerScope, "sequential");
         return yield* Effect.gen(function* () {
-          const session = yield* (
+          const opened = yield* (
             mode._tag === "Open"
               ? adapter.open(mode.input)
               : adapter.resume({
@@ -293,12 +293,12 @@ export const makeHarnessAgentSessionManager = (
                   cwd: mode.input.cwd,
                 })
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
-          const managed = yield* register({ session, scope: sessionScope });
+          const managed = yield* register({ runtime: opened, scope: sessionScope });
           // Both the register winner and a deduped loser pass through here:
           // recording the index twice is idempotent and `runtime.start` treats
           // an already-draining ref as a no-op.
           yield* Ref.update(refs, (current) =>
-            new Map(current).set(managed.session.sessionId, ref),
+            new Map(current).set(managed.runtime.sessionId, ref),
           );
           yield* startDrain(managed, ref);
           return managed;
@@ -309,7 +309,7 @@ export const makeHarnessAgentSessionManager = (
       Ref.get(refs).pipe(
         Effect.flatMap((current) => {
           const ref = current.get(sessionId);
-          return ref === undefined ? Effect.void : runtime.stop(ref);
+          return ref === undefined ? Effect.void : live.stop(ref);
         }),
         Effect.andThen(closeInstance(sessionId)),
         Effect.andThen(
@@ -327,7 +327,7 @@ export const makeHarnessAgentSessionManager = (
     ): Effect.Effect<void, ResumeSessionError> =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const candidate = yield* Deferred.make<ManagedSession, ResumeSessionError>();
+          const candidate = yield* Deferred.make<ManagedRuntime, ResumeSessionError>();
           const decision = yield* Ref.modify<ManagerState, EnsureDecision>(state, (current) => {
             const closing = current.closing.get(input.sessionId);
             if (closing) return [{ _tag: "WaitForClose", deferred: closing }, current];
@@ -390,7 +390,7 @@ export const makeHarnessAgentSessionManager = (
     return {
       open: (harnessAgentId, input, ref) =>
         build({ _tag: "Open", harnessAgentId, input }, ref).pipe(
-          Effect.map((managed) => managed.session),
+          Effect.map((managed) => managed.runtime),
           // `build` is shared with the resume path, so its error union carries
           // SessionNotResumable; on the open path that can only mean the
           // adapter misbehaved, so it is folded into AgentOpenError.
@@ -401,11 +401,11 @@ export const makeHarnessAgentSessionManager = (
           ),
         ),
       ensure,
-      get: (sessionId) => getManaged(sessionId).pipe(Effect.map((managed) => managed.session)),
+      get: (sessionId) => getManaged(sessionId).pipe(Effect.map((managed) => managed.runtime)),
       close,
-      status: (ref) => runtime.status(ref),
-      emit: (ref, body) => runtime.emit(ref, body),
-      snapshot: (ref) => runtime.snapshot(ref),
+      status: (ref) => live.status(ref),
+      emit: (ref, body) => live.emit(ref, body),
+      snapshot: (ref) => live.snapshot(ref),
     } satisfies HarnessAgentSessionManagerShape;
   });
 
