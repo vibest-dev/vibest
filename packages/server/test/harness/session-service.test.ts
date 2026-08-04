@@ -54,6 +54,8 @@ describe("HarnessAgentSessionService", () => {
     opts: {
       unavailable?: string;
       history?: ReadonlyArray<UIMessage>;
+      // The adapter reads history cold, off disk — no runtime involved.
+      coldHistory?: ReadonlyArray<UIMessage>;
       // Feed the projection a turn: "open" leaves it in flight, "finished"
       // ends it (the runtime retains the completed buffer until the next turn).
       turn?: "open" | "finished";
@@ -137,6 +139,9 @@ describe("HarnessAgentSessionService", () => {
                 spy.resume.push({ sessionId, cwd });
                 return makeSession(sessionId);
               }),
+            ...(opts.coldHistory !== undefined
+              ? { getMessages: () => Effect.succeed(opts.coldHistory ?? []) }
+              : {}),
             getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
           } satisfies HarnessAgentAdapter;
           const registry = makeHarnessAgentRegistry([adapter]);
@@ -327,6 +332,21 @@ describe("HarnessAgentSessionService", () => {
       }),
     );
     expect(messages.map((message) => message.id)).toEqual(["u1", "a1", "u2", "a2"]);
+  });
+
+  it("getMessages reads cold through the adapter without starting anything", async () => {
+    const history: UIMessage[] = [{ id: "m1", role: "user", parts: [] }];
+    const result = await run({ coldHistory: history }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.close(ref);
+        const messages = yield* fixture.service.getMessages(ref, "/tmp/vibest-app");
+        return { messages, resume: fixture.spy.resume };
+      }),
+    );
+    expect(result.messages).toEqual(history);
+    // A harness that can read its own transcript is never asked for a process.
+    expect(result.resume).toEqual([]);
   });
 
   it("getMessages fails CapabilityUnsupported when the harness has no history read", async () => {

@@ -167,7 +167,6 @@ const toPermissionResult = (
 const makeRuntime = (
   agent: ClaudeCodeAgent,
   sessionId: string,
-  cwd: string | undefined,
 ): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
@@ -408,17 +407,8 @@ const makeRuntime = (
           Effect.andThen(emit({ type: "session.request.replied", sessionId, requestId })),
         ),
       getCapabilities,
-      // Native history read: the SDK reads the session's transcript file and
-      // the fold rebuilds final-form messages. `SessionMessage` never leaves
-      // here. `dir` narrows the lookup to the project's cwd bucket — the same
-      // narrowing getSessionInfo uses.
-      getMessages: Effect.gen(function* () {
-        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
-        const records = yield* agent.session
-          .getSessionMessages(sessionId, cwd !== undefined ? { dir: cwd } : undefined)
-          .pipe(Effect.mapError((cause) => operationError(sessionId, "get-messages", cause)));
-        return sessionMessagesToUIMessages(records);
-      }),
+      // No `getMessages` here: the transcript is a file, so the read belongs on
+      // the adapter, where it costs no session (see `readMessages`).
       close,
     } satisfies HarnessAgentRuntime;
   });
@@ -454,7 +444,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
-      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId, input.cwd)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
       Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
@@ -464,8 +454,20 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
           ? cause
           : new AgentOpenError({ harnessAgentId: "claude-code", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId, input.cwd)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
+  // Cold history read: the SDK reads the session's transcript file and the
+  // fold rebuilds final-form messages, so a client can page through a session
+  // it never opened. `SessionMessage` never leaves here. `dir` narrows the
+  // lookup to the project's cwd bucket — the same narrowing getSessionInfo
+  // uses.
+  getMessages: (harnessSessionId, cwd) =>
+    agent.session
+      .getSessionMessages(harnessSessionId, cwd !== undefined ? { dir: cwd } : undefined)
+      .pipe(
+        Effect.map(sessionMessagesToUIMessages),
+        Effect.mapError((cause) => operationError(harnessSessionId, "get-messages", cause)),
+      ),
   getSessionInfo: (harnessSessionId, cwd) =>
     agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(
       // The SDK buckets a session under the cwd it ran in. That is the project's

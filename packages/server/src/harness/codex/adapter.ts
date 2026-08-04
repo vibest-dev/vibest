@@ -319,16 +319,8 @@ const makeRuntime = (
         supportsSteering: true,
         supportsPermissions: true,
       }),
-      // Native history read: `thread/read` returns the stored turns in the
-      // same ThreadItem vocabulary the live transform streams, so the cold
-      // fold and the live track can't drift apart.
-      getMessages: Effect.gen(function* () {
-        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
-        const thread = yield* agent.session
-          .read({ sessionId, includeTurns: true })
-          .pipe(Effect.mapError((cause) => operationError(sessionId, "get-messages", cause)));
-        return turnsToUIMessages(thread.turns);
-      }),
+      // No `getMessages` here: `thread/read` answers off the shared
+      // app-server, so the read belongs on the adapter (see `readMessages`).
       close,
     } satisfies HarnessAgentRuntime;
   });
@@ -378,6 +370,15 @@ export const makeCodexAdapter = (
           : new AgentOpenError({ harnessAgentId: "codex", cause }),
       ),
       Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
+    ),
+  // Cold history read: `thread/read` returns the stored turns in the same
+  // ThreadItem vocabulary the live transform streams, so the cold fold and the
+  // live track can't drift apart — and it answers off the shared app-server,
+  // so reading a session costs no thread of its own.
+  getMessages: (harnessSessionId) =>
+    agent.session.read({ sessionId: harnessSessionId, includeTurns: true }).pipe(
+      Effect.map((thread) => turnsToUIMessages(thread.turns)),
+      Effect.mapError((cause) => operationError(harnessSessionId, "get-messages", cause)),
     ),
   getSessionInfo: (harnessSessionId) =>
     agent.session.read({ sessionId: harnessSessionId }).pipe(

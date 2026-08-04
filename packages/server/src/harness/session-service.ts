@@ -114,11 +114,15 @@ export type HarnessAgentSessionServiceShape = {
     projectId: string,
   ) => Effect.Effect<ReadonlyArray<SessionSummary>, StoreReadError>;
   /**
-   * The session's native history as final-form UIMessages. Ensures the
-   * session has a runtime (single-flight acquisition via the manager), reads
-   * through the runtime's optional `getMessages` (absence = the harness has no
-   * history read → {@link CapabilityUnsupported}), then trims the active
-   * turn's tail so history never duplicates the live stream.
+   * The session's native history as final-form UIMessages, then trimmed of the
+   * active turn's tail so history never duplicates the live stream.
+   *
+   * How it is read is the harness's own policy, expressed structurally rather
+   * than by a flag: an adapter that can read a transcript cold does so and
+   * costs nothing, otherwise the session's runtime answers — acquired for the
+   * purpose if it has none, which for pi is the only way its history exists at
+   * all. A harness that offers neither read fails
+   * {@link CapabilityUnsupported}.
    */
   readonly getMessages: (
     ref: SessionRef,
@@ -285,6 +289,57 @@ export const makeHarnessAgentSessionService = (deps: {
             ),
           );
 
+  /**
+   * The three ways a harness can produce history, in the order that costs the
+   * least. Which one applies is structural — what the adapter and the runtime
+   * implement — not a flag: a cold read answers off disk or a shared server, a
+   * runtime we already hold answers for free, and only a harness whose history
+   * *lives* in its child process is worth starting one for.
+   *
+   * That last case is also where a harness offering neither read is found out,
+   * one acquisition too late; there is no cheaper way to learn it, and no such
+   * harness exists today.
+   */
+  const readHistory = (
+    ref: SessionRef,
+    harnessSessionId: string,
+    cwd: string,
+  ): Effect.Effect<
+    ReadonlyArray<UIMessage>,
+    ResumeSessionError | CapabilityUnsupported | SessionClosed | AgentOperationError
+  > =>
+    registry.get(ref.harnessAgentId).pipe(
+      Effect.flatMap((adapter) => {
+        const cold = adapter.getMessages;
+        if (cold) return cold(harnessSessionId, cwd);
+        return manager.peek(ref).pipe(
+          Effect.flatMap((held) =>
+            held
+              ? Effect.succeed(held)
+              : manager.ensureRuntime(
+                  { sessionId: harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
+                  ref,
+                ),
+          ),
+          Effect.flatMap(
+            (
+              runtime,
+            ): Effect.Effect<
+              ReadonlyArray<UIMessage>,
+              CapabilityUnsupported | SessionClosed | AgentOperationError
+            > =>
+              runtime.getMessages ??
+              Effect.fail(
+                new CapabilityUnsupported({
+                  harnessAgentId: ref.harnessAgentId,
+                  capability: "getMessages",
+                }),
+              ),
+          ),
+        );
+      }),
+    );
+
   const readChecked = (ref: SessionRef) =>
     repo
       .read(ref.projectId, ref.sessionId)
@@ -448,47 +503,27 @@ export const makeHarnessAgentSessionService = (deps: {
     getMessages: (ref, cwd) =>
       readChecked(ref).pipe(
         Effect.flatMap((metadata) =>
-          manager
-            .ensureRuntime(
-              { sessionId: metadata.harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
-              ref,
-            )
-            .pipe(
-              Effect.flatMap(
-                (
-                  runtime,
-                ): Effect.Effect<
-                  ReadonlyArray<UIMessage>,
-                  CapabilityUnsupported | SessionClosed | AgentOperationError
-                > =>
-                  runtime.getMessages ??
-                  Effect.fail(
-                    new CapabilityUnsupported({
-                      harnessAgentId: ref.harnessAgentId,
-                      capability: "getMessages",
-                    }),
-                  ),
-              ),
-              Effect.flatMap((messages) =>
-                // History includes the in-flight turn's user entry; the live
-                // stream replays that turn, so drop the last user segment while
-                // a turn runs. A finished turn's buffer is retained
-                // (complete: true) until the next turn starts — that is
-                // settled history, not an in-flight turn, so it must not trim.
-                // An untouched session reads as idle, so it never trims.
-                manager.snapshot(ref).pipe(
-                  Effect.map((snapshot) => {
-                    if (snapshot.activeTurn === null || snapshot.activeTurn.complete) {
-                      return messages;
-                    }
-                    for (let index = messages.length - 1; index >= 0; index -= 1) {
-                      if (messages[index]?.role === "user") return messages.slice(0, index);
-                    }
+          readHistory(ref, metadata.harnessSessionId, cwd).pipe(
+            Effect.flatMap((messages) =>
+              // History includes the in-flight turn's user entry; the live
+              // stream replays that turn, so drop the last user segment while
+              // a turn runs. A finished turn's buffer is retained
+              // (complete: true) until the next turn starts — that is
+              // settled history, not an in-flight turn, so it must not trim.
+              // An untouched session reads as idle, so it never trims.
+              manager.snapshot(ref).pipe(
+                Effect.map((snapshot) => {
+                  if (snapshot.activeTurn === null || snapshot.activeTurn.complete) {
                     return messages;
-                  }),
-                ),
+                  }
+                  for (let index = messages.length - 1; index >= 0; index -= 1) {
+                    if (messages[index]?.role === "user") return messages.slice(0, index);
+                  }
+                  return messages;
+                }),
               ),
             ),
+          ),
         ),
       ),
 

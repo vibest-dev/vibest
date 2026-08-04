@@ -71,6 +71,9 @@ export type HarnessAgentSessionManagerShape = {
    * start one.
    */
   readonly get: (ref: SessionRef) => Effect.Effect<HarnessAgentRuntime, HarnessSessionNotFound>;
+  /** The same lookup as {@link get}, for callers that have something else to do
+   * when nothing is running rather than an error to raise. */
+  readonly peek: (ref: SessionRef) => Effect.Effect<HarnessAgentRuntime | undefined>;
   /**
    * Close and forget a session — runtime and session state alike; idempotent.
    * This is the only path that discards a crashed session (a crash alone
@@ -237,6 +240,13 @@ export const makeHarnessAgentSessionManager = (
         Effect.flatMap((runtime) => (runtime ? Effect.succeed(runtime) : acquireVia(ref, acquire))),
       );
 
+    const peek = (ref: SessionRef): Effect.Effect<HarnessAgentRuntime | undefined> =>
+      withSession<HarnessAgentRuntime | undefined>(
+        ref,
+        (session) => session.peekRuntime,
+        undefined,
+      );
+
     // The session stays in the table, marked closing, until its runtime is
     // gone: removing it first would let a concurrent write build a second
     // session for the same ref and resume it alongside the one still dying.
@@ -296,17 +306,14 @@ export const makeHarnessAgentSessionManager = (
         ),
       ensureRuntime: (input, ref) => acquireVia(ref, acquireResume(input)),
       get: (ref) =>
-        withSession<HarnessAgentRuntime | undefined>(
-          ref,
-          (session) => session.peekRuntime,
-          undefined,
-        ).pipe(
+        peek(ref).pipe(
           Effect.flatMap((runtime) =>
             runtime
               ? Effect.succeed(runtime)
               : Effect.fail(new HarnessSessionNotFound({ sessionId: ref.sessionId })),
           ),
         ),
+      peek,
       close,
       status: (ref) => withSession(ref, (session) => session.status, toStatus(initialSessionState)),
       snapshot: (ref) =>
