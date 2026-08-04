@@ -197,22 +197,31 @@ describe("HarnessAgentSessionService", () => {
     expect(result.listed).toHaveLength(0);
   });
 
-  it("resume translates the ref to the native id and passes the cwd", async () => {
-    const resumeSpy = await run({}, (fixture) =>
+  it("attach backfills the cwd and starts nothing", async () => {
+    const result = await run({}, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* fixture.service.close(ref);
-        yield* fixture.service.resume(ref, "/tmp/vibest-app");
-        return fixture.spy.resume;
+        // A record from before we stored cwd — the case the backfill exists for.
+        const stored = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+        const { cwd: _dropped, ...withoutCwd } = stored;
+        yield* fixture.repo.write(withoutCwd);
+
+        yield* fixture.service.attach(ref, "/tmp/vibest-app");
+        const after = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+        return { cwd: after.cwd, resume: fixture.spy.resume, open: fixture.spy.open };
       }),
     );
-    expect(resumeSpy).toEqual([{ sessionId: "native-1", cwd: "/tmp/vibest-app" }]);
+    expect(result.cwd).toBe("/tmp/vibest-app");
+    // Opening a session page costs no process — the whole point of `attach`.
+    expect(result.resume).toEqual([]);
+    expect(result.open).toHaveLength(1);
   });
 
-  it("resume fails with SessionNotFound for an unknown session", async () => {
+  it("attach fails with SessionNotFound for an unknown session", async () => {
     const err = await run({}, (fixture) =>
       Effect.flip(
-        fixture.service.resume(
+        fixture.service.attach(
           { projectId: "proj-a", harnessAgentId: "claude-code", sessionId: "missing" },
           "/tmp/vibest-app",
         ),
@@ -221,12 +230,12 @@ describe("HarnessAgentSessionService", () => {
     expect(err._tag).toBe("SessionNotFound");
   });
 
-  it("resume fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {
+  it("attach fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {
     const err = await run({}, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         return yield* Effect.flip(
-          fixture.service.resume({ ...ref, harnessAgentId: "codex" }, "/tmp/vibest-app"),
+          fixture.service.attach({ ...ref, harnessAgentId: "codex" }, "/tmp/vibest-app"),
         );
       }),
     );

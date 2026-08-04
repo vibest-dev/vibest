@@ -37,6 +37,7 @@ import {
   AgentRequestUnavailable,
   CapabilityUnsupported,
   PermissionModeUnsupported,
+  SessionNotResumable,
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
@@ -95,12 +96,30 @@ export type HarnessAgentSessionServiceShape = {
       readonly permissionMode?: PermissionMode;
     },
   ) => Effect.Effect<SessionRef, CreateSessionError | StoreWriteError>;
-  readonly resume: (
+  /**
+   * What a client does when it opens a session: prove the ref is real and
+   * self-consistent, record the project's working directory on it, and confirm
+   * the harness still has the native session behind it. Deliberately starts
+   * nothing — a session becomes live when someone prompts it, not when someone
+   * looks at it, which is why a reconnecting client no longer revives every
+   * agent it had open.
+   *
+   * The cwd backfill is the reason this is a write: `cwd` is a floor field we
+   * own, and this is the only path that learns the project's path for a
+   * session created before we stored one.
+   */
+  readonly attach: (
     ref: SessionRef,
     cwd: string,
   ) => Effect.Effect<
     void,
-    SessionNotFound | SessionRefMismatch | StoreReadError | ResumeSessionError
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | StoreWriteError
+    | HarnessAgentNotFound
+    | SessionNotResumable
+    | AgentOperationError
   >;
   readonly close: (
     ref: SessionRef,
@@ -426,19 +445,27 @@ export const makeHarnessAgentSessionService = (deps: {
         }),
       ),
 
-    resume: (ref, cwd) =>
+    attach: (ref, cwd) =>
       readChecked(ref).pipe(
-        Effect.flatMap((metadata) =>
-          manager.ensureRuntime(
-            {
-              sessionId: metadata.harnessSessionId,
-              harnessAgentId: ref.harnessAgentId,
-              cwd,
-            },
-            ref,
-          ),
+        Effect.tap((metadata) =>
+          metadata.cwd === cwd ? Effect.void : repo.write({ ...metadata, cwd }),
         ),
-        Effect.asVoid,
+        Effect.flatMap((metadata) =>
+          registry
+            .get(ref.harnessAgentId)
+            .pipe(
+              Effect.flatMap((adapter) => adapter.getSessionInfo(metadata.harnessSessionId, cwd)),
+            ),
+        ),
+        // A harness that has forgotten the session says so cheaply, and saying
+        // it now is the difference between a toast on open and a mystery when
+        // the user finally sends a message. `unsupported` is not a verdict —
+        // pi cannot answer this question at all.
+        Effect.flatMap((info) =>
+          info._tag === "missing"
+            ? Effect.fail(new SessionNotResumable({ sessionId: ref.sessionId }))
+            : Effect.void,
+        ),
       ),
 
     close: (ref) =>

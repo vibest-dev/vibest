@@ -66,11 +66,14 @@ export const sessionRouter = orpc.router({
       }),
     );
   }),
-  resume: orpc.resume.effect(function* ({ input, errors }) {
+  // Opening a session page: validate, backfill cwd, confirm the harness still
+  // has the native session. No process is started here — that is the whole
+  // point of the rename.
+  attach: orpc.attach.effect(function* ({ input, errors }) {
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
     return yield* projects.findById(input.ref.projectId).pipe(
-      Effect.flatMap((project) => sessions.resume(input.ref, project.path)),
+      Effect.flatMap((project) => sessions.attach(input.ref, project.path)),
       Effect.as(input.ref),
       Effect.catchTags({
         SessionNotFound: (e) =>
@@ -82,12 +85,8 @@ export const sessionRouter = orpc.router({
         ProjectNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
         HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        AgentUnavailable: (e) =>
-          Effect.fail(errors.UNSUPPORTED({ message: `${e.harnessAgentId}: ${e.reason}` })),
-        ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        HarnessSessionNotFound: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
         SessionNotResumable: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
-        AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
       }),
     );
   }),

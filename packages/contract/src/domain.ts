@@ -605,9 +605,6 @@ export const CreateSessionInputSchema = Schema.Struct({
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
-export const ResumeSessionInputSchema = Schema.Struct({ ref: SessionRefSchema });
-export type ResumeSessionInput = typeof ResumeSessionInputSchema.Type;
-
 export const ListSessionsInputSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
 });

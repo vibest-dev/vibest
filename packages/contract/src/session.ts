@@ -11,7 +11,6 @@ import {
   RenameSessionInputSchema,
   ResolveRefInputSchema,
   RespondToAgentRequestInputSchema,
-  ResumeSessionInputSchema,
   type SessionMessages,
   SessionRefSchema,
   type SessionRuntimeSnapshot,
@@ -37,9 +36,10 @@ export const sessionContract = {
   create: base
     .input(toStandardSchema(CreateSessionInputSchema))
     .output(toStandardSchema(SessionRefSchema)),
-  resume: base
-    .input(toStandardSchema(ResumeSessionInputSchema))
-    .output(toStandardSchema(SessionRefSchema)),
+  // Not "resume": it validates the ref, backfills the session's cwd, and
+  // checks the harness still knows the native session. It starts nothing —
+  // only a prompt does that.
+  attach: base.input(toStandardSchema(RefInputSchema)).output(toStandardSchema(SessionRefSchema)),
   close: base.input(toStandardSchema(RefInputSchema)),
 
   // history / index
