@@ -359,6 +359,38 @@ describe("HarnessAgentSessionService", () => {
     expect(err._tag).toBe("CapabilityUnsupported");
   });
 
+  it("interrupt succeeds with nothing running instead of starting an agent", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.close(ref);
+        yield* fixture.service.interrupt(ref);
+        return fixture.spy.resume;
+      }),
+    );
+    // The turn it would have stopped died with the process; resuming one in
+    // order to interrupt it would be absurd.
+    expect(result).toEqual([]);
+  });
+
+  it("respondToAgentRequest reports the request as gone with nothing running", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.close(ref);
+        const err = yield* Effect.flip(
+          fixture.service.respondToAgentRequest(ref, "req-1", {
+            type: "tool",
+            behavior: "allow",
+          }),
+        );
+        return { err, resume: fixture.spy.resume };
+      }),
+    );
+    expect(result.err._tag).toBe("AgentRequestUnavailable");
+    expect(result.resume).toEqual([]);
+  });
+
   it("titles a session from its first prompt, collapsing whitespace", async () => {
     const listed = await run({}, (fixture) =>
       Effect.gen(function* () {

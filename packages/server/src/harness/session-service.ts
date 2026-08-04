@@ -26,7 +26,6 @@ import type { Session } from "../types";
 import type { PromptReceipt, SessionCapabilities, SessionInfoResult, UserInput } from "./adapter";
 import type {
   AgentOperationError,
-  AgentRequestUnavailable,
   CreateSessionError,
   HarnessAgentNotFound,
   HarnessSessionNotFound,
@@ -34,7 +33,11 @@ import type {
   SessionClosed,
   TurnAlreadyRunning,
 } from "./errors";
-import { CapabilityUnsupported, PermissionModeUnsupported } from "./errors";
+import {
+  AgentRequestUnavailable,
+  CapabilityUnsupported,
+  PermissionModeUnsupported,
+} from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
@@ -155,16 +158,17 @@ export type HarnessAgentSessionServiceShape = {
     | TurnAlreadyRunning
     | AgentOperationError
   >;
+  /**
+   * Stop the active turn. A session with nothing running succeeds without
+   * doing anything: after a restart the turn the user is trying to stop died
+   * with the process, so "stopped" is the truth and starting an agent in order
+   * to interrupt it would be absurd.
+   */
   readonly interrupt: (
     ref: SessionRef,
   ) => Effect.Effect<
     void,
-    | SessionNotFound
-    | SessionRefMismatch
-    | StoreReadError
-    | HarnessSessionNotFound
-    | SessionClosed
-    | AgentOperationError
+    SessionNotFound | SessionRefMismatch | StoreReadError | SessionClosed | AgentOperationError
   >;
   // Session-scoped config setters. They record the choice on the session and
   // push it to the runtime only if one is live: picking a model for a session
@@ -197,6 +201,12 @@ export type HarnessAgentSessionServiceShape = {
     | SessionClosed
     | AgentOperationError
   >;
+  /**
+   * Answer a permission or question request. With nothing running there is
+   * nobody left to hear it — the request died with the process that raised it —
+   * so this is {@link AgentRequestUnavailable}, the same answer a request
+   * someone else already resolved gets.
+   */
   readonly respondToAgentRequest: (
     ref: SessionRef,
     requestId: string,
@@ -206,7 +216,6 @@ export type HarnessAgentSessionServiceShape = {
     | SessionNotFound
     | SessionRefMismatch
     | StoreReadError
-    | HarnessSessionNotFound
     | AgentRequestUnavailable
     | AgentOperationError
   >;
@@ -351,8 +360,6 @@ export const makeHarnessAgentSessionService = (deps: {
   // The repo read stays: it is what validates the ref (SessionNotFound /
   // SessionRefMismatch) before the manager is asked for anything. It just no
   // longer supplies an address — the manager is keyed by the ref itself.
-  const withSession = (ref: SessionRef) => readChecked(ref).pipe(Effect.andThen(manager.get(ref)));
-
   // The first prompt establishes the session title. Best-effort: a failed
   // title write must never block the prompt itself. A record that already has
   // a title (any later prompt) is left alone. On a real write we publish
@@ -560,7 +567,11 @@ export const makeHarnessAgentSessionService = (deps: {
         );
       }),
 
-    interrupt: (ref) => withSession(ref).pipe(Effect.flatMap((session) => session.interrupt)),
+    interrupt: (ref) =>
+      readChecked(ref).pipe(
+        Effect.andThen(manager.peek(ref)),
+        Effect.flatMap((runtime) => runtime?.interrupt ?? Effect.void),
+      ),
 
     setModel: (ref, model) =>
       readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { model }))),
@@ -587,12 +598,23 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     respondToAgentRequest: (ref, requestId, response) =>
-      withSession(ref).pipe(
-        Effect.flatMap((session) => session.respondToAgentRequest(requestId, response)),
+      readChecked(ref).pipe(
+        Effect.andThen(manager.peek(ref)),
+        Effect.flatMap((runtime) =>
+          runtime
+            ? runtime.respondToAgentRequest(requestId, response)
+            : Effect.fail(new AgentRequestUnavailable({ sessionId: ref.sessionId, requestId })),
+        ),
       ),
 
     getCapabilities: (ref) =>
-      withSession(ref).pipe(Effect.flatMap((session) => session.getCapabilities)),
+      // The one operation still gated on something running: what a harness can
+      // do is negotiated with the live agent, and there is nothing to ask when
+      // no agent is there.
+      readChecked(ref).pipe(
+        Effect.andThen(manager.get(ref)),
+        Effect.flatMap((runtime) => runtime.getCapabilities),
+      ),
 
     getSessionInfo: (ref) =>
       readChecked(ref).pipe(
