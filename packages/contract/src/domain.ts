@@ -184,6 +184,8 @@ export type SessionStatus = typeof SessionStatusSchema.Type;
 
 export const SessionScopedEventTypes = [
   "session.message.chunk",
+  "session.prompt.submitted",
+  "session.prompt.rejected",
   "session.turn.started",
   "session.turn.ended",
   "session.request.asked",
@@ -207,6 +209,26 @@ export type SessionScopedEventBody =
       readonly turnId: string;
       readonly chunk: UIMessageChunk;
     }
+  // A user prompt was accepted for this session. Published by the session
+  // service *before* the harness call, so it always precedes the turn's own
+  // events in seq order; `messageId` echoes the client-supplied id (or a
+  // server-minted one), letting the prompting client dedupe its optimistic
+  // message while every other client appends it. If the harness then rejects
+  // the prompt, `session.prompt.rejected` compensates.
+  | {
+      readonly type: "session.prompt.submitted";
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    }
+  // Compensates a `session.prompt.submitted` whose harness call was then
+  // rejected (turn already running, session closed, harness error): clients
+  // drop the message with this id, and the runtime clears the retained
+  // activePrompt so a mid-turn joiner never hydrates a prompt that never ran.
+  | {
+      readonly type: "session.prompt.rejected";
+      readonly messageId: string;
+      readonly reason?: string;
+    }
   | { readonly type: "session.turn.started"; readonly turnId: string }
   | {
       readonly type: "session.turn.ended";
@@ -227,7 +249,19 @@ export type SessionScopedEventBody =
 /** A session-scoped event before the SessionRuntime stamps its `seq`. */
 export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
 
-export type SessionScopedEvent = { readonly seq: number } & SessionScopedEventDraft;
+export type SessionScopedEvent = {
+  readonly seq: number;
+  /**
+   * The session's phase *after* this event applied, stamped by the
+   * SessionRuntime alongside `seq`. Consumers copy it (sidebar status, chat
+   * composer state) instead of re-deriving phase from event types — the
+   * runtime is the only place that knows the full transition table
+   * (`requires_action` in particular is invisible to a client-side mapping).
+   * Absent only on chunk events replayed from a snapshot's retained buffer;
+   * there the snapshot's own `status` is the phase source.
+   */
+  readonly phase?: SessionPhase;
+} & SessionScopedEventDraft;
 
 export type CollectionEvent = { readonly ref: SessionRef } & (
   | { readonly type: "session.created" }
@@ -302,6 +336,21 @@ export type ActiveTurnSnapshot = {
   // A finished turn's buffer is retained (complete: true) until the next turn
   // starts, so recovery can replay a tail that ended mid-disconnect.
   readonly complete: boolean;
+  // The buffer is bounded; a turn that overflowed it had its oldest chunks
+  // dropped. A truncated buffer cannot rebuild the turn's message from its
+  // start — consumers skip it and recover the turn from the history read
+  // once it ends.
+  readonly truncated: boolean;
+};
+
+// The latest accepted prompt, retained like the active turn's buffer:
+// `session.prompt.submitted` is never re-sent, so a client attaching mid-turn
+// recovers the user message from here. `seq` is the submit event's seq — replay
+// gates on it, so a client that saw the live event never renders it twice.
+export type ActivePromptSnapshot = {
+  readonly messageId: string;
+  readonly parts: ReadonlyArray<PromptPart>;
+  readonly seq: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -425,6 +474,7 @@ export type SessionRuntimeSnapshot = {
   readonly status: SessionStatus;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;
+  readonly activePrompt: ActivePromptSnapshot | null;
   // Last session-scoped seq folded into this snapshot; 0 before any event.
   readonly cursor: number;
 };
@@ -468,6 +518,10 @@ export type PromptPart = typeof PromptPartSchema.Type;
 export const PromptInputSchema = Schema.Struct({
   ref: SessionRefSchema,
   parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
+  // The client's own id for the optimistic user message, echoed back in
+  // `session.prompt.submitted` so the sender can recognise (and skip) its own
+  // prompt while other clients render it. Absent → the server mints one.
+  messageId: Schema.optionalKey(Schema.NonEmptyString),
 });
 export type PromptInput = typeof PromptInputSchema.Type;
 
@@ -521,6 +575,7 @@ export type DirectoryEntry = typeof DirectoryEntrySchema.Type;
 
 export const BrowseInputSchema = Schema.Struct({
   path: Schema.optionalKey(Schema.String),
+  includeHidden: Schema.optionalKey(Schema.Boolean),
 });
 export const BrowseResultSchema = Schema.Struct({
   path: Schema.String,

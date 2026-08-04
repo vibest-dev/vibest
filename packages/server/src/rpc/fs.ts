@@ -39,11 +39,14 @@ export const fsRouter = orpc.router({
     // Resolving and joining are pure string math, so they stay on `node:path`.
     const dir = path.resolve(input.path ?? os.homedir());
     // Folder-picker policy (owned here, not a shared fs service): directories
-    // only, hide dotfolders and node_modules, sorted by name.
+    // only, hide dotfolders unless requested, always hide node_modules, and
+    // sort by name.
     const names = yield* fs
       .readDirectory(dir)
       .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path: dir } })));
-    const candidates = names.filter((name) => !name.startsWith(".") && !IGNORED_DIRS.has(name));
+    const candidates = names.filter(
+      (name) => (input.includeHidden || !name.startsWith(".")) && !IGNORED_DIRS.has(name),
+    );
     // readDirectory yields names only, so stat each to keep just directories. A
     // failing stat (e.g. broken symlink) drops that entry rather than the list.
     const flagged = yield* Effect.forEach(

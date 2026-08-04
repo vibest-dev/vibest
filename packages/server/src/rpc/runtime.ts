@@ -64,12 +64,22 @@ const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
  * The trade is that a CLI installed while the server is running is not noticed
  * until it restarts.
  */
-const cacheAvailability = (
+// The `uninterruptible` around the CALL is load-bearing: `Effect.cached` runs
+// the computation on the first caller's fiber and stores whatever exit it
+// observes — forever, including an interruption. A client that disconnects
+// mid-`harness.list` interrupts that fiber, and the poisoned cache then
+// replays the interruption to every later caller: the endpoint 500s until the
+// server restarts. Wrapping the computation alone is not enough (the pending
+// interrupt lands exactly when interruptibility is restored, before the cache
+// stores the exit), so the guard covers the whole cached call. The check is
+// bounded (one `--version` spawn with its own timeout), so riding out the
+// interruption is safe.
+export const cacheAvailability = (
   adapter: HarnessAgentAdapter,
 ): Effect.Effect<HarnessAgentAdapter, never, FileSystem.FileSystem> =>
-  Effect.map(Effect.cached(adapter.checkAvailability), (checkAvailability) => ({
+  Effect.map(Effect.cached(adapter.checkAvailability), (cachedCheck) => ({
     ...adapter,
-    checkAvailability,
+    checkAvailability: Effect.uninterruptible(cachedCheck),
   }));
 
 const RegistryLayer = Layer.effect(

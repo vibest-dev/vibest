@@ -14,6 +14,7 @@ export type RequestAppOptions = {
   readonly authToken: string | undefined;
   /** Extra cross-origin allowlist entries on top of the built-in trusted set. */
   readonly corsOrigins: readonly string[];
+  readonly allowedHosts: readonly string[];
   readonly tickets: TicketStore;
   /** Everything the API routes below do not claim. */
   readonly ui: UIApp;
@@ -46,11 +47,14 @@ export const makeRequestApp = (
     // is not loopback comes from an attacker page whose domain rebound to
     // 127.0.0.1 — CORS would not stop it, this does. Answered before the CORS
     // headers are computed, so a rebound request gets none of them.
-    if (!isLoopbackHost(request.headers.host)) {
+    if (!isLoopbackHost(request.headers.host, options.allowedHosts)) {
       return forbidden;
     }
 
-    const headers = corsHeaders(request.headers.origin, options.corsOrigins);
+    const headers = corsHeaders(request.headers.origin, {
+      extraOrigins: options.corsOrigins,
+      allowedHosts: options.allowedHosts,
+    });
     const withCors = (response: HttpServerResponse.HttpServerResponse) =>
       headers ? HttpServerResponse.setHeaders(response, headers) : response;
 

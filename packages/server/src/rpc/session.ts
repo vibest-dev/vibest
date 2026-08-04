@@ -144,16 +144,6 @@ export const sessionRouter = orpc.router({
     );
   }),
   getMessages: orpc.getMessages.effect(function* ({ input, errors }) {
-    // Scope gate: only pi serves native history today (tickets 10/11 widen
-    // this). The gate also keeps claude-code/codex from paying an ensure — a
-    // live process — for a call that would end CapabilityUnsupported anyway.
-    if (input.ref.harnessAgentId !== "pi") {
-      return yield* Effect.fail(
-        errors.UNSUPPORTED({
-          message: `native history reads not implemented for ${input.ref.harnessAgentId} yet`,
-        }),
-      );
-    }
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
     return yield* projects.findById(input.ref.projectId).pipe(

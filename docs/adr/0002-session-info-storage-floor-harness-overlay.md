@@ -114,7 +114,7 @@ Landed (server-only, storage schema at `version: 1`, no migration):
 - The **`session.updated` collection event carries the reconciler**: the server
   publishes it (with the new title) when the first prompt stamps the title — the
   "specific event", never a timer. A single always-mounted client subscriber
-  (`SessionEventsSync`) consumes the global firehose and patches each open
+  (`useSessionListSync`) consumes the global firehose and patches each open
   `session.list` cache in place (updated → merge title, renamed, deleted;
   created is a no-op the creating tab already seeded). This is multi-client,
   survives navigation/reload, and replaced the fragile per-route turn-end

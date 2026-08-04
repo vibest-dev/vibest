@@ -140,6 +140,8 @@ export interface CodexAgent {
      */
     readonly read: (config: {
       readonly sessionId: string;
+      /** Include stored turns + items (rollout history) in the reply. */
+      readonly includeTurns?: boolean;
     }) => Effect.Effect<ThreadReadResponse["thread"], CodexTransportFailure>;
     readonly prompt: (input: {
       readonly sessionId: string;
@@ -604,6 +606,7 @@ export const makeCodexAgentWithDependencies = <R>(
             const transport = yield* holder.ensure;
             const response = yield* transport.request<ThreadReadResponse>("thread/read", {
               threadId: config.sessionId,
+              ...(config.includeTurns !== undefined ? { includeTurns: config.includeTurns } : {}),
             });
             return response.thread;
           }),

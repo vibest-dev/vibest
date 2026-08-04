@@ -12,7 +12,14 @@ import type { PiUIMessageChunk } from "./ui-message";
 // with retries/compaction folded into the same run):
 //   • message_update deltas → text-* / reasoning-* (ids are `m<msg>.<block>`;
 //     pi content indexes restart per assistant message, so blocks are scoped
-//     by a per-run message ordinal)
+//     by a per-run message ordinal, advanced on `message_start role=assistant`
+//     — the only per-message marker RPC mode actually emits; the
+//     assistantMessageEvent `start` delta never appears on this wire)
+//   • a `message_start role=user` after assistant output is a delivered steer
+//     (pi injects it as a real user entry — see ADR 0003): close the open
+//     UIMessage and start a fresh one, so live segmentation matches the
+//     persisted history fold. The echo of the *prompting* input arrives
+//     before any assistant message and is skipped.
 //   • tool_execution_start/end → tool-input-available + tool-output-available.
 //     The AI-SDK tool chunks are generic, so args/results forward whole; the
 //     PiTools types still discriminate `message.parts` downstream.
@@ -49,7 +56,13 @@ export function createPiTransform(
   let turnOpen = false;
   // Ordinal of the assistant message within the run; pi's contentIndex restarts
   // per message, so block ids need both to stay unique inside one UIMessage.
+  // Doubles as "has this run produced assistant output yet" (> 0), which is
+  // what tells a delivered steer apart from the prompting input's echo.
   let messageOrdinal = 0;
+  // A steered user message landed mid-run: split before the next assistant
+  // message rather than eagerly, so an interrupt right after delivery doesn't
+  // leave an empty trailing UIMessage.
+  let pendingSplit = false;
   // Block ids that streamed at least one delta, so *_end can recover text that
   // only arrived whole (the no-delta fallback, mirroring codex).
   const streamedBlocks = new Set<string>();
@@ -61,9 +74,6 @@ export function createPiTransform(
   ): Generator<PiUIMessageChunk> {
     const delta = event.assistantMessageEvent;
     switch (delta.type) {
-      case "start":
-        messageOrdinal += 1;
-        break;
       case "text_start":
         yield { type: "text-start", id: blockId(delta.contentIndex) };
         break;
@@ -111,7 +121,22 @@ export function createPiTransform(
         if (!turnOpen) {
           turnOpen = true;
           messageOrdinal = 0;
+          pendingSplit = false;
           yield { type: "start", messageId: uuid(), messageMetadata: { sessionId } };
+        }
+        break;
+
+      case "message_start":
+        if (!turnOpen) break;
+        if (event.message.role === "assistant") {
+          if (pendingSplit) {
+            pendingSplit = false;
+            yield { type: "finish" };
+            yield { type: "start", messageId: uuid(), messageMetadata: { sessionId } };
+          }
+          messageOrdinal += 1;
+        } else if (event.message.role === "user" && messageOrdinal > 0) {
+          pendingSplit = true;
         }
         break;
 
@@ -164,6 +189,7 @@ export function createPiTransform(
       case "agent_settled":
         if (turnOpen) {
           turnOpen = false;
+          pendingSplit = false;
           streamedBlocks.clear();
           yield { type: "finish" };
         }
@@ -175,7 +201,6 @@ export function createPiTransform(
       // it's routed or listed.
       default:
         void (event.type satisfies
-          | "message_start"
           | "message_end"
           | "tool_execution_update"
           | "turn_start"

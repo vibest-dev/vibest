@@ -32,6 +32,13 @@ export function createDesktopHost(
     if (!isAbortError(error)) console.error("Desktop server connection failed", error);
   });
 
+  // The feed's snapshot. Every subscriber advances it, so it is tracked with
+  // its own revision — a subscriber that opened later must not push the
+  // snapshot backwards. Per-subscriber revisions stay local: sharing one would
+  // let the first stream to see an event make the others discard it.
+  let status = bootstrap.status;
+  let statusRevision = bootstrap.statusRevision;
+
   return {
     platform: {
       quit: () => {
@@ -39,11 +46,12 @@ export function createDesktopHost(
           if (!isAbortError(error)) console.error("Failed to request desktop quit", error);
         });
       },
+      os: bootstrap.os,
     },
     server,
     refreshServer: () => client.server.connection(),
     status: {
-      initial: bootstrap.status,
+      getSnapshot: () => status,
       subscribe: (listener) => {
         const controller = new AbortController();
         let revision = bootstrap.statusRevision;
@@ -53,6 +61,10 @@ export function createDesktopHost(
             onEvent: (snapshot) => {
               if (snapshot.revision <= revision) return;
               revision = snapshot.revision;
+              if (snapshot.revision > statusRevision) {
+                statusRevision = snapshot.revision;
+                status = snapshot.status;
+              }
               listener(snapshot.status);
             },
             onError: (error) => {

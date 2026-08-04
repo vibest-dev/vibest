@@ -6,6 +6,7 @@ import type {
   ReasoningEffort,
   SessionRef,
   SessionRuntimeSnapshot,
+  SessionScopedEventBody,
   SessionStatus,
   SessionSummary,
 } from "@vibest/contract";
@@ -494,19 +495,41 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     prompt: (input) =>
-      readChecked(input.ref).pipe(
-        Effect.flatMap((metadata) =>
-          toUserInput(input.parts).pipe(
-            Effect.flatMap((userInput) =>
-              // The first prompt names the session before it reaches the harness.
-              stampTitleFromFirstPrompt(metadata, input.parts).pipe(
-                Effect.andThen(manager.get(metadata.harnessSessionId)),
-                Effect.flatMap((session) => session.prompt(userInput)),
-              ),
-            ),
+      Effect.gen(function* () {
+        const metadata = yield* readChecked(input.ref);
+        const userInput = yield* toUserInput(input.parts);
+        // The first prompt names the session before it reaches the harness.
+        yield* stampTitleFromFirstPrompt(metadata, input.parts);
+        const session = yield* manager.get(metadata.harnessSessionId);
+        const messageId = input.messageId ?? (yield* newSessionId);
+
+        // Best-effort: a session whose runtime is gone will fail the prompt
+        // itself with the real error a line later.
+        const emitBestEffort = (body: SessionScopedEventBody) =>
+          manager
+            .emit(input.ref, body)
+            .pipe(Effect.catchTag("SessionNotActive", () => Effect.void));
+
+        // Broadcast the accepted prompt *before* the harness call so it always
+        // precedes the turn's own events in seq order. If the harness then
+        // rejects the prompt, `session.prompt.rejected` compensates — clients
+        // drop the phantom user message and the runtime clears the retained
+        // activePrompt.
+        yield* emitBestEffort({
+          type: "session.prompt.submitted",
+          messageId,
+          parts: input.parts,
+        });
+        return yield* session.prompt(userInput).pipe(
+          Effect.tapError((promptError) =>
+            emitBestEffort({
+              type: "session.prompt.rejected",
+              messageId,
+              reason: promptError.message,
+            }),
           ),
-        ),
-      ),
+        );
+      }),
 
     interrupt: (ref) => withSession(ref).pipe(Effect.flatMap((session) => session.interrupt)),
 

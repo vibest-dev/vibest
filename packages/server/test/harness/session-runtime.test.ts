@@ -233,3 +233,48 @@ it.effect("a naturally ending stream removes its runtime", () =>
     }),
   ),
 );
+
+it.effect("bounds the active turn buffer and marks it truncated on overflow", () =>
+  run(
+    Effect.gen(function* () {
+      const manager = yield* SessionRuntimeService;
+      const queue = yield* makeQueue;
+      yield* manager.start(ref, streamFromQueueOne(queue));
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      // Three ~4MiB deltas cross the 10MiB byte cap; eviction keeps the
+      // newest tail.
+      const big = "x".repeat(4 * 1024 * 1024);
+      for (let index = 0; index < 3; index += 1) {
+        yield* Queue.offer(queue, { type: "text-delta", id: "t", delta: big });
+      }
+      const snapshot = yield* awaitCursor(manager, 4);
+      assert.equal(snapshot.activeTurn?.truncated, true);
+      // The retained tail stays within the cap and keeps the newest chunks.
+      assert.equal((snapshot.activeTurn?.chunks.length ?? 0) < 3, true);
+      assert.equal(snapshot.activeTurn?.chunks.at(-1)?.seq, 4);
+    }),
+  ),
+);
+
+it.effect("a turn under the buffer caps is not marked truncated", () =>
+  run(
+    Effect.gen(function* () {
+      const manager = yield* SessionRuntimeService;
+      const queue = yield* makeQueue;
+      yield* manager.start(ref, streamFromQueueOne(queue));
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      yield* Queue.offer(queue, { type: "text-delta", id: "t", delta: "hello" });
+      const snapshot = yield* awaitCursor(manager, 2);
+      assert.equal(snapshot.activeTurn?.truncated, false);
+      assert.equal(snapshot.activeTurn?.chunks.length, 1);
+    }),
+  ),
+);

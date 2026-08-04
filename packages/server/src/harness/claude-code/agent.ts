@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import { Deferred, Effect, Exit, FiberSet, FileSystem, Queue, Ref, Scope, Stream } from "effect";
@@ -13,6 +16,7 @@ import {
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
 import { resolveClaudeExecutable } from "./executable";
+import { parseTranscriptRecords } from "./transcript";
 
 const SESSION_QUEUE_CAPACITY = 1024;
 
@@ -96,6 +100,14 @@ export interface ClaudeCodeAgent {
       sessionId: string,
       options?: { readonly dir?: string },
     ) => Effect.Effect<ClaudeSessionInfo, ClaudeSdkError>;
+    /**
+     * Reads the session's transcript records from the SDK's on-disk history
+     * without touching the live query — the raw material for a history fold.
+     */
+    readonly getSessionMessages: (
+      sessionId: string,
+      options?: { readonly dir?: string },
+    ) => Effect.Effect<sdk.SessionMessage[], ClaudeSdkError>;
     readonly prompt: (input: {
       readonly sessionId: string;
       readonly message: sdk.SDKUserMessage["message"];
@@ -676,6 +688,36 @@ export const makeClaudeCodeAgent = ({
           Effect.tryPromise<ClaudeSessionInfo, ClaudeSdkError>({
             try: () => getSessionInfo(sessionId, options?.dir ? { dir: options.dir } : undefined),
             catch: (cause) => sdkError("get-session-info", cause),
+          }),
+        // File-order read of the CLI's own transcript, NOT `sdk.getSessionMessages`
+        // — see `parseTranscriptRecords` for why the SDK's branch walk loses
+        // replies. `dir` narrows to the CLI's munged project directory first;
+        // a miss falls back to scanning every project directory (session ids
+        // are uuids, so the file name cannot collide).
+        getSessionMessages: (sessionId, options) =>
+          Effect.gen(function* () {
+            const projectsRoot = path.join(os.homedir(), ".claude", "projects");
+            const fileName = `${sessionId}.jsonl`;
+            // Unreadable candidate = absent candidate: keep scanning; a session
+            // with no transcript on disk yields empty history, not an error.
+            const readCandidate = (candidate: string) =>
+              fileSystem.readFileString(candidate).pipe(
+                Effect.map((content) => parseTranscriptRecords(content, sessionId)),
+                Effect.orElseSucceed(() => null),
+              );
+            if (options?.dir !== undefined) {
+              const munged = options.dir.replace(/[^a-zA-Z0-9]/g, "-");
+              const narrowed = yield* readCandidate(path.join(projectsRoot, munged, fileName));
+              if (narrowed !== null) return narrowed;
+            }
+            const entries = yield* fileSystem
+              .readDirectory(projectsRoot)
+              .pipe(Effect.orElseSucceed((): string[] => []));
+            for (const entry of entries) {
+              const records = yield* readCandidate(path.join(projectsRoot, entry, fileName));
+              if (records !== null) return records;
+            }
+            return [];
           }),
         setModel: (sessionId, model) =>
           callQuery(sessionId, "set-model", (sdkQuery) => sdkQuery.setModel(model)),

@@ -4,7 +4,8 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "interruptible": true
+      "interruptible": true,
+      "passThroughEnv": ["*"]
     },
     "preview": {
       "cache": false,

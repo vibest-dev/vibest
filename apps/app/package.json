@@ -40,6 +40,7 @@
     "tailwindcss": "catalog:",
     "tw-animate-css": "catalog:",
     "tw-shimmer": "^0.4.12",
+    "use-stick-to-bottom": "^1.1.6",
     "zustand": "catalog:"
   },
   "devDependencies": {

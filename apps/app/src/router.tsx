@@ -4,14 +4,14 @@ import Loader from "./components/loader";
 import type { AppClients } from "./lib/orpc";
 import { routeTree } from "./routeTree.gen";
 
-type RouterDependencies = Pick<AppClients, "orpcQueryUtils" | "queryClient">;
+type RouterDependencies = Pick<AppClients, "orpcClient" | "orpcQueryUtils" | "queryClient">;
 
-export const createRouter = ({ orpcQueryUtils, queryClient }: RouterDependencies) => {
+export const createRouter = ({ orpcClient, orpcQueryUtils, queryClient }: RouterDependencies) => {
   const router = createTanStackRouter({
     routeTree,
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
-    context: { orpcQueryUtils, queryClient },
+    context: { orpcClient, orpcQueryUtils, queryClient },
     defaultPendingComponent: () => <Loader />,
     defaultNotFoundComponent: () => <div>Not Found</div>,
   });

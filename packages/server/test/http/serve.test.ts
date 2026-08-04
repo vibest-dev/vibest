@@ -27,34 +27,44 @@ afterEach(() => {
 describe("resolveServeConfig", () => {
   it("prefers the flag over env and default for the port", () => {
     process.env.VIBEST_PORT = "5000";
-    expect(resolveServeConfig({ port: Option.some(3000), corsOrigin: [] }).port).toBe(3000);
+    expect(
+      resolveServeConfig({ port: Option.some(3000), corsOrigin: [], allowedHost: [] }).port,
+    ).toBe(3000);
   });
 
   it("falls back to VIBEST_PORT when no flag is given", () => {
     process.env.VIBEST_PORT = "5000";
-    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [] }).port).toBe(5000);
+    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [], allowedHost: [] }).port).toBe(
+      5000,
+    );
   });
 
   it("defaults to 4000 in production and 0 in development", () => {
-    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [] }).port).toBe(4000);
+    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [], allowedHost: [] }).port).toBe(
+      4000,
+    );
     process.env.NODE_ENV = "development";
-    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [] }).port).toBe(0);
+    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [], allowedHost: [] }).port).toBe(
+      0,
+    );
   });
 
   it("prefers repeated --cors-origin flags over VIBEST_CORS_ORIGINS", () => {
     process.env.VIBEST_CORS_ORIGINS = "https://env.example";
     expect(
-      resolveServeConfig({ port: Option.none(), corsOrigin: ["https://a.test", "https://b.test"] })
-        .corsOrigins,
+      resolveServeConfig({
+        port: Option.none(),
+        corsOrigin: ["https://a.test", "https://b.test"],
+        allowedHost: [],
+      }).corsOrigins,
     ).toEqual(["https://a.test", "https://b.test"]);
   });
 
   it("falls back to the comma-separated env list when no flag is given", () => {
     process.env.VIBEST_CORS_ORIGINS = " https://a.test , https://b.test ,";
-    expect(resolveServeConfig({ port: Option.none(), corsOrigin: [] }).corsOrigins).toEqual([
-      "https://a.test",
-      "https://b.test",
-    ]);
+    expect(
+      resolveServeConfig({ port: Option.none(), corsOrigin: [], allowedHost: [] }).corsOrigins,
+    ).toEqual(["https://a.test", "https://b.test"]);
   });
 });
 
@@ -68,7 +78,7 @@ describe("runServe", () => {
 
     try {
       const exit = await Effect.runPromiseExit(
-        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [] })),
+        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })),
       );
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
       expect(error).toBeInstanceOf(ServerStartupError);

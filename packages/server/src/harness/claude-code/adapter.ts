@@ -26,6 +26,7 @@ import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { streamFromQueueOne } from "../queue-stream";
 import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
 import { checkClaudeAvailability } from "./executable";
+import { sessionMessagesToUIMessages } from "./history";
 import { toSessionEvent } from "./to-session-event";
 import { createTransform } from "./transform";
 
@@ -166,6 +167,7 @@ const toPermissionResult = (
 const makeSession = (
   agent: ClaudeCodeAgent,
   sessionId: string,
+  cwd: string | undefined,
 ): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
@@ -406,6 +408,17 @@ const makeSession = (
           Effect.andThen(emit({ type: "session.request.replied", sessionId, requestId })),
         ),
       getCapabilities,
+      // Native history read: the SDK reads the session's transcript file and
+      // the fold rebuilds final-form messages. `SessionMessage` never leaves
+      // here. `dir` narrows the lookup to the project's cwd bucket — the same
+      // narrowing getSessionInfo uses.
+      getMessages: Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        const records = yield* agent.session
+          .getSessionMessages(sessionId, cwd !== undefined ? { dir: cwd } : undefined)
+          .pipe(Effect.mapError((cause) => operationError(sessionId, "get-messages", cause)));
+        return sessionMessagesToUIMessages(records);
+      }),
       close,
     } satisfies HarnessAgentSession;
   });
@@ -441,7 +454,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId, input.cwd)),
       Effect.tap((session) => applyInitialSessionConfig(session, input)),
     ),
   resume: (input) =>
@@ -451,7 +464,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
           ? cause
           : new AgentOpenError({ harnessAgentId: "claude-code", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId, input.cwd)),
     ),
   getSessionInfo: (harnessSessionId, cwd) =>
     agent.session.getSessionInfo(harnessSessionId, cwd ? { dir: cwd } : undefined).pipe(

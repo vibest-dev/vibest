@@ -30,6 +30,13 @@ outside their hash inputs. `pnpm clean` runs `git clean -xdf`.
 `apps/desktop/src` has its own layering contract in `apps/desktop/AGENTS.md` —
 read it before touching that app.
 
+## Pull requests
+
+Use **squash merge** — one commit per PR keeps `main` readable. Don't mix
+merge-commit / rebase merges in the repo. Squash rewrites the branch tip out
+of `main`'s history, so deleting the local feature branch needs `git branch -D`
+— the changes are already on `main`, so it's safe.
+
 ## Going deeper
 
 - `CONTEXT.md` — glossary. Read it before naming anything in the session domain;

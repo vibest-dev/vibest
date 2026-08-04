@@ -29,6 +29,12 @@ export type CreateServerOptions = {
    * common case, where the static policy already covers every real client.
    */
   corsOrigins?: readonly string[] | undefined;
+  /**
+   * Extra Host-header allowlist entries on top of loopback, for a trusted
+   * reverse proxy in front of the daemon (e.g. `tailscale serve`, which
+   * preserves the tailnet MagicDNS Host). Unset in the common case.
+   */
+  allowedHosts?: readonly string[] | undefined;
 };
 
 /** Startup failed for an operational reason: building the server or binding. */
@@ -71,11 +77,12 @@ type WiredServer = {
 function wireServer(options: {
   readonly authToken: string | undefined;
   readonly corsOrigins: readonly string[];
+  readonly allowedHosts: readonly string[];
   readonly tickets: TicketStore;
   readonly wsHandler: (ws: WebSocket) => void;
   readonly handleRequest: RequestListener;
 }): WiredServer {
-  const { authToken, corsOrigins, tickets, wsHandler, handleRequest } = options;
+  const { authToken, corsOrigins, allowedHosts, tickets, wsHandler, handleRequest } = options;
 
   const server = http.createServer();
   server.on("request", handleRequest);
@@ -105,8 +112,9 @@ function wireServer(options: {
     // A native client (no Origin) still passes, gated only by the ticket below.
     const origin = req.headers.origin;
     if (
-      !isLoopbackHost(req.headers.host) ||
-      (origin !== undefined && !isAllowedOrigin(origin, corsOrigins))
+      !isLoopbackHost(req.headers.host, allowedHosts) ||
+      (origin !== undefined &&
+        !isAllowedOrigin(origin, { extraOrigins: corsOrigins, allowedHosts }))
     ) {
       socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
@@ -157,7 +165,7 @@ const buildServer = (
   stages: ServerStages,
 ): Effect.Effect<Server, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const { authToken, corsOrigins = [] } = options;
+    const { authToken, corsOrigins = [], allowedHosts = [] } = options;
 
     const rpcRuntime = yield* Effect.acquireRelease(
       Effect.promise(() => stages.createRpcRuntime()),
@@ -177,7 +185,7 @@ const buildServer = (
     const handleRequest = yield* Effect.promise(() =>
       stages.createRequestHandler(
         rpcRuntime,
-        makeRequestApp({ authToken, corsOrigins, tickets, ui }),
+        makeRequestApp({ authToken, corsOrigins, allowedHosts, tickets, ui }),
         requestScope,
       ),
     );
@@ -185,7 +193,9 @@ const buildServer = (
     // Last stage, so its release runs first: stop accepting connections and
     // drain both socket populations before anything behind them is torn down.
     const { server } = yield* Effect.acquireRelease(
-      Effect.sync(() => wireServer({ authToken, corsOrigins, tickets, wsHandler, handleRequest })),
+      Effect.sync(() =>
+        wireServer({ authToken, corsOrigins, allowedHosts, tickets, wsHandler, handleRequest }),
+      ),
       closeWiredServer,
     );
     return server;

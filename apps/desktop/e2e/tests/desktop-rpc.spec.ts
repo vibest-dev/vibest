@@ -202,9 +202,6 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
     const window = await app.firstWindow({ timeout: 30_000 });
     await expect(window).toHaveTitle("Vibest");
     await expect(window.getByText("Vibest could not start")).toHaveCount(0);
-    await expect(window.getByRole("button", { name: "New chat", exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
   } finally {
     try {
       if (app !== undefined) {
@@ -227,18 +224,22 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
   e2ePaths,
   window,
 }) => {
-  // The app lands on /draft, the new-session surface: typing the first
-  // message creates the session and navigates into it.
+  // The app lands on /draft, the new-session surface: picking the seeded
+  // project and typing the first message creates the session and navigates
+  // into it. There is no default project — the composer blocks until one is
+  // chosen.
   await waitForConnectedUi(window);
-  await window.getByRole("combobox").first().click();
-  await window.getByRole("option", { name: /E2E Project/ }).click();
-  await expect(window).toHaveURL(new RegExp(`projectId=${e2ePaths.projectId}`));
+
+  await window.getByRole("combobox").filter({ hasText: "Select a project" }).click();
+  await window.getByRole("option", { name: /e2e-workspace/ }).click();
 
   const input = window.locator("[contenteditable='true']");
   await input.fill("Desktop SDK E2E");
-  await window.locator("button[type='submit']").click();
+  await input.press("Enter");
 
   await expect(window).toHaveURL(/\/session\/[0-9a-f-]+/);
+  // Scoped to the transcript: the prompt text also becomes the session's
+  // optimistic title in the sidebar.
   const transcript = window.getByRole("log");
   await expect(transcript.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
   await expect(transcript.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
@@ -266,16 +267,17 @@ test("reports a server crash and recovers on the pinned connection", async ({
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
-test("leaves the shared server daemon running during Electron shutdown", async ({
-  electronApp,
-  window,
-}) => {
+test("leaves the daemon running through Electron shutdown", async ({ electronApp, window }) => {
   await expect(window).toHaveTitle("Vibest");
   const pid = await waitForServer(appPid(electronApp));
 
   await electronApp.close();
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
 
+  // The server is the shared vibest daemon the app attached to (or spawned) —
+  // it deliberately outlives Electron so the CLI and the next app launch
+  // converge on the same backend. `vibest daemon stop` is how it ends (the
+  // fixture teardown does the equivalent for the per-test daemon).
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
   expect(processExists(pid)).toBe(true);
 });
 

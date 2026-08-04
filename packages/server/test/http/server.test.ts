@@ -174,6 +174,25 @@ describe("createServer WebSocket ticket", () => {
     const base = await start({});
     expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
   });
+
+  it("accepts a proxy-forwarded upgrade whose Host and Origin name an allowed host", async () => {
+    // The tailscale-serve shape: the proxy preserves its public Host, and the
+    // page it served connects back with the matching browser Origin. Allowing
+    // the Host but rejecting the Origin would render the app without a
+    // working WebSocket.
+    const base = await start({ allowedHosts: ["proxy.ts.net"] });
+    expect(
+      await connect(base, "", "/ws/rpc", {
+        headers: { host: "proxy.ts.net" },
+        origin: "https://proxy.ts.net",
+      }),
+    ).toBe(200);
+  });
+
+  it("keeps rejecting unrelated Origins when allowed hosts are configured", async () => {
+    const base = await start({ allowedHosts: ["proxy.ts.net"] });
+    expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
+  });
 });
 
 describe("createServer staged startup", () => {

@@ -2,6 +2,7 @@ import type {
   HarnessAgentId,
   SessionRef,
   SessionRuntimeSnapshot,
+  SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
 import { Context, Deferred, Effect, Exit, FileSystem, Layer, Ref, Scope, Stream } from "effect";
@@ -110,6 +111,14 @@ export type HarnessAgentSessionManagerShape = {
   /** The projected status/snapshot for a session's live (or crashed) runtime. */
   readonly status: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
   readonly snapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
+  /**
+   * Inject a server-originated session event into the live runtime's stream —
+   * same seq counter and fan-out as harness events (see runtime `emit`).
+   */
+  readonly emit: (
+    ref: SessionRef,
+    body: SessionScopedEventBody,
+  ) => Effect.Effect<void, SessionNotActive>;
 };
 
 export class HarnessAgentSessionManager extends Context.Service<
@@ -395,6 +404,7 @@ export const makeHarnessAgentSessionManager = (
       get: (sessionId) => getManaged(sessionId).pipe(Effect.map((managed) => managed.session)),
       close,
       status: (ref) => runtime.status(ref),
+      emit: (ref, body) => runtime.emit(ref, body),
       snapshot: (ref) => runtime.snapshot(ref),
     } satisfies HarnessAgentSessionManagerShape;
   });

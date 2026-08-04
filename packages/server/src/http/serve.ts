@@ -19,11 +19,11 @@ function takeAuthToken(): string | undefined {
   return token;
 }
 
-function corsOriginsFromEnv(): string[] {
-  return (process.env.VIBEST_CORS_ORIGINS ?? "")
+function listFromEnv(name: string): string[] {
+  return (process.env[name] ?? "")
     .split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 function portFromEnv(): number {
@@ -42,11 +42,18 @@ export const serveFlags = {
     Flag.withDescription("Origin allowed to make cross-origin requests; repeatable"),
     Flag.atLeast(0),
   ),
+  allowedHost: Flag.string("allowed-host").pipe(
+    Flag.withDescription(
+      "Extra Host header accepted besides loopback, for a trusted reverse proxy; repeatable",
+    ),
+    Flag.atLeast(0),
+  ),
 };
 
 type ServeInput = {
   readonly port: Option.Option<number>;
   readonly corsOrigin: ReadonlyArray<string>;
+  readonly allowedHost: ReadonlyArray<string>;
 };
 
 /**
@@ -57,10 +64,14 @@ type ServeInput = {
 export function resolveServeConfig(input: ServeInput): {
   readonly port: number;
   readonly corsOrigins: readonly string[];
+  readonly allowedHosts: readonly string[];
 } {
   return {
     port: Option.getOrElse(input.port, portFromEnv),
-    corsOrigins: input.corsOrigin.length > 0 ? input.corsOrigin : corsOriginsFromEnv(),
+    corsOrigins:
+      input.corsOrigin.length > 0 ? input.corsOrigin : listFromEnv("VIBEST_CORS_ORIGINS"),
+    allowedHosts:
+      input.allowedHost.length > 0 ? input.allowedHost : listFromEnv("VIBEST_ALLOWED_HOSTS"),
   };
 }
 
@@ -73,11 +84,11 @@ export function resolveServeConfig(input: ServeInput): {
 export const runServe = (input: ServeInput) =>
   Effect.gen(function* () {
     const authToken = takeAuthToken();
-    const { port: requestedPort, corsOrigins } = resolveServeConfig(input);
+    const { port: requestedPort, corsOrigins, allowedHosts } = resolveServeConfig(input);
 
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => createServer({ authToken, corsOrigins }),
+        try: () => createServer({ authToken, corsOrigins, allowedHosts }),
         catch: (cause) => new ServerStartupError({ phase: "create", cause }),
       }),
       // A shutdown failure is logged, not thrown: the process is exiting, and
