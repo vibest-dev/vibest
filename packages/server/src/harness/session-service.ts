@@ -295,8 +295,10 @@ export const makeHarnessAgentSessionService = (deps: {
   const resolveHarnessSessionId = (ref: SessionRef) =>
     readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
 
-  const withSession = (ref: SessionRef) =>
-    resolveHarnessSessionId(ref).pipe(Effect.flatMap((id) => manager.get(id)));
+  // The repo read stays: it is what validates the ref (SessionNotFound /
+  // SessionRefMismatch) before the manager is asked for anything. It just no
+  // longer supplies an address — the manager is keyed by the ref itself.
+  const withSession = (ref: SessionRef) => readChecked(ref).pipe(Effect.andThen(manager.get(ref)));
 
   // The first prompt establishes the session title. Best-effort: a failed
   // title write must never block the prompt itself. A record that already has
@@ -355,7 +357,7 @@ export const makeHarnessAgentSessionService = (deps: {
                 };
                 return repo.write(metadata).pipe(
                   // A failed metadata write must not leak the native session.
-                  Effect.tapError(() => manager.close(session.sessionId)),
+                  Effect.tapError(() => manager.close(ref)),
                   Effect.andThen(bus.publish({ ref, type: "session.created" })),
                   Effect.as(ref),
                 );
@@ -380,24 +382,16 @@ export const makeHarnessAgentSessionService = (deps: {
 
     close: (ref) =>
       resolveHarnessSessionId(ref).pipe(
-        Effect.flatMap((harnessSessionId) =>
-          manager
-            .close(harnessSessionId)
-            .pipe(Effect.andThen(bus.closeSession(ref, "session_closed"))),
-        ),
+        Effect.andThen(manager.close(ref)),
+        Effect.andThen(bus.closeSession(ref, "session_closed")),
       ),
 
     delete: (ref) =>
       readChecked(ref).pipe(
-        Effect.flatMap((metadata) =>
-          manager
-            .close(metadata.harnessSessionId)
-            .pipe(
-              Effect.andThen(bus.closeSession(ref, "session_deleted")),
-              Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
-              Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
-            ),
-        ),
+        Effect.andThen(manager.close(ref)),
+        Effect.andThen(bus.closeSession(ref, "session_deleted")),
+        Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
+        Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
       ),
 
     rename: (ref, name) =>
@@ -454,7 +448,7 @@ export const makeHarnessAgentSessionService = (deps: {
               ref,
             )
             .pipe(
-              Effect.andThen(manager.get(metadata.harnessSessionId)),
+              Effect.andThen(manager.get(ref)),
               Effect.flatMap(
                 (
                   session,
@@ -500,7 +494,7 @@ export const makeHarnessAgentSessionService = (deps: {
         const userInput = yield* toUserInput(input.parts);
         // The first prompt names the session before it reaches the harness.
         yield* stampTitleFromFirstPrompt(metadata, input.parts);
-        const session = yield* manager.get(metadata.harnessSessionId);
+        const session = yield* manager.get(input.ref);
         const messageId = input.messageId ?? (yield* newSessionId);
 
         // Best-effort: a session whose runtime is gone will fail the prompt

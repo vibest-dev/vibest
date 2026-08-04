@@ -138,34 +138,34 @@ const makeFixture = Effect.gen(function* () {
 
 type Fixture = Effect.Success<typeof makeFixture>;
 
-/** Liveness probe: `get` succeeds while a session is active, fails once torn down. */
-const isActive = (fixture: Fixture, sessionId: string) =>
-  fixture.manager.get(sessionId).pipe(Effect.exit, Effect.map(Exit.isSuccess));
+/** Liveness probe: `get` succeeds while a session has a runtime, fails once torn down. */
+const isActive = (fixture: Fixture, ref: SessionRef) =>
+  fixture.manager.get(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess));
 
-it.effect("drains the native stream into the projection and tears down on close", () =>
+it.effect("drains the native stream into the session and tears down on close", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
     const ref = refFor("created");
     const session = yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, ref);
 
     const receipt = yield* session.prompt({ parts: [{ type: "text", text: "hello" }] });
-    // The manager's internal drain projects the emitted turn: 3 events, seq 3.
+    // The manager's drain folds the emitted turn into the session: 3 events, seq 3.
     const snapshot = yield* Effect.eventually(
       fixture.manager.snapshot(ref).pipe(
         Effect.filterOrFail(
           (current) => current.cursor >= 3,
-          () => new Error("projection did not catch up"),
+          () => new Error("session did not catch up"),
         ),
       ),
     );
 
-    yield* fixture.manager.close(session.sessionId);
+    yield* fixture.manager.close(ref);
 
     assert.deepEqual(receipt, { turnId: "turn-1" });
     assert.equal(snapshot.status.phase, "idle");
     assert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    assert.equal(yield* isActive(fixture, session.sessionId), false);
-    // Close discards the projection with the instance.
+    assert.equal(yield* isActive(fixture, ref), false);
+    // Close discards the session state with the runtime.
     assert.equal(
       yield* fixture.manager.status(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess)),
       false,
@@ -194,8 +194,8 @@ it.effect("single-flights ensure in owner scope when the first waiter cancels", 
     yield* Fiber.join(second);
 
     assert.equal(yield* Ref.get(fixture.resumeCalls), 1);
-    assert.equal(yield* isActive(fixture, input.sessionId), true);
-    yield* fixture.manager.close(input.sessionId);
+    assert.equal(yield* isActive(fixture, ref), true);
+    yield* fixture.manager.close(ref);
   }),
 );
 
@@ -205,7 +205,7 @@ it.effect("waits for an in-flight close before reopening the same session id", (
     const ref = refFor("created");
     const session = yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, ref);
     yield* Ref.set(fixture.holdClose, true);
-    const close = yield* Effect.forkChild(fixture.manager.close(session.sessionId));
+    const close = yield* Effect.forkChild(fixture.manager.close(ref));
     yield* Effect.eventually(
       Ref.get(fixture.closeCalls).pipe(
         Effect.filterOrFail(
@@ -233,8 +233,8 @@ it.effect("waits for an in-flight close before reopening the same session id", (
     yield* Fiber.join(close);
     yield* Fiber.join(resume);
 
-    assert.equal(yield* isActive(fixture, session.sessionId), true);
-    yield* fixture.manager.close(session.sessionId);
+    assert.equal(yield* isActive(fixture, ref), true);
+    yield* fixture.manager.close(ref);
   }),
 );
 
@@ -242,7 +242,8 @@ it.effect("closes a session that is still being resumed", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
     const input = { sessionId: "resumed-session", harnessAgentId: "claude-code" } as const;
-    const resume = yield* Effect.forkChild(fixture.manager.ensure(input, refFor("resumed")));
+    const ref = refFor("resumed");
+    const resume = yield* Effect.forkChild(fixture.manager.ensure(input, ref));
     yield* Effect.eventually(
       Ref.get(fixture.resumeCalls).pipe(
         Effect.filterOrFail(
@@ -251,23 +252,24 @@ it.effect("closes a session that is still being resumed", () =>
         ),
       ),
     );
-    const close = yield* Effect.forkChild(fixture.manager.close(input.sessionId));
+    const close = yield* Effect.forkChild(fixture.manager.close(ref));
 
     yield* Deferred.succeed(fixture.resumeGate, undefined);
     yield* Fiber.join(resume);
     yield* Fiber.join(close);
 
     assert.equal(yield* Ref.get(fixture.closeCalls), 1);
-    assert.equal(yield* isActive(fixture, input.sessionId), false);
+    assert.equal(yield* isActive(fixture, ref), false);
   }),
 );
 
 it.effect("shares one idempotent close operation", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
-    const session = yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, refFor("created"));
-    const first = yield* Effect.forkChild(fixture.manager.close(session.sessionId));
-    const second = yield* Effect.forkChild(fixture.manager.close(session.sessionId));
+    const ref = refFor("created");
+    yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, ref);
+    const first = yield* Effect.forkChild(fixture.manager.close(ref));
+    const second = yield* Effect.forkChild(fixture.manager.close(ref));
 
     yield* Fiber.join(first);
     yield* Fiber.join(second);
@@ -275,19 +277,19 @@ it.effect("shares one idempotent close operation", () =>
   }),
 );
 
-it.effect("a crash releases the instance but keeps the projection queryable", () =>
+it.effect("a crash releases the runtime but keeps the session queryable", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
     const ref = refFor("created");
-    const session = yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, ref);
+    yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, ref);
 
     yield* Deferred.succeed(fixture.crashGate, undefined);
-    // The crash closes the native instance (onCrash) …
+    // The crash closes the native runtime (onCrash) …
     yield* Effect.eventually(
       Ref.get(fixture.closeCalls).pipe(
         Effect.filterOrFail(
           (calls) => calls === 1,
-          () => new Error("crash did not close the instance"),
+          () => new Error("crash did not close the runtime"),
         ),
       ),
     );
@@ -295,14 +297,14 @@ it.effect("a crash releases the instance but keeps the projection queryable", ()
       fixture.manager.status(ref).pipe(
         Effect.filterOrFail(
           (status) => status.phase === "crashed",
-          () => new Error("projection did not reach crashed"),
+          () => new Error("session did not reach crashed"),
         ),
       ),
     );
-    // … while the projection survives at phase "crashed" for reconnecting
-    // clients, and only an explicit close discards it (via the ref index).
-    assert.equal(yield* isActive(fixture, session.sessionId), false);
-    yield* fixture.manager.close(session.sessionId);
+    // … while the session survives at phase "crashed" for reconnecting
+    // clients, and only an explicit close discards it.
+    assert.equal(yield* isActive(fixture, ref), false);
+    yield* fixture.manager.close(ref);
     assert.equal(
       yield* fixture.manager.status(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess)),
       false,
