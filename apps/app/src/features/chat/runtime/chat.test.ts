@@ -37,6 +37,7 @@ class FakeTransport implements ChatSessionTransport {
   historyGate: Promise<void> | null = null;
   getMessagesCalls = 0;
   promptCalls: Array<{ messageId: string; parts: ReadonlyArray<PromptPart> }> = [];
+  promptError: unknown = null;
   responded: Array<{ requestId: string; response: AgentResponse }> = [];
 
   subscribe(onEvent: (event: ChatTransportEvent) => void): () => void {
@@ -47,6 +48,7 @@ class FakeTransport implements ChatSessionTransport {
   }
   prompt = async (input: { messageId: string; parts: ReadonlyArray<PromptPart> }) => {
     this.promptCalls.push(input);
+    if (this.promptError) throw this.promptError;
     return { turnId: "turn-receipt" };
   };
   getMessages = async () => {
@@ -352,6 +354,118 @@ describe("Chat prompting", () => {
     expect(messages).toHaveLength(2);
     expect(assistantText(messages[1]!)).toBe("reply");
     expect(chat.store.getState().status).toBe("ready");
+  });
+});
+
+describe("Chat stream errors", () => {
+  it("surfaces the exact live provider error after the turn settles", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    const providerError = "429: 已达到 5 小时的使用上限。";
+    await attach({});
+
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, {
+      type: "session.message.chunk",
+      turnId: "turn-1",
+      chunk: { type: "error", errorText: providerError },
+    });
+    // Pi currently follows the error chunk with finish, which the adapter
+    // reports as a completed turn. Visibility must not depend on the outcome.
+    live(3, { type: "session.turn.ended", turnId: "turn-1", outcome: "completed", phase: "idle" });
+    await settle();
+
+    expect(chat.store.getState().error?.message).toBe(providerError);
+    expect(chat.store.getState().status).toBe("ready");
+
+    await chat.prompt("retry");
+    expect(chat.store.getState().error).toBeUndefined();
+    expect(chat.store.getState().status).toBe("submitted");
+    expect(transport.promptCalls.at(-1)?.parts).toEqual([{ type: "text", text: "retry" }]);
+  });
+
+  it("restores an unseen provider error after its retained prompt boundary", async () => {
+    const { chat, attach } = makeChat();
+    const providerError = "Connection error.";
+    await attach({ cursor: 1 });
+
+    await attach({
+      status: { phase: "idle" },
+      activePrompt: { messageId: "prompt-1", parts: [{ type: "text", text: "go" }], seq: 2 },
+      activeTurn: activeTurn({
+        turnId: "turn-1",
+        chunks: [
+          chunkEvent(3, "turn-1", {
+            type: "error",
+            errorText: providerError,
+          }),
+        ],
+        complete: true,
+      }),
+      cursor: 4,
+    });
+
+    expect(chat.store.getState().error?.message).toBe(providerError);
+  });
+
+  it("lets a newer retained prompt clear an older completed-turn error", async () => {
+    const { chat, attach } = makeChat();
+    await attach({});
+    chat.store.setState({ error: new Error("older local failure") });
+
+    await attach({
+      status: { phase: "idle" },
+      activePrompt: {
+        messageId: "prompt-new",
+        parts: [{ type: "text", text: "try again" }],
+        seq: 4,
+      },
+      activeTurn: activeTurn({
+        turnId: "turn-old",
+        chunks: [chunkEvent(2, "turn-old", { type: "error", errorText: "old provider error" })],
+        complete: true,
+      }),
+      cursor: 4,
+    });
+
+    expect(chat.store.getState().error).toBeUndefined();
+    expect(chat.store.getState().messages.at(-1)?.id).toBe("prompt-new");
+  });
+
+  it("clears a stale error for unseen broadcast and retained prompts", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({});
+    chat.store.setState({ error: new Error("old failure") });
+
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: "remote-1",
+      parts: [{ type: "text", text: "remote" }],
+      phase: "idle",
+    });
+    expect(chat.store.getState().error).toBeUndefined();
+
+    chat.store.setState({ error: new Error("another old failure") });
+    await attach({
+      status: { phase: "running" },
+      activePrompt: { messageId: "remote-2", parts: [{ type: "text", text: "retained" }], seq: 2 },
+      activeTurn: activeTurn({ turnId: "turn-2", chunks: [] }),
+      cursor: 3,
+    });
+    expect(chat.store.getState().error).toBeUndefined();
+  });
+
+  it("does not let a delayed self-echo clear a prompt RPC failure", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    const promptError = new Error("Prompt RPC failed");
+    await attach({});
+    transport.promptError = promptError;
+
+    await expect(chat.prompt("go")).rejects.toThrow(promptError);
+    const { messageId, parts } = transport.promptCalls[0]!;
+    expect(chat.store.getState().error?.message).toBe(promptError.message);
+
+    live(1, { type: "session.prompt.submitted", messageId, parts, phase: "idle" });
+    expect(chat.store.getState().error?.message).toBe(promptError.message);
   });
 });
 

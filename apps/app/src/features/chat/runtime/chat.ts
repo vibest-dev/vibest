@@ -3,6 +3,7 @@ import type {
   PermissionMode,
   PromptPart,
   ReasoningEffort,
+  SessionMessageChunkEvent,
   SessionPhase,
   SessionRef,
   SessionRuntimeSnapshot,
@@ -128,6 +129,7 @@ export class Chat {
     this.#cursor = event.seq;
     switch (event.type) {
       case "session.message.chunk":
+        this.#captureChunkError(event.chunk);
         if (!this.#recoverTurnIds.has(event.turnId)) {
           if (event.chunk.type === "error") this.#erroredTurnIds.add(event.turnId);
           this.#turnFold(event.turnId).enqueue(event.chunk);
@@ -137,7 +139,10 @@ export class Chat {
       // optimistic message already carries the same id, making the append a
       // no-op.
       case "session.prompt.submitted":
-        this.#pushUserMessage(event.messageId, event.parts);
+        // The sender already cleared its stale error synchronously in prompt().
+        // Only a genuinely unseen prompt may clear here: a delayed self-echo
+        // must not erase a newer prompt RPC failure.
+        if (this.#pushUserMessage(event.messageId, event.parts)) this.#state.error = undefined;
         break;
       // The harness rejected a prompt whose submitted event already broadcast:
       // drop the phantom user message (the sender's optimistic copy included).
@@ -292,11 +297,36 @@ export class Chat {
     const stale = this.#cursor === 0 && activeTurn?.complete === true;
 
     // The retained prompt is the only recovery for a `prompt.submitted`
-    // missed while detached (events are never re-sent). Delivered before the
-    // chunk replay so the user bubble lands above the streaming reply.
+    // missed while detached (events are never re-sent). A complete turn is
+    // normally stale on first attach, except when the retained prompt itself
+    // is the snapshot's latest event: then it belongs to the next, not-yet-
+    // started turn and must render above the settled history floor.
     const activePrompt = snapshot.activePrompt;
-    if (activePrompt && activePrompt.seq > this.#cursor && !stale) {
-      this.#pushUserMessage(activePrompt.messageId, activePrompt.parts);
+    let appliedPromptSeq: number | undefined;
+    if (
+      activePrompt &&
+      activePrompt.seq > this.#cursor &&
+      (!stale || activePrompt.seq === snapshot.cursor)
+    ) {
+      appliedPromptSeq = activePrompt.seq;
+      if (this.#pushUserMessage(activePrompt.messageId, activePrompt.parts)) {
+        this.#state.error = undefined;
+      }
+    }
+
+    // Error text is not part of the settled transcript floor. Only the latest
+    // unseen error matters, but compare its seq with the retained prompt: the
+    // runtime can hold a completed old turn beside a newer submitted prompt.
+    // In that shape the prompt clears the old error rather than resurrecting
+    // it; an error after the prompt belongs to the new turn and wins.
+    let latestError: SessionMessageChunkEvent | undefined;
+    for (const chunkEvent of activeTurn?.chunks ?? []) {
+      if (chunkEvent.seq > this.#cursor && chunkEvent.chunk.type === "error") {
+        latestError = chunkEvent;
+      }
+    }
+    if (latestError && (appliedPromptSeq === undefined || latestError.seq > appliedPromptSeq)) {
+      this.#captureChunkError(latestError.chunk);
     }
 
     // A turn flagged for recovery that is no longer active ended while we
@@ -373,9 +403,14 @@ export class Chat {
   // Shared handlers
   // ---------------------------------------------------------------------
 
-  #pushUserMessage(messageId: string, parts: ReadonlyArray<PromptPart>): void {
-    if (this.#state.messages.some((message) => message.id === messageId)) return;
+  #captureChunkError(chunk: UIMessageChunk): void {
+    if (chunk.type === "error") this.#state.error = new Error(chunk.errorText);
+  }
+
+  #pushUserMessage(messageId: string, parts: ReadonlyArray<PromptPart>): boolean {
+    if (this.#state.messages.some((message) => message.id === messageId)) return false;
     this.#state.pushMessage(toUserMessage(messageId, parts));
+    return true;
   }
 
   // Policy, not transport: an empty plan carries nothing to review, so it is
@@ -468,6 +503,7 @@ export class Chat {
   prompt = async (text: string): Promise<void> => {
     const messageId = generateId();
     const parts: PromptPart[] = [{ type: "text", text }];
+    this.#state.error = undefined;
     this.#state.pushMessage(toUserMessage(messageId, parts));
     this.#setStatus("submitted");
     try {
