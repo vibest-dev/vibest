@@ -325,27 +325,18 @@ export const sessionRouter = orpc.router({
       }),
     );
   }),
-  getStatus: orpc.getStatus.effect(function* ({ input, errors }) {
+  // Total, and deliberately so: a persisted session this process has not
+  // touched reads as idle rather than SESSION_NOT_ACTIVE. A client reattaching
+  // after a server restart used to get that error on every snapshot and retry
+  // forever, because nothing on the observation path could ever make it go
+  // away.
+  getStatus: orpc.getStatus.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getStatus(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotActive: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-      }),
-    );
+    return yield* sessions.getStatus(input.ref);
   }),
-  getSnapshot: orpc.getSnapshot.effect(function* ({ input, errors }) {
+  getSnapshot: orpc.getSnapshot.effect(function* ({ input }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getSnapshot(input.ref).pipe(
-      Effect.catchTags({
-        SessionNotActive: (e) =>
-          Effect.fail(
-            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
-          ),
-      }),
-    );
+    return yield* sessions.getSnapshot(input.ref);
   }),
 
   // events --------------------------------------------------------------------

@@ -165,11 +165,10 @@ it.effect("drains the native stream into the session and tears down on close", (
     assert.equal(snapshot.status.phase, "idle");
     assert.equal(yield* Ref.get(fixture.closeCalls), 1);
     assert.equal(yield* isActive(fixture, ref), false);
-    // Close discards the session state with the runtime.
-    assert.equal(
-      yield* fixture.manager.status(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess)),
-      false,
-    );
+    // Close discards the session along with its runtime, so the ref falls back
+    // to the answer any untouched session gives.
+    assert.deepEqual(yield* fixture.manager.status(ref), { phase: "idle" });
+    assert.equal((yield* fixture.manager.snapshot(ref)).cursor, 0);
   }),
 );
 
@@ -305,9 +304,6 @@ it.effect("a crash releases the runtime but keeps the session queryable", () =>
     // clients, and only an explicit close discards it.
     assert.equal(yield* isActive(fixture, ref), false);
     yield* fixture.manager.close(ref);
-    assert.equal(
-      yield* fixture.manager.status(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess)),
-      false,
-    );
+    assert.deepEqual(yield* fixture.manager.status(ref), { phase: "idle" });
   }),
 );

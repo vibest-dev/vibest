@@ -5,7 +5,7 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Data, Deferred, Effect, Fiber, Ref, Scope, Semaphore, Stream } from "effect";
+import { Deferred, Effect, Fiber, Ref, Scope, Semaphore, Stream } from "effect";
 
 import type { EventBusShape } from "../events/event-bus";
 import type { AgentOperationError } from "./errors";
@@ -37,10 +37,6 @@ import {
  * and it never opens, resumes, or closes a native session itself.
  */
 
-export class SessionNotActive extends Data.TaggedError("SessionNotActive")<{
-  readonly sessionId: string;
-}> {}
-
 /** The live drain: the fiber consuming a runtime's native stream, plus the
  * token that lets only its own cleanup evict it. */
 type Drain = {
@@ -62,15 +58,21 @@ export type HarnessAgentSessionShape = {
     events: Stream.Stream<SessionEnvelopeBody, AgentOperationError>,
     options?: { readonly onCrash?: Effect.Effect<void> },
   ) => Effect.Effect<void>;
-  /** Stop draining. The folded state is discarded with it. */
+  /** Stop draining. The session and its folded state survive. */
   readonly detach: Effect.Effect<void>;
-  readonly snapshot: Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
-  readonly status: Effect.Effect<SessionStatus, SessionNotActive>;
+  /**
+   * What this session is doing, always answerable. A session that has never
+   * had a runtime reads as idle at cursor 0 — which is the truth, not a
+   * placeholder: nothing has happened on it in this process.
+   */
+  readonly snapshot: Effect.Effect<SessionRuntimeSnapshot>;
+  readonly status: Effect.Effect<SessionStatus>;
   /**
    * Inject a server-originated wire event into the session's stream: it gets
    * the same contiguous seq stamping and bus fan-out as harness-driven events.
+   * Independent of any runtime — the seq counter is the session's own.
    */
-  readonly emit: (body: SessionScopedEventBody) => Effect.Effect<void, SessionNotActive>;
+  readonly emit: (body: SessionScopedEventBody) => Effect.Effect<void>;
 };
 
 export const makeHarnessAgentSession = (
@@ -172,21 +174,12 @@ export const makeHarnessAgentSession = (
       ),
     );
 
-    const whenDraining = <A>(read: Effect.Effect<A>): Effect.Effect<A, SessionNotActive> =>
-      Ref.get(drain).pipe(
-        Effect.flatMap((current) =>
-          current ? read : Effect.fail(new SessionNotActive({ sessionId: ref.sessionId })),
-        ),
-      );
-
     return {
       ref,
       attach,
       detach,
-      snapshot: whenDraining(
-        Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
-      ),
-      status: whenDraining(Ref.get(state).pipe(Effect.map(toStatus))),
-      emit: (body) => whenDraining(applyWith(() => body)),
+      snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
+      status: Ref.get(state).pipe(Effect.map(toStatus)),
+      emit: (body) => applyWith(() => body),
     } satisfies HarnessAgentSessionShape;
   });

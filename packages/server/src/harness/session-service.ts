@@ -6,7 +6,6 @@ import type {
   ReasoningEffort,
   SessionRef,
   SessionRuntimeSnapshot,
-  SessionScopedEventBody,
   SessionStatus,
   SessionSummary,
 } from "@vibest/contract";
@@ -38,7 +37,6 @@ import type {
 import { CapabilityUnsupported, PermissionModeUnsupported } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
-import type { SessionNotActive } from "./session";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
 import { HarnessAgentSessionManager } from "./session-manager";
 import {
@@ -236,10 +234,13 @@ export type HarnessAgentSessionServiceShape = {
     | HarnessAgentNotFound
     | AgentOperationError
   >;
-  readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
-  readonly getSnapshot: (
-    ref: SessionRef,
-  ) => Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
+  /**
+   * What a session is doing. Total: a persisted session with nothing live in
+   * memory reads as idle, so attaching after a restart neither fails nor
+   * starts anything.
+   */
+  readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus>;
+  readonly getSnapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot>;
   /** Reverse a bare sessionId back into its full SessionRef. */
   readonly resolveRef: (
     sessionId: string,
@@ -402,20 +403,19 @@ export const makeHarnessAgentSessionService = (deps: {
     // A pure read of our own records — display data is self-owned (title from
     // the first prompt, createdAt/cwd from create), so no per-session backend
     // lookup. `status` is the one overlay, and it comes from the manager's
-    // projection, not the harness index.
+    // live sessions, not the harness index: a row with no status is one this
+    // process has not touched, which is different from one sitting idle.
     list: (projectId) =>
       repo.list(projectId).pipe(
         Effect.flatMap((sessions) =>
           Effect.forEach(sessions, (metadata) =>
             manager
-              .status({
+              .liveStatus({
                 projectId: metadata.projectId,
                 harnessAgentId: metadata.harnessAgentId,
                 sessionId: metadata.sessionId,
               })
               .pipe(
-                Effect.map((s): SessionStatus | null => s),
-                Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
                 Effect.map(
                   (status) =>
                     ({
@@ -431,7 +431,7 @@ export const makeHarnessAgentSessionService = (deps: {
                       ...(metadata.updatedAt !== undefined
                         ? { updatedAt: metadata.updatedAt }
                         : {}),
-                      ...(status !== null ? { status } : {}),
+                      ...(status !== undefined ? { status } : {}),
                     }) satisfies SessionSummary,
                 ),
               ),
@@ -481,7 +481,6 @@ export const makeHarnessAgentSessionService = (deps: {
                     }
                     return messages;
                   }),
-                  Effect.catchTag("SessionNotActive", () => Effect.succeed(messages)),
                 ),
               ),
             ),
@@ -497,26 +496,19 @@ export const makeHarnessAgentSessionService = (deps: {
         const session = yield* manager.get(input.ref);
         const messageId = input.messageId ?? (yield* newSessionId);
 
-        // Best-effort: a session whose runtime is gone will fail the prompt
-        // itself with the real error a line later.
-        const emitBestEffort = (body: SessionScopedEventBody) =>
-          manager
-            .emit(input.ref, body)
-            .pipe(Effect.catchTag("SessionNotActive", () => Effect.void));
-
         // Broadcast the accepted prompt *before* the harness call so it always
         // precedes the turn's own events in seq order. If the harness then
         // rejects the prompt, `session.prompt.rejected` compensates — clients
         // drop the phantom user message and the runtime clears the retained
         // activePrompt.
-        yield* emitBestEffort({
+        yield* manager.emit(input.ref, {
           type: "session.prompt.submitted",
           messageId,
           parts: input.parts,
         });
         return yield* session.prompt(userInput).pipe(
           Effect.tapError((promptError) =>
-            emitBestEffort({
+            manager.emit(input.ref, {
               type: "session.prompt.rejected",
               messageId,
               reason: promptError.message,

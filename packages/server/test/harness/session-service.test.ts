@@ -299,10 +299,9 @@ describe("HarnessAgentSessionService", () => {
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       while (true) {
-        const turn = yield* fixture.service.getSnapshot(ref).pipe(
-          Effect.map((snapshot) => snapshot.activeTurn),
-          Effect.catchTag("SessionNotActive", () => Effect.succeed(null)),
-        );
+        const turn = yield* fixture.service
+          .getSnapshot(ref)
+          .pipe(Effect.map((snapshot) => snapshot.activeTurn));
         if (done(turn)) return;
         yield* Effect.sleep("10 millis");
       }

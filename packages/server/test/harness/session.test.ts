@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import type { SessionRef } from "@vibest/contract";
-import { Context, Effect, Exit, Layer, Queue, Ref, Stream } from "effect";
+import { Context, Effect, Layer, Queue, Ref, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import { EventBus, EventBusLayer } from "../../src/events";
@@ -60,6 +60,23 @@ const awaitPhase = (session: HarnessAgentSessionShape, phase: string) =>
       ),
     ),
   );
+
+// The reason snapshot/status are total: after a restart every persisted
+// session is in exactly this state, and a client must be able to attach,
+// snapshot, and subscribe to it without anything starting a process.
+it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const snapshot = yield* session.snapshot;
+      assert.equal(snapshot.status.phase, "idle");
+      assert.equal(snapshot.cursor, 0);
+      assert.equal(snapshot.activeTurn, null);
+      assert.equal(snapshot.activePrompt, null);
+      assert.deepEqual(snapshot.pendingRequests, []);
+    }),
+  ),
+);
 
 it.effect("attach is idempotent for a live drain and stamps contiguous seqs", () =>
   run(
@@ -203,27 +220,58 @@ it.effect("attach replaces a crashed drain with fresh state", () =>
   ),
 );
 
-it.effect("detach stops the drain", () =>
+it.effect("detach stops the drain and leaves the session readable", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       const queue = yield* makeQueue;
       yield* session.attach(streamFromQueueOne(queue));
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      yield* awaitPhase(session, "running");
+
       yield* session.detach;
-      const exit = yield* Effect.exit(session.status);
-      assert.equal(Exit.isFailure(exit), true);
+      // What the session had folded is still readable — losing a runtime is
+      // not losing the session.
+      assert.equal((yield* session.status).phase, "running");
+      // But nothing consumes the stream any more, so nothing more is folded.
+      yield* Queue.offer(queue, {
+        type: "session.turn.ended",
+        sessionId: nativeId,
+        turnId: "turn-1",
+        outcome: "completed",
+      });
+      yield* Effect.yieldNow;
+      assert.equal((yield* session.snapshot).cursor, 1);
     }),
   ),
 );
 
-it.effect("a naturally ending stream drops the drain", () =>
+it.effect("a naturally ending stream frees the session for a fresh attach", () =>
   run(
     Effect.gen(function* () {
       const session = yield* SessionService;
       yield* session.attach(Stream.empty);
+
+      const queue = yield* makeQueue;
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      // A drain that ended cleanly must stop counting as live, or a session
+      // whose runtime exited could never take another one. Retried because
+      // the ended fiber clears itself asynchronously.
       yield* Effect.eventually(
-        Effect.exit(session.status).pipe(
-          Effect.filterOrFail(Exit.isFailure, () => new Error("drain was not dropped")),
+        session.attach(streamFromQueueOne(queue)).pipe(
+          Effect.andThen(session.status),
+          Effect.filterOrFail(
+            (status) => status.phase === "running",
+            () => new Error("the ended drain still blocks a fresh attach"),
+          ),
         ),
       );
     }),

@@ -19,11 +19,8 @@ import {
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
-import {
-  type HarnessAgentSessionShape,
-  makeHarnessAgentSession,
-  SessionNotActive,
-} from "./session";
+import { type HarnessAgentSessionShape, makeHarnessAgentSession } from "./session";
+import { initialSessionState, toSnapshot, toStatus } from "./session-fold";
 import type { ResumeManagedSessionInput } from "./session-io";
 
 /**
@@ -107,17 +104,30 @@ export type HarnessAgentSessionManagerShape = {
    * queryable at phase "crashed" for reconnecting clients).
    */
   readonly close: (ref: SessionRef) => Effect.Effect<void>;
-  /** The status/snapshot of a session's live (or crashed) state. */
-  readonly status: (ref: SessionRef) => Effect.Effect<SessionStatus, SessionNotActive>;
-  readonly snapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot, SessionNotActive>;
   /**
-   * Inject a server-originated session event into the live runtime's stream —
-   * same seq counter and fan-out as harness events (see runtime `emit`).
+   * The status/snapshot of a session. Total on purpose: a ref with nothing
+   * live in memory — the ordinary state of every persisted session after a
+   * server restart — reads as idle at cursor 0 rather than failing. That is
+   * what lets a client attach, snapshot, and subscribe without anything
+   * starting a process on its behalf.
+   *
+   * Neither call creates a session; only the write paths do.
    */
-  readonly emit: (
-    ref: SessionRef,
-    body: SessionScopedEventBody,
-  ) => Effect.Effect<void, SessionNotActive>;
+  readonly status: (ref: SessionRef) => Effect.Effect<SessionStatus>;
+  readonly snapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot>;
+  /**
+   * The status of a session that is live in memory, or `undefined` when it is
+   * not. The distinction `status` deliberately erases, for the one caller that
+   * needs it: `list` must show an untouched session as having no status at
+   * all, not as a freshly idle one.
+   */
+  readonly liveStatus: (ref: SessionRef) => Effect.Effect<SessionStatus | undefined>;
+  /**
+   * Inject a server-originated session event into the session's stream — same
+   * seq counter and fan-out as harness events (see session `emit`). A write,
+   * so it materializes the session if this is the first thing to touch it.
+   */
+  readonly emit: (ref: SessionRef, body: SessionScopedEventBody) => Effect.Effect<void>;
 };
 
 export class HarnessAgentSessionManager extends Context.Service<
@@ -163,18 +173,16 @@ export const makeHarnessAgentSessionManager = (
         }),
       );
 
-    const notActive = <A>(ref: SessionRef): Effect.Effect<A, SessionNotActive> =>
-      Effect.fail(new SessionNotActive({ sessionId: ref.sessionId }));
-
-    const withSession = <A, E>(
+    /** Read through a live session, or answer for one that isn't there. */
+    const withSession = <A>(
       ref: SessionRef,
-      use: (session: HarnessAgentSessionShape) => Effect.Effect<A, E>,
-      absent: Effect.Effect<A, E | SessionNotActive>,
-    ): Effect.Effect<A, E | SessionNotActive> =>
+      use: (session: HarnessAgentSessionShape) => Effect.Effect<A>,
+      absent: A,
+    ): Effect.Effect<A> =>
       Ref.get(sessions).pipe(
         Effect.flatMap((current) => {
           const session = current.get(ref.sessionId);
-          return session ? use(session) : absent;
+          return session ? use(session) : Effect.succeed(absent);
         }),
       );
 
@@ -421,9 +429,12 @@ export const makeHarnessAgentSessionManager = (
       ensure,
       get: (ref) => getManaged(ref).pipe(Effect.map((managed) => managed.runtime)),
       close,
-      status: (ref) => withSession(ref, (session) => session.status, notActive(ref)),
-      emit: (ref, body) => withSession(ref, (session) => session.emit(body), notActive(ref)),
-      snapshot: (ref) => withSession(ref, (session) => session.snapshot, notActive(ref)),
+      status: (ref) => withSession(ref, (session) => session.status, toStatus(initialSessionState)),
+      snapshot: (ref) =>
+        withSession(ref, (session) => session.snapshot, toSnapshot(ref, initialSessionState)),
+      liveStatus: (ref) =>
+        withSession<SessionStatus | undefined>(ref, (session) => session.status, undefined),
+      emit: (ref, body) => sessionFor(ref).pipe(Effect.flatMap((session) => session.emit(body))),
     } satisfies HarnessAgentSessionManagerShape;
   });
 
