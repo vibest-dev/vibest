@@ -4,8 +4,16 @@ import type {
   ServerConnection,
   ServerStatusSnapshot,
   DesktopBootstrap,
+  DesktopOs,
 } from "../../shared/desktop-rpc";
 import type { LocalServer } from "../server/local-server";
+
+/** `process.platform` is Node's vocabulary; the renderer speaks `DesktopOs`. */
+function currentOs(): DesktopOs {
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "win32") return "windows";
+  return "linux";
+}
 
 export class DesktopApplication extends Context.Service<
   DesktopApplication,
@@ -33,6 +41,7 @@ export function makeDesktopApplication({
       return {
         status: current.status,
         statusRevision: current.revision,
+        os: currentOs(),
       };
     }),
     serverConnection: server.connection,

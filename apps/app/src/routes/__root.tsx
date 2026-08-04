@@ -32,7 +32,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
   const navigate = useNavigate();
-  const { hasWindowControls } = usePlatform();
+  const { os } = usePlatform();
 
   const handleNewChat = () => navigate({ to: "/draft" });
 
@@ -45,12 +45,14 @@ function RootLayout() {
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel />
       {/*
-       * Fixed (not inside AppSidebar), same as SidebarTrigger below: the
-       * offcanvas sidebar slides this off-screen on collapse otherwise, while
-       * desktop's real traffic lights never move. The browser has no traffic
-       * lights, so this fills that corner instead of leaving it blank.
+       * Only macOS puts native traffic lights in this corner (`hiddenInset` +
+       * `trafficLightPosition` in the desktop's main-window.ts are no-ops
+       * elsewhere), so every other host fills it with the brand mark. Fixed,
+       * not inside AppSidebar, for the same reason as SidebarTrigger below:
+       * the offcanvas sidebar would otherwise slide it off-screen on collapse,
+       * while real traffic lights never move.
        */}
-      {!hasWindowControls && (
+      {os !== "macos" && (
         <BrandMark className="fixed top-3 left-3 z-30 [-webkit-app-region:no-drag]" />
       )}
       {/*
