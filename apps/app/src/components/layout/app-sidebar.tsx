@@ -11,16 +11,27 @@ import {
 import { Blocks, Search, SquarePen } from "lucide-react";
 import { useState } from "react";
 
+import { BrandMark } from "@/components/layout/brand-mark";
 import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
 import { ProjectList } from "@/features/projects/project-list";
+import { usePlatform } from "@/platform-context";
 
 export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   const [importOpen, setImportOpen] = useState(false);
+  const { os } = usePlatform();
 
   return (
     <Sidebar variant="inset" collapsible="offcanvas" className="md:p-1.5">
-      {/* Reserves the traffic-light / pinned-toggle row (see __root.tsx). */}
-      <SidebarHeader className="h-10 [-webkit-app-region:drag]" />
+      {/*
+       * Reserves the traffic-light / pinned-toggle row (see __root.tsx). On
+       * macOS the row belongs to the native traffic lights; everywhere else it
+       * carries the brand mark, which collapses away with the sidebar. `px-4`
+       * lines its icon up with the menu icons below (this padding + the group's
+       * p-2 + the menu button's p-2).
+       */}
+      <SidebarHeader className="h-10 flex-row items-center px-4 [-webkit-app-region:drag]">
+        {os !== "macos" && <BrandMark />}
+      </SidebarHeader>
 
       <SidebarContent className="[-webkit-app-region:no-drag]">
         {/* New chat is wired; the rest are placeholders. */}

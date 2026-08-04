@@ -9,7 +9,6 @@ import {
 import { cn } from "@vibest/ui/lib/utils";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { BrandMark } from "@/components/layout/brand-mark";
 import type { AppClients } from "@/lib/orpc";
 import { usePlatform } from "@/platform-context";
 
@@ -44,24 +43,36 @@ function RootLayout() {
     <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel />
-      {/*
-       * Only macOS puts native traffic lights in this corner (`hiddenInset` +
-       * `trafficLightPosition` in the desktop's main-window.ts are no-ops
-       * elsewhere), so every other host fills it with the brand mark. Fixed,
-       * not inside AppSidebar, for the same reason as SidebarTrigger below:
-       * the offcanvas sidebar would otherwise slide it off-screen on collapse,
-       * while real traffic lights never move.
-       */}
-      {os !== "macos" && (
-        <BrandMark className="fixed top-3 left-3 z-30 [-webkit-app-region:no-drag]" />
-      )}
-      {/*
-       * Single fixed toggle for every state: the offcanvas sidebar would carry
-       * an inside toggle off-screen on collapse, and swapping two copies
-       * flickers. top-11/left-22 sits it on the macOS traffic-light row.
-       */}
-      <SidebarTrigger className="fixed top-[11px] left-22 z-30 [-webkit-app-region:no-drag]" />
+      <ShellToggle hasTrafficLights={os === "macos"} />
     </SidebarProvider>
+  );
+}
+
+/**
+ * Still one fixed toggle for every state rather than a copy inside the sidebar
+ * and a copy outside it: the offcanvas sidebar carries an inside toggle
+ * off-screen on collapse, and swapping two copies flickers. Only its x moves,
+ * animated in step with the sidebar slide.
+ *
+ * Expanded it sits at the sidebar's inner right edge — `--sidebar-width` less
+ * the sidebar's own p-1.5, the group's p-2, and the size-7 button. Collapsed it
+ * takes the corner over, unless macOS's traffic lights already own it.
+ */
+function ShellToggle({ hasTrafficLights }: { hasTrafficLights: boolean }) {
+  const { state, isMobile } = useSidebar();
+  const expanded = !isMobile && state === "expanded";
+
+  return (
+    <SidebarTrigger
+      className={cn(
+        "fixed top-[11px] z-30 transition-[left] duration-200 ease-linear [-webkit-app-region:no-drag]",
+        expanded
+          ? "left-[calc(var(--sidebar-width)-3.375rem)]"
+          : hasTrafficLights
+            ? "left-22"
+            : "left-2",
+      )}
+    />
   );
 }
 

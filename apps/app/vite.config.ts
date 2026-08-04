@@ -34,6 +34,13 @@ export default defineConfig({
     // server at the URL you expected to be ours.
     port: 4190,
     strictPort: true,
+    // Vite rejects any Host it doesn't recognise, which is every name a tunnel
+    // puts in front of it (tailnet MagicDNS, ngrok, …). Opt in per run —
+    // `VIBEST_ALLOWED_HOSTS=<host>[,<host>] pnpm dev` — so the default stays
+    // localhost-only and nobody widens it by accident. The daemon's own
+    // WebSocket guard is separate and allowlists loopback origins only, so a
+    // tunnelled run also needs `VIBEST_CORS_ORIGINS=<origin>` (see http/cors.ts).
+    allowedHosts: process.env.VIBEST_ALLOWED_HOSTS?.split(",").filter(Boolean),
     proxy: {
       "/api": { target: serverTarget, changeOrigin: true },
       "/ws/rpc": { target: serverTarget, changeOrigin: true, ws: true },
