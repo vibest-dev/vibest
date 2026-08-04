@@ -5,32 +5,7 @@
       "cache": false,
       "persistent": true,
       "interruptible": true,
-      "passThroughEnv": [
-        "ANTIGRAVITY_AGENT",
-        "ANTIGRAVITY_TRAJECTORY_ID",
-        "BOLT_ENV",
-        "BOLT_ORIGIN",
-        "BOLT_SERVER_URL",
-        "CLAUDECODE",
-        "CLAUDE_CODE_SESSION_ID",
-        "CLINE_WRAPPER_PATH",
-        "CODEX_CI",
-        "CODEX_SHELL",
-        "CODEX_THREAD_ID",
-        "COPILOT_AGENT_SESSION_ID",
-        "COPILOT_CLI",
-        "COPILOT_RUN_APP",
-        "CURSOR_AGENT",
-        "CURSOR_CONVERSATION_ID",
-        "GEMINI_CLI",
-        "KIRO_SESSION_ID",
-        "KILO",
-        "KILOCODE_VERSION",
-        "KILO_RUN_ID",
-        "PI_CODING_AGENT",
-        "REPLIT_SESSION",
-        "RORK_API_URL"
-      ]
+      "passThroughEnv": ["*"]
     },
     "preview": {
       "cache": false,
