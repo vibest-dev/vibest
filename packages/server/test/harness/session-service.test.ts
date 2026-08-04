@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, Stream } from "effect";
+import { Crypto, Effect, FileSystem, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -37,6 +37,13 @@ type Fixture = {
   readonly repo: HarnessAgentSessionRepositoryShape;
   readonly bus: EventBusShape;
   readonly spy: Spy;
+  /**
+   * A second service over the same storage and the same adapter — what a
+   * server restart looks like from the session domain: the records survive,
+   * nothing is live, and the spy keeps counting across both so "how many
+   * processes has this session cost" stays answerable.
+   */
+  readonly restart: Effect.Effect<Fixture, never, Scope.Scope | FileSystem.FileSystem>;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -62,7 +69,7 @@ describe("HarnessAgentSessionService", () => {
       // The harness rejects every prompt (a turn is already running).
       promptFails?: boolean;
     },
-    program: (fixture: Fixture) => Effect.Effect<A, E>,
+    program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
     Effect.runPromise(
       Effect.scoped(
@@ -145,20 +152,24 @@ describe("HarnessAgentSessionService", () => {
             getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
           } satisfies HarnessAgentAdapter;
           const registry = makeHarnessAgentRegistry([adapter]);
-          const bus = yield* makeEventBus();
-          const manager = yield* makeHarnessAgentSessionManager(registry, bus);
-          const repo = yield* makeHarnessAgentSessionRepository(
-            path.join(home, "storage", "sessions"),
-          );
           const crypto = yield* Crypto.Crypto;
-          const service = makeHarnessAgentSessionService({
-            manager,
-            registry,
-            repo,
-            bus,
-            newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
-          });
-          return yield* program({ service, repo, bus, spy });
+          const build: Effect.Effect<Fixture, never, Scope.Scope | FileSystem.FileSystem> =
+            Effect.gen(function* () {
+              const bus = yield* makeEventBus();
+              const manager = yield* makeHarnessAgentSessionManager(registry, bus);
+              const repo = yield* makeHarnessAgentSessionRepository(
+                path.join(home, "storage", "sessions"),
+              );
+              const service = makeHarnessAgentSessionService({
+                manager,
+                registry,
+                repo,
+                bus,
+                newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
+              });
+              return { service, repo, bus, spy, restart: build };
+            });
+          return yield* program(yield* build);
         }),
       ).pipe(Effect.provide(NodePlatformLayer)),
     );
@@ -398,6 +409,58 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(result.err._tag).toBe("AgentRequestUnavailable");
     expect(result.resume).toEqual([]);
+  });
+
+  // The bug this whole shape exists for: a browser left open across a server
+  // restart used to hit SESSION_NOT_ACTIVE on every snapshot and retry forever,
+  // because nothing on the observation path could make the error go away.
+  it("a restarted server answers for a session it has never touched", async () => {
+    const history: UIMessage[] = [{ id: "m1", role: "user", parts: [] }];
+    const result = await run({ coldHistory: history }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const restarted = yield* fixture.restart;
+
+        yield* restarted.service.attach(ref, "/tmp/vibest-app");
+        const status = yield* restarted.service.getStatus(ref);
+        const snapshot = yield* restarted.service.getSnapshot(ref);
+        const listed = yield* restarted.service.list("proj-a");
+        const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
+        return { ref, status, snapshot, listed, messages, spy: fixture.spy };
+      }),
+    );
+
+    // Everything a reattaching client asks for is answerable …
+    expect(result.status).toEqual({ phase: "idle" });
+    expect(result.snapshot.cursor).toBe(0);
+    expect(result.snapshot.activeTurn).toBeNull();
+    expect(result.messages).toEqual(history);
+    // … a session nothing has touched carries no status at all, so the sidebar
+    // does not light up every row as active …
+    expect(result.listed).toHaveLength(1);
+    expect(result.listed[0]?.status).toBeUndefined();
+    // … and none of it started an agent. `open` is the one at create time.
+    expect(result.spy.open).toHaveLength(1);
+    expect(result.spy.resume).toEqual([]);
+  });
+
+  // `turn: "finished"` keeps the fake's event stream open, which is what a real
+  // runtime does: a stream that ends means the agent is done and the session
+  // lets it go, so an empty one would be released between the two prompts.
+  it("the first prompt after a restart starts exactly one agent", async () => {
+    const result = await run({ turn: "finished" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const restarted = yield* fixture.restart;
+        yield* restarted.service.attach(ref, "/tmp/vibest-app");
+
+        yield* restarted.service.prompt({ ref, parts: [{ type: "text", text: "hello" }] });
+        yield* restarted.service.prompt({ ref, parts: [{ type: "text", text: "again" }] });
+        return fixture.spy.resume;
+      }),
+    );
+    // Two prompts, one resume: the session keeps the runtime it acquired.
+    expect(result).toEqual([{ sessionId: "native-1", cwd: "/tmp/vibest-app" }]);
   });
 
   it("titles a session from its first prompt, collapsing whitespace", async () => {

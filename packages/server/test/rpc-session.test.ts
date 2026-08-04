@@ -151,6 +151,28 @@ describe("session router", () => {
     }
   });
 
+  it("answers for a closed session over the wire instead of SESSION_NOT_ACTIVE", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+      await client.session.close({ ref });
+
+      // The reattach a browser does after a server restart. None of it used to
+      // be answerable without a live runtime, so the client retried forever.
+      const attached = await client.session.attach({ ref });
+      const status = await client.session.getStatus({ ref });
+      const snapshot = await client.session.getSnapshot({ ref });
+
+      expect(attached).toEqual(ref);
+      expect(status).toEqual({ phase: "idle" });
+      expect(snapshot.cursor).toBe(0);
+      expect(snapshot.activeTurn).toBeNull();
+    } finally {
+      await dispose();
+    }
+  });
+
   it("lists sessions with live status and drops them on delete", async () => {
     const { client, workspace, dispose } = await setup();
     try {
