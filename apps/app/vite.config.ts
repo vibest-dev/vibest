@@ -22,7 +22,10 @@ import { defineConfig } from "vite";
  */
 const SERVER_PORT = Number(process.env.VIBEST_PORT ?? 4180);
 const serverTarget = `http://127.0.0.1:${SERVER_PORT}`;
-const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
+const RUNNING_IN_AGENT =
+  process.env.VIBEST_RUN_IN_AGENT === "1" ||
+  process.env.VIBEST_RUN_IN_AGENT === "true" ||
+  isRunningFromAgent({ experimentalProcessTree: true });
 
 export default defineConfig({
   define: {

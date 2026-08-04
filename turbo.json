@@ -4,7 +4,8 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "interruptible": true
+      "interruptible": true,
+      "passThroughEnv": ["PI_CODING_AGENT", "VIBEST_RUN_IN_AGENT"]
     },
     "preview": {
       "cache": false,

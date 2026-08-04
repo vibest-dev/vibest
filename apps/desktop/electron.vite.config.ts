@@ -8,7 +8,10 @@ import { codeInspectorPlugin } from "code-inspector-plugin";
 import { defineConfig } from "electron-vite";
 import type { Plugin } from "vite";
 
-const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
+const RUNNING_IN_AGENT =
+  process.env.VIBEST_RUN_IN_AGENT === "1" ||
+  process.env.VIBEST_RUN_IN_AGENT === "true" ||
+  isRunningFromAgent({ experimentalProcessTree: true });
 
 // The dev overlays (react-grab, react-scan) reach outside the origin on boot,
 // which the shipped CSP rejects. Production eliminates both overlays, so the
