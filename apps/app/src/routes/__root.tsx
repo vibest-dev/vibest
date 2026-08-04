@@ -9,7 +9,9 @@ import {
 import { cn } from "@vibest/ui/lib/utils";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { BrandMark } from "@/components/layout/brand-mark";
 import type { AppClients } from "@/lib/orpc";
+import { usePlatform } from "@/platform-context";
 
 export interface RouterAppContext {
   orpcQueryUtils: AppClients["orpcQueryUtils"];
@@ -30,6 +32,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
   const navigate = useNavigate();
+  const { hasWindowControls } = usePlatform();
 
   const handleNewChat = () => navigate({ to: "/draft" });
 
@@ -41,6 +44,15 @@ function RootLayout() {
     <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
       <CardPanel />
+      {/*
+       * Fixed (not inside AppSidebar), same as SidebarTrigger below: the
+       * offcanvas sidebar slides this off-screen on collapse otherwise, while
+       * desktop's real traffic lights never move. The browser has no traffic
+       * lights, so this fills that corner instead of leaving it blank.
+       */}
+      {!hasWindowControls && (
+        <BrandMark className="fixed top-3 left-3 z-30 [-webkit-app-region:no-drag]" />
+      )}
       {/*
        * Single fixed toggle for every state: the offcanvas sidebar would carry
        * an inside toggle off-screen on collapse, and swapping two copies

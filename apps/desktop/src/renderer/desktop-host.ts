@@ -46,6 +46,7 @@ export function createDesktopHost(
           if (!isAbortError(error)) console.error("Failed to request desktop quit", error);
         });
       },
+      hasWindowControls: true,
     },
     server,
     refreshServer: () => client.server.connection(),
