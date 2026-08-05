@@ -21,10 +21,6 @@ import { TranscriptRenderProvider } from "./transcript/transcript-render-provide
 // messages simply has none yet.
 function EmptyTranscript({ historyStatus }: { historyStatus: HistoryStatus }) {
   if (historyStatus === "loading") {
-    // Reads as a turn that hasn't produced text yet: the shimmer sits where the
-    // first message will land, so the transcript settles in place instead of a
-    // centered spinner claiming the panel and then vanishing. Same thinking
-    // indicator the tool batches use.
     return <Shimmer className="text-sm">Loading earlier messages…</Shimmer>;
   }
   if (historyStatus === "unavailable") {
