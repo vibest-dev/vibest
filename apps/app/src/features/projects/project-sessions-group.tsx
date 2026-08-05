@@ -35,7 +35,7 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
       <section className="relative min-w-0" aria-labelledby={`project-${project.id}`}>
         {/* pe-8 keeps a long name from running under the absolutely positioned action. */}
         <SidebarGroupLabel
-          className="text-sidebar-accent-foreground h-7 min-w-0 pe-8 text-sm"
+          className="text-sidebar-accent-foreground h-7 pe-8 text-sm"
           id={`project-${project.id}`}
           title={project.path}
           render={
