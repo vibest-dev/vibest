@@ -176,10 +176,10 @@ export type SessionStatus = typeof SessionStatusSchema.Type;
 // Events
 //
 // Session-scoped events carry `seq`: contiguous per session, stamped by the
-// SessionRuntime, starting at 1. Collection events are unnumbered — they are
-// invalidation signals recovered via list methods, never replayed. Events are
-// TypeScript types, not Schemas: they are produced by the server and never
-// validated as RPC input.
+// server's `HarnessAgentSession`, starting at 1. Collection events are
+// unnumbered — they are invalidation signals recovered via list methods, never
+// replayed. Events are TypeScript types, not Schemas: they are produced by the
+// server and never validated as RPC input.
 // ---------------------------------------------------------------------------
 
 export const SessionScopedEventTypes = [
@@ -246,16 +246,16 @@ export type SessionScopedEventBody =
     }
   | { readonly type: "session.crashed"; readonly reason: string };
 
-/** A session-scoped event before the SessionRuntime stamps its `seq`. */
+/** A session-scoped event before the server's `HarnessAgentSession` stamps its `seq`. */
 export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
 
 export type SessionScopedEvent = {
   readonly seq: number;
   /**
-   * The session's phase *after* this event applied, stamped by the
-   * SessionRuntime alongside `seq`. Consumers copy it (sidebar status, chat
-   * composer state) instead of re-deriving phase from event types — the
-   * runtime is the only place that knows the full transition table
+   * The session's phase *after* this event applied, stamped by the server's
+   * `HarnessAgentSession` alongside `seq`. Consumers copy it (sidebar status,
+   * chat composer state) instead of re-deriving phase from event types — the
+   * server-side fold is the only place that knows the full transition table
    * (`requires_action` in particular is invisible to a client-side mapping).
    * Absent only on chunk events replayed from a snapshot's retained buffer;
    * there the snapshot's own `status` is the phase source.

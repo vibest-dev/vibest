@@ -111,5 +111,5 @@ already written" is not a reason to add to the list:
 
 `node:path` is not on this list because it never needed an exemption — see
 "Where the boundary is" above. Path math is pure, so it stays `node:path`
-everywhere, and thirteen files in `packages/server/src` import it for exactly
+everywhere, and ten files in `packages/server/src` import it for exactly
 that.

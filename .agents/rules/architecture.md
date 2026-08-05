@@ -61,6 +61,10 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   inside a directory it is handed and deliberately has no default of its own.
 - `HarnessAgentIdSchema` in `packages/contract/src/domain.ts` is the whitelist:
   `claude-code`, `codex`, `pi` and nothing else. A fourth harness needs a literal
-  there, a `packages/server/src/harness/<agent>/` transform, and a server adapter
-  registered in `packages/server/src/harness/registry.ts` — all three, or it is
-  unreachable at runtime.
+  there, a `packages/server/src/harness/<agent>/` transform, and its adapter added
+  to the `RegistryLayer` in `packages/server/src/rpc/runtime.ts` — all three, or it
+  is unreachable at runtime. `harness/registry.ts` is only the lookup table's
+  factory (`makeHarnessAgentRegistry(adapters)`) and names no harness; that
+  composition root is the single place the adapters are constructed, and it wraps
+  each in `cacheAvailability` so a `--version` probe costs one spawn per server
+  rather than one per call.

@@ -19,6 +19,11 @@ labels: [wayfinder:map]
 2. **一个全局 EventBus**，纯 fan-out + 过滤，不承担发号；订阅只有两个维度：`{kind:'session'; ref}`（单会话，有 cursor/重放语义）和 `{kind:'global'}`（firehose，透传所有事件，无 after、无重放、断线不补）。**没有 project 维度。**
 3. **snapshot 主动获取**（`session.getSnapshot`），不在订阅流里返回。无丢失边界靠固定顺序：先 subscribe 缓冲 → 后 getSnapshot 拿 cursor → 丢弃缓冲中 `seq ≤ cursor` → 排干 → live。
 4. **只有 session 事件带 seq**：由各 SessionRuntime 在 projection 折叠处自增（会话内连续），global/集合事件不带序号、不重放。`StreamingCursor = { turnId, lastAppliedSeq }`。
+   **勘误（2026-08-05）**：决策本身不变，两个词已改名。发号者现在叫
+   `HarnessAgentSession`（`harness/session.ts`，每个 SessionRef 一个，可选持有
+   runtime）；折叠不叫 projection 而是 `harness/session-fold.ts` 的纯 fold——见
+   `CONTEXT.md` 的 _Avoid_ 清单。自增仍在 fold 处，且与 publish 同持一个信号量，
+   否则两个 fiber 可能先发 n+1 再发 n，客户端的 `seq ≤ cursor` 守卫会永久丢掉 n。
 5. **慢消费者**：订阅者有界队列满 → 发终止性 `closed(slow_consumer)` 踢掉，删除现有 gap 折叠 / `degraded` / `REPLAY_CAPACITY` 机制；active-turn buffer 不设上限，只记 count/bytes 指标，turn 结束释放。
 6. **create**：入参 `{projectId, harnessAgentId, ...}` → 出参 `SessionRef {projectId, harnessAgentId, sessionId}`；sessionId 由 server 生成，adapter 原生 ID 降级为元数据字段 `harnessSessionId`；元数据文件 `~/.vibest/storage/sessions/<projectId>/<sessionId>.json` 原子写；adapter 只见 cwd 不见 projectId；任一步失败不留半初始化状态。
 7. **恢复三路径**：刷新（无 cursor，全量重建）/ 短暂断线（带 cursor 续传，turn 变更先用历史收敛旧 projection）/ 服务重启（`SESSION_NOT_ACTIVE` → resume → 走刷新路径），客户端收敛为单个 reconcile 入口。
