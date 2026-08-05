@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, FileSystem, Ref, Stream } from "effect";
 
 import type { CodexTransport } from "../../../src/harness/codex";
 import { makeCodexAdapter } from "../../../src/harness/codex/adapter";
@@ -94,13 +93,19 @@ rl.on("line", (line) => {
 });
 `;
 
-function makeFake(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-codex-"));
+const makeTempDirectory = (prefix: string) =>
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fileSystem) => fileSystem.makeTempDirectoryScoped({ prefix })),
+  );
+
+const makeFakeAgent = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fake-codex-" });
   const file = path.join(dir, "fake-codex.js");
-  fs.writeFileSync(file, FAKE);
-  fs.chmodSync(file, 0o755);
-  return file;
-}
+  yield* fileSystem.writeFileString(file, FAKE);
+  yield* fileSystem.chmod(file, 0o755);
+  return yield* makeCodexAgent({ executablePath: file });
+});
 
 layer(NodeServices.layer)("CodexAgent", (it) => {
   it.effect("does not let an old transport generation evict new sessions", () =>
@@ -184,8 +189,9 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("creates a thread and streams a full turn", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
       assert.equal(sessionId, "th_1");
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
@@ -204,8 +210,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       // model chosen before the first prompt — which is when a session seeds a
       // runtime it has just acquired — can only reach it as a turn override.
       // If this regresses, picking a model silently does nothing.
-      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-"));
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const workspace = yield* makeTempDirectory("codex-model-");
+      const agent = yield* makeFakeAgent;
       const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
       yield* session.setModel("gpt-5.6-luna");
@@ -217,8 +223,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("leaves the model unset when nothing was chosen", () =>
     Effect.gen(function* () {
-      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-model-"));
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const workspace = yield* makeTempDirectory("codex-model-");
+      const agent = yield* makeFakeAgent;
       const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
       yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
@@ -231,7 +237,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("surfaces thread metadata as session info", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const agent = yield* makeFakeAgent;
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_1");
       assert.equal(result._tag, "found");
       if (result._tag === "found") {
@@ -244,7 +250,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("falls back to the thread preview when it has no title", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const agent = yield* makeFakeAgent;
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_untitled");
       assert.equal(result._tag, "found");
       if (result._tag === "found") assert.equal(result.info.title, "first message");
@@ -253,7 +259,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("maps an unknown thread to missing session info", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const agent = yield* makeFakeAgent;
       const result = yield* makeCodexAdapter(agent).getSessionInfo("th_missing");
       assert.equal(result._tag, "missing");
     }),
@@ -261,7 +267,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("reports a transport crash while the adapter session is idle", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const agent = yield* makeFakeAgent;
       const session = yield* makeCodexAdapter(agent).open({ cwd: "/tmp/idle-crash" });
       const crashSeen = yield* Deferred.make<void>();
       yield* Stream.runForEach(session.events, (event) =>
@@ -296,8 +302,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts a turn requested while turn/start is still pending", () =>
     Effect.gen(function* () {
-      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "codex-starting-interrupt-"));
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const cwd = yield* makeTempDirectory("codex-starting-interrupt-");
+      const agent = yield* makeFakeAgent;
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
         agent.session.prompt({ sessionId, text: "slow-start" }),
@@ -326,8 +332,8 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("interrupts the native turn when the prompt caller cancels during turn/start", () =>
     Effect.gen(function* () {
-      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "codex-starting-cancel-"));
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
+      const cwd = yield* makeTempDirectory("codex-starting-cancel-");
+      const agent = yield* makeFakeAgent;
       const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* Effect.forkChild(
         agent.session.prompt({ sessionId, text: "slow-start" }),
@@ -363,8 +369,9 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("unblocks a waiting prompt when the transport crashes", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
       yield* agent.session.prompt({ sessionId, text: "hold" });
       const secondDone = yield* Deferred.make<void>();
       yield* agent.session.prompt({ sessionId, text: "steer-after-crash" }).pipe(
@@ -399,8 +406,9 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("exposes prompt output through the unified adapter event stream", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const session = yield* makeCodexAdapter(agent).open({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const session = yield* makeCodexAdapter(agent).open({ cwd });
       const collected = yield* Effect.forkChild(
         Stream.runCollect(
           session.events.pipe(
@@ -431,8 +439,9 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("keeps a retryable error inside the active turn", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* agent.session.prompt({ sessionId, text: "retry" });
       const chunks = yield* Stream.runCollect(prompt.output);
 
@@ -444,14 +453,13 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("does not let an abandoned session stall the shared transport", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "flood" });
       yield* Stream.runHead(prompt.output);
-      const replacement = yield* agent.session
-        .create({ cwd: "/tmp" })
-        .pipe(Effect.timeout("2 seconds"));
+      const replacement = yield* agent.session.create({ cwd }).pipe(Effect.timeout("2 seconds"));
       assert.equal(replacement.sessionId, "th_1");
       yield* agent.session.abort(replacement.sessionId);
     }),
@@ -459,8 +467,9 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
 
   it.effect("crashes existing sessions and lazily starts a replacement transport", () =>
     Effect.gen(function* () {
-      const agent = yield* makeCodexAgent({ executablePath: makeFake() });
-      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
       const prompt = yield* agent.session.prompt({ sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
       assert.deepEqual(
@@ -468,7 +477,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
         ["start", "text-start", "text-delta", "error"],
       );
 
-      const replacement = yield* agent.session.create({ cwd: "/tmp" });
+      const replacement = yield* agent.session.create({ cwd });
       const replacementPrompt = yield* agent.session.prompt({
         sessionId: replacement.sessionId,
         text: "ping",
