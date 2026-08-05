@@ -214,6 +214,9 @@ export class Chat {
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
     this.#queuedEvents = null;
+    // Terminal before the floor ever landed (or attached): no history is coming,
+    // so stop rendering a spinner that would never resolve.
+    this.#state.historyStatus = "settled";
     this.#state.clearPendingRequests();
     this.#state.error = new Error(
       reason === "session_deleted" ? "Session deleted" : "Session closed",
@@ -256,8 +259,15 @@ export class Chat {
       if (history !== null && history.length > 0 && this.#state.messages.length === 0) {
         this.#state.messages = Array.from(history);
       }
+      // An empty read is still a floor: the session simply has nothing settled
+      // yet. Only the absent capability (null) leaves the transcript unfounded.
+      this.#state.historyStatus = history === null ? "unavailable" : "settled";
     } catch (historyError) {
       console.error("Failed to load session history", historyError);
+      // A failed read is still a finished one — the spinner has to stop — but an
+      // unannotated blank would claim the session is empty. A later reconcile
+      // clears this when the read succeeds.
+      this.#state.historyStatus = "unavailable";
     }
     const snapshot = this.#floorSnapshot;
     this.#floorSnapshot = null;
@@ -446,6 +456,9 @@ export class Chat {
   async #reconcileHistory(): Promise<void> {
     try {
       const history = await this.#transport.getMessages();
+      // Same read as the floor's, so it answers the same question: a reconcile
+      // that lands clears a floor read that failed earlier.
+      this.#state.historyStatus = history === null ? "unavailable" : "settled";
       if (history === null) {
         // Capability absent: no settled transcript will ever materialize, so
         // a deferred reconcile must not retry forever.

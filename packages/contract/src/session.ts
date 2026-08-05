@@ -36,10 +36,11 @@ export const sessionContract = {
   create: base
     .input(toStandardSchema(CreateSessionInputSchema))
     .output(toStandardSchema(SessionRefSchema)),
-  // Not "resume": it validates the ref, backfills the session's cwd, and
-  // checks the harness still knows the native session. It starts nothing —
-  // only a prompt does that.
-  attach: base.input(toStandardSchema(RefInputSchema)).output(toStandardSchema(SessionRefSchema)),
+  // Neither "resume" nor "attach": it validates the ref, backfills the
+  // session's cwd, and checks the harness still knows the native session. It
+  // starts nothing and connects nothing — only a prompt starts a runtime, and
+  // only `subscribe` attaches to the event stream.
+  prepare: base.input(toStandardSchema(RefInputSchema)).output(toStandardSchema(SessionRefSchema)),
   close: base.input(toStandardSchema(RefInputSchema)),
 
   // history / index

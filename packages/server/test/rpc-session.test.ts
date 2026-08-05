@@ -158,13 +158,14 @@ describe("session router", () => {
       const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
       await client.session.close({ ref });
 
-      // The reattach a browser does after a server restart. None of it used to
-      // be answerable without a live runtime, so the client retried forever.
-      const attached = await client.session.attach({ ref });
+      // What a browser does when it reopens the page after a server restart.
+      // None of it used to be answerable without a live runtime, so the client
+      // retried forever.
+      const prepared = await client.session.prepare({ ref });
       const status = await client.session.getStatus({ ref });
       const snapshot = await client.session.getSnapshot({ ref });
 
-      expect(attached).toEqual(ref);
+      expect(prepared).toEqual(ref);
       expect(status).toEqual({ phase: "idle" });
       expect(snapshot.cursor).toBe(0);
       expect(snapshot.activeTurn).toBeNull();

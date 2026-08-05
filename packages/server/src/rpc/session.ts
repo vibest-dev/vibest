@@ -68,12 +68,12 @@ export const sessionRouter = orpc.router({
   }),
   // Opening a session page: validate, backfill cwd, confirm the harness still
   // has the native session. No process is started here — that is the whole
-  // point of the rename.
-  attach: orpc.attach.effect(function* ({ input, errors }) {
+  // point of the name.
+  prepare: orpc.prepare.effect(function* ({ input, errors }) {
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
     return yield* projects.findById(input.ref.projectId).pipe(
-      Effect.flatMap((project) => sessions.attach(input.ref, project.path)),
+      Effect.flatMap((project) => sessions.prepare(input.ref, project.path)),
       Effect.as(input.ref),
       Effect.catchTags({
         SessionNotFound: (e) =>

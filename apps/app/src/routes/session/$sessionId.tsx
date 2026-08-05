@@ -35,7 +35,7 @@ export const Route = createFileRoute("/session/$sessionId")({
   loader: async ({ context, params, deps }) => {
     const { session } = context.orpcQueryUtils;
 
-    // Fast path: the link handed us a whole ref, so attach can go first. We
+    // Fast path: the link handed us a whole ref, so prepare can go first. We
     // return what the server answers with, not what the URL claimed.
     if (deps.projectId !== undefined && deps.harness !== undefined) {
       const hinted: SessionRef = {
@@ -43,13 +43,13 @@ export const Route = createFileRoute("/session/$sessionId")({
         harnessAgentId: deps.harness,
         sessionId: params.sessionId,
       };
-      const attached = await session.attach.call({ ref: hinted }).catch((error: unknown) => {
+      const prepared = await session.prepare.call({ ref: hinted }).catch((error: unknown) => {
         // A bad hint and a session the harness has forgotten both fall through
         // to the lookup; only this line tells them apart afterwards.
-        console.warn("Attach from URL ref failed, falling back to lookup", error);
+        console.warn("Preparing the URL's ref failed, falling back to lookup", error);
         return undefined;
       });
-      if (attached) return attached;
+      if (prepared) return prepared;
     }
 
     // An unresolvable sessionId (pruned storage, hand-edited URL) would
@@ -69,10 +69,10 @@ export const Route = createFileRoute("/session/$sessionId")({
     // native history was cleaned up fails here — surface it instead of leaving
     // a silently dead chat. The page still renders, so keep the console trail
     // for diagnosis after the toast auto-dismisses.
-    await session.attach.call({ ref }).catch((error: unknown) => {
-      console.error("Failed to attach to session", error);
+    await session.prepare.call({ ref }).catch((error: unknown) => {
+      console.error("Failed to prepare session", error);
       toast.error(
-        `Failed to attach to session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to prepare session: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
     return ref;

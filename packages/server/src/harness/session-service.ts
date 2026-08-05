@@ -105,7 +105,7 @@ export type HarnessAgentSessionServiceShape = {
    * own, and this is the only path that learns the project's path for a
    * session created before we stored one.
    */
-  readonly attach: (
+  readonly prepare: (
     ref: SessionRef,
     cwd: string,
   ) => Effect.Effect<
@@ -425,7 +425,7 @@ export const makeHarnessAgentSessionService = (deps: {
         }),
       ),
 
-    attach: (ref, cwd) =>
+    prepare: (ref, cwd) =>
       readChecked(ref).pipe(
         Effect.tap((metadata) =>
           metadata.cwd === cwd ? Effect.void : repo.write({ ...metadata, cwd }),

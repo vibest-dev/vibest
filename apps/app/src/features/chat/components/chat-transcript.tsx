@@ -7,12 +7,35 @@ import {
   ConversationScrollButton,
 } from "@/components/conversation";
 import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
-import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
+import type { ChatStoreState, HistoryStatus } from "@/features/chat/runtime/chat-state";
 
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";
 import { MessageView } from "./transcript/message-view";
 import { TranscriptRenderProvider } from "./transcript/transcript-render-provider";
+
+// What an empty transcript means, in one place: nothing until the settled
+// history floor has landed, so an unread session shows the read rather than a
+// verdict about the conversation. "settled" renders nothing — a session with no
+// messages simply has none yet.
+function EmptyTranscript({ historyStatus }: { historyStatus: HistoryStatus }) {
+  if (historyStatus === "loading") {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader />
+      </div>
+    );
+  }
+  if (historyStatus === "unavailable") {
+    return (
+      <div className="text-muted-foreground mx-auto max-w-md py-12 text-center text-sm">
+        Earlier messages couldn&apos;t be loaded. The agent still has its own context, so you can
+        pick up where you left off.
+      </div>
+    );
+  }
+  return null;
+}
 
 // Pure view over a store snapshot: message stream, then the error line, then
 // pending agent request cards. Only the last message can be streaming, so only
@@ -26,11 +49,6 @@ function ChatTranscriptView({
 }) {
   const lastIndex = snapshot.messages.length - 1;
   const turnInProgress = snapshot.status === "submitted" || snapshot.status === "streaming";
-  // A reopened session hydrates its transcript from native history where the
-  // harness supports it (pi today) — then this notice never shows. It remains
-  // for the harnesses without a history read: the agent still resumes with its
-  // own context, so the conversation continues regardless.
-  const showEmptyNotice = snapshot.messages.length === 0 && snapshot.status === "ready";
   return (
     <Conversation>
       {/* Width cap lives here, inside the scroller, so the scrollbar stays at
@@ -39,11 +57,8 @@ function ChatTranscriptView({
         scrollClassName="scrollbar-thin"
         className="mx-auto w-full max-w-4xl min-w-80"
       >
-        {showEmptyNotice && (
-          <div className="text-muted-foreground mx-auto max-w-md py-12 text-center text-sm">
-            Past messages can&apos;t be replayed yet. The agent still has its own context, so you
-            can pick up where you left off.
-          </div>
+        {snapshot.messages.length === 0 && (
+          <EmptyTranscript historyStatus={snapshot.historyStatus} />
         )}
         {snapshot.messages.map((message, index) => (
           <MessageView

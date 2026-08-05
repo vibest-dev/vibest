@@ -142,7 +142,7 @@ function DraftRoute() {
   const permissionMode = resolvePermissionMode(harnessAgent, search.permission);
 
   // Create the session and start its first turn against the manager's persisted
-  // store, then navigate — the session route re-attaches the same Chat with the
+  // store, then navigate — the session route picks up the same Chat with the
   // turn already streaming.
   const startSession = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
@@ -155,7 +155,7 @@ function DraftRoute() {
         ...(model !== undefined ? { providerId: model.providerId, modelId: model.modelId } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
-      void manager.attach(ref).prompt(text);
+      void manager.chatFor(ref).prompt(text);
       return ref;
     },
     onSuccess: (ref, { text }) => {

@@ -208,7 +208,7 @@ describe("HarnessAgentSessionService", () => {
     expect(result.listed).toHaveLength(0);
   });
 
-  it("attach backfills the cwd and starts nothing", async () => {
+  it("prepare backfills the cwd and starts nothing", async () => {
     const result = await run({}, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
@@ -218,21 +218,21 @@ describe("HarnessAgentSessionService", () => {
         const { cwd: _dropped, ...withoutCwd } = stored;
         yield* fixture.repo.write(withoutCwd);
 
-        yield* fixture.service.attach(ref, "/tmp/vibest-app");
+        yield* fixture.service.prepare(ref, "/tmp/vibest-app");
         const after = yield* fixture.repo.read(ref.projectId, ref.sessionId);
         return { cwd: after.cwd, resume: fixture.spy.resume, open: fixture.spy.open };
       }),
     );
     expect(result.cwd).toBe("/tmp/vibest-app");
-    // Opening a session page costs no process — the whole point of `attach`.
+    // Opening a session page costs no process — the whole point of `prepare`.
     expect(result.resume).toEqual([]);
     expect(result.open).toHaveLength(1);
   });
 
-  it("attach fails with SessionNotFound for an unknown session", async () => {
+  it("prepare fails with SessionNotFound for an unknown session", async () => {
     const err = await run({}, (fixture) =>
       Effect.flip(
-        fixture.service.attach(
+        fixture.service.prepare(
           { projectId: "proj-a", harnessAgentId: "claude-code", sessionId: "missing" },
           "/tmp/vibest-app",
         ),
@@ -241,12 +241,12 @@ describe("HarnessAgentSessionService", () => {
     expect(err._tag).toBe("SessionNotFound");
   });
 
-  it("attach fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {
+  it("prepare fails with SessionRefMismatch when the ref's agent disagrees with metadata", async () => {
     const err = await run({}, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         return yield* Effect.flip(
-          fixture.service.attach({ ...ref, harnessAgentId: "codex" }, "/tmp/vibest-app"),
+          fixture.service.prepare({ ...ref, harnessAgentId: "codex" }, "/tmp/vibest-app"),
         );
       }),
     );
@@ -421,7 +421,7 @@ describe("HarnessAgentSessionService", () => {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         const restarted = yield* fixture.restart;
 
-        yield* restarted.service.attach(ref, "/tmp/vibest-app");
+        yield* restarted.service.prepare(ref, "/tmp/vibest-app");
         const status = yield* restarted.service.getStatus(ref);
         const snapshot = yield* restarted.service.getSnapshot(ref);
         const listed = yield* restarted.service.list("proj-a");
@@ -452,7 +452,7 @@ describe("HarnessAgentSessionService", () => {
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         const restarted = yield* fixture.restart;
-        yield* restarted.service.attach(ref, "/tmp/vibest-app");
+        yield* restarted.service.prepare(ref, "/tmp/vibest-app");
 
         yield* restarted.service.prompt({ ref, parts: [{ type: "text", text: "hello" }] });
         yield* restarted.service.prompt({ ref, parts: [{ type: "text", text: "again" }] });

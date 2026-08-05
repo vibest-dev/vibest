@@ -3,12 +3,22 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { AgentRequest } from "./agent-requests";
 
+// Where the settled-history floor stands. A Chat is born "loading", so an empty
+// transcript means "not read yet" rather than "nothing was ever said"; only
+// once the floor lands does an empty transcript mean the session really is
+// empty. "unavailable" covers both ways the read can come back with nothing to
+// lay down — the harness has no history read, or the read failed — which are
+// the same fact to a reader: the transcript starts here, the agent's own
+// context does not.
+export type HistoryStatus = "loading" | "settled" | "unavailable";
+
 // Each Chat owns its own store: messages + status + error + pendingRequests.
 export type ChatStoreState = {
   messages: UIMessage[];
   status: ChatStatus;
   error?: Error;
   pendingRequests: AgentRequest[];
+  historyStatus: HistoryStatus;
 };
 
 // The slice of ai-sdk's ChatState this runtime still honors — the shared data
@@ -30,6 +40,7 @@ export class ChatState implements AiChatStateSlice {
       status: "ready",
       error: undefined,
       pendingRequests: [],
+      historyStatus: "loading",
     }));
   }
 
@@ -45,6 +56,13 @@ export class ChatState implements AiChatStateSlice {
   }
   set status(status: ChatStatus) {
     this.store.setState({ status });
+  }
+
+  get historyStatus(): HistoryStatus {
+    return this.store.getState().historyStatus;
+  }
+  set historyStatus(historyStatus: HistoryStatus) {
+    this.store.setState({ historyStatus });
   }
 
   get error(): Error | undefined {

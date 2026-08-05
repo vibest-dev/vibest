@@ -303,6 +303,51 @@ describe("Chat hydration", () => {
   });
 });
 
+// An empty transcript means two different things before and after the floor
+// lands, and the transcript renders a verdict on it — so the state is asserted
+// rather than inferred from `messages.length`.
+describe("Chat history floor state", () => {
+  it("stays 'loading' until the floor lands, then settles even on an empty read", async () => {
+    const { chat, transport, attach } = makeChat();
+    let openGate: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      openGate = resolve;
+    });
+    transport.history = [];
+    expect(chat.store.getState().historyStatus).toBe("loading");
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("loading");
+    openGate();
+    await settle();
+    expect(chat.store.getState().historyStatus).toBe("settled");
+  });
+
+  // Both ways a read comes back with no floor — capability absent, read threw —
+  // land on the same state: the transcript says so instead of showing a blank
+  // that would read as "nothing was ever said".
+  it("marks the history unavailable when the harness has no read", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = null;
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("unavailable");
+  });
+
+  it("marks the history unavailable when the read fails", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.getMessages = async () => {
+      throw new Error("rpc failed");
+    };
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("unavailable");
+  });
+
+  it("stops loading when the session terminates before any floor landed", async () => {
+    const { chat, emit } = makeChat();
+    emit({ type: "closed", reason: "session_deleted" });
+    expect(chat.store.getState().historyStatus).toBe("settled");
+  });
+});
+
 describe("Chat prompting", () => {
   it("pushes the optimistic message, submits fire-and-forget, and dedupes its echo", async () => {
     const { chat, transport, attach, live } = makeChat();

@@ -16,6 +16,10 @@ _Avoid_: bare sessionId as a wire identity
 The agent-native session identity (Claude session UUID, Codex thread ID) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
 _Avoid_: native id
 
+**Attach**:
+A client connecting to a session's live event stream — `session.subscribe` plus the snapshot taken at connect, surfaced to the chat runtime as the synthetic `"attached"` event (whose terminal counterpart is `"closed"`). Reserved for that: nothing else in the session domain attaches. Opening a session page is `session.prepare` (validate the ref, backfill cwd, ask the harness whether the native session is still there — starts nothing); getting the client-side `Chat` instance for a ref is `ChatManager.chatFor`.
+_Avoid_: attach for the cold pre-flight (its former name) or for taking a Chat instance; resume (`session.prepare` starts nothing — only a prompt does)
+
 **Session metadata**:
 The server-owned recovery record for a session: which Project, which harness agent, which harness session id. Distinct from conversation history, which stays in the agent's native storage.
 
