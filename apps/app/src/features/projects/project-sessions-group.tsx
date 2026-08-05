@@ -1,146 +1,39 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useRouteContext } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import type { Project, SessionSummary } from "@vibest/contract";
 import {
   Collapsible,
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "@vibest/ui/components/collapsible";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import {
   SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuAction,
-  SidebarMenuButton,
-  SidebarMenuItem,
 } from "@vibest/ui/components/sidebar";
-import {
-  Archive,
-  ArchiveRestore,
-  ChevronRight,
-  Ellipsis,
-  Folder,
-  FolderOpen,
-  SquarePen,
-} from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, SquarePen } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
+import { ProjectSessionRow } from "@/features/projects/project-session-row";
 import { useProjectSessions } from "@/features/projects/use-project-sessions";
 
 const EMPTY_SESSIONS: ReadonlyArray<SessionSummary> = [];
 
-function SessionMenuItem({
-  activeSessionId,
-  archivePending,
-  onArchiveChange,
-  onOpen,
-  session,
-}: {
-  readonly activeSessionId: string | undefined;
-  readonly archivePending: boolean;
-  readonly onArchiveChange: (session: SessionSummary, archived: boolean) => void;
-  readonly onOpen: (session: SessionSummary) => void;
-  readonly session: SessionSummary;
-}) {
-  const title = session.title ?? "New chat";
-
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={session.sessionId === activeSessionId}
-        onClick={() => onOpen(session)}
-      >
-        <span className="truncate">{title}</span>
-        {/* Busy elsewhere too: status is server-derived, so a turn any client
-            is running shows here. requires_action keeps the turn open. */}
-        {(session.status?.phase === "running" || session.status?.phase === "requires_action") && (
-          <span
-            className="ms-auto size-2 shrink-0 animate-pulse rounded-full bg-emerald-500"
-            title="A turn is running in this session"
-          />
-        )}
-      </SidebarMenuButton>
-      <Menu>
-        <MenuTrigger
-          render={
-            <SidebarMenuAction
-              aria-label={`Actions for ${title}`}
-              disabled={archivePending}
-              showOnHover
-            />
-          }
-        >
-          <Ellipsis />
-        </MenuTrigger>
-        <MenuPopup align="start" side="right">
-          <MenuItem
-            disabled={archivePending}
-            onClick={() => onArchiveChange(session, !session.archived)}
-          >
-            {session.archived ? <ArchiveRestore /> : <Archive />}
-            {session.archived ? "Restore" : "Archive"}
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
-    </SidebarMenuItem>
-  );
-}
-
 /**
  * One project and the sessions under it, as a collapsible sidebar group. The
  * label is its own collapse trigger; a Folder icon swaps to FolderOpen when the
- * panel is open (two icon entities, not a rotation). Fetching lives in
- * `useProjectSessions`; how a row looks and what a click does are this
- * component's own business.
+ * panel is open (two icon entities, not a rotation). This component owns only
+ * grouping and fetching; each row composes its own navigation and actions.
  */
 export function ProjectSessionsGroup({ project }: { project: Project }) {
-  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [archivedOpen, setArchivedOpen] = useState(false);
-  // strict: false — the sidebar renders on every route, and most have no sessionId.
-  const { sessionId: activeSessionId } = useParams({ strict: false });
   const activeSessions = useProjectSessions(project.id);
   const archivedSessions = useProjectSessions(project.id, {
     archived: true,
     enabled: archivedOpen,
   });
 
-  const setArchived = useMutation({
-    mutationFn: ({ archived, session }: { archived: boolean; session: SessionSummary }) =>
-      orpcQueryUtils.session.archive.call({
-        ref: {
-          projectId: session.projectId,
-          harnessAgentId: session.harnessAgentId,
-          sessionId: session.sessionId,
-        },
-        archived,
-      }),
-    onSuccess: (_, { session }) => {
-      const listKey = (archived: boolean) =>
-        orpcQueryUtils.session.list.queryOptions({
-          input: { projectId: session.projectId, archived },
-        }).queryKey;
-      return Promise.all([
-        queryClient.invalidateQueries({ queryKey: listKey(false) }),
-        queryClient.invalidateQueries({ queryKey: listKey(true) }),
-      ]);
-    },
-    onError: (error) => toast.error(`Failed to update session: ${error.message}`),
-  });
-
-  const openSession = (session: SessionSummary) =>
-    navigate({
-      to: "/session/$sessionId",
-      params: { sessionId: session.sessionId },
-      search: { projectId: session.projectId, harness: session.harnessAgentId },
-    });
-  const pendingSessionId = setArchived.isPending
-    ? setArchived.variables?.session.sessionId
-    : undefined;
   const activeRows = activeSessions.data ?? EMPTY_SESSIONS;
   const archivedRows = archivedSessions.data ?? EMPTY_SESSIONS;
 
@@ -175,16 +68,7 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
           <SidebarGroupContent>
             <SidebarMenu>
               {activeRows.map((session) => (
-                <SessionMenuItem
-                  activeSessionId={activeSessionId}
-                  archivePending={pendingSessionId === session.sessionId}
-                  key={session.sessionId}
-                  onArchiveChange={(target, archived) =>
-                    setArchived.mutate({ session: target, archived })
-                  }
-                  onOpen={openSession}
-                  session={session}
-                />
+                <ProjectSessionRow key={session.sessionId} session={session} />
               ))}
             </SidebarMenu>
             <Collapsible className="mt-1" onOpenChange={setArchivedOpen} open={archivedOpen}>
@@ -205,16 +89,7 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
                 ) : (
                   <SidebarMenu className="pt-1">
                     {archivedRows.map((session) => (
-                      <SessionMenuItem
-                        activeSessionId={activeSessionId}
-                        archivePending={pendingSessionId === session.sessionId}
-                        key={session.sessionId}
-                        onArchiveChange={(target, archived) =>
-                          setArchived.mutate({ session: target, archived })
-                        }
-                        onOpen={openSession}
-                        session={session}
-                      />
+                      <ProjectSessionRow key={session.sessionId} session={session} />
                     ))}
                   </SidebarMenu>
                 )}
