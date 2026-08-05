@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEditorState } from "@tiptap/react";
 import type { ListSessionsOutput, SessionSummary } from "@vibest/contract";
 import {
   HARNESS_AGENT_IDS,
@@ -33,8 +32,8 @@ import { ChatInput } from "@/features/chat/components/input/chat-input";
 import { ChatInputProvider } from "@/features/chat/components/input/chat-input-provider";
 import { createChatBaseExtensions } from "@/features/chat/components/input/extensions/chat-base-extensions";
 import { createSubmitKeymap } from "@/features/chat/components/input/extensions/keymaps";
-import { hasChatContent } from "@/features/chat/components/input/serialize";
 import { useChatInputController } from "@/features/chat/components/input/use-chat-input-controller";
+import { useChatInputHasContent } from "@/features/chat/components/input/use-chat-input-has-content";
 import { ModelSelect } from "@/features/chat/components/model-select";
 import { PermissionModeSelect } from "@/features/chat/components/permission-mode-select";
 import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
@@ -224,10 +223,7 @@ function DraftRoute() {
     },
   });
 
-  const hasContent = useEditorState({
-    editor: controller?.editor ?? null,
-    selector: ({ editor }) => (editor ? hasChatContent(editor) : false),
-  });
+  const hasContent = useChatInputHasContent(controller);
 
   // Every branch below renders instead of the composer, because a composer that
   // can never submit is worse than saying why. `data === undefined` must be

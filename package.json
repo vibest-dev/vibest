@@ -26,6 +26,7 @@
     "@types/node": "catalog:",
     "agent-cli-detector": "^0.1.4",
     "eslint-plugin-react-you-might-not-need-an-effect": "^1.0.1",
+    "jsdom": "^26.1.0",
     "lint-staged": "^17.1.0",
     "oxfmt": "^0.58.0",
     "oxlint": "^1.74.0",

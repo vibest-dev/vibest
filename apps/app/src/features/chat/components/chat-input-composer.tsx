@@ -1,4 +1,3 @@
-import { useEditorState } from "@tiptap/react";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -15,8 +14,8 @@ import { ChatInput } from "./input/chat-input";
 import { ChatInputProvider } from "./input/chat-input-provider";
 import { createChatBaseExtensions } from "./input/extensions/chat-base-extensions";
 import { createSubmitKeymap } from "./input/extensions/keymaps";
-import { hasChatContent } from "./input/serialize";
 import { useChatInputController } from "./input/use-chat-input-controller";
+import { useChatInputHasContent } from "./input/use-chat-input-has-content";
 
 // Live-session input bar on the TipTap chat-input kit: Enter sends (IME-safe,
 // handled by the submit keymap) / Shift+Enter breaks the line; an in-flight
@@ -44,10 +43,7 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
     },
   });
 
-  const hasContent = useEditorState({
-    editor: controller?.editor ?? null,
-    selector: ({ editor }) => (editor ? hasChatContent(editor) : false),
-  });
+  const hasContent = useChatInputHasContent(controller);
 
   return (
     <PromptInput
