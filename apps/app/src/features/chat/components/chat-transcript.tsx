@@ -1,4 +1,5 @@
 import { Loader } from "@vibest/ui/ai-elements/loader";
+import { Shimmer } from "@vibest/ui/ai-elements/shimmer";
 import { useStore } from "zustand";
 
 import {
@@ -20,11 +21,11 @@ import { TranscriptRenderProvider } from "./transcript/transcript-render-provide
 // messages simply has none yet.
 function EmptyTranscript({ historyStatus }: { historyStatus: HistoryStatus }) {
   if (historyStatus === "loading") {
-    return (
-      <div className="flex justify-center py-12">
-        <Loader />
-      </div>
-    );
+    // Reads as a turn that hasn't produced text yet: the shimmer sits where the
+    // first message will land, so the transcript settles in place instead of a
+    // centered spinner claiming the panel and then vanishing. Same thinking
+    // indicator the tool batches use.
+    return <Shimmer className="text-sm">Loading earlier messages…</Shimmer>;
   }
   if (historyStatus === "unavailable") {
     return (
