@@ -11,8 +11,7 @@ import {
   SidebarGroupLabel,
   SidebarMenu,
 } from "@vibest/ui/components/sidebar";
-import { ChevronRight, Folder, FolderOpen, SquarePen } from "lucide-react";
-import { useState } from "react";
+import { Folder, FolderOpen, SquarePen } from "lucide-react";
 
 import { ProjectSessionRow } from "@/features/projects/project-session-row";
 import { useProjectSessions } from "@/features/projects/use-project-sessions";
@@ -27,15 +26,8 @@ const EMPTY_SESSIONS: ReadonlyArray<SessionSummary> = [];
  */
 export function ProjectSessionsGroup({ project }: { project: Project }) {
   const navigate = useNavigate();
-  const [archivedOpen, setArchivedOpen] = useState(false);
-  const activeSessions = useProjectSessions(project.id);
-  const archivedSessions = useProjectSessions(project.id, {
-    archived: true,
-    enabled: archivedOpen,
-  });
-
-  const activeRows = activeSessions.data ?? EMPTY_SESSIONS;
-  const archivedRows = archivedSessions.data ?? EMPTY_SESSIONS;
+  const sessions = useProjectSessions(project.id);
+  const rows = sessions.data ?? EMPTY_SESSIONS;
 
   return (
     <Collapsible defaultOpen>
@@ -67,34 +59,10 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
         <CollapsiblePanel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {activeRows.map((session) => (
+              {rows.map((session) => (
                 <ProjectSessionRow key={session.sessionId} session={session} />
               ))}
             </SidebarMenu>
-            <Collapsible className="mt-1" onOpenChange={setArchivedOpen} open={archivedOpen}>
-              <CollapsibleTrigger className="text-sidebar-foreground/70 hover:bg-sidebar-accent/70 group/archived-trigger flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-xs font-medium outline-hidden focus-visible:ring-2">
-                <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]/archived-trigger:rotate-90" />
-                <span>Archived</span>
-                {archivedSessions.data !== undefined ? (
-                  <span className="ms-auto tabular-nums">{archivedRows.length}</span>
-                ) : null}
-              </CollapsibleTrigger>
-              <CollapsiblePanel>
-                {archivedSessions.isPending ? (
-                  <p className="text-sidebar-foreground/60 px-2 py-1 text-xs">Loading...</p>
-                ) : archivedRows.length === 0 ? (
-                  <p className="text-sidebar-foreground/60 px-2 py-1 text-xs">
-                    No archived sessions
-                  </p>
-                ) : (
-                  <SidebarMenu className="pt-1">
-                    {archivedRows.map((session) => (
-                      <ProjectSessionRow key={session.sessionId} session={session} />
-                    ))}
-                  </SidebarMenu>
-                )}
-              </CollapsiblePanel>
-            </Collapsible>
           </SidebarGroupContent>
         </CollapsiblePanel>
       </section>
