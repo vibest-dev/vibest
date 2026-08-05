@@ -33,15 +33,8 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
   return (
     <Collapsible defaultOpen>
       <section className="relative min-w-0" aria-labelledby={`project-${project.id}`}>
-        {/*
-         * pe-8 keeps a long name from running under the absolutely positioned
-         * action. w-full is what makes that — and the name's own `truncate` —
-         * bite at all: the label renders as a <button>, and a button in a block
-         * box is shrink-to-fit even at `display: flex`, so without a width it
-         * grows to the name and spills out of the sidebar. The label is a div
-         * everywhere else, and a div does fill its block parent, which is why
-         * this only bites here.
-         */}
+        {/* pe-8 keeps a long name off the absolutely positioned action; w-full is what
+            makes it and `truncate` bite, since the label renders as a shrink-to-fit <button>. */}
         <SidebarGroupLabel
           className="text-sidebar-accent-foreground h-7 w-full min-w-0 pe-8 text-sm"
           id={`project-${project.id}`}
