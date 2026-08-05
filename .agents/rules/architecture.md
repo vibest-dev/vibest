@@ -22,14 +22,20 @@
   those pure and diskless.
 - **The session domain lives in `packages/server/src/harness/` with exactly five
   public roles**: `HarnessAgentRegistry` (who exists), `HarnessAgentAdapter` (how
-  to get in), `HarnessAgentSessionManager` (sole owner of live state — instances
-  _and_ projections; the only caller of `adapter.open`/`adapter.resume`),
-  `HarnessAgentSession` (what one live session can do), and
-  `HarnessAgentSessionService` (the outward face: SessionRef ↔ native-id
-  translation, metadata persistence, wire-vocabulary validation, collection
-  events). `session-runtime.ts` and `session-repository.ts` are private
-  collaborators of the manager and the service — no Context tags, don't wire
-  them directly. The RPC router contributes only `projectId → workspace path`
+  to get in), `HarnessAgentSessionManager` (sole owner of live state — one
+  session per ref; the only caller of `adapter.open`/`adapter.resume`),
+  `HarnessAgentRuntime` (the live execution resource an adapter produces: a pi
+  child, a Claude SDK handle, a Codex thread), and `HarnessAgentSessionService`
+  (the outward face: SessionRef ↔ native-id translation, metadata persistence,
+  wire-vocabulary validation, collection events). `session.ts`,
+  `session-fold.ts` and `session-repository.ts` are private collaborators of the
+  manager and the service — no Context tags, don't wire them directly.
+  `HarnessAgentSession` (`session.ts`) is one session as this server sees it —
+  the owner of phase, seq/cursor, buffers and pending requests — and it
+  _optionally_ owns a runtime: observing a session costs no process, and a
+  runtime is acquired only by a prompt (or by a history read on a harness with
+  no cold `adapter.getMessages`). The RPC router contributes only
+  `projectId → workspace path`
   (via `ProjectService`) and error-code mapping. Adapters see `cwd`, never
   `projectId`; the manager receives a `SessionRef` but only carries it (event
   stamping), never interprets it.
