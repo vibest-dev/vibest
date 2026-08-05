@@ -374,6 +374,24 @@ describe("HarnessAgentSessionService", () => {
       }
     });
 
+  it("archives a running session and closes its live instance", async () => {
+    const result = await run({ turn: "open" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* waitForTurn(fixture, ref, (turn) => turn !== null && !turn.complete);
+        yield* fixture.service.archive(ref, true);
+        const active = yield* fixture.service.list("proj-a", false);
+        const archived = yield* fixture.service.list("proj-a", true);
+        return { active, archived, closed: fixture.spy.close.slice() };
+      }),
+    );
+
+    expect(result.active).toEqual([]);
+    expect(result.archived).toHaveLength(1);
+    expect(result.archived[0]?.status).toBeUndefined();
+    expect(result.closed).toEqual(["native-1"]);
+  });
+
   it("getMessages trims the last user segment while a turn is in flight", async () => {
     const messages = await run({ history: fourTurnHistory, turn: "open" }, (fixture) =>
       Effect.gen(function* () {

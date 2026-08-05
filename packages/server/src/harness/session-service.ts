@@ -475,13 +475,19 @@ export const makeHarnessAgentSessionService = (deps: {
 
     archive: (ref, archived) =>
       readChecked(ref).pipe(
-        Effect.flatMap((metadata) =>
-          (metadata.archived ?? false) === archived
-            ? Effect.void
-            : repo
-                .write({ ...metadata, archived })
-                .pipe(Effect.andThen(bus.publish({ ref, type: "session.archived", archived }))),
-        ),
+        Effect.flatMap((metadata) => {
+          const changed = (metadata.archived ?? false) !== archived;
+          const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
+          // Archive is also a lifecycle boundary: persist first so a failed
+          // metadata write never kills live work. Restore stays cold until open.
+          const close = archived
+            ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
+            : Effect.void;
+          const publish = changed
+            ? bus.publish({ ref, type: "session.archived", archived })
+            : Effect.void;
+          return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
+        }),
       ),
 
     // A pure read of our own records — display data is self-owned (title from
