@@ -484,7 +484,7 @@ describe("HarnessAgentSessionService", () => {
         yield* restarted.service.prepare(ref, "/tmp/vibest-app");
         const status = yield* restarted.service.getStatus(ref);
         const snapshot = yield* restarted.service.getSnapshot(ref);
-        const listed = yield* restarted.service.list("proj-a");
+        const listed = yield* restarted.service.list("proj-a", false);
         const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
         return { ref, status, snapshot, listed, messages, spy: fixture.spy };
       }),
