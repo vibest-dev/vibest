@@ -13,7 +13,7 @@ import { HarnessIcon } from "./harness-icon";
 
 // Which agent runs the session. Only offered before the session exists: the
 // harness is part of the SessionRef, so it is fixed at create time (see
-// HarnessBadge for how a live session shows it).
+// ChatHarnessIcon for how a live session shows it).
 //
 // Harnesses whose CLI is missing stay in the list, disabled and labelled with
 // the declared `reason` — hiding them turns "why is Codex not here?" into a
