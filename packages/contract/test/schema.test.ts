@@ -2,10 +2,12 @@ import { Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  ArchiveSessionInputSchema,
   CollectionEventTypes,
   HarnessListOutputSchema,
   HarnessProbeInputSchema,
   HarnessProbeOutputSchema,
+  ListSessionsInputSchema,
   type ServerEvent,
   serverErrors,
   ServerErrorCodes,
@@ -37,6 +39,21 @@ describe("SessionRef", () => {
 
   it("rejects an unknown harness agent", () => {
     expect(accepts(SessionRefSchema, { ...ref, harnessAgentId: "gpt" })).toBe(false);
+  });
+});
+
+describe("ArchiveSessionInput", () => {
+  it("requires an explicit archived state", () => {
+    expect(accepts(ArchiveSessionInputSchema, { ref, archived: true })).toBe(true);
+    expect(accepts(ArchiveSessionInputSchema, { ref })).toBe(false);
+  });
+});
+
+describe("ListSessionsInput", () => {
+  it("accepts an archived filter and lets callers omit it for the active default", () => {
+    expect(accepts(ListSessionsInputSchema, { projectId: UUID, archived: false })).toBe(true);
+    expect(accepts(ListSessionsInputSchema, { projectId: UUID, archived: true })).toBe(true);
+    expect(accepts(ListSessionsInputSchema, { projectId: UUID })).toBe(true);
   });
 });
 

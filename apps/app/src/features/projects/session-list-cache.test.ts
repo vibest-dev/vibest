@@ -10,16 +10,17 @@ const ref: SessionRef = {
   sessionId: "session-1",
 };
 
-const listKeyFor: ListKeyFor = (projectId) => ["sessions", projectId];
+const listKeyFor: ListKeyFor = (projectId, archived) => ["sessions", projectId, archived];
 
 const seed = (rows: ListSessionsOutput) => {
   const queryClient = new QueryClient();
-  queryClient.setQueryData<ListSessionsOutput>(listKeyFor(ref.projectId), rows);
+  queryClient.setQueryData<ListSessionsOutput>(listKeyFor(ref.projectId, false), rows);
   return queryClient;
 };
 
 const row = (overrides: Partial<ListSessionsOutput[number]> = {}): ListSessionsOutput[number] => ({
   ...ref,
+  archived: false,
   createdAt: "2026-08-03T00:00:00.000Z",
   historyAvailable: true,
   title: "hello",
@@ -27,7 +28,7 @@ const row = (overrides: Partial<ListSessionsOutput[number]> = {}): ListSessionsO
 });
 
 const rows = (queryClient: QueryClient) =>
-  queryClient.getQueryData<ListSessionsOutput>(listKeyFor(ref.projectId));
+  queryClient.getQueryData<ListSessionsOutput>(listKeyFor(ref.projectId, false));
 
 describe("applySessionListEvent", () => {
   it("copies the server-stamped phase onto the row", () => {
@@ -90,7 +91,19 @@ describe("applySessionListEvent", () => {
       title: "created elsewhere",
     };
     applySessionListEvent(queryClient, listKeyFor, event);
-    expect(queryClient.getQueryState(listKeyFor(ref.projectId))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(listKeyFor(ref.projectId, false))?.isInvalidated).toBe(true);
+  });
+
+  it("removes an archived row from the active cache and invalidates the archived cache", () => {
+    const queryClient = seed([row()]);
+    queryClient.setQueryData<ListSessionsOutput>(listKeyFor(ref.projectId, true), []);
+    applySessionListEvent(queryClient, listKeyFor, {
+      ref,
+      type: "session.archived",
+      archived: true,
+    });
+    expect(rows(queryClient)).toEqual([]);
+    expect(queryClient.getQueryState(listKeyFor(ref.projectId, true))?.isInvalidated).toBe(true);
   });
 
   it("renames and deletes rows in place", () => {

@@ -174,27 +174,39 @@ describe("session router", () => {
     }
   });
 
-  it("lists sessions with live status and drops them on delete", async () => {
+  it("lists, archives, restores, and deletes sessions", async () => {
     const { client, workspace, dispose } = await setup();
     try {
       const project = await client.project.create({ path: workspace });
       const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
 
       // Active session: list carries the live phase from the running runtime.
+      // Omitted `archived` defaults to the active-session listing.
       const active = await client.session.list({ projectId: project.id });
       expect(active).toHaveLength(1);
       expect(active[0]?.sessionId).toBe(ref.sessionId);
       expect(active[0]?.status?.phase).toBeDefined();
+      expect(active[0]?.archived).toBe(false);
+
+      await client.session.archive({ ref, archived: true });
+      const archived = await client.session.list({ projectId: project.id, archived: true });
+      expect(archived[0]?.archived).toBe(true);
+      expect(await client.session.list({ projectId: project.id, archived: false })).toEqual([]);
+
+      await client.session.archive({ ref, archived: false });
+      const restored = await client.session.list({ projectId: project.id, archived: false });
+      expect(restored[0]?.archived).toBe(false);
+      expect(await client.session.list({ projectId: project.id, archived: true })).toEqual([]);
 
       // Closed but not deleted: metadata stays, the runtime is gone → no status.
       await client.session.close({ ref });
-      const idle = await client.session.list({ projectId: project.id });
+      const idle = await client.session.list({ projectId: project.id, archived: false });
       expect(idle).toHaveLength(1);
       expect(idle[0]?.status).toBeUndefined();
 
       // Delete: metadata removed → the session leaves the listing entirely.
       await client.session.delete({ ref });
-      const empty = await client.session.list({ projectId: project.id });
+      const empty = await client.session.list({ projectId: project.id, archived: false });
       expect(empty).toHaveLength(0);
     } finally {
       await dispose();

@@ -21,7 +21,7 @@ A client connecting to a session's live event stream — `session.subscribe` plu
 _Avoid_: attach for the cold pre-flight (its former name) or for taking a Chat instance; resume (`session.prepare` starts nothing — only a prompt does)
 
 **Session metadata**:
-The server-owned recovery record for a session: which Project, which harness agent, which harness session id. Distinct from conversation history, which stays in the agent's native storage.
+The server-owned recovery record for a session: which Project, which harness agent, which harness session id, and whether the session is archived. Distinct from conversation history, which stays in the agent's native storage.
 
 **Workspace path**:
 The validated absolute directory handed to a harness agent when opening or resuming a session; always derived from `Project.path`, never accepted directly from session API callers.

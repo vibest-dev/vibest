@@ -4,7 +4,7 @@ import { isSessionScopedEvent } from "@vibest/contract";
 
 type SessionRow = ListSessionsOutput[number];
 
-export type ListKeyFor = (projectId: string) => QueryKey;
+export type ListKeyFor = (projectId: string, archived: boolean) => QueryKey;
 
 // One in-place row edit. Returns whether the row existed; an `update` that
 // returns the same row leaves the previous array untouched, so query
@@ -31,6 +31,31 @@ const patchRow = (
   return found;
 };
 
+const patchLists = (
+  queryClient: QueryClient,
+  listKeys: ReadonlyArray<QueryKey>,
+  sessionId: string,
+  update: (row: SessionRow) => SessionRow,
+): boolean => {
+  let found = false;
+  for (const listKey of listKeys) {
+    found = patchRow(queryClient, listKey, sessionId, update) || found;
+  }
+  return found;
+};
+
+const removeFromLists = (
+  queryClient: QueryClient,
+  listKeys: ReadonlyArray<QueryKey>,
+  sessionId: string,
+) => {
+  for (const listKey of listKeys) {
+    queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) =>
+      prev?.filter((row) => row.sessionId !== sessionId),
+    );
+  }
+};
+
 /**
  * Fold one firehose event into the `session.list` caches. Pure with respect to
  * React — the hook owns the subscription, this owns what an event means.
@@ -46,11 +71,11 @@ export const applySessionListEvent = (
   listKeyFor: ListKeyFor,
   event: ServerEvent,
 ): void => {
-  const listKey = listKeyFor(event.ref.projectId);
+  const listKeys = [listKeyFor(event.ref.projectId, false), listKeyFor(event.ref.projectId, true)];
   if (isSessionScopedEvent(event)) {
     const phase = event.phase;
     if (phase === undefined || event.type === "session.message.chunk") return;
-    patchRow(queryClient, listKey, event.ref.sessionId, (row) =>
+    patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
       row.status?.phase === phase ? row : { ...row, status: { phase } },
     );
     return;
@@ -61,22 +86,33 @@ export const applySessionListEvent = (
       // one's live status/createdAt. A row we don't hold yet (another client
       // created this session) → pull the authoritative list once; the read is
       // a cheap pure-storage query.
-      const found = patchRow(queryClient, listKey, event.ref.sessionId, (row) =>
+      const found = patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
         event.title !== undefined ? { ...row, title: event.title } : row,
       );
-      if (!found) void queryClient.invalidateQueries({ queryKey: listKey });
+      if (!found) {
+        for (const listKey of listKeys) {
+          void queryClient.invalidateQueries({ queryKey: listKey });
+        }
+      }
       break;
     }
     case "session.renamed":
-      patchRow(queryClient, listKey, event.ref.sessionId, (row) => ({
+      patchLists(queryClient, listKeys, event.ref.sessionId, (row) => ({
         ...row,
         title: event.name,
       }));
       break;
+    case "session.archived": {
+      const sourceKey = listKeyFor(event.ref.projectId, !event.archived);
+      const destinationKey = listKeyFor(event.ref.projectId, event.archived);
+      removeFromLists(queryClient, [sourceKey], event.ref.sessionId);
+      // The event carries no full summary. An open destination query refetches
+      // now; a disabled archived query remains lazy until its panel opens.
+      void queryClient.invalidateQueries({ queryKey: destinationKey });
+      break;
+    }
     case "session.deleted":
-      queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) =>
-        prev?.filter((s) => s.sessionId !== event.ref.sessionId),
-      );
+      removeFromLists(queryClient, listKeys, event.ref.sessionId);
       break;
     case "session.created":
       // The creating tab already seeded this row optimistically; a title-less

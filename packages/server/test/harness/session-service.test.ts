@@ -192,6 +192,7 @@ describe("HarnessAgentSessionService", () => {
     expect(result.stored.harnessSessionId).toBe("native-1");
     expect(result.stored.projectId).toBe("proj-a");
     expect(result.stored.cwd).toBe("/tmp/vibest-app");
+    expect(result.stored.archived).toBe(false);
   });
 
   it("create surfaces AgentUnavailable and writes no metadata", async () => {
@@ -269,7 +270,7 @@ describe("HarnessAgentSessionService", () => {
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* fixture.service.delete(ref);
-        const listed = yield* fixture.service.list("proj-a");
+        const listed = yield* fixture.service.list("proj-a", false);
         return { listed, closeSpy: fixture.spy.close };
       }),
     );
@@ -282,7 +283,7 @@ describe("HarnessAgentSessionService", () => {
       Effect.gen(function* () {
         const a = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         const b = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        const listed = yield* fixture.service.list("proj-a");
+        const listed = yield* fixture.service.list("proj-a", false);
         return { a, b, listed };
       }),
     );
@@ -292,6 +293,47 @@ describe("HarnessAgentSessionService", () => {
     );
     // We own the record, so a session we created reads as history-available.
     expect(result.listed.every((summary) => summary.historyAvailable)).toBe(true);
+    expect(result.listed.every((summary) => !summary.archived)).toBe(true);
+  });
+
+  it("archives and restores a session, publishing each changed state", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "global" });
+            yield* fixture.service.archive(ref, true);
+            const archived = yield* fixture.service.list("proj-a", true);
+            const activeWhileArchived = yield* fixture.service.list("proj-a", false);
+            yield* fixture.service.archive(ref, true); // idempotent: no duplicate event
+            yield* fixture.service.archive(ref, false);
+            const restored = yield* fixture.service.list("proj-a", false);
+            const archivedAfterRestore = yield* fixture.service.list("proj-a", true);
+            const items = yield* Stream.runCollect(Stream.take(stream, 2));
+            return {
+              archived,
+              activeWhileArchived,
+              restored,
+              archivedAfterRestore,
+              items: Array.from(items),
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.archived[0]?.archived).toBe(true);
+    expect(result.activeWhileArchived).toEqual([]);
+    expect(result.restored[0]?.archived).toBe(false);
+    expect(result.archivedAfterRestore).toEqual([]);
+    expect(
+      result.items.map((item) =>
+        item.type === "event" && item.event.type === "session.archived"
+          ? item.event.archived
+          : undefined,
+      ),
+    ).toEqual([true, false]);
   });
 
   it("getMessages reopens a closed session and reads through the live instance", async () => {
@@ -471,7 +513,7 @@ describe("HarnessAgentSessionService", () => {
           ref,
           parts: [{ type: "text", text: "  Fix the  login  bug " }],
         });
-        return yield* fixture.service.list("proj-a");
+        return yield* fixture.service.list("proj-a", false);
       }),
     );
     expect(listed).toHaveLength(1);
@@ -628,7 +670,7 @@ describe("HarnessAgentSessionService", () => {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* fixture.service.prompt({ ref, parts: [{ type: "text", text: "first" }] });
         yield* fixture.service.prompt({ ref, parts: [{ type: "text", text: "second" }] });
-        return yield* fixture.service.list("proj-a");
+        return yield* fixture.service.list("proj-a", false);
       }),
     );
     expect(listed[0]?.title).toBe("first");
@@ -638,7 +680,7 @@ describe("HarnessAgentSessionService", () => {
     const listed = await run({}, (fixture) =>
       Effect.gen(function* () {
         yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        return yield* fixture.service.list("proj-a");
+        return yield* fixture.service.list("proj-a", false);
       }),
     );
     expect(listed).toHaveLength(1);

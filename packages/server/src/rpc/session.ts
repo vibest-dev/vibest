@@ -109,7 +109,7 @@ export const sessionRouter = orpc.router({
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
     return yield* projects.findById(input.projectId).pipe(
-      Effect.andThen(sessions.list(input.projectId)),
+      Effect.andThen(sessions.list(input.projectId, input.archived ?? false)),
       Effect.catchTags({
         ProjectNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `project ${e.projectId} not found` })),
@@ -119,6 +119,19 @@ export const sessionRouter = orpc.router({
   rename: orpc.rename.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
     yield* sessions.rename(input.ref, input.name).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+      }),
+    );
+  }),
+  archive: orpc.archive.effect(function* ({ input, errors }) {
+    const sessions = yield* HarnessAgentSessionService;
+    yield* sessions.archive(input.ref, input.archived).pipe(
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),

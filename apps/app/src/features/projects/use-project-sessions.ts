@@ -2,8 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { SessionSummary } from "@vibest/contract";
 
-const NO_SESSIONS: ReadonlyArray<SessionSummary> = [];
-
 // Newest-first: a session is opened right after it is created. Module scope
 // keeps `select` referentially stable across renders.
 const selectNewestFirst = (
@@ -18,12 +16,15 @@ const selectNewestFirst = (
  * the draft route seeds an optimistic row, `useSessionListSync` patches titles
  * in from `session.updated`.
  */
-export function useProjectSessions(projectId: string): ReadonlyArray<SessionSummary> {
+export function useProjectSessions(
+  projectId: string,
+  { archived = false, enabled = true }: { archived?: boolean; enabled?: boolean } = {},
+) {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
-  const { data } = useQuery({
-    ...orpcQueryUtils.session.list.queryOptions({ input: { projectId } }),
+  return useQuery({
+    ...orpcQueryUtils.session.list.queryOptions({ input: { projectId, archived } }),
+    enabled,
     staleTime: 30_000,
     select: selectNewestFirst,
   });
-  return data ?? NO_SESSIONS;
 }

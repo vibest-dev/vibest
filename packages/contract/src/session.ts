@@ -1,6 +1,7 @@
 import { eventIterator, oc, type } from "@orpc/contract";
 
 import {
+  ArchiveSessionInputSchema,
   CreateSessionInputSchema,
   serverErrors,
   ListSessionsInputSchema,
@@ -46,6 +47,7 @@ export const sessionContract = {
   // history / index
   list: base.input(toStandardSchema(ListSessionsInputSchema)).output(type<ListSessionsOutput>()),
   rename: base.input(toStandardSchema(RenameSessionInputSchema)),
+  archive: base.input(toStandardSchema(ArchiveSessionInputSchema)),
   delete: base.input(toStandardSchema(RefInputSchema)),
   getMessages: base.input(toStandardSchema(RefInputSchema)).output(type<SessionMessages>()),
   // sessionId (a bookmarked URL) → full SessionRef via server-side reverse lookup.

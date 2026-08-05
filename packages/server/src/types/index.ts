@@ -45,6 +45,8 @@ export interface Session {
   readonly cwd?: string;
   /** Display title, set from the session's first prompt. */
   readonly title?: string;
+  /** Whether the session is hidden from the project's primary session list. */
+  readonly archived?: boolean;
   /** Recency (ISO). Reserved — not written yet (see the type doc). */
   readonly updatedAt?: string;
   /** Whether the backend still has the transcript. Reserved — not written yet. */

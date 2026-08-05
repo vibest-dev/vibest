@@ -18,6 +18,7 @@ const SessionSchema = Schema.Struct({
   createdAt: Schema.String,
   cwd: Schema.optionalKey(Schema.String),
   title: Schema.optionalKey(Schema.String),
+  archived: Schema.optionalKey(Schema.Boolean),
   updatedAt: Schema.optionalKey(Schema.String),
   historyAvailable: Schema.optionalKey(Schema.Boolean),
 });

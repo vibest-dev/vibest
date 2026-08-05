@@ -198,6 +198,7 @@ export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
 export const CollectionEventTypes = [
   "session.created",
   "session.updated",
+  "session.archived",
   "session.deleted",
   "session.renamed",
 ] as const;
@@ -269,6 +270,7 @@ export type CollectionEvent = { readonly ref: SessionRef } & (
   // from the first prompt). Carries the new value so clients patch the row in
   // place instead of clobbering an optimistic title with a refetch.
   | { readonly type: "session.updated"; readonly title?: string }
+  | { readonly type: "session.archived"; readonly archived: boolean }
   | { readonly type: "session.deleted" }
   | { readonly type: "session.renamed"; readonly name: string }
 );
@@ -607,6 +609,7 @@ export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
 export const ListSessionsInputSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
+  archived: Schema.optionalKey(Schema.Boolean),
 });
 export type ListSessionsInput = typeof ListSessionsInputSchema.Type;
 
@@ -615,6 +618,7 @@ export type SessionSummary = {
   readonly harnessAgentId: HarnessAgentId;
   readonly sessionId: string;
   readonly title?: string;
+  readonly archived: boolean;
   readonly createdAt: string;
   readonly updatedAt?: string;
   readonly historyAvailable: boolean;
@@ -629,6 +633,12 @@ export const RenameSessionInputSchema = Schema.Struct({
   name: Schema.NonEmptyString,
 });
 export type RenameSessionInput = typeof RenameSessionInputSchema.Type;
+
+export const ArchiveSessionInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  archived: Schema.Boolean,
+});
+export type ArchiveSessionInput = typeof ArchiveSessionInputSchema.Type;
 
 export const RefInputSchema = Schema.Struct({ ref: SessionRefSchema });
 export type RefInput = typeof RefInputSchema.Type;

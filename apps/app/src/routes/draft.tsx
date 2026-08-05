@@ -162,7 +162,7 @@ function DraftRoute() {
       // `.key({ input })` — the latter omits `type` and setQueryData would write
       // a phantom entry the sidebar never reads.
       const listKey = orpcQueryUtils.session.list.queryOptions({
-        input: { projectId: ref.projectId },
+        input: { projectId: ref.projectId, archived: false },
       }).queryKey;
 
       // Optimistic title: seed the row with the prompt text so it appears named
@@ -178,6 +178,7 @@ function DraftRoute() {
           harnessAgentId: ref.harnessAgentId,
           sessionId: ref.sessionId,
           title: text,
+          archived: false,
           // Placeholder ordering key (≈ now); the real createdAt loads on reload.
           createdAt: new Date().toISOString(),
           historyAvailable: true,
