@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouteContext } from "@tanstack/react-router";
 import type { SessionSummary } from "@vibest/contract";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import { SidebarMenuAction } from "@vibest/ui/components/sidebar";
@@ -9,7 +9,10 @@ import { toast } from "sonner";
 /** Session mutations live behind one actions-menu capability boundary. */
 export function SessionActionsMenu({ session }: { readonly session: SessionSummary }) {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // strict: false — the menu also renders on routes without a sessionId.
+  const { sessionId: activeSessionId } = useParams({ strict: false });
   const title = session.title ?? "New chat";
 
   const setArchived = useMutation({
@@ -22,15 +25,24 @@ export function SessionActionsMenu({ session }: { readonly session: SessionSumma
         },
         archived,
       }),
-    onSuccess: () => {
-      const listKey = (archived: boolean) =>
+    onSuccess: (_, archived) => {
+      const listKey = (isArchived: boolean) =>
         orpcQueryUtils.session.list.queryOptions({
-          input: { projectId: session.projectId, archived },
+          input: { projectId: session.projectId, archived: isArchived },
         }).queryKey;
-      return Promise.all([
+      const refreshLists = Promise.all([
         queryClient.invalidateQueries({ queryKey: listKey(false) }),
         queryClient.invalidateQueries({ queryKey: listKey(true) }),
       ]);
+
+      if (archived && activeSessionId === session.sessionId) {
+        return Promise.all([
+          refreshLists,
+          navigate({ to: "/draft", search: { projectId: session.projectId } }),
+        ]);
+      }
+
+      return refreshLists;
     },
     onError: (error) => toast.error(`Failed to update session: ${error.message}`),
   });
