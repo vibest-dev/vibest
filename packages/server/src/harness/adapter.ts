@@ -28,13 +28,11 @@ import {
   CreateSessionInputSchema,
   PromptReceiptSchema,
   ResumeSessionInputSchema,
-  SessionConfigSchema,
   UserInputPartSchema,
   UserInputSchema,
   type CreateSessionInput,
   type PromptReceipt,
   type ResumeSessionInput,
-  type SessionConfig,
   type UserInput,
   type UserInputPart,
 } from "./session-io";
@@ -45,7 +43,6 @@ export {
   PromptReceiptSchema,
   ResumeSessionInputSchema,
   SessionCapabilitiesSchema,
-  SessionConfigSchema,
   UserInputPartSchema,
   UserInputSchema,
 };
@@ -55,7 +52,6 @@ export type {
   PromptReceipt,
   ResumeSessionInput,
   SessionCapabilities,
-  SessionConfig,
   UserInput,
   UserInputPart,
 };

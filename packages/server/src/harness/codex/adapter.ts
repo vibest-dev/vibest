@@ -320,7 +320,7 @@ const makeRuntime = (
         supportsPermissions: true,
       }),
       // No `getMessages` here: `thread/read` answers off the shared
-      // app-server, so the read belongs on the adapter (see `readMessages`).
+      // app-server, so the read belongs on the adapter (see `HarnessAgentAdapter.getMessages`).
       close,
     } satisfies HarnessAgentRuntime;
   });

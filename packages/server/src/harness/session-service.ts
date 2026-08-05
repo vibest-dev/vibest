@@ -41,6 +41,7 @@ import {
 } from "./errors";
 import type { HarnessAgentRegistryShape } from "./registry";
 import { HarnessAgentRegistry } from "./registry";
+import type { SessionConfig } from "./session-io";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
 import { HarnessAgentSessionManager } from "./session-manager";
 import {
@@ -90,11 +91,7 @@ export type HarnessAgentSessionServiceShape = {
     projectId: string,
     harnessAgentId: HarnessAgentId,
     cwd: string,
-    config?: {
-      readonly model?: string;
-      readonly reasoningEffort?: ReasoningEffort;
-      readonly permissionMode?: PermissionMode;
-    },
+    config?: SessionConfig,
   ) => Effect.Effect<SessionRef, CreateSessionError | StoreWriteError>;
   /**
    * What a client does when it opens a session: prove the ref is real and
@@ -310,13 +307,14 @@ export const makeHarnessAgentSessionService = (deps: {
           );
 
   /**
-   * The three ways a harness can produce history, in the order that costs the
-   * least. Which one applies is structural — what the adapter and the runtime
-   * implement — not a flag: a cold read answers off disk or a shared server, a
-   * runtime we already hold answers for free, and only a harness whose history
-   * *lives* in its child process is worth starting one for.
+   * The two ways a harness can produce history. Which one applies is structural
+   * — what the adapter and the runtime implement — not a flag: a cold read
+   * answers off disk or a shared server, and only a harness whose history
+   * *lives* in its child process is worth a runtime for. `ensureRuntime` is
+   * free when the session already holds one, so asking for it costs a process
+   * only when there is none.
    *
-   * That last case is also where a harness offering neither read is found out,
+   * The warm branch is also where a harness offering neither read is found out,
    * one acquisition too late; there is no cheaper way to learn it, and no such
    * harness exists today.
    */
@@ -332,31 +330,28 @@ export const makeHarnessAgentSessionService = (deps: {
       Effect.flatMap((adapter) => {
         const cold = adapter.getMessages;
         if (cold) return cold(harnessSessionId, cwd);
-        return manager.peek(ref).pipe(
-          Effect.flatMap((held) =>
-            held
-              ? Effect.succeed(held)
-              : manager.ensureRuntime(
-                  { sessionId: harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
-                  ref,
+        return manager
+          .ensureRuntime(
+            { sessionId: harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
+            ref,
+          )
+          .pipe(
+            Effect.flatMap(
+              (
+                runtime,
+              ): Effect.Effect<
+                ReadonlyArray<UIMessage>,
+                CapabilityUnsupported | SessionClosed | AgentOperationError
+              > =>
+                runtime.getMessages ??
+                Effect.fail(
+                  new CapabilityUnsupported({
+                    harnessAgentId: ref.harnessAgentId,
+                    capability: "getMessages",
+                  }),
                 ),
-          ),
-          Effect.flatMap(
-            (
-              runtime,
-            ): Effect.Effect<
-              ReadonlyArray<UIMessage>,
-              CapabilityUnsupported | SessionClosed | AgentOperationError
-            > =>
-              runtime.getMessages ??
-              Effect.fail(
-                new CapabilityUnsupported({
-                  harnessAgentId: ref.harnessAgentId,
-                  capability: "getMessages",
-                }),
-              ),
-          ),
-        );
+            ),
+          );
       }),
     );
 
@@ -405,43 +400,28 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.andThen(newSessionId),
         Effect.flatMap((sessionId) => {
           const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-          return manager
-            .open(
-              harnessAgentId,
-              {
+          return manager.open(harnessAgentId, { cwd }, config ?? {}, ref).pipe(
+            Effect.flatMap((session) => {
+              const metadata: Session = {
+                version: 1,
+                sessionId,
+                projectId,
+                harnessAgentId,
+                harnessSessionId: session.sessionId,
+                createdAt: new Date().toISOString(),
+                // Our own floor field: the session's working directory. Stored
+                // so an imported/rehomed session stays self-contained and a
+                // resume has cwd before it can call getSessionInfo.
                 cwd,
-                ...(config?.model !== undefined ? { model: config.model } : {}),
-                ...(config?.reasoningEffort !== undefined
-                  ? { reasoningEffort: config.reasoningEffort }
-                  : {}),
-                ...(config?.permissionMode !== undefined
-                  ? { permissionMode: config.permissionMode }
-                  : {}),
-              },
-              ref,
-            )
-            .pipe(
-              Effect.flatMap((session) => {
-                const metadata: Session = {
-                  version: 1,
-                  sessionId,
-                  projectId,
-                  harnessAgentId,
-                  harnessSessionId: session.sessionId,
-                  createdAt: new Date().toISOString(),
-                  // Our own floor field: the session's working directory. Stored
-                  // so an imported/rehomed session stays self-contained and a
-                  // resume has cwd before it can call getSessionInfo.
-                  cwd,
-                };
-                return repo.write(metadata).pipe(
-                  // A failed metadata write must not leak the native session.
-                  Effect.tapError(() => manager.close(ref)),
-                  Effect.andThen(bus.publish({ ref, type: "session.created" })),
-                  Effect.as(ref),
-                );
-              }),
-            );
+              };
+              return repo.write(metadata).pipe(
+                // A failed metadata write must not leak the native session.
+                Effect.tapError(() => manager.close(ref)),
+                Effect.andThen(bus.publish({ ref, type: "session.created" })),
+                Effect.as(ref),
+              );
+            }),
+          );
         }),
       ),
 
@@ -537,11 +517,11 @@ export const makeHarnessAgentSessionService = (deps: {
               // (complete: true) until the next turn starts — that is
               // settled history, not an in-flight turn, so it must not trim.
               // An untouched session reads as idle, so it never trims.
-              manager.snapshot(ref).pipe(
-                Effect.map((snapshot) => {
-                  if (snapshot.activeTurn === null || snapshot.activeTurn.complete) {
-                    return messages;
-                  }
+              // `activeTurnId` is set exactly while a turn is running, which is
+              // the whole question — no need to copy the turn's chunks to ask.
+              manager.status(ref).pipe(
+                Effect.map((status) => {
+                  if (status.activeTurnId === undefined) return messages;
                   for (let index = messages.length - 1; index >= 0; index -= 1) {
                     if (messages[index]?.role === "user") return messages.slice(0, index);
                   }

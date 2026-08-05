@@ -30,8 +30,8 @@ import { initialSessionState, toSnapshot, toStatus } from "./session-fold";
 import type { ResumeManagedSessionInput, SessionConfig } from "./session-io";
 
 /**
- * The sole owner of live session state: one {@link HarnessAgentSession} per
- * ref, each optionally holding a runtime. The manager's own job is narrow —
+ * The sole owner of live session state: one {@link HarnessAgentSessionShape}
+ * per ref, each optionally holding a runtime. The manager's own job is narrow —
  * keep the table, and turn "which harness, which native id, which cwd" into
  * the `acquire` a session runs when it decides it needs a runtime.
  *
@@ -50,11 +50,14 @@ export type HarnessAgentSessionManagerShape = {
   /**
    * Open a fresh native session via the adapter and take ownership of it. The
    * one eager path: a session that does not exist yet has no native id to
-   * resume by, so creating it *is* opening it.
+   * resume by, so creating it *is* opening it. `config` becomes the session's
+   * config, so the create-time choice reaches this runtime and every later one
+   * by the same seeding path.
    */
   readonly open: (
     harnessAgentId: HarnessAgentId,
     input: CreateSessionInput,
+    config: SessionConfig,
     ref: SessionRef,
   ) => Effect.Effect<HarnessAgentRuntime, CreateSessionError>;
   /**
@@ -304,23 +307,13 @@ export const makeHarnessAgentSessionManager = (
     );
 
     return {
-      open: (harnessAgentId, input, ref) =>
+      open: (harnessAgentId, input, config, ref) =>
         // The create-time choice becomes the session's config before anything
         // is opened, so seeding on acquisition is the only path that applies
         // it — including on every runtime the session takes after this one.
         sessionFor(ref)
           .pipe(
-            Effect.flatMap((session) =>
-              session.setConfig({
-                ...(input.model !== undefined ? { model: input.model } : {}),
-                ...(input.reasoningEffort !== undefined
-                  ? { reasoningEffort: input.reasoningEffort }
-                  : {}),
-                ...(input.permissionMode !== undefined
-                  ? { permissionMode: input.permissionMode }
-                  : {}),
-              }),
-            ),
+            Effect.flatMap((session) => session.setConfig(config)),
             // Nothing is running yet, so recording the choice cannot fail.
             Effect.orDie,
             Effect.andThen(acquireVia(ref, acquireOpen(harnessAgentId, input))),

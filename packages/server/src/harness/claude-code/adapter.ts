@@ -407,7 +407,7 @@ const makeRuntime = (
         ),
       getCapabilities,
       // No `getMessages` here: the transcript is a file, so the read belongs on
-      // the adapter, where it costs no session (see `readMessages`).
+      // the adapter, where it costs no session (see `HarnessAgentAdapter.getMessages`).
       close,
     } satisfies HarnessAgentRuntime;
   });
