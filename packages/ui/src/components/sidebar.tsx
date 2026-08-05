@@ -442,11 +442,7 @@ export function SidebarGroupLabel({
 }: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
-      // `w-full min-w-0`: a `render`ed <button> shrinks to fit its content even
-      // at `display: flex`, so a long label would overflow the sidebar instead
-      // of letting a `truncate`d child clip. Div renders already fill the row,
-      // so this only pins down the control case.
-      "text-sidebar-foreground ring-sidebar-ring flex h-8 w-full min-w-0 shrink-0 items-center rounded-lg px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+      "text-sidebar-foreground ring-sidebar-ring flex h-8 shrink-0 items-center rounded-lg px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
       "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
       className,
     ),
