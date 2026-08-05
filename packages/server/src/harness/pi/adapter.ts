@@ -2,6 +2,7 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type {
+  AvailabilityResult,
   HarnessAgentAdapter,
   HarnessAgentRuntime,
   SessionInfoResult,
@@ -16,7 +17,6 @@ import {
   TurnAlreadyRunning,
 } from "../errors";
 import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
-import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
 import { entriesToUIMessages } from "./history";
@@ -229,19 +229,21 @@ const makeRuntime = (
     } satisfies HarnessAgentRuntime;
   });
 
-export const makePiAdapter = (
-  agent: PiAgent,
-  options: { readonly executablePath?: string } = {},
-): HarnessAgentAdapter => ({
+export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
   // Pi has neither a permission protocol nor a model catalogue — declaring
   // nothing (empty subset, no probe) is what makes the UI render no config
   // controls for it.
   permissionModes: [],
-  checkAvailability: findExecutable(options.executablePath ?? "pi").pipe(
-    Effect.map((found) =>
-      found ? { available: true } : { available: false, reason: "Pi was not found on PATH." },
+  // Answered off the agent's own cached resolve, so "available" and "what the
+  // transport spawns" cannot disagree — see `harness/executable.ts`.
+  // `suspend`, because building an adapter must stay a pure declaration that
+  // never touches its agent (`adapter-capabilities.test.ts` locks this).
+  checkAvailability: Effect.suspend(() => agent.executable).pipe(
+    Effect.as({ available: true } as AvailabilityResult),
+    Effect.catch((cause) =>
+      Effect.succeed({ available: false, reason: cause.message } as AvailabilityResult),
     ),
   ),
   open: (input) =>

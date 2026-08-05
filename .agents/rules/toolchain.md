@@ -6,7 +6,11 @@
   `vitest`, `effect`, or `@effect/*` does nothing. Several pins are caret-free
   because a caret breaks the runtime. The reasons are commented inline; read them
   before changing versions. `packages/server` pins the Claude SDK as a literal
-  while `packages/vibest` uses `catalog:` — bump both together.
+  while `packages/vibest` uses `catalog:` — bump both together. Same for pi
+  (`@earendil-works/pi-coding-agent`), literally pinned in **both**: the CLI
+  declares it so the bundled `dist/cli.mjs` can resolve the copy it spawns
+  (`harness/pi/executable.ts`), which a `packages/server`-only dependency is
+  invisible to. Two literals, one version.
 - **Lint:** `lint:check` runs `--deny-warnings`, so the whole `suspicious`
   category fails CI while only warning locally. oxfmt reorders imports.
 - **Commits rewrite files:** pre-commit runs lint-staged (`oxlint --fix` + `oxfmt`)

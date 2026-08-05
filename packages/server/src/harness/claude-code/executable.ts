@@ -1,44 +1,40 @@
 import childProcess from "node:child_process";
 import module from "node:module";
-import os from "node:os";
 import path from "node:path";
 import util from "node:util";
 
-import { Data, Effect, FileSystem } from "effect";
+import { Effect, FileSystem } from "effect";
 
-import { isExecutableFile, pathDelimiter } from "../executable";
+import type { ExecutableNotFound } from "../errors";
+import {
+  type HarnessExecutableSpec,
+  type ResolveExecutableDeps,
+  resolveHarnessExecutable,
+} from "../executable";
 
 const moduleRequire = module.createRequire(import.meta.url);
 const execFileAsync = util.promisify(childProcess.execFile);
-
-/** No `claude` binary anywhere we look — carries the user-facing remedy. */
-export class ClaudeExecutableNotFound extends Data.TaggedError("ClaudeExecutableNotFound")<{
-  readonly reason: string;
-}> {
-  override get message() {
-    return this.reason;
-  }
-}
 
 const NOT_FOUND =
   "Claude Code was not found. Install it from https://claude.com/claude-code, " +
   "or set VIBEST_CLAUDE_EXECUTABLE to the path of the `claude` binary.";
 
-/** Where the native installer and the common package managers put `claude`. */
-function extraInstallDirs(home: string): string[] {
-  return [
-    path.join(home, ".local", "bin"),
-    path.join(home, ".bun", "bin"),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-  ];
-}
-
 /**
  * The version-matched binary the Claude Agent SDK ships as an optional platform
- * dependency. Present when running from a checkout; absent in the packaged
- * desktop app, which excludes it (it is ~230 MB — the user's own Claude Code
- * install is used there instead).
+ * dependency. Its version is pinned to the SDK's wire protocol, so it is
+ * preferred over the user's own install whenever it is really on disk — absent
+ * in the packaged desktop app, which excludes it (~230 MB) and uses the user's
+ * install instead.
+ *
+ * Resolved in two hops, and that is the whole trick: the platform package is an
+ * optionalDependency *of the SDK*, so under pnpm's strict layout it is not
+ * visible from this module at all — a direct
+ * `require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude")` throws
+ * MODULE_NOT_FOUND in every pnpm checkout, which is exactly what it did, so
+ * this level never once fired and every install silently fell through to PATH.
+ * Resolving the SDK's own entry first (that hop always succeeds — it is a
+ * direct dependency) and asking *from there* puts the platform package back in
+ * view.
  *
  * `module.createRequire` has no Effect equivalent, so module resolution stays raw.
  *
@@ -49,62 +45,44 @@ function extraInstallDirs(home: string): string[] {
 function sdkBinary(binary: string): string | undefined {
   const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
   try {
-    const resolved = moduleRequire.resolve(`${pkg}/${binary}`);
+    const sdkEntry = moduleRequire.resolve("@anthropic-ai/claude-agent-sdk");
+    const resolved = module.createRequire(sdkEntry).resolve(`${pkg}/${binary}`);
     return resolved.includes(`.asar${path.sep}`) ? undefined : resolved;
   } catch {
     return undefined;
   }
 }
 
-export type ResolveDeps = {
-  env?: NodeJS.ProcessEnv;
-  home?: string;
-  /** The SDK's own bundled binary, if it is really on disk. */
-  bundled?: (binary: string) => string | undefined;
-  platform?: NodeJS.Platform;
+/**
+ * `VIBEST_E2E_CLAUDE_EXECUTABLE` is gated on `VIBEST_E2E` so a test fixture can
+ * never be picked up by a real install that happens to have the variable set.
+ */
+export const claudeExecutableSpec: HarnessExecutableSpec = {
+  harnessAgentId: "claude-code",
+  binaryName: "claude",
+  override: (env) =>
+    env["VIBEST_E2E"] === "1"
+      ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
+      : env["VIBEST_CLAUDE_EXECUTABLE"],
+  bundled: sdkBinary,
+  notFoundReason: NOT_FOUND,
 };
 
-/**
- * The `claude` binary the SDK should exec.
- *
- * Prefers the SDK's own copy when it is really on disk, because its version is
- * matched to the SDK's wire protocol. Falls back to the user's install — the
- * only option in the packaged app, which is why the desktop host has to hand
- * the server a login-shell PATH: launchd gives a GUI app a bare one.
- */
+export type ResolveDeps = ResolveExecutableDeps & {
+  /** The SDK's own bundled binary, if it is really on disk. Injectable for tests. */
+  bundled?: (binary: string) => string | undefined;
+};
+
+/** The `claude` binary the SDK should exec. */
 export const resolveClaudeExecutable = (
   deps: ResolveDeps = {},
-): Effect.Effect<string, ClaudeExecutableNotFound, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const {
-      env = process.env,
-      home = os.homedir(),
-      bundled = sdkBinary,
-      platform = process.platform,
-    } = deps;
-    const fs = yield* FileSystem.FileSystem;
-    const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
-
-    const override =
-      env["VIBEST_E2E"] === "1"
-        ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
-        : env["VIBEST_CLAUDE_EXECUTABLE"];
-    if (override) return override;
-
-    const binary = platform === "win32" ? "claude.exe" : "claude";
-
-    const fromSdk = bundled(binary);
-    if (fromSdk && (yield* isExecutable(fromSdk))) return fromSdk;
-
-    const dirs = [...(env["PATH"] ?? "").split(pathDelimiter(platform)), ...extraInstallDirs(home)];
-    for (const dir of dirs) {
-      if (!dir) continue;
-      const candidate = path.join(dir, binary);
-      if (yield* isExecutable(candidate)) return candidate;
-    }
-
-    return yield* Effect.fail(new ClaudeExecutableNotFound({ reason: NOT_FOUND }));
-  });
+): Effect.Effect<string, ExecutableNotFound, FileSystem.FileSystem> => {
+  const { bundled, ...rest } = deps;
+  return resolveHarnessExecutable(
+    bundled ? { ...claudeExecutableSpec, bundled } : claudeExecutableSpec,
+    rest,
+  );
+};
 
 /**
  * The CLI version vibest is built against: the version the Agent SDK bundles,
@@ -161,6 +139,12 @@ export type AvailabilityDeps = ResolveDeps & {
   readVersion?: (executable: string) => Promise<string>;
   /** The version floor; injectable for tests. */
   requiredVersion?: () => Effect.Effect<string, Error, FileSystem.FileSystem>;
+  /**
+   * The resolve to check, so availability and the spawn can be the *same*
+   * answer rather than two walks that may disagree. Defaults to resolving on
+   * the spot, which is what tests and any standalone caller want.
+   */
+  resolve?: Effect.Effect<string, ExecutableNotFound, FileSystem.FileSystem>;
 };
 
 /**
@@ -168,12 +152,15 @@ export type AvailabilityDeps = ResolveDeps & {
  * CLI: a missing binary reports the resolve error, but an unreadable or
  * unparseable `--version` fails OPEN (available) rather than blocking on a
  * version we could not establish — the SDK will surface any real launch fault.
+ *
+ * The version floor is what stays claude-code's own: finding the binary is the
+ * shared walk, verifying it is new enough to speak the SDK's protocol is not.
  */
 export const checkClaudeAvailability = (
   deps: AvailabilityDeps = {},
 ): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const executable = yield* resolveClaudeExecutable(deps).pipe(
+    const executable = yield* (deps.resolve ?? resolveClaudeExecutable(deps)).pipe(
       Effect.map((resolved) => ({ ok: true as const, path: resolved })),
       Effect.catch((cause) => Effect.succeed({ ok: false as const, reason: cause.message })),
     );

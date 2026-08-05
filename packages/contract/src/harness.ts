@@ -5,6 +5,7 @@ import {
   HarnessListOutputSchema,
   HarnessProbeInputSchema,
   HarnessProbeOutputSchema,
+  serverErrors,
   toStandardSchema,
 } from "./domain";
 
@@ -32,6 +33,7 @@ export const harnessContract = {
    * client renders a retryable degraded state instead.
    */
   probe: oc
+    .errors(serverErrors)
     .input(toStandardSchema(HarnessProbeInputSchema))
     .output(toStandardSchema(HarnessProbeOutputSchema)),
 };

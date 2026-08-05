@@ -44,12 +44,16 @@ export const ClaudeCodeLayer: Layer.Layer<ClaudeCode> = Layer.effect(
   makeClaudeCodeAgent(),
 ).pipe(Layer.provide(PlatformLayer));
 
+// `PlatformLayer` on top of the process layer: resolving the executable reads
+// the filesystem, and `NodeProcessLayer` has already consumed its own copy.
 export const CodexLayer: Layer.Layer<Codex> = Layer.effect(Codex, makeCodexAgent()).pipe(
   Layer.provide(NodeProcessLayer),
+  Layer.provide(PlatformLayer),
 );
 
 export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
   Layer.provide(NodeProcessLayer),
+  Layer.provide(PlatformLayer),
 );
 
 const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
@@ -103,7 +107,12 @@ const HarnessListProvided = HarnessListLayer.pipe(
   Layer.provide(RegistryLayer),
   Layer.provide(PlatformLayer),
 );
-const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
+const HarnessProbeProvided = HarnessProbeLayer.pipe(
+  Layer.provide(RegistryLayer),
+  // The availability gate reads the filesystem, so this route needs the
+  // platform now — it did not before, which is exactly how it slipped past it.
+  Layer.provide(PlatformLayer),
+);
 
 // The session stack: the manager owns all live state (instances + projections,
 // publishing wire events onto the bus); the outward façade on top does the

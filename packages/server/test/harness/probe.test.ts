@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
-import { Effect, Ref } from "effect";
+import { Cause, Effect, Exit, Ref } from "effect";
 
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
-import { CapabilityProbeFailed } from "../../src/harness/errors";
+import { AgentUnavailable, CapabilityProbeFailed } from "../../src/harness/errors";
 import { makeHarnessProbe } from "../../src/harness/probe";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { NodePlatformLayer } from "../platform";
 
 const adapter = (over: {
   id: HarnessAgentAdapter["id"];
@@ -34,7 +35,7 @@ it.effect("probes the directory it was asked about, grouped under the built-in p
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
     const probe = yield* makeHarnessProbe(
       makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
-    );
+    ).pipe(Effect.provide(NodePlatformLayer));
 
     const result = yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
@@ -51,7 +52,7 @@ it.effect("gives concurrent callers one probe, not one each", () =>
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
     const probe = yield* makeHarnessProbe(
       makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
-    );
+    ).pipe(Effect.provide(NodePlatformLayer));
     const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     // Two tabs on the same directory, arriving before the first probe settles.
@@ -68,7 +69,7 @@ it.effect("treats two directories as two probes, and does not serialise them", (
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
     const probe = yield* makeHarnessProbe(
       makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
-    );
+    ).pipe(Effect.provide(NodePlatformLayer));
 
     yield* Effect.all(
       [
@@ -89,7 +90,7 @@ it.effect("normalises the directory, so one answer serves its aliases", () =>
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
     const probe = yield* makeHarnessProbe(
       makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
-    );
+    ).pipe(Effect.provide(NodePlatformLayer));
 
     yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
     yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app/" });
@@ -115,7 +116,7 @@ it.effect("caches a success but retries a failure", () =>
       );
     const probe = yield* makeHarnessProbe(
       makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: flaky })]),
-    );
+    ).pipe(Effect.provide(NodePlatformLayer));
     const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     // A cached failure would pin "no models" for the whole TTL, so the user
@@ -132,12 +133,48 @@ it.effect("caches a success but retries a failure", () =>
 
 it.effect("answers an empty provider list for a harness that has no probe", () =>
   Effect.gen(function* () {
-    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([adapter({ id: "pi" })]));
+    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([adapter({ id: "pi" })])).pipe(
+      Effect.provide(NodePlatformLayer),
+    );
 
     // Not a failure: pi genuinely has no models, and the client renders no
     // picker rather than an error.
     assert.deepEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
       providers: [],
     });
+  }),
+);
+
+it.effect("never asks an unavailable harness for its catalogue", () =>
+  Effect.gen(function* () {
+    // The bug this gate exists for: with the CLI absent, `list` correctly
+    // reported the harness greyed out while this path walked into the adapter
+    // anyway and hit its missing binary — which claude-code answers with a
+    // defect, not a failure, taking the whole endpoint down every few seconds
+    // instead of degrading the one harness.
+    const asked = yield* Ref.make(false);
+    const uninstalled: HarnessAgentAdapter = {
+      ...adapter({
+        id: "claude-code",
+        probeModels: () => Ref.set(asked, true).pipe(Effect.as([])),
+      }),
+      checkAvailability: Effect.succeed({ available: false, reason: "not on PATH" }),
+    };
+
+    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([uninstalled])).pipe(
+      Effect.provide(NodePlatformLayer),
+    );
+
+    const exit = yield* probe
+      .probe({ harnessAgentId: "claude-code", cwd: "/work/app" })
+      .pipe(Effect.exit);
+
+    assert.equal(yield* Ref.get(asked), false);
+    // A typed failure, not a defect: the route maps it to UNSUPPORTED, which
+    // is what keeps "not installed" distinct from "the probe broke".
+    assert.equal(Exit.isFailure(exit) && Cause.hasFails(exit.cause), true);
+    assert.equal(Exit.isFailure(exit) && Cause.hasDies(exit.cause), false);
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+    assert.ok(error instanceof AgentUnavailable && error.reason === "not on PATH");
   }),
 );

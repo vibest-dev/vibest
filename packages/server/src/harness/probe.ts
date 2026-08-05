@@ -1,8 +1,9 @@
 import path from "node:path";
 
 import type { HarnessAgentId, HarnessProbeInput, HarnessProbeOutput } from "@vibest/contract";
-import { Cache, Context, Data, Effect, Exit, Layer } from "effect";
+import { Cache, Context, Data, Effect, Exit, FileSystem, Layer } from "effect";
 
+import type { AgentUnavailable, HarnessAgentNotFound } from "./errors";
 import { CapabilityProbeFailed } from "./errors";
 import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry";
 
@@ -61,10 +62,20 @@ class ProbeKey extends Data.Class<{
   readonly cwd: string;
 }> {}
 
+/**
+ * `AgentUnavailable` rides alongside `CapabilityProbeFailed` rather than being
+ * folded into it: "this harness's CLI is not installed" is a settled fact the
+ * client should render as a greyed-out harness, while a probe failure is a
+ * transient, retryable degraded state. Collapsing the two would make an
+ * uninstalled harness look like a server that keeps breaking.
+ */
 export type HarnessProbeShape = {
   readonly probe: (
     input: HarnessProbeInput,
-  ) => Effect.Effect<HarnessProbeOutput, CapabilityProbeFailed>;
+  ) => Effect.Effect<
+    HarnessProbeOutput,
+    CapabilityProbeFailed | AgentUnavailable | HarnessAgentNotFound
+  >;
 };
 
 export class HarnessProbeService extends Context.Service<HarnessProbeService, HarnessProbeShape>()(
@@ -73,21 +84,23 @@ export class HarnessProbeService extends Context.Service<HarnessProbeService, Ha
 
 export const makeHarnessProbe = (
   registry: HarnessAgentRegistryShape,
-): Effect.Effect<HarnessProbeShape> =>
+): Effect.Effect<HarnessProbeShape, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
+    // Bound once here so the service's `probe` stays `R`-free for its RPC
+    // caller — the requirement comes from the registry's availability gate.
+    const platform = yield* Effect.context<FileSystem.FileSystem>();
     // One built-in provider per harness for now, so resolving a providerId is
     // a registry lookup. Never collapse a failure into an empty answer here —
     // the error channel is what keeps "probe failed" distinguishable from
     // "this harness has no models".
     const probeProvider = ({ providerId, cwd }: ProbeKey) =>
       Effect.gen(function* () {
-        const adapter = yield* registry
-          .get(providerId)
-          .pipe(
-            Effect.mapError(
-              (cause) => new CapabilityProbeFailed({ harnessAgentId: providerId, cause }),
-            ),
-          );
+        // `require`, not `get`: asking a harness for its catalogue spawns its
+        // CLI, so an absent binary has to stop the call here. Going in on an
+        // unchecked adapter is what used to reach claude-code's "the
+        // executable vanished after the availability check gated on it"
+        // defect — a check this path never performed.
+        const adapter = yield* registry.require(providerId).pipe(Effect.provide(platform));
         // No probe at all is an answer, not a failure: this harness has no
         // model catalogue (pi), so the client renders no picker for it.
         if (!adapter.probeModels) return { providers: [] } satisfies HarnessProbeOutput;
@@ -122,11 +135,14 @@ export const makeHarnessProbe = (
     };
   });
 
-export const HarnessProbeLayer: Layer.Layer<HarnessProbeService, never, HarnessAgentRegistry> =
-  Layer.effect(
-    HarnessProbeService,
-    Effect.gen(function* () {
-      const registry = yield* HarnessAgentRegistry;
-      return yield* makeHarnessProbe(registry);
-    }),
-  );
+export const HarnessProbeLayer: Layer.Layer<
+  HarnessProbeService,
+  never,
+  HarnessAgentRegistry | FileSystem.FileSystem
+> = Layer.effect(
+  HarnessProbeService,
+  Effect.gen(function* () {
+    const registry = yield* HarnessAgentRegistry;
+    return yield* makeHarnessProbe(registry);
+  }),
+);

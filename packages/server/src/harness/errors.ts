@@ -40,10 +40,19 @@ export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFou
   {
     harnessAgentId: HarnessAgentIdSchema,
     executable: Schema.String,
+    /**
+     * The harness's own remedy sentence (how to install it, which env var
+     * overrides it). Carried on the error rather than composed at each
+     * display site so the log line, the RPC message and the greyed-out
+     * harness's tooltip are all the same words.
+     */
+    reason: Schema.optionalKey(Schema.String),
   },
 ) {
   override get message() {
-    return `Executable '${this.executable}' for '${this.harnessAgentId}' was not found.`;
+    return (
+      this.reason ?? `Executable '${this.executable}' for '${this.harnessAgentId}' was not found.`
+    );
   }
 }
 

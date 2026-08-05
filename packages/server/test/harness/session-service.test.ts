@@ -166,6 +166,7 @@ describe("HarnessAgentSessionService", () => {
                 repo,
                 bus,
                 newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
+                platform: yield* Effect.context<FileSystem.FileSystem>(),
               });
               return { service, repo, bus, spy, restart: build };
             });

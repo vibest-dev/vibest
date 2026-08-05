@@ -1,5 +1,5 @@
 import type { AgentRequest, AgentResponse } from "@vibest/contract";
-import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { v7 as uuid } from "uuid";
@@ -7,11 +7,14 @@ import { v7 as uuid } from "uuid";
 import {
   AgentOperationError,
   AgentRequestUnavailable,
+  type ExecutableNotFound,
   PiTransportError,
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
+import { resolveHarnessExecutable } from "../executable";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { piExecutableSpec } from "./executable";
 import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
 import { createPiTransform } from "./transform";
@@ -83,6 +86,13 @@ export interface PiAgentDependencies<R> {
 }
 
 export interface PiAgent {
+  /**
+   * The absolute path this agent will spawn, resolved once and cached.
+   *
+   * Exposed so the adapter's `checkAvailability` answers off the *same* resolve
+   * the transport launches — see the note in `harness/executable.ts`.
+   */
+  readonly executable: Effect.Effect<string, ExecutableNotFound>;
   readonly session: {
     readonly create: (config: {
       readonly cwd: string;
@@ -129,7 +139,7 @@ export interface PiAgent {
 /** @internal */
 export const makePiAgentWithDependencies = <R>(
   dependencies: PiAgentDependencies<R>,
-): Effect.Effect<PiAgent, never, R | Scope.Scope> =>
+): Effect.Effect<Omit<PiAgent, "executable">, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const buildContext = yield* Effect.context<R>();
@@ -578,18 +588,52 @@ export const makePiAgentWithDependencies = <R>(
         interrupt,
         abort,
       },
-    } satisfies PiAgent;
+    } satisfies Omit<PiAgent, "executable">;
   });
 
+/**
+ * An explicit `executablePath` wins outright (tests point it at a fake binary);
+ * otherwise the shared four-level search answers, once, for both the transport
+ * and the adapter's availability check.
+ */
 export const makePiAgent = (
   options: PiAgentOptions = {},
-): Effect.Effect<PiAgent, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
-  makePiAgentWithDependencies({
-    makeTransport: (config) =>
-      makePiTransport({
-        ...(options.executablePath ? { executablePath: options.executablePath } : {}),
-        ...(options.args ? { args: options.args } : {}),
-        sessionId: config.sessionId,
-        ...(config.cwd ? { cwd: config.cwd } : {}),
-      }),
+): Effect.Effect<
+  PiAgent,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const executable = options.executablePath
+      ? Effect.succeed(options.executablePath)
+      : yield* Effect.cached(
+          resolveHarnessExecutable(piExecutableSpec).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+          ),
+        );
+    const agent = yield* makePiAgentWithDependencies({
+      makeTransport: (config) =>
+        Effect.flatMap(
+          // A resolve miss reaches the caller as a spawn failure, which is what
+          // it is: the launch could not happen. The transport's error channel
+          // is unchanged.
+          Effect.mapError(
+            executable,
+            (cause) =>
+              new PiTransportError({
+                operation: "spawn",
+                cause,
+              }),
+          ),
+          (executablePath) =>
+            makePiTransport({
+              executablePath,
+              ...(options.args ? { args: options.args } : {}),
+              sessionId: config.sessionId,
+              ...(config.cwd ? { cwd: config.cwd } : {}),
+            }),
+        ),
+    });
+    return { ...agent, executable };
   });

@@ -97,6 +97,7 @@ it.effect("a registry get that misses a listed id dies with the id in the defect
     const broken: HarnessAgentRegistryShape = {
       list: Effect.succeed([{ id: "claude-code", name: "claude-code" }]),
       get: (harnessAgentId) => Effect.fail(new HarnessAgentNotFound({ harnessAgentId })),
+      require: (harnessAgentId) => Effect.fail(new HarnessAgentNotFound({ harnessAgentId })),
     };
 
     const exit = yield* makeHarnessList(broken).list.pipe(

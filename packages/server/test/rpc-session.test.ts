@@ -59,9 +59,9 @@ async function setup() {
   // Paths plus the platform services the repositories' JSON store runs on.
   const pathsLayer = Layer.provideMerge(layerPaths(home), NodeServices.layer);
 
-  // The fake path goes to the adapter too: `session.create` gates on
-  // checkAvailability, which is a PATH lookup — without the override the test
-  // silently depends on a real codex install.
+  // Handed to the agent alone: the adapter's checkAvailability now answers off
+  // the agent's own resolve, so `session.create`'s gate sees this fake without
+  // the path being passed twice.
   const executablePath = makeFake();
   const codexLayer = Layer.effect(Codex, makeCodexAgent({ executablePath })).pipe(
     Layer.provide(NodeServices.layer),
@@ -70,7 +70,7 @@ async function setup() {
     HarnessAgentRegistry,
     Effect.gen(function* () {
       const codex = yield* Codex;
-      return makeHarnessAgentRegistry([makeCodexAdapter(codex, { executablePath })]);
+      return makeHarnessAgentRegistry([makeCodexAdapter(codex)]);
     }),
   ).pipe(Layer.provide(codexLayer));
 
@@ -100,7 +100,7 @@ async function setup() {
     projectServiceLayer,
     registryLayer,
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
-    HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
+    HarnessProbeLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
   );

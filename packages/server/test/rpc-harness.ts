@@ -49,7 +49,10 @@ export async function makeRpcTestHarness(
     Layer.provide(registryLayer),
     Layer.provide(NodePlatformLayer),
   );
-  const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
+  const probeLayer = HarnessProbeLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(NodePlatformLayer),
+  );
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
