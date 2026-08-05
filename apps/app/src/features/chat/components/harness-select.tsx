@@ -9,6 +9,8 @@ import {
 
 import { useHarnessAgents } from "@/features/chat/harness/use-harness";
 
+import { HarnessIcon } from "./harness-icon";
+
 // Which agent runs the session. Only offered before the session exists: the
 // harness is part of the SessionRef, so it is fixed at create time (see
 // HarnessBadge for how a live session shows it).
@@ -29,6 +31,7 @@ export function HarnessSelect({
     label: harnessAgent.name,
     value: harnessAgent.id,
   }));
+  const selectedHarnessAgent = harnessAgents.find((harnessAgent) => harnessAgent.id === value);
 
   return (
     <PromptInputModelSelect
@@ -39,7 +42,10 @@ export function HarnessSelect({
       }}
     >
       <PromptInputModelSelectTrigger className="min-h-8 py-0">
-        <PromptInputModelSelectValue />
+        <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
+          <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
+          <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
+        </PromptInputModelSelectValue>
       </PromptInputModelSelectTrigger>
       <PromptInputModelSelectContent>
         {harnessAgents.map((harnessAgent) => (
@@ -48,13 +54,16 @@ export function HarnessSelect({
             value={harnessAgent.id}
             disabled={!harnessAgent.available}
           >
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">{harnessAgent.name}</span>
-              {harnessAgent.reason ? (
-                <span className="text-muted-foreground truncate text-xs">
-                  {harnessAgent.reason}
-                </span>
-              ) : null}
+            <span className="flex min-w-0 items-start gap-2">
+              <HarnessIcon className="mt-0.5 size-4 shrink-0" harnessAgentId={harnessAgent.id} />
+              <span className="min-w-0 truncate">
+                {harnessAgent.name}
+                {harnessAgent.reason ? (
+                  <small className="text-muted-foreground block truncate text-xs">
+                    {harnessAgent.reason}
+                  </small>
+                ) : null}
+              </span>
             </span>
           </PromptInputModelSelectItem>
         ))}
