@@ -1,34 +1,29 @@
 import os from "node:os";
 import path from "node:path";
 
-import type { HarnessAgentId } from "@vibest/contract";
 import { Effect, FileSystem } from "effect";
 
-import { ExecutableNotFound } from "./errors";
-
 /**
- * Locating the CLI a harness runs — one search, shared by all three.
+ * The mechanics of locating a CLI on disk. *Where to look, in what order* is
+ * each harness's own business — see `<agent>/executable.ts`; this file only
+ * supplies the two things all three would otherwise reimplement: "is this a
+ * runnable file" and "walk the install directories for this name".
  *
- * It used to search PATH and nothing else, deliberately: the transports
- * spawned a bare command name (`spawn("codex")`), the OS resolved that through
- * PATH alone, so anything found elsewhere would have reported a harness
- * available that then failed with an opaque ENOENT. That constraint is gone,
- * and removing it is the point of this module: {@link resolveHarnessExecutable}
- * returns an absolute path and **that path is what gets spawned**. The search
- * and the launch can no longer disagree, because they are the same answer.
+ * The whole point of resolving here rather than letting the OS do it: the
+ * result is an absolute path, and **that path is what gets spawned**. It used
+ * to be PATH-only, deliberately — the transports spawned a bare command name,
+ * the OS resolved that through PATH alone, so anything found elsewhere would
+ * have reported a harness available that then failed with an opaque ENOENT.
  *
- * Which makes the invariant to protect: *never widen this search without the
- * result reaching spawn.* A caller that resolves here and then execs a bare
- * name has reintroduced the exact bug this replaced — the harness reports
- * available off one set of rules and launches off another.
+ * So the invariant every caller inherits: *never widen the search without the
+ * result reaching spawn.* Resolve here and then exec a bare name and you have
+ * reintroduced the exact bug this replaced — availability answered off one set
+ * of rules, the launch off another.
  *
  * The old shape cost real users: a `codex` installed by bun (`~/.bun/bin`, not
  * on a systemd unit's PATH) read as "not installed", while claude-code — whose
  * resolver already searched past PATH *because* its result was passed to the
  * SDK — found its own binary in that very directory.
- *
- * Four levels, first hit wins. What differs per harness is declared in a
- * {@link HarnessExecutableSpec}; the walk itself never varies.
  */
 
 /**
@@ -43,8 +38,8 @@ export const pathDelimiter = (platform: NodeJS.Platform) => (platform === "win32
 
 /**
  * Where the native installers and common package managers put a CLI. Searched
- * after PATH, so a PATH entry always wins; this level exists for the process
- * whose PATH is not a login shell's — a systemd unit, a launchd GUI app, a
+ * after PATH, so a PATH entry always wins; this exists for the process whose
+ * PATH is not a login shell's — a systemd unit, a launchd GUI app, a
  * non-interactive `ssh host "…"` — which is the normal case for a server
  * deployment and the one where every one of these directories is missing.
  */
@@ -56,33 +51,6 @@ function fallbackInstallDirs(home: string): ReadonlyArray<string> {
     "/usr/local/bin",
   ];
 }
-
-/**
- * What one harness declares about finding its CLI. Everything here is a
- * difference that is real between harnesses; anything the same for all three
- * belongs in {@link resolveHarnessExecutable} instead.
- */
-export type HarnessExecutableSpec = {
-  readonly harnessAgentId: HarnessAgentId;
-  /** Bare name, no extension — Windows variants are derived by the resolver. */
-  readonly binaryName: string;
-  /**
-   * An operator's explicit answer, read straight from the environment. A
-   * function rather than a variable name because claude-code has a second,
-   * test-only variable gated on `VIBEST_E2E`.
-   */
-  readonly override: (env: NodeJS.ProcessEnv) => string | undefined;
-  /**
-   * The copy that ships as one of vibest's own dependencies, resolved through
-   * the module graph. Absent for a harness vibest does not bundle (codex).
-   * Best-effort by contract: a miss falls through to PATH rather than failing,
-   * because the same code runs from a source checkout and from a bundle whose
-   * module graph does not contain the harness.
-   */
-  readonly bundled?: (binary: string) => string | undefined;
-  /** Human-facing sentence for `availability`, naming how to fix it. */
-  readonly notFoundReason: string;
-};
 
 export type ResolveExecutableDeps = {
   env?: NodeJS.ProcessEnv;
@@ -112,62 +80,58 @@ export const isExecutableFile = (
     Effect.catch(() => Effect.succeed(false)),
   );
 
-/** The names a bare command can take on this platform. */
-const candidateNames = (binaryName: string, platform: NodeJS.Platform): ReadonlyArray<string> =>
+/**
+ * The names a bare command can take on this platform. Exported because a
+ * harness that nominates a file itself — a copy inside its own package — has to
+ * ask for the same set of names the search would have tried.
+ */
+export const candidateNames = (
+  binaryName: string,
+  platform: NodeJS.Platform,
+): ReadonlyArray<string> =>
   platform !== "win32" || path.extname(binaryName)
     ? [binaryName]
     : WINDOWS_EXTENSIONS.map((extension) => `${binaryName}${extension}`);
 
 /**
- * The absolute path to a harness's CLI, or {@link ExecutableNotFound}.
- *
- * The result is what the transport spawns — see the module note above; that is
- * the whole reason levels 2 and 4 are allowed to exist.
+ * A single candidate, checked. For the levels a harness knows how to name
+ * itself — an env override it wants verified, a copy inside its own package.
  */
-export const resolveHarnessExecutable = (
-  spec: HarnessExecutableSpec,
+export const executableAt = (
+  candidate: string,
   deps: ResolveExecutableDeps = {},
-): Effect.Effect<string, ExecutableNotFound, FileSystem.FileSystem> =>
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.use((fs) =>
+    isExecutableFile(fs, candidate, deps.platform ?? process.platform),
+  ).pipe(Effect.map((runnable) => (runnable ? candidate : undefined)));
+
+/**
+ * Walk PATH, then the fallback install directories, for `binaryName`. One walk
+ * so PATH order is honoured and a PATH hit always beats a fallback; candidates
+ * are checked in sequence and the first runnable one wins, rather than stat'ing
+ * the whole search space.
+ *
+ * `undefined` means "not installed anywhere we look" — the caller decides
+ * whether that is the end of its search and what to say about it.
+ */
+export const searchInstallDirs = (
+  binaryName: string,
+  deps: ResolveExecutableDeps = {},
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const { env = process.env, platform = process.platform, home = os.homedir() } = deps;
     const fs = yield* FileSystem.FileSystem;
-    const isExecutable = (candidate: string) => isExecutableFile(fs, candidate, platform);
 
-    // 1. An explicit override is taken at face value, unverified. Falling back
-    //    when it does not exist would be worse than failing: the operator
-    //    would be told the harness works while it silently runs a different
-    //    binary than the one they named.
-    const override = spec.override(env);
-    if (override) return override;
-
-    const names = candidateNames(spec.binaryName, platform);
-
-    // 2. vibest's own copy, when it has one.
-    for (const name of names) {
-      const bundled = spec.bundled?.(name);
-      if (bundled && (yield* isExecutable(bundled))) return bundled;
-    }
-
-    // 3 and 4. PATH first, then the install directories a stripped environment
-    //    would have dropped. One walk, so PATH order is honoured and a PATH hit
-    //    always beats a fallback.
     const directories = [
       ...(env["PATH"] ?? "").split(pathDelimiter(platform)),
       ...fallbackInstallDirs(home),
     ];
     for (const directory of directories) {
       if (!directory) continue;
-      for (const name of names) {
+      for (const name of candidateNames(binaryName, platform)) {
         const candidate = path.join(directory, name);
-        if (yield* isExecutable(candidate)) return candidate;
+        if (yield* isExecutableFile(fs, candidate, platform)) return candidate;
       }
     }
-
-    return yield* Effect.fail(
-      new ExecutableNotFound({
-        harnessAgentId: spec.harnessAgentId,
-        executable: spec.binaryName,
-        reason: spec.notFoundReason,
-      }),
-    );
+    return undefined;
   });

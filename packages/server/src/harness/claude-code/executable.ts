@@ -5,11 +5,12 @@ import util from "node:util";
 
 import { Effect, FileSystem } from "effect";
 
-import type { ExecutableNotFound } from "../errors";
+import { ExecutableNotFound } from "../errors";
 import {
-  type HarnessExecutableSpec,
+  candidateNames,
+  executableAt,
+  searchInstallDirs,
   type ResolveExecutableDeps,
-  resolveHarnessExecutable,
 } from "../executable";
 
 const moduleRequire = module.createRequire(import.meta.url);
@@ -53,36 +54,52 @@ function sdkBinary(binary: string): string | undefined {
   }
 }
 
-/**
- * `VIBEST_E2E_CLAUDE_EXECUTABLE` is gated on `VIBEST_E2E` so a test fixture can
- * never be picked up by a real install that happens to have the variable set.
- */
-export const claudeExecutableSpec: HarnessExecutableSpec = {
-  harnessAgentId: "claude-code",
-  binaryName: "claude",
-  override: (env) =>
-    env["VIBEST_E2E"] === "1"
-      ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
-      : env["VIBEST_CLAUDE_EXECUTABLE"],
-  bundled: sdkBinary,
-  notFoundReason: NOT_FOUND,
-};
-
 export type ResolveDeps = ResolveExecutableDeps & {
   /** The SDK's own bundled binary, if it is really on disk. Injectable for tests. */
   bundled?: (binary: string) => string | undefined;
 };
 
-/** The `claude` binary the SDK should exec. */
+/**
+ * The `claude` binary the SDK should exec.
+ *
+ * The order is claude-code's own: an explicit override wins unverified (naming
+ * a path is the user saying "this one" — reporting it missing is more confusing
+ * than letting the SDK fail on it), then the SDK's version-matched copy,
+ * then whatever the machine has installed.
+ *
+ * `VIBEST_E2E_CLAUDE_EXECUTABLE` is gated on `VIBEST_E2E` so a test fixture can
+ * never be picked up by a real install that happens to have the variable set.
+ */
 export const resolveClaudeExecutable = (
   deps: ResolveDeps = {},
-): Effect.Effect<string, ExecutableNotFound, FileSystem.FileSystem> => {
-  const { bundled, ...rest } = deps;
-  return resolveHarnessExecutable(
-    bundled ? { ...claudeExecutableSpec, bundled } : claudeExecutableSpec,
-    rest,
-  );
-};
+): Effect.Effect<string, ExecutableNotFound, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const env = deps.env ?? process.env;
+
+    const override =
+      env["VIBEST_E2E"] === "1"
+        ? env["VIBEST_E2E_CLAUDE_EXECUTABLE"]
+        : env["VIBEST_CLAUDE_EXECUTABLE"];
+    if (override) return override;
+
+    for (const name of candidateNames("claude", deps.platform ?? process.platform)) {
+      const bundled = (deps.bundled ?? sdkBinary)(name);
+      if (!bundled) continue;
+      const verified = yield* executableAt(bundled, deps);
+      if (verified) return verified;
+    }
+
+    const installed = yield* searchInstallDirs("claude", deps);
+    if (installed) return installed;
+
+    return yield* Effect.fail(
+      new ExecutableNotFound({
+        harnessAgentId: "claude-code",
+        executable: "claude",
+        reason: NOT_FOUND,
+      }),
+    );
+  });
 
 /**
  * The CLI version vibest is built against: the version the Agent SDK bundles,

@@ -25,9 +25,8 @@ import {
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
-import { resolveHarnessExecutable } from "../executable";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
-import { codexExecutableSpec } from "./executable";
+import { resolveCodexExecutable } from "./executable";
 import {
   approvalSourceOf,
   buildApprovalRequest,
@@ -866,9 +865,7 @@ export const makeCodexAgent = (
     const executable = options.executablePath
       ? Effect.succeed(options.executablePath)
       : yield* Effect.cached(
-          resolveHarnessExecutable(codexExecutableSpec).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-          ),
+          resolveCodexExecutable().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
         );
     const agent = yield* makeCodexAgentWithDependencies({
       makeTransport: () =>

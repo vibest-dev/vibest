@@ -12,9 +12,8 @@ import {
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
-import { resolveHarnessExecutable } from "../executable";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
-import { piExecutableSpec } from "./executable";
+import { resolvePiExecutable } from "./executable";
 import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
 import { createPiTransform } from "./transform";
@@ -608,9 +607,7 @@ export const makePiAgent = (
     const executable = options.executablePath
       ? Effect.succeed(options.executablePath)
       : yield* Effect.cached(
-          resolveHarnessExecutable(piExecutableSpec).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-          ),
+          resolvePiExecutable().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
         );
     const agent = yield* makePiAgentWithDependencies({
       makeTransport: (config) =>
