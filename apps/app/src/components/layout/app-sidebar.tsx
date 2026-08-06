@@ -24,14 +24,8 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
     <Sidebar
       variant="inset"
       collapsible="offcanvas"
-      /*
-       * Two nudges that put the scrollbar on the seam with the inset. The
-       * scrollbar's own `m-1` sat it 4px inside the sidebar card, so it read as
-       * floating over the list rather than marking its edge — drop the inline
-       * margin, keep the block one. `pe-0` then closes the gutter this side of
-       * the inset (which already carries `ms-0`), so the panel runs right up to
-       * the main card instead of leaving a 6px strip between them.
-       */
+      // `pe-0` closes the gutter to the inset (which already has `ms-0`), and
+      // `mx-0` undoes the scrollbar's own `m-1`, so both land on one seam.
       className="md:p-1.5 md:pe-0 [&_[data-slot=scroll-area-scrollbar][data-orientation=vertical]]:mx-0"
     >
       {/*
