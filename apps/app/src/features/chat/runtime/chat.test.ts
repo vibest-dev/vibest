@@ -64,9 +64,9 @@ class FakeTransport implements ChatSessionTransport {
   setPermissionMode = async (_mode: PermissionMode) => {};
 }
 
-const makeChat = () => {
+const makeChat = (options?: { onTerminated?: () => void }) => {
   const transport = new FakeTransport();
-  const chat = new Chat({ sessionRef: ref, transport });
+  const chat = new Chat({ sessionRef: ref, transport, onTerminated: options?.onTerminated });
   const emit = (event: ChatTransportEvent) => transport.onEvent?.(event);
   const attach = async (snapshot: Partial<SessionRuntimeSnapshot>) => {
     emit({
@@ -790,6 +790,18 @@ describe("Chat lifecycle", () => {
     emit({ type: "closed", reason: "session_closed" });
     expect(chat.store.getState().status).toBe("error");
     expect(chat.store.getState().error?.message).toBe("Session closed");
+  });
+
+  it("hands the owner a one-shot termination signal", async () => {
+    let terminations = 0;
+    const { emit, attach } = makeChat({ onTerminated: () => (terminations += 1) });
+    await attach({});
+
+    emit({ type: "closed", reason: "session_closed" });
+    // A duplicate from the same dead stream is still one termination: the
+    // owner has already released this Chat by then.
+    emit({ type: "closed", reason: "session_deleted" });
+    expect(terminations).toBe(1);
   });
 
   it("dispose tears down the subscription and folds", async () => {
