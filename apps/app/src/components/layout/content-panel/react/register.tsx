@@ -14,11 +14,11 @@ import type { AnyPanelView } from "./view";
  * the first render, so registering after paint would show an empty tab strip
  * for a frame.
  */
-export function RegisterPanels({
-  definitions,
-}: {
+export interface RegisterPanelsProps {
   readonly definitions: readonly AnyPanelDefinition<AnyPanelView>[];
-}): null {
+}
+
+export function RegisterPanels({ definitions }: RegisterPanelsProps): null {
   const { contentPanel } = useContentPanelContext();
   useLayoutEffect(() => contentPanel.registerAll(definitions), [contentPanel, definitions]);
   return null;

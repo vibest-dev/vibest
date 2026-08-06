@@ -3,7 +3,7 @@ import { Empty, EmptyContent, EmptyDescription } from "@vibest/ui/components/emp
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import { cn } from "@vibest/ui/lib/utils";
 import { Maximize2Icon, Minimize2Icon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ComponentProps, useEffect, useRef, type ReactNode } from "react";
 
 import type { OpenPanel } from "../core/content-panel";
 import { type ContentPanelSession, useContentPanel, usePanelSnapshot } from "./hooks";
@@ -19,7 +19,9 @@ import type { AnyPanelView } from "./view";
  * tenant of the chat's. The margins mirror `SidebarInset`'s so the gap between
  * the cards matches the gap to the sidebar.
  */
-export function ContentPanelOutlet({ className }: { className?: string }): ReactNode {
+export type ContentPanelOutletProps = ComponentProps<"aside">;
+
+export function ContentPanelOutlet({ className, ...props }: ContentPanelOutletProps): ReactNode {
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const session = useContentPanel();
 
@@ -28,18 +30,20 @@ export function ContentPanelOutlet({ className }: { className?: string }): React
   if (presentation === "hidden" || session === null) return null;
 
   return (
-    <div
+    <aside
+      data-slot="content-panel"
+      data-state={presentation}
       className={cn(
         "bg-background relative flex min-h-0 min-w-0 flex-col overflow-hidden border [-webkit-app-region:no-drag]",
         "md:my-1.5 md:me-1.5 md:rounded-xl md:shadow-sm/5",
-        presentation === "maximized" ? "flex-1" : "w-[28rem] shrink-0",
+        presentation === "maximized" ? "flex-1" : "w-112 shrink-0",
         className,
       )}
-      data-content-panel={presentation}
+      {...props}
     >
       <TabStrip presentation={presentation} session={session} />
       <PanelBody session={session} />
-    </div>
+    </aside>
   );
 }
 
@@ -60,7 +64,7 @@ function TabStrip({
   useEffect(() => {
     if (activeId === null) return;
     scroller.current
-      ?.querySelector("[data-panel-tab-active]")
+      ?.querySelector("[data-slot=content-panel-tab][data-active]")
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId]);
 
@@ -117,8 +121,10 @@ function Tab({
   const Icon = panel.view.icon;
   return (
     <div
-      // How the strip finds the tab to scroll into view.
-      data-panel-tab-active={active || undefined}
+      data-slot="content-panel-tab"
+      // `data-active`, as both `tabs` and `sidebar` spell it. Also how the strip
+      // finds the tab to scroll into view.
+      data-active={active || undefined}
       className={cn(
         "group flex h-7 max-w-40 shrink-0 items-center gap-1 rounded-md ps-1.5 pe-1 text-xs",
         active
@@ -134,6 +140,8 @@ function Tab({
     >
       <button
         type="button"
+        // Which tab is current must not be carried by the background alone.
+        aria-current={active || undefined}
         className="flex min-w-0 items-center gap-1.5"
         onClick={() => session.activate(panel.id)}
         title={panel.label}
@@ -197,19 +205,24 @@ function EmptyState({ session }: { session: ContentPanelSession }): ReactNode {
     <Empty className="py-6 md:py-6">
       <EmptyContent>
         <EmptyDescription>Choose what to show alongside the chat.</EmptyDescription>
-        <div className="grid w-full grid-cols-2 gap-2">
+        {/*
+         * Ghost buttons, not bordered tiles: this is already inside the panel's
+         * card, and cards do not nest (design.md). The published Button carries
+         * the hover, focus ring and coarse-pointer step for free.
+         */}
+        <div className="grid w-full grid-cols-2 gap-1">
           {openable.map((entry) => {
             const Icon = entry.view.icon;
             return (
-              <button
+              <Button
                 key={entry.type}
-                type="button"
+                variant="ghost"
+                className="justify-start"
                 onClick={() => session.openNew(entry.type)}
-                className="bg-card hover:bg-accent/60 flex min-h-20 flex-col items-start rounded-lg border p-3 text-start transition"
               >
-                <Icon className="mb-2 size-4" />
-                <span className="text-sm font-medium">{entry.title}</span>
-              </button>
+                <Icon />
+                {entry.title}
+              </Button>
             );
           })}
         </div>

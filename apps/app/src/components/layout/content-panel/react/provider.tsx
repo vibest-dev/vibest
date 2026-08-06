@@ -14,11 +14,14 @@ import type { AnyPanelView } from "./view";
  * for the benefit of one. A panel that needs a workspace path takes it in its
  * payload — already persisted and parsed — or resolves it in its own view.
  */
-export function ContentPanelProvider(props: {
+export interface ContentPanelProviderProps {
   readonly contentPanel: ContentPanel<AnyPanelView>;
+  /** null off a session route; every panel hook below degrades to a no-op. */
   readonly sessionId: string | null;
   readonly children: ReactNode;
-}): ReactNode {
+}
+
+export function ContentPanelProvider(props: ContentPanelProviderProps): ReactNode {
   const { contentPanel, sessionId, children } = props;
   const value = useMemo(() => ({ contentPanel, sessionId }), [contentPanel, sessionId]);
   return <ContentPanelContext value={value}>{children}</ContentPanelContext>;
