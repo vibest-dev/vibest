@@ -124,9 +124,7 @@ Non-negotiable on every component: semantic HTML first (ARIA only where HTML
 can't); a complete keyboard map (Arrows/Home/End/Escape per widget role);
 accessible names on icon-only buttons; `:focus-visible` indicators; state via
 `aria-expanded`/`aria-checked`/`aria-selected`; never convey information by
-color alone; 44px minimum touch targets; labels, not placeholders. Implementing
-a modal, menu, tabs, form, live region, or focus trap → read
-`docs/component-spec/accessibility.md` for the full per-widget patterns.
+color alone; 44px minimum touch targets; labels, not placeholders.
 
 ## Review checklist
 
