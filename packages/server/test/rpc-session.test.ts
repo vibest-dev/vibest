@@ -59,7 +59,7 @@ async function setup() {
   // Paths plus the platform services the repositories' JSON store runs on.
   const pathsLayer = Layer.provideMerge(layerPaths(home), NodeServices.layer);
 
-  // Handed to the agent alone: the adapter's checkAvailability now answers off
+  // Handed to the agent alone: the adapter's availability now answers off
   // the agent's own resolve, so `session.create`'s gate sees this fake without
   // the path being passed twice.
   const executablePath = makeFake();

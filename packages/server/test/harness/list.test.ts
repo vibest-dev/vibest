@@ -19,7 +19,7 @@ const adapter = (over: {
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.id },
-  checkAvailability: Effect.succeed(
+  availability: Effect.succeed(
     over.available === false
       ? { available: false, ...(over.reason ? { reason: over.reason } : {}) }
       : { available: true },

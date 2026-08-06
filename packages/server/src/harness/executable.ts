@@ -80,7 +80,7 @@ export type HarnessExecutableSpec = {
    * module graph does not contain the harness.
    */
   readonly bundled?: (binary: string) => string | undefined;
-  /** Human-facing sentence for `checkAvailability`, naming how to fix it. */
+  /** Human-facing sentence for `availability`, naming how to fix it. */
   readonly notFoundReason: string;
 };
 

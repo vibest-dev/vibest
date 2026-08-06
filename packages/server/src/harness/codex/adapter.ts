@@ -354,7 +354,7 @@ export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
   // is in `harness/executable.ts`.
   // `suspend`, because building an adapter must stay a pure declaration that
   // never touches its agent (`adapter-capabilities.test.ts` locks this).
-  checkAvailability: Effect.suspend(() => agent.executable).pipe(
+  availability: Effect.suspend(() => agent.executable).pipe(
     Effect.as({ available: true } as AvailabilityResult),
     Effect.catch((cause) =>
       Effect.succeed({ available: false, reason: cause.message } as AvailabilityResult),

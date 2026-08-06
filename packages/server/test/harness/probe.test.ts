@@ -15,7 +15,7 @@ const adapter = (over: {
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.id },
-  checkAvailability: Effect.succeed({ available: true }),
+  availability: Effect.succeed({ available: true }),
   permissionModes: [],
   ...(over.probeModels ? { probeModels: over.probeModels } : {}),
   open: () => Effect.die("probe must not open a session"),
@@ -158,7 +158,7 @@ it.effect("never asks an unavailable harness for its catalogue", () =>
         id: "claude-code",
         probeModels: () => Ref.set(asked, true).pipe(Effect.as([])),
       }),
-      checkAvailability: Effect.succeed({ available: false, reason: "not on PATH" }),
+      availability: Effect.succeed({ available: false, reason: "not on PATH" }),
     };
 
     const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([uninstalled])).pipe(

@@ -77,7 +77,7 @@ export interface ClaudeCodeAgent {
   /**
    * The absolute path this agent hands the SDK, resolved once and cached.
    *
-   * Exposed so the adapter's `checkAvailability` answers off the *same* resolve
+   * Exposed so the adapter's `availability` answers off the *same* resolve
    * the SDK launches — see the note in `harness/executable.ts` on why one
    * search, not two, is the invariant here.
    */

@@ -31,7 +31,7 @@ export type HarnessAgentRegistryShape = {
    * Registered-but-unavailable and not-registered-at-all are one question to
    * every caller here ("can I use this?"), so both errors come out of one
    * call. The `FileSystem` requirement is the adapter's own
-   * `checkAvailability` showing through; consumers bind it while building
+   * `availability` showing through; consumers bind it while building
    * their layer, as they already do.
    */
   readonly require: (
@@ -69,7 +69,7 @@ export const makeHarnessAgentRegistry = (
     require: (harnessAgentId) =>
       get(harnessAgentId).pipe(
         Effect.flatMap((adapter) =>
-          adapter.checkAvailability.pipe(
+          adapter.availability.pipe(
             Effect.flatMap((availability) =>
               availability.available
                 ? Effect.succeed(adapter)

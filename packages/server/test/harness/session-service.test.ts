@@ -129,7 +129,7 @@ describe("HarnessAgentSessionService", () => {
           const adapter = {
             id: "claude-code",
             descriptor: { id: "claude-code", name: "Claude Code" },
-            checkAvailability: Effect.sync(() =>
+            availability: Effect.sync(() =>
               opts.unavailable !== undefined
                 ? { available: false, reason: opts.unavailable }
                 : { available: true },

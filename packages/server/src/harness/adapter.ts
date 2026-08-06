@@ -142,11 +142,16 @@ export interface HarnessAgentAdapter {
   readonly id: HarnessAgentId;
   readonly descriptor: AgentDescriptor;
   /**
-   * A PATH lookup, so it reads the filesystem — the requirement rides the `R`
-   * channel out to whoever builds the service that calls it (list, session
-   * service), which binds the platform layers at its own construction.
+   * Whether this harness can be used right now, and why not when it cannot.
+   *
+   * Locating the CLI reads the filesystem, so the requirement rides the `R`
+   * channel out to whoever builds the service that calls it (list, the
+   * registry's gate), which binds the platform layers at its own construction.
+   *
+   * Answered off the agent's own cached resolve, so it cannot disagree with
+   * what the transport goes on to spawn — see `harness/executable.ts`.
    */
-  readonly checkAvailability: Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem>;
+  readonly availability: Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem>;
   /**
    * The subset of vibest's permission vocabulary this harness can honour, and
    * which member to preselect. Plain values, not effects: they follow from the

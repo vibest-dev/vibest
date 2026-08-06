@@ -9,7 +9,7 @@ import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 const claude = {
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
-  checkAvailability: Effect.succeed({ available: true }),
+  availability: Effect.succeed({ available: true }),
   permissionModes: [],
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
   open: () => Effect.die("not used"),

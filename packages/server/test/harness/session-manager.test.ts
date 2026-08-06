@@ -108,7 +108,7 @@ const makeFixture = Effect.gen(function* () {
   const adapter = {
     id: "claude-code",
     descriptor: { id: "claude-code", name: "Claude Code" },
-    checkAvailability: Effect.succeed({ available: true }),
+    availability: Effect.succeed({ available: true }),
     permissionModes: [],
     open: () => makeRuntime("created-session"),
     resume: ({ sessionId }) =>

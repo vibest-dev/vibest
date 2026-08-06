@@ -108,7 +108,7 @@ export const requiredClaudeVersion = (): Effect.Effect<string, Error, FileSystem
  * Runs `<executable> --version`; returns its raw stdout (e.g. "2.1.216 (Claude Code)").
  *
  * Still `node:child_process`: `ChildProcessSpawner` supervises its children
- * through a `Scope`, and threading one into `checkAvailability` would push
+ * through a `Scope`, and threading one into `availability` would push
  * `Scope` onto every harness adapter's availability check for a single
  * short-lived capture. Left as a follow-up rather than widened here.
  */
@@ -156,7 +156,7 @@ export type AvailabilityDeps = ResolveDeps & {
  * The version floor is what stays claude-code's own: finding the binary is the
  * shared walk, verifying it is new enough to speak the SDK's protocol is not.
  */
-export const checkClaudeAvailability = (
+export const claudeAvailability = (
   deps: AvailabilityDeps = {},
 ): Effect.Effect<AvailabilityResult, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {

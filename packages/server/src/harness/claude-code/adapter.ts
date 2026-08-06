@@ -24,7 +24,7 @@ import {
 import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { streamFromQueueOne } from "../queue-stream";
 import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
-import { checkClaudeAvailability } from "./executable";
+import { claudeAvailability } from "./executable";
 import { sessionMessagesToUIMessages } from "./history";
 import { toSessionEvent } from "./to-session-event";
 import { createTransform } from "./transform";
@@ -441,8 +441,8 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   // wire protocol the harness types no longer match.
   // `resolve` handed in, so finding the binary happens once and both this check
   // and the SDK launch use that answer; the version floor on top stays
-  // claude-code's own (see `checkClaudeAvailability`).
-  checkAvailability: checkClaudeAvailability({
+  // claude-code's own (see `claudeAvailability`).
+  availability: claudeAvailability({
     resolve: Effect.suspend(() => agent.executable),
   }),
   open: (input) =>

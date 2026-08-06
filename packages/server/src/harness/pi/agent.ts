@@ -89,7 +89,7 @@ export interface PiAgent {
   /**
    * The absolute path this agent will spawn, resolved once and cached.
    *
-   * Exposed so the adapter's `checkAvailability` answers off the *same* resolve
+   * Exposed so the adapter's `availability` answers off the *same* resolve
    * the transport launches — see the note in `harness/executable.ts`.
    */
   readonly executable: Effect.Effect<string, ExecutableNotFound>;

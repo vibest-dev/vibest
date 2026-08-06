@@ -125,7 +125,7 @@ export interface CodexAgent {
   /**
    * The absolute path this agent will spawn, resolved once and cached.
    *
-   * Exposed so the adapter's `checkAvailability` can answer off the *same*
+   * Exposed so the adapter's `availability` can answer off the *same*
    * resolve the transport launches, rather than performing a second, differently
    * scoped search. Two searches were what let "available" and "what actually
    * runs" disagree — see the note in `harness/executable.ts`.

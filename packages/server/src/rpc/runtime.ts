@@ -81,9 +81,9 @@ const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
 export const cacheAvailability = (
   adapter: HarnessAgentAdapter,
 ): Effect.Effect<HarnessAgentAdapter, never, FileSystem.FileSystem> =>
-  Effect.map(Effect.cached(adapter.checkAvailability), (cachedCheck) => ({
+  Effect.map(Effect.cached(adapter.availability), (cachedCheck) => ({
     ...adapter,
-    checkAvailability: Effect.uninterruptible(cachedCheck),
+    availability: Effect.uninterruptible(cachedCheck),
   }));
 
 const RegistryLayer = Layer.effect(
