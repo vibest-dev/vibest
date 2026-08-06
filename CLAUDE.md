@@ -25,6 +25,7 @@ outside their hash inputs. `pnpm clean` runs `git clean -xdf`.
 @.agents/rules/architecture.md
 @.agents/rules/stack.md
 @.agents/rules/frontend-state.md
+@.agents/rules/ui-components.md
 @.agents/rules/toolchain.md
 
 `apps/desktop/src` has its own layering contract in `apps/desktop/AGENTS.md` —
