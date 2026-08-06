@@ -45,7 +45,7 @@ import {
 import {
   useHarnessAgent,
   useHarnessAgents,
-  useHarnessProbe,
+  useHarnessModels,
 } from "@/features/chat/harness/use-harness";
 import { useChatManager } from "@/features/chat/runtime/chat-context";
 import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
@@ -128,14 +128,14 @@ function DraftRoute() {
   const harnessAgent = useHarnessAgent(harnessAgentId);
   // The selected project's directory decides what its harness can offer — a
   // project's own settings can remap what a model id resolves to. No project
-  // picked means no cwd to probe, so the model picker has nothing to offer;
-  // the composer blocks on project selection anyway. Undefined until the probe
-  // lands is not a wait either: submitting meanwhile omits `model` — which is
-  // exactly what "the user didn't pick one" already means.
-  const probe = useHarnessProbe(harnessAgentId, selected?.path);
+  // picked means no cwd to ask about, so the model picker has nothing to
+  // offer; the composer blocks on project selection anyway. Undefined until
+  // the answer lands is not a wait either: submitting meanwhile omits `model` —
+  // which is exactly what "the user didn't pick one" already means.
+  const models = useHarnessModels(harnessAgentId, selected?.path);
   // Each dimension resolves on its own — a stale URL pick is dropped, an
   // absent one falls back to the declared default.
-  const providers = probe.data?.providers ?? [];
+  const providers = models.data?.providers ?? [];
   const model = resolveModel(providers, search.provider, search.model);
   const permissionModes = orderPermissionModes(harnessAgent?.permissionModes ?? []);
   const permissionMode = resolvePermissionMode(harnessAgent, search.permission);

@@ -107,7 +107,7 @@ already written" is not a reason to add to the list:
 | `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle      |
 | `node:os.homedir` (`config/paths.ts`, `rpc/fs.ts`)                        | Effect has no OS/home-directory service                                                              |
 | `node:module.createRequire` (`harness/claude-code/executable.ts`)         | no Effect equivalent                                                                                 |
-| `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no port-probe or process-signal service                                                   |
+| `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no free-port or process-signal service                                                    |
 
 `node:path` is not on this list because it never needed an exemption — see
 "Where the boundary is" above. Path math is pure, so it stays `node:path`

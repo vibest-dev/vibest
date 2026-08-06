@@ -4,7 +4,7 @@ import type { DaemonRecord } from "./record";
 
 const HEALTH_TIMEOUT_MS = 1_000;
 
-/** True if a process with this pid exists (signal 0 probes without killing). */
+/** True if a process with this pid exists (signal 0 tests without killing). */
 export function pidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -19,7 +19,7 @@ export function pidAlive(pid: number): boolean {
 /**
  * True if `${address}/api/health` answers `ok`. Always bounded: a wedged
  * daemon that accepts connections but never responds must read as unhealthy,
- * not hang the probe (and with it every liveness poll built on top).
+ * not hang the check (and with it every liveness poll built on top).
  */
 export const healthy = (address: string, signal?: AbortSignal): Effect.Effect<boolean> =>
   Effect.promise(async () => {

@@ -138,7 +138,7 @@ const makeFixture = Effect.gen(function* () {
 
 type Fixture = Effect.Success<typeof makeFixture>;
 
-/** Liveness probe: `get` succeeds while a session has a runtime, fails once torn down. */
+/** Liveness check: `get` succeeds while a session has a runtime, fails once torn down. */
 const isActive = (fixture: Fixture, ref: SessionRef) =>
   fixture.manager.get(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess));
 

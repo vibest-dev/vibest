@@ -237,15 +237,12 @@ export class PermissionModeUnsupported extends Schema.TaggedErrorClass<Permissio
   }
 }
 
-export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
-  "CapabilityProbeFailed",
-  {
-    harnessAgentId: HarnessAgentIdSchema,
-    cause: Schema.Defect(),
-  },
-) {
+export class ModelListFailed extends Schema.TaggedErrorClass<ModelListFailed>()("ModelListFailed", {
+  harnessAgentId: HarnessAgentIdSchema,
+  cause: Schema.Defect(),
+}) {
   override get message() {
-    return `Failed to probe '${this.harnessAgentId}' capabilities: ${causeSummary(this.cause)}`;
+    return `Failed to read '${this.harnessAgentId}' models: ${causeSummary(this.cause)}`;
   }
 }
 

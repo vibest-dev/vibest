@@ -14,7 +14,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelsLayer,
   makeHarnessAgentRegistry,
 } from "../harness";
 import {
@@ -101,13 +101,13 @@ const RegistryLayer = Layer.effect(
 ).pipe(Layer.provide(ProvidersLayer), Layer.provide(PlatformLayer));
 
 // Both harness routes read the same registry instance. It matters most for the
-// probe: one cache, shared by every connecting client, so N tabs on the same
-// directory still cost one CLI spawn.
+// model catalogue: one cache, shared by every connecting client, so N tabs on
+// the same directory still cost one CLI spawn.
 const HarnessListProvided = HarnessListLayer.pipe(
   Layer.provide(RegistryLayer),
   Layer.provide(PlatformLayer),
 );
-const HarnessProbeProvided = HarnessProbeLayer.pipe(
+const HarnessModelsProvided = HarnessModelsLayer.pipe(
   Layer.provide(RegistryLayer),
   // The availability gate reads the filesystem, so this route needs the
   // platform now — it did not before, which is exactly how it slipped past it.
@@ -149,7 +149,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   ProjectServiceProvided,
   RegistryLayer,
   HarnessListProvided,
-  HarnessProbeProvided,
+  HarnessModelsProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a

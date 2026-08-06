@@ -16,7 +16,7 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
-  CapabilityProbeFailed,
+  ModelListFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -420,7 +420,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   // Codex defaults lower because its "full" also drops the sandbox; this one
   // only bypasses the prompts.
   defaultPermissionMode: "full",
-  probeModels: (cwd) =>
+  listModels: (cwd) =>
     agent.listModels(cwd).pipe(
       // No `reasoningEfforts` traits on purpose: the SDK exposes the levels in its
       // catalogue but offers no runtime call to apply one, and declaring a
@@ -431,9 +431,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       Effect.map((models) =>
         models.map((model) => ({ id: model.value, label: model.displayName })),
       ),
-      Effect.mapError(
-        (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
-      ),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "claude-code", cause })),
     ),
   // Present AND new enough: a resolvable binary that is older than the version
   // the SDK bundles reports as unavailable, so a too-old install fails fast

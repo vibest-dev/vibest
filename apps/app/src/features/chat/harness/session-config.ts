@@ -29,7 +29,7 @@ export function pickDefaultHarnessAgentId(
 /**
  * Each session-config dimension resolves on its own — their option sources are
  * different endpoints (permission modes are declared by `harness.list`, the
- * model catalog is probed by `harness.probe`, reasoningEffort candidates are read off
+ * model catalog comes from `harness.models`, reasoningEffort candidates are read off
  * the resolved model), so there is no combined "config" object to name. What
  * the resolvers share is one rule: a pick that isn't offered is dropped, never
  * passed through, and an absent pick falls back to the declared default. Stale
@@ -38,13 +38,13 @@ export function pickDefaultHarnessAgentId(
  *
  * A dimension nothing declared has no options and no value, so its control
  * isn't rendered and `session.create` omits the field — which is how the
- * harness ends up using its own configured default. A probe that simply hasn't
+ * harness ends up using its own configured default. A catalog that simply hasn't
  * arrived yet lands there too, and that is deliberate: the user can submit
  * before it does, and gets the harness's default rather than a wait.
  */
 
 /** The traits behind a providerId/modelId pair — undefined when the pair is
- * absent or points outside the probed catalog. Both halves must match: a
+ * absent or points outside the fetched catalog. Both halves must match: a
  * modelId is only unique within its provider. */
 export const findModelInfo = (
   providers: ReadonlyArray<ProviderInfo>,
@@ -58,7 +58,7 @@ export const findModelInfo = (
 /** The picked pair while the catalog still offers it, else nothing. There is
  * deliberately no default to fall back to: a catalog's "default" marker is the
  * provider's suggestion, not what an unconfigured session actually runs — the
- * harness's own user config decides that, and it is not probeable. No pick →
+ * harness's own user config decides that, and there is no way to ask for it. No pick →
  * the control shows its placeholder and the wire omits the field, so the
  * harness decides. */
 export const resolveModel = (

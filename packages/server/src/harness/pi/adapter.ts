@@ -233,7 +233,7 @@ export const makePiAdapter = (agent: PiAgent): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
   // Pi has neither a permission protocol nor a model catalogue — declaring
-  // nothing (empty subset, no probe) is what makes the UI render no config
+  // nothing (empty subset, no catalogue) is what makes the UI render no config
   // controls for it.
   permissionModes: [],
   // Answered off the agent's own cached resolve, so "available" and "what the

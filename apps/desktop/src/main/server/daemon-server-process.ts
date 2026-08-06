@@ -14,7 +14,7 @@ const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const MAX_HEALTH_MISSES = 3;
 
 export type DaemonServerProcessOptions = {
-  /** How often to probe the attached daemon's liveness. */
+  /** How often to check the attached daemon's liveness. */
   readonly pollIntervalMs?: number;
 };
 
@@ -76,7 +76,7 @@ export function makeDaemonServerProcess(
             while (true) {
               yield* Effect.sleep(pollIntervalMs);
               if (!pidAlive(handle.pid)) return { exitCode: null };
-              // Tolerate transient probe failures; a wedged-but-alive daemon
+              // Tolerate transient check failures; a wedged-but-alive daemon
               // still counts as dead after enough consecutive misses.
               misses = (yield* healthy(handle.address)) ? 0 : misses + 1;
               if (misses >= MAX_HEALTH_MISSES) return { exitCode: null };

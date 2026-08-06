@@ -20,7 +20,7 @@ const LAUNCHCTL_KEYS = [
   "no_proxy",
 ] as const;
 
-// The error stays `unknown` on purpose: every probe failure is swallowed into
+// The error stays `unknown` on purpose: every failure here is swallowed into
 // the base-environment fallback and never crosses this module's boundary.
 export type RunCommand = (file: string, args: readonly string[]) => Effect.Effect<string, unknown>;
 

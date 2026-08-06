@@ -1,10 +1,10 @@
 import path from "node:path";
 
-import type { HarnessAgentId, HarnessProbeInput, HarnessProbeOutput } from "@vibest/contract";
+import type { HarnessAgentId, HarnessModelsInput, HarnessModelsOutput } from "@vibest/contract";
 import { Cache, Context, Data, Effect, Exit, FileSystem, Layer } from "effect";
 
 import type { AgentUnavailable, HarnessAgentNotFound } from "./errors";
-import { CapabilityProbeFailed } from "./errors";
+import { ModelListFailed } from "./errors";
 import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry";
 
 /**
@@ -13,7 +13,7 @@ import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry
  *
  * Today every harness carries exactly one built-in provider (its own model
  * catalogue, `providerId === harnessAgentId`); user-configured providers join
- * the same seam later by extending the key → probe resolution below. The cache
+ * the same seam later by extending the key → provider resolution below. The cache
  * key is therefore (providerId, cwd) — the unit that will stay correct when a
  * second kind of provider exists.
  *
@@ -33,7 +33,7 @@ import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry
  * de-duplication window, not a claim about how long the answer stays true; the
  * client's `staleTime` is what decides freshness.
  */
-const PROBE_TTL = "60 seconds";
+const MODELS_TTL = "60 seconds";
 
 /**
  * Failures are deliberately given no lifetime at all. `Cache` stores the
@@ -44,11 +44,11 @@ const PROBE_TTL = "60 seconds";
 const FAILURE_TTL = 0;
 
 /**
- * Far above any real probe (measured: 0.7s / 3.6s). This is the "the CLI is
+ * Far above any real answer (measured: 0.7s / 3.6s). This is the "the CLI is
  * wedged" guard, not a latency budget — nothing is waiting on it to paint, so
  * there is no reason to cut a slow-but-working machine off.
  */
-const PROBE_TIMEOUT = "30 seconds";
+const LIST_TIMEOUT = "30 seconds";
 
 /**
  * Big enough that no real usage pattern evicts anything, small enough that it
@@ -57,43 +57,44 @@ const PROBE_TIMEOUT = "30 seconds";
 const CACHE_CAPACITY = 256;
 
 /** A `Data.Class` because structural equality is what makes it a cache key. */
-class ProbeKey extends Data.Class<{
+class ModelsKey extends Data.Class<{
   readonly providerId: HarnessAgentId;
   readonly cwd: string;
 }> {}
 
 /**
- * `AgentUnavailable` rides alongside `CapabilityProbeFailed` rather than being
+ * `AgentUnavailable` rides alongside `ModelListFailed` rather than being
  * folded into it: "this harness's CLI is not installed" is a settled fact the
- * client should render as a greyed-out harness, while a probe failure is a
- * transient, retryable degraded state. Collapsing the two would make an
- * uninstalled harness look like a server that keeps breaking.
+ * client should render as a greyed-out harness, while a failure to read the
+ * catalogue is a transient, retryable degraded state. Collapsing the two would
+ * make an uninstalled harness look like a server that keeps breaking.
  */
-export type HarnessProbeShape = {
-  readonly probe: (
-    input: HarnessProbeInput,
+export type HarnessModelsShape = {
+  readonly list: (
+    input: HarnessModelsInput,
   ) => Effect.Effect<
-    HarnessProbeOutput,
-    CapabilityProbeFailed | AgentUnavailable | HarnessAgentNotFound
+    HarnessModelsOutput,
+    ModelListFailed | AgentUnavailable | HarnessAgentNotFound
   >;
 };
 
-export class HarnessProbeService extends Context.Service<HarnessProbeService, HarnessProbeShape>()(
-  "HarnessProbeService",
-) {}
+export class HarnessModelsService extends Context.Service<
+  HarnessModelsService,
+  HarnessModelsShape
+>()("HarnessModelsService") {}
 
-export const makeHarnessProbe = (
+export const makeHarnessModels = (
   registry: HarnessAgentRegistryShape,
-): Effect.Effect<HarnessProbeShape, never, FileSystem.FileSystem> =>
+): Effect.Effect<HarnessModelsShape, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    // Bound once here so the service's `probe` stays `R`-free for its RPC
+    // Bound once here so the service's `list` stays `R`-free for its RPC
     // caller — the requirement comes from the registry's availability gate.
     const platform = yield* Effect.context<FileSystem.FileSystem>();
     // One built-in provider per harness for now, so resolving a providerId is
     // a registry lookup. Never collapse a failure into an empty answer here —
-    // the error channel is what keeps "probe failed" distinguishable from
+    // the error channel is what keeps "the read failed" distinguishable from
     // "this harness has no models".
-    const probeProvider = ({ providerId, cwd }: ProbeKey) =>
+    const loadProvider = ({ providerId, cwd }: ModelsKey) =>
       Effect.gen(function* () {
         // `require`, not `get`: asking a harness for its catalogue spawns its
         // CLI, so an absent binary has to stop the call here. Going in on an
@@ -101,48 +102,48 @@ export const makeHarnessProbe = (
         // executable vanished after the availability check gated on it"
         // defect — a check this path never performed.
         const adapter = yield* registry.require(providerId).pipe(Effect.provide(platform));
-        // No probe at all is an answer, not a failure: this harness has no
-        // model catalogue (pi), so the client renders no picker for it.
-        if (!adapter.probeModels) return { providers: [] } satisfies HarnessProbeOutput;
+        // No catalogue at all is an answer, not a failure: this harness has
+        // none to offer (pi), so the client renders no picker for it.
+        if (!adapter.listModels) return { providers: [] } satisfies HarnessModelsOutput;
 
-        const models = yield* adapter.probeModels(cwd).pipe(
+        const models = yield* adapter.listModels(cwd).pipe(
           Effect.timeoutOrElse({
-            duration: PROBE_TIMEOUT,
+            duration: LIST_TIMEOUT,
             orElse: () =>
               Effect.fail(
-                new CapabilityProbeFailed({
+                new ModelListFailed({
                   harnessAgentId: providerId,
-                  cause: new Error(`model probe timed out after ${PROBE_TIMEOUT}`),
+                  cause: new Error(`reading the model catalogue timed out after ${LIST_TIMEOUT}`),
                 }),
               ),
           }),
         );
         return {
           providers: [{ id: providerId, label: adapter.descriptor.name, models }],
-        } satisfies HarnessProbeOutput;
+        } satisfies HarnessModelsOutput;
       });
 
-    const cache = yield* Cache.makeWith(probeProvider, {
+    const cache = yield* Cache.makeWith(loadProvider, {
       capacity: CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? PROBE_TTL : FAILURE_TTL),
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? MODELS_TTL : FAILURE_TTL),
     });
 
     return {
       // Resolved on the way in, so `/w/app`, `/w/app/` and `/w/x/../app` are one
-      // entry rather than three probes of the same directory.
-      probe: ({ harnessAgentId, cwd }) =>
-        Cache.get(cache, new ProbeKey({ providerId: harnessAgentId, cwd: path.resolve(cwd) })),
+      // entry rather than three reads of the same directory.
+      list: ({ harnessAgentId, cwd }) =>
+        Cache.get(cache, new ModelsKey({ providerId: harnessAgentId, cwd: path.resolve(cwd) })),
     };
   });
 
-export const HarnessProbeLayer: Layer.Layer<
-  HarnessProbeService,
+export const HarnessModelsLayer: Layer.Layer<
+  HarnessModelsService,
   never,
   HarnessAgentRegistry | FileSystem.FileSystem
 > = Layer.effect(
-  HarnessProbeService,
+  HarnessModelsService,
   Effect.gen(function* () {
     const registry = yield* HarnessAgentRegistry;
-    return yield* makeHarnessProbe(registry);
+    return yield* makeHarnessModels(registry);
   }),
 );

@@ -416,7 +416,7 @@ export type ModelInfo = typeof ModelInfoSchema.Type;
 // of the composite key that makes `modelId` meaningful.
 // No default marker on purpose: a catalog's "default" flag is the provider's
 // suggestion, not what an unconfigured session actually runs (the harness's
-// own user config decides that, and it is not probeable). The default is
+// own user config decides that, and there is no way to ask for it). The default is
 // expressed by absence — no pick on the wire means the harness decides.
 export const ProviderInfoSchema = Schema.Struct({
   id: Schema.String,
@@ -455,21 +455,21 @@ export type HarnessListOutput = typeof HarnessListOutputSchema.Type;
 // what a project is (see `session/port.ts` — "the port speaks ... a resolved
 // `cwd` only"), and the directory is what the answer actually depends on. It
 // also makes the cache key right for free: two projects registered at the same
-// path share one probe instead of spawning twice for the same answer.
-export const HarnessProbeInputSchema = Schema.Struct({
+// path share one cache entry instead of spawning twice for the same answer.
+export const HarnessModelsInputSchema = Schema.Struct({
   harnessAgentId: HarnessAgentIdSchema,
   cwd: Schema.String,
 });
-export type HarnessProbeInput = typeof HarnessProbeInputSchema.Type;
+export type HarnessModelsInput = typeof HarnessModelsInputSchema.Type;
 
-// What probing one harness in one directory yielded. Empty `providers` means
-// the harness has no model catalogue at all (pi). A failed probe is an error,
+// What one harness offers in one directory. Empty `providers` means the
+// harness has no model catalogue at all (pi). A failed read is an error,
 // never an empty result — an expired login must stay distinguishable from
 // "this harness has no model picker".
-export const HarnessProbeOutputSchema = Schema.Struct({
+export const HarnessModelsOutputSchema = Schema.Struct({
   providers: Schema.Array(ProviderInfoSchema),
 });
-export type HarnessProbeOutput = typeof HarnessProbeOutputSchema.Type;
+export type HarnessModelsOutput = typeof HarnessModelsOutputSchema.Type;
 
 export type SessionRuntimeSnapshot = {
   readonly ref: SessionRef;
@@ -593,7 +593,7 @@ export const BrowseResultSchema = Schema.Struct({
 // via the dedicated setters — never carried on a prompt turn. The two channels
 // fail differently on purpose: `permissionMode` is our closed union (a bad
 // value is a client bug → INVALID_ARGUMENT), while the model pair and `reasoningEffort`
-// come from probed lists that go stale, so applying them is best-effort — a
+// come from fetched lists that go stale, so applying them is best-effort — a
 // miss falls back to the harness default and the session still opens.
 // `providerId`/`modelId` must be given together; a half pair is a client bug
 // the RPC boundary rejects.

@@ -3,8 +3,8 @@ import { Schema } from "effect";
 
 import {
   HarnessListOutputSchema,
-  HarnessProbeInputSchema,
-  HarnessProbeOutputSchema,
+  HarnessModelsInputSchema,
+  HarnessModelsOutputSchema,
   serverErrors,
   toStandardSchema,
 } from "./domain";
@@ -27,13 +27,13 @@ export const harnessContract = {
    * CLI spawn and the answer changes per directory, so it is fetched lazily,
    * for the selected harness only, off the startup path.
    *
-   * A failed probe fails the call — it is never collapsed into an empty
+   * A failed read fails the call — it is never collapsed into an empty
    * result. An expired login answering "no models" would be cached as "this
    * harness has no model picker", which is the worst kind of silent error; the
    * client renders a retryable degraded state instead.
    */
-  probe: oc
+  models: oc
     .errors(serverErrors)
-    .input(toStandardSchema(HarnessProbeInputSchema))
-    .output(toStandardSchema(HarnessProbeOutputSchema)),
+    .input(toStandardSchema(HarnessModelsInputSchema))
+    .output(toStandardSchema(HarnessModelsOutputSchema)),
 };

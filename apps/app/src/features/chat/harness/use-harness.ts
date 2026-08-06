@@ -4,7 +4,7 @@ import type {
   HarnessAgentId,
   HarnessAgentInfo,
   HarnessListOutput,
-  HarnessProbeOutput,
+  HarnessModelsOutput,
 } from "@vibest/contract";
 import { useCallback } from "react";
 
@@ -44,30 +44,30 @@ export function useHarnessAgent(harnessAgentId: HarnessAgentId): HarnessAgentInf
 }
 
 /**
- * The probed model providers for one harness in one directory. Returns the
- * whole query, because its failure is meaningful: a failed probe must stay
+ * The model providers one harness offers in one directory. Returns the
+ * whole query, because its failure is meaningful: a failed read must stay
  * distinguishable from "this harness has no models" (empty providers), so the
  * UI can render a retryable degraded state instead of silently hiding the
  * picker.
  *
  * While `cwd` is unknown the input is `skipToken`, not a fabricated value:
  * unlike `enabled: false`, a skipped query cannot be forced to run by
- * `refetch()`, so the retry affordance can never fire a probe against a
+ * `refetch()`, so the retry affordance can never fire a request against a
  * made-up directory.
  *
  * Unlike the list this is fetched lazily and costs a CLI spawn, so it is held
  * far longer than TanStack's defaults would: without a `staleTime` every
- * window focus would re-probe. The server de-duplicates concurrent asks and
+ * window focus would re-fetch. The server de-duplicates concurrent asks and
  * holds its own short-lived answer, so a stale read here is cheap to correct
  * and an eager one is not.
  */
-export function useHarnessProbe(
+export function useHarnessModels(
   harnessAgentId: HarnessAgentId,
   cwd: string | undefined,
-): UseQueryResult<HarnessProbeOutput> {
+): UseQueryResult<HarnessModelsOutput> {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   return useQuery({
-    ...orpcQueryUtils.harness.probe.queryOptions({
+    ...orpcQueryUtils.harness.models.queryOptions({
       input: cwd === undefined ? skipToken : { harnessAgentId, cwd },
     }),
     staleTime: 5 * 60_000,

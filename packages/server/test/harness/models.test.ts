@@ -4,40 +4,40 @@ import { it } from "@effect/vitest";
 import { Cause, Effect, Exit, Ref } from "effect";
 
 import type { HarnessAgentAdapter } from "../../src/harness/adapter";
-import { AgentUnavailable, CapabilityProbeFailed } from "../../src/harness/errors";
-import { makeHarnessProbe } from "../../src/harness/probe";
+import { AgentUnavailable, ModelListFailed } from "../../src/harness/errors";
+import { makeHarnessModels } from "../../src/harness/models";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 import { NodePlatformLayer } from "../platform";
 
 const adapter = (over: {
   id: HarnessAgentAdapter["id"];
-  probeModels?: HarnessAgentAdapter["probeModels"];
+  listModels?: HarnessAgentAdapter["listModels"];
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.id },
   availability: Effect.succeed({ available: true }),
   permissionModes: [],
-  ...(over.probeModels ? { probeModels: over.probeModels } : {}),
-  open: () => Effect.die("probe must not open a session"),
-  resume: () => Effect.die("probe must not resume a session"),
+  ...(over.listModels ? { listModels: over.listModels } : {}),
+  open: () => Effect.die("reading models must not open a session"),
+  resume: () => Effect.die("reading models must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
 });
 
-/** Records every cwd it is probed with, and yields so callers can actually race. */
-const recordingProbe = (seen: Ref.Ref<ReadonlyArray<string>>) => (cwd: string) =>
+/** Records every cwd it is asked about, and yields so callers can actually race. */
+const recordingList = (seen: Ref.Ref<ReadonlyArray<string>>) => (cwd: string) =>
   Ref.update(seen, (current) => [...current, cwd]).pipe(
     Effect.andThen(Effect.yieldNow),
     Effect.as([{ id: "sonnet", label: "Sonnet" }]),
   );
 
-it.effect("probes the directory it was asked about, grouped under the built-in provider", () =>
+it.effect("answers for the directory it was asked about, grouped under the built-in provider", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const probe = yield* makeHarnessProbe(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
     ).pipe(Effect.provide(NodePlatformLayer));
 
-    const result = yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const result = yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     assert.deepEqual(yield* Ref.get(seen), ["/work/app"]);
     // Models never leave their provider: the built-in provider carries the
@@ -47,15 +47,15 @@ it.effect("probes the directory it was asked about, grouped under the built-in p
   }),
 );
 
-it.effect("gives concurrent callers one probe, not one each", () =>
+it.effect("gives concurrent callers one CLI spawn, not one each", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const probe = yield* makeHarnessProbe(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
     ).pipe(Effect.provide(NodePlatformLayer));
-    const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const ask = models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
-    // Two tabs on the same directory, arriving before the first probe settles.
+    // Two tabs on the same directory, arriving before the first answer settles.
     const [first, second] = yield* Effect.all([ask, ask], { concurrency: "unbounded" });
 
     assert.equal((yield* Ref.get(seen)).length, 1);
@@ -64,22 +64,22 @@ it.effect("gives concurrent callers one probe, not one each", () =>
   }),
 );
 
-it.effect("treats two directories as two probes, and does not serialise them", () =>
+it.effect("treats two directories as two questions, and does not serialise them", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const probe = yield* makeHarnessProbe(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
     ).pipe(Effect.provide(NodePlatformLayer));
 
     yield* Effect.all(
       [
-        probe.probe({ harnessAgentId: "claude-code", cwd: "/work/a" }),
-        probe.probe({ harnessAgentId: "claude-code", cwd: "/work/b" }),
+        models.list({ harnessAgentId: "claude-code", cwd: "/work/a" }),
+        models.list({ harnessAgentId: "claude-code", cwd: "/work/b" }),
       ],
       { concurrency: "unbounded" },
     );
 
-    // Both ran; if the registration lock covered the probes, the second would
+    // Both ran; if the registration lock covered the lookups, the second would
     // have queued behind the first rather than interleaving.
     assert.deepEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
   }),
@@ -88,13 +88,13 @@ it.effect("treats two directories as two probes, and does not serialise them", (
 it.effect("normalises the directory, so one answer serves its aliases", () =>
   Effect.gen(function* () {
     const seen = yield* Ref.make<ReadonlyArray<string>>([]);
-    const probe = yield* makeHarnessProbe(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: recordingProbe(seen) })]),
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
     ).pipe(Effect.provide(NodePlatformLayer));
 
-    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
-    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app/" });
-    yield* probe.probe({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app/" });
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
 
     assert.equal((yield* Ref.get(seen)).length, 1);
   }),
@@ -109,15 +109,13 @@ it.effect("caches a success but retries a failure", () =>
         Effect.flatMap((n) =>
           n > 1
             ? Effect.succeed([{ id: "sonnet" }])
-            : Effect.fail(
-                new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause: "boom" }),
-              ),
+            : Effect.fail(new ModelListFailed({ harnessAgentId: "claude-code", cause: "boom" })),
         ),
       );
-    const probe = yield* makeHarnessProbe(
-      makeHarnessAgentRegistry([adapter({ id: "claude-code", probeModels: flaky })]),
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: flaky })]),
     ).pipe(Effect.provide(NodePlatformLayer));
-    const ask = probe.probe({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    const ask = models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
 
     // A cached failure would pin "no models" for the whole TTL, so the user
     // would have to wait it out after logging back in.
@@ -131,15 +129,15 @@ it.effect("caches a success but retries a failure", () =>
   }),
 );
 
-it.effect("answers an empty provider list for a harness that has no probe", () =>
+it.effect("answers an empty provider list for a harness with no catalogue", () =>
   Effect.gen(function* () {
-    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([adapter({ id: "pi" })])).pipe(
+    const models = yield* makeHarnessModels(makeHarnessAgentRegistry([adapter({ id: "pi" })])).pipe(
       Effect.provide(NodePlatformLayer),
     );
 
     // Not a failure: pi genuinely has no models, and the client renders no
     // picker rather than an error.
-    assert.deepEqual(yield* probe.probe({ harnessAgentId: "pi", cwd: "/work/app" }), {
+    assert.deepEqual(yield* models.list({ harnessAgentId: "pi", cwd: "/work/app" }), {
       providers: [],
     });
   }),
@@ -156,22 +154,22 @@ it.effect("never asks an unavailable harness for its catalogue", () =>
     const uninstalled: HarnessAgentAdapter = {
       ...adapter({
         id: "claude-code",
-        probeModels: () => Ref.set(asked, true).pipe(Effect.as([])),
+        listModels: () => Ref.set(asked, true).pipe(Effect.as([])),
       }),
       availability: Effect.succeed({ available: false, reason: "not on PATH" }),
     };
 
-    const probe = yield* makeHarnessProbe(makeHarnessAgentRegistry([uninstalled])).pipe(
+    const models = yield* makeHarnessModels(makeHarnessAgentRegistry([uninstalled])).pipe(
       Effect.provide(NodePlatformLayer),
     );
 
-    const exit = yield* probe
-      .probe({ harnessAgentId: "claude-code", cwd: "/work/app" })
+    const exit = yield* models
+      .list({ harnessAgentId: "claude-code", cwd: "/work/app" })
       .pipe(Effect.exit);
 
     assert.equal(yield* Ref.get(asked), false);
-    // A typed failure, not a defect: the route maps it to UNSUPPORTED, which
-    // is what keeps "not installed" distinct from "the probe broke".
+    // A typed failure, not a defect: the route maps it to UNSUPPORTED, which is
+    // what keeps "not installed" distinct from "the CLI broke while answering".
     assert.equal(Exit.isFailure(exit) && Cause.hasFails(exit.cause), true);
     assert.equal(Exit.isFailure(exit) && Cause.hasDies(exit.cause), false);
     const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;

@@ -10,7 +10,7 @@ describe("makeJsonDocument typing", () => {
   it("infers each migrate input from its sibling schema and the store value from `schema`", () => {
     // Constructing the effect is pure — nothing touches the filesystem here.
     const effect = makeJsonDocument({
-      path: "/tmp/probe.json",
+      path: "/tmp/store.json",
       schema: V2,
       migrations: [
         {
@@ -34,7 +34,7 @@ describe("makeJsonDocument typing", () => {
 
   it("accepts a store without migrations", () => {
     const effect = makeJsonDocument({
-      path: "/tmp/probe.json",
+      path: "/tmp/store.json",
       schema: V1,
       defaults: { theme: "light" },
     });

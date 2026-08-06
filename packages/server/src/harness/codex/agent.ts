@@ -133,7 +133,7 @@ export interface CodexAgent {
   /**
    * The model catalog for the signed-in account, read straight from the
    * app-server. Follows the account and the installed codex version, so it can
-   * only be probed — never hardcoded.
+   * only be read from the app-server — never hardcoded.
    */
   readonly listModels: Effect.Effect<ReadonlyArray<Model>, CodexTransportFailure>;
   readonly session: {

@@ -98,7 +98,7 @@ type AcquireDecision =
 // The two channels fail differently on purpose (harness-concept-ownership §3.3):
 // `permissionMode` was validated at the RPC boundary, so failing to apply it is
 // a real fault and the acquisition fails with it. `model`/`reasoningEffort` come
-// from probed lists that go stale (an old URL, a re-mapped alias), so they are
+// from fetched lists that go stale (an old URL, a re-mapped alias), so they are
 // best-effort: a miss is logged and the session runs on the harness default
 // rather than turning "the list was a bit old" into "the session cannot start".
 const seedConfig = (

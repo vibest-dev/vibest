@@ -15,7 +15,7 @@ import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry
  * nothing memoizes it. Worth caching per process — see the note in
  * `claudeAvailability`.
  *
- * Anything that needs a CLI to answer belongs to {@link HarnessProbeService}
+ * Anything that needs a CLI to answer belongs to {@link HarnessModelsService}
  * instead. That split is about acquisition cost and failure mode only — it
  * says nothing about who owns the values' meaning (both endpoints can carry
  * normalized and opaque settings, see docs/design/harness-concept-ownership.md).

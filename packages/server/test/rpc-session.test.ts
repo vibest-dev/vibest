@@ -15,7 +15,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelsLayer,
   makeHarnessAgentRegistry,
 } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
@@ -100,7 +100,7 @@ async function setup() {
     projectServiceLayer,
     registryLayer,
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
-    HarnessProbeLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
+    HarnessModelsLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
   );

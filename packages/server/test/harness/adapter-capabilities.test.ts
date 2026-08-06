@@ -31,16 +31,16 @@ it("pi declares an empty permission subset and no default", () => {
   expect(adapter.defaultPermissionMode).toBeUndefined();
 });
 
-it("only the harnesses with a model catalogue declare a probe", () => {
-  expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).probeModels).toBeDefined();
-  expect(makeCodexAdapter(stub<CodexAgent>()).probeModels).toBeDefined();
+it("only the harnesses with a model catalogue declare a list", () => {
+  expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).listModels).toBeDefined();
+  expect(makeCodexAdapter(stub<CodexAgent>()).listModels).toBeDefined();
   // Absent, not empty: pi has no model switch, so the client renders no picker.
-  expect(makePiAdapter(stub<PiAgent>()).probeModels).toBeUndefined();
+  expect(makePiAdapter(stub<PiAgent>()).listModels).toBeUndefined();
 });
 
 it("declaring an adapter never touches its agent", () => {
   // Construction has to stay a pure declaration — the stubs above would throw
-  // on any property access if a probe were built eagerly rather than per call.
+  // on any property access if a lookup were built eagerly rather than per call.
   expect(() => makeClaudeCodeAdapter(stub<ClaudeCodeAgent>())).not.toThrow();
   expect(() => makeCodexAdapter(stub<CodexAgent>())).not.toThrow();
 });

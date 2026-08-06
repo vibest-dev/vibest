@@ -26,9 +26,9 @@ const adapter = (over: {
   ),
   permissionModes: ["ask"],
   defaultPermissionMode: "ask",
-  // Listing must never reach for one of these: declaring a model probe
+  // Listing must never reach for one of these: declaring a model catalogue
   // changes nothing about what this call returns.
-  probeModels: () => Effect.die("list must not probe models"),
+  listModels: () => Effect.die("list must not read the model catalogue"),
   open: () => Effect.die("list must not open a session"),
   resume: () => Effect.die("list must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),

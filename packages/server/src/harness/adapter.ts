@@ -16,7 +16,7 @@ import type {
   AgentOperationError,
   AgentRequestUnavailable,
   AgentUnavailable,
-  CapabilityProbeFailed,
+  ModelListFailed,
   CapabilityUnsupported,
   ExecutableNotFound,
   SessionClosed,
@@ -163,24 +163,23 @@ export interface HarnessAgentAdapter {
   readonly permissionModes: ReadonlyArray<PermissionMode>;
   readonly defaultPermissionMode?: PermissionMode;
   /**
-   * Probe this harness's built-in model provider in one working directory. It
-   * follows the signed-in account, the installed version *and* the directory's
-   * own config, so it can only be probed — never hardcoded, and never probed
-   * once for everyone. Absent for harnesses with no model catalogue (pi).
+   * Ask this harness's built-in model provider what it offers in one working
+   * directory. The answer follows the signed-in account, the installed version
+   * *and* the directory's own config, so it can only be asked for — never
+   * hardcoded, and never asked once for everyone. Absent for harnesses with no
+   * model catalogue (pi).
    *
    * `cwd` is honoured where it matters: claude-code passes it to the SDK
    * because a project's settings can remap what a model id resolves to. Codex
    * ignores it — its `model/list` is app-server-global — but still takes it, so
    * callers never have to know which is which.
    *
-   * The error channel is the point: a probe that fails has to stay
+   * The error channel is the point: a failed read has to stay
    * distinguishable from a harness that genuinely has no models, otherwise an
    * expired login gets cached as "this harness has no model picker".
-   * {@link HarnessProbeService} owns the timeout, caching and de-duplication.
+   * {@link HarnessModelsService} owns the timeout, caching and de-duplication.
    */
-  readonly probeModels?: (
-    cwd: string,
-  ) => Effect.Effect<ReadonlyArray<ModelInfo>, CapabilityProbeFailed>;
+  readonly listModels?: (cwd: string) => Effect.Effect<ReadonlyArray<ModelInfo>, ModelListFailed>;
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<

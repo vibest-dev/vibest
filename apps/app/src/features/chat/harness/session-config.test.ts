@@ -18,7 +18,7 @@ const claudeCode: HarnessAgentInfo = {
   defaultPermissionMode: "full",
 };
 
-// The other half, probed per directory rather than declared once. Models live
+// The other half, fetched per directory rather than declared once. Models live
 // inside their provider — the built-in provider carries the harness's id.
 const claudeProviders: ReadonlyArray<ProviderInfo> = [
   {
@@ -42,11 +42,11 @@ describe("resolveModel", () => {
 
   it("resolves to nothing when the user picked nothing", () => {
     // No fabricated default: the wire omits the field, so the session runs on
-    // the harness's own configured default — which is not probeable.
+    // the harness's own configured default — which we cannot ask for.
     expect(resolveModel(claudeProviders, undefined, undefined)).toBeUndefined();
   });
 
-  it("drops a pick the probe doesn't vouch for", () => {
+  it("drops a pick the catalog doesn't vouch for", () => {
     // The shape of "switched harness with a stale model in the URL": never
     // display or submit a pair that isn't in this harness's providers.
     expect(resolveModel(claudeProviders, "codex", "gpt-5.6-sol")).toBeUndefined();
@@ -58,7 +58,7 @@ describe("resolveModel", () => {
     expect(resolveModel(claudeProviders, "codex", "sonnet")).toBeUndefined();
   });
 
-  it("ignores a URL-supplied pick until the probe can vouch for it", () => {
+  it("ignores a URL-supplied pick until the catalog can vouch for it", () => {
     // Passing it through unchecked would send `session.create` a pair this
     // directory may not resolve at all; omitting it means "harness default".
     expect(resolveModel([], "claude-code", "sonnet")).toBeUndefined();
@@ -100,7 +100,7 @@ describe("reasoningEffort cascades from the selected model", () => {
     expect(resolveReasoningEffort(sol, "max")).toBe("medium");
   });
 
-  it("resolves to nothing while the probe is still in flight", () => {
+  it("resolves to nothing while the catalog is still in flight", () => {
     expect(resolveReasoningEffort(undefined, "high")).toBeUndefined();
   });
 });
