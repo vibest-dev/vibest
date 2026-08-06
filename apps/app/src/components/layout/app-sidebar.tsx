@@ -21,7 +21,19 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   const { os } = usePlatform();
 
   return (
-    <Sidebar variant="inset" collapsible="offcanvas" className="md:p-1.5">
+    <Sidebar
+      variant="inset"
+      collapsible="offcanvas"
+      /*
+       * Two nudges that put the scrollbar on the seam with the inset. The
+       * scrollbar's own `m-1` sat it 4px inside the sidebar card, so it read as
+       * floating over the list rather than marking its edge — drop the inline
+       * margin, keep the block one. `pe-0` then closes the gutter this side of
+       * the inset (which already carries `ms-0`), so the panel runs right up to
+       * the main card instead of leaving a 6px strip between them.
+       */
+      className="md:p-1.5 md:pe-0 [&_[data-slot=scroll-area-scrollbar][data-orientation=vertical]]:mx-0"
+    >
       {/*
        * Reserves the traffic-light / pinned-toggle row (see __root.tsx). On
        * macOS the row belongs to the native traffic lights; everywhere else it
