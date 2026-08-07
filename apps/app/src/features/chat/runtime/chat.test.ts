@@ -38,6 +38,9 @@ class FakeTransport implements ChatSessionTransport {
   getMessagesCalls = 0;
   promptCalls: Array<{ messageId: string; parts: ReadonlyArray<PromptPart> }> = [];
   promptError: unknown = null;
+  // When set, prompt blocks on it — for tests where the RPC is still in flight
+  // (a dropped socket queues it until the link reconnects).
+  promptGate: Promise<void> | null = null;
   responded: Array<{ requestId: string; response: AgentResponse }> = [];
 
   subscribe(onEvent: (event: ChatTransportEvent) => void): () => void {
@@ -48,6 +51,7 @@ class FakeTransport implements ChatSessionTransport {
   }
   prompt = async (input: { messageId: string; parts: ReadonlyArray<PromptPart> }) => {
     this.promptCalls.push(input);
+    if (this.promptGate) await this.promptGate;
     if (this.promptError) throw this.promptError;
     return { turnId: "turn-receipt" };
   };
@@ -151,6 +155,34 @@ describe("Chat hydration", () => {
     const last = chat.store.getState().messages.at(-1)!;
     expect(last.role).toBe("assistant");
     expect(assistantText(last)).toBe("after the restart");
+  });
+
+  // The server goes down while a prompt is queued on the dropped socket: the
+  // link holds the call, so the send is still pending when the server comes
+  // back. Its snapshot is idle and its settled transcript has never seen the
+  // prompt — neither may erase the optimistic bubble the user is looking at.
+  it("keeps an in-flight prompt when the server restarts under it", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const sent = chat.prompt("still queued");
+    await settle();
+    expect(chat.store.getState().messages).toHaveLength(2);
+    expect(chat.store.getState().status).toBe("submitted");
+
+    // The rebuilt session restarts its seq counter and knows nothing yet.
+    await attach({ cursor: 0 });
+
+    expect(chat.store.getState().messages.map((message) => message.role)).toEqual(["user", "user"]);
+    expect(chat.store.getState().status).toBe("submitted");
+
+    releasePrompt();
+    await sent;
   });
 
   it("lays the history floor before folding buffered or live chunks", async () => {
