@@ -59,3 +59,29 @@ _Avoid_: widget, element
 **Coss registry**:
 The upstream shadcn-style component registry at `coss.com/ui` (the `@coss` namespace in `components.json`). It is the source of truth for base components. It is a rolling "latest" — items carry no version or date, so "the latest version" means whatever the registry serves now.
 _Avoid_: coss/ui (repo shorthand)
+
+## Content Panel
+
+The column beside the chat, in `apps/app/src/components/layout/content-panel/`.
+_Avoid_: right panel, right sidebar, aux panel — "right" is a position, and the
+left one is already the **sidebar**.
+
+**ContentPanel**:
+The host: one app-wide instance (`apps/app/src/content-panel.ts`) owning the registry, the per-session tab lists, and every live panel instance. Its zustand store holds only what the UI re-renders on _and_ what survives a reload — everything else lives on the instances. Knows no panel type.
+_Avoid_: panel manager, panel store
+
+**Panel type**:
+The string a definition registers under (`terminal`, `file`, …). Registration is open: `HarnessAgentIdSchema`-style whitelists have no counterpart here, and an unregistered type in persisted state is skipped, not dropped.
+_Avoid_: panel kind, panel variant
+
+**PanelDefinition**:
+What `definePanel` / `definePanelFamily` produce — the type, how to label it, how to parse its persisted payload, optionally how to build its instance, and its view. A **singleton** has no `key` (one panel, id = type); a **family** has one (id = `type:key(payload)`), and that is the _only_ thing that differs between them.
+_Avoid_: PanelSpec, panel config, panel registration
+
+**PanelHandle / PanelInstance**:
+The handle is what every panel gets: id, sessionId, live `payload`, and `activate` / `close` / `setPayload` / `reopen`. A definition's `create` returns _extra_ members, which the host prototype-links onto the handle to make the **instance**. Instance state is live and unpersisted (a scrollback, a spinner); it outlives navigation and dies on `close`, never on unmount. Materialized lazily — the tab strip draws a restored tab without one, so reopening ten tabs spawns nothing until each is rendered.
+_Avoid_: panel object, panel controller
+
+**Tab strip**:
+The host's row of open panels — the only place a tab is drawn. A panel that wants several of something opens several panels rather than growing tabs of its own.
+_Avoid_: inner tabs, sub-tabs, splits

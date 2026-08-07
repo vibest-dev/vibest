@@ -18,8 +18,9 @@ export type { Project } from "@vibest/contract";
 
 /**
  * Server-owned recovery record for one session, persisted at
- * `storage/sessions/<projectId>/<sessionId>.json`. The filename mirrors
- * `sessionId`, which is also stored in the body so a loaded record is
+ * `storage/sessions/<projectId>/<sessionId>.json`, inside a `{version, data}`
+ * envelope that owns the version — this record does not carry one. The filename
+ * mirrors `sessionId`, which is also stored in the body so a loaded record is
  * self-contained; `harnessSessionId` is the agent-native id (claude session
  * uuid / codex thread id) the server translates to when calling the harness.
  *
@@ -32,7 +33,6 @@ export type { Project } from "@vibest/contract";
  * See docs/adr/0002-session-info-storage-floor-harness-overlay.md.
  */
 export interface Session {
-  readonly version: 1;
   readonly sessionId: string;
   readonly projectId: string;
   readonly harnessAgentId: HarnessAgentId;

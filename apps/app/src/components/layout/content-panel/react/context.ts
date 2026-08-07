@@ -1,0 +1,20 @@
+import { createContext, use } from "react";
+
+import type { ContentPanel } from "../core/content-panel";
+import type { AnyPanelView } from "./view";
+
+export interface ContentPanelContextValue {
+  readonly contentPanel: ContentPanel<AnyPanelView>;
+  /** null outside a session route (`/draft`, `/`), where there is nothing to scope panels to. */
+  readonly sessionId: string | null;
+}
+
+export const ContentPanelContext = createContext<ContentPanelContextValue | null>(null);
+
+export function useContentPanelContext(): ContentPanelContextValue {
+  const value = use(ContentPanelContext);
+  if (value === null) {
+    throw new Error("Content panel hooks need a <ContentPanelProvider> above them.");
+  }
+  return value;
+}

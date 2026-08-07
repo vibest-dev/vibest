@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, Outlet, useNavigate } from "@tanstack/react-router";
+import { createRootRouteWithContext, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
 import {
   SidebarInset,
   SidebarProvider,
@@ -9,6 +9,12 @@ import {
 import { cn } from "@vibest/ui/lib/utils";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
+import { ContentPanelOutlet } from "@/components/layout/content-panel/react/outlet";
+import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
+import { RegisterPanels } from "@/components/layout/content-panel/react/register";
+import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
+import { contentPanel, STATIC_PANELS } from "@/content-panel";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
 import { usePlatform } from "@/platform-context";
@@ -38,6 +44,21 @@ function RootLayout() {
   const navigate = useNavigate();
   const { os } = usePlatform();
 
+  // The content panel is session-scoped, but it is bound here rather than in the
+  // session route: it is a card of the shell, peer to the chat's, and maximizing
+  // it has to be able to take the chat card's width.
+  //
+  // A named match, not `useParams({ strict: false })`: this component *is* the
+  // root route's, so the nearest match is always the root — which has no params
+  // — and the session route's would never be seen. The match's loaderData is
+  // also the ref the server confirmed, unlike the URL's search hints. Off a
+  // session route it is null and every panel hook degrades to a no-op.
+  const sessionId = useMatch({
+    from: "/session/$sessionId",
+    shouldThrow: false,
+    select: (match) => match.loaderData?.sessionId ?? null,
+  });
+
   const handleNewChat = () => navigate({ to: "/draft" });
 
   return (
@@ -47,7 +68,13 @@ function RootLayout() {
     // scroll the document instead of the message list.
     <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
       <AppSidebar onNewChat={handleNewChat} />
-      <CardPanel />
+      {/* Adds no DOM, so the two cards below are flex children of the shell. */}
+      <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionId ?? null}>
+        <RegisterPanels definitions={STATIC_PANELS} />
+        <CardPanel />
+        {/* A sibling card, not a column inside the chat's — see the outlet. */}
+        <ContentPanelOutlet />
+      </ContentPanelProvider>
       <ShellToggle hasTrafficLights={os === "macos"} />
     </SidebarProvider>
   );
@@ -87,9 +114,18 @@ function CardPanel() {
   // Collapsed, the card slides under the toggle + traffic lights — pad so the
   // title clears them.
   const collapsedDesktop = !isMobile && state === "collapsed";
+  // Maximizing squeezes this card to nothing rather than unmounting it: the
+  // route lives inside, and unmounting would dispose the composer's editor.
+  const maximized = usePanelSnapshot((snapshot) => snapshot.presentation === "maximized");
 
   return (
-    <SidebarInset className="flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5">
+    <SidebarInset
+      className={cn(
+        "flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5",
+        // Border and rounding off too — at zero width they would draw a sliver.
+        maximized && "w-0 flex-none border-0 md:peer-data-[variant=inset]:rounded-none",
+      )}
+    >
       <header
         className={cn(
           // Divider is a box-shadow (no layout space) so it can't nudge the
@@ -103,6 +139,7 @@ function CardPanel() {
           <span className="font-medium">New chat</span>
           <span className="text-muted-foreground">Playground</span>
         </div>
+        <ContentPanelToggle className="ms-auto [-webkit-app-region:no-drag]" />
       </header>
       {/*
        * Always the Outlet, never a router-state-driven swap: `isLoading` flips
@@ -112,7 +149,7 @@ function CardPanel() {
        * whatever the user had typed. Slow route loaders are already covered by
        * the router's own `defaultPendingComponent` (see router.tsx).
        */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Outlet />
       </div>
     </SidebarInset>
