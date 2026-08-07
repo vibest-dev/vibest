@@ -235,13 +235,6 @@ export const makeHarnessAgentSessionManager = (
     /**
      * The heaviest thing this server does: `open`/`resume` is where an agent
      * CLI is actually spawned or an SDK handle established. It is also the
-     * likeliest to fail — a CLI that is not installed, an expired login, a cwd
-     * that vanished — and the failure surfaces to the user as a session that
-     * "does nothing", so it is worth a line whichever way it goes.
-     *
-     * Timed because seconds here are normal and tens of seconds are not, and
-     * that difference is invisible from any other vantage point.
-     */
     /**
      * The heaviest thing this server does: `open`/`resume` is where an agent
      * CLI is actually spawned or an SDK handle established. It is also the
@@ -249,43 +242,29 @@ export const makeHarnessAgentSessionManager = (
      * that vanished — and the failure reaches the user as a session that "does
      * nothing".
      *
-     * The span is the whole instrumentation. `telemetry/tracer.ts` turns it
-     * into a line carrying the duration (seconds here are normal, tens of
-     * seconds are not, and that is invisible from anywhere else) and the
-     * outcome, raising a failed acquisition to `warn` on its own. The harness's
-     * native id is attached after the fact because it does not exist until the
-     * adapter answers — it is what a `claude --resume` on the command line
-     * would take.
+     * `withSpan` is the whole instrumentation on both. `telemetry/tracer.ts`
+     * turns it into a line carrying the duration (seconds here are normal, tens
+     * of seconds are not, and that is invisible from anywhere else) and the
+     * outcome, raising a failed acquisition to `warn` on its own. Which session
+     * and which harness come from the caller's `inSession`; the harness's own
+     * id is attached after the fact because it does not exist until the adapter
+     * answers — it is what a `claude --resume` on the command line would take.
      */
-    const tracedAcquire = (
-      operation: "open" | "resume",
-      harnessAgentId: HarnessAgentId,
-      acquire: AcquireRuntime,
-    ): AcquireRuntime =>
-      acquire.pipe(
-        Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
-        Effect.withSpan(`harness.${operation}`, { attributes: { harnessAgentId } }),
-      );
-
     const acquireOpen = (
       harnessAgentId: HarnessAgentId,
       input: CreateSessionInput,
     ): AcquireRuntime =>
-      tracedAcquire(
-        "open",
-        harnessAgentId,
-        checkAvailable(harnessAgentId).pipe(Effect.flatMap((adapter) => adapter.open(input))),
+      checkAvailable(harnessAgentId).pipe(
+        Effect.flatMap((adapter) => adapter.open(input)),
+        Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
+        Effect.withSpan("harness.open"),
       );
 
     const acquireResume = (input: ResumeManagedSessionInput): AcquireRuntime =>
-      tracedAcquire(
-        "resume",
-        input.harnessAgentId,
-        checkAvailable(input.harnessAgentId).pipe(
-          Effect.flatMap((adapter) =>
-            adapter.resume({ sessionId: input.sessionId, cwd: input.cwd }),
-          ),
-        ),
+      checkAvailable(input.harnessAgentId).pipe(
+        Effect.flatMap((adapter) => adapter.resume({ sessionId: input.sessionId, cwd: input.cwd })),
+        Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
+        Effect.withSpan("harness.resume"),
       );
 
     /** Acquire through a session, retrying against a fresh one when the session

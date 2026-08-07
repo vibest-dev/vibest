@@ -23,6 +23,7 @@ import {
   toStatus,
   toWireBody,
 } from "./session-fold";
+import { inSession } from "./session-identity";
 import type { SessionConfig } from "./session-io";
 
 /**
@@ -221,23 +222,10 @@ export const makeHarnessAgentSession = (
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
 
-    /**
-     * Everything this session logs names this session. Bound once here rather
-     * than at each site because the sources are not one fiber: the drain fiber
-     * folding runtime events, an `emit` arriving on an RPC fiber, and the
-     * runtime's own logging underneath all pass through the two seams below.
-     * `annotateLogs` is scoped, so wrapping the seam covers whatever it calls —
-     * including code that never heard of a `SessionRef`. `annotateSpans` is its
-     * span-side twin, and carries the same identity onto `session.drain` and
-     * anything spanned beneath it.
-     */
-    const identity = {
-      sessionId: ref.sessionId,
-      projectId: ref.projectId,
-      harnessAgentId: ref.harnessAgentId,
-    };
-    const identified = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      effect.pipe(Effect.annotateLogs(identity), Effect.annotateSpans(identity));
+    // The service binds this per call; a session has to bind it again because
+    // its sources are not one fiber — the drain fiber outlives the RPC that
+    // forked it, and an `emit` arrives on a fiber of its own.
+    const identified = inSession(ref);
 
     /**
      * The turn's two bookends, and deliberately nothing between them: a turn
