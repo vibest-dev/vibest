@@ -1,6 +1,10 @@
-import { Tool, ToolContent, ToolHeader } from "@vibest/ui/ai-elements/tool";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@vibest/ui/components/collapsible";
 import { isToolUIPart, type UIMessage } from "ai";
-import { ListTreeIcon } from "lucide-react";
+import { ListTreeIcon, SquareMinusIcon, SquarePlusIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { AssistantMessage } from "./assistant-message";
@@ -39,19 +43,45 @@ function CollapsibleAssistantMessage({
   }
   return (
     <div>
-      <Tool>
-        <ToolHeader icon={ListTreeIcon}>{summary.label}</ToolHeader>
-        <ToolContent>
+      <Collapsible className="not-prose w-full py-1">
+        <SummaryTrigger label={summary.label} />
+        {/* Flush left, unlike a tool card's body: what folds here is whole
+            messages, so indenting them behind a rule would nest the whole
+            transcript one level in. */}
+        <CollapsibleContent className="mt-2 space-y-2 transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
           <AssistantMessage
             message={message}
             parts={summary.workParts}
             isStreaming={false}
             showActions={false}
           />
-        </ToolContent>
-      </Tool>
+        </CollapsibleContent>
+      </Collapsible>
       <AssistantMessage message={message} parts={summary.answerParts} isStreaming={false} />
     </div>
+  );
+}
+
+// The turn's icon swaps to a +/- box on hover or once open, the same
+// affordance ToolHeader gives a tool card. Local rather than borrowed: this
+// row summarises a turn, not a tool call, so it doesn't belong to that family.
+function SummaryTrigger({ label }: { label: string }) {
+  return (
+    <CollapsibleTrigger
+      className="group"
+      render={
+        <div className="text-muted-foreground hover:text-foreground flex w-full cursor-pointer items-center gap-2 overflow-hidden">
+          <span className="relative">
+            <ListTreeIcon className="size-4 group-hover:opacity-0 group-data-[panel-open]:opacity-0" />
+            <div className="absolute inset-0 size-4 opacity-0 group-hover:opacity-100 group-data-[panel-open]:opacity-100">
+              <SquarePlusIcon className="size-4 group-data-[panel-open]:hidden" />
+              <SquareMinusIcon className="hidden size-4 group-data-[panel-open]:block" />
+            </div>
+          </span>
+          <span className="truncate text-sm">{label}</span>
+        </div>
+      }
+    />
   );
 }
 
