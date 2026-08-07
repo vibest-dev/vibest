@@ -301,12 +301,10 @@ function DraftRoute() {
         {/* Tighter than the stock py-4: one borderless control needs less room
             than the title/description pair the header is padded for. */}
         <CardFrameHeader className="py-2">
-          {/* The picker is the whole header — borderless so it reads as the
-              frame's own label rather than a second control stacked above the
-              composer. The negative inset pulls its text back onto the header's
-              padding edge; the hover tint is what still says it's clickable. */}
+          {/* The picker is the whole header — it carries its own borderless
+              styling, so it reads as the frame's label rather than a second
+              control stacked above the composer. */}
           <ProjectSelect
-            className="hover:bg-accent -mx-5.5 min-w-0 justify-self-start border-transparent bg-transparent shadow-none before:hidden dark:bg-transparent"
             // Harness config survives a project switch — it says how the session
             // runs, not what it is about. A pick the new project's catalog
             // doesn't offer is dropped by the resolvers, not carried into the
