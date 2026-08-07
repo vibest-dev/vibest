@@ -14,6 +14,7 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
+import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
 import {
   Empty,
   EmptyContent,
@@ -289,26 +290,53 @@ function DraftRoute() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <div className="flex w-full max-w-2xl flex-col gap-2">
-        <ProjectSelect
-          // Harness config survives a project switch — it says how the session
-          // runs, not what it is about. A pick the new project's catalog doesn't
-          // offer is dropped by the resolvers, not carried into the session.
-          onChange={(next) =>
-            navigate({
-              to: "/draft",
-              search: (prev) => ({ ...prev, projectId: next }),
-              replace: true,
-            })
+      {/*
+        CardFrame lifts the project pick out of the composer and into the frame
+        that holds it: what the session is *about* sits above, how it runs stays
+        on the composer toolbar below. The frame's own padding is the breathing
+        room on both sides of the header — the composer Card butts up against
+        the frame edge, so no gap utility here.
+      */}
+      <CardFrame className="w-full max-w-2xl">
+        {/* Tighter than the stock py-4: one borderless control needs less room
+            than the title/description pair the header is padded for. */}
+        <CardFrameHeader className="py-2">
+          {/* The picker is the whole header — borderless so it reads as the
+              frame's own label rather than a second control stacked above the
+              composer. The negative inset pulls its text back onto the header's
+              padding edge; the hover tint is what still says it's clickable. */}
+          <ProjectSelect
+            className="hover:bg-accent -mx-5.5 min-w-0 justify-self-start border-transparent bg-transparent shadow-none before:hidden dark:bg-transparent"
+            // Harness config survives a project switch — it says how the session
+            // runs, not what it is about. A pick the new project's catalog
+            // doesn't offer is dropped by the resolvers, not carried into the
+            // session.
+            onChange={(next) =>
+              navigate({
+                to: "/draft",
+                search: (prev) => ({ ...prev, projectId: next }),
+                replace: true,
+              })
+            }
+            projects={projects.data}
+            value={selected?.id ?? null}
+          />
+        </CardFrameHeader>
+        {/*
+          The composer *is* the Card: rendering the form as the frame's card
+          slot keeps a single element (no wrapper div between them), which is
+          what CardFrame's inset/clip styling targets. Card's own border wins
+          over PromptInput's standalone ring, as it should inside a frame.
+        */}
+        <Card
+          render={
+            <PromptInput
+              onSubmit={(e) => {
+                e.preventDefault();
+                void controller?.submit();
+              }}
+            />
           }
-          projects={projects.data}
-          value={selected?.id ?? null}
-        />
-        <PromptInput
-          onSubmit={(e) => {
-            e.preventDefault();
-            void controller?.submit();
-          }}
         >
           <ChatInputProvider controller={controller}>
             <ChatInput />
@@ -349,8 +377,8 @@ function DraftRoute() {
               <PromptInputSubmit disabled={!hasContent || !selected || startSession.isPending} />
             </PromptInputToolbar>
           </ChatInputProvider>
-        </PromptInput>
-      </div>
+        </Card>
+      </CardFrame>
     </div>
   );
 }

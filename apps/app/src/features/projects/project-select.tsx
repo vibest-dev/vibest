@@ -6,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@vibest/ui/components/select";
+import { cn } from "@vibest/ui/lib/utils";
 
 // Project picker for the draft surface. There is no default: a new session must
 // name its project explicitly, so `null` is a real state the composer blocks on.
@@ -13,10 +14,13 @@ export function ProjectSelect({
   projects,
   value,
   onChange,
+  className,
 }: {
   projects: ReadonlyArray<Project>;
   value: string | null;
   onChange: (projectId: string) => void;
+  /** Applied to the trigger — the caller owns how the picker sits in its frame. */
+  className?: string;
 }) {
   const selected = projects.find((project) => project.id === value);
 
@@ -30,7 +34,7 @@ export function ProjectSelect({
     >
       {/* The name is only the folder's basename, so two projects can share one —
           the path is what actually tells them apart. */}
-      <SelectTrigger className="w-auto min-w-48" size="sm" title={selected?.path}>
+      <SelectTrigger className={cn("w-auto min-w-48", className)} size="sm" title={selected?.path}>
         <SelectValue placeholder="Select a project" />
       </SelectTrigger>
       <SelectContent>
