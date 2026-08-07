@@ -11,6 +11,7 @@ import {
 } from "@vibest/ui/components/sidebar";
 import { ChevronRight, FolderPlus } from "lucide-react";
 
+import { COLLAPSIBLE_PANEL_MOTION } from "@/features/projects/panel-motion";
 import { ProjectSessionsGroup } from "@/features/projects/project-sessions-group";
 import { useProjects } from "@/features/projects/use-projects";
 
@@ -34,7 +35,9 @@ export function ProjectList({ onImport }: { onImport: () => void }) {
           <FolderPlus />
           <span className="sr-only">Import project</span>
         </SidebarGroupAction>
-        <CollapsiblePanel>
+        {/* keepMounted: rebuilding every project's rows on each expand is a long
+            task once the sidebar is real-sized — see panel-motion.ts. */}
+        <CollapsiblePanel className={COLLAPSIBLE_PANEL_MOTION} keepMounted>
           <SidebarGroupContent className="flex flex-col gap-2">
             {(projects.data ?? []).map((project) => (
               <ProjectSessionsGroup key={project.id} project={project} />
