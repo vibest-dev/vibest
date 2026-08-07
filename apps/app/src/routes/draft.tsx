@@ -290,25 +290,12 @@ function DraftRoute() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
-      {/*
-        CardFrame lifts the project pick out of the composer and into the frame
-        that holds it: what the session is *about* sits above, how it runs stays
-        on the composer toolbar below. The frame's own padding is the breathing
-        room on both sides of the header — the composer Card butts up against
-        the frame edge, so no gap utility here.
-      */}
       <CardFrame className="w-full max-w-2xl">
-        {/* Tighter than the stock py-4: one borderless control needs less room
-            than the title/description pair the header is padded for. */}
         <CardFrameHeader className="py-2">
-          {/* The picker is the whole header — it carries its own borderless
-              styling, so it reads as the frame's label rather than a second
-              control stacked above the composer. */}
           <ProjectSelect
             // Harness config survives a project switch — it says how the session
-            // runs, not what it is about. A pick the new project's catalog
-            // doesn't offer is dropped by the resolvers, not carried into the
-            // session.
+            // runs, not what it is about. A pick the new project's catalog doesn't
+            // offer is dropped by the resolvers, not carried into the session.
             onChange={(next) =>
               navigate({
                 to: "/draft",
@@ -320,12 +307,6 @@ function DraftRoute() {
             value={selected?.id ?? null}
           />
         </CardFrameHeader>
-        {/*
-          The composer *is* the Card: rendering the form as the frame's card
-          slot keeps a single element (no wrapper div between them), which is
-          what CardFrame's inset/clip styling targets. Card's own border wins
-          over PromptInput's standalone ring, as it should inside a frame.
-        */}
         <Card
           render={
             <PromptInput
