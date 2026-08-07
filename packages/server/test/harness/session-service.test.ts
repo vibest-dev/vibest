@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, FileSystem, Logger, type Scope, Stream } from "effect";
+import { Crypto, Effect, FileSystem, Layer, Logger, References, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -137,11 +137,17 @@ describe("HarnessAgentSessionService", () => {
             ),
             permissionModes: [],
             open: ({ cwd }) =>
-              Effect.sync(() => {
-                spy.open.push({ cwd });
-                opened += 1;
-                return makeSession(`native-${opened}`);
-              }),
+              // An adapter sees `cwd` and never a `SessionRef` — this line is
+              // the probe for whether the identity reaches it anyway.
+              Effect.logDebug("adapter opening").pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    spy.open.push({ cwd });
+                    opened += 1;
+                    return makeSession(`native-${opened}`);
+                  }),
+                ),
+              ),
             resume: ({ sessionId, cwd }) =>
               Effect.sync(() => {
                 spy.resume.push({ sessionId, cwd });
@@ -747,5 +753,34 @@ describe("HarnessAgentSessionService", () => {
     const sessionId = created?.annotations.sessionId;
     expect(typeof sessionId).toBe("string");
     expect(records.every((r) => r.annotations.sessionId === sessionId)).toBe(true);
+  });
+
+  // The identity is bound once at the service boundary, not repeated at each
+  // log site — so a layer that has never heard of a `SessionRef` (an adapter
+  // sees `cwd` and nothing else) still writes lines that grep out with the
+  // session's own. This is the test that keeps that wrap from being "tidied"
+  // back into per-site annotations.
+  it("puts the session's identity on what the layers below it log", async () => {
+    const records: Array<LogRecord> = [];
+    await run({}, (fixture) =>
+      fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app").pipe(
+        Effect.provide(
+          Layer.merge(
+            Logger.layer([
+              Logger.map(structured, (record) => {
+                records.push(record);
+              }),
+            ]),
+            Layer.succeed(References.MinimumLogLevel, "Debug"),
+          ),
+        ),
+      ),
+    );
+
+    const adapterLine = records.find((record) => record.message === "adapter opening");
+    expect(adapterLine).toBeDefined();
+    expect(adapterLine?.annotations.projectId).toBe("proj-a");
+    expect(adapterLine?.annotations.harnessAgentId).toBe("claude-code");
+    expect(adapterLine?.annotations.sessionId).toMatch(UUID_RE);
   });
 });

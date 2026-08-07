@@ -222,6 +222,24 @@ export const makeHarnessAgentSession = (
     const applyLock = Semaphore.makeUnsafe(1);
 
     /**
+     * Everything this session logs names this session. Bound once here rather
+     * than at each site because the sources are not one fiber: the drain fiber
+     * folding runtime events, an `emit` arriving on an RPC fiber, and the
+     * runtime's own logging underneath all pass through the two seams below.
+     * `annotateLogs` is scoped, so wrapping the seam covers whatever it calls —
+     * including code that never heard of a `SessionRef`. `annotateSpans` is its
+     * span-side twin, and carries the same identity onto `session.drain` and
+     * anything spanned beneath it.
+     */
+    const identity = {
+      sessionId: ref.sessionId,
+      projectId: ref.projectId,
+      harnessAgentId: ref.harnessAgentId,
+    };
+    const identified = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(Effect.annotateLogs(identity), Effect.annotateSpans(identity));
+
+    /**
      * The turn's two bookends, and deliberately nothing between them: a turn
      * emits hundreds of chunk events, and logging those would bury the shape of
      * a session under its content. Start and end are what answer "did it run,
@@ -238,13 +256,9 @@ export const makeHarnessAgentSession = (
      * news about the agent, not a defect in this server.
      */
     const logTurn = (body: SessionScopedEventBody, seq: number): Effect.Effect<void> => {
-      // Carried here rather than left to the caller's annotations, because a
-      // turn can also be driven from an `emit` on the RPC path, which has no
-      // session annotations of its own.
-      const identity = { sessionId: ref.sessionId, harnessAgentId: ref.harnessAgentId, seq };
       if (body.type === "session.turn.started") {
         return Effect.logInfo("turn started").pipe(
-          Effect.annotateLogs({ event: body.type, turnId: body.turnId, ...identity }),
+          Effect.annotateLogs({ event: body.type, turnId: body.turnId, seq }),
         );
       }
       if (body.type !== "session.turn.ended") return Effect.void;
@@ -254,7 +268,7 @@ export const makeHarnessAgentSession = (
           event: body.type,
           turnId: body.turnId,
           outcome: body.outcome,
-          ...identity,
+          seq,
           ...(body.usage ? { usage: body.usage } : {}),
           ...(body.error ? { errorCategory: body.error.category, error: body.error.message } : {}),
         }),
@@ -267,25 +281,29 @@ export const makeHarnessAgentSession = (
     const applyWith = (
       make: (current: SessionState) => SessionScopedEventBody | null,
     ): Effect.Effect<void> =>
-      applyLock.withPermit(
-        Ref.get(state).pipe(
-          Effect.flatMap((current) => {
-            const wireBody = make(current);
-            if (!wireBody) return Effect.void;
-            const event: SessionScopedEvent = { seq: current.seq + 1, ref, ...wireBody };
-            const next = foldSessionEvent(current, event);
-            // Publish with the post-fold phase stamped on: consumers copy the
-            // session's phase off the event instead of re-deriving it from
-            // event types. (The buffered chunk copy inside `next` keeps the
-            // un-stamped draft — snapshot replays read phase from the
-            // snapshot's own status.)
-            return Ref.set(state, next).pipe(
-              Effect.andThen(bus.publish({ ...event, phase: next.phase })),
-              // After the publish: subscribers are the ones waiting on this,
-              // and the log must not sit in front of them.
-              Effect.andThen(logTurn(wireBody, event.seq)),
-            );
-          }),
+      // The seam every session event passes through, and therefore where the
+      // identity goes on — an `emit` arriving on an RPC fiber gets it here.
+      identified(
+        applyLock.withPermit(
+          Ref.get(state).pipe(
+            Effect.flatMap((current) => {
+              const wireBody = make(current);
+              if (!wireBody) return Effect.void;
+              const event: SessionScopedEvent = { seq: current.seq + 1, ref, ...wireBody };
+              const next = foldSessionEvent(current, event);
+              // Publish with the post-fold phase stamped on: consumers copy the
+              // session's phase off the event instead of re-deriving it from
+              // event types. (The buffered chunk copy inside `next` keeps the
+              // un-stamped draft — snapshot replays read phase from the
+              // snapshot's own status.)
+              return Ref.set(state, next).pipe(
+                Effect.andThen(bus.publish({ ...event, phase: next.phase })),
+                // After the publish: subscribers are the ones waiting on this,
+                // and the log must not sit in front of them.
+                Effect.andThen(logTurn(wireBody, event.seq)),
+              );
+            }),
+          ),
         ),
       );
 
@@ -304,15 +322,12 @@ export const makeHarnessAgentSession = (
     // that stops responding, a turn that never ends — is downstream of this
     // line, and it is the one that carries the reason.
     const crash = (reason: string) =>
-      apply({ type: "session.crashed", sessionId: ref.sessionId, reason }).pipe(
-        Effect.andThen(
-          Effect.logError("session runtime crashed").pipe(
-            Effect.annotateLogs({
-              event: "session.crashed",
-              sessionId: ref.sessionId,
-              harnessAgentId: ref.harnessAgentId,
-              reason,
-            }),
+      identified(
+        apply({ type: "session.crashed", sessionId: ref.sessionId, reason }).pipe(
+          Effect.andThen(
+            Effect.logError("session runtime crashed").pipe(
+              Effect.annotateLogs({ event: "session.crashed", reason }),
+            ),
           ),
         ),
       );
@@ -390,22 +405,23 @@ export const makeHarnessAgentSession = (
         // crash. The drain waits to be stored first, so an instantly ending
         // stream cannot clear a slot that was never filled.
         const registered = yield* Deferred.make<void>();
-        const drain = Deferred.await(registered).pipe(
-          Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
-          Effect.andThen(release),
-          Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
-          // `root`, because a forked fiber inherits the span of whoever forked
-          // it. This drain outlives that caller by every turn that follows, so
-          // without it the runtime's whole lifetime — every later turn — would
-          // be stamped with the `traceId` of the one RPC that happened to
-          // acquire it. A wrong trace is worse than none: it makes `jq` on a
-          // traceId return another request's output.
-          //
-          // `sessionId` is the join key that replaces the lost parentage, and
-          // it is the one that survives into the JSONL — a span link would
-          // only be visible to a collector we do not run yet.
-          Effect.withSpan("session.drain", { root: true }),
-          Effect.annotateLogs({ sessionId: ref.sessionId, harnessAgentId: ref.harnessAgentId }),
+        const drain = identified(
+          Deferred.await(registered).pipe(
+            Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
+            Effect.andThen(release),
+            Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
+            // `root`, because a forked fiber inherits the span of whoever forked
+            // it. This drain outlives that caller by every turn that follows, so
+            // without it the runtime's whole lifetime — every later turn — would
+            // be stamped with the `traceId` of the one RPC that happened to
+            // acquire it. A wrong trace is worse than none: it makes `jq` on a
+            // traceId return another request's output.
+            //
+            // The `identified` wrap around this is what replaces the lost
+            // parentage: `sessionId` is the join key, and unlike a span link it
+            // survives into the JSONL without a collector we do not run yet.
+            Effect.withSpan("session.drain", { root: true }),
+          ),
         );
         const fiber = yield* Effect.forkIn(drain, ownerScope);
         // A release that started while this was in flight leaves `acquiring`

@@ -400,30 +400,49 @@ export const makeHarnessAgentSessionService = (deps: {
   };
 
   /**
+   * Put the session's identity on *everything* logged while working on it —
+   * not just this layer's own lines, but the manager's, the session's, and any
+   * adapter running underneath. `annotateLogs` is scoped rather than per-call,
+   * so a single wrap at the entry point is what makes `jq 'select(.annotations
+   * .sessionId=="…")'` return a session's whole story instead of the handful of
+   * places that remembered to name it.
+   *
+   * Not on the RPC wrapper, which is the other candidate: oRPC hands it the
+   * procedure path and nothing else — the decoded input, where the ref lives,
+   * never reaches it. This is the closest seam that has one.
+   *
+   * Applied to every method that can reach the manager, an adapter or a
+   * runtime. The exceptions are named where they sit.
+   *
+   * Both channels, because a log line and a span are read the same way and both
+   * need the same key: `annotateSpans` is the span-side twin, and it is what
+   * puts `sessionId` on the `harness.open` attributes — and therefore on the
+   * line `telemetry/tracer.ts` writes when that span closes.
+   */
+  const inSession = <A, E, R>(ref: SessionRef, effect: Effect.Effect<A, E, R>) => {
+    const identity = {
+      sessionId: ref.sessionId,
+      projectId: ref.projectId,
+      harnessAgentId: ref.harnessAgentId,
+    };
+    return effect.pipe(Effect.annotateLogs(identity), Effect.annotateSpans(identity));
+  };
+
+  /**
    * The lifecycle boundaries, at `info` — a session appearing, going away, or
    * being put aside. There are a few dozen of these in a working day, against
-   * thousands of `rpc.call` lines at `debug`, which is why they sit at a level
-   * that shows by default: read on their own they are the story of what was
-   * worked on and when.
+   * thousands of span lines at `debug`, which is why they sit at a level that
+   * shows by default: read on their own they are the story of what was worked
+   * on and when.
+   *
+   * Identity comes from the enclosing `inSession`, so what is named here is
+   * only what this particular boundary adds.
    *
    * Deliberately after the operation, never before: a line saying a session was
    * deleted, written before the delete could fail, is worse than no line.
    */
-  const logLifecycle = (
-    event: string,
-    message: string,
-    ref: SessionRef,
-    extra: Record<string, unknown> = {},
-  ) =>
-    Effect.logInfo(message).pipe(
-      Effect.annotateLogs({
-        event,
-        sessionId: ref.sessionId,
-        projectId: ref.projectId,
-        harnessAgentId: ref.harnessAgentId,
-        ...extra,
-      }),
-    );
+  const logLifecycle = (event: string, message: string, extra: Record<string, unknown> = {}) =>
+    Effect.logInfo(message).pipe(Effect.annotateLogs({ event, ...extra }));
 
   return {
     create: (projectId, harnessAgentId, cwd, config) =>
@@ -431,105 +450,123 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.andThen(newSessionId),
         Effect.flatMap((sessionId) => {
           const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-          return manager.open(harnessAgentId, { cwd }, config ?? {}, ref).pipe(
-            Effect.flatMap((session) => {
-              const metadata: Session = {
-                version: 1,
-                sessionId,
-                projectId,
-                harnessAgentId,
-                harnessSessionId: session.sessionId,
-                createdAt: new Date().toISOString(),
-                // Our own floor field: the session's working directory. Stored
-                // so an imported/rehomed session stays self-contained and a
-                // resume has cwd before it can call getSessionInfo.
-                cwd,
-                archived: false,
-              };
-              return repo.write(metadata).pipe(
-                // A failed metadata write must not leak the native session.
-                Effect.tapError(() => manager.close(ref)),
-                Effect.andThen(bus.publish({ ref, type: "session.created" })),
-                Effect.andThen(
-                  logLifecycle("session.created", "session created", ref, {
-                    cwd,
-                    harnessSessionId: session.sessionId,
-                  }),
-                ),
-                Effect.as(ref),
-              );
-            }),
+          return inSession(
+            ref,
+            manager.open(harnessAgentId, { cwd }, config ?? {}, ref).pipe(
+              Effect.flatMap((session) => {
+                const metadata: Session = {
+                  version: 1,
+                  sessionId,
+                  projectId,
+                  harnessAgentId,
+                  harnessSessionId: session.sessionId,
+                  createdAt: new Date().toISOString(),
+                  // Our own floor field: the session's working directory. Stored
+                  // so an imported/rehomed session stays self-contained and a
+                  // resume has cwd before it can call getSessionInfo.
+                  cwd,
+                  archived: false,
+                };
+                return repo.write(metadata).pipe(
+                  // A failed metadata write must not leak the native session.
+                  Effect.tapError(() => manager.close(ref)),
+                  Effect.andThen(bus.publish({ ref, type: "session.created" })),
+                  Effect.andThen(
+                    logLifecycle("session.created", "session created", {
+                      cwd,
+                      harnessSessionId: session.sessionId,
+                    }),
+                  ),
+                  Effect.as(ref),
+                );
+              }),
+            ),
           );
         }),
       ),
 
     prepare: (ref, cwd) =>
-      readChecked(ref).pipe(
-        Effect.tap((metadata) =>
-          metadata.cwd === cwd ? Effect.void : repo.write({ ...metadata, cwd }),
-        ),
-        Effect.flatMap((metadata) =>
-          registry
-            .get(ref.harnessAgentId)
-            .pipe(
-              Effect.flatMap((adapter) => adapter.getSessionInfo(metadata.harnessSessionId, cwd)),
-            ),
-        ),
-        // A harness that has forgotten the session says so cheaply, and saying
-        // it now is the difference between a toast on open and a mystery when
-        // the user finally sends a message. `unsupported` is not a verdict —
-        // pi cannot answer this question at all.
-        Effect.flatMap((info) =>
-          info._tag === "missing"
-            ? Effect.fail(new SessionNotResumable({ sessionId: ref.sessionId }))
-            : Effect.void,
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.tap((metadata) =>
+            metadata.cwd === cwd ? Effect.void : repo.write({ ...metadata, cwd }),
+          ),
+          Effect.flatMap((metadata) =>
+            registry
+              .get(ref.harnessAgentId)
+              .pipe(
+                Effect.flatMap((adapter) => adapter.getSessionInfo(metadata.harnessSessionId, cwd)),
+              ),
+          ),
+          // A harness that has forgotten the session says so cheaply, and saying
+          // it now is the difference between a toast on open and a mystery when
+          // the user finally sends a message. `unsupported` is not a verdict —
+          // pi cannot answer this question at all.
+          Effect.flatMap((info) =>
+            info._tag === "missing"
+              ? Effect.fail(new SessionNotResumable({ sessionId: ref.sessionId }))
+              : Effect.void,
+          ),
         ),
       ),
 
     close: (ref) =>
-      resolveHarnessSessionId(ref).pipe(
-        Effect.andThen(manager.close(ref)),
-        Effect.andThen(bus.closeSession(ref, "session_closed")),
-        Effect.andThen(logLifecycle("session.closed", "session closed", ref)),
+      inSession(
+        ref,
+        resolveHarnessSessionId(ref).pipe(
+          Effect.andThen(manager.close(ref)),
+          Effect.andThen(bus.closeSession(ref, "session_closed")),
+          Effect.andThen(logLifecycle("session.closed", "session closed")),
+        ),
       ),
 
     delete: (ref) =>
-      readChecked(ref).pipe(
-        Effect.andThen(manager.close(ref)),
-        Effect.andThen(bus.closeSession(ref, "session_deleted")),
-        Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
-        Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
-        // The one line that outlives what it describes: the metadata is gone,
-        // so this is all that is left to say the session ever existed.
-        Effect.andThen(logLifecycle("session.deleted", "session deleted", ref)),
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(manager.close(ref)),
+          Effect.andThen(bus.closeSession(ref, "session_deleted")),
+          Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
+          Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+          // The one line that outlives what it describes: the metadata is gone,
+          // so this is all that is left to say the session ever existed.
+          Effect.andThen(logLifecycle("session.deleted", "session deleted")),
+        ),
       ),
 
     rename: (ref, name) =>
-      resolveHarnessSessionId(ref).pipe(
-        Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
+      inSession(
+        ref,
+        resolveHarnessSessionId(ref).pipe(
+          Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
+        ),
       ),
 
     archive: (ref, archived) =>
-      readChecked(ref).pipe(
-        Effect.flatMap((metadata) => {
-          const changed = (metadata.archived ?? false) !== archived;
-          const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
-          // Archive is also a lifecycle boundary: persist first so a failed
-          // metadata write never kills live work. Restore stays cold until open.
-          const close = archived
-            ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
-            : Effect.void;
-          const publish = changed
-            ? bus.publish({ ref, type: "session.archived", archived }).pipe(
-                Effect.andThen(
-                  logLifecycle("session.archived", "session archive state changed", ref, {
-                    archived,
-                  }),
-                ),
-              )
-            : Effect.void;
-          return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
-        }),
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) => {
+            const changed = (metadata.archived ?? false) !== archived;
+            const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
+            // Archive is also a lifecycle boundary: persist first so a failed
+            // metadata write never kills live work. Restore stays cold until open.
+            const close = archived
+              ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
+              : Effect.void;
+            const publish = changed
+              ? bus.publish({ ref, type: "session.archived", archived }).pipe(
+                  Effect.andThen(
+                    logLifecycle("session.archived", "session archive state changed", {
+                      archived,
+                    }),
+                  ),
+                )
+              : Effect.void;
+            return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
+          }),
+        ),
       ),
 
     // A pure read of our own records — display data is self-owned (title from
@@ -576,26 +613,29 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     getMessages: (ref, cwd) =>
-      readChecked(ref).pipe(
-        Effect.flatMap((metadata) =>
-          readHistory(ref, metadata.harnessSessionId, cwd).pipe(
-            Effect.flatMap((messages) =>
-              // History includes the in-flight turn's user entry; the live
-              // stream replays that turn, so drop the last user segment while
-              // a turn runs. A finished turn's buffer is retained
-              // (complete: true) until the next turn starts — that is
-              // settled history, not an in-flight turn, so it must not trim.
-              // An untouched session reads as idle, so it never trims.
-              // `activeTurnId` is set exactly while a turn is running, which is
-              // the whole question — no need to copy the turn's chunks to ask.
-              manager.status(ref).pipe(
-                Effect.map((status) => {
-                  if (status.activeTurnId === undefined) return messages;
-                  for (let index = messages.length - 1; index >= 0; index -= 1) {
-                    if (messages[index]?.role === "user") return messages.slice(0, index);
-                  }
-                  return messages;
-                }),
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) =>
+            readHistory(ref, metadata.harnessSessionId, cwd).pipe(
+              Effect.flatMap((messages) =>
+                // History includes the in-flight turn's user entry; the live
+                // stream replays that turn, so drop the last user segment while
+                // a turn runs. A finished turn's buffer is retained
+                // (complete: true) until the next turn starts — that is
+                // settled history, not an in-flight turn, so it must not trim.
+                // An untouched session reads as idle, so it never trims.
+                // `activeTurnId` is set exactly while a turn is running, which is
+                // the whole question — no need to copy the turn's chunks to ask.
+                manager.status(ref).pipe(
+                  Effect.map((status) => {
+                    if (status.activeTurnId === undefined) return messages;
+                    for (let index = messages.length - 1; index >= 0; index -= 1) {
+                      if (messages[index]?.role === "user") return messages.slice(0, index);
+                    }
+                    return messages;
+                  }),
+                ),
               ),
             ),
           ),
@@ -603,108 +643,131 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     prompt: (input) =>
-      Effect.gen(function* () {
-        const metadata = yield* readChecked(input.ref);
-        const userInput = yield* toUserInput(input.parts);
-        // The first prompt names the session before it reaches the harness.
-        yield* stampTitleFromFirstPrompt(metadata, input.parts);
-        const messageId = input.messageId ?? (yield* newSessionId);
+      inSession(
+        input.ref,
+        Effect.gen(function* () {
+          const metadata = yield* readChecked(input.ref);
+          const userInput = yield* toUserInput(input.parts);
+          // The first prompt names the session before it reaches the harness.
+          yield* stampTitleFromFirstPrompt(metadata, input.parts);
+          const messageId = input.messageId ?? (yield* newSessionId);
 
-        // Broadcast the accepted prompt *before* the harness call so it always
-        // precedes the turn's own events in seq order. If the harness then
-        // rejects the prompt, `session.prompt.rejected` compensates — clients
-        // drop the phantom user message and the runtime clears the retained
-        // activePrompt.
-        yield* manager.emit(input.ref, {
-          type: "session.prompt.submitted",
-          messageId,
-          parts: input.parts,
-        });
-        // A user message is the one thing that justifies starting an agent, so
-        // this is where a runtime is acquired if the session has none — after
-        // the submitted event, so a failed acquisition is compensated by the
-        // same `prompt.rejected` that a harness-side rejection uses.
-        const runtime = yield* manager.ensureRuntime(
-          {
-            sessionId: metadata.harnessSessionId,
-            harnessAgentId: input.ref.harnessAgentId,
-            ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
-          },
-          input.ref,
-        );
-        return yield* runtime.prompt(userInput).pipe(
-          Effect.tapError((promptError) =>
-            manager.emit(input.ref, {
-              type: "session.prompt.rejected",
-              messageId,
-              reason: promptError.message,
-            }),
-          ),
-        );
-      }),
+          // Broadcast the accepted prompt *before* the harness call so it always
+          // precedes the turn's own events in seq order. If the harness then
+          // rejects the prompt, `session.prompt.rejected` compensates — clients
+          // drop the phantom user message and the runtime clears the retained
+          // activePrompt.
+          yield* manager.emit(input.ref, {
+            type: "session.prompt.submitted",
+            messageId,
+            parts: input.parts,
+          });
+          // A user message is the one thing that justifies starting an agent, so
+          // this is where a runtime is acquired if the session has none — after
+          // the submitted event, so a failed acquisition is compensated by the
+          // same `prompt.rejected` that a harness-side rejection uses.
+          const runtime = yield* manager.ensureRuntime(
+            {
+              sessionId: metadata.harnessSessionId,
+              harnessAgentId: input.ref.harnessAgentId,
+              ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
+            },
+            input.ref,
+          );
+          return yield* runtime.prompt(userInput).pipe(
+            Effect.tapError((promptError) =>
+              manager.emit(input.ref, {
+                type: "session.prompt.rejected",
+                messageId,
+                reason: promptError.message,
+              }),
+            ),
+          );
+        }),
+      ),
 
     interrupt: (ref) =>
-      readChecked(ref).pipe(
-        Effect.andThen(manager.peek(ref)),
-        Effect.flatMap((runtime) => runtime?.interrupt ?? Effect.void),
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(manager.peek(ref)),
+          Effect.flatMap((runtime) => runtime?.interrupt ?? Effect.void),
+        ),
       ),
 
     setModel: (ref, model) =>
-      readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { model }))),
+      inSession(ref, readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { model })))),
 
     setReasoningEffort: (ref, reasoningEffort) =>
-      readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { reasoningEffort }))),
+      inSession(
+        ref,
+        readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { reasoningEffort }))),
+      ),
 
     setPermissionMode: (ref, permissionMode) =>
-      readChecked(ref).pipe(
-        Effect.andThen(
-          // The ref checked out, so its harness is one of ours by construction.
-          checkPermissionMode(ref.harnessAgentId, permissionMode).pipe(
-            Effect.catchTag("HarnessAgentNotFound", (cause) =>
-              Effect.die(
-                new Error(
-                  `invariant: session '${ref.sessionId}' names an unregistered adapter '${ref.harnessAgentId}'`,
-                  { cause },
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(
+            // The ref checked out, so its harness is one of ours by construction.
+            checkPermissionMode(ref.harnessAgentId, permissionMode).pipe(
+              Effect.catchTag("HarnessAgentNotFound", (cause) =>
+                Effect.die(
+                  new Error(
+                    `invariant: session '${ref.sessionId}' names an unregistered adapter '${ref.harnessAgentId}'`,
+                    { cause },
+                  ),
                 ),
               ),
             ),
           ),
+          Effect.andThen(manager.setConfig(ref, { permissionMode })),
         ),
-        Effect.andThen(manager.setConfig(ref, { permissionMode })),
       ),
 
     respondToAgentRequest: (ref, requestId, response) =>
-      readChecked(ref).pipe(
-        Effect.andThen(manager.peek(ref)),
-        Effect.flatMap((runtime) =>
-          runtime
-            ? runtime.respondToAgentRequest(requestId, response)
-            : Effect.fail(new AgentRequestUnavailable({ sessionId: ref.sessionId, requestId })),
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(manager.peek(ref)),
+          Effect.flatMap((runtime) =>
+            runtime
+              ? runtime.respondToAgentRequest(requestId, response)
+              : Effect.fail(new AgentRequestUnavailable({ sessionId: ref.sessionId, requestId })),
+          ),
         ),
       ),
 
     getCapabilities: (ref) =>
-      // The one operation still gated on something running: what a harness can
-      // do is negotiated with the live agent, and there is nothing to ask when
-      // no agent is there.
-      readChecked(ref).pipe(
-        Effect.andThen(manager.get(ref)),
-        Effect.flatMap((runtime) => runtime.getCapabilities),
-      ),
-
-    getSessionInfo: (ref) =>
-      readChecked(ref).pipe(
-        Effect.flatMap((metadata) =>
-          registry
-            .get(metadata.harnessAgentId)
-            .pipe(
-              Effect.flatMap((adapter) =>
-                adapter.getSessionInfo(metadata.harnessSessionId, metadata.cwd),
-              ),
-            ),
+      inSession(
+        ref,
+        // The one operation still gated on something running: what a harness can
+        // do is negotiated with the live agent, and there is nothing to ask when
+        // no agent is there.
+        readChecked(ref).pipe(
+          Effect.andThen(manager.get(ref)),
+          Effect.flatMap((runtime) => runtime.getCapabilities),
         ),
       ),
 
+    getSessionInfo: (ref) =>
+      inSession(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) =>
+            registry
+              .get(metadata.harnessAgentId)
+              .pipe(
+                Effect.flatMap((adapter) =>
+                  adapter.getSessionInfo(metadata.harnessSessionId, metadata.cwd),
+                ),
+              ),
+          ),
+        ),
+      ),
+
+    // Not wrapped: both are pure reads of in-memory state, and `getSnapshot` is
+    // on the subscribe path, which runs per reconnect.
     getStatus: (ref) => manager.status(ref),
     getSnapshot: (ref) => manager.snapshot(ref),
 

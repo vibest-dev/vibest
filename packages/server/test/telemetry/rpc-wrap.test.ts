@@ -140,6 +140,24 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
     }),
   );
 
+  // `annotateSpans` is what carries an identity the traced code never named
+  // onto the span's own line — the same trick `annotateLogs` does for logs, and
+  // the reason `session-service.ts` sets both from one wrap.
+  it.effect("carries the caller's span annotations onto the span line", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureSpans(records));
+
+      yield* wrap(Effect.void, { path: ["session", "close"] }).pipe(
+        Effect.annotateSpans({ sessionId: "session-1" }),
+      );
+      yield* Effect.yieldNow;
+
+      const span = records.find((record) => record.annotations.event === "span");
+      assert.equal(span?.annotations.sessionId, "session-1");
+    }),
+  );
+
   it.effect("stays quiet at the default level", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
