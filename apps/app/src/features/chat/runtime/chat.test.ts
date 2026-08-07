@@ -185,6 +185,51 @@ describe("Chat hydration", () => {
     await sent;
   });
 
+  // The other half of the same rule, and the reason "submitted" alone can't
+  // stand in for an unsettled prompt: a phase can also arrive on a live event
+  // from a turn that isn't ours. Idle moves us off "submitted" while our own
+  // prompt is still on the wire, so only the in-flight count still knows the
+  // settled transcript is missing a message.
+  it("keeps an in-flight prompt when another client's turn ends", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const sent = chat.prompt("still queued");
+    await settle();
+    expect(chat.store.getState().messages).toHaveLength(2);
+
+    // Not our turn, and not completed — so it both lands an idle phase and
+    // triggers the reconcile.
+    live(9, { type: "session.turn.ended", turnId: "other", outcome: "canceled", phase: "idle" });
+    await settle();
+    expect(chat.store.getState().messages).toHaveLength(2);
+
+    releasePrompt();
+    await sent;
+  });
+
+  // The counter is the RPC's own window, not the spinner's: once the prompt
+  // has landed, a snapshot is allowed to speak for it again. Holding
+  // "submitted" until a live event arrives would strand this case — the whole
+  // turn ran while detached, so the re-attach is the only thing left to clear
+  // the spinner.
+  it("clears the spinner from a snapshot once the prompt has landed", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+    await chat.prompt("second");
+    expect(chat.store.getState().status).toBe("submitted");
+
+    transport.history = [userMessage("user-1", "hello"), userMessage("assistant-1", "reply")];
+    await attach({ cursor: 20 });
+    expect(chat.store.getState().status).toBe("ready");
+  });
+
   it("lays the history floor before folding buffered or live chunks", async () => {
     const { chat, transport, attach, live } = makeChat();
     transport.history = [userMessage("user-1", "hello")];
