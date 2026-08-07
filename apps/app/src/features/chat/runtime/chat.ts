@@ -20,6 +20,13 @@ import { sanitizeTail } from "./sanitize-tail";
 export interface ChatInit {
   sessionRef: SessionRef;
   transport: ChatSessionTransport;
+  /**
+   * Fired once, when the server declares this session's stream over for good
+   * (closed or deleted). The owner's cue to stop caching this Chat — the
+   * instance stays usable for whoever is currently rendering it, showing the
+   * terminal error, and is simply never handed out again.
+   */
+  onTerminated?: () => void;
 }
 
 // Runtime phase → AI-SDK chat status. "submitted" is a sender-local optimistic
@@ -75,6 +82,7 @@ export class Chat {
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
   readonly #transport: ChatSessionTransport;
+  readonly #onTerminated: (() => void) | undefined;
   readonly #unsubscribe: () => void;
   readonly #turnFolds = new Map<string, TurnFold>();
   // Turns whose live rendering was abandoned (buffer truncated, replay gap):
@@ -106,11 +114,12 @@ export class Chat {
   // over it.
   #terminated = false;
 
-  constructor({ sessionRef, transport }: ChatInit) {
+  constructor({ sessionRef, transport, onTerminated }: ChatInit) {
     this.harnessAgentId = sessionRef.harnessAgentId;
     this.#state = new ChatState();
     this.store = this.#state.store;
     this.#transport = transport;
+    this.#onTerminated = onTerminated;
     this.#unsubscribe = transport.subscribe((event) => {
       if (event.type === "attached") this.#hydrate(event.snapshot);
       else if (event.type === "closed") this.#terminate(event.reason);
@@ -210,6 +219,10 @@ export class Chat {
   // so the runtime is gone and prompting or answering could only fail. Enter
   // the same terminal shape a crash does, with the reason on the error.
   #terminate(reason: "session_closed" | "session_deleted"): void {
+    // A second `closed` would re-enter with the same terminal shape, but
+    // `onTerminated` is a one-shot handover — its owner may already have let
+    // this instance go.
+    if (this.#terminated) return;
     this.#terminated = true;
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
@@ -222,6 +235,7 @@ export class Chat {
       reason === "session_deleted" ? "Session deleted" : "Session closed",
     );
     this.#setStatus("error");
+    this.#onTerminated?.();
   }
 
   // ---------------------------------------------------------------------

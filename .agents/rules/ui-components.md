@@ -84,7 +84,7 @@ className={cn(
 
 Colors and spacing come from semantic design tokens (`--background`,
 `--primary`, `--primary-foreground`…), never hardcoded values — tokens name
-what something *is*, not how it looks, so themes swap under them. For dynamic
+what something _is_, not how it looks, so themes swap under them. For dynamic
 values use CSS variables (`bg-[var(--color)]` + `style={{ "--color": x }}`),
 never interpolated class names.
 
@@ -93,11 +93,11 @@ never interpolated class names.
 Never expose per-state className props (`openClassName`, `classes={{...}}`).
 Expose state as attributes and let consumers style with selectors:
 
-| Mechanism    | Carries                                                                                      |
-| ------------ | -------------------------------------------------------------------------------------------- |
-| `data-state` | Visual/layout state: `open`/`closed`, `active`, loading, `data-orientation`, `data-side`     |
+| Mechanism    | Carries                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `data-state` | Visual/layout state: `open`/`closed`, `active`, loading, `data-orientation`, `data-side`                    |
 | `data-slot`  | Stable identity for parent/global targeting — kebab-case, purpose-named (`submit-button`, not `blueButton`) |
-| props        | Variants (`variant`, `size`), behavior config, event handlers                                 |
+| props        | Variants (`variant`, `size`), behavior config, event handlers                                               |
 
 ```tsx
 <div data-slot="dialog" data-state={isOpen ? "open" : "closed"} ... />
