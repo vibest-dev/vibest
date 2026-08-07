@@ -1,5 +1,5 @@
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import { Cause, Clock, Context, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect";
 import type { WebSocket } from "ws";
 
 import type { RpcContext } from "./context";
@@ -20,55 +20,25 @@ import { AgentRuntimeLayer } from "./runtime";
  * defect or a client that disconnected mid-call. The latter is routine and
  * must not be reported as a server error.
  *
- * The span is what makes the JSONL navigable. Nothing below here mentions
- * tracing, yet every line a procedure produces — through the session service,
- * the repositories, an adapter — carries this call's `traceId`, so one request
- * reassembles with `jq 'select(.traceId=="…")'`. It costs no exporter: the
- * default tracer still mints ids for a span nobody collects.
+ * The span does two jobs and neither is stated at any call site. It makes the
+ * JSONL navigable — every line a procedure produces, through the session
+ * service, the repositories, an adapter, carries this call's `traceId`, so one
+ * request reassembles with `jq 'select(.traceId=="…")'`. And because
+ * `telemetry/tracer.ts` logs spans as they close, it *is* the per-call record:
+ * name, duration and outcome, with no clock read or `onExit` written here.
+ *
+ * What remains below is the one thing a span cannot carry: the failure's cause.
  */
 export function makeRpcWrap(telemetry: Context.Context<never>) {
   return <A, E>(effect: Effect.Effect<A, E>, options: { readonly path: ReadonlyArray<string> }) => {
     const procedure = options.path.join(".");
-    /**
-     * Every call, at `debug`. The UI is chatty enough — list queries, config
-     * reads, a subscription per open session — that logging these at `info`
-     * would bury the events worth reading. Off by default, one
-     * `VIBEST_LOG_LEVEL=Debug` away when the question is "what did the UI
-     * actually ask for", which a failures-only log cannot answer.
-     *
-     * `onExit` rather than `timed` so the duration survives the failure and
-     * interrupt paths too: "slow, then failed" and "failed instantly" have
-     * different causes, and an interrupt here is the tab that closed mid-call.
-     */
-    const logCall = (start: number) => (exit: Exit.Exit<A, E>) =>
-      Clock.currentTimeMillis.pipe(
-        Effect.flatMap((end) =>
-          Effect.logDebug("rpc call").pipe(
-            Effect.annotateLogs({
-              event: "rpc.call",
-              procedure,
-              outcome: Exit.isSuccess(exit)
-                ? "ok"
-                : Cause.hasInterruptsOnly(exit.cause)
-                  ? "interrupted"
-                  : "error",
-              durationMs: end - start,
-            }),
-          ),
-        ),
-      );
-    return Clock.currentTimeMillis.pipe(
-      Effect.flatMap((start) =>
-        effect.pipe(
-          Effect.tapCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError("rpc procedure failed", cause).pipe(
-                  Effect.annotateLogs({ event: "rpc.failed", procedure }),
-                ),
-          ),
-          Effect.onExit(logCall(start)),
-        ),
+    return effect.pipe(
+      Effect.tapCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError("rpc procedure failed", cause).pipe(
+              Effect.annotateLogs({ event: "rpc.failed", procedure }),
+            ),
       ),
       // Inside `provide` so the span sees the telemetry context, and outside
       // the tap so a failure is logged with the span it failed in.

@@ -5,7 +5,7 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Clock, Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
+import { Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
@@ -242,58 +242,43 @@ export const makeHarnessAgentSessionManager = (
      * Timed because seconds here are normal and tens of seconds are not, and
      * that difference is invisible from any other vantage point.
      */
-    const withRuntimeLog = (
+    /**
+     * The heaviest thing this server does: `open`/`resume` is where an agent
+     * CLI is actually spawned or an SDK handle established. It is also the
+     * likeliest to fail — a CLI that is not installed, an expired login, a cwd
+     * that vanished — and the failure reaches the user as a session that "does
+     * nothing".
+     *
+     * The span is the whole instrumentation. `telemetry/tracer.ts` turns it
+     * into a line carrying the duration (seconds here are normal, tens of
+     * seconds are not, and that is invisible from anywhere else) and the
+     * outcome, raising a failed acquisition to `warn` on its own. The harness's
+     * native id is attached after the fact because it does not exist until the
+     * adapter answers — it is what a `claude --resume` on the command line
+     * would take.
+     */
+    const tracedAcquire = (
       operation: "open" | "resume",
       harnessAgentId: HarnessAgentId,
       acquire: AcquireRuntime,
     ): AcquireRuntime =>
-      Clock.currentTimeMillis.pipe(
-        Effect.flatMap((start) =>
-          acquire.pipe(
-            Effect.tap((runtime) =>
-              Clock.currentTimeMillis.pipe(
-                Effect.flatMap((end) =>
-                  Effect.logInfo("harness runtime acquired").pipe(
-                    Effect.annotateLogs({
-                      event: "harness.runtime.acquired",
-                      operation,
-                      harnessAgentId,
-                      // The harness's own id for the session, which is what a
-                      // `claude --resume` on the command line would take.
-                      harnessSessionId: runtime.sessionId,
-                      durationMs: end - start,
-                    }),
-                  ),
-                ),
-              ),
-            ),
-            Effect.tapError((error) =>
-              Effect.logWarning("harness runtime failed to start").pipe(
-                Effect.annotateLogs({
-                  event: "harness.runtime.failed",
-                  operation,
-                  harnessAgentId,
-                  reason: String(error),
-                }),
-              ),
-            ),
-            Effect.withSpan(`harness.${operation}`),
-          ),
-        ),
+      acquire.pipe(
+        Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
+        Effect.withSpan(`harness.${operation}`, { attributes: { harnessAgentId } }),
       );
 
     const acquireOpen = (
       harnessAgentId: HarnessAgentId,
       input: CreateSessionInput,
     ): AcquireRuntime =>
-      withRuntimeLog(
+      tracedAcquire(
         "open",
         harnessAgentId,
         checkAvailable(harnessAgentId).pipe(Effect.flatMap((adapter) => adapter.open(input))),
       );
 
     const acquireResume = (input: ResumeManagedSessionInput): AcquireRuntime =>
-      withRuntimeLog(
+      tracedAcquire(
         "resume",
         input.harnessAgentId,
         checkAvailable(input.harnessAgentId).pipe(

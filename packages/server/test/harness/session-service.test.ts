@@ -728,17 +728,17 @@ describe("HarnessAgentSessionService", () => {
       ),
     );
 
+    // Only the events. Spawning the agent is a *span* — `harness.open`, timed
+    // and reported by `telemetry/tracer.ts`, which this fixture does not
+    // install — so it is absent here by design rather than missing.
     expect(records.map((record) => record.annotations.event)).toEqual([
-      // Spawning the agent comes first, and is its own line: it is the
-      // expensive half of `create` and the half that fails.
-      "harness.runtime.acquired",
       "session.created",
       "session.archived",
       "session.deleted",
     ]);
     expect(records.every((record) => record.level === "INFO")).toBe(true);
 
-    const created = records[1];
+    const created = records[0];
     expect(created?.annotations.cwd).toBe("/tmp/vibest-app");
     expect(created?.annotations.harnessSessionId).toBe("native-1");
     expect(created?.annotations.projectId).toBe("proj-a");
@@ -746,10 +746,6 @@ describe("HarnessAgentSessionService", () => {
     // file holding many.
     const sessionId = created?.annotations.sessionId;
     expect(typeof sessionId).toBe("string");
-    expect(records.slice(1).every((r) => r.annotations.sessionId === sessionId)).toBe(true);
-
-    const acquired = records[0];
-    expect(acquired?.annotations.operation).toBe("open");
-    expect(typeof acquired?.annotations.durationMs).toBe("number");
+    expect(records.every((r) => r.annotations.sessionId === sessionId)).toBe(true);
   });
 });

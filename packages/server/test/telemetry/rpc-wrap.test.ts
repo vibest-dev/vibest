@@ -4,7 +4,7 @@ import { layer } from "@effect/vitest";
 import { Effect, Layer, Logger, References } from "effect";
 
 import { makeRpcWrap } from "../../src/rpc/handlers";
-import { structured, type LogRecord } from "../../src/telemetry";
+import { SpanLoggerLayer, structured, type LogRecord } from "../../src/telemetry";
 
 const captureContext = (into: Array<LogRecord>) =>
   Layer.build(
@@ -91,41 +91,52 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
     }),
   );
 
-  // The call log is `debug`, so the default `Info` floor hides it. That is the
-  // design — but it means a test at the default level proves nothing about it.
-  const captureDebug = (into: Array<LogRecord>) =>
-    Layer.build(
-      Layer.mergeAll(
-        Logger.layer([
-          Logger.map(structured, (record) => {
-            into.push(record);
-          }),
-        ]),
-        Layer.succeed(References.MinimumLogLevel, "Debug"),
-      ),
+  // The per-call record is the span, not a log statement — `makeRpcWrap` never
+  // reads a clock. Installing the span logger is what turns the `withSpan` it
+  // already had into that record, so this is the test that the wrapper needs no
+  // logging code of its own.
+  const captureSpans = (into: Array<LogRecord>) => {
+    const logging = Layer.mergeAll(
+      Logger.layer([
+        Logger.map(structured, (record) => {
+          into.push(record);
+        }),
+      ]),
+      Layer.succeed(References.MinimumLogLevel, "Debug"),
     );
+    // `provide`, then `merge` — the span logger captures the context it is
+    // built in, so building it *beside* the loggers (which is what a single
+    // `mergeAll` or a `provideMerge` in the other direction does) silently
+    // sends the span lines to Effect's default logger instead.
+    return Layer.build(Layer.merge(logging, SpanLoggerLayer.pipe(Layer.provide(logging))));
+  };
 
-  it.effect("times every call, including the ones that fail", () =>
+  it.effect("records every call as a span, timed, without any logging code", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureDebug(records));
+      const wrap = makeRpcWrap(yield* captureSpans(records));
 
       yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
       yield* Effect.exit(wrap(Effect.fail("nope"), { path: ["session", "prompt"] }));
       yield* Effect.exit(wrap(Effect.interrupt, { path: ["session", "subscribe"] }));
+      // The span logger writes from a detached fiber, so let it run.
+      yield* Effect.yieldNow;
 
-      const calls = records.filter((record) => record.annotations.event === "rpc.call");
+      const spans = records.filter((record) => record.annotations.event === "span");
       assert.deepEqual(
-        calls.map((call) => [call.annotations.procedure, call.annotations.outcome]),
+        spans.map((span) => [span.message, span.annotations.outcome, span.level]),
         [
-          ["project.list", "ok"],
-          ["session.prompt", "error"],
-          ["session.subscribe", "interrupted"],
+          ["rpc.project.list", "ok", "DEBUG"],
+          // A failed span is raised to `warn` so it survives the default floor.
+          ["rpc.session.prompt", "error", "WARN"],
+          // An interrupt is not a failure. The session drain fiber is
+          // interrupted on every normal close, so treating the two alike would
+          // put a warning in the log each time a session shuts down cleanly.
+          ["rpc.session.subscribe", "interrupted", "DEBUG"],
         ],
       );
-      // Present on all three — an interrupt that took 30s reads very
-      // differently from one that took 3ms.
-      assert.ok(calls.every((call) => typeof call.annotations.durationMs === "number"));
+      assert.ok(spans.every((span) => typeof span.annotations.durationMs === "number"));
+      assert.ok(spans.every((span) => typeof span.annotations.traceId === "string"));
     }),
   );
 

@@ -4,6 +4,7 @@ import type { TelemetryConfig } from "./config";
 import { installCrashHandler } from "./crash";
 import { makeFileLogger } from "./file-sink";
 import { jsonl } from "./format";
+import { SpanLoggerLayer } from "./tracer";
 
 const consoleLogger = (config: TelemetryConfig): Logger.Logger<unknown, void> | undefined => {
   switch (config.consoleFormat) {
@@ -48,15 +49,19 @@ export const makeTelemetryContext = (
     const console = consoleLogger(config);
     const loggers = console === undefined ? [fileLogger] : [console, fileLogger];
 
-    return yield* Layer.build(
-      Layer.mergeAll(
-        // Not `mergeWithExisting` — the default logger would otherwise print
-        // every line a second time, unstructured.
-        Logger.layer(loggers),
-        Layer.succeed(References.MinimumLogLevel, config.minimumLogLevel),
-        // Effect 4 defaults this to `false`, i.e. the built-in loggers write to
-        // stdout. That channel belongs to the `vibest:ready` handshake.
-        Layer.succeed(Logger.LogToStderr, true),
-      ),
+    const logging = Layer.mergeAll(
+      // Not `mergeWithExisting` — the default logger would otherwise print
+      // every line a second time, unstructured.
+      Logger.layer(loggers),
+      Layer.succeed(References.MinimumLogLevel, config.minimumLogLevel),
+      // Effect 4 defaults this to `false`, i.e. the built-in loggers write to
+      // stdout. That channel belongs to the `vibest:ready` handshake.
+      Layer.succeed(Logger.LogToStderr, true),
     );
+
+    // The span logger is built *over* the loggers so it can capture them for
+    // its detached fibers, and merged back in so the result carries both. The
+    // order is load-bearing in one direction only: loggers do not need a
+    // tracer, a tracer that logs needs the loggers.
+    return yield* Layer.build(Layer.merge(logging, SpanLoggerLayer.pipe(Layer.provide(logging))));
   });
