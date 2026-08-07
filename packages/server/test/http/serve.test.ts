@@ -1,13 +1,26 @@
+import fs from "node:fs/promises";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { resolveServeConfig, runServe } from "../../src/http/serve";
 import { ServerStartupError } from "../../src/http/server";
 
-const ENV_KEYS = ["VIBEST_PORT", "VIBEST_CORS_ORIGINS", "NODE_ENV"] as const;
+const ENV_KEYS = [
+  "VIBEST_PORT",
+  "VIBEST_CORS_ORIGINS",
+  "NODE_ENV",
+  // `runServe` builds the telemetry context, which creates `$VIBEST_HOME/logs`
+  // and writes to it. Both are pinned per test so the suite never touches the
+  // developer's real `~/.vibest`.
+  "VIBEST_HOME",
+  "VIBEST_LOG_CONSOLE",
+] as const;
 
 let saved: Record<string, string | undefined>;
 
@@ -76,15 +89,22 @@ describe("runServe", () => {
     await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
     const { port } = blocker.address() as AddressInfo;
 
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-serve-"));
+    process.env.VIBEST_HOME = home;
+    process.env.VIBEST_LOG_CONSOLE = "quiet";
+
     try {
       const exit = await Effect.runPromiseExit(
-        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })),
+        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })).pipe(
+          Effect.provide(NodeFileSystem.layer),
+        ),
       );
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
       expect(error).toBeInstanceOf(ServerStartupError);
       expect((error as ServerStartupError).phase).toBe("listen");
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
+      await fs.rm(home, { recursive: true, force: true });
     }
   });
 });

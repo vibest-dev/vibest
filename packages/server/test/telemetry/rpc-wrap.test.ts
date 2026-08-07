@@ -1,0 +1,154 @@
+import assert from "node:assert/strict";
+
+import { layer } from "@effect/vitest";
+import { Effect, Layer, Logger, References } from "effect";
+
+import { makeRpcWrap } from "../../src/rpc/handlers";
+import { structured, type LogRecord } from "../../src/telemetry";
+
+const captureContext = (into: Array<LogRecord>) =>
+  Layer.build(
+    Logger.layer([
+      Logger.map(structured, (record) => {
+        into.push(record);
+      }),
+    ]),
+  );
+
+/**
+ * `effect/wrap` is what replaced `console.error("[rpc]", …)`. It is the only
+ * error reporting the ~25 procedures have, so what it does and does not report
+ * is worth pinning down.
+ */
+layer(Layer.empty)("rpc effect/wrap", (it) => {
+  it.effect("reports a defect with the procedure path", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      const exit = yield* Effect.exit(
+        wrap(Effect.die(new Error("boom")), { path: ["session", "prompt"] }),
+      );
+
+      assert.ok(exit._tag === "Failure");
+      assert.equal(records.length, 1);
+      const record = records[0];
+      assert.ok(record !== undefined);
+      assert.equal(record.level, "ERROR");
+      assert.equal(record.annotations.event, "rpc.failed");
+      assert.equal(record.annotations.procedure, "session.prompt");
+      assert.ok(String(record.cause).includes("boom"));
+    }),
+  );
+
+  it.effect("reports a typed failure the router did not map", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      yield* Effect.exit(wrap(Effect.fail("store unavailable"), { path: ["project", "list"] }));
+
+      assert.equal(records.length, 1);
+      assert.equal(records[0]?.annotations.procedure, "project.list");
+    }),
+  );
+
+  // A browser tab closing mid-request interrupts the handler fiber. That is
+  // routine, and logging it as a server error would bury the real failures
+  // under noise from every navigation.
+  it.effect("stays silent when the caller disconnects", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      const exit = yield* Effect.exit(wrap(Effect.interrupt, { path: ["session", "subscribe"] }));
+
+      assert.ok(exit._tag === "Failure");
+      assert.deepEqual(records, []);
+    }),
+  );
+
+  // The whole point of the span: a procedure's own logs, and the logs of
+  // everything it calls, share one `traceId` — without any of them knowing.
+  it.effect("stamps a shared traceId on every line the procedure produces", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      yield* wrap(
+        Effect.gen(function* () {
+          yield* Effect.logInfo("reading the store").pipe(Effect.withSpan("store.read"));
+          yield* Effect.logInfo("opening the harness");
+        }),
+        { path: ["session", "prompt"] },
+      );
+
+      const [inner, outer] = records;
+      assert.ok(inner !== undefined && outer !== undefined);
+      assert.equal(inner.traceId, outer.traceId);
+      assert.equal(inner.span, "rpc.session.prompt > store.read");
+      assert.equal(outer.span, "rpc.session.prompt");
+    }),
+  );
+
+  // The call log is `debug`, so the default `Info` floor hides it. That is the
+  // design — but it means a test at the default level proves nothing about it.
+  const captureDebug = (into: Array<LogRecord>) =>
+    Layer.build(
+      Layer.mergeAll(
+        Logger.layer([
+          Logger.map(structured, (record) => {
+            into.push(record);
+          }),
+        ]),
+        Layer.succeed(References.MinimumLogLevel, "Debug"),
+      ),
+    );
+
+  it.effect("times every call, including the ones that fail", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureDebug(records));
+
+      yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
+      yield* Effect.exit(wrap(Effect.fail("nope"), { path: ["session", "prompt"] }));
+      yield* Effect.exit(wrap(Effect.interrupt, { path: ["session", "subscribe"] }));
+
+      const calls = records.filter((record) => record.annotations.event === "rpc.call");
+      assert.deepEqual(
+        calls.map((call) => [call.annotations.procedure, call.annotations.outcome]),
+        [
+          ["project.list", "ok"],
+          ["session.prompt", "error"],
+          ["session.subscribe", "interrupted"],
+        ],
+      );
+      // Present on all three — an interrupt that took 30s reads very
+      // differently from one that took 3ms.
+      assert.ok(calls.every((call) => typeof call.annotations.durationMs === "number"));
+    }),
+  );
+
+  it.effect("stays quiet at the default level", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
+
+      assert.deepEqual(records, []);
+    }),
+  );
+
+  it.effect("leaves a successful procedure's value untouched", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const wrap = makeRpcWrap(yield* captureContext(records));
+
+      const value = yield* wrap(Effect.succeed({ ok: true }), { path: ["harness", "list"] });
+
+      assert.deepEqual(value, { ok: true });
+      assert.deepEqual(records, []);
+    }),
+  );
+});

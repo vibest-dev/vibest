@@ -1,6 +1,7 @@
-import { Effect, Option } from "effect";
+import { type Context, Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
+import { makeTelemetryContext, resolveTelemetryConfig } from "../telemetry";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
 import { createServer, ServerStartupError } from "./server";
@@ -80,21 +81,58 @@ export function resolveServeConfig(input: ServeInput): {
  * The auth token is env-only. The server is acquired in the ambient scope so
  * `NodeRuntime.runMain`'s SIGINT/SIGTERM interrupt tears it down through the
  * release finalizer.
+ *
+ * This is where the process's one telemetry context is built, which is what
+ * makes logging identical whether the server runs in the foreground
+ * (`vibest serve`, `pnpm dev`) or detached as the daemon: both paths run this
+ * body, so both persist to `$VIBEST_HOME/logs` rather than only the daemon
+ * getting a log through its redirected stdio.
  */
 export const runServe = (input: ServeInput) =>
+  Effect.gen(function* () {
+    // Built in the ambient scope, so its batch fiber lives as long as the
+    // server and its final flush runs on the same interrupt that stops it.
+    const telemetry = yield* makeTelemetryContext(resolveTelemetryConfig());
+    return yield* serveWith(input, telemetry).pipe(Effect.provide(telemetry));
+  });
+
+const serveWith = (input: ServeInput, telemetry: Context.Context<never>) =>
   Effect.gen(function* () {
     const authToken = takeAuthToken();
     const { port: requestedPort, corsOrigins, allowedHosts } = resolveServeConfig(input);
 
+    // The first line of every run, and the one that dates the file. It also
+    // records the shape of the run — auth on or off, which origins are allowed
+    // — because a misconfiguration explains failures that otherwise look like
+    // the client's fault.
+    yield* Effect.logInfo("server starting").pipe(
+      Effect.annotateLogs({
+        event: "server.starting",
+        requestedPort,
+        authenticated: authToken !== undefined,
+        corsOrigins,
+        allowedHosts,
+        version: process.env.npm_package_version,
+        node: process.version,
+      }),
+    );
+
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => createServer({ authToken, corsOrigins, allowedHosts }),
+        try: () => createServer({ authToken, corsOrigins, allowedHosts, telemetry }),
         catch: (cause) => new ServerStartupError({ phase: "create", cause }),
       }),
       // A shutdown failure is logged, not thrown: the process is exiting, and
       // a defect here would mask whatever caused the exit in the first place.
+      //
+      // The clean stop is logged too: a log that ends without it ended in a
+      // kill -9, an OOM, or a crash, and knowing which is the first question
+      // when reading back a run that stopped for no visible reason.
       (managed) =>
         Effect.tryPromise(() => managed.dispose()).pipe(
+          Effect.andThen(
+            Effect.logInfo("server stopped").pipe(Effect.annotateLogs({ event: "server.stopped" })),
+          ),
           Effect.catch((error) => Effect.logWarning("server shutdown failed", error)),
         ),
     );
@@ -104,10 +142,16 @@ export const runServe = (input: ServeInput) =>
       catch: (cause) => new ServerStartupError({ phase: "listen", cause }),
     });
 
-    // Machine-readable first, for the desktop supervisor; human-readable second.
-    // Both go to stdout — Effect's logger writes to stderr, so it never mixes in.
+    // Machine-readable first, for the desktop supervisor; human-readable
+    // second. Both go to stdout, which stays clear of logging because the
+    // telemetry context sets `Logger.LogToStderr` — Effect 4 defaults that to
+    // `false`, i.e. stdout, so this separation is configured, not inherent.
     console.log(formatReadyLine({ port }));
     console.log(`vibest listening on http://127.0.0.1:${port}`);
+
+    yield* Effect.logInfo("server listening").pipe(
+      Effect.annotateLogs({ event: "server.listening", port }),
+    );
 
     return yield* Effect.never;
   });

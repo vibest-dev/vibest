@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, FileSystem, type Scope, Stream } from "effect";
+import { Crypto, Effect, FileSystem, Logger, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -24,6 +24,7 @@ import {
   type HarnessAgentSessionServiceShape,
   makeHarnessAgentSessionService,
 } from "../../src/harness/session-service";
+import { structured, type LogRecord } from "../../src/telemetry";
 import { NodePlatformLayer } from "../platform";
 
 type Spy = {
@@ -703,5 +704,52 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(listed).toHaveLength(1);
     expect(listed[0]?.title).toBeUndefined();
+  });
+
+  // The lifecycle log is what a periodic read of `$VIBEST_HOME/logs` is for:
+  // read on its own it says what was worked on, when, and where. It has to hold
+  // together across the whole span of a session, so it is asserted as a
+  // sequence rather than one line at a time.
+  it("logs each lifecycle boundary once, in order, at info", async () => {
+    const records: Array<LogRecord> = [];
+    await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.archive(ref, true);
+        yield* fixture.service.delete(ref);
+      }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.map(structured, (record) => {
+              records.push(record);
+            }),
+          ]),
+        ),
+      ),
+    );
+
+    expect(records.map((record) => record.annotations.event)).toEqual([
+      // Spawning the agent comes first, and is its own line: it is the
+      // expensive half of `create` and the half that fails.
+      "harness.runtime.acquired",
+      "session.created",
+      "session.archived",
+      "session.deleted",
+    ]);
+    expect(records.every((record) => record.level === "INFO")).toBe(true);
+
+    const created = records[1];
+    expect(created?.annotations.cwd).toBe("/tmp/vibest-app");
+    expect(created?.annotations.harnessSessionId).toBe("native-1");
+    expect(created?.annotations.projectId).toBe("proj-a");
+    // Every line carries the id, so one session's whole life greps out of a
+    // file holding many.
+    const sessionId = created?.annotations.sessionId;
+    expect(typeof sessionId).toBe("string");
+    expect(records.slice(1).every((r) => r.annotations.sessionId === sessionId)).toBe(true);
+
+    const acquired = records[0];
+    expect(acquired?.annotations.operation).toBe("open");
+    expect(typeof acquired?.annotations.durationMs).toBe("number");
   });
 });

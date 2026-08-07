@@ -2,7 +2,7 @@ import type { RequestListener, Server } from "node:http";
 import http from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Data, Effect, Exit, Scope } from "effect";
+import { Cause, Context, Data, Effect, Exit, Scope } from "effect";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
@@ -35,6 +35,15 @@ export type CreateServerOptions = {
    * preserves the tailnet MagicDNS Host). Unset in the common case.
    */
   allowedHosts?: readonly string[] | undefined;
+  /**
+   * The process's logging context (`telemetry/runtime.ts`). Threaded in rather
+   * than built here: `CurrentLoggers` is a per-context reference, and this
+   * function stands up a runtime of its own *plus* two bare `Effect.runPromise`
+   * roots — all three must share the one context, or a second set of loggers
+   * ends up appending to the same file. Unset in tests, which then get the
+   * plain Effect logger.
+   */
+  telemetry?: Context.Context<never> | undefined;
 };
 
 /** Startup failed for an operational reason: building the server or binding. */
@@ -48,7 +57,7 @@ export class ServerStartupError extends Data.TaggedError("ServerStartupError")<{
  * and assert that every earlier stage's finalizer still runs (issue #155).
  */
 export type ServerStages = {
-  readonly createRpcRuntime: () => Promise<RpcRuntime>;
+  readonly createRpcRuntime: (telemetry: Context.Context<never>) => Promise<RpcRuntime>;
   readonly createUI: (runtime: RpcRuntime) => Promise<UIApp>;
   readonly createRequestHandler: (
     runtime: RpcRuntime,
@@ -58,7 +67,7 @@ export type ServerStages = {
 };
 
 const defaultStages: ServerStages = {
-  createRpcRuntime: () => createRpcRuntime(),
+  createRpcRuntime: (telemetry) => createRpcRuntime(telemetry),
   createUI: (runtime) => runtime.run(createUIHandler()),
   // The request half is Effect-native and runs on the RPC runtime, which
   // already carries FileSystem/Path/HttpPlatform. `makeHandler` gives back a
@@ -81,29 +90,83 @@ function wireServer(options: {
   readonly tickets: TicketStore;
   readonly wsHandler: (ws: WebSocket) => void;
   readonly handleRequest: RequestListener;
+  /**
+   * Node hands these events to synchronous listeners, so writing a log from
+   * one needs a runtime injected from where the composition root has it. The
+   * callback takes the whole effect rather than a message, so the lines stay
+   * written where the event happens instead of behind an event vocabulary that
+   * exists only to be translated back.
+   */
+  readonly runLog: (effect: Effect.Effect<void>) => void;
 }): WiredServer {
-  const { authToken, corsOrigins, allowedHosts, tickets, wsHandler, handleRequest } = options;
+  const { authToken, corsOrigins, allowedHosts, tickets, wsHandler, handleRequest, runLog } =
+    options;
 
   const server = http.createServer();
   server.on("request", handleRequest);
 
   const wss = new WebSocketServer({ noServer: true });
 
+  // A connection is the UI attaching, so it bounds every session event that
+  // follows; `clients` is on each line because "did they all drop?" is the
+  // question these answer together.
   wss.on("connection", (ws) => {
+    runLog(
+      Effect.logInfo("websocket connected").pipe(
+        Effect.annotateLogs({ event: "ws.connected", clients: wss.clients.size }),
+      ),
+    );
+    ws.on("close", (code: number, reason: Buffer) => {
+      runLog(
+        Effect.logInfo("websocket disconnected").pipe(
+          Effect.annotateLogs({
+            event: "ws.disconnected",
+            code,
+            ...(reason.length > 0 ? { reason: reason.toString() } : {}),
+            clients: wss.clients.size,
+          }),
+        ),
+      );
+    });
     wsHandler(ws);
   });
-  wss.on("error", (e: Error & { code: string; port: number }) => {
-    console.error(e);
+  wss.on("error", (error: Error) => {
+    runLog(
+      Effect.logError("websocket server error", error).pipe(
+        Effect.annotateLogs({ event: "ws.server_error" }),
+      ),
+    );
   });
 
   // The only upgrade this server answers. Raw on purpose: oRPC owns this event,
   // so Effect's own websocket support (`NodeHttpServer.makeUpgradeHandler`)
   // must stay out of it.
+  /**
+   * Every rejection below ends in `socket.destroy()`, which tells the client
+   * nothing beyond a status line and told this server nothing at all. These are
+   * the security-relevant events — a rebinding Host, a foreign Origin, a bad
+   * ticket — so they are `warn` rather than `debug`: rare, and the kind of thing
+   * you want to find by filtering a level, not by knowing to look.
+   */
+  const rejectUpgrade = (
+    socket: { write: (chunk: string) => unknown; destroy: () => unknown },
+    status: string,
+    reason: string,
+    annotations: Record<string, unknown>,
+  ) => {
+    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+    runLog(
+      Effect.logWarning("websocket upgrade rejected").pipe(
+        Effect.annotateLogs({ event: "ws.upgrade_rejected", status, reason, ...annotations }),
+      ),
+    );
+  };
+
   server.on("upgrade", (req, socket, head) => {
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
     if (requestUrl.pathname !== "/ws/rpc") {
-      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-      socket.destroy();
+      rejectUpgrade(socket, "404 Not Found", "unknown_path", { path: requestUrl.pathname });
       return;
     }
 
@@ -116,8 +179,10 @@ function wireServer(options: {
       (origin !== undefined &&
         !isAllowedOrigin(origin, { extraOrigins: corsOrigins, allowedHosts }))
     ) {
-      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-      socket.destroy();
+      rejectUpgrade(socket, "403 Forbidden", "host_or_origin", {
+        host: req.headers.host,
+        ...(origin !== undefined ? { origin } : {}),
+      });
       return;
     }
 
@@ -125,8 +190,9 @@ function wireServer(options: {
       // A WS handshake carries no Authorization header, so the renderer proves
       // itself with a single-use ticket minted over the authenticated HTTP link.
       if (!tickets.consume(requestUrl.searchParams.get("ticket"))) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-        socket.destroy();
+        rejectUpgrade(socket, "401 Unauthorized", "invalid_ticket", {
+          presented: requestUrl.searchParams.has("ticket"),
+        });
         return;
       }
     }
@@ -165,10 +231,10 @@ const buildServer = (
   stages: ServerStages,
 ): Effect.Effect<Server, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const { authToken, corsOrigins = [], allowedHosts = [] } = options;
+    const { authToken, corsOrigins = [], allowedHosts = [], telemetry = Context.empty() } = options;
 
     const rpcRuntime = yield* Effect.acquireRelease(
-      Effect.promise(() => stages.createRpcRuntime()),
+      Effect.promise(() => stages.createRpcRuntime(telemetry)),
       (runtime) => Effect.promise(() => runtime.dispose()),
     );
     const wsHandler = createWsRPCHandler(rpcRuntime.context);
@@ -194,7 +260,17 @@ const buildServer = (
     // drain both socket populations before anything behind them is torn down.
     const { server } = yield* Effect.acquireRelease(
       Effect.sync(() =>
-        wireServer({ authToken, corsOrigins, allowedHosts, tickets, wsHandler, handleRequest }),
+        wireServer({
+          authToken,
+          corsOrigins,
+          allowedHosts,
+          tickets,
+          wsHandler,
+          handleRequest,
+          runLog: (effect) => {
+            Effect.runFork(effect.pipe(Effect.provide(telemetry)));
+          },
+        }),
       ),
       closeWiredServer,
     );
@@ -205,19 +281,33 @@ export async function createServer(
   options: CreateServerOptions = {},
   stages: ServerStages = defaultStages,
 ): Promise<ManagedServer> {
+  const telemetry = options.telemetry ?? Context.empty();
+  // This function is the process's third Effect root — bare `runPromise` with
+  // no layer of its own. Without the `provide`, every startup and shutdown
+  // failure below would go to the default logger and never reach the log file.
+  const onRoot = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.provide(telemetry));
+
   const scope = Scope.makeUnsafe();
   let disposing: Promise<void> | undefined;
-  const dispose = () => (disposing ??= Effect.runPromise(Scope.close(scope, Exit.void)));
+  // Still `runPromise`, not `runPromiseExit`: `runServe` catches a disposal
+  // failure and logs it, so this must keep rejecting.
+  const dispose = () => (disposing ??= Effect.runPromise(onRoot(Scope.close(scope, Exit.void))));
 
   const built = await Effect.runPromiseExit(
-    buildServer(options, stages).pipe(Scope.provide(scope)),
+    onRoot(buildServer(options, stages).pipe(Scope.provide(scope))),
   );
   if (Exit.isFailure(built)) {
     // A later stage failed: release every stage that already succeeded, then
     // surface the original failure. A cleanup failure must not mask it.
-    const cleanup = await Effect.runPromiseExit(Scope.close(scope, built));
+    const cleanup = await Effect.runPromiseExit(onRoot(Scope.close(scope, built)));
     if (Exit.isFailure(cleanup)) {
-      console.error("[server] cleanup after failed startup", Cause.squash(cleanup.cause));
+      await Effect.runPromise(
+        onRoot(
+          Effect.logError("server cleanup after failed startup", cleanup.cause).pipe(
+            Effect.annotateLogs({ event: "server.cleanup_failed" }),
+          ),
+        ),
+      );
     }
     throw Cause.squash(built.cause);
   }

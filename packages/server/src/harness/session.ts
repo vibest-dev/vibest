@@ -221,6 +221,46 @@ export const makeHarnessAgentSession = (
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
 
+    /**
+     * The turn's two bookends, and deliberately nothing between them: a turn
+     * emits hundreds of chunk events, and logging those would bury the shape of
+     * a session under its content. Start and end are what answer "did it run,
+     * how long, and how did it go" — which is what a periodic read of the log
+     * is looking for.
+     *
+     * Here rather than in `session-fold.ts` because the fold is a pure function
+     * and is worth keeping that way; this is the effectful side of the same
+     * transition, and every source of turn events — the drain fiber and `emit`
+     * callers alike — passes through here.
+     *
+     * A failed turn is `warn` so that skimming for problems is a level filter
+     * rather than a read of every line. It is not `error`: the agent failing is
+     * news about the agent, not a defect in this server.
+     */
+    const logTurn = (body: SessionScopedEventBody, seq: number): Effect.Effect<void> => {
+      // Carried here rather than left to the caller's annotations, because a
+      // turn can also be driven from an `emit` on the RPC path, which has no
+      // session annotations of its own.
+      const identity = { sessionId: ref.sessionId, harnessAgentId: ref.harnessAgentId, seq };
+      if (body.type === "session.turn.started") {
+        return Effect.logInfo("turn started").pipe(
+          Effect.annotateLogs({ event: body.type, turnId: body.turnId, ...identity }),
+        );
+      }
+      if (body.type !== "session.turn.ended") return Effect.void;
+      const message = body.outcome === "failed" ? Effect.logWarning : Effect.logInfo;
+      return message("turn ended").pipe(
+        Effect.annotateLogs({
+          event: body.type,
+          turnId: body.turnId,
+          outcome: body.outcome,
+          ...identity,
+          ...(body.usage ? { usage: body.usage } : {}),
+          ...(body.error ? { errorCategory: body.error.category, error: body.error.message } : {}),
+        }),
+      );
+    };
+
     // The body builder runs under the same permit as the fold+publish so both
     // read one consistent state — deriving the active turn from a read outside
     // the lock would reintroduce exactly the interleaving the lock stops.
@@ -241,6 +281,9 @@ export const makeHarnessAgentSession = (
             // snapshot's own status.)
             return Ref.set(state, next).pipe(
               Effect.andThen(bus.publish({ ...event, phase: next.phase })),
+              // After the publish: subscribers are the ones waiting on this,
+              // and the log must not sit in front of them.
+              Effect.andThen(logTurn(wireBody, event.seq)),
             );
           }),
         ),
@@ -256,8 +299,23 @@ export const makeHarnessAgentSession = (
         ),
       );
 
+    // `error`, and the only session event that earns it: the agent's process or
+    // stream died under us. Everything the user sees after this — a session
+    // that stops responding, a turn that never ends — is downstream of this
+    // line, and it is the one that carries the reason.
     const crash = (reason: string) =>
-      apply({ type: "session.crashed", sessionId: ref.sessionId, reason });
+      apply({ type: "session.crashed", sessionId: ref.sessionId, reason }).pipe(
+        Effect.andThen(
+          Effect.logError("session runtime crashed").pipe(
+            Effect.annotateLogs({
+              event: "session.crashed",
+              sessionId: ref.sessionId,
+              harnessAgentId: ref.harnessAgentId,
+              reason,
+            }),
+          ),
+        ),
+      );
 
     // A session that starts over is idle again — the crash was the *runtime*
     // ending, not the session. seq and cursor carry across on purpose: clients
@@ -336,6 +394,18 @@ export const makeHarnessAgentSession = (
           Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
           Effect.andThen(release),
           Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
+          // `root`, because a forked fiber inherits the span of whoever forked
+          // it. This drain outlives that caller by every turn that follows, so
+          // without it the runtime's whole lifetime — every later turn — would
+          // be stamped with the `traceId` of the one RPC that happened to
+          // acquire it. A wrong trace is worse than none: it makes `jq` on a
+          // traceId return another request's output.
+          //
+          // `sessionId` is the join key that replaces the lost parentage, and
+          // it is the one that survives into the JSONL — a span link would
+          // only be visible to a collector we do not run yet.
+          Effect.withSpan("session.drain", { root: true }),
+          Effect.annotateLogs({ sessionId: ref.sessionId, harnessAgentId: ref.harnessAgentId }),
         );
         const fiber = yield* Effect.forkIn(drain, ownerScope);
         // A release that started while this was in flight leaves `acquiring`

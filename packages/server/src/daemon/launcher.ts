@@ -3,10 +3,10 @@ import fs from "node:fs";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
+import { logsDirectory, stdioLogFile } from "../telemetry/paths";
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
-import { daemonLogPath } from "./paths";
 import { reservePort } from "./port";
 import { type DaemonRecord, readRecord, removeRecord, writeRecord } from "./record";
 import { clearTombstone, hasTombstone, writeTombstone } from "./tombstone";
@@ -304,12 +304,36 @@ const spawnDaemon = (
       yield* removeRecord(options.daemonDir);
       return yield* Effect.fail(
         new DaemonLaunchError({
-          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${daemonLogPath(options.daemonDir)}`,
+          message: `vibest daemon did not become healthy within ${timeoutMs}ms; see ${logsDirectory(options.home)}`,
         }),
       );
     }
     return attach(record, false);
   });
+
+/**
+ * The daemon's stdio needs a real file descriptor before the child exists, so
+ * this is plain synchronous `node:fs` inside the already-exempt spawn seam.
+ *
+ * Truncated rather than rotated once it passes the cap. Rotation earns its keep
+ * for a log you read; this one holds only what never reached a logger (see
+ * `stdioLogFile`) and is normally a couple of lines, so an unbounded file would
+ * be a disk leak with nothing of value in it. The structured log next to it is
+ * the one with real retention.
+ */
+const STDIO_LOG_MAX_BYTES = 1_000_000;
+
+function openStdioLog(home: string): number {
+  const logsDir = logsDirectory(home);
+  fs.mkdirSync(logsDir, { recursive: true });
+  const file = stdioLogFile(logsDir);
+  try {
+    if (fs.statSync(file).size > STDIO_LOG_MAX_BYTES) fs.truncateSync(file, 0);
+  } catch {
+    // No file yet, or it cannot be stat'd — `openSync` below decides.
+  }
+  return fs.openSync(file, "a", 0o600);
+}
 
 /**
  * The one seam Effect cannot model: a detached, unref'd child with stdio
@@ -320,10 +344,12 @@ const spawnDaemon = (
  */
 function spawnDetached(options: ResolveDaemonOptions, port: number, token: string): number {
   const { home, daemonDir } = options;
-  const logFd = fs.openSync(daemonLogPath(daemonDir), "a", 0o600);
+  const logFd = openStdioLog(home);
   try {
     const [command, ...args] = options.serverArgv;
     if (command === undefined) throw new Error("serverArgv must not be empty");
+
+    const inherited = options.environment ?? process.env;
 
     const child = childProcess.spawn(command, args, {
       detached: true,
@@ -332,11 +358,18 @@ function spawnDetached(options: ResolveDaemonOptions, port: number, token: strin
         // Extra CORS origins (if any) ride the inherited environment's
         // VIBEST_CORS_ORIGINS — the launcher no longer computes a per-launch
         // set, since the daemon's policy is otherwise static.
-        ...(options.environment ?? process.env),
+        ...inherited,
         VIBEST_HOME: home,
         VIBEST_DAEMON_DIR: daemonDir,
         VIBEST_PORT: String(port),
         VIBEST_AUTH_TOKEN: token,
+        // This child's stdio is `daemon-stdio.log` (the `logFd` above) and it
+        // also writes the structured log beside it. Left alone, the console
+        // logger would put every line in both — once as JSON, once
+        // pretty-printed. Silenced by default, but an explicit setting in the
+        // inherited environment still wins, so `VIBEST_LOG_CONSOLE=pretty
+        // vibest daemon start` remains a way to get a human-readable stdio log.
+        VIBEST_LOG_CONSOLE: inherited.VIBEST_LOG_CONSOLE ?? "quiet",
       },
     });
     child.unref();

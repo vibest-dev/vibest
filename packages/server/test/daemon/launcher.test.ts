@@ -58,7 +58,10 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         assert.equal(spawned.reused, false);
         assert.match(spawned.address, /^http:\/\/127\.0\.0\.1:\d+$/);
         assert.ok(pidAlive(spawned.pid));
-        assert.ok(yield* fs.exists(path.join(daemonDir, "daemon.log")));
+        // Stdio lands with the rest of the logging, not in the daemon
+        // directory — that holds lifecycle state only.
+        assert.ok(yield* fs.exists(path.join(home, "logs", "daemon-stdio.log")));
+        assert.equal(yield* fs.exists(path.join(daemonDir, "daemon.log")), false);
 
         const record = yield* readRecord(daemonDir);
         assert.equal(record?.pid, spawned.pid);
@@ -88,10 +91,14 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         assert.equal((yield* readRecord(daemonDir))?.pid, spawned.pid);
         // Nothing leaks into the default directory, nor into `$VIBEST_HOME`.
         assert.equal(yield* readRecord(defaultDir), undefined);
-        assert.ok(yield* fs.exists(path.join(daemonDir, "daemon.log")));
-        for (const file of ["daemon.pid", "daemon.lock", "daemon.log", "daemon.stopped"]) {
+        for (const file of ["daemon.pid", "daemon.lock", "daemon.stopped"]) {
           assert.equal(yield* fs.exists(path.join(home, file)), false);
+          assert.equal(yield* fs.exists(path.join(defaultDir, file)), false);
         }
+        // Logging is deliberately NOT isolated per daemon directory: one
+        // `$VIBEST_HOME` means one place to read, and every line carries the
+        // `pid` that wrote it.
+        assert.ok(yield* fs.exists(path.join(home, "logs", "daemon-stdio.log")));
 
         assert.equal(yield* stopDaemon(daemonDir), "stopped");
         assert.ok(yield* fs.exists(path.join(daemonDir, "daemon.stopped")));

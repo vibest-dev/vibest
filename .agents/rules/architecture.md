@@ -55,7 +55,9 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   not the CLI. `packages/server/src/config/paths.ts` holds the only definitions of
   both locations: `resolveVibestHome` for `$VIBEST_HOME` (Projects and Sessions)
   and `resolveDaemonDirectory` for `$VIBEST_DAEMON_DIR` (`daemon.pid`, `.lock`,
-  `.log`, `.stopped`, defaulting to `$VIBEST_HOME/daemon`). The single-daemon
+  `.stopped`, defaulting to `$VIBEST_HOME/daemon`). The daemon directory holds
+  lifecycle state only — every log the server writes goes to `$VIBEST_HOME/logs`
+  (`src/telemetry/`), so there is one place to look. The single-daemon
   invariant is keyed on the daemon directory, so every front door resolves it
   there and passes it down — `packages/server/src/daemon/paths.ts` names files
   inside a directory it is handed and deliberately has no default of its own.

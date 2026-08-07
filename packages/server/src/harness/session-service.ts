@@ -399,6 +399,32 @@ export const makeHarnessAgentSessionService = (deps: {
     );
   };
 
+  /**
+   * The lifecycle boundaries, at `info` — a session appearing, going away, or
+   * being put aside. There are a few dozen of these in a working day, against
+   * thousands of `rpc.call` lines at `debug`, which is why they sit at a level
+   * that shows by default: read on their own they are the story of what was
+   * worked on and when.
+   *
+   * Deliberately after the operation, never before: a line saying a session was
+   * deleted, written before the delete could fail, is worse than no line.
+   */
+  const logLifecycle = (
+    event: string,
+    message: string,
+    ref: SessionRef,
+    extra: Record<string, unknown> = {},
+  ) =>
+    Effect.logInfo(message).pipe(
+      Effect.annotateLogs({
+        event,
+        sessionId: ref.sessionId,
+        projectId: ref.projectId,
+        harnessAgentId: ref.harnessAgentId,
+        ...extra,
+      }),
+    );
+
   return {
     create: (projectId, harnessAgentId, cwd, config) =>
       checkPermissionMode(harnessAgentId, config?.permissionMode).pipe(
@@ -424,6 +450,12 @@ export const makeHarnessAgentSessionService = (deps: {
                 // A failed metadata write must not leak the native session.
                 Effect.tapError(() => manager.close(ref)),
                 Effect.andThen(bus.publish({ ref, type: "session.created" })),
+                Effect.andThen(
+                  logLifecycle("session.created", "session created", ref, {
+                    cwd,
+                    harnessSessionId: session.sessionId,
+                  }),
+                ),
                 Effect.as(ref),
               );
             }),
@@ -458,6 +490,7 @@ export const makeHarnessAgentSessionService = (deps: {
       resolveHarnessSessionId(ref).pipe(
         Effect.andThen(manager.close(ref)),
         Effect.andThen(bus.closeSession(ref, "session_closed")),
+        Effect.andThen(logLifecycle("session.closed", "session closed", ref)),
       ),
 
     delete: (ref) =>
@@ -466,6 +499,9 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.andThen(bus.closeSession(ref, "session_deleted")),
         Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
         Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+        // The one line that outlives what it describes: the metadata is gone,
+        // so this is all that is left to say the session ever existed.
+        Effect.andThen(logLifecycle("session.deleted", "session deleted", ref)),
       ),
 
     rename: (ref, name) =>
@@ -484,7 +520,13 @@ export const makeHarnessAgentSessionService = (deps: {
             ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
             : Effect.void;
           const publish = changed
-            ? bus.publish({ ref, type: "session.archived", archived })
+            ? bus.publish({ ref, type: "session.archived", archived }).pipe(
+                Effect.andThen(
+                  logLifecycle("session.archived", "session archive state changed", ref, {
+                    archived,
+                  }),
+                ),
+              )
             : Effect.void;
           return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
         }),

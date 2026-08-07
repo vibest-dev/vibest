@@ -5,7 +5,7 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
+import { Clock, Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
@@ -232,15 +232,75 @@ export const makeHarnessAgentSessionManager = (
         ),
       );
 
+    /**
+     * The heaviest thing this server does: `open`/`resume` is where an agent
+     * CLI is actually spawned or an SDK handle established. It is also the
+     * likeliest to fail — a CLI that is not installed, an expired login, a cwd
+     * that vanished — and the failure surfaces to the user as a session that
+     * "does nothing", so it is worth a line whichever way it goes.
+     *
+     * Timed because seconds here are normal and tens of seconds are not, and
+     * that difference is invisible from any other vantage point.
+     */
+    const withRuntimeLog = (
+      operation: "open" | "resume",
+      harnessAgentId: HarnessAgentId,
+      acquire: AcquireRuntime,
+    ): AcquireRuntime =>
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((start) =>
+          acquire.pipe(
+            Effect.tap((runtime) =>
+              Clock.currentTimeMillis.pipe(
+                Effect.flatMap((end) =>
+                  Effect.logInfo("harness runtime acquired").pipe(
+                    Effect.annotateLogs({
+                      event: "harness.runtime.acquired",
+                      operation,
+                      harnessAgentId,
+                      // The harness's own id for the session, which is what a
+                      // `claude --resume` on the command line would take.
+                      harnessSessionId: runtime.sessionId,
+                      durationMs: end - start,
+                    }),
+                  ),
+                ),
+              ),
+            ),
+            Effect.tapError((error) =>
+              Effect.logWarning("harness runtime failed to start").pipe(
+                Effect.annotateLogs({
+                  event: "harness.runtime.failed",
+                  operation,
+                  harnessAgentId,
+                  reason: String(error),
+                }),
+              ),
+            ),
+            Effect.withSpan(`harness.${operation}`),
+          ),
+        ),
+      );
+
     const acquireOpen = (
       harnessAgentId: HarnessAgentId,
       input: CreateSessionInput,
     ): AcquireRuntime =>
-      checkAvailable(harnessAgentId).pipe(Effect.flatMap((adapter) => adapter.open(input)));
+      withRuntimeLog(
+        "open",
+        harnessAgentId,
+        checkAvailable(harnessAgentId).pipe(Effect.flatMap((adapter) => adapter.open(input))),
+      );
 
     const acquireResume = (input: ResumeManagedSessionInput): AcquireRuntime =>
-      checkAvailable(input.harnessAgentId).pipe(
-        Effect.flatMap((adapter) => adapter.resume({ sessionId: input.sessionId, cwd: input.cwd })),
+      withRuntimeLog(
+        "resume",
+        input.harnessAgentId,
+        checkAvailable(input.harnessAgentId).pipe(
+          Effect.flatMap((adapter) =>
+            adapter.resume({ sessionId: input.sessionId, cwd: input.cwd }),
+          ),
+        ),
       );
 
     /** Acquire through a session, retrying against a fresh one when the session

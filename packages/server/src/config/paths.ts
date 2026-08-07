@@ -58,7 +58,8 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
 export type DaemonLocation = {
   /** `$VIBEST_HOME` — Projects and Sessions. Handed to the daemon process. */
   readonly home: string;
-  /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.log`, `.stopped`. */
+  /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.stopped`. Lifecycle state
+   * only; the daemon's logs live under `$VIBEST_HOME/logs`. */
   readonly daemonDir: string;
 };
 

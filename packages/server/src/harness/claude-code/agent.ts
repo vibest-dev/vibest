@@ -201,6 +201,35 @@ export const makeClaudeCodeAgent = ({
         Effect.provideService(FileSystem.FileSystem, fileSystem),
       ),
     );
+    /**
+     * The `claude` CLI's own stderr, routed into the server's log instead of
+     * the process's. It used to be a bare `console.error`, which in the daemon
+     * meant it landed in `daemon.log` — a different file from everything else,
+     * unstructured, and with nothing to say which session produced it.
+     *
+     * The SDK hands these to a synchronous callback with no fiber of its own,
+     * so the context is captured here and provided per line. Unlike the warning
+     * above, this context never reaches a caller's effect — it is provided to a
+     * log effect built right here — so it cannot override anyone's scope.
+     */
+    const telemetryContext = yield* Effect.context<never>();
+    const logSdkStderr = (line: string, annotations: Record<string, unknown>): void => {
+      const text = line.trimEnd();
+      if (text.length === 0) return;
+      Effect.runFork(
+        // Debug: this is the CLI's diagnostic chatter, not a server error. It
+        // stays out of the way until someone sets VIBEST_LOG_LEVEL=Debug.
+        Effect.logDebug(text).pipe(
+          Effect.annotateLogs({
+            event: "harness.stderr",
+            harnessAgentId: "claude-code",
+            ...annotations,
+          }),
+          Effect.provide(telemetryContext),
+        ),
+      );
+    };
+
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
       new Map<string, Deferred.Deferred<SessionState, ClaudeAgentFailure>>(),
@@ -326,7 +355,7 @@ export const makeClaudeCodeAgent = ({
             // at runtime (setPermissionMode). This only enables the capability;
             // the active mode stays whatever `permissionMode` currently is.
             allowDangerouslySkipPermissions: true,
-            stderr: (error) => console.error(error),
+            stderr: (error) => logSdkStderr(error, { sessionId }),
             executable: process.execPath as "node",
             pathToClaudeCodeExecutable: yield* claudeExecutable,
             env: { ...env },
@@ -563,7 +592,7 @@ export const makeClaudeCodeAgent = ({
                   mcpServers: {},
                   strictMcpConfig: true,
                   settingSources: ["user", "project", "local"],
-                  stderr: (error) => console.error(error),
+                  stderr: (error) => logSdkStderr(error, { probe: "list-models" }),
                   executable: process.execPath as "node",
                   pathToClaudeCodeExecutable,
                   env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
@@ -700,9 +729,25 @@ export const makeClaudeCodeAgent = ({
             const fileName = `${sessionId}.jsonl`;
             // Unreadable candidate = absent candidate: keep scanning; a session
             // with no transcript on disk yields empty history, not an error.
+            // A miss is the common case — this scans every project directory —
+            // so the read failure is only worth `debug`. It is still worth
+            // *something*: an unreadable-but-present transcript and an absent
+            // one are indistinguishable from the empty history both produce,
+            // and only this line tells them apart.
             const readCandidate = (candidate: string) =>
               fileSystem.readFileString(candidate).pipe(
                 Effect.map((content) => parseTranscriptRecords(content, sessionId)),
+                Effect.tapError((cause) =>
+                  Effect.logDebug("transcript candidate unreadable").pipe(
+                    Effect.annotateLogs({
+                      event: "harness.transcript.miss",
+                      harnessAgentId: "claude-code",
+                      sessionId,
+                      candidate,
+                      reason: cause.reason._tag,
+                    }),
+                  ),
+                ),
                 Effect.orElseSucceed(() => null),
               );
             if (options?.dir !== undefined) {
@@ -710,9 +755,21 @@ export const makeClaudeCodeAgent = ({
               const narrowed = yield* readCandidate(path.join(projectsRoot, munged, fileName));
               if (narrowed !== null) return narrowed;
             }
-            const entries = yield* fileSystem
-              .readDirectory(projectsRoot)
-              .pipe(Effect.orElseSucceed((): string[] => []));
+            // No `~/.claude/projects` at all: the CLI has never run here. That
+            // is a legitimate empty history, not a failure — but a history
+            // request for a session that supposedly exists says otherwise.
+            const entries = yield* fileSystem.readDirectory(projectsRoot).pipe(
+              Effect.tapError(() =>
+                Effect.logDebug("no claude-code projects directory to scan").pipe(
+                  Effect.annotateLogs({
+                    event: "harness.transcript.no_root",
+                    harnessAgentId: "claude-code",
+                    projectsRoot,
+                  }),
+                ),
+              ),
+              Effect.orElseSucceed((): string[] => []),
+            );
             for (const entry of entries) {
               const records = yield* readCandidate(path.join(projectsRoot, entry, fileName));
               if (records !== null) return records;
