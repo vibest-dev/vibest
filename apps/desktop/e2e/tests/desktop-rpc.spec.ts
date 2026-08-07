@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
 
-import { expect, stopE2eDaemon, test, waitForE2eDaemon } from "./fixtures.js";
+import { expect, stopE2eDaemonAndDetectLeak, test, waitForE2eDaemon } from "./fixtures.js";
 
 function appPid(electronApp: ElectronApplication): number {
   const pid = electronApp.process().pid;
@@ -205,12 +205,21 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
   } finally {
     try {
       if (app !== undefined) {
-        await waitForE2eDaemon(vibestHome);
+        // Discarding this made a 30s discovery timeout look like an instant
+        // hit, and the stop below then ran against a daemon never found.
+        if (!(await waitForE2eDaemon(vibestHome))) {
+          console.warn(`e2e daemon never published a record (home=${vibestHome})`);
+        }
         await app.close();
       }
     } finally {
       try {
-        await stopE2eDaemon(vibestHome);
+        const leakedPid = await stopE2eDaemonAndDetectLeak(vibestHome);
+        // Warn rather than throw: this `finally` may already be unwinding the
+        // test's own failure, which must not be masked.
+        if (leakedPid !== undefined) {
+          console.warn(`e2e daemon ${leakedPid} survived teardown (home=${vibestHome})`);
+        }
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),

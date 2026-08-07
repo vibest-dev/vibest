@@ -8,7 +8,7 @@ import {
   _electron as electron,
   test as base,
 } from "@playwright/test";
-import { readRecord, resolveDaemonLocation, stopDaemon } from "@vibest/server/daemon";
+import { pidAlive, readRecord, resolveDaemonLocation, stopDaemon } from "@vibest/server/daemon";
 import { Effect, FileSystem } from "effect";
 
 const provideFileSystem = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
@@ -21,6 +21,21 @@ function e2eDaemonLocation(home: string) {
 export function stopE2eDaemon(home: string): Promise<"stopped" | "not-running"> {
   const { daemonDir, legacyDaemonDir } = e2eDaemonLocation(home);
   return provideFileSystem(stopDaemon(daemonDir, legacyDaemonDir));
+}
+
+/**
+ * Stop the daemon and report the pid it left running, if any.
+ *
+ * `stopDaemon`'s own answer cannot carry this: `"not-running"` is the correct
+ * result for every test that drives the server to a terminal failure, so it
+ * says nothing about whether a process survived. Reading the record first and
+ * re-checking that pid afterwards does.
+ */
+export async function stopE2eDaemonAndDetectLeak(home: string): Promise<number | undefined> {
+  const { daemonDir } = e2eDaemonLocation(home);
+  const record = await provideFileSystem(readRecord(daemonDir));
+  await stopE2eDaemon(home);
+  return record !== undefined && pidAlive(record.pid) ? record.pid : undefined;
 }
 
 export async function waitForE2eDaemon(home: string, timeoutMs = 30_000): Promise<boolean> {
@@ -125,18 +140,27 @@ export const test = base.extend<{
       },
     });
 
+    let leakedPid: number | undefined;
     try {
       await use(app);
     } finally {
-      try {
-        await waitForE2eDaemon(e2ePaths.vibestHome);
-      } finally {
-        try {
-          await app.close();
-        } finally {
-          await stopE2eDaemon(e2ePaths.vibestHome);
-        }
+      // The discovery result used to be discarded outright, so a 30s timeout
+      // was indistinguishable from an instant hit and the teardown below went
+      // on to stop a daemon it had never found.
+      const discovered = await waitForE2eDaemon(e2ePaths.vibestHome);
+      if (!discovered) {
+        console.warn(`e2e daemon never published a record (home=${e2ePaths.vibestHome})`);
       }
+      try {
+        await app.close();
+      } finally {
+        leakedPid = await stopE2eDaemonAndDetectLeak(e2ePaths.vibestHome);
+      }
+    }
+    // Only reached when the test body itself passed, so a leak can never mask
+    // the real failure.
+    if (leakedPid !== undefined) {
+      throw new Error(`e2e daemon ${leakedPid} survived teardown (home=${e2ePaths.vibestHome})`);
     }
   },
 
