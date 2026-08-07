@@ -28,6 +28,24 @@ export const logFileFor = (directory: string, date: Date): string =>
 export const logsDirectory = (home: string): string => path.join(home, "logs");
 
 /**
+ * Owner-only, matching `daemon.pid` (which holds the auth token). Log lines
+ * carry working directories, project and session ids, and whatever an agent
+ * wrote to stderr; the default `0644`/`0755` would publish all of that to every
+ * account on a shared machine.
+ *
+ * Here rather than beside either writer because there are two, in different
+ * processes, and **whichever runs first decides**: the launcher opens
+ * `daemon-stdio.log` before the daemon exists, so it — not the batched sink
+ * inside the daemon — is what creates `logs/` on a fresh install. A mode set on
+ * only one of them is a mode that does not hold.
+ *
+ * Both apply at creation only, so an install that predates this keeps whatever
+ * it was made with.
+ */
+export const LOG_FILE_MODE = 0o600;
+export const LOG_DIRECTORY_MODE = 0o700;
+
+/**
  * Where a detached daemon's raw stdout/stderr lands.
  *
  * This is not application logging — that goes to `server-<date>.jsonl` in the

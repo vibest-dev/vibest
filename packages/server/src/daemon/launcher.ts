@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
-import { logsDirectory, stdioLogFile } from "../telemetry/paths";
+import { LOG_DIRECTORY_MODE, LOG_FILE_MODE, logsDirectory, stdioLogFile } from "../telemetry/paths";
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
@@ -325,14 +325,17 @@ const STDIO_LOG_MAX_BYTES = 1_000_000;
 
 function openStdioLog(home: string): number {
   const logsDir = logsDirectory(home);
-  fs.mkdirSync(logsDir, { recursive: true });
+  // Mode here and not only in `telemetry/file-sink.ts`: this runs in the
+  // launcher, before the daemon exists, so on a fresh install it is what creates
+  // `logs/` and the sink's own mode never gets a say.
+  fs.mkdirSync(logsDir, { recursive: true, mode: LOG_DIRECTORY_MODE });
   const file = stdioLogFile(logsDir);
   try {
     if (fs.statSync(file).size > STDIO_LOG_MAX_BYTES) fs.truncateSync(file, 0);
   } catch {
     // No file yet, or it cannot be stat'd — `openSync` below decides.
   }
-  return fs.openSync(file, "a", 0o600);
+  return fs.openSync(file, "a", LOG_FILE_MODE);
 }
 
 /**

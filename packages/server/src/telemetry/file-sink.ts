@@ -3,7 +3,7 @@ import path from "node:path";
 import { Cause, Clock, Effect, FileSystem, Logger, Ref, type Scope } from "effect";
 
 import { jsonl } from "./format";
-import { dayKey, LOG_FILE_PATTERN, logFileFor } from "./paths";
+import { dayKey, LOG_DIRECTORY_MODE, LOG_FILE_MODE, LOG_FILE_PATTERN, logFileFor } from "./paths";
 
 /**
  * How long writes are buffered. `Logger.batched` also flushes whatever is
@@ -12,16 +12,6 @@ import { dayKey, LOG_FILE_PATTERN, logFileFor } from "./paths";
 const FLUSH_WINDOW_MS = 1000;
 
 const MILLIS_PER_DAY = 86_400_000;
-
-/**
- * Owner-only, matching `daemon.pid` (which holds the auth token) and the stdio
- * log. These lines carry working directories, project and session ids, and
- * whatever an agent wrote to stderr — the default `0644` would publish all of
- * that to every account on a shared machine. Applies at creation, so a file
- * that already exists keeps the mode it was made with.
- */
-const FILE_MODE = 0o600;
-const DIRECTORY_MODE = 0o700;
 
 /**
  * Drop log files whose day is older than the retention window. Best-effort:
@@ -88,7 +78,7 @@ export const makeFileLogger = (options: {
     const fs = yield* FileSystem.FileSystem;
     // Both best-effort: logging must never be the reason the server won't boot.
     yield* fs
-      .makeDirectory(options.directory, { recursive: true, mode: DIRECTORY_MODE })
+      .makeDirectory(options.directory, { recursive: true, mode: LOG_DIRECTORY_MODE })
       .pipe(Effect.ignore);
     yield* prune(fs, options.directory, options.retentionDays);
 
@@ -101,7 +91,7 @@ export const makeFileLogger = (options: {
           if (lines.length === 0) return;
           const file = logFileFor(options.directory, new Date(yield* Clock.currentTimeMillis));
           yield* fs
-            .writeFileString(file, `${lines.join("\n")}\n`, { flag: "a", mode: FILE_MODE })
+            .writeFileString(file, `${lines.join("\n")}\n`, { flag: "a", mode: LOG_FILE_MODE })
             .pipe(Effect.catchCause((cause) => reportOnce(reported, file, cause)));
         }),
     });

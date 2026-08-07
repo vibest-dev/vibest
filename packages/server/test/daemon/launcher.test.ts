@@ -62,6 +62,15 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         // directory — that holds lifecycle state only.
         assert.ok(yield* fs.exists(path.join(home, "logs", "daemon-stdio.log")));
         assert.equal(yield* fs.exists(path.join(daemonDir, "daemon.log")), false);
+        // Asserted *here*, on a real launch, and not only where the batched
+        // sink is unit-tested: the launcher creates `logs/` before the daemon
+        // it is spawning exists, so it is the one whose mode decides on a fresh
+        // install. Testing the sink alone passes while the daemon path leaves
+        // the directory world-readable.
+        const logs = yield* fs.stat(path.join(home, "logs"));
+        const stdio = yield* fs.stat(path.join(home, "logs", "daemon-stdio.log"));
+        assert.equal((Number(logs.mode) & 0o777).toString(8), "700");
+        assert.equal((Number(stdio.mode) & 0o777).toString(8), "600");
 
         const record = yield* readRecord(daemonDir);
         assert.equal(record?.pid, spawned.pid);
