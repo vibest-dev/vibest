@@ -10,7 +10,7 @@ import type {
   SessionSummary,
 } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Context, Crypto, Effect, FileSystem, Layer } from "effect";
+import { Context, Crypto, Effect, FileSystem, Layer, Semaphore } from "effect";
 
 import { Paths } from "../config/paths";
 import {
@@ -125,10 +125,16 @@ export type HarnessAgentSessionServiceShape = {
   readonly delete: (
     ref: SessionRef,
   ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError>;
+  /**
+   * Set a session title by hand. The title is ours to own (see {@link deriveTitle}),
+   * so this is a plain metadata write — the harness is never told, and a
+   * user-chosen title survives every later prompt because
+   * `readAndStampTitleFromFirstPrompt` only fills a record that has none.
+   */
   readonly rename: (
     ref: SessionRef,
-    name: string,
-  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError>;
+    title: string,
+  ) => Effect.Effect<void, SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError>;
   readonly archive: (
     ref: SessionRef,
     archived: boolean,
@@ -293,6 +299,23 @@ export const makeHarnessAgentSessionService = (deps: {
 }): HarnessAgentSessionServiceShape => {
   const { manager, registry, repo, bus, newSessionId } = deps;
 
+  // Metadata updates are read-modify-write operations over one JSON record.
+  // Serialize each session independently so two fields changed at once cannot
+  // overwrite each other from stale snapshots, while a slow harness shutdown
+  // for one session never stalls metadata work for every other session. Locks
+  // stay keyed for this service's lifetime: retaining one tiny semaphore per
+  // touched session avoids replacing a lock while delete waiters still hold it.
+  const metadataMutationLocks = new Map<string, ReturnType<typeof Semaphore.makeUnsafe>>();
+  const withMetadataMutation = <A, E, R>(
+    ref: SessionRef,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> => {
+    const key = `${ref.projectId}\0${ref.sessionId}`;
+    const lock = metadataMutationLocks.get(key) ?? Semaphore.makeUnsafe(1);
+    metadataMutationLocks.set(key, lock);
+    return lock.withPermit(effect);
+  };
+
   // The permission mode is our closed vocabulary, so membership in the
   // harness's declared subset is checked here — the boundary between the
   // wire and the adapters — and rejected loudly. Opaque values (model) get
@@ -380,24 +403,27 @@ export const makeHarnessAgentSessionService = (deps: {
   // SessionRefMismatch) before the manager is asked for anything. It just no
   // longer supplies an address — the manager is keyed by the ref itself.
   // The first prompt establishes the session title. Best-effort: a failed
-  // title write must never block the prompt itself. A record that already has
-  // a title (any later prompt) is left alone. On a real write we publish
-  // `session.updated` so every client patches the row — the specific event
-  // that reconciles the optimistic title, in place of any timer.
-  const stampTitleFromFirstPrompt = (metadata: Session, parts: PromptInput["parts"]) => {
-    if (metadata.title !== undefined) return Effect.void;
-    const title = deriveTitle(parts);
-    if (title === undefined) return Effect.void;
-    const ref: SessionRef = {
-      projectId: metadata.projectId,
-      harnessAgentId: metadata.harnessAgentId,
-      sessionId: metadata.sessionId,
-    };
-    return repo.write({ ...metadata, title }).pipe(
-      Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
-      Effect.catchTag("StoreWriteError", () => Effect.void),
+  // title write must never block the prompt itself. Re-read while holding the
+  // metadata gate so a concurrent manual rename always wins rather than being
+  // overwritten from the prompt's stale snapshot. On a real write we publish
+  // `session.updated` before releasing the gate, preserving write/event order.
+  const readAndStampTitleFromFirstPrompt = (ref: SessionRef, parts: PromptInput["parts"]) =>
+    withMetadataMutation(
+      ref,
+      readChecked(ref).pipe(
+        Effect.flatMap((metadata) => {
+          if (metadata.title !== undefined) return Effect.succeed(metadata);
+          const title = deriveTitle(parts);
+          if (title === undefined) return Effect.succeed(metadata);
+          const updated = { ...metadata, title };
+          return repo.write(updated).pipe(
+            Effect.andThen(bus.publish({ ref, type: "session.updated", title })),
+            Effect.as(updated),
+            Effect.catchTag("StoreWriteError", () => Effect.succeed(metadata)),
+          );
+        }),
+      ),
     );
-  };
 
   return {
     create: (projectId, harnessAgentId, cwd, config) =>
@@ -431,10 +457,16 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     prepare: (ref, cwd) =>
-      readChecked(ref).pipe(
-        Effect.tap((metadata) =>
-          metadata.cwd === cwd ? Effect.void : repo.write({ ...metadata, cwd }),
+      withMetadataMutation(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) => {
+            if (metadata.cwd === cwd) return Effect.succeed(metadata);
+            const updated = { ...metadata, cwd };
+            return repo.write(updated).pipe(Effect.as(updated));
+          }),
         ),
+      ).pipe(
         Effect.flatMap((metadata) =>
           registry
             .get(ref.harnessAgentId)
@@ -460,33 +492,51 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     delete: (ref) =>
-      readChecked(ref).pipe(
-        Effect.andThen(manager.close(ref)),
-        Effect.andThen(bus.closeSession(ref, "session_deleted")),
-        Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
-        Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+      withMetadataMutation(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(manager.close(ref)),
+          Effect.andThen(bus.closeSession(ref, "session_deleted")),
+          Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
+          Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+        ),
       ),
 
-    rename: (ref, name) =>
-      resolveHarnessSessionId(ref).pipe(
-        Effect.andThen(bus.publish({ ref, type: "session.renamed", name })),
+    rename: (ref, title) =>
+      withMetadataMutation(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) =>
+            // Persist before announcing: a rename every client has applied but
+            // no record carries would come back on the next list load. A no-op
+            // rename writes and publishes nothing.
+            metadata.title === title
+              ? Effect.void
+              : repo
+                  .write({ ...metadata, title })
+                  .pipe(Effect.andThen(bus.publish({ ref, type: "session.renamed", title }))),
+          ),
+        ),
       ),
 
     archive: (ref, archived) =>
-      readChecked(ref).pipe(
-        Effect.flatMap((metadata) => {
-          const changed = (metadata.archived ?? false) !== archived;
-          const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
-          // Archive is also a lifecycle boundary: persist first so a failed
-          // metadata write never kills live work. Restore stays cold until open.
-          const close = archived
-            ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
-            : Effect.void;
-          const publish = changed
-            ? bus.publish({ ref, type: "session.archived", archived })
-            : Effect.void;
-          return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
-        }),
+      withMetadataMutation(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) => {
+            const changed = (metadata.archived ?? false) !== archived;
+            const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
+            // Archive is also a lifecycle boundary: persist first so a failed
+            // metadata write never kills live work. Restore stays cold until open.
+            const close = archived
+              ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
+              : Effect.void;
+            const publish = changed
+              ? bus.publish({ ref, type: "session.archived", archived })
+              : Effect.void;
+            return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
+          }),
+        ),
       ),
 
     // A pure read of our own records — display data is self-owned (title from
@@ -561,10 +611,9 @@ export const makeHarnessAgentSessionService = (deps: {
 
     prompt: (input) =>
       Effect.gen(function* () {
-        const metadata = yield* readChecked(input.ref);
         const userInput = yield* toUserInput(input.parts);
         // The first prompt names the session before it reaches the harness.
-        yield* stampTitleFromFirstPrompt(metadata, input.parts);
+        const metadata = yield* readAndStampTitleFromFirstPrompt(input.ref, input.parts);
         const messageId = input.messageId ?? (yield* newSessionId);
 
         // Broadcast the accepted prompt *before* the harness call so it always

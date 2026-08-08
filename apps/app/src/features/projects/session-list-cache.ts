@@ -44,6 +44,12 @@ const patchLists = (
   return found;
 };
 
+const invalidateLists = (queryClient: QueryClient, listKeys: ReadonlyArray<QueryKey>): void => {
+  for (const listKey of listKeys) {
+    void queryClient.invalidateQueries({ queryKey: listKey });
+  }
+};
+
 const removeFromLists = (
   queryClient: QueryClient,
   listKeys: ReadonlyArray<QueryKey>,
@@ -63,8 +69,8 @@ const removeFromLists = (
  * Session-scoped events contribute only their server-stamped `phase` (the
  * runtime stamps its post-event phase, so this copies rather than re-derives);
  * chunk events are skipped for traffic — their phase never differs from the
- * lifecycle event that opened the turn. A phase or title for a row we don't
- * hold is dropped or resolved by one list refetch — the next load carries it.
+ * lifecycle event that opened the turn. A title for a row we don't hold is
+ * resolved by one list refetch — the authoritative read carries the summary.
  */
 export const applySessionListEvent = (
   queryClient: QueryClient,
@@ -89,19 +95,21 @@ export const applySessionListEvent = (
       const found = patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
         event.title !== undefined ? { ...row, title: event.title } : row,
       );
-      if (!found) {
-        for (const listKey of listKeys) {
-          void queryClient.invalidateQueries({ queryKey: listKey });
-        }
-      }
+      if (!found) invalidateLists(queryClient, listKeys);
       break;
     }
-    case "session.renamed":
-      patchLists(queryClient, listKeys, event.ref.sessionId, (row) => ({
-        ...row,
-        title: event.name,
-      }));
+    case "session.renamed": {
+      // Same-title short-circuit as the phase patch above: a row already
+      // carrying this title keeps its identity, so duplicate delivery stays
+      // idempotent and does not re-render the whole list. A missing row means
+      // another client may have created and renamed the session before this
+      // client ever listed it, so pull the complete summary once.
+      const found = patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
+        row.title === event.title ? row : { ...row, title: event.title },
+      );
+      if (!found) invalidateLists(queryClient, listKeys);
       break;
+    }
     case "session.archived": {
       const sourceKey = listKeyFor(event.ref.projectId, !event.archived);
       const destinationKey = listKeyFor(event.ref.projectId, event.archived);
@@ -117,7 +125,29 @@ export const applySessionListEvent = (
     case "session.created":
       // The creating tab already seeded this row optimistically; a title-less
       // row elsewhere has nothing to show yet. Other clients pick the session
-      // up on its first prompt's `session.updated`, or their next list load.
+      // up on its first prompt's `session.updated`, a manual rename, or their
+      // next list load.
       break;
   }
+};
+
+/**
+ * Reconcile the initiating tab after a successful rename RPC. The firehose is
+ * still the primary path, but it has no replay: if this response lands during
+ * a subscription gap, patch the row that still carries the dialog's starting
+ * title. A different current title is treated as a newer event and preserved.
+ */
+export const reconcileSessionRenameSuccess = (
+  queryClient: QueryClient,
+  listKeyFor: ListKeyFor,
+  ref: ServerEvent["ref"],
+  previousTitle: string | undefined,
+  title: string,
+): void => {
+  const listKeys = [listKeyFor(ref.projectId, false), listKeyFor(ref.projectId, true)];
+  const found = patchLists(queryClient, listKeys, ref.sessionId, (row) => {
+    if (row.title === title || row.title !== previousTitle) return row;
+    return { ...row, title };
+  });
+  if (!found) invalidateLists(queryClient, listKeys);
 };

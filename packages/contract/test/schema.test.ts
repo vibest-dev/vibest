@@ -8,6 +8,8 @@ import {
   HarnessProbeInputSchema,
   HarnessProbeOutputSchema,
   ListSessionsInputSchema,
+  MAX_SESSION_TITLE_CHARS,
+  RenameSessionInputSchema,
   type ServerEvent,
   serverErrors,
   ServerErrorCodes,
@@ -46,6 +48,32 @@ describe("ArchiveSessionInput", () => {
   it("requires an explicit archived state", () => {
     expect(accepts(ArchiveSessionInputSchema, { ref, archived: true })).toBe(true);
     expect(accepts(ArchiveSessionInputSchema, { ref })).toBe(false);
+  });
+});
+
+describe("RenameSessionInput", () => {
+  it("accepts a trimmed, non-empty title within the bound", () => {
+    expect(accepts(RenameSessionInputSchema, { ref, title: "Login bug" })).toBe(true);
+    expect(
+      accepts(RenameSessionInputSchema, { ref, title: "x".repeat(MAX_SESSION_TITLE_CHARS) }),
+    ).toBe(true);
+  });
+
+  it("rejects a title that would render as a blank row", () => {
+    expect(accepts(RenameSessionInputSchema, { ref, title: "" })).toBe(false);
+    expect(accepts(RenameSessionInputSchema, { ref, title: "   " })).toBe(false);
+    // Untrimmed rather than blank, but the server stores the string as given.
+    expect(accepts(RenameSessionInputSchema, { ref, title: " Login bug " })).toBe(false);
+  });
+
+  it("rejects a title past the bound", () => {
+    expect(
+      accepts(RenameSessionInputSchema, { ref, title: "x".repeat(MAX_SESSION_TITLE_CHARS + 1) }),
+    ).toBe(false);
+  });
+
+  it("rejects the legacy name field", () => {
+    expect(accepts(RenameSessionInputSchema, { ref, name: "Login bug" })).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, FileSystem, type Scope, Stream } from "effect";
+import { Crypto, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -68,6 +68,8 @@ describe("HarnessAgentSessionService", () => {
       turn?: "open" | "finished";
       // The harness rejects every prompt (a turn is already running).
       promptFails?: boolean;
+      // Optional close hook for exercising lifecycle contention.
+      close?: (sessionId: string) => Promise<void>;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
@@ -124,7 +126,13 @@ describe("HarnessAgentSessionService", () => {
             ...(opts.history !== undefined ? { getMessages: Effect.succeed(opts.history) } : {}),
             close: Effect.sync(() => {
               spy.close.push(sessionId);
-            }),
+            }).pipe(
+              Effect.andThen(
+                opts.close === undefined
+                  ? Effect.void
+                  : Effect.promise(() => opts.close?.(sessionId) ?? Promise.resolve()),
+              ),
+            ),
           });
           const adapter = {
             id: "claude-code",
@@ -703,5 +711,126 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(listed).toHaveLength(1);
     expect(listed[0]?.title).toBeUndefined();
+  });
+
+  // The rename used to be broadcast-only, so every client showed the new title
+  // until the next list load read the old one back off disk.
+  it("rename persists the title across a restart", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.rename(ref, "Login bug");
+        const listed = yield* fixture.service.list("proj-a", false);
+        const restarted = yield* fixture.restart;
+        return { listed, afterRestart: yield* restarted.service.list("proj-a", false) };
+      }),
+    );
+    expect(result.listed[0]?.title).toBe("Login bug");
+    expect(result.afterRestart[0]?.title).toBe("Login bug");
+  });
+
+  it("publishes session.renamed per change, and nothing for a no-op rename", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "global" });
+            yield* fixture.service.rename(ref, "First title");
+            yield* fixture.service.rename(ref, "First title"); // no-op: no event
+            yield* fixture.service.rename(ref, "Second title");
+            const items = yield* Stream.runCollect(Stream.take(stream, 2));
+            return Array.from(items);
+          }),
+        );
+      }),
+    );
+    expect(
+      result.map((item) =>
+        item.type === "event" && item.event.type === "session.renamed"
+          ? item.event.title
+          : item.type,
+      ),
+    ).toEqual(["First title", "Second title"]);
+  });
+
+  // The title is the user's once they have chosen one: the first-prompt stamp
+  // only fills a record that has none.
+  it("keeps a hand-chosen title through the first prompt", async () => {
+    const listed = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.rename(ref, "Login bug");
+        yield* fixture.service.prompt({ ref, parts: [{ type: "text", text: "first" }] });
+        return yield* fixture.service.list("proj-a", false);
+      }),
+    );
+    expect(listed[0]?.title).toBe("Login bug");
+  });
+
+  it("preserves rename and archive changes made concurrently", async () => {
+    const stored = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* Effect.all(
+          [fixture.service.rename(ref, "Login bug"), fixture.service.archive(ref, true)],
+          { concurrency: "unbounded" },
+        );
+        return yield* fixture.repo.read(ref.projectId, ref.sessionId);
+      }),
+    );
+    expect(stored.title).toBe("Login bug");
+    expect(stored.archived).toBe(true);
+  });
+
+  it("keeps the manual title when rename races the first prompt stamp", async () => {
+    const listed = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* Effect.all(
+          [
+            fixture.service.prompt({ ref, parts: [{ type: "text", text: "automatic title" }] }),
+            fixture.service.rename(ref, "Login bug"),
+          ],
+          { concurrency: "unbounded" },
+        );
+        return yield* fixture.service.list("proj-a", false);
+      }),
+    );
+    expect(listed[0]?.title).toBe("Login bug");
+  });
+
+  it("does not let one slow session close stall another session's rename", async () => {
+    let releaseClose!: () => void;
+    let markCloseStarted!: () => void;
+    const closeStarted = new Promise<void>((resolve) => {
+      markCloseStarted = resolve;
+    });
+    const closeReleased = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+
+    const stored = await run(
+      {
+        close: async (sessionId) => {
+          if (sessionId !== "native-1") return;
+          markCloseStarted();
+          await closeReleased;
+        },
+      },
+      (fixture) =>
+        Effect.gen(function* () {
+          const slow = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+          const other = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+          const archiving = yield* Effect.forkChild(fixture.service.archive(slow, true));
+          yield* Effect.promise(() => closeStarted);
+          yield* fixture.service.rename(other, "Still responsive");
+          releaseClose();
+          yield* Fiber.join(archiving);
+          return yield* fixture.repo.read(other.projectId, other.sessionId);
+        }),
+    );
+
+    expect(stored.title).toBe("Still responsive");
   });
 });

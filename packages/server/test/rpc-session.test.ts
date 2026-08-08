@@ -174,7 +174,7 @@ describe("session router", () => {
     }
   });
 
-  it("lists, archives, restores, and deletes sessions", async () => {
+  it("lists, renames, archives, restores, and deletes sessions", async () => {
     const { client, workspace, dispose } = await setup();
     try {
       const project = await client.project.create({ path: workspace });
@@ -187,6 +187,10 @@ describe("session router", () => {
       expect(active[0]?.sessionId).toBe(ref.sessionId);
       expect(active[0]?.status?.phase).toBeDefined();
       expect(active[0]?.archived).toBe(false);
+
+      await client.session.rename({ ref, title: "Login bug" });
+      const renamed = await client.session.list({ projectId: project.id });
+      expect(renamed[0]?.title).toBe("Login bug");
 
       await client.session.archive({ ref, archived: true });
       const archived = await client.session.list({ projectId: project.id, archived: true });
@@ -208,6 +212,35 @@ describe("session router", () => {
       await client.session.delete({ ref });
       const empty = await client.session.list({ projectId: project.id, archived: false });
       expect(empty).toHaveLength(0);
+    } finally {
+      await dispose();
+    }
+  });
+
+  // The renaming client can repaint its own row optimistically; this is the
+  // path it cannot cover — a second client learning the new title without
+  // being told to go re-read the list. The firehose carries the title itself,
+  // which is what lets the fold patch in place instead of invalidating.
+  it("announces a rename on the global firehose, carrying the new title", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+
+      // Subscribed before the rename: the live stream has no replay, so an
+      // event this observer misses is an event it never learns about.
+      const observer = await client.session.subscribe({ scope: { kind: "global" } });
+      await client.session.rename({ ref, title: "Login bug" });
+
+      let announced: string | undefined;
+      for await (const item of observer) {
+        if (item.type !== "event") continue;
+        if (item.event.type === "session.renamed") {
+          announced = item.event.title;
+          break;
+        }
+      }
+      expect(announced).toBe("Login bug");
     } finally {
       await dispose();
     }
