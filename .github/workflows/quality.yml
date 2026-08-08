@@ -26,20 +26,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup project toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          node-version-file: ".node-version"
-          architecture: x64
-          package-manager-cache: false
-
-      # Activate the exact pnpm release (including its integrity hash) declared
-      # by package.json, after setup-node has selected the project's Node 24.
-      - name: Activate project package manager
-        run: |
-          corepack enable
-          corepack install
-        shell: bash
+          version: "2026.8.3"
+          install_args: "--locked"
 
       - name: Verify CI environment
         run: |
@@ -48,16 +39,15 @@ jobs:
           test "$VERSION_ID" = "24.04"
           test "$(uname -m)" = "x86_64"
 
-          expected_node="$(tr -d '[:space:]' < .node-version)"
+          expected_node="$(mise current node)"
           actual_node="$(node --version)"
           actual_node="${actual_node#v}"
-          case "$actual_node" in
-            "$expected_node" | "$expected_node".*) ;;
-            *) echo "Expected Node $expected_node.x, got $actual_node" >&2; exit 1 ;;
-          esac
+          test "$actual_node" = "$expected_node"
 
-          expected_pnpm="$(node -p "require('./package.json').packageManager.match(/^pnpm@([^+]+)/)[1]")"
+          expected_pnpm="$(mise current pnpm)"
+          metadata_pnpm="$(node -p "require('./package.json').packageManager.match(/^pnpm@([^+]+)/)[1]")"
           actual_pnpm="$(pnpm --version)"
+          test "$metadata_pnpm" = "$expected_pnpm"
           test "$actual_pnpm" = "$expected_pnpm"
 
           printf 'Ubuntu %s, Node %s, pnpm %s, %s\n' \
