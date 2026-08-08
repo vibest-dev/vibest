@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@earendil-works/pi-coding-agent": "0.80.7",
     "@effect/platform-node": "catalog:",
     "@orpc/contract": "catalog:orpc",
     "@orpc/server": "catalog:orpc",

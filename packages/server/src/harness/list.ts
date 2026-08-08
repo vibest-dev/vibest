@@ -13,9 +13,9 @@ import { HarnessAgentRegistry, type HarnessAgentRegistryShape } from "./registry
  * It is not free, though, and the client awaits it before first paint:
  * claude-code's check spawns `claude --version` (~45 ms) on every call, and
  * nothing memoizes it. Worth caching per process — see the note in
- * `checkClaudeAvailability`.
+ * `claudeAvailability`.
  *
- * Anything that needs a CLI to answer belongs to {@link HarnessProbeService}
+ * Anything that needs a CLI to answer belongs to {@link HarnessModelsService}
  * instead. That split is about acquisition cost and failure mode only — it
  * says nothing about who owns the values' meaning (both endpoints can carry
  * normalized and opaque settings, see docs/design/harness-concept-ownership.md).
@@ -47,7 +47,7 @@ export const makeHarnessList = (registry: HarnessAgentRegistryShape) => ({
                 ),
               ),
             );
-            const availability = yield* adapter.checkAvailability;
+            const availability = yield* adapter.availability;
             return {
               id: descriptor.id,
               name: descriptor.name,

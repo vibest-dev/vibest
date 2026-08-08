@@ -10,6 +10,7 @@ import { v7 as uuid } from "uuid";
 import {
   AgentRequestUnavailable,
   ClaudeSdkError,
+  type ExecutableNotFound,
   HarnessSessionNotFound,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -74,9 +75,18 @@ type ResumeDecision =
 
 export interface ClaudeCodeAgent {
   /**
+   * The absolute path this agent hands the SDK, resolved once and cached.
+   *
+   * Exposed so the adapter's `availability` answers off the *same* resolve
+   * the SDK launches — see the note in `harness/executable.ts` on why one
+   * search, not two, is the invariant here.
+   */
+  readonly executable: Effect.Effect<string, ExecutableNotFound>;
+  /**
    * The models a session started in `cwd` could run, read without opening a
    * session. The catalog follows the user's account and the resolved CLI, so
-   * it can only be probed — never hardcoded. The directory is not incidental:
+   * it can only be read from the CLI — never hardcoded. The directory is not
+   * incidental:
    * a project's `.claude/settings.json` can remap what an id resolves to, so
    * the same `sonnet` is a different model in two projects.
    */
@@ -179,27 +189,32 @@ export const makeClaudeCodeAgent = ({
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     // Locating the `claude` binary reads the filesystem. Bind the platform
-    // services once here so the agent's own methods stay R-free; a machine
-    // with no Claude Code install is a defect at this point, since the
-    // adapter's availability check has already gated on it.
+    // services once here so the agent's own methods stay R-free.
     // `Effect.provideService`, not `Effect.provide(Effect.context())`: the
     // latter captures the whole layer-build context — including the `Scope`
     // above — and wins the merge, so it would override a caller's scope.
     const fileSystem = yield* FileSystem.FileSystem;
     // Cached: the answer is fixed for the process, and both `buildSession` and
     // `listModels` ask, so an uncached Effect re-walks PATH on every session.
-    const claudeExecutable = yield* Effect.cached(
+    //
+    // A miss is a failure, not a defect. It used to die on an invariant
+    // ("the executable vanished after the availability check gated on it") —
+    // but the model-list path reached this without ever passing that gate, so
+    // the invariant was false and an uninstalled harness took the endpoint
+    // down instead of degrading itself. The gate is real now
+    // (`HarnessAgentRegistry.require`), and even so this stays recoverable:
+    // a binary that is renamed, uninstalled or on an unmounted network share
+    // between the check and the call is an environment fault, and both callers
+    // already carry `ClaudeSdkError`.
+    const executable = yield* Effect.cached(
       resolveClaudeExecutable({ env }).pipe(
-        Effect.catchTag("ClaudeExecutableNotFound", (cause) =>
-          Effect.die(
-            new Error(
-              "invariant: the claude executable vanished after the availability check gated on it",
-              { cause },
-            ),
-          ),
-        ),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
       ),
+    );
+    // The same cached answer, wearing the error type this file's two callers
+    // already carry — not a second resolve.
+    const claudeExecutable = Effect.mapError(executable, (cause) =>
+      sdkError("resolve-executable", cause),
     );
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
@@ -530,10 +545,10 @@ export const makeClaudeCodeAgent = ({
     // `settingSources` it is what makes the answer specific to the project the
     // user is about to work in: a project that sets
     // `env.ANTHROPIC_DEFAULT_SONNET_MODEL` (or runs through Bedrock/Vertex)
-    // keeps the same ids but changes what they resolve to, so a catalog probed
+    // keeps the same ids but changes what they resolve to, so a catalog read
     // in some other directory is a catalog for someone else's project.
     //
-    // Two things *are* stripped, because a probe should cost as little as a
+    // Two things *are* stripped, because a question should cost as little as a
     // question. Medians of five runs on a developer machine:
     //
     //   4.3s  a session's own options
@@ -572,14 +587,14 @@ export const makeClaudeCodeAgent = ({
             catch: (cause) => sdkError("list-models", cause),
           }),
         ),
-        (probe) =>
+        (session) =>
           Effect.tryPromise({
-            try: () => probe.supportedModels(),
+            try: () => session.supportedModels(),
             catch: (cause) => sdkError("list-models", cause),
           }),
-        // Returning the generator is what tears the child process down; a probe
+        // Returning the generator is what tears the child process down; a read
         // that leaked one per call would be a process leak per directory.
-        (probe) => Effect.promise(() => probe.return()).pipe(Effect.ignore),
+        (session) => Effect.promise(() => session.return()).pipe(Effect.ignore),
       );
 
     return {
@@ -751,5 +766,6 @@ export const makeClaudeCodeAgent = ({
             yield* closeSession(session);
           }),
       },
+      executable,
     } satisfies ClaudeCodeAgent;
   });

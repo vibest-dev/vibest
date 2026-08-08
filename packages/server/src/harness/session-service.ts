@@ -290,8 +290,14 @@ export const makeHarnessAgentSessionService = (deps: {
   readonly bus: EventBusShape;
   /** Mints a session id; RNG failure is a defect, so the effect never fails. */
   readonly newSessionId: Effect.Effect<string>;
+  /**
+   * Bound here so the service's own shape stays `R`-free. Only the registry's
+   * availability gate needs it — the same trade `HarnessListLayer` and the
+   * session manager already make.
+   */
+  readonly platform: Context.Context<FileSystem.FileSystem>;
 }): HarnessAgentSessionServiceShape => {
-  const { manager, registry, repo, bus, newSessionId } = deps;
+  const { manager, registry, repo, bus, newSessionId, platform } = deps;
 
   // The permission mode is our closed vocabulary, so membership in the
   // harness's declared subset is checked here — the boundary between the
@@ -331,7 +337,8 @@ export const makeHarnessAgentSessionService = (deps: {
     ReadonlyArray<UIMessage>,
     ResumeSessionError | CapabilityUnsupported | SessionClosed | AgentOperationError
   > =>
-    registry.get(ref.harnessAgentId).pipe(
+    registry.require(ref.harnessAgentId).pipe(
+      Effect.provide(platform),
       Effect.flatMap((adapter) => {
         const cold = adapter.getMessages;
         if (cold) return cold(harnessSessionId, cwd);
@@ -696,11 +703,13 @@ export const HarnessAgentSessionServiceLayer: Layer.Layer<
     const paths = yield* Paths;
     const crypto = yield* Crypto.Crypto;
     const repo = yield* makeHarnessAgentSessionRepository(paths.sessionsDir);
+    const platform = yield* Effect.context<FileSystem.FileSystem>();
     return makeHarnessAgentSessionService({
       manager,
       registry,
       repo,
       bus,
+      platform,
       // A platform RNG that cannot produce a uuid is a defect, not a domain
       // failure — keep it out of the service's error channel. Tag-specific so
       // a future recoverable error on this channel stays typed instead of dying.

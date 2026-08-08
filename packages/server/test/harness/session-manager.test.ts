@@ -108,7 +108,7 @@ const makeFixture = Effect.gen(function* () {
   const adapter = {
     id: "claude-code",
     descriptor: { id: "claude-code", name: "Claude Code" },
-    checkAvailability: Effect.succeed({ available: true }),
+    availability: Effect.succeed({ available: true }),
     permissionModes: [],
     open: () => makeRuntime("created-session"),
     resume: ({ sessionId }) =>
@@ -138,7 +138,7 @@ const makeFixture = Effect.gen(function* () {
 
 type Fixture = Effect.Success<typeof makeFixture>;
 
-/** Liveness probe: `get` succeeds while a session has a runtime, fails once torn down. */
+/** Liveness check: `get` succeeds while a session has a runtime, fails once torn down. */
 const isActive = (fixture: Fixture, ref: SessionRef) =>
   fixture.manager.get(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess));
 

@@ -1,70 +1,104 @@
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 
-import { findExecutable, type FindExecutableDeps } from "../../src/harness/executable";
+import { executableAt, searchInstallDirs } from "../../src/harness/executable";
 import { fakeExecutables, fakeStats, fileInfo } from "../fake-file-system";
 
-// The whole point of this resolver is to answer the same question the OS will
-// answer when a transport calls `spawn("codex")`. Every test here is about that
-// agreement: anything it finds that spawn wouldn't turns a clear "not found on
-// PATH" into an opaque ENOENT once the user picks the harness.
-const resolve = (
-  command: string,
-  deps: FindExecutableDeps,
+// The search primitive every harness's own resolver ends with. Its result is
+// what the transport spawns — that is the property these tests are really
+// about. It is also what changed: the search used to be PATH-only *because*
+// spawn re-resolved a bare name and would have disagreed with anything found
+// elsewhere. Now the two are the same answer, so the search is allowed to look
+// where a stripped environment's PATH cannot.
+const search = (
+  deps: Parameters<typeof searchInstallDirs>[1],
   ...installed: ReadonlyArray<string>
-): string | undefined =>
-  Effect.runSync(findExecutable(command, deps).pipe(Effect.provide(fakeExecutables(...installed))));
+) =>
+  searchInstallDirs("codex", { home: "/home/din", ...deps }).pipe(
+    Effect.provide(fakeExecutables(...installed)),
+  );
 
-it("resolves a bare command against PATH, in PATH order", () => {
-  const resolved = resolve(
-    "codex",
-    { env: { PATH: "/first:/second" }, platform: "darwin" },
-    "/first/codex",
-    "/second/codex",
+it("resolves against PATH, in PATH order", () => {
+  const resolved = Effect.runSync(
+    search(
+      { env: { PATH: "/first:/second" }, platform: "darwin" },
+      "/first/codex",
+      "/second/codex",
+    ),
   );
 
   expect(resolved).toBe("/first/codex");
 });
 
-it("does not look outside PATH, because spawn will not either", () => {
-  const resolved = resolve(
-    "codex",
-    { env: { PATH: "/usr/bin" }, platform: "darwin" },
-    // Installed, but somewhere this process's PATH does not mention.
-    "/Users/someone/.local/bin/codex",
+// The regression this whole change exists for: a systemd unit / launchd app /
+// non-interactive ssh gets a PATH that never saw a login shell, and every
+// bun-, npm- or native-installer-managed CLI lives outside it.
+it("finds a CLI installed outside a stripped PATH", () => {
+  const resolved = Effect.runSync(
+    search({ env: { PATH: "/usr/bin:/bin" }, platform: "darwin" }, "/home/din/.bun/bin/codex"),
   );
 
-  expect(resolved).toBeUndefined();
+  expect(resolved).toBe("/home/din/.bun/bin/codex");
 });
 
-it("takes an absolute command as an override and only checks it is runnable", () => {
-  const deps = { env: { PATH: "" }, platform: "darwin" as const };
+it("still lets PATH win over an install directory", () => {
+  const resolved = Effect.runSync(
+    search(
+      { env: { PATH: "/usr/bin" }, platform: "darwin" },
+      "/usr/bin/codex",
+      "/home/din/.bun/bin/codex",
+    ),
+  );
 
-  expect(resolve("/opt/codex", deps, "/opt/codex")).toBe("/opt/codex");
-  expect(resolve("/opt/missing", deps, "/opt/codex")).toBeUndefined();
+  expect(resolved).toBe("/usr/bin/codex");
 });
 
 // Paths stay posix-shaped because `node:path` follows the host running the
 // test, not the `platform` we pass in; only the extension probing is under
 // test here, and that is the part `platform` actually drives.
 it("finds the .cmd shim npm installs on Windows, not just .exe", () => {
-  const resolved = resolve("codex", { env: { PATH: "/bin" }, platform: "win32" }, "/bin/codex.cmd");
+  const resolved = Effect.runSync(
+    search({ env: { PATH: "/bin" }, platform: "win32" }, "/bin/codex.cmd"),
+  );
 
   expect(resolved).toBe("/bin/codex.cmd");
 });
 
-it("reports a missing command as undefined rather than guessing a path", () => {
-  expect(resolve("pi", { env: { PATH: "/usr/bin:/bin" }, platform: "darwin" })).toBeUndefined();
+// `undefined`, not a failure: what to say about "nowhere on this machine" is
+// the calling harness's own wording, and some of them have levels left to try.
+it("reports nothing found rather than failing", () => {
+  const resolved = Effect.runSync(search({ env: { PATH: "/usr/bin:/bin" }, platform: "darwin" }));
+
+  expect(resolved).toBeUndefined();
 });
 
 // A directory carries the same execute bits a binary does, and `spawn` cannot
 // run one — so the mode check alone would report a false hit.
 it("ignores a directory that shares the command's name", () => {
   const resolved = Effect.runSync(
-    findExecutable("codex", { env: { PATH: "/bin" }, platform: "darwin" }).pipe(
-      Effect.provide(fakeStats({ "/bin/codex": fileInfo("Directory", 0o755) })),
-    ),
+    searchInstallDirs("codex", {
+      env: { PATH: "/bin" },
+      platform: "darwin",
+      home: "/home/din",
+    }).pipe(Effect.provide(fakeStats({ "/bin/codex": fileInfo("Directory", 0o755) }))),
   );
 
   expect(resolved).toBeUndefined();
+});
+
+it("verifies a single nominated candidate", () => {
+  // The level a harness nominates itself — a copy inside its own package.
+  const present = Effect.runSync(
+    executableAt("/app/node_modules/.bin/pi", { platform: "darwin" }).pipe(
+      Effect.provide(fakeExecutables("/app/node_modules/.bin/pi")),
+    ),
+  );
+  const absent = Effect.runSync(
+    executableAt("/app/node_modules/.bin/pi", { platform: "darwin" }).pipe(
+      Effect.provide(fakeExecutables()),
+    ),
+  );
+
+  expect(present).toBe("/app/node_modules/.bin/pi");
+  expect(absent).toBeUndefined();
 });

@@ -9,7 +9,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelsLayer,
   makeHarnessAgentRegistry,
   type HarnessAgentAdapter,
 } from "../src/harness";
@@ -49,7 +49,10 @@ export async function makeRpcTestHarness(
     Layer.provide(registryLayer),
     Layer.provide(NodePlatformLayer),
   );
-  const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
+  const modelsLayer = HarnessModelsLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(NodePlatformLayer),
+  );
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
@@ -58,7 +61,7 @@ export async function makeRpcTestHarness(
       projectLayer,
       registryLayer,
       listLayer,
-      probeLayer,
+      modelsLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
       NodePlatformLayer,
     ),

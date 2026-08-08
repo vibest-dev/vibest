@@ -7,7 +7,7 @@ import { describe, expect } from "vitest";
 import {
   type AvailabilityDeps,
   type AvailabilityResult,
-  checkClaudeAvailability,
+  claudeAvailability,
   type ResolveDeps,
   resolveClaudeExecutable,
 } from "../../../src/harness/claude-code/executable";
@@ -108,7 +108,7 @@ describe("resolveClaudeExecutable", () => {
   });
 });
 
-describe("checkClaudeAvailability (version floor)", () => {
+describe("claudeAvailability (version floor)", () => {
   /** A resolvable executable plus injectable version reader / floor. */
   function availDeps(overrides: AvailabilityDeps = {}): AvailabilityDeps {
     return {
@@ -121,9 +121,7 @@ describe("checkClaudeAvailability (version floor)", () => {
 
   /** The check reads the platform only through the resolver; a bare fake will do. */
   const check = (overrides: AvailabilityDeps = {}, ...installed: ReadonlyArray<string>) =>
-    checkClaudeAvailability(availDeps(overrides)).pipe(
-      Effect.provide(fakeExecutables(...installed)),
-    );
+    claudeAvailability(availDeps(overrides)).pipe(Effect.provide(fakeExecutables(...installed)));
 
   /** Unconditional reason extractor so assertions never sit behind an `if`. */
   const reasonOf = (result: AvailabilityResult): string => (result.available ? "" : result.reason);

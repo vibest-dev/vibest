@@ -13,7 +13,7 @@ import {
 } from "@/features/chat/harness/reasoning-efforts";
 
 // Presentational reasoning-reasoningEffort picker. Its candidates cascade from the
-// selected model's probed traits — not from the harness — so the caller passes
+// selected model's own traits — not from the harness — so the caller passes
 // them in; an empty list means the current model has no reasoningEffort switch and no
 // control is rendered. Labels and ordering are client-owned: reasoningEffort names are
 // vibest's vocabulary, like permission modes.

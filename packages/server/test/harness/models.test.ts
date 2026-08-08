@@ -1,0 +1,178 @@
+import assert from "node:assert/strict";
+
+import { it } from "@effect/vitest";
+import { Cause, Effect, Exit, Ref } from "effect";
+
+import type { HarnessAgentAdapter } from "../../src/harness/adapter";
+import { AgentUnavailable, ModelListFailed } from "../../src/harness/errors";
+import { makeHarnessModels } from "../../src/harness/models";
+import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { NodePlatformLayer } from "../platform";
+
+const adapter = (over: {
+  id: HarnessAgentAdapter["id"];
+  listModels?: HarnessAgentAdapter["listModels"];
+}): HarnessAgentAdapter => ({
+  id: over.id,
+  descriptor: { id: over.id, name: over.id },
+  availability: Effect.succeed({ available: true }),
+  permissionModes: [],
+  ...(over.listModels ? { listModels: over.listModels } : {}),
+  open: () => Effect.die("reading models must not open a session"),
+  resume: () => Effect.die("reading models must not resume a session"),
+  getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
+});
+
+/** Records every cwd it is asked about, and yields so callers can actually race. */
+const recordingList = (seen: Ref.Ref<ReadonlyArray<string>>) => (cwd: string) =>
+  Ref.update(seen, (current) => [...current, cwd]).pipe(
+    Effect.andThen(Effect.yieldNow),
+    Effect.as([{ id: "sonnet", label: "Sonnet" }]),
+  );
+
+it.effect("answers for the directory it was asked about, grouped under the built-in provider", () =>
+  Effect.gen(function* () {
+    const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
+    ).pipe(Effect.provide(NodePlatformLayer));
+
+    const result = yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
+
+    assert.deepEqual(yield* Ref.get(seen), ["/work/app"]);
+    // Models never leave their provider: the built-in provider carries the
+    // harness's own id, which is the other half of every providerId/modelId pair.
+    assert.equal(result.providers[0]?.id, "claude-code");
+    assert.equal(result.providers[0]?.models[0]?.id, "sonnet");
+  }),
+);
+
+it.effect("gives concurrent callers one CLI spawn, not one each", () =>
+  Effect.gen(function* () {
+    const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
+    ).pipe(Effect.provide(NodePlatformLayer));
+    const ask = models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
+
+    // Two tabs on the same directory, arriving before the first answer settles.
+    const [first, second] = yield* Effect.all([ask, ask], { concurrency: "unbounded" });
+
+    assert.equal((yield* Ref.get(seen)).length, 1);
+    assert.equal(first.providers[0]?.models[0]?.id, "sonnet");
+    assert.equal(second.providers[0]?.models[0]?.id, "sonnet");
+  }),
+);
+
+it.effect("treats two directories as two questions, and does not serialise them", () =>
+  Effect.gen(function* () {
+    const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
+    ).pipe(Effect.provide(NodePlatformLayer));
+
+    yield* Effect.all(
+      [
+        models.list({ harnessAgentId: "claude-code", cwd: "/work/a" }),
+        models.list({ harnessAgentId: "claude-code", cwd: "/work/b" }),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    // Both ran; if the registration lock covered the lookups, the second would
+    // have queued behind the first rather than interleaving.
+    assert.deepEqual(Array.from(yield* Ref.get(seen)).toSorted(), ["/work/a", "/work/b"]);
+  }),
+);
+
+it.effect("normalises the directory, so one answer serves its aliases", () =>
+  Effect.gen(function* () {
+    const seen = yield* Ref.make<ReadonlyArray<string>>([]);
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: recordingList(seen) })]),
+    ).pipe(Effect.provide(NodePlatformLayer));
+
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/app/" });
+    yield* models.list({ harnessAgentId: "claude-code", cwd: "/work/nested/../app" });
+
+    assert.equal((yield* Ref.get(seen)).length, 1);
+  }),
+);
+
+it.effect("caches a success but retries a failure", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make(0);
+    // Fails once, then succeeds — the shape of an expired login the user fixes.
+    const flaky = () =>
+      Ref.updateAndGet(calls, (n) => n + 1).pipe(
+        Effect.flatMap((n) =>
+          n > 1
+            ? Effect.succeed([{ id: "sonnet" }])
+            : Effect.fail(new ModelListFailed({ harnessAgentId: "claude-code", cause: "boom" })),
+        ),
+      );
+    const models = yield* makeHarnessModels(
+      makeHarnessAgentRegistry([adapter({ id: "claude-code", listModels: flaky })]),
+    ).pipe(Effect.provide(NodePlatformLayer));
+    const ask = models.list({ harnessAgentId: "claude-code", cwd: "/work/app" });
+
+    // A cached failure would pin "no models" for the whole TTL, so the user
+    // would have to wait it out after logging back in.
+    yield* Effect.result(ask);
+    assert.equal((yield* ask).providers[0]?.models[0]?.id, "sonnet");
+    assert.equal(yield* Ref.get(calls), 2);
+
+    // The success, on the other hand, is worth keeping: no second spawn.
+    yield* ask;
+    assert.equal(yield* Ref.get(calls), 2);
+  }),
+);
+
+it.effect("answers an empty provider list for a harness with no catalogue", () =>
+  Effect.gen(function* () {
+    const models = yield* makeHarnessModels(makeHarnessAgentRegistry([adapter({ id: "pi" })])).pipe(
+      Effect.provide(NodePlatformLayer),
+    );
+
+    // Not a failure: pi genuinely has no models, and the client renders no
+    // picker rather than an error.
+    assert.deepEqual(yield* models.list({ harnessAgentId: "pi", cwd: "/work/app" }), {
+      providers: [],
+    });
+  }),
+);
+
+it.effect("never asks an unavailable harness for its catalogue", () =>
+  Effect.gen(function* () {
+    // The bug this gate exists for: with the CLI absent, `list` correctly
+    // reported the harness greyed out while this path walked into the adapter
+    // anyway and hit its missing binary — which claude-code answers with a
+    // defect, not a failure, taking the whole endpoint down every few seconds
+    // instead of degrading the one harness.
+    const asked = yield* Ref.make(false);
+    const uninstalled: HarnessAgentAdapter = {
+      ...adapter({
+        id: "claude-code",
+        listModels: () => Ref.set(asked, true).pipe(Effect.as([])),
+      }),
+      availability: Effect.succeed({ available: false, reason: "not on PATH" }),
+    };
+
+    const models = yield* makeHarnessModels(makeHarnessAgentRegistry([uninstalled])).pipe(
+      Effect.provide(NodePlatformLayer),
+    );
+
+    const exit = yield* models
+      .list({ harnessAgentId: "claude-code", cwd: "/work/app" })
+      .pipe(Effect.exit);
+
+    assert.equal(yield* Ref.get(asked), false);
+    // A typed failure, not a defect: the route maps it to UNSUPPORTED, which is
+    // what keeps "not installed" distinct from "the CLI broke while answering".
+    assert.equal(Exit.isFailure(exit) && Cause.hasFails(exit.cause), true);
+    assert.equal(Exit.isFailure(exit) && Cause.hasDies(exit.cause), false);
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+    assert.ok(error instanceof AgentUnavailable && error.reason === "not on PATH");
+  }),
+);

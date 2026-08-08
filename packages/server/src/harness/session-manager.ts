@@ -12,7 +12,6 @@ import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
 import {
   AgentOpenError,
   type AgentOperationError,
-  AgentUnavailable,
   type CreateSessionError,
   HarnessSessionNotFound,
   type ResumeSessionError,
@@ -213,24 +212,13 @@ export const makeHarnessAgentSessionManager = (
         }),
       );
 
+    // The gate itself lives in the registry (one of it, for every caller); all
+    // this adds is the platform the manager already holds, so the shape it
+    // exposes stays `R`-free.
     const checkAvailable = (harnessAgentId: HarnessAgentId) =>
-      registry.get(harnessAgentId).pipe(
-        Effect.tap((adapter) =>
-          adapter.checkAvailability.pipe(
-            Effect.flatMap((availability) =>
-              availability.available
-                ? Effect.void
-                : Effect.fail(
-                    new AgentUnavailable({
-                      harnessAgentId,
-                      reason: availability.reason ?? "Unavailable",
-                    }),
-                  ),
-            ),
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-          ),
-        ),
-      );
+      registry
+        .require(harnessAgentId)
+        .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
 
     const acquireOpen = (
       harnessAgentId: HarnessAgentId,

@@ -11,7 +11,7 @@ import {
 // a session (ChatModelSelect binds it to ChatSession context) and on the draft
 // surface (URL search params, no session yet).
 //
-// The options come from the probed providers, never from a list in here: the
+// The options come from the fetched providers, never from a list in here: the
 // catalogue follows the signed-in account and the installed CLI, so a hardcoded
 // one is a claim the provider never made. Model ids are opaque and atomic —
 // this component renders `label ?? id` and echoes the providerId/modelId pair

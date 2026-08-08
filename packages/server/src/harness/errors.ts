@@ -40,10 +40,19 @@ export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFou
   {
     harnessAgentId: HarnessAgentIdSchema,
     executable: Schema.String,
+    /**
+     * The harness's own remedy sentence (how to install it, which env var
+     * overrides it). Carried on the error rather than composed at each
+     * display site so the log line, the RPC message and the greyed-out
+     * harness's tooltip are all the same words.
+     */
+    reason: Schema.optionalKey(Schema.String),
   },
 ) {
   override get message() {
-    return `Executable '${this.executable}' for '${this.harnessAgentId}' was not found.`;
+    return (
+      this.reason ?? `Executable '${this.executable}' for '${this.harnessAgentId}' was not found.`
+    );
   }
 }
 
@@ -228,15 +237,12 @@ export class PermissionModeUnsupported extends Schema.TaggedErrorClass<Permissio
   }
 }
 
-export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
-  "CapabilityProbeFailed",
-  {
-    harnessAgentId: HarnessAgentIdSchema,
-    cause: Schema.Defect(),
-  },
-) {
+export class ModelListFailed extends Schema.TaggedErrorClass<ModelListFailed>()("ModelListFailed", {
+  harnessAgentId: HarnessAgentIdSchema,
+  cause: Schema.Defect(),
+}) {
   override get message() {
-    return `Failed to probe '${this.harnessAgentId}' capabilities: ${causeSummary(this.cause)}`;
+    return `Failed to read '${this.harnessAgentId}' models: ${causeSummary(this.cause)}`;
   }
 }
 

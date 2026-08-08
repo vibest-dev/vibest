@@ -22,7 +22,7 @@ export function Chat({
   /**
    * The session's working directory. Resolved by the route, not here: that
    * lookup belongs to the projects feature, and features don't reach sideways.
-   * Undefined until the project list lands, which only delays the model probe.
+   * Undefined until the project list lands, which only delays the model list.
    */
   cwd: string | undefined;
 }) {

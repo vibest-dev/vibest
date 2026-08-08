@@ -6,6 +6,7 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import {
+  type AvailabilityResult,
   type HarnessAgentAdapter,
   type HarnessAgentRuntime,
   type SessionInfoResult,
@@ -15,14 +16,13 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
-  CapabilityProbeFailed,
+  ModelListFailed,
   CodexRpcError,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
 import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
-import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { CodexAgent } from "./agent";
 import { turnsToUIMessages } from "./history";
@@ -325,10 +325,7 @@ const makeRuntime = (
     } satisfies HarnessAgentRuntime;
   });
 
-export const makeCodexAdapter = (
-  agent: CodexAgent,
-  options: { readonly executablePath?: string } = {},
-): HarnessAgentAdapter => ({
+export const makeCodexAdapter = (agent: CodexAgent): HarnessAgentAdapter => ({
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
   permissionModes: CODEX_PERMISSION_MODE_IDS,
@@ -340,20 +337,27 @@ export const makeCodexAdapter = (
   // it answers for the whole app-server. Taking the argument anyway keeps the
   // seam uniform, so callers never branch on which harness cares, and the day
   // codex grows per-project config this is a one-line change here.
-  probeModels: (_cwd) =>
+  listModels: (_cwd) =>
     agent.listModels.pipe(
       // The catalog's `isDefault` flag is deliberately not forwarded: it is
       // the API's suggestion, while an unconfigured session actually runs
-      // whatever the user's own config.toml says — which is not probeable.
+      // whatever the user's own config.toml says — which we cannot ask for.
       // The default is expressed by absence, not by a marker.
       Effect.map((models) => models.map(toModelInfo)),
-      Effect.mapError((cause) => new CapabilityProbeFailed({ harnessAgentId: "codex", cause })),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "codex", cause })),
     ),
-  // A PATH lookup, not a spawn: negotiate has to stay cheap on machines where
+  // A filesystem walk, not a spawn: this has to stay cheap on machines where
   // codex simply isn't installed, which is the common case.
-  checkAvailability: findExecutable(options.executablePath ?? "codex").pipe(
-    Effect.map((found) =>
-      found ? { available: true } : { available: false, reason: "Codex was not found on PATH." },
+  //
+  // Answered off the agent's own cached resolve, so "available" and "what the
+  // transport spawns" cannot disagree — the reason this is not a second lookup
+  // is in `harness/executable.ts`.
+  // `suspend`, because building an adapter must stay a pure declaration that
+  // never touches its agent (`adapter-capabilities.test.ts` locks this).
+  availability: Effect.suspend(() => agent.executable).pipe(
+    Effect.as({ available: true } as AvailabilityResult),
+    Effect.catch((cause) =>
+      Effect.succeed({ available: false, reason: cause.message } as AvailabilityResult),
     ),
   ),
   open: (input) =>

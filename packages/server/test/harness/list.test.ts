@@ -19,16 +19,16 @@ const adapter = (over: {
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.id },
-  checkAvailability: Effect.succeed(
+  availability: Effect.succeed(
     over.available === false
       ? { available: false, ...(over.reason ? { reason: over.reason } : {}) }
       : { available: true },
   ),
   permissionModes: ["ask"],
   defaultPermissionMode: "ask",
-  // Listing must never reach for one of these: declaring a model probe
+  // Listing must never reach for one of these: declaring a model catalogue
   // changes nothing about what this call returns.
-  probeModels: () => Effect.die("list must not probe models"),
+  listModels: () => Effect.die("list must not read the model catalogue"),
   open: () => Effect.die("list must not open a session"),
   resume: () => Effect.die("list must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
@@ -97,6 +97,7 @@ it.effect("a registry get that misses a listed id dies with the id in the defect
     const broken: HarnessAgentRegistryShape = {
       list: Effect.succeed([{ id: "claude-code", name: "claude-code" }]),
       get: (harnessAgentId) => Effect.fail(new HarnessAgentNotFound({ harnessAgentId })),
+      require: (harnessAgentId) => Effect.fail(new HarnessAgentNotFound({ harnessAgentId })),
     };
 
     const exit = yield* makeHarnessList(broken).list.pipe(

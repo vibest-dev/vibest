@@ -16,7 +16,7 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
-  CapabilityProbeFailed,
+  ModelListFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -24,7 +24,7 @@ import {
 import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { streamFromQueueOne } from "../queue-stream";
 import type { ClaudeCodeAgent, ToolPermissionRequest } from "./agent";
-import { checkClaudeAvailability } from "./executable";
+import { claudeAvailability } from "./executable";
 import { sessionMessagesToUIMessages } from "./history";
 import { toSessionEvent } from "./to-session-event";
 import { createTransform } from "./transform";
@@ -420,7 +420,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   // Codex defaults lower because its "full" also drops the sandbox; this one
   // only bypasses the prompts.
   defaultPermissionMode: "full",
-  probeModels: (cwd) =>
+  listModels: (cwd) =>
     agent.listModels(cwd).pipe(
       // No `reasoningEfforts` traits on purpose: the SDK exposes the levels in its
       // catalogue but offers no runtime call to apply one, and declaring a
@@ -431,15 +431,18 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       Effect.map((models) =>
         models.map((model) => ({ id: model.value, label: model.displayName })),
       ),
-      Effect.mapError(
-        (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
-      ),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "claude-code", cause })),
     ),
   // Present AND new enough: a resolvable binary that is older than the version
   // the SDK bundles reports as unavailable, so a too-old install fails fast
   // (AgentUnavailable → UNSUPPORTED) instead of launching against a CLI whose
   // wire protocol the harness types no longer match.
-  checkAvailability: checkClaudeAvailability(),
+  // `resolve` handed in, so finding the binary happens once and both this check
+  // and the SDK launch use that answer; the version floor on top stays
+  // claude-code's own (see `claudeAvailability`).
+  availability: claudeAvailability({
+    resolve: Effect.suspend(() => agent.executable),
+  }),
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "claude-code", cause })),

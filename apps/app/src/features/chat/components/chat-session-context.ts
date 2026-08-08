@@ -19,7 +19,7 @@ export interface ChatSessionValue {
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;
   /** A turn is producing a reply (submitted / streaming). */
   turnInProgress: boolean;
-  /** Probed model providers; empty when the harness has no model switch. */
+  /** The model providers this harness offers; empty when it has no model switch. */
   providers: ReadonlyArray<ProviderInfo>;
   /** The selected model pair — always both or neither. */
   providerId: string | undefined;

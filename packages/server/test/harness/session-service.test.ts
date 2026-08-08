@@ -129,7 +129,7 @@ describe("HarnessAgentSessionService", () => {
           const adapter = {
             id: "claude-code",
             descriptor: { id: "claude-code", name: "Claude Code" },
-            checkAvailability: Effect.sync(() =>
+            availability: Effect.sync(() =>
               opts.unavailable !== undefined
                 ? { available: false, reason: opts.unavailable }
                 : { available: true },
@@ -166,6 +166,7 @@ describe("HarnessAgentSessionService", () => {
                 repo,
                 bus,
                 newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
+                platform: yield* Effect.context<FileSystem.FileSystem>(),
               });
               return { service, repo, bus, spy, restart: build };
             });

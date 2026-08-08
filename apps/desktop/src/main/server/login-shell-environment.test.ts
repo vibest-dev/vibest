@@ -45,7 +45,7 @@ describe("resolveLoginShellEnvironment", () => {
     });
   });
 
-  it("runs the environment probe through the interactive login shell", async () => {
+  it("reads the environment through the interactive login shell", async () => {
     const command = vi.fn<RunCommand>(() => Effect.succeed(fenced({ PATH: "/usr/bin" })));
 
     await resolve(command, {
@@ -112,7 +112,7 @@ describe("resolveLoginShellEnvironment", () => {
     });
   });
 
-  it("uses the inherited environment when the shell probe fails on linux", async () => {
+  it("uses the inherited environment when the shell read fails on linux", async () => {
     const command = vi.fn<RunCommand>(() => Effect.fail(new Error("shell exploded")));
 
     await expect(
@@ -138,7 +138,7 @@ describe("resolveLoginShellEnvironment", () => {
     expect(command).not.toHaveBeenCalled();
   });
 
-  it("keeps the inherited environment when every darwin probe fails", async () => {
+  it("keeps the inherited environment when every darwin attempt fails", async () => {
     const command = vi.fn<RunCommand>(() => Effect.fail(new Error("nope")));
 
     await expect(

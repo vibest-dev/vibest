@@ -66,5 +66,5 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   is unreachable at runtime. `harness/registry.ts` is only the lookup table's
   factory (`makeHarnessAgentRegistry(adapters)`) and names no harness; that
   composition root is the single place the adapters are constructed, and it wraps
-  each in `cacheAvailability` so a `--version` probe costs one spawn per server
+  each in `cacheAvailability` so a `--version` check costs one spawn per server
   rather than one per call.

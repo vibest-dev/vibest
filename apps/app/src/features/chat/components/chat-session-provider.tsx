@@ -9,7 +9,7 @@ import {
   resolveModel,
   resolvePermissionMode,
 } from "@/features/chat/harness/session-config";
-import { useHarnessAgent, useHarnessProbe } from "@/features/chat/harness/use-harness";
+import { useHarnessAgent, useHarnessModels } from "@/features/chat/harness/use-harness";
 import { selectTurnInProgress, useChatHandle } from "@/features/chat/runtime/use-chat-handle";
 
 import { ChatSessionContext, type ChatSessionValue } from "./chat-session-context";
@@ -48,9 +48,9 @@ export function ChatSessionProvider({
   const harnessAgent = useHarnessAgent(chat.harnessAgentId);
   // What this harness offers *in this session's directory* — a project's own
   // settings can remap what a model id resolves to, so the providers have to
-  // be probed per project, not once per harness.
-  const probe = useHarnessProbe(chat.harnessAgentId, cwd);
-  const providers = probe.data?.providers ?? NO_PROVIDERS;
+  // be read per project, not once per harness.
+  const models = useHarnessModels(chat.harnessAgentId, cwd);
+  const providers = models.data?.providers ?? NO_PROVIDERS;
   // Each dimension resolves on its own; reasoningEffort cascades from the resolved model.
   const model = resolveModel(providers, picked.providerId, picked.modelId);
   const modelInfo = findModelInfo(providers, model?.providerId, model?.modelId);
@@ -95,7 +95,7 @@ export function ChatSessionProvider({
 
   const reasoningEfforts = modelInfo?.reasoningEfforts ?? NO_REASONING_EFFORTS;
   // orderPermissionModes builds a new array on every call, so it is memoised on
-  // the harness's declared list — which only changes when the probe does.
+  // the harness's declared list — which only changes when the harness does.
   const declaredPermissionModes = harnessAgent?.permissionModes;
   const permissionModes = useMemo(
     () => orderPermissionModes(declaredPermissionModes ?? []),

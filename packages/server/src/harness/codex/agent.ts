@@ -13,7 +13,7 @@ import type {
   TurnSteerResponse,
   UserInput,
 } from "@vibest/contract/codex/protocol/v2";
-import { Deferred, Effect, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, FileSystem, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
@@ -21,10 +21,12 @@ import {
   AgentOperationError,
   AgentRequestUnavailable,
   CodexTransportError,
+  type ExecutableNotFound,
   HarnessSessionNotFound,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { resolveCodexExecutable } from "./executable";
 import {
   approvalSourceOf,
   buildApprovalRequest,
@@ -120,9 +122,18 @@ export interface CodexAgentDependencies<R> {
 
 export interface CodexAgent {
   /**
+   * The absolute path this agent will spawn, resolved once and cached.
+   *
+   * Exposed so the adapter's `availability` can answer off the *same*
+   * resolve the transport launches, rather than performing a second, differently
+   * scoped search. Two searches were what let "available" and "what actually
+   * runs" disagree — see the note in `harness/executable.ts`.
+   */
+  readonly executable: Effect.Effect<string, ExecutableNotFound>;
+  /**
    * The model catalog for the signed-in account, read straight from the
    * app-server. Follows the account and the installed codex version, so it can
-   * only be probed — never hardcoded.
+   * only be read from the app-server — never hardcoded.
    */
   readonly listModels: Effect.Effect<ReadonlyArray<Model>, CodexTransportFailure>;
   readonly session: {
@@ -177,7 +188,7 @@ export interface CodexAgent {
 /** @internal */
 export const makeCodexAgentWithDependencies = <R>(
   dependencies: CodexAgentDependencies<R>,
-): Effect.Effect<CodexAgent, never, R | Scope.Scope> =>
+): Effect.Effect<Omit<CodexAgent, "executable">, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     const sessions = yield* Ref.make(new Map<string, SessionState>());
@@ -834,10 +845,40 @@ export const makeCodexAgentWithDependencies = <R>(
         interrupt,
         abort,
       },
-    } satisfies CodexAgent;
+    } satisfies Omit<CodexAgent, "executable">;
   });
 
+/**
+ * An explicit `executablePath` wins outright (tests point it at a fake binary);
+ * otherwise the shared four-level search answers, once, for both the transport
+ * and the adapter's availability check.
+ */
 export const makeCodexAgent = (
   options: CodexAgentOptions = {},
-): Effect.Effect<CodexAgent, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
-  makeCodexAgentWithDependencies({ makeTransport: () => makeCodexTransport(options) });
+): Effect.Effect<
+  CodexAgent,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const executable = options.executablePath
+      ? Effect.succeed(options.executablePath)
+      : yield* Effect.cached(
+          resolveCodexExecutable().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
+        );
+    const agent = yield* makeCodexAgentWithDependencies({
+      makeTransport: () =>
+        Effect.flatMap(
+          // The resolve failure reaches the caller as a spawn failure, which is
+          // what it is: the launch could not happen. Keeps the transport's
+          // error channel unchanged.
+          Effect.mapError(
+            executable,
+            (cause) => new CodexTransportError({ operation: "spawn", cause }),
+          ),
+          (executablePath) => makeCodexTransport({ ...options, executablePath }),
+        ),
+    });
+    return { ...agent, executable };
+  });
