@@ -2,12 +2,9 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, useMatch, useNavigate } from "@tanstack/react-router";
 import { SidebarProvider } from "@vibest/ui/components/sidebar";
 
-import { AppSidebar } from "@/components/layout/app-sidebar";
-import { CardPanel } from "@/components/layout/card-panel";
-import { ContentPanelOutlet } from "@/components/layout/content-panel/react/outlet";
+import { AppShell } from "@/components/layout/app-shell";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
 import { RegisterPanels } from "@/components/layout/content-panel/react/register";
-import { ShellToggle } from "@/components/layout/shell-toggle";
 import { contentPanel, STATIC_PANELS } from "@/content-panel";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
@@ -29,6 +26,11 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
     ),
   component: RootLayout,
 });
+
+/** Restore the state persisted by SidebarProvider. */
+function readSidebarCookie(): boolean {
+  return !document.cookie.includes("sidebar_state=false");
+}
 
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
@@ -60,16 +62,14 @@ function RootLayout() {
     // h-svh pins the shell to the viewport: the provider's own min-h-svh leaves
     // the height auto, so a long transcript would stretch the whole card and
     // scroll the document instead of the message list.
-    <SidebarProvider className="h-svh overflow-hidden [-webkit-app-region:drag]">
-      <AppSidebar onNewChat={handleNewChat} />
-      {/* Adds no DOM, so the two cards below are flex children of the shell. */}
+    <SidebarProvider
+      className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
+      defaultOpen={readSidebarCookie()}
+    >
       <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionId ?? null}>
         <RegisterPanels definitions={STATIC_PANELS} />
-        <CardPanel />
-        {/* A sibling card, not a column inside the chat's — see the outlet. */}
-        <ContentPanelOutlet />
+        <AppShell hasTrafficLights={os === "macos"} onNewChat={handleNewChat} />
       </ContentPanelProvider>
-      <ShellToggle hasTrafficLights={os === "macos"} />
     </SidebarProvider>
   );
 }

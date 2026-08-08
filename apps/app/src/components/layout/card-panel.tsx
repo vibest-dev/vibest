@@ -1,37 +1,31 @@
 import { Outlet } from "@tanstack/react-router";
-import { SidebarInset, useSidebar } from "@vibest/ui/components/sidebar";
+import { SidebarInset, SidebarTrigger, useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
 
-import { usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
 import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
 
-export function CardPanel() {
+export interface CardPanelProps {
+  hasTrafficLights: boolean;
+}
+
+export function CardPanel({ hasTrafficLights }: CardPanelProps) {
   const { state, isMobile } = useSidebar();
-  // The fixed toggle sits over this header. Reserve its coarse-pointer hit
-  // target on mobile; collapsed desktop also has to clear the traffic lights.
   const collapsedDesktop = !isMobile && state === "collapsed";
-  // Maximizing squeezes this card to nothing rather than unmounting it: the
-  // route lives inside, and unmounting would dispose the composer's editor.
-  const maximized = usePanelSnapshot((snapshot) => snapshot.presentation === "maximized");
+  const ownsToggle = isMobile || collapsedDesktop;
 
   return (
-    <SidebarInset
-      className={cn(
-        "flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:peer-data-[variant=inset]:m-1.5 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-1.5",
-        // Border and rounding off too — at zero width they would draw a sliver.
-        maximized && "w-0 flex-none border-0 md:peer-data-[variant=inset]:rounded-none",
-      )}
-    >
+    <SidebarInset className="flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:rounded-xl md:shadow-sm/5">
       <header
         className={cn(
-          // Divider is a box-shadow (no layout space) so it can't nudge the
-          // title off the light line; transition animates the collapse-time
-          // padding shift in sync with the sidebar slide.
-          "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] transition-[padding] duration-200 ease-linear [-webkit-app-region:drag]",
-          isMobile && "ps-14",
-          collapsedDesktop && "ps-30",
+          "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] [-webkit-app-region:drag]",
+          collapsedDesktop && hasTrafficLights && "ps-20",
         )}
       >
+        {ownsToggle && (
+          <SidebarTrigger
+            className={cn(isMobile ? "-ms-0.5" : "-ms-2", "[-webkit-app-region:no-drag]")}
+          />
+        )}
         <div className="flex items-center gap-2 text-sm">
           <span className="font-medium">New chat</span>
           <span className="text-muted-foreground">Playground</span>

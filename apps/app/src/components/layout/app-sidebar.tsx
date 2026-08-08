@@ -7,6 +7,8 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
 } from "@vibest/ui/components/sidebar";
 import { Blocks, Search, SquarePen } from "lucide-react";
 import { useState } from "react";
@@ -19,24 +21,20 @@ import { usePlatform } from "@/platform-context";
 export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
   const [importOpen, setImportOpen] = useState(false);
   const { os } = usePlatform();
+  const { isMobile, state } = useSidebar();
 
   return (
     <Sidebar
       variant="inset"
-      collapsible="offcanvas"
-      // `pe-0` closes the gutter to the inset (which already has `ms-0`), and
-      // `mx-0` undoes the scrollbar's own `m-1`, so both land on one seam.
-      className="md:p-1.5 md:pe-0 [&_[data-slot=scroll-area-scrollbar][data-orientation=vertical]]:mx-0"
+      // The panel group owns desktop width; mobile remains an overlay sheet.
+      collapsible={isMobile ? "offcanvas" : "none"}
+      className="w-full [&_[data-slot=scroll-area-scrollbar][data-orientation=vertical]]:mx-0"
     >
-      {/*
-       * Reserves the traffic-light / pinned-toggle row (see __root.tsx). On
-       * macOS the row belongs to the native traffic lights; everywhere else it
-       * carries the brand mark, which collapses away with the sidebar. `px-4`
-       * lines its icon up with the menu icons below (this padding + the group's
-       * p-2 + the menu button's p-2).
-       */}
       <SidebarHeader className="h-10 flex-row items-center px-4 [-webkit-app-region:drag]">
         {os !== "macos" && <BrandMark />}
+        {!isMobile && state === "expanded" && (
+          <SidebarTrigger className="ms-auto -me-2 [-webkit-app-region:no-drag]" />
+        )}
       </SidebarHeader>
 
       <SidebarContent className="[-webkit-app-region:no-drag]">
