@@ -38,6 +38,9 @@ class FakeTransport implements ChatSessionTransport {
   getMessagesCalls = 0;
   promptCalls: Array<{ messageId: string; parts: ReadonlyArray<PromptPart> }> = [];
   promptError: unknown = null;
+  // When set, prompt blocks on it — models a call waiting for the WebSocket
+  // reconnect loop to reach the restarted server.
+  promptGate: Promise<void> | null = null;
   responded: Array<{ requestId: string; response: AgentResponse }> = [];
 
   subscribe(onEvent: (event: ChatTransportEvent) => void): () => void {
@@ -48,13 +51,16 @@ class FakeTransport implements ChatSessionTransport {
   }
   prompt = async (input: { messageId: string; parts: ReadonlyArray<PromptPart> }) => {
     this.promptCalls.push(input);
+    if (this.promptGate) await this.promptGate;
     if (this.promptError) throw this.promptError;
     return { turnId: "turn-receipt" };
   };
   getMessages = async () => {
     this.getMessagesCalls += 1;
-    if (this.historyGate) await this.historyGate;
-    return this.history;
+    const history = this.history;
+    const gate = this.historyGate;
+    if (gate) await gate;
+    return history;
   };
   respondToAgentRequest = async (requestId: string, response: AgentResponse) => {
     this.responded.push({ requestId, response });
@@ -151,6 +157,121 @@ describe("Chat hydration", () => {
     const last = chat.store.getState().messages.at(-1)!;
     expect(last.role).toBe("assistant");
     expect(assistantText(last)).toBe("after the restart");
+  });
+
+  it("keeps a pending prompt across a restarted server snapshot", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const sent = chat.prompt("still queued");
+    await settle();
+
+    // The rebuilt server starts at cursor zero and has not accepted the prompt
+    // yet, so neither its idle phase nor its settled history may erase the
+    // optimistic bubble.
+    await attach({ cursor: 0 });
+    expect(chat.store.getState().messages.map((message) => message.role)).toEqual(["user", "user"]);
+    expect(chat.store.getState().status).toBe("submitted");
+
+    releasePrompt();
+    await sent;
+    // The cursor-zero snapshot predated acceptance, so settling the RPC must
+    // not briefly turn its stale idle phase into a ready composer.
+    expect(chat.store.getState().messages.map((message) => message.role)).toEqual(["user", "user"]);
+    expect(chat.store.getState().status).toBe("submitted");
+  });
+
+  it("applies a completed restart snapshot when the pending prompt settles", async () => {
+    const { chat, transport, attach } = makeChat();
+    const oldHistory = [userMessage("user-1", "hello")];
+    transport.history = oldHistory;
+    await attach({ cursor: 8 });
+
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const sent = chat.prompt("still queued");
+    await settle();
+    const { messageId } = transport.promptCalls[0]!;
+
+    // The restarted server has already accepted and completed the turn, but
+    // the unary prompt receipt is still pending on the recovering connection.
+    transport.history = [
+      ...oldHistory,
+      userMessage(messageId, "still queued"),
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "completed while reconnecting" }],
+      },
+    ];
+    await attach({
+      activePrompt: { messageId, parts: [{ type: "text", text: "still queued" }], seq: 1 },
+      activeTurn: activeTurn({ turnId: "turn-complete", chunks: [], complete: true }),
+      cursor: 6,
+    });
+    expect(chat.store.getState().status).toBe("submitted");
+
+    releasePrompt();
+    await sent;
+    await settle();
+
+    expect(chat.store.getState().messages.map((message) => message.id)).toEqual([
+      "user-1",
+      messageId,
+      "assistant-1",
+    ]);
+    expect(chat.store.getState().status).toBe("ready");
+  });
+
+  it("ignores a stale history read that overlapped a prompt", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    const oldHistory = [userMessage("user-1", "hello")];
+    transport.history = oldHistory;
+    await attach({ cursor: 8 });
+
+    let releaseStaleHistory: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      releaseStaleHistory = resolve;
+    });
+    // Start a slow reconciliation before our prompt exists. Its response has
+    // already captured the old settled transcript.
+    live(9, { type: "session.turn.ended", turnId: "other", outcome: "canceled", phase: "idle" });
+    await settle();
+    expect(transport.getMessagesCalls).toBe(2);
+
+    await chat.prompt("new prompt");
+    const { messageId } = transport.promptCalls[0]!;
+
+    // A later attach obtains authoritative history and clears submitted. The
+    // older response must not overwrite this newer state when it finally lands.
+    transport.historyGate = null;
+    transport.history = [
+      ...oldHistory,
+      userMessage(messageId, "new prompt"),
+      { id: "assistant-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ];
+    await attach({ cursor: 20 });
+    expect(chat.store.getState().messages.map((message) => message.id)).toEqual([
+      "user-1",
+      messageId,
+      "assistant-1",
+    ]);
+
+    releaseStaleHistory();
+    await settle();
+
+    expect(chat.store.getState().messages.map((message) => message.id)).toEqual([
+      "user-1",
+      messageId,
+      "assistant-1",
+    ]);
   });
 
   it("lays the history floor before folding buffered or live chunks", async () => {
