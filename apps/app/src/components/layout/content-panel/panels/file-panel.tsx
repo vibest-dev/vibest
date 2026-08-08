@@ -51,7 +51,7 @@ function FilePanelView({ instance }: { instance: PanelHandle<FilePayload> }) {
       <div className="text-muted-foreground shrink-0 border-b px-3 py-1.5 text-xs">{path}</div>
       <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
         {mockSource(path).map((text, index) => (
-          <div key={index} className={index + 1 === line ? "bg-primary/10 -mx-3 px-3" : undefined}>
+          <div key={text} className={index + 1 === line ? "bg-primary/10 -mx-3 px-3" : undefined}>
             <span className="text-muted-foreground/60 me-3 inline-block w-6 text-end">
               {index + 1}
             </span>

@@ -376,15 +376,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 6.0.3(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-      clsx:
-        specifier: 'catalog:'
-        version: 2.1.1
       code-inspector-plugin:
         specifier: latest
         version: 2.0.7(@opencode-ai/sdk@1.18.3)(supports-color@10.2.2)
-      dmg-builder:
-        specifier: 26.4.0
-        version: 26.4.0(supports-color@10.2.2)
       electron:
         specifier: ^41.10.2
         version: 41.10.2(supports-color@7.2.0)
@@ -400,9 +394,6 @@ importers:
       nanoid:
         specifier: ^5.1.16
         version: 5.1.16
-      next-themes:
-        specifier: ^0.4.6
-        version: 0.4.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       p-queue:
         specifier: 'catalog:'
         version: 9.3.1
@@ -412,9 +403,6 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
-      tailwind-merge:
-        specifier: 'catalog:'
-        version: 3.6.0
       tailwindcss:
         specifier: 'catalog:'
         version: 4.3.3
