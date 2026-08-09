@@ -51,6 +51,7 @@ export function ShellGroup({
   return (
     <Group
       className="flex min-h-0 w-full flex-1"
+      data-mobile-pinch-zoom
       defaultLayout={defaultLayout}
       resizeTargetMinimumSize={{ coarse: 28, fine: 18 }}
       onLayoutChanged={(layout, meta) => {
