@@ -15,12 +15,12 @@ export interface AppShellSlotProps {
   readonly children: ReactNode;
 }
 
-function AppShellSidebar({ children }: AppShellSlotProps): ReactNode {
-  return children;
+export function AppShellSidebar({ children }: AppShellSlotProps) {
+  return <>{children}</>;
 }
 
-function AppShellMain({ children }: AppShellSlotProps): ReactNode {
-  return children;
+export function AppShellMain({ children }: AppShellSlotProps) {
+  return <>{children}</>;
 }
 
 const contentOf = (
@@ -40,7 +40,7 @@ export interface AppShellRootProps {
   readonly children: ReactNode;
 }
 
-function AppShellRoot({ children }: AppShellRootProps) {
+export function AppShell({ children }: AppShellRootProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
@@ -81,8 +81,3 @@ function AppShellRoot({ children }: AppShellRootProps) {
     </>
   );
 }
-
-export const AppShell = Object.assign(AppShellRoot, {
-  Main: AppShellMain,
-  Sidebar: AppShellSidebar,
-});

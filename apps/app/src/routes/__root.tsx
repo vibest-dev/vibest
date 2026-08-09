@@ -9,7 +9,7 @@ import type { SessionRef } from "@vibest/contract";
 import { SidebarProvider } from "@vibest/ui/components/sidebar";
 import { useCallback } from "react";
 
-import { AppShell } from "@/components/layout/app-shell";
+import { AppShell, AppShellMain, AppShellSidebar } from "@/components/layout/app-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CardPanel } from "@/components/layout/card-panel";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
@@ -101,16 +101,16 @@ function RootLayout() {
       <ContentPanelProvider contentPanel={contentPanel} sessionRef={sessionRef}>
         <RegisterPanels definitions={STATIC_PANELS} />
         <AppShell>
-          <AppShell.Sidebar>
+          <AppShellSidebar>
             <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
-          </AppShell.Sidebar>
-          <AppShell.Main>
+          </AppShellSidebar>
+          <AppShellMain>
             <CardPanel
               hasTrafficLights={os === "macos"}
               heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
               supportingText={project?.name}
             />
-          </AppShell.Main>
+          </AppShellMain>
         </AppShell>
       </ContentPanelProvider>
     </SidebarProvider>
