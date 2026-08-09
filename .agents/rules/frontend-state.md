@@ -64,9 +64,9 @@ for per-agent tool rendering.
   project/harness identity, and is constructed at App mount (module scope has no
   host connection yet).
 - Content-panel tabs, live instances, provider bindings, and panel handles use
-  the complete `SessionRef`; new shell state is never keyed by a bare sessionId.
-  The v1 migration bucket is the sole exception: its globally unique UUID key is
-  read only through an authoritative route ref and re-keyed on the first write.
+  the complete `SessionRef`; shell state is never keyed by a bare sessionId.
+  Content-panel persistence is disposable client state: do not add storage
+  versions or migrations. An incompatible shape may be discarded.
 - `useSessionListSync` is the only consumer of the global event firehose; session
   events (chunks, requests) belong to the per-session chat transport.
 - The live stream has no replay: subscribe before `session.prompt`, and recover

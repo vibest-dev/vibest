@@ -37,14 +37,12 @@ const withPanels = (...definitions: Parameters<ContentPanel<null>["register"]>[0
 };
 
 /** A read-only `Storage` standing in for a reload with these panels persisted. */
-const storageHolding = (bySessionKey: unknown, version = 2, writes: string[] = []): Storage => {
-  const state =
-    version === 1 ? { bySessionId: bySessionKey } : { bySessionKey, legacyBySessionId: {} };
-  const value = JSON.stringify({ state, version });
+const storageHolding = (bySessionKey: unknown): Storage => {
+  const value = JSON.stringify({ state: { bySessionKey } });
   return {
     length: 1,
     getItem: (key) => (key === "vibest:content-panel" ? value : null),
-    setItem: (_key, next) => void writes.push(next),
+    setItem: () => {},
     removeItem: () => {},
     clear: () => {},
     key: () => null,
@@ -280,52 +278,6 @@ describe("ContentPanel", () => {
 
     expect(snapshot.active?.instance).toBeDefined();
     expect(created).toBe(1);
-  });
-
-  it("restores a v1 record and claims it on the first write through a SessionRef", () => {
-    const host = new ContentPanel<null>({
-      storage: storageHolding(
-        {
-          "session-1": {
-            presentation: "docked",
-            activeId: "diff",
-            panels: [{ id: "diff", type: "diff" }],
-          },
-        },
-        1,
-      ),
-    });
-    host.register(diff);
-
-    // Snapshot can read the inert legacy record before the first interaction,
-    // so there is no empty-panel flash during an upgrade.
-    expect(snapshotOf(host).panels).toHaveLength(1);
-
-    host.setPresentation(S, "maximized");
-    const state = host.store.getState();
-    expect(state.bySessionKey[sessionRefKey(S)]?.panels).toHaveLength(1);
-    expect(state.legacyBySessionId).toEqual({});
-  });
-
-  it("does not overwrite an unknown future storage version", () => {
-    const writes: string[] = [];
-    const host = new ContentPanel<null>({
-      storage: storageHolding(
-        {
-          [sessionRefKey(S)]: {
-            presentation: "docked",
-            activeId: "diff",
-            panels: [{ id: "diff", type: "diff" }],
-          },
-        },
-        3,
-        writes,
-      ),
-    });
-    host.register(diff);
-
-    expect(snapshotOf(host).panels).toHaveLength(0);
-    expect(writes).toEqual([]);
   });
 
   it("scopes panels by the complete SessionRef", () => {

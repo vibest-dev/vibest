@@ -35,8 +35,6 @@ interface SessionPanels {
  */
 export interface ContentPanelState {
   readonly bySessionKey: Readonly<Record<string, SessionPanels>>;
-  /** v1 records waiting for an authoritative SessionRef to claim them. */
-  readonly legacyBySessionId: Readonly<Record<string, SessionPanels>>;
   /**
    * Definitions live in the host's Map: they carry components, they are not UI
    * state. This counter is the only part of the registry the UI reacts to, and
@@ -45,7 +43,7 @@ export interface ContentPanelState {
   readonly registryVersion: number;
 }
 
-type PersistedState = Pick<ContentPanelState, "bySessionKey" | "legacyBySessionId">;
+type PersistedState = Pick<ContentPanelState, "bySessionKey">;
 
 export interface OpenPanel<View> {
   readonly id: string;
@@ -85,18 +83,6 @@ export interface ContentPanelOptions {
 }
 
 const STORAGE_NAME = "vibest:content-panel";
-const STORAGE_VERSION = 2;
-
-const hasFutureStorageVersion = (storage: Storage): boolean => {
-  try {
-    const raw = storage.getItem(STORAGE_NAME);
-    if (raw === null) return false;
-    const parsed = JSON.parse(raw) as { readonly version?: unknown };
-    return typeof parsed.version === "number" && parsed.version > STORAGE_VERSION;
-  } catch {
-    return false;
-  }
-};
 
 const EMPTY_SESSION: SessionPanels = { presentation: "hidden", activeId: null, panels: [] };
 /** Shared so an empty strip is `Object.is`-stable without costing a cache entry. */
@@ -130,42 +116,17 @@ export class ContentPanel<View = unknown> {
   #openable: { registryVersion: number; entries: readonly OpenablePanel<View>[] } | null = null;
 
   constructor(options: ContentPanelOptions = {}) {
-    const initial: ContentPanelState = {
-      bySessionKey: {},
-      legacyBySessionId: {},
-      registryVersion: 0,
-    };
+    const initial: ContentPanelState = { bySessionKey: {}, registryVersion: 0 };
     const { storage } = options;
-    this.store =
-      storage !== undefined && !hasFutureStorageVersion(storage)
-        ? createStore<ContentPanelState>()(
-            persist<ContentPanelState, [], [], PersistedState>(() => initial, {
-              name: STORAGE_NAME,
-              version: STORAGE_VERSION,
-              storage: createJSONStorage(() => storage),
-              partialize: (state) => ({
-                bySessionKey: state.bySessionKey,
-                legacyBySessionId: state.legacyBySessionId,
-              }),
-              // v1 knew only the globally unique session UUID. Keep those records
-              // inert until an authoritative route ref can claim one.
-              migrate: (persisted, version) => {
-                if (version === 1) {
-                  const legacy = persisted as { readonly bySessionId?: unknown };
-                  return {
-                    bySessionKey: {},
-                    legacyBySessionId:
-                      typeof legacy.bySessionId === "object" && legacy.bySessionId !== null
-                        ? (legacy.bySessionId as Readonly<Record<string, SessionPanels>>)
-                        : {},
-                  };
-                }
-                if (version === 2) return persisted as PersistedState;
-                throw new Error(`Unsupported content-panel storage version: ${version}`);
-              },
-            }),
-          )
-        : createStore<ContentPanelState>(() => initial);
+    this.store = storage
+      ? createStore<ContentPanelState>()(
+          persist<ContentPanelState, [], [], PersistedState>(() => initial, {
+            name: STORAGE_NAME,
+            storage: createJSONStorage(() => storage),
+            partialize: (state) => ({ bySessionKey: state.bySessionKey }),
+          }),
+        )
+      : createStore<ContentPanelState>(() => initial);
   }
 
   register(definition: AnyPanelDefinition<View>): () => void {
@@ -273,12 +234,9 @@ export class ContentPanel<View = unknown> {
     }
     this.#tabs.delete(sessionKey);
     this.store.setState((state) => {
-      const hasCurrent = sessionKey in state.bySessionKey;
-      const hasLegacy = sessionRef.sessionId in state.legacyBySessionId;
-      if (!hasCurrent && !hasLegacy) return state;
-      const { [sessionKey]: _current, ...bySessionKey } = state.bySessionKey;
-      const { [sessionRef.sessionId]: _legacy, ...legacyBySessionId } = state.legacyBySessionId;
-      return { bySessionKey, legacyBySessionId };
+      if (!(sessionKey in state.bySessionKey)) return state;
+      const { [sessionKey]: _forgotten, ...bySessionKey } = state.bySessionKey;
+      return { bySessionKey };
     });
   }
 
@@ -299,10 +257,7 @@ export class ContentPanel<View = unknown> {
       return { presentation: "hidden", panels: NO_PANELS, active: null, openable };
     }
     const sessionKey = sessionRefKey(sessionRef);
-    const session =
-      state.bySessionKey[sessionKey] ??
-      state.legacyBySessionId[sessionRef.sessionId] ??
-      EMPTY_SESSION;
+    const session = state.bySessionKey[sessionKey] ?? EMPTY_SESSION;
     const panels = this.#tabsFor(sessionRef, session.panels, state.registryVersion);
     return {
       presentation: session.presentation,
@@ -414,22 +369,14 @@ export class ContentPanel<View = unknown> {
 
   #sessionOf(sessionRef: SessionRef): SessionPanels {
     const state = this.store.getState();
-    return (
-      state.bySessionKey[sessionRefKey(sessionRef)] ??
-      state.legacyBySessionId[sessionRef.sessionId] ??
-      EMPTY_SESSION
-    );
+    return state.bySessionKey[sessionRefKey(sessionRef)] ?? EMPTY_SESSION;
   }
 
   #writeSession(sessionRef: SessionRef, session: SessionPanels): void {
     const sessionKey = sessionRefKey(sessionRef);
-    this.store.setState((state) => {
-      const { [sessionRef.sessionId]: _claimed, ...legacyBySessionId } = state.legacyBySessionId;
-      return {
-        bySessionKey: { ...state.bySessionKey, [sessionKey]: session },
-        legacyBySessionId,
-      };
-    });
+    this.store.setState((state) => ({
+      bySessionKey: { ...state.bySessionKey, [sessionKey]: session },
+    }));
   }
 
   #setPayload(sessionRef: SessionRef, id: string, next: unknown): void {
