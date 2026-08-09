@@ -26,12 +26,10 @@ const PANEL_IDS = {
 export function ShellGroup({
   hasSidebar,
   hasContentPanel,
-  resizable,
   children,
 }: {
   hasSidebar: boolean;
   hasContentPanel: boolean;
-  resizable: boolean;
   children: ReactNode;
 }): ReactNode {
   const panelIds = useMemo(
@@ -53,9 +51,7 @@ export function ShellGroup({
   return (
     <Group
       className="flex min-h-0 w-full flex-1"
-      data-mobile-static-layout={resizable ? undefined : ""}
       defaultLayout={defaultLayout}
-      disabled={!resizable}
       resizeTargetMinimumSize={{ coarse: 28, fine: 18 }}
       onLayoutChanged={(layout, meta) => {
         // Preserve the last expanded widths.

@@ -89,14 +89,6 @@
   }
 }
 
-/* Mobile uses a static shell: react-resizable-panels still owns programmatic
-   panel sizing, but its inline touch-action must not reserve drag gestures when
-   user resizing is disabled. !important overrides the library's inline style. */
-[data-mobile-static-layout],
-[data-mobile-static-layout] [data-panel] > div {
-  touch-action: auto !important;
-}
-
 /* TipTap Placeholder extension renders via ::before on the empty first paragraph. */
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);

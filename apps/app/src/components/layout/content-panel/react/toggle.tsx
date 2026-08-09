@@ -25,6 +25,7 @@ export function ContentPanelToggle({ className, ...props }: ContentPanelTogglePr
       size="icon-xs"
       aria-label="Toggle content panel"
       aria-pressed={presentation !== "hidden"}
+      data-slot="content-panel-toggle"
       className={cn(presentation !== "hidden" && "bg-accent", className)}
       onClick={() => session.toggleVisibility()}
       {...props}
