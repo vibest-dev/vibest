@@ -89,14 +89,12 @@
   }
 }
 
-/* react-resizable-panels sets inline touch-action: pan-y on horizontal groups
-   and panels. Keep vertical scrolling while allowing Safari pinch zoom on
-   touch devices. !important is required to override the library's inline style. */
-@media (pointer: coarse) {
-  [data-mobile-pinch-zoom],
-  [data-mobile-pinch-zoom] [data-panel] > div {
-    touch-action: pan-y pinch-zoom !important;
-  }
+/* Mobile uses a static shell: react-resizable-panels still owns programmatic
+   panel sizing, but its inline touch-action must not reserve drag gestures when
+   user resizing is disabled. !important overrides the library's inline style. */
+[data-mobile-static-layout],
+[data-mobile-static-layout] [data-panel] > div {
+  touch-action: auto !important;
 }
 
 /* TipTap Placeholder extension renders via ::before on the empty first paragraph. */

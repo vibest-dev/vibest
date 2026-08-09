@@ -27,7 +27,7 @@ export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
   return (
     <>
       {isMobile && <AppSidebar onNewChat={onNewChat} />}
-      <ShellGroup hasContentPanel={contentVisible} hasSidebar={!isMobile}>
+      <ShellGroup hasContentPanel={contentVisible} hasSidebar={!isMobile} resizable={!isMobile}>
         {!isMobile && (
           <>
             <ShellSidebarPanel>
@@ -48,7 +48,7 @@ export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
         </ShellMainPanel>
         {contentVisible && (
           <>
-            <ShellSeparator />
+            <ShellSeparator disabled={isMobile} />
             <ShellContentPanel>
               <ContentPanelOutlet />
             </ShellContentPanel>
