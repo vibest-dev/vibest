@@ -1,5 +1,5 @@
 import { useSidebar } from "@vibest/ui/components/sidebar";
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 
 import { useContentPanel, usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
 import { ContentPanelOutlet } from "@/components/layout/content-panel/react/outlet";
@@ -11,18 +11,43 @@ import {
   ShellSidebarPanel,
 } from "@/components/layout/shell-panels";
 
-/** Structural shell only; the root composition owns the semantic surfaces. */
-export interface AppShellProps {
+export interface AppShellSlotProps {
   readonly children: ReactNode;
-  readonly sidebar: ReactNode;
 }
 
-export function AppShell({ children, sidebar }: AppShellProps) {
+function AppShellSidebar({ children }: AppShellSlotProps): ReactNode {
+  return children;
+}
+
+function AppShellMain({ children }: AppShellSlotProps): ReactNode {
+  return children;
+}
+
+const contentOf = (
+  children: ReactNode,
+  Slot: (props: AppShellSlotProps) => ReactNode,
+): ReactNode => {
+  for (const child of Children.toArray(children)) {
+    if (isValidElement<AppShellSlotProps>(child) && child.type === Slot) {
+      return child.props.children;
+    }
+  }
+  return null;
+};
+
+/** Structural shell only; the root composition owns the semantic surfaces. */
+export interface AppShellRootProps {
+  readonly children: ReactNode;
+}
+
+function AppShellRoot({ children }: AppShellRootProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const contentVisible = presentation !== "hidden" && session !== null;
   const maximized = presentation === "maximized";
+  const sidebar = contentOf(children, AppShellSidebar);
+  const main = contentOf(children, AppShellMain);
 
   return (
     <>
@@ -42,7 +67,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
             session?.setPresentation(collapsed ? "maximized" : "docked")
           }
         >
-          {children}
+          {main}
         </ShellMainPanel>
         {contentVisible && (
           <>
@@ -56,3 +81,8 @@ export function AppShell({ children, sidebar }: AppShellProps) {
     </>
   );
 }
+
+export const AppShell = Object.assign(AppShellRoot, {
+  Main: AppShellMain,
+  Sidebar: AppShellSidebar,
+});

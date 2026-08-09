@@ -34,8 +34,10 @@ for per-agent tool rendering.
   files are the whole allow-list today. `routes/__root.tsx` is the shell's one
   route-identity seam: it reads the authoritative session-route loader ref and
   composes the project sidebar, card heading, and content-panel binding from it.
-  `AppShell` stays structural through sidebar/main slots; `CardPanel` receives
-  display primitives and neither component interprets routes or Project state.
+  `AppShell` stays structural through its compound `Sidebar`/`Main` children;
+  child components are composed as JSX children, never passed through named
+  props. `CardPanel` receives display primitives and neither component
+  interprets routes or Project state.
 - **`components/` is for what no single feature owns** — the shell
   (`layout/`) and generic pieces (`loader.tsx`). Base and composite UI belongs
   in `@vibest/ui`, not here.

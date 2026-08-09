@@ -100,14 +100,17 @@ function RootLayout() {
     >
       <ContentPanelProvider contentPanel={contentPanel} sessionRef={sessionRef}>
         <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell
-          sidebar={<AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />}
-        >
-          <CardPanel
-            hasTrafficLights={os === "macos"}
-            heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
-            supportingText={project?.name}
-          />
+        <AppShell>
+          <AppShell.Sidebar>
+            <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
+          </AppShell.Sidebar>
+          <AppShell.Main>
+            <CardPanel
+              hasTrafficLights={os === "macos"}
+              heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
+              supportingText={project?.name}
+            />
+          </AppShell.Main>
         </AppShell>
       </ContentPanelProvider>
     </SidebarProvider>
