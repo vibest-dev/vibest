@@ -17,11 +17,10 @@ layer(NodeServices.layer)("pi live smoke", (it) => {
           sessionId,
           text: "Reply with exactly: PONG",
         });
-        const chunks = Array.from(yield* Stream.runCollect(prompt.output));
+        const outputs = Array.from(yield* Stream.runCollect(prompt.output));
+        const chunks = outputs.flatMap((output) => (output._tag === "Chunk" ? [output.chunk] : []));
         // A failed model call also ends in `finish` (the run settles either
-        // way), so finish alone proves nothing — require actual assistant
-        // text. Error chunks are tolerated: transient provider timeouts
-        // surface as retryable errors mid-turn and the run still recovers.
+        // way), so finish alone proves nothing — require actual assistant text.
         const text = chunks
           .filter((chunk) => chunk.type === "text-delta")
           .map((chunk) => ("delta" in chunk ? chunk.delta : ""))

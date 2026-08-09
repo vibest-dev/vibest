@@ -1,3 +1,4 @@
+import type { TurnRetryState } from "@vibest/contract";
 import type { ChatState as AiChatState, ChatStatus, UIMessage } from "ai";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
@@ -18,6 +19,7 @@ export type ChatStoreState = {
   status: ChatStatus;
   error?: Error;
   pendingRequests: AgentRequest[];
+  retry: TurnRetryState | null;
   historyStatus: HistoryStatus;
 };
 
@@ -40,6 +42,7 @@ export class ChatState implements AiChatStateSlice {
       status: "ready",
       error: undefined,
       pendingRequests: [],
+      retry: null,
       historyStatus: "loading",
     }));
   }
@@ -70,6 +73,13 @@ export class ChatState implements AiChatStateSlice {
   }
   set error(error: Error | undefined) {
     this.store.setState({ error });
+  }
+
+  get retry(): TurnRetryState | null {
+    return this.store.getState().retry;
+  }
+  set retry(retry: TurnRetryState | null) {
+    this.store.setState({ retry });
   }
 
   pushMessage = (message: UIMessage) => {

@@ -1,4 +1,4 @@
-import { Effect, Queue, Ref, Scope, Stream } from "effect";
+import { Clock, Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type {
@@ -18,7 +18,7 @@ import {
 import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
-import type { PiAgent } from "./agent";
+import type { PiAgent, PiTurnOutput } from "./agent";
 import { entriesToUIMessages } from "./history";
 import type { PiUIMessageChunk } from "./ui-message";
 
@@ -159,30 +159,42 @@ const makeRuntime = (
           }
 
           const finished = yield* Ref.make(false);
-          const pump = Stream.runForEach(prompt.output, (chunk) =>
-            emit(chunk).pipe(
-              Effect.andThen(
-                chunk.type === "finish"
-                  ? Ref.set(finished, true).pipe(
-                      Effect.andThen(
-                        emit({
-                          type: "session.turn.ended",
-                          sessionId,
-                          turnId: prompt.turnId,
-                          outcome: "completed",
-                        }).pipe(
-                          Effect.andThen(
-                            Ref.update(activeTurn, (current) =>
-                              current === prompt.turnId ? undefined : current,
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                  : Effect.void,
-              ),
-            ),
-          ).pipe(
+          const publishOutput = (output: PiTurnOutput): Effect.Effect<void, AgentOperationError> =>
+            Effect.gen(function* () {
+              switch (output._tag) {
+                case "RetryStarted":
+                  return yield* emit({
+                    type: "session.turn.retry.started",
+                    sessionId,
+                    turnId: prompt.turnId,
+                    retryNumber: output.retryNumber,
+                    maxRetries: output.maxRetries,
+                    nextAttemptAt: (yield* Clock.currentTimeMillis) + output.delayMs,
+                  });
+                case "RetryEnded":
+                  return yield* emit({
+                    type: "session.turn.retry.ended",
+                    sessionId,
+                    turnId: prompt.turnId,
+                  });
+                case "Chunk": {
+                  const chunk = output.chunk;
+                  yield* emit(chunk);
+                  if (chunk.type !== "finish") return;
+                  yield* Ref.set(finished, true);
+                  yield* emit({
+                    type: "session.turn.ended",
+                    sessionId,
+                    turnId: prompt.turnId,
+                    outcome: "completed",
+                  });
+                  yield* Ref.update(activeTurn, (current) =>
+                    current === prompt.turnId ? undefined : current,
+                  );
+                }
+              }
+            });
+          const pump = Stream.runForEach(prompt.output, publishOutput).pipe(
             Effect.flatMap(() => Ref.get(finished)),
             Effect.flatMap((didFinish) =>
               prompt.started && !didFinish

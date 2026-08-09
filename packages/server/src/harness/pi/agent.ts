@@ -58,12 +58,22 @@ type TurnDecision =
 
 export type PiSessionFailure = PiTransportFailure | AgentOperationError;
 
+export type PiTurnOutput =
+  | { readonly _tag: "Chunk"; readonly chunk: PiUIMessageChunk }
+  | {
+      readonly _tag: "RetryStarted";
+      readonly retryNumber: number;
+      readonly maxRetries: number;
+      readonly delayMs: number;
+    }
+  | { readonly _tag: "RetryEnded" };
+
 type SessionState = {
   readonly sessionId: string;
   readonly scope: Scope.Closeable;
   readonly transport: PiTransport;
   readonly termination: Deferred.Deferred<never, PiSessionFailure>;
-  readonly chunks: Queue.Queue<PiUIMessageChunk, Cause.Done | AgentOperationError>;
+  readonly chunks: Queue.Queue<PiTurnOutput, Cause.Done | AgentOperationError>;
   readonly requests: Queue.Queue<AgentRequest, Cause.Done>;
   readonly pending: Ref.Ref<ReadonlyMap<string, PendingRequest>>;
   readonly turnState: Ref.Ref<PiTurnState>;
@@ -98,7 +108,7 @@ export interface PiAgent {
       {
         readonly turnId: string;
         readonly started: boolean;
-        readonly output: Stream.Stream<PiUIMessageChunk, AgentOperationError>;
+        readonly output: Stream.Stream<PiTurnOutput, AgentOperationError>;
       },
       HarnessSessionNotFound | PiTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
@@ -206,7 +216,10 @@ export const makePiAgentWithDependencies = <R>(
             Effect.andThen(completeTurn(session)),
             Effect.andThen(Queue.end(session.requests)),
             Effect.andThen(
-              Queue.offer(session.chunks, { type: "error", errorText: failure.message }),
+              Queue.offer(session.chunks, {
+                _tag: "Chunk",
+                chunk: { type: "error", errorText: failure.message },
+              }),
             ),
             Effect.flatMap((accepted) =>
               accepted
@@ -227,6 +240,30 @@ export const makePiAgentWithDependencies = <R>(
       event: Parameters<SessionState["transform"]>[0],
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
+        const offer = (output: PiTurnOutput) =>
+          Queue.offer(session.chunks, output).pipe(
+            Effect.flatMap((accepted) =>
+              accepted
+                ? Effect.succeed(true)
+                : evictOverflowedSession(session).pipe(Effect.as(false)),
+            ),
+          );
+
+        if (event.type === "auto_retry_start") {
+          if (
+            !(yield* offer({
+              _tag: "RetryStarted",
+              retryNumber: event.attempt,
+              maxRetries: event.maxAttempts,
+              delayMs: event.delayMs,
+            }))
+          ) {
+            return;
+          }
+        } else if (event.type === "auto_retry_end") {
+          if (!(yield* offer({ _tag: "RetryEnded" }))) return;
+        }
+
         for (const chunk of session.transform(event)) {
           if (chunk.type === "finish") {
             const transition = yield* Ref.modify<PiTurnState, FinishTransition>(
@@ -251,11 +288,7 @@ export const makePiAgentWithDependencies = <R>(
             if (!transition.deliver) continue;
           }
 
-          const accepted = yield* Queue.offer(session.chunks, chunk);
-          if (!accepted) {
-            yield* evictOverflowedSession(session);
-            return;
-          }
+          if (!(yield* offer({ _tag: "Chunk", chunk }))) return;
         }
       });
 
@@ -338,7 +371,7 @@ export const makePiAgentWithDependencies = <R>(
             scope,
             transport,
             termination: yield* Deferred.make<never, PiSessionFailure>(),
-            chunks: yield* Queue.dropping<PiUIMessageChunk, Cause.Done | AgentOperationError>(
+            chunks: yield* Queue.dropping<PiTurnOutput, Cause.Done | AgentOperationError>(
               SESSION_QUEUE_CAPACITY,
             ),
             requests: yield* Queue.bounded<AgentRequest, Cause.Done>(SESSION_QUEUE_CAPACITY),
@@ -410,7 +443,7 @@ export const makePiAgentWithDependencies = <R>(
               {
                 readonly turnId: string;
                 readonly started: boolean;
-                readonly output: Stream.Stream<PiUIMessageChunk, AgentOperationError>;
+                readonly output: Stream.Stream<PiTurnOutput, AgentOperationError>;
               },
               PiTransportFailure | AgentOperationError | TurnAlreadyRunning
             > =>
@@ -527,10 +560,14 @@ export const makePiAgentWithDependencies = <R>(
                     turnId,
                     started: true,
                     output: streamFromQueueOne(session.chunks).pipe(
-                      Stream.tap((chunk) =>
-                        chunk.type === "finish" ? finishConsumed : Effect.void,
+                      Stream.tap((output) =>
+                        output._tag === "Chunk" && output.chunk.type === "finish"
+                          ? finishConsumed
+                          : Effect.void,
                       ),
-                      Stream.takeUntil((chunk) => chunk.type === "finish"),
+                      Stream.takeUntil(
+                        (output) => output._tag === "Chunk" && output.chunk.type === "finish",
+                      ),
                       Stream.ensuring(abandonTurn),
                     ),
                   };

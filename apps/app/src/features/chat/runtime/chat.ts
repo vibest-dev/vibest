@@ -93,6 +93,7 @@ export class Chat {
   // internally and still complete, with the retried tail persisted but never
   // streamed — reconcile from history at turn end regardless of outcome.
   readonly #erroredTurnIds = new Set<string>();
+  #activeTurnId: string | undefined;
   #cursor = 0;
   #historyLoaded = false;
   // Non-null while the history floor is loading: live events queue here so
@@ -136,6 +137,7 @@ export class Chat {
     if (this.#terminated) return;
     if (event.seq <= this.#cursor) return;
     this.#cursor = event.seq;
+    let copyPhase = true;
     switch (event.type) {
       case "session.message.chunk":
         this.#captureChunkError(event.chunk);
@@ -161,29 +163,50 @@ export class Chat {
         );
         break;
       case "session.turn.started":
+        this.#activeTurnId = event.turnId;
+        this.#state.retry = null;
         break;
-      case "session.turn.ended":
+      case "session.turn.retry.started":
+        if (this.#activeTurnId !== event.turnId) break;
+        this.#state.retry = {
+          turnId: event.turnId,
+          retryNumber: event.retryNumber,
+          maxRetries: event.maxRetries,
+          nextAttemptAt: event.nextAttemptAt,
+        };
+        break;
+      case "session.turn.retry.ended":
+        if (this.#state.retry?.turnId === event.turnId) this.#state.retry = null;
+        break;
+      case "session.turn.ended": {
+        const endedActiveTurn = this.#activeTurnId === event.turnId;
+        const needsReconcile =
+          event.outcome !== "completed" ||
+          this.#recoverTurnIds.has(event.turnId) ||
+          this.#erroredTurnIds.has(event.turnId);
         this.#turnFolds.get(event.turnId)?.close();
         this.#turnFolds.delete(event.turnId);
-        // Unanswered requests are stale once the turn ends — no ghost cards.
+        this.#recoverTurnIds.delete(event.turnId);
+        this.#erroredTurnIds.delete(event.turnId);
+        if (!endedActiveTurn) {
+          // Keep the newer turn's phase, retry, and request cards intact. Any
+          // missing settled tail can reconcile when that active turn ends.
+          if (needsReconcile) this.#needsReconcile = true;
+          copyPhase = false;
+          break;
+        }
+        this.#activeTurnId = undefined;
+        if (this.#state.retry?.turnId === event.turnId) this.#state.retry = null;
+        // Unanswered requests are stale once their active turn ends — no ghost cards.
         this.#state.clearPendingRequests();
         // The settled transcript may hold more than the live stream carried:
         // a non-completed turn can have persisted partial (or internally
         // retried full) output, and an abandoned turn was never rendered
-        // live at all.
-        if (
-          event.outcome !== "completed" ||
-          this.#recoverTurnIds.has(event.turnId) ||
-          this.#erroredTurnIds.has(event.turnId) ||
-          // A reconcile deferred earlier (skipped mid-stream) retries at the
-          // next turn boundary, when the replace is safe again.
-          this.#needsReconcile
-        ) {
-          void this.#reconcileHistory();
-        }
-        this.#recoverTurnIds.delete(event.turnId);
-        this.#erroredTurnIds.delete(event.turnId);
+        // live at all. A reconcile deferred earlier retries now, when replace
+        // is safe again.
+        if (needsReconcile || this.#needsReconcile) void this.#reconcileHistory();
         break;
+      }
       case "session.request.asked":
         this.#handleRequest(event.request);
         break;
@@ -192,6 +215,8 @@ export class Chat {
         this.#state.removePendingRequest(event.requestId);
         break;
       case "session.crashed":
+        this.#activeTurnId = undefined;
+        this.#state.retry = null;
         for (const fold of this.#turnFolds.values()) fold.close();
         this.#turnFolds.clear();
         // The server projection drops its pending requests on crash; a card
@@ -206,6 +231,7 @@ export class Chat {
     // it would wipe that local state before turn.started (or the prompt
     // RPC's own rejection) lands.
     if (
+      copyPhase &&
       event.phase !== undefined &&
       event.type !== "session.message.chunk" &&
       event.type !== "session.prompt.submitted" &&
@@ -231,6 +257,8 @@ export class Chat {
     // so stop rendering a spinner that would never resolve.
     this.#state.historyStatus = "settled";
     this.#state.clearPendingRequests();
+    this.#activeTurnId = undefined;
+    this.#state.retry = null;
     this.#state.error = new Error(
       reason === "session_deleted" ? "Session deleted" : "Session closed",
     );
@@ -314,6 +342,9 @@ export class Chat {
     for (const request of snapshot.pendingRequests) this.#handleRequest(request);
 
     const activeTurn = snapshot.activeTurn;
+    this.#activeTurnId = activeTurn && !activeTurn.complete ? activeTurn.turnId : undefined;
+    // Retry is server-owned turn state: every attach replaces it wholesale.
+    this.#state.retry = activeTurn && !activeTurn.complete ? activeTurn.retry : null;
 
     // A fold whose turn is no longer active ended while we were detached —
     // its turn.ended will never arrive, so nothing else closes it (and an

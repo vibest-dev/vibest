@@ -190,6 +190,105 @@ it.effect("ensureRuntime keeps the runtime it holds and stamps contiguous seqs",
   ),
 );
 
+it.effect("retains retry state for reconnect and gates it by active turn", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const queue = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      yield* Queue.offer(queue, {
+        type: "session.turn.retry.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+        retryNumber: 1,
+        maxRetries: 3,
+        nextAttemptAt: 10_000,
+      });
+      let snapshot = yield* awaitCursor(session, 2);
+      assert.deepEqual(snapshot.activeTurn?.retry, {
+        turnId: "turn-1",
+        retryNumber: 1,
+        maxRetries: 3,
+        nextAttemptAt: 10_000,
+      });
+
+      yield* Queue.offer(queue, {
+        type: "session.turn.retry.ended",
+        sessionId: nativeId,
+        turnId: "stale-turn",
+      });
+      snapshot = yield* awaitCursor(session, 3);
+      assert.equal(snapshot.activeTurn?.retry?.turnId, "turn-1");
+
+      yield* Queue.offer(queue, {
+        type: "session.turn.retry.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+        retryNumber: 2,
+        maxRetries: 3,
+        nextAttemptAt: 20_000,
+      });
+      snapshot = yield* awaitCursor(session, 4);
+      assert.equal(snapshot.activeTurn?.retry?.retryNumber, 2);
+
+      yield* Queue.offer(queue, {
+        type: "session.turn.ended",
+        sessionId: nativeId,
+        turnId: "turn-1",
+        outcome: "completed",
+      });
+      snapshot = yield* awaitCursor(session, 5);
+      assert.equal(snapshot.activeTurn?.complete, true);
+      assert.equal(snapshot.activeTurn?.retry, null);
+    }),
+  ),
+);
+
+it.effect("a stale turn end cannot finish the newer active turn", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const queue = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(queue)));
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-1",
+      });
+      yield* Queue.offer(queue, {
+        type: "session.turn.started",
+        sessionId: nativeId,
+        turnId: "turn-2",
+      });
+      yield* Queue.offer(queue, {
+        type: "session.turn.retry.started",
+        sessionId: nativeId,
+        turnId: "turn-2",
+        retryNumber: 1,
+        maxRetries: 3,
+        nextAttemptAt: 10_000,
+      });
+      yield* Queue.offer(queue, {
+        type: "session.turn.ended",
+        sessionId: nativeId,
+        turnId: "turn-1",
+        outcome: "completed",
+      });
+
+      const snapshot = yield* awaitCursor(session, 4);
+      assert.equal(snapshot.status.phase, "running");
+      assert.equal(snapshot.activeTurn?.turnId, "turn-2");
+      assert.equal(snapshot.activeTurn?.complete, false);
+      assert.equal(snapshot.activeTurn?.retry?.turnId, "turn-2");
+    }),
+  ),
+);
+
 it.effect("concurrent acquisitions run the acquire exactly once", () =>
   run(
     Effect.gen(function* () {

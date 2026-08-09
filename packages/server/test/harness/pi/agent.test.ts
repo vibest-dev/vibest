@@ -8,7 +8,7 @@ import { layer } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Stream } from "effect";
 
 import { makePiAdapter } from "../../../src/harness/pi/adapter";
-import { makePiAgent } from "../../../src/harness/pi/agent";
+import { makePiAgent, type PiTurnOutput } from "../../../src/harness/pi/agent";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -59,6 +59,17 @@ rl.on("line", (line) => {
     settle();
     return;
   }
+  if (text === "retry") {
+    send({ type: "agent_end", messages: [assistant({ stopReason: "error", errorMessage: "Connection error." })], willRetry: true });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 5000, errorMessage: "Connection error." });
+    upd({ type: "start" });
+    upd({ type: "text_start", contentIndex: 0 });
+    upd({ type: "text_delta", contentIndex: 0, delta: "recovered" });
+    upd({ type: "text_end", contentIndex: 0, content: "recovered" });
+    send({ type: "auto_retry_end", success: true, attempt: 1 });
+    settle();
+    return;
+  }
   if (text === "crash") {
     upd({ type: "start" });
     upd({ type: "text_start", contentIndex: 0 });
@@ -83,6 +94,9 @@ function makeFake(): string {
   return file;
 }
 
+const outputChunks = (outputs: Iterable<PiTurnOutput>) =>
+  Array.from(outputs).flatMap((output) => (output._tag === "Chunk" ? [output.chunk] : []));
+
 layer(NodeServices.layer)("PiAgent", (it) => {
   it.effect("creates a session and streams a full turn", () =>
     Effect.gen(function* () {
@@ -94,7 +108,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       assert.equal(prompt.started, true);
       const chunks = yield* Stream.runCollect(prompt.output);
       assert.deepEqual(
-        Array.from(chunks, (chunk) => chunk.type),
+        outputChunks(chunks).map((chunk) => chunk.type),
         ["start", "text-start", "text-delta", "text-end", "finish"],
       );
       yield* agent.session.abort(sessionId);
@@ -130,7 +144,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const prompt = yield* agent.session.prompt({ sessionId, text: "tool" });
       const chunks = yield* Stream.runCollect(prompt.output);
       assert.deepEqual(
-        Array.from(chunks, (chunk) => chunk.type),
+        outputChunks(chunks).map((chunk) => chunk.type),
         ["start", "tool-input-available", "tool-output-available", "finish"],
       );
       yield* agent.session.abort(sessionId);
@@ -179,7 +193,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       assert.equal(accepted, true);
 
       const chunks = yield* Fiber.join(collected);
-      const deltas = Array.from(chunks).filter((chunk) => chunk.type === "text-delta");
+      const deltas = outputChunks(chunks).filter((chunk) => chunk.type === "text-delta");
       assert.ok(
         deltas.some((chunk) => "delta" in chunk && chunk.delta === "confirmed:true"),
         "the confirm answer did not reach the pi child",
@@ -200,7 +214,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       assert.equal(second.turnId, first.turnId);
 
       const chunks = yield* Stream.runCollect(first.output);
-      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(outputChunks(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -214,7 +228,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
 
       yield* agent.session.interrupt(sessionId);
       const chunks = yield* Fiber.join(collected);
-      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(outputChunks(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -228,7 +242,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
 
       const prompt = yield* agent.session.prompt({ sessionId, text: "ping" });
       const chunks = yield* Stream.runCollect(prompt.output);
-      assert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      assert.equal(outputChunks(chunks).at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -242,7 +256,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const prompt = yield* agent.session.prompt({ sessionId: doomed.sessionId, text: "crash" });
       const chunks = yield* Stream.runCollect(prompt.output);
       assert.deepEqual(
-        Array.from(chunks, (chunk) => chunk.type),
+        outputChunks(chunks).map((chunk) => chunk.type),
         ["start", "text-start", "text-delta", "error"],
       );
 
@@ -264,7 +278,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       // The sibling session's child is untouched.
       const sibling = yield* agent.session.prompt({ sessionId: healthy.sessionId, text: "ping" });
       const siblingChunks = yield* Stream.runCollect(sibling.output);
-      assert.equal(Array.from(siblingChunks).at(-1)?.type, "finish");
+      assert.equal(outputChunks(siblingChunks).at(-1)?.type, "finish");
       yield* agent.session.abort(healthy.sessionId);
     }),
   );
@@ -304,6 +318,43 @@ layer(NodeServices.layer)("PiAgent", (it) => {
         supportsSteering: true,
         supportsPermissions: false,
       });
+      yield* session.close;
+    }),
+  );
+
+  it.effect("publishes retry lifecycle without surfacing the transient provider error", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const session = yield* makePiAdapter(agent).open({ cwd: "/tmp" });
+      const collected = yield* Effect.forkChild(
+        Stream.runCollect(
+          session.events.pipe(
+            Stream.takeUntil((event) => event.body.type === "session.turn.ended"),
+          ),
+        ),
+      );
+
+      yield* session.prompt({ parts: [{ type: "text", text: "retry" }] });
+      const events = Array.from(yield* Fiber.join(collected));
+      assert.deepEqual(
+        events.map((event) => event.body.type),
+        [
+          "session.turn.started",
+          "start",
+          "session.turn.retry.started",
+          "text-start",
+          "text-delta",
+          "text-end",
+          "session.turn.retry.ended",
+          "finish",
+          "session.turn.ended",
+        ],
+      );
+      const retry = events.find((event) => event.body.type === "session.turn.retry.started");
+      assert.ok(retry?.body.type === "session.turn.retry.started");
+      assert.equal(retry.body.retryNumber, 1);
+      assert.equal(retry.body.maxRetries, 3);
+      assert.equal(retry.body.nextAttemptAt, 5000);
       yield* session.close;
     }),
   );
