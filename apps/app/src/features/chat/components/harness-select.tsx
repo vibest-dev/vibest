@@ -1,5 +1,6 @@
 import type { HarnessAgentId } from "@vibest/contract";
 import {
+  PromptInputButton,
   PromptInputModelSelect,
   PromptInputModelSelectContent,
   PromptInputModelSelectItem,
@@ -42,16 +43,24 @@ export function HarnessSelect({
         if (next) onChange(next as HarnessAgentId);
       }}
     >
-      <PromptInputModelSelectTrigger className="group hover:bg-accent data-pressed:bg-accent min-h-8 border-0 bg-transparent px-3 py-0 shadow-none not-data-disabled:not-focus-visible:not-aria-invalid:not-data-pressed:before:shadow-none dark:bg-transparent dark:not-data-disabled:not-focus-visible:not-aria-invalid:not-data-pressed:before:shadow-none [&>[data-slot=select-icon]]:hidden">
-        <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
-          <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
-          <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
-        </PromptInputModelSelectValue>
-        <ChevronDownIcon
-          aria-hidden="true"
-          className="size-4 shrink-0 opacity-70 transition-transform group-data-[popup-open]:rotate-180"
-        />
-      </PromptInputModelSelectTrigger>
+      {/* The render callback preserves Base UI's Select behavior while replacing
+          the field-style trigger chrome and its hard-coded up/down icon. */}
+      <PromptInputModelSelectTrigger
+        render={({ children: _children, className: _className, ...triggerProps }) => (
+          <PromptInputButton
+            {...triggerProps}
+            className="text-foreground font-normal"
+            size="default"
+            variant="ghost"
+          >
+            <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
+              <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
+              <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
+            </PromptInputModelSelectValue>
+            <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 opacity-70" />
+          </PromptInputButton>
+        )}
+      />
       <PromptInputModelSelectContent>
         {harnessAgents.map((harnessAgent) => (
           <PromptInputModelSelectItem
