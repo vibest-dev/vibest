@@ -6,6 +6,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
 import { RegisterPanels } from "@/components/layout/content-panel/react/register";
 import { contentPanel, STATIC_PANELS } from "@/content-panel";
+import { useProjectSession } from "@/features/projects/use-project-sessions";
+import { useProject } from "@/features/projects/use-projects";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
 import { usePlatform } from "@/platform-context";
@@ -49,11 +51,18 @@ function RootLayout() {
   // — and the session route's would never be seen. The match's loaderData is
   // also the ref the server confirmed, unlike the URL's search hints. Off a
   // session route it is null and every panel hook degrades to a no-op.
-  const sessionId = useMatch({
+  const sessionRef = useMatch({
     from: "/session/$sessionId",
     shouldThrow: false,
-    select: (match) => match.loaderData?.sessionId ?? null,
+    select: (match) => match.loaderData ?? null,
   });
+  const draftProjectId = useMatch({
+    from: "/draft",
+    shouldThrow: false,
+    select: (match) => match.search.projectId ?? null,
+  });
+  const project = useProject(sessionRef?.projectId ?? draftProjectId);
+  const session = useProjectSession(sessionRef?.projectId, sessionRef?.sessionId);
 
   const handleNewChat = () => navigate({ to: "/draft" });
 
@@ -66,9 +75,14 @@ function RootLayout() {
       className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
       defaultOpen={readSidebarCookie()}
     >
-      <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionId ?? null}>
+      <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionRef?.sessionId ?? null}>
         <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell hasTrafficLights={os === "macos"} onNewChat={handleNewChat} />
+        <AppShell
+          hasTrafficLights={os === "macos"}
+          onNewChat={handleNewChat}
+          projectName={project?.name}
+          title={sessionRef === null ? "New chat" : (session?.title ?? "New chat")}
+        />
       </ContentPanelProvider>
     </SidebarProvider>
   );

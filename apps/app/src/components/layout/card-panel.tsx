@@ -6,9 +6,11 @@ import { ContentPanelToggle } from "@/components/layout/content-panel/react/togg
 
 export interface CardPanelProps {
   hasTrafficLights: boolean;
+  projectName: string | undefined;
+  title: string;
 }
 
-export function CardPanel({ hasTrafficLights }: CardPanelProps) {
+export function CardPanel({ hasTrafficLights, projectName, title }: CardPanelProps) {
   const { state, isMobile } = useSidebar();
   const collapsedDesktop = !isMobile && state === "collapsed";
   const ownsToggle = isMobile || collapsedDesktop;
@@ -26,9 +28,18 @@ export function CardPanel({ hasTrafficLights }: CardPanelProps) {
             className={cn(isMobile ? "-ms-0.5" : "-ms-2", "[-webkit-app-region:no-drag]")}
           />
         )}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium">New chat</span>
-          <span className="text-muted-foreground">Playground</span>
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <span className="min-w-0 truncate font-medium" title={title}>
+            {title}
+          </span>
+          {projectName !== undefined && (
+            <span
+              className="text-muted-foreground max-w-[50%] min-w-0 truncate"
+              title={projectName}
+            >
+              {projectName}
+            </span>
+          )}
         </div>
         <ContentPanelToggle className="ms-auto [-webkit-app-region:no-drag]" />
       </header>
