@@ -6,8 +6,6 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
 import { RegisterPanels } from "@/components/layout/content-panel/react/register";
 import { contentPanel, STATIC_PANELS } from "@/content-panel";
-import { useProjectSession } from "@/features/projects/use-project-sessions";
-import { useProject } from "@/features/projects/use-projects";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
 import { usePlatform } from "@/platform-context";
@@ -56,14 +54,6 @@ function RootLayout() {
     shouldThrow: false,
     select: (match) => match.loaderData ?? null,
   });
-  const draftProjectId = useMatch({
-    from: "/draft",
-    shouldThrow: false,
-    select: (match) => match.search.projectId ?? null,
-  });
-  const project = useProject(sessionRef?.projectId ?? draftProjectId);
-  const session = useProjectSession(sessionRef?.projectId, sessionRef?.sessionId);
-
   const handleNewChat = () => navigate({ to: "/draft" });
 
   return (
@@ -77,12 +67,7 @@ function RootLayout() {
     >
       <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionRef?.sessionId ?? null}>
         <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell
-          hasTrafficLights={os === "macos"}
-          onNewChat={handleNewChat}
-          projectName={project?.name}
-          title={sessionRef === null ? "New chat" : (session?.title ?? "New chat")}
-        />
+        <AppShell hasTrafficLights={os === "macos"} onNewChat={handleNewChat} />
       </ContentPanelProvider>
     </SidebarProvider>
   );

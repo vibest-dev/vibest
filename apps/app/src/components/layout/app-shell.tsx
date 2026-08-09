@@ -15,11 +15,9 @@ import {
 export interface AppShellProps {
   hasTrafficLights: boolean;
   onNewChat: () => void;
-  projectName: string | undefined;
-  title: string;
 }
 
-export function AppShell({ hasTrafficLights, onNewChat, projectName, title }: AppShellProps) {
+export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
@@ -46,7 +44,7 @@ export function AppShell({ hasTrafficLights, onNewChat, projectName, title }: Ap
             session?.setPresentation(collapsed ? "maximized" : "docked")
           }
         >
-          <CardPanel hasTrafficLights={hasTrafficLights} projectName={projectName} title={title} />
+          <CardPanel hasTrafficLights={hasTrafficLights} />
         </ShellMainPanel>
         {contentVisible && (
           <>

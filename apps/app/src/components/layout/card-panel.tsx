@@ -1,17 +1,34 @@
-import { Outlet } from "@tanstack/react-router";
+import { Outlet, useMatch } from "@tanstack/react-router";
 import { SidebarInset, SidebarTrigger, useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
 
 import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
+import { useProjectSession } from "@/features/projects/use-project-sessions";
+import { useProject } from "@/features/projects/use-projects";
 
 export interface CardPanelProps {
   hasTrafficLights: boolean;
-  projectName: string | undefined;
-  title: string;
 }
 
-export function CardPanel({ hasTrafficLights, projectName, title }: CardPanelProps) {
+export function CardPanel({ hasTrafficLights }: CardPanelProps) {
   const { state, isMobile } = useSidebar();
+  // This card is part of the app-shell composition root, so it is the seam that
+  // combines route identity with project-owned session metadata. AppShell stays
+  // layout-only instead of exposing Project concepts through pass-through props.
+  const sessionRef = useMatch({
+    from: "/session/$sessionId",
+    shouldThrow: false,
+    select: (match) => match.loaderData ?? null,
+  });
+  const draftProjectId = useMatch({
+    from: "/draft",
+    shouldThrow: false,
+    select: (match) => match.search.projectId ?? null,
+  });
+  const project = useProject(sessionRef?.projectId ?? draftProjectId);
+  const session = useProjectSession(sessionRef?.projectId, sessionRef?.sessionId);
+  const title = sessionRef === null ? "New chat" : (session?.title ?? "New chat");
+  const projectName = project?.name;
   const collapsedDesktop = !isMobile && state === "collapsed";
   const ownsToggle = isMobile || collapsedDesktop;
 
