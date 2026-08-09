@@ -1,12 +1,12 @@
 import type { HarnessAgentId } from "@vibest/contract";
 import {
-  PromptInputButton,
   PromptInputModelSelect,
   PromptInputModelSelectContent,
   PromptInputModelSelectItem,
   PromptInputModelSelectTrigger,
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
+import { Button } from "@vibest/ui/components/button";
 import { ChevronDownIcon } from "lucide-react";
 
 import { useHarnessAgents } from "@/features/chat/harness/use-harness";
@@ -47,9 +47,9 @@ export function HarnessSelect({
           the field-style trigger chrome and its hard-coded up/down icon. */}
       <PromptInputModelSelectTrigger
         render={({ children: _children, className: _className, ...triggerProps }) => (
-          <PromptInputButton
+          <Button
             {...triggerProps}
-            className="text-foreground font-normal"
+            className="text-foreground gap-1.5 px-3 font-normal"
             size="default"
             variant="ghost"
           >
@@ -58,7 +58,7 @@ export function HarnessSelect({
               <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
             </PromptInputModelSelectValue>
             <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 opacity-70" />
-          </PromptInputButton>
+          </Button>
         )}
       />
       <PromptInputModelSelectContent>
