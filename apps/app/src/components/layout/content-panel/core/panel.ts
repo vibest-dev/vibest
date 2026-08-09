@@ -1,3 +1,5 @@
+import type { SessionRef } from "@vibest/contract";
+
 /**
  * The panel vocabulary. Zero React on purpose: everything here is data or a
  * pure function, so the workspace model in `content-panel.ts` can be driven
@@ -20,7 +22,7 @@
  */
 export interface PanelHandle<Payload> {
   readonly id: string;
-  readonly sessionId: string;
+  readonly sessionRef: SessionRef;
   readonly payload: Payload;
   activate(): void;
   close(): void;

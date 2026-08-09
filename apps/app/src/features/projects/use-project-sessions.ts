@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import type { SessionSummary } from "@vibest/contract";
+import type { SessionRef, SessionSummary } from "@vibest/contract";
 import { useCallback } from "react";
+
+import { sameSessionRef } from "@/lib/session-ref";
 
 // Newest-first: a session is opened right after it is created. Module scope
 // keeps `select` referentially stable across renders.
@@ -30,30 +32,37 @@ export function useProjectSessions(
   });
 }
 
-export const selectProjectSession = (
+export const selectProjectSessionTitle = (
   sessions: ReadonlyArray<SessionSummary>,
-  sessionId: string,
-): SessionSummary | undefined => sessions.find((session) => session.sessionId === sessionId);
+  ref: SessionRef,
+): string | null | undefined => {
+  const session = sessions.find((candidate) => sameSessionRef(candidate, ref));
+  return session === undefined ? undefined : (session.title ?? null);
+};
 
 /**
- * One session from a project's held lists.
+ * One session title from a project's held lists.
  *
- * The selector closes over `sessionId`, so it stays memoised: title events can
- * patch the shared list while this consumer re-renders only for its own row.
+ * The selector closes over the primitive SessionRef fields, so it stays
+ * memoised: title events can patch the shared list while this consumer
+ * re-renders only for its own title.
  * The archived list stays cold unless the active list has loaded without the
  * routed session; this preserves archived bookmarks without doubling the usual
  * session-page request.
  */
-export function useProjectSession(
-  projectId: string | undefined,
-  sessionId: string | undefined,
-): SessionSummary | undefined {
+export function useProjectSessionTitle(ref: SessionRef | undefined): string | undefined {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
-  const enabled = projectId !== undefined && sessionId !== undefined;
+  const projectId = ref?.projectId;
+  const harnessAgentId = ref?.harnessAgentId;
+  const sessionId = ref?.sessionId;
+  const enabled =
+    projectId !== undefined && harnessAgentId !== undefined && sessionId !== undefined;
   const select = useCallback(
     (sessions: ReadonlyArray<SessionSummary>) =>
-      sessionId === undefined ? undefined : selectProjectSession(sessions, sessionId),
-    [sessionId],
+      projectId === undefined || harnessAgentId === undefined || sessionId === undefined
+        ? undefined
+        : selectProjectSessionTitle(sessions, { projectId, harnessAgentId, sessionId }),
+    [harnessAgentId, projectId, sessionId],
   );
   const active = useQuery({
     ...orpcQueryUtils.session.list.queryOptions({
@@ -72,5 +81,6 @@ export function useProjectSession(
     select,
   });
 
-  return active.data ?? archived.data;
+  if (active.data !== undefined) return active.data ?? undefined;
+  return archived.data ?? undefined;
 }

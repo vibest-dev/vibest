@@ -1,3 +1,4 @@
+import type { SessionRef } from "@vibest/contract";
 import {
   Sidebar,
   SidebarContent,
@@ -18,7 +19,13 @@ import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
 import { ProjectList } from "@/features/projects/project-list";
 import { usePlatform } from "@/platform-context";
 
-export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
+export function AppSidebar({
+  isSessionActive,
+  onNewChat,
+}: {
+  readonly isSessionActive: (ref: SessionRef) => boolean;
+  readonly onNewChat: () => void;
+}) {
   const [importOpen, setImportOpen] = useState(false);
   const { os } = usePlatform();
   const { isMobile, state } = useSidebar();
@@ -64,7 +71,7 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <ProjectList onImport={() => setImportOpen(true)} />
+        <ProjectList isSessionActive={isSessionActive} onImport={() => setImportOpen(true)} />
       </SidebarContent>
 
       {importOpen && <ImportProjectDialog onClose={() => setImportOpen(false)} />}

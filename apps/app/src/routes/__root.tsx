@@ -1,13 +1,20 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, useMatch, useNavigate } from "@tanstack/react-router";
+import type { SessionRef } from "@vibest/contract";
 import { SidebarProvider } from "@vibest/ui/components/sidebar";
+import { useCallback, useRef } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { AppSidebar } from "@/components/layout/app-sidebar";
+import { CardPanel } from "@/components/layout/card-panel";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
 import { RegisterPanels } from "@/components/layout/content-panel/react/register";
 import { contentPanel, STATIC_PANELS } from "@/content-panel";
+import { useProjectSessionTitle } from "@/features/projects/use-project-sessions";
+import { useProject } from "@/features/projects/use-projects";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
+import { sameSessionRef } from "@/lib/session-ref";
 import { usePlatform } from "@/platform-context";
 
 export interface RouterAppContext {
@@ -40,20 +47,37 @@ function RootLayout() {
   const navigate = useNavigate();
   const { os } = usePlatform();
 
-  // The content panel is session-scoped, but it is bound here rather than in the
-  // session route: it is a card of the shell, peer to the chat's, and maximizing
-  // it has to be able to take the chat card's width.
+  // This is the shell's one route-identity seam: the content panel, active
+  // sidebar row, and card heading all derive from the same authoritative ref.
+  // The content panel is bound here rather than in the session route because it
+  // is a peer card whose maximized state controls the whole shell.
   //
   // A named match, not `useParams({ strict: false })`: this component *is* the
   // root route's, so the nearest match is always the root — which has no params
   // — and the session route's would never be seen. The match's loaderData is
   // also the ref the server confirmed, unlike the URL's search hints. Off a
   // session route it is null and every panel hook degrades to a no-op.
-  const sessionRef = useMatch({
-    from: "/session/$sessionId",
+  const sessionRef =
+    useMatch({
+      from: "/session/$sessionId",
+      shouldThrow: false,
+      select: (match) => match.loaderData ?? null,
+    }) ?? null;
+  const draftProjectId = useMatch({
+    from: "/draft",
     shouldThrow: false,
-    select: (match) => match.loaderData ?? null,
+    select: (match) => match.search.projectId ?? null,
   });
+  const project = useProject(sessionRef?.projectId ?? draftProjectId);
+  const sessionTitle = useProjectSessionTitle(sessionRef ?? undefined);
+  // Mutations can settle after navigation. This stable predicate reads the
+  // latest authoritative route ref instead of a render-time `active` boolean.
+  const currentSessionRef = useRef(sessionRef);
+  currentSessionRef.current = sessionRef;
+  const isSessionActive = useCallback(
+    (candidate: SessionRef) => sameSessionRef(candidate, currentSessionRef.current),
+    [],
+  );
   const handleNewChat = () => navigate({ to: "/draft" });
 
   return (
@@ -65,9 +89,17 @@ function RootLayout() {
       className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
       defaultOpen={readSidebarCookie()}
     >
-      <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionRef?.sessionId ?? null}>
+      <ContentPanelProvider contentPanel={contentPanel} sessionRef={sessionRef}>
         <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell hasTrafficLights={os === "macos"} onNewChat={handleNewChat} />
+        <AppShell
+          sidebar={<AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />}
+        >
+          <CardPanel
+            hasTrafficLights={os === "macos"}
+            heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
+            supportingText={project?.name}
+          />
+        </AppShell>
       </ContentPanelProvider>
     </SidebarProvider>
   );

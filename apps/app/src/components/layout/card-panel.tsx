@@ -1,34 +1,17 @@
-import { Outlet, useMatch } from "@tanstack/react-router";
+import { Outlet } from "@tanstack/react-router";
 import { SidebarInset, SidebarTrigger, useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
 
 import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
-import { useProjectSession } from "@/features/projects/use-project-sessions";
-import { useProject } from "@/features/projects/use-projects";
 
 export interface CardPanelProps {
-  hasTrafficLights: boolean;
+  readonly hasTrafficLights: boolean;
+  readonly heading: string;
+  readonly supportingText?: string;
 }
 
-export function CardPanel({ hasTrafficLights }: CardPanelProps) {
+export function CardPanel({ hasTrafficLights, heading, supportingText }: CardPanelProps) {
   const { state, isMobile } = useSidebar();
-  // This card is part of the app-shell composition root, so it is the seam that
-  // combines route identity with project-owned session metadata. AppShell stays
-  // layout-only instead of exposing Project concepts through pass-through props.
-  const sessionRef = useMatch({
-    from: "/session/$sessionId",
-    shouldThrow: false,
-    select: (match) => match.loaderData ?? null,
-  });
-  const draftProjectId = useMatch({
-    from: "/draft",
-    shouldThrow: false,
-    select: (match) => match.search.projectId ?? null,
-  });
-  const project = useProject(sessionRef?.projectId ?? draftProjectId);
-  const session = useProjectSession(sessionRef?.projectId, sessionRef?.sessionId);
-  const title = sessionRef === null ? "New chat" : (session?.title ?? "New chat");
-  const projectName = project?.name;
   const collapsedDesktop = !isMobile && state === "collapsed";
   const ownsToggle = isMobile || collapsedDesktop;
 
@@ -46,15 +29,15 @@ export function CardPanel({ hasTrafficLights }: CardPanelProps) {
           />
         )}
         <div className="flex min-w-0 items-center gap-2 text-sm">
-          <span className="min-w-0 truncate font-medium" title={title}>
-            {title}
+          <span className="min-w-0 truncate font-medium" title={heading}>
+            {heading}
           </span>
-          {projectName !== undefined && (
+          {supportingText !== undefined && (
             <span
               className="text-muted-foreground max-w-[50%] min-w-0 truncate"
-              title={projectName}
+              title={supportingText}
             >
-              {projectName}
+              {supportingText}
             </span>
           )}
         </div>

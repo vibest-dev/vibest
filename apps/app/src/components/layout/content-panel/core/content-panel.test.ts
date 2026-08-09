@@ -1,4 +1,7 @@
+import type { SessionRef } from "@vibest/contract";
 import { describe, expect, it } from "vitest";
+
+import { sessionRefKey } from "@/lib/session-ref";
 
 import { ContentPanel } from "./content-panel";
 import { definePanel, definePanelFamily, type PanelHandle } from "./panel";
@@ -16,10 +19,16 @@ const file = definePanelFamily({
   view: null,
 });
 
-const S = "session-1";
+const ref = (overrides: Partial<SessionRef> = {}): SessionRef => ({
+  projectId: "11111111-1111-4111-8111-111111111111",
+  harnessAgentId: "pi",
+  sessionId: "session-1",
+  ...overrides,
+});
+const S = ref();
 
-const snapshotOf = (host: ContentPanel<null>, sessionId: string | null = S) =>
-  host.snapshot(host.store.getState(), sessionId);
+const snapshotOf = (host: ContentPanel<null>, sessionRef: SessionRef | null = S) =>
+  host.snapshot(host.store.getState(), sessionRef);
 
 const withPanels = (...definitions: Parameters<ContentPanel<null>["register"]>[0][]) => {
   const host = new ContentPanel<null>();
@@ -28,12 +37,14 @@ const withPanels = (...definitions: Parameters<ContentPanel<null>["register"]>[0
 };
 
 /** A read-only `Storage` standing in for a reload with these panels persisted. */
-const storageHolding = (bySessionId: unknown): Storage => {
-  const value = JSON.stringify({ state: { bySessionId }, version: 1 });
+const storageHolding = (bySessionKey: unknown, version = 2, writes: string[] = []): Storage => {
+  const state =
+    version === 1 ? { bySessionId: bySessionKey } : { bySessionKey, legacyBySessionId: {} };
+  const value = JSON.stringify({ state, version });
   return {
     length: 1,
     getItem: (key) => (key === "vibest:content-panel" ? value : null),
-    setItem: () => {},
+    setItem: (_key, next) => void writes.push(next),
     removeItem: () => {},
     clear: () => {},
     key: () => null,
@@ -249,7 +260,7 @@ describe("ContentPanel", () => {
     });
     const host = new ContentPanel<null>({
       storage: storageHolding({
-        [S]: {
+        [sessionRefKey(S)]: {
           presentation: "docked",
           activeId: "counted:1",
           panels: [
@@ -271,14 +282,64 @@ describe("ContentPanel", () => {
     expect(created).toBe(1);
   });
 
-  it("scopes panels per session", () => {
-    const host = withPanels(diff);
-    host.open(S, diff);
-    host.open("session-2", diff);
-    host.close("session-2", "diff");
+  it("restores a v1 record and claims it on the first write through a SessionRef", () => {
+    const host = new ContentPanel<null>({
+      storage: storageHolding(
+        {
+          "session-1": {
+            presentation: "docked",
+            activeId: "diff",
+            panels: [{ id: "diff", type: "diff" }],
+          },
+        },
+        1,
+      ),
+    });
+    host.register(diff);
 
+    // Snapshot can read the inert legacy record before the first interaction,
+    // so there is no empty-panel flash during an upgrade.
     expect(snapshotOf(host).panels).toHaveLength(1);
-    expect(snapshotOf(host, "session-2").panels).toHaveLength(0);
+
+    host.setPresentation(S, "maximized");
+    const state = host.store.getState();
+    expect(state.bySessionKey[sessionRefKey(S)]?.panels).toHaveLength(1);
+    expect(state.legacyBySessionId).toEqual({});
+  });
+
+  it("does not overwrite an unknown future storage version", () => {
+    const writes: string[] = [];
+    const host = new ContentPanel<null>({
+      storage: storageHolding(
+        {
+          [sessionRefKey(S)]: {
+            presentation: "docked",
+            activeId: "diff",
+            panels: [{ id: "diff", type: "diff" }],
+          },
+        },
+        3,
+        writes,
+      ),
+    });
+    host.register(diff);
+
+    expect(snapshotOf(host).panels).toHaveLength(0);
+    expect(writes).toEqual([]);
+  });
+
+  it("scopes panels by the complete SessionRef", () => {
+    const host = withPanels(diff);
+    const sameIdOtherProject = ref({
+      projectId: "22222222-2222-4222-8222-222222222222",
+    });
+    const handle = host.open(S, diff);
+    host.open(sameIdOtherProject, diff);
+    host.close(sameIdOtherProject, "diff");
+
+    expect(handle.sessionRef).toEqual(S);
+    expect(snapshotOf(host).panels).toHaveLength(1);
+    expect(snapshotOf(host, sameIdOtherProject).panels).toHaveLength(0);
   });
 
   it("forget drops a session and disposes its instances", () => {

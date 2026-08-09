@@ -18,7 +18,8 @@ export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSc
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Server-generated, opaque to clients; unique within a project.
+  // Server-generated, opaque to clients, and globally unique for reverse lookup.
+  // Session operations still use the complete ref rather than this field alone.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;

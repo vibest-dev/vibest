@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useRouteContext } from "@tanstack/react-router";
+import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import type { SessionSummary } from "@vibest/contract";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
 import { SidebarMenuAction } from "@vibest/ui/components/sidebar";
@@ -10,12 +10,16 @@ import { toast } from "sonner";
 import { RenameSessionDialog } from "@/features/projects/rename-session-dialog";
 
 /** Session mutations live behind one actions-menu capability boundary. */
-export function SessionActionsMenu({ session }: { readonly session: SessionSummary }) {
+export function SessionActionsMenu({
+  isActive,
+  session,
+}: {
+  readonly isActive: () => boolean;
+  readonly session: SessionSummary;
+}) {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // strict: false — the menu also renders on routes without a sessionId.
-  const { sessionId: activeSessionId } = useParams({ strict: false });
   const [renaming, setRenaming] = useState(false);
   const title = session.title ?? "New chat";
 
@@ -39,7 +43,7 @@ export function SessionActionsMenu({ session }: { readonly session: SessionSumma
         queryClient.invalidateQueries({ queryKey: listKey(true) }),
       ]);
 
-      if (archived && activeSessionId === session.sessionId) {
+      if (archived && isActive()) {
         return Promise.all([
           refreshLists,
           navigate({ to: "/draft", search: { projectId: session.projectId } }),

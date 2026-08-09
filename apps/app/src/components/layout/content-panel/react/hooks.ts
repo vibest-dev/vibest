@@ -1,3 +1,4 @@
+import type { SessionRef } from "@vibest/contract";
 import { useMemo } from "react";
 import { useStore } from "zustand";
 
@@ -8,7 +9,7 @@ import type { AnyPanelView } from "./view";
 
 /** Session-level operations, with the session already bound. Panel-level ones live on the instance. */
 export interface ContentPanelSession {
-  readonly sessionId: string;
+  readonly sessionRef: SessionRef;
   open<Type extends string, Payload, Extra extends object>(
     definition: PanelDefinition<Type, Payload, Extra, AnyPanelView>,
     ...payload: PayloadArgs<Payload>
@@ -29,19 +30,19 @@ export interface ContentPanelSession {
  * null outside a session route.
  */
 export function useContentPanel(): ContentPanelSession | null {
-  const { contentPanel, sessionId } = useContentPanelContext();
+  const { contentPanel, sessionRef } = useContentPanelContext();
   return useMemo(() => {
-    if (sessionId === null) return null;
+    if (sessionRef === null) return null;
     return {
-      sessionId,
-      open: (definition, ...payload) => contentPanel.open(sessionId, definition, ...payload),
-      openNew: (type) => contentPanel.openNew(sessionId, type),
-      activate: (id) => contentPanel.activate(sessionId, id),
-      close: (id) => contentPanel.close(sessionId, id),
-      setPresentation: (presentation) => contentPanel.setPresentation(sessionId, presentation),
-      toggleVisibility: () => contentPanel.toggleVisibility(sessionId),
+      sessionRef,
+      open: (definition, ...payload) => contentPanel.open(sessionRef, definition, ...payload),
+      openNew: (type) => contentPanel.openNew(sessionRef, type),
+      activate: (id) => contentPanel.activate(sessionRef, id),
+      close: (id) => contentPanel.close(sessionRef, id),
+      setPresentation: (presentation) => contentPanel.setPresentation(sessionRef, presentation),
+      toggleVisibility: () => contentPanel.toggleVisibility(sessionRef),
     };
-  }, [contentPanel, sessionId]);
+  }, [contentPanel, sessionRef]);
 }
 
 /**
@@ -53,6 +54,8 @@ export function useContentPanel(): ContentPanelSession | null {
 export function usePanelSnapshot<Selected>(
   selector: (snapshot: PanelSnapshot<AnyPanelView>) => Selected,
 ): Selected {
-  const { contentPanel, sessionId } = useContentPanelContext();
-  return useStore(contentPanel.store, (state) => selector(contentPanel.snapshot(state, sessionId)));
+  const { contentPanel, sessionRef } = useContentPanelContext();
+  return useStore(contentPanel.store, (state) =>
+    selector(contentPanel.snapshot(state, sessionRef)),
+  );
 }

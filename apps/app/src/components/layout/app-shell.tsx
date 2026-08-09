@@ -1,7 +1,6 @@
 import { useSidebar } from "@vibest/ui/components/sidebar";
+import type { ReactNode } from "react";
 
-import { AppSidebar } from "@/components/layout/app-sidebar";
-import { CardPanel } from "@/components/layout/card-panel";
 import { useContentPanel, usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
 import { ContentPanelOutlet } from "@/components/layout/content-panel/react/outlet";
 import {
@@ -12,12 +11,13 @@ import {
   ShellSidebarPanel,
 } from "@/components/layout/shell-panels";
 
+/** Structural shell only; the root composition owns the semantic surfaces. */
 export interface AppShellProps {
-  hasTrafficLights: boolean;
-  onNewChat: () => void;
+  readonly children: ReactNode;
+  readonly sidebar: ReactNode;
 }
 
-export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
+export function AppShell({ children, sidebar }: AppShellProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
@@ -26,13 +26,11 @@ export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
 
   return (
     <>
-      {isMobile && <AppSidebar onNewChat={onNewChat} />}
+      {isMobile && sidebar}
       <ShellGroup hasContentPanel={contentVisible} hasSidebar={!isMobile}>
         {!isMobile && (
           <>
-            <ShellSidebarPanel>
-              <AppSidebar onNewChat={onNewChat} />
-            </ShellSidebarPanel>
+            <ShellSidebarPanel>{sidebar}</ShellSidebarPanel>
             <ShellSeparator disabled={maximized} />
           </>
         )}
@@ -44,7 +42,7 @@ export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
             session?.setPresentation(collapsed ? "maximized" : "docked")
           }
         >
-          <CardPanel hasTrafficLights={hasTrafficLights} />
+          {children}
         </ShellMainPanel>
         {contentVisible && (
           <>

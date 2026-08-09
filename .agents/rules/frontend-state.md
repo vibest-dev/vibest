@@ -31,7 +31,11 @@ for per-agent tool rendering.
   projects.
 - **Only composition roots may combine features**: `routes/`,
   `app-interface.tsx`, and the app shell in `components/layout/`. Those four
-  files are the whole allow-list today.
+  files are the whole allow-list today. `routes/__root.tsx` is the shell's one
+  route-identity seam: it reads the authoritative session-route loader ref and
+  composes the project sidebar, card heading, and content-panel binding from it.
+  `AppShell` stays structural through sidebar/main slots; `CardPanel` receives
+  display primitives and neither component interprets routes or Project state.
 - **`components/` is for what no single feature owns** — the shell
   (`layout/`) and generic pieces (`loader.tsx`). Base and composite UI belongs
   in `@vibest/ui`, not here.
@@ -55,9 +59,14 @@ for per-agent tool rendering.
 [dep])`) or it re-runs every render and loses referential stability; say so in
   a comment so nobody "simplifies" the `useCallback` away.
 - Zustand here is not a global store: each `Chat` instance creates its own vanilla
-  store as the AI SDK `ChatState`. `ChatManager` caches Chat instances by
-  sessionId so transcripts survive navigation, and is constructed at App mount
-  (module scope has no host connection yet).
+  store as the AI SDK `ChatState`. `ChatManager` caches Chat instances by the
+  complete `SessionRef` so transcripts survive navigation without crossing
+  project/harness identity, and is constructed at App mount (module scope has no
+  host connection yet).
+- Content-panel tabs, live instances, provider bindings, and panel handles use
+  the complete `SessionRef`; new shell state is never keyed by a bare sessionId.
+  The v1 migration bucket is the sole exception: its globally unique UUID key is
+  read only through an authoritative route ref and re-keyed on the first write.
 - `useSessionListSync` is the only consumer of the global event firehose; session
   events (chunks, requests) belong to the per-session chat transport.
 - The live stream has no replay: subscribe before `session.prompt`, and recover

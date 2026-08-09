@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { Project, SessionSummary } from "@vibest/contract";
+import type { Project, SessionRef, SessionSummary } from "@vibest/contract";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -24,7 +24,13 @@ const EMPTY_SESSIONS: ReadonlyArray<SessionSummary> = [];
  * panel is open (two icon entities, not a rotation). This component owns only
  * grouping and fetching; each row composes its own navigation and actions.
  */
-export function ProjectSessionsGroup({ project }: { project: Project }) {
+export function ProjectSessionsGroup({
+  isSessionActive,
+  project,
+}: {
+  readonly isSessionActive: (ref: SessionRef) => boolean;
+  readonly project: Project;
+}) {
   const navigate = useNavigate();
   const sessions = useProjectSessions(project.id);
   const rows = sessions.data ?? EMPTY_SESSIONS;
@@ -60,7 +66,12 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
           <SidebarGroupContent>
             <SidebarMenu>
               {rows.map((session) => (
-                <ProjectSessionRow key={session.sessionId} session={session} />
+                <ProjectSessionRow
+                  key={session.sessionId}
+                  active={isSessionActive(session)}
+                  isActive={() => isSessionActive(session)}
+                  session={session}
+                />
               ))}
             </SidebarMenu>
           </SidebarGroupContent>

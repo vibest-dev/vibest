@@ -1,3 +1,4 @@
+import type { SessionRef } from "@vibest/contract";
 import { createContext, use } from "react";
 
 import type { ContentPanel } from "../core/content-panel";
@@ -6,7 +7,7 @@ import type { AnyPanelView } from "./view";
 export interface ContentPanelContextValue {
   readonly contentPanel: ContentPanel<AnyPanelView>;
   /** null outside a session route (`/draft`, `/`), where there is nothing to scope panels to. */
-  readonly sessionId: string | null;
+  readonly sessionRef: SessionRef | null;
 }
 
 export const ContentPanelContext = createContext<ContentPanelContextValue | null>(null);

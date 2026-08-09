@@ -1,19 +1,25 @@
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import type { SessionSummary } from "@vibest/contract";
 import { SidebarMenuButton, SidebarMenuItem } from "@vibest/ui/components/sidebar";
 
 import { SessionActionsMenu } from "@/features/projects/session-actions-menu";
 
 /** One session row: open-session navigation plus composed session actions. */
-export function ProjectSessionRow({ session }: { readonly session: SessionSummary }) {
+export function ProjectSessionRow({
+  active,
+  isActive,
+  session,
+}: {
+  readonly active: boolean;
+  readonly isActive: () => boolean;
+  readonly session: SessionSummary;
+}) {
   const navigate = useNavigate();
-  // strict: false — the sidebar renders on every route, and most have no sessionId.
-  const { sessionId: activeSessionId } = useParams({ strict: false });
 
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={session.sessionId === activeSessionId}
+        isActive={active}
         onClick={() =>
           navigate({
             to: "/session/$sessionId",
@@ -32,7 +38,7 @@ export function ProjectSessionRow({ session }: { readonly session: SessionSummar
           />
         )}
       </SidebarMenuButton>
-      <SessionActionsMenu session={session} />
+      <SessionActionsMenu isActive={isActive} session={session} />
     </SidebarMenuItem>
   );
 }
