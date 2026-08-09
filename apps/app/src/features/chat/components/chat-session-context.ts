@@ -15,7 +15,8 @@ export interface ChatSessionValue {
   harnessAgentId: HarnessAgentId;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatStoreState>;
-  prompt: (text: string) => void | Promise<void>;
+  /** Resolves when the locally queued prompt reaches the server. */
+  prompt: (text: string) => Promise<void>;
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;
   /** A turn is producing a reply (submitted / streaming). */
   turnInProgress: boolean;

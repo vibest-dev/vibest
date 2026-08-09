@@ -51,8 +51,10 @@ class FakeTransport implements ChatSessionTransport {
   }
   prompt = async (input: { messageId: string; parts: ReadonlyArray<PromptPart> }) => {
     this.promptCalls.push(input);
-    if (this.promptGate) await this.promptGate;
-    if (this.promptError) throw this.promptError;
+    const gate = this.promptGate;
+    const error = this.promptError;
+    if (gate) await gate;
+    if (error) throw error;
     return { turnId: "turn-receipt" };
   };
   getMessages = async () => {
@@ -82,6 +84,8 @@ const makeChat = (options?: { onTerminated?: () => void }) => {
         status: { phase: "idle" },
         activeTurn: null,
         activePrompt: null,
+        acceptedPrompt: null,
+        pendingPrompts: [],
         pendingRequests: [],
         cursor: 0,
         ...snapshot,
@@ -212,7 +216,12 @@ describe("Chat hydration", () => {
       },
     ];
     await attach({
-      activePrompt: { messageId, parts: [{ type: "text", text: "still queued" }], seq: 1 },
+      activePrompt: {
+        messageId,
+        parts: [{ type: "text", text: "still queued" }],
+        seq: 1,
+        acceptedTurnId: "turn-complete",
+      },
       activeTurn: activeTurn({ turnId: "turn-complete", chunks: [], complete: true }),
       cursor: 6,
     });
@@ -359,7 +368,12 @@ describe("Chat hydration", () => {
     // running turn. The floor is still in flight.
     await attach({
       status: { phase: "requires_action" },
-      activePrompt: { messageId: "m2", parts: [{ type: "text", text: "hi" }], seq: 11 },
+      activePrompt: {
+        messageId: "m2",
+        parts: [{ type: "text", text: "hi" }],
+        seq: 11,
+        acceptedTurnId: "turn-2",
+      },
       activeTurn: activeTurn({ turnId: "turn-2", chunks: [] }),
       pendingRequests: [toolRequest],
       cursor: 12,
@@ -385,7 +399,12 @@ describe("Chat hydration", () => {
     const [start] = textChunks("t2", "");
     await attach({
       status: { phase: "running" },
-      activePrompt: { messageId: "m2", parts: [{ type: "text", text: "second" }], seq: 10 },
+      activePrompt: {
+        messageId: "m2",
+        parts: [{ type: "text", text: "second" }],
+        seq: 10,
+        acceptedTurnId: "turn-2",
+      },
       activeTurn: activeTurn({ turnId: "turn-2", chunks: [chunkEvent(12, "turn-2", start!)] }),
       cursor: 12,
     });
@@ -409,7 +428,12 @@ describe("Chat hydration", () => {
     const [start] = textChunks("t", "");
     await attach({
       status: { phase: "running" },
-      activePrompt: { messageId: "prompt-1", parts: [{ type: "text", text: "run it" }], seq: 1 },
+      activePrompt: {
+        messageId: "prompt-1",
+        parts: [{ type: "text", text: "run it" }],
+        seq: 1,
+        acceptedTurnId: "turn-1",
+      },
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(2, "turn-1", start!)],
@@ -470,7 +494,669 @@ describe("Chat history floor state", () => {
 });
 
 describe("Chat prompting", () => {
-  it("pushes the optimistic message, submits fire-and-forget, and dedupes its echo", async () => {
+  it("hydrates every unresolved prompt when multiple candidates are pending", async () => {
+    const { chat, attach, live } = makeChat();
+    const pendingA = {
+      messageId: "pending-a",
+      parts: [{ type: "text" as const, text: "A" }],
+      seq: 3,
+      acceptedTurnId: null,
+    };
+    const pendingB = {
+      messageId: "pending-b",
+      parts: [{ type: "text" as const, text: "B" }],
+      seq: 4,
+      acceptedTurnId: null,
+    };
+    await attach({
+      status: { phase: "idle" },
+      activePrompt: pendingB,
+      pendingPrompts: [pendingA, pendingB],
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [], complete: true }),
+      cursor: 4,
+    });
+
+    expect(chat.store.getState().messages.map((message) => message.id)).toEqual([
+      "pending-a",
+      "pending-b",
+    ]);
+
+    live(5, {
+      type: "session.prompt.accepted",
+      messageId: "pending-a",
+      turnId: "turn-a",
+      phase: "idle",
+    });
+    live(6, {
+      type: "session.prompt.rejected",
+      messageId: "pending-b",
+      reason: "turn running",
+      phase: "idle",
+    });
+    live(7, { type: "session.turn.started", turnId: "turn-a", phase: "running" });
+
+    expect(chat.store.getState().messages.map((message) => message.id)).toEqual(["pending-a"]);
+  });
+
+  it("waits for the initial session snapshot before dispatching", async () => {
+    const { chat, transport, attach } = makeChat();
+    const submitted = chat.prompt("early");
+    await settle();
+
+    expect(transport.promptCalls).toEqual([]);
+    expect(chat.store.getState().queuedMessages).toHaveLength(1);
+
+    await attach({});
+    await submitted;
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("queues a second prompt until the active turn ends", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+
+    await chat.prompt("first");
+    const first = transport.promptCalls[0]!;
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: first.messageId,
+      parts: first.parts,
+      phase: "idle",
+    });
+    live(2, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(3, {
+      type: "session.prompt.accepted",
+      messageId: first.messageId,
+      turnId: "turn-1",
+      phase: "running",
+    });
+
+    const second = chat.prompt("second");
+    await settle();
+
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(chat.store.getState().queuedMessages.map((message) => message.parts)).toEqual([
+      [{ type: "text", text: "second" }],
+    ]);
+
+    live(4, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+
+    expect(transport.promptCalls).toHaveLength(2);
+    expect(transport.promptCalls[1]?.parts).toEqual([{ type: "text", text: "second" }]);
+    expect(chat.store.getState().queuedMessages).toEqual([]);
+  });
+
+  it("does not advance when acceptance is stamped idle before turn.started", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    await chat.prompt("first");
+    const second = chat.prompt("second");
+    const firstCall = transport.promptCalls[0]!;
+
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: firstCall.messageId,
+      parts: firstCall.parts,
+      phase: "idle",
+    });
+    live(2, {
+      type: "session.prompt.accepted",
+      messageId: firstCall.messageId,
+      turnId: "turn-1",
+      phase: "idle",
+    });
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
+    live(3, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(4, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+    expect(transport.promptCalls).toHaveLength(2);
+  });
+
+  it("advances when turn.ended is drained before its prompt.accepted correlation", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    await chat.prompt("first");
+    const second = chat.prompt("second");
+    const firstCall = transport.promptCalls[0]!;
+
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: firstCall.messageId,
+      parts: firstCall.parts,
+      phase: "idle",
+    });
+    live(2, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(3, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    expect(transport.promptCalls).toHaveLength(1);
+
+    live(4, {
+      type: "session.prompt.accepted",
+      messageId: firstCall.messageId,
+      turnId: "turn-1",
+      phase: "idle",
+    });
+    await second;
+    expect(transport.promptCalls).toHaveLength(2);
+  });
+
+  it("keeps local correlation after the unary receipt until stream acceptance arrives", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+
+    await chat.prompt("first");
+    const second = chat.prompt("second");
+    live(1, {
+      type: "session.prompt.rejected",
+      messageId: "older-remote-prompt",
+      reason: "stale rejection",
+      phase: "idle",
+    });
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
+    const firstCall = transport.promptCalls[0]!;
+    live(2, {
+      type: "session.prompt.submitted",
+      messageId: firstCall.messageId,
+      parts: firstCall.parts,
+      phase: "idle",
+    });
+    live(3, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(4, {
+      type: "session.prompt.accepted",
+      messageId: firstCall.messageId,
+      turnId: "turn-1",
+      phase: "running",
+    });
+    live(5, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+    expect(transport.promptCalls).toHaveLength(2);
+  });
+
+  it("waits for the turn boundary rather than only the prompt receipt", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+
+    let releaseFirst: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = chat.prompt("first");
+    const second = chat.prompt("second");
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
+    releaseFirst();
+    await first;
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
+    const firstCall = transport.promptCalls[0]!;
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: firstCall.messageId,
+      parts: firstCall.parts,
+      phase: "idle",
+    });
+    live(2, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(3, {
+      type: "session.prompt.accepted",
+      messageId: firstCall.messageId,
+      turnId: "turn-1",
+      phase: "running",
+    });
+    live(4, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+
+    expect(transport.promptCalls).toHaveLength(2);
+  });
+
+  it("does not dispatch while a retained prompt is still awaiting harness acceptance", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
+      cursor: 3,
+    });
+    const queued = chat.prompt("local next");
+
+    await attach({
+      status: { phase: "idle" },
+      activePrompt: {
+        messageId: "remote-prompt",
+        parts: [{ type: "text", text: "remote next" }],
+        seq: 4,
+        acceptedTurnId: null,
+      },
+      pendingPrompts: [
+        {
+          messageId: "remote-prompt",
+          parts: [{ type: "text", text: "remote next" }],
+          seq: 4,
+          acceptedTurnId: null,
+        },
+      ],
+      activeTurn: null,
+      cursor: 4,
+    });
+    expect(transport.promptCalls).toEqual([]);
+
+    live(5, { type: "session.turn.started", turnId: "turn-remote", phase: "running" });
+    live(6, {
+      type: "session.prompt.accepted",
+      messageId: "remote-prompt",
+      turnId: "turn-remote",
+      phase: "running",
+    });
+    live(7, {
+      type: "session.turn.ended",
+      turnId: "turn-remote",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await queued;
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("does not treat an idle accepted snapshot as completed until its turn matches", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
+      cursor: 3,
+    });
+    const queued = chat.prompt("local next");
+
+    await attach({
+      status: { phase: "idle" },
+      activePrompt: {
+        messageId: "remote-prompt",
+        parts: [{ type: "text", text: "remote next" }],
+        seq: 4,
+        acceptedTurnId: "turn-remote",
+      },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [], complete: true }),
+      cursor: 5,
+    });
+    expect(transport.promptCalls).toEqual([]);
+
+    live(6, { type: "session.turn.started", turnId: "turn-remote", phase: "running" });
+    live(7, {
+      type: "session.turn.ended",
+      turnId: "turn-remote",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await queued;
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("keeps older unresolved submissions after the newer candidate is rejected", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: "remote-a",
+      parts: [{ type: "text", text: "A" }],
+      phase: "idle",
+    });
+    live(2, {
+      type: "session.prompt.submitted",
+      messageId: "remote-b",
+      parts: [{ type: "text", text: "B" }],
+      phase: "idle",
+    });
+    const queued = chat.prompt("local next");
+
+    live(3, {
+      type: "session.prompt.rejected",
+      messageId: "remote-b",
+      reason: "turn running",
+      phase: "idle",
+    });
+    expect(transport.promptCalls).toEqual([]);
+
+    live(4, {
+      type: "session.prompt.accepted",
+      messageId: "remote-a",
+      turnId: "turn-a",
+      phase: "idle",
+    });
+    live(5, { type: "session.turn.started", turnId: "turn-a", phase: "running" });
+    live(6, {
+      type: "session.turn.ended",
+      turnId: "turn-a",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await queued;
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("ignores a stale acceptance after a newer turn already ended", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    live(1, { type: "session.turn.started", turnId: "turn-new", phase: "running" });
+    live(2, {
+      type: "session.turn.ended",
+      turnId: "turn-new",
+      outcome: "completed",
+      phase: "idle",
+    });
+    live(3, {
+      type: "session.prompt.accepted",
+      messageId: "older-prompt",
+      turnId: "turn-old",
+      phase: "idle",
+    });
+
+    await chat.prompt("still dispatches");
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("keeps the boundary closed when an older prompt is rejected after a newer submission", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
+      cursor: 3,
+    });
+    const queued = chat.prompt("local next");
+
+    live(4, {
+      type: "session.prompt.submitted",
+      messageId: "remote-new",
+      parts: [{ type: "text", text: "remote next" }],
+      phase: "running",
+    });
+    live(5, {
+      type: "session.turn.ended",
+      turnId: "turn-old",
+      outcome: "completed",
+      phase: "idle",
+    });
+    live(6, {
+      type: "session.prompt.rejected",
+      messageId: "remote-old",
+      reason: "stale rejection",
+      phase: "idle",
+    });
+    expect(transport.promptCalls).toEqual([]);
+
+    live(7, { type: "session.turn.started", turnId: "turn-remote", phase: "running" });
+    live(8, {
+      type: "session.prompt.accepted",
+      messageId: "remote-new",
+      turnId: "turn-remote",
+      phase: "running",
+    });
+    live(9, {
+      type: "session.turn.ended",
+      turnId: "turn-remote",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await queued;
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("reconciles a local accepted prompt masked by a newer remote candidate", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    let releaseFirst: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = chat.prompt("local first");
+    const second = chat.prompt("local second");
+    await settle();
+    const localMessageId = transport.promptCalls[0]!.messageId;
+
+    await attach({
+      status: { phase: "running" },
+      activePrompt: {
+        messageId: "remote-pending",
+        parts: [{ type: "text", text: "remote" }],
+        seq: 2,
+        acceptedTurnId: null,
+      },
+      acceptedPrompt: {
+        messageId: localMessageId,
+        parts: [{ type: "text", text: "local first" }],
+        seq: 1,
+        acceptedTurnId: "turn-local",
+      },
+      pendingPrompts: [
+        {
+          messageId: "remote-pending",
+          parts: [{ type: "text", text: "remote" }],
+          seq: 2,
+          acceptedTurnId: null,
+        },
+      ],
+      activeTurn: activeTurn({ turnId: "turn-local", chunks: [] }),
+      cursor: 3,
+    });
+    releaseFirst();
+    await first;
+
+    live(4, {
+      type: "session.prompt.rejected",
+      messageId: "remote-pending",
+      reason: "turn running",
+      phase: "running",
+    });
+    expect(transport.promptCalls).toHaveLength(1);
+    live(5, {
+      type: "session.turn.ended",
+      turnId: "turn-local",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+    expect(transport.promptCalls).toHaveLength(2);
+  });
+
+  it("keeps queued prompts across reattach and dispatches them from an idle snapshot", async () => {
+    const { chat, transport, attach } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
+      cursor: 4,
+    });
+
+    const queued = chat.prompt("after restart");
+    await settle();
+    expect(transport.promptCalls).toEqual([]);
+    expect(chat.store.getState().queuedMessages).toHaveLength(1);
+
+    // The queue belongs to the Chat, so a server-side runtime rebuild does not
+    // erase it. The fresh idle snapshot is the next safe dispatch boundary.
+    await attach({ status: { phase: "idle" }, activeTurn: null, cursor: 0 });
+    await queued;
+
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(transport.promptCalls[0]?.parts).toEqual([{ type: "text", text: "after restart" }]);
+    expect(chat.store.getState().queuedMessages).toEqual([]);
+  });
+
+  it("preserves FIFO order across consecutive turns", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+
+    await chat.prompt("first");
+    const first = transport.promptCalls[0]!;
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: first.messageId,
+      parts: first.parts,
+      phase: "idle",
+    });
+    live(2, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(3, {
+      type: "session.prompt.accepted",
+      messageId: first.messageId,
+      turnId: "turn-1",
+      phase: "running",
+    });
+
+    const second = chat.prompt("second");
+    const third = chat.prompt("third");
+    await settle();
+    expect(transport.promptCalls.map((call) => call.parts[0])).toEqual([
+      { type: "text", text: "first" },
+    ]);
+
+    live(4, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await second;
+    expect(transport.promptCalls.map((call) => call.parts[0])).toEqual([
+      { type: "text", text: "first" },
+      { type: "text", text: "second" },
+    ]);
+    expect(chat.store.getState().queuedMessages.map((message) => message.parts[0])).toEqual([
+      { type: "text", text: "third" },
+    ]);
+
+    const secondCall = transport.promptCalls[1]!;
+    live(5, {
+      type: "session.prompt.submitted",
+      messageId: secondCall.messageId,
+      parts: secondCall.parts,
+      phase: "idle",
+    });
+    live(6, { type: "session.turn.started", turnId: "turn-2", phase: "running" });
+    live(7, {
+      type: "session.prompt.accepted",
+      messageId: secondCall.messageId,
+      turnId: "turn-2",
+      phase: "running",
+    });
+    live(8, {
+      type: "session.turn.ended",
+      turnId: "turn-2",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await third;
+
+    expect(transport.promptCalls.map((call) => call.parts[0])).toEqual([
+      { type: "text", text: "first" },
+      { type: "text", text: "second" },
+      { type: "text", text: "third" },
+    ]);
+    expect(chat.store.getState().queuedMessages).toEqual([]);
+  });
+
+  it("waits for an authoritative idle snapshot after an ambiguous head failure", async () => {
+    const { chat, transport, attach } = makeChat();
+    await attach({});
+    transport.promptError = new Error("connection lost");
+    const first = chat.prompt("first");
+    const second = chat.prompt("second");
+    await expect(first).rejects.toThrow("connection lost");
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(chat.store.getState().queuedMessages).toHaveLength(1);
+
+    transport.promptError = null;
+    await attach({ status: { phase: "idle" }, activePrompt: null, activeTurn: null, cursor: 0 });
+    await second;
+
+    expect(transport.promptCalls).toHaveLength(2);
+    expect(transport.promptCalls[1]?.parts).toEqual([{ type: "text", text: "second" }]);
+  });
+
+  it("advances the FIFO when the server explicitly rejects the failed head", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    transport.promptError = new Error("turn already running");
+    const first = chat.prompt("first");
+    const second = chat.prompt("second");
+    await expect(first).rejects.toThrow("turn already running");
+    expect(transport.promptCalls).toHaveLength(1);
+
+    transport.promptError = null;
+    const firstCall = transport.promptCalls[0]!;
+    live(1, {
+      type: "session.prompt.rejected",
+      messageId: firstCall.messageId,
+      reason: "turn running",
+      phase: "idle",
+    });
+    await second;
+
+    expect(transport.promptCalls).toHaveLength(2);
+    expect(transport.promptCalls[1]?.parts).toEqual([{ type: "text", text: "second" }]);
+  });
+
+  it("advances when rejection evidence arrives before the unary RPC rejects", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    let releaseFirst: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    transport.promptError = new Error("turn already running");
+    const first = chat.prompt("first");
+    const second = chat.prompt("second");
+    await settle();
+
+    const firstCall = transport.promptCalls[0]!;
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: firstCall.messageId,
+      parts: firstCall.parts,
+      phase: "idle",
+    });
+    live(2, {
+      type: "session.prompt.rejected",
+      messageId: firstCall.messageId,
+      reason: "turn running",
+      phase: "idle",
+    });
+    transport.promptError = null;
+    releaseFirst();
+
+    await expect(first).rejects.toThrow("turn already running");
+    await second;
+    expect(transport.promptCalls).toHaveLength(2);
+    expect(transport.promptCalls[1]?.parts).toEqual([{ type: "text", text: "second" }]);
+  });
+
+  it("pushes the optimistic message, submits on its turn, and dedupes its echo", async () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({});
     await chat.prompt("hello there");
@@ -580,7 +1266,12 @@ describe("Chat stream errors", () => {
 
     await attach({
       status: { phase: "idle" },
-      activePrompt: { messageId: "prompt-1", parts: [{ type: "text", text: "go" }], seq: 2 },
+      activePrompt: {
+        messageId: "prompt-1",
+        parts: [{ type: "text", text: "go" }],
+        seq: 2,
+        acceptedTurnId: "turn-1",
+      },
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [
@@ -608,7 +1299,16 @@ describe("Chat stream errors", () => {
         messageId: "prompt-new",
         parts: [{ type: "text", text: "try again" }],
         seq: 4,
+        acceptedTurnId: null,
       },
+      pendingPrompts: [
+        {
+          messageId: "prompt-new",
+          parts: [{ type: "text", text: "try again" }],
+          seq: 4,
+          acceptedTurnId: null,
+        },
+      ],
       activeTurn: activeTurn({
         turnId: "turn-old",
         chunks: [chunkEvent(2, "turn-old", { type: "error", errorText: "old provider error" })],
@@ -637,7 +1337,12 @@ describe("Chat stream errors", () => {
     chat.store.setState({ error: new Error("another old failure") });
     await attach({
       status: { phase: "running" },
-      activePrompt: { messageId: "remote-2", parts: [{ type: "text", text: "retained" }], seq: 2 },
+      activePrompt: {
+        messageId: "remote-2",
+        parts: [{ type: "text", text: "retained" }],
+        seq: 2,
+        acceptedTurnId: "turn-2",
+      },
       activeTurn: activeTurn({ turnId: "turn-2", chunks: [] }),
       cursor: 3,
     });
@@ -878,6 +1583,29 @@ describe("Chat lifecycle", () => {
     expect(chat.store.getState().status).toBe("error");
   });
 
+  it("dispatches the queued follow-up after the active runtime crashes", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
+    });
+    live(1, {
+      type: "session.prompt.submitted",
+      messageId: "remote-pending",
+      parts: [{ type: "text", text: "waiting for harness" }],
+      phase: "running",
+    });
+    const queued = chat.prompt("resume after crash");
+    expect(transport.promptCalls).toEqual([]);
+
+    live(2, { type: "session.crashed", reason: "boom", phase: "crashed" });
+    await queued;
+
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(transport.promptCalls[0]?.parts).toEqual([{ type: "text", text: "resume after crash" }]);
+    expect(chat.store.getState().status).toBe("submitted");
+  });
+
   it("clears pending requests when the session crashes", async () => {
     const { chat, attach, live } = makeChat();
     await attach({});
@@ -925,10 +1653,57 @@ describe("Chat lifecycle", () => {
     expect(terminations).toBe(1);
   });
 
-  it("dispose tears down the subscription and folds", async () => {
+  it("rejects the currently submitting prompt when the session terminates", async () => {
+    const { chat, transport, emit, attach } = makeChat();
+    await attach({});
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const submitting = chat.prompt("in flight");
+    await settle();
+
+    emit({ type: "closed", reason: "session_deleted" });
+
+    await expect(submitting).rejects.toThrow("Session is no longer available");
+    releasePrompt();
+    await settle();
+    expect(chat.store.getState().error?.message).toBe("Session deleted");
+  });
+
+  it("rejects queued prompts when the session terminates", async () => {
+    const { chat, emit, attach } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
+    });
+    const queued = chat.prompt("never sent");
+
+    emit({ type: "closed", reason: "session_deleted" });
+
+    await expect(queued).rejects.toThrow("Session is no longer available");
+    expect(chat.store.getState().queuedMessages).toEqual([]);
+  });
+
+  it("dispose rejects the submitting and waiting prompts without dispatching the tail", async () => {
     const { chat, transport, attach } = makeChat();
     await attach({});
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const submitting = chat.prompt("in flight");
+    const waiting = chat.prompt("never sent");
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
     chat.dispose();
+
+    await expect(submitting).rejects.toThrow("Chat disposed");
+    await expect(waiting).rejects.toThrow("Chat disposed");
+    releasePrompt();
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
     expect(transport.disposed).toBe(1);
   });
 });

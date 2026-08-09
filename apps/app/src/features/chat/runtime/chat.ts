@@ -15,6 +15,7 @@ import type { StoreApi } from "zustand/vanilla";
 import type { AgentRequest, AgentResponse } from "./agent-requests";
 import { ChatState, type ChatStoreState } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
+import { ClientPromptQueue, type ClientQueuedPrompt } from "./client-prompt-queue";
 import { sanitizeTail } from "./sanitize-tail";
 
 export interface ChatInit {
@@ -65,9 +66,10 @@ type TurnFold = {
 // Session controller, single-consumer: every message — this client's own
 // turns included — folds out of the one persistent subscription, so all
 // clients run the identical rendering path and none needs to claim turns.
-// Sending is fire-and-forget: prompt() pushes the optimistic user message and
-// submits the RPC; the turn's content comes back through the subscription
-// like everyone else's.
+// Sending is serialized through a client-local FIFO. `prompt()` returns a
+// promise that settles when that item reaches the head and its RPC settles;
+// the turn's content still comes back through the subscription like everyone
+// else's. The queue intentionally lives only for this Chat's lifetime.
 //
 // State sync vs increments: the transport's "attached" snapshot replaces
 // wholesale what the server owns (pending requests, phase) and replays the
@@ -93,6 +95,7 @@ export class Chat {
   // internally and still complete, with the retried tail persisted but never
   // streamed — reconcile from history at turn end regardless of outcome.
   readonly #erroredTurnIds = new Set<string>();
+  readonly #promptQueue: ClientPromptQueue;
   // Prompts whose RPC has not settled. A call made after the socket drops can
   // wait inside oRPC's reconnect loop until the restarted server is reachable;
   // snapshots and settled history received meanwhile may not account for it.
@@ -104,6 +107,12 @@ export class Chat {
   // snapshot. Applied when the final successful prompt RPC settles, unless a
   // newer lifecycle event has already supplied a phase.
   #deferredSnapshotPhase: SessionPhase | null = null;
+  // Whether submitting a new prompt would start a fresh turn. This is stricter
+  // than UI status: an idle session can still hold a submitted prompt that the
+  // harness has not accepted yet, while a crashed runtime can accept a resume.
+  #promptBoundaryOpen = false;
+  readonly #pendingPromptMessageIds = new Set<string>();
+  #lastEndedTurnId: string | null = null;
   #cursor = 0;
   #historyLoaded = false;
   // Non-null while the history floor is loading: live events queue here so
@@ -124,11 +133,13 @@ export class Chat {
   // in-flight history-floor read completing late would otherwise re-hydrate
   // over it.
   #terminated = false;
+  #disposed = false;
 
   constructor({ sessionRef, transport, onTerminated }: ChatInit) {
     this.harnessAgentId = sessionRef.harnessAgentId;
     this.#state = new ChatState();
     this.store = this.#state.store;
+    this.#promptQueue = new ClientPromptQueue(this.#state.setQueuedMessages);
     this.#transport = transport;
     this.#onTerminated = onTerminated;
     this.#unsubscribe = transport.subscribe((event) => {
@@ -148,6 +159,48 @@ export class Chat {
     if (event.seq <= this.#cursor) return;
     this.#cursor = event.seq;
     switch (event.type) {
+      case "session.prompt.submitted":
+        this.#pendingPromptMessageIds.add(event.messageId);
+        this.#promptBoundaryOpen = false;
+        break;
+      case "session.prompt.accepted":
+        if (!this.#pendingPromptMessageIds.delete(event.messageId)) break;
+        // The manager's direct acceptance emit can beat the adapter's queued
+        // turn.started event. Idle is safe only when this exact turn already
+        // ended; otherwise wait for its lifecycle events.
+        this.#promptBoundaryOpen =
+          this.#pendingPromptMessageIds.size === 0 &&
+          (event.phase === "crashed" ||
+            (event.phase === "idle" && this.#lastEndedTurnId === event.turnId));
+        break;
+      case "session.prompt.rejected":
+        if (!this.#pendingPromptMessageIds.delete(event.messageId)) break;
+        this.#promptBoundaryOpen =
+          this.#pendingPromptMessageIds.size === 0 &&
+          (event.phase === "idle" || event.phase === "crashed");
+        break;
+      case "session.turn.started":
+        this.#promptBoundaryOpen = false;
+        break;
+      case "session.turn.ended":
+        this.#lastEndedTurnId = event.turnId;
+        this.#promptBoundaryOpen =
+          this.#pendingPromptMessageIds.size === 0 &&
+          (event.phase === "idle" || event.phase === "crashed");
+        break;
+      case "session.crashed":
+        // Crash discards activePrompt and activeTurn in the server projection.
+        this.#pendingPromptMessageIds.clear();
+        this.#lastEndedTurnId = null;
+        this.#promptBoundaryOpen = true;
+        break;
+      default:
+        if (event.phase === "running" || event.phase === "requires_action") {
+          this.#promptBoundaryOpen = false;
+        }
+        break;
+    }
+    switch (event.type) {
       case "session.message.chunk":
         this.#captureChunkError(event.chunk);
         if (!this.#recoverTurnIds.has(event.turnId)) {
@@ -166,6 +219,8 @@ export class Chat {
         break;
       // The harness rejected a prompt whose submitted event already broadcast:
       // drop the phantom user message (the sender's optimistic copy included).
+      case "session.prompt.accepted":
+        break;
       case "session.prompt.rejected":
         this.#state.messages = this.#state.messages.filter(
           (message) => message.id !== event.messageId,
@@ -220,11 +275,13 @@ export class Chat {
       event.phase !== undefined &&
       event.type !== "session.message.chunk" &&
       event.type !== "session.prompt.submitted" &&
+      event.type !== "session.prompt.accepted" &&
       event.type !== "session.prompt.rejected"
     ) {
       this.#deferredSnapshotPhase = null;
       this.#setStatus(statusFromPhase(event.phase));
     }
+    this.#maybeDispatchPrompt();
   }
 
   // The stream ended for good: the session was closed or deleted server-side,
@@ -243,6 +300,7 @@ export class Chat {
     // so stop rendering a spinner that would never resolve.
     this.#state.historyStatus = "settled";
     this.#state.clearPendingRequests();
+    this.#rejectLocalPromptQueue(new Error("Session is no longer available"));
     this.#state.error = new Error(
       reason === "session_deleted" ? "Session deleted" : "Session closed",
     );
@@ -303,6 +361,9 @@ export class Chat {
     const queued = this.#queuedEvents ?? [];
     this.#queuedEvents = null;
     for (const event of queued) this.#apply(event);
+    // Hydration called the queue gate while events were still buffered. Once
+    // the floor is complete, an idle snapshot can release an early prompt.
+    this.#maybeDispatchPrompt();
   }
 
   #hydrateFromSnapshot(
@@ -349,14 +410,28 @@ export class Chat {
     // is the snapshot's latest event: then it belongs to the next, not-yet-
     // started turn and must render above the settled history floor.
     const activePrompt = snapshot.activePrompt;
+    const acceptedPrompt =
+      snapshot.acceptedPrompt ?? (activePrompt?.acceptedTurnId !== null ? activePrompt : null);
+    const acceptedPromptBelongsToStaleTurn =
+      stale && acceptedPrompt?.acceptedTurnId === activeTurn?.turnId;
+    const promptCandidates = [
+      ...(acceptedPrompt && !acceptedPromptBelongsToStaleTurn ? [acceptedPrompt] : []),
+      ...snapshot.pendingPrompts,
+    ].filter(
+      (prompt, index, prompts) =>
+        prompts.findIndex((candidate) => candidate.messageId === prompt.messageId) === index,
+    );
+    const retainedPrompts = promptCandidates.reduce<typeof promptCandidates>((ordered, prompt) => {
+      const insertionIndex = ordered.findIndex((candidate) => candidate.seq > prompt.seq);
+      if (insertionIndex === -1) ordered.push(prompt);
+      else ordered.splice(insertionIndex, 0, prompt);
+      return ordered;
+    }, []);
     let appliedPromptSeq: number | undefined;
-    if (
-      activePrompt &&
-      activePrompt.seq > this.#cursor &&
-      (!stale || activePrompt.seq === snapshot.cursor)
-    ) {
-      appliedPromptSeq = activePrompt.seq;
-      if (this.#pushUserMessage(activePrompt.messageId, activePrompt.parts)) {
+    for (const prompt of retainedPrompts) {
+      if (prompt.seq <= this.#cursor) continue;
+      appliedPromptSeq = Math.max(appliedPromptSeq ?? 0, prompt.seq);
+      if (this.#pushUserMessage(prompt.messageId, prompt.parts)) {
         this.#state.error = undefined;
       }
     }
@@ -393,7 +468,7 @@ export class Chat {
     // fell inside the drop, and only the settled transcript still has them.
     if (!options?.skipGapCheck && snapshot.cursor > this.#cursor) {
       const retainedFloor = Math.min(
-        activePrompt?.seq ?? Infinity,
+        ...retainedPrompts.map((prompt) => prompt.seq),
         !stale && activeTurn ? (activeTurn.chunks[0]?.seq ?? Infinity) : Infinity,
       );
       if (retainedFloor > this.#cursor + 1) this.#needsReconcile = true;
@@ -407,22 +482,47 @@ export class Chat {
     // A prompt still waiting on the wire is invisible to this snapshot. Keep
     // the sender-local submitted state, but retain the latest phase so a turn
     // that completed before the unary receipt can converge when the RPC settles.
+    const snapshotLastEndedTurnId = activeTurn?.complete ? activeTurn.turnId : null;
+    const snapshotBoundaryOpen =
+      snapshot.pendingPrompts.length === 0 &&
+      (snapshot.status.phase === "crashed" ||
+        (snapshot.status.phase === "idle" &&
+          (acceptedPrompt === null ||
+            (acceptedPrompt.acceptedTurnId !== null &&
+              activeTurn?.complete === true &&
+              activeTurn.turnId === acceptedPrompt.acceptedTurnId))));
     if (this.#promptsInFlight.size === 0) {
+      this.#pendingPromptMessageIds.clear();
+      for (const prompt of snapshot.pendingPrompts) {
+        this.#pendingPromptMessageIds.add(prompt.messageId);
+      }
+      this.#lastEndedTurnId = snapshotLastEndedTurnId;
+      this.#promptBoundaryOpen = snapshotBoundaryOpen;
       this.#deferredSnapshotPhase = null;
       this.#setStatus(statusFromPhase(snapshot.status.phase));
     } else {
-      const pendingPromptSnapshot = snapshot.activePrompt;
-      // `activePrompt` proves the server accepted our message. For idle, also
-      // require a later completed turn event: prompt.submitted itself keeps the
-      // previous complete turn beside the new prompt until its turn starts.
+      // acceptedPrompt remains visible even when a newer unresolved candidate
+      // masks it in activePrompt, so reconnect can still settle this client's
+      // in-flight correlation without retaining a stale local id forever.
       const accountsForPendingPrompt =
         this.#promptsInFlight.size === 1 &&
-        pendingPromptSnapshot !== null &&
-        this.#promptsInFlight.has(pendingPromptSnapshot.messageId) &&
-        (snapshot.status.phase !== "idle" ||
-          (snapshot.activeTurn?.complete === true && snapshot.cursor > pendingPromptSnapshot.seq));
-      this.#deferredSnapshotPhase = accountsForPendingPrompt ? snapshot.status.phase : null;
+        acceptedPrompt !== null &&
+        acceptedPrompt.acceptedTurnId !== null &&
+        this.#promptsInFlight.has(acceptedPrompt.messageId);
+      if (accountsForPendingPrompt) {
+        this.#pendingPromptMessageIds.clear();
+        this.#lastEndedTurnId = snapshotLastEndedTurnId;
+      }
+      for (const prompt of snapshot.pendingPrompts) {
+        this.#pendingPromptMessageIds.add(prompt.messageId);
+      }
+      this.#promptBoundaryOpen = accountsForPendingPrompt && snapshotBoundaryOpen;
+      this.#deferredSnapshotPhase =
+        accountsForPendingPrompt && (snapshot.status.phase !== "idle" || snapshotBoundaryOpen)
+          ? snapshot.status.phase
+          : null;
     }
+    this.#maybeDispatchPrompt();
   }
 
   #replayActiveTurn(activeTurn: NonNullable<SessionRuntimeSnapshot["activeTurn"]>): void {
@@ -576,34 +676,73 @@ export class Chat {
     if (this.#needsReconcile) void this.#reconcileHistory();
   }
 
+  #maybeDispatchPrompt(): void {
+    if (
+      this.#terminated ||
+      this.#disposed ||
+      this.#promptQueue.isDispatching ||
+      !this.#historyLoaded ||
+      this.#queuedEvents !== null ||
+      !this.#promptBoundaryOpen ||
+      !this.#promptQueue.hasWaiting
+    ) {
+      return;
+    }
+    const dispatch = this.#promptQueue.dispatchNext((prompt) => this.#submitPrompt(prompt));
+    if (dispatch) void dispatch.finally(() => this.#maybeDispatchPrompt());
+  }
+
+  async #submitPrompt(item: ClientQueuedPrompt): Promise<void> {
+    const messageId = item.message.id;
+    this.#pendingPromptMessageIds.add(messageId);
+    this.#promptBoundaryOpen = false;
+    this.#promptRevision += 1;
+    this.#promptsInFlight.add(messageId);
+    this.#state.error = undefined;
+    this.#state.pushMessage(item.message);
+    this.#setStatus("submitted");
+    try {
+      await this.#transport.prompt({ messageId, parts: item.parts });
+    } catch (promptError) {
+      if (!this.#terminated && !this.#disposed) {
+        this.#state.error =
+          promptError instanceof Error ? promptError : new Error(String(promptError));
+        this.#deferredSnapshotPhase = null;
+        this.#setStatus("error");
+      }
+      throw promptError;
+    } finally {
+      this.#promptsInFlight.delete(messageId);
+      if (
+        !this.#terminated &&
+        !this.#disposed &&
+        this.#promptsInFlight.size === 0 &&
+        this.#state.status !== "error"
+      ) {
+        this.#resumeAfterPromptSettlement();
+      }
+    }
+  }
+
+  #rejectLocalPromptQueue(error: Error): void {
+    this.#promptQueue.rejectAll(error);
+  }
+
   // ---------------------------------------------------------------------
   // Public surface
   // ---------------------------------------------------------------------
 
-  // Fire-and-forget: push the optimistic user message, submit the RPC, and
-  // let the subscription carry the reply back like any other client's turn.
-  prompt = async (text: string): Promise<void> => {
-    const messageId = generateId();
+  // Enqueue locally. The returned promise settles only when this item reaches
+  // the head and the server prompt RPC settles; queued items remain visible in
+  // a separate store slice so history reconciliation cannot erase them.
+  prompt = (text: string): Promise<void> => {
+    if (this.#terminated) return Promise.reject(new Error("Session is no longer available"));
+    if (this.#disposed) return Promise.reject(new Error("Chat disposed"));
     const parts: PromptPart[] = [{ type: "text", text }];
-    this.#promptRevision += 1;
-    this.#promptsInFlight.add(messageId);
-    this.#state.error = undefined;
-    this.#state.pushMessage(toUserMessage(messageId, parts));
-    this.#setStatus("submitted");
-    try {
-      await this.#transport.prompt({ messageId, parts });
-    } catch (promptError) {
-      this.#state.error =
-        promptError instanceof Error ? promptError : new Error(String(promptError));
-      this.#deferredSnapshotPhase = null;
-      this.#setStatus("error");
-      throw promptError;
-    } finally {
-      this.#promptsInFlight.delete(messageId);
-      if (this.#promptsInFlight.size === 0 && this.#state.status !== "error") {
-        this.#resumeAfterPromptSettlement();
-      }
-    }
+    const message = toUserMessage(generateId(), parts);
+    const submitted = this.#promptQueue.enqueue({ message, parts });
+    this.#maybeDispatchPrompt();
+    return submitted;
   };
 
   // Model / reasoningEffort / permission are session config, changed via their
@@ -634,7 +773,10 @@ export class Chat {
   };
 
   dispose = (): void => {
+    if (this.#disposed) return;
+    this.#disposed = true;
     this.#unsubscribe();
+    this.#rejectLocalPromptQueue(new Error("Chat disposed"));
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
   };

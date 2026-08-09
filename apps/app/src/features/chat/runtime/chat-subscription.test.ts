@@ -12,6 +12,8 @@ const snapshot: SessionRuntimeSnapshot = {
   status: { phase: "idle" },
   activeTurn: null,
   activePrompt: null,
+  acceptedPrompt: null,
+  pendingPrompts: [],
   pendingRequests: [],
   cursor: 0,
 };
