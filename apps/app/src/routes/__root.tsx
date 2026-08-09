@@ -1,8 +1,13 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, useMatch, useNavigate } from "@tanstack/react-router";
+import {
+  createRootRouteWithContext,
+  useMatch,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
 import type { SessionRef } from "@vibest/contract";
 import { SidebarProvider } from "@vibest/ui/components/sidebar";
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -70,13 +75,17 @@ function RootLayout() {
   });
   const project = useProject(sessionRef?.projectId ?? draftProjectId);
   const sessionTitle = useProjectSessionTitle(sessionRef ?? undefined);
-  // Mutations can settle after navigation. This stable predicate reads the
-  // latest authoritative route ref instead of a render-time `active` boolean.
-  const currentSessionRef = useRef(sessionRef);
-  currentSessionRef.current = sessionRef;
+  // Mutations can settle after navigation. Read the router's current match at
+  // call time instead of capturing a render-time `active` boolean.
+  const router = useRouter();
   const isSessionActive = useCallback(
-    (candidate: SessionRef) => sameSessionRef(candidate, currentSessionRef.current),
-    [],
+    (candidate: SessionRef) => {
+      const current = router.state.matches.find(
+        (match) => match.routeId === "/session/$sessionId",
+      )?.loaderData;
+      return sameSessionRef(candidate, current);
+    },
+    [router],
   );
   const handleNewChat = () => navigate({ to: "/draft" });
 
