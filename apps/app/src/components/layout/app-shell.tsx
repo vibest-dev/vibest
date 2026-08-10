@@ -12,9 +12,12 @@ import {
 } from "@/components/layout/shell-panels";
 
 interface AppShellContextValue {
-  readonly contentVisible: boolean;
-  readonly maximized: boolean;
-  readonly setMainCollapsed: (collapsed: boolean) => void;
+  /** Whether the session-bound content-panel column is mounted. */
+  readonly hasVisibleContentPanel: boolean;
+  /** Whether the content panel fills the shell and collapses the main column. */
+  readonly isContentPanelMaximized: boolean;
+  /** Switch the content panel between maximized and docked presentation. */
+  readonly setContentPanelMaximized: (maximized: boolean) => void;
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);
@@ -31,25 +34,26 @@ export interface AppShellSlotProps {
 
 export function AppShellSidebar({ children }: AppShellSlotProps) {
   const { isMobile } = useSidebar();
-  const { maximized } = useAppShell();
+  const { isContentPanelMaximized } = useAppShell();
   if (isMobile) return <>{children}</>;
   return (
     <>
       <ShellSidebarPanel>{children}</ShellSidebarPanel>
-      <ShellSeparator disabled={maximized} />
+      <ShellSeparator disabled={isContentPanelMaximized} />
     </>
   );
 }
 
 export function AppShellMain({ children }: AppShellSlotProps) {
   const { isMobile } = useSidebar();
-  const { contentVisible, maximized, setMainCollapsed } = useAppShell();
+  const { hasVisibleContentPanel, isContentPanelMaximized, setContentPanelMaximized } =
+    useAppShell();
   return (
     <ShellMainPanel
-      hasContentPanel={contentVisible}
-      collapsed={maximized}
-      collapsible={maximized || (contentVisible && !isMobile)}
-      onCollapsedChange={setMainCollapsed}
+      hasContentPanel={hasVisibleContentPanel}
+      collapsed={isContentPanelMaximized}
+      collapsible={isContentPanelMaximized || (hasVisibleContentPanel && !isMobile)}
+      onCollapsedChange={setContentPanelMaximized}
     >
       {children}
     </ShellMainPanel>
@@ -65,22 +69,22 @@ export function AppShell({ children }: AppShellRootProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
-  const contentVisible = presentation !== "hidden" && session !== null;
-  const maximized = presentation === "maximized";
-  const setMainCollapsed = useCallback(
-    (collapsed: boolean) => session?.setPresentation(collapsed ? "maximized" : "docked"),
+  const hasVisibleContentPanel = presentation !== "hidden" && session !== null;
+  const isContentPanelMaximized = presentation === "maximized";
+  const setContentPanelMaximized = useCallback(
+    (maximized: boolean) => session?.setPresentation(maximized ? "maximized" : "docked"),
     [session],
   );
   const context = useMemo(
-    () => ({ contentVisible, maximized, setMainCollapsed }),
-    [contentVisible, maximized, setMainCollapsed],
+    () => ({ hasVisibleContentPanel, isContentPanelMaximized, setContentPanelMaximized }),
+    [hasVisibleContentPanel, isContentPanelMaximized, setContentPanelMaximized],
   );
 
   return (
     <AppShellContext value={context}>
-      <ShellGroup hasContentPanel={contentVisible} hasSidebar={!isMobile}>
+      <ShellGroup hasContentPanel={hasVisibleContentPanel} hasSidebar={!isMobile}>
         {children}
-        {contentVisible && (
+        {hasVisibleContentPanel && (
           <>
             <ShellSeparator />
             <ShellContentPanel>
