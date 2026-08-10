@@ -13,9 +13,18 @@ import { generateId, readUIMessageStream, type UIMessage, type UIMessageChunk } 
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentRequest, AgentResponse } from "./agent-requests";
-import { ChatState, type ChatStoreState } from "./chat-state";
+import { createChatState, type ChatState, type OutgoingMessage } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
-import { ClientPromptQueue, type ClientQueuedPrompt } from "./client-prompt-queue";
+import {
+  firstQueuedMessage,
+  hasMessage,
+  hasSendingMessage,
+  isChatActive,
+  sendingMessage,
+  updateChat,
+  type ChatAction,
+} from "./chat-update";
+import { buildChatView, ChatViewStore, type ChatView } from "./chat-view";
 import { sanitizeTail } from "./sanitize-tail";
 
 export interface ChatInit {
@@ -63,6 +72,11 @@ type TurnFold = {
   readonly close: () => void;
 };
 
+type PromptPromise = {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+};
+
 // Session controller, single-consumer: every message — this client's own
 // turns included — folds out of the one persistent subscription, so all
 // clients run the identical rendering path and none needs to claim turns.
@@ -81,8 +95,9 @@ export class Chat {
   // codex have dedicated renderers; any other harness falls back to the
   // generic tool card.
   readonly harnessAgentId: HarnessAgentId;
-  readonly store: StoreApi<ChatStoreState>;
-  readonly #state: ChatState;
+  readonly store: StoreApi<ChatView>;
+  #chatState: ChatState;
+  readonly #viewStore: ChatViewStore;
   readonly #transport: ChatSessionTransport;
   readonly #onTerminated: (() => void) | undefined;
   readonly #unsubscribe: () => void;
@@ -95,11 +110,9 @@ export class Chat {
   // internally and still complete, with the retried tail persisted but never
   // streamed — reconcile from history at turn end regardless of outcome.
   readonly #erroredTurnIds = new Set<string>();
-  readonly #promptQueue: ClientPromptQueue;
-  // Prompts whose RPC has not settled. A call made after the socket drops can
-  // wait inside oRPC's reconnect loop until the restarted server is reachable;
-  // snapshots and settled history received meanwhile may not account for it.
-  readonly #promptsInFlight = new Set<string>();
+  // Promise settlement is intentionally kept outside ChatState: callbacks are
+  // process resources, while ChatState contains only inspectable chat facts.
+  readonly #promptPromises = new Map<string, PromptPromise>();
   // Invalidates a history read that overlaps a prompt, even when that prompt
   // settles before the older read returns.
   #promptRevision = 0;
@@ -128,18 +141,11 @@ export class Chat {
   // history at the next safe point. Cleared when a reconcile lands.
   #needsReconcile = false;
 
-  // Set when the session was closed or deleted server-side: the subscription
-  // has stopped for good, and nothing may overwrite the terminal state — an
-  // in-flight history-floor read completing late would otherwise re-hydrate
-  // over it.
-  #terminated = false;
-  #disposed = false;
-
   constructor({ sessionRef, transport, onTerminated }: ChatInit) {
     this.harnessAgentId = sessionRef.harnessAgentId;
-    this.#state = new ChatState();
-    this.store = this.#state.store;
-    this.#promptQueue = new ClientPromptQueue(this.#state.setQueuedMessages);
+    this.#chatState = createChatState();
+    this.#viewStore = new ChatViewStore(buildChatView(this.#chatState));
+    this.store = this.#viewStore.store;
     this.#transport = transport;
     this.#onTerminated = onTerminated;
     this.#unsubscribe = transport.subscribe((event) => {
@@ -150,12 +156,19 @@ export class Chat {
     });
   }
 
+  #update(action: ChatAction): void {
+    const next = updateChat(this.#chatState, action);
+    if (next === this.#chatState) return;
+    this.#chatState = next;
+    this.#viewStore.publish(buildChatView(next));
+  }
+
   // ---------------------------------------------------------------------
   // Event application (increments)
   // ---------------------------------------------------------------------
 
   #apply(event: SessionScopedEvent): void {
-    if (this.#terminated) return;
+    if (!isChatActive(this.#chatState)) return;
     if (event.seq <= this.#cursor) return;
     this.#cursor = event.seq;
     switch (event.type) {
@@ -215,16 +228,14 @@ export class Chat {
         // The sender already cleared its stale error synchronously in prompt().
         // Only a genuinely unseen prompt may clear here: a delayed self-echo
         // must not erase a newer prompt RPC failure.
-        if (this.#pushUserMessage(event.messageId, event.parts)) this.#state.error = undefined;
+        this.#pushUserMessage(event.messageId, event.parts);
         break;
       // The harness rejected a prompt whose submitted event already broadcast:
       // drop the phantom user message (the sender's optimistic copy included).
       case "session.prompt.accepted":
         break;
       case "session.prompt.rejected":
-        this.#state.messages = this.#state.messages.filter(
-          (message) => message.id !== event.messageId,
-        );
+        this.#update({ type: "userMessageRejected", messageId: event.messageId });
         break;
       case "session.turn.started":
         break;
@@ -232,7 +243,7 @@ export class Chat {
         this.#turnFolds.get(event.turnId)?.close();
         this.#turnFolds.delete(event.turnId);
         // Unanswered requests are stale once the turn ends — no ghost cards.
-        this.#state.clearPendingRequests();
+        this.#update({ type: "requestsCleared" });
         // The settled transcript may hold more than the live stream carried:
         // a non-completed turn can have persisted partial (or internally
         // retried full) output, and an abandoned turn was never rendered
@@ -255,14 +266,14 @@ export class Chat {
         break;
       case "session.request.replied":
       case "session.request.rejected":
-        this.#state.removePendingRequest(event.requestId);
+        this.#update({ type: "requestRemoved", requestId: event.requestId });
         break;
       case "session.crashed":
         for (const fold of this.#turnFolds.values()) fold.close();
         this.#turnFolds.clear();
         // The server projection drops its pending requests on crash; a card
         // left behind here could never be answered.
-        this.#state.clearPendingRequests();
+        this.#update({ type: "requestsCleared" });
         break;
     }
     // Status is copied off the event (the runtime stamps its post-event
@@ -291,20 +302,15 @@ export class Chat {
     // A second `closed` would re-enter with the same terminal shape, but
     // `onTerminated` is a one-shot handover — its owner may already have let
     // this instance go.
-    if (this.#terminated) return;
-    this.#terminated = true;
+    if (!isChatActive(this.#chatState)) return;
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
     this.#queuedEvents = null;
-    // Terminal before the floor ever landed (or attached): no history is coming,
-    // so stop rendering a spinner that would never resolve.
-    this.#state.historyStatus = "settled";
-    this.#state.clearPendingRequests();
-    this.#rejectLocalPromptQueue(new Error("Session is no longer available"));
-    this.#state.error = new Error(
-      reason === "session_deleted" ? "Session deleted" : "Session closed",
-    );
-    this.#setStatus("error");
+    this.#rejectOutgoingMessages(new Error("Session is no longer available"));
+    this.#update({
+      type: "sessionTerminated",
+      error: new Error(reason === "session_deleted" ? "Session deleted" : "Session closed"),
+    });
     this.#onTerminated?.();
   }
 
@@ -340,18 +346,18 @@ export class Chat {
       // already ahead of the disk (optimistic prompt), while a server-side
       // active turn just means another client is mid-turn — exactly when the
       // floor is still wanted.
-      if (history !== null && history.length > 0 && this.#state.messages.length === 0) {
-        this.#state.messages = Array.from(history);
-      }
-      // An empty read is still a floor: the session simply has nothing settled
-      // yet. Only the absent capability (null) leaves the transcript unfounded.
-      this.#state.historyStatus = history === null ? "unavailable" : "settled";
+      this.#update({
+        type: "historyReadFinished",
+        history,
+        replaceMessages:
+          history !== null && history.length > 0 && this.#chatState.session.messages.length === 0,
+      });
     } catch (historyError) {
       console.error("Failed to load session history", historyError);
       // A failed read is still a finished one — the spinner has to stop — but an
       // unannotated blank would claim the session is empty. A later reconcile
       // clears this when the read succeeds.
-      this.#state.historyStatus = "unavailable";
+      this.#update({ type: "historyReadFailed" });
     }
     const snapshot = this.#floorSnapshot;
     this.#floorSnapshot = null;
@@ -370,7 +376,7 @@ export class Chat {
     snapshot: SessionRuntimeSnapshot,
     options?: { readonly skipGapCheck?: boolean },
   ): void {
-    if (this.#terminated) return;
+    if (!isChatActive(this.#chatState)) return;
     // A snapshot below our cursor means the server's seq counter restarted —
     // its in-memory session was rebuilt (a server restart, or a close and
     // reopen). Nothing else can produce it: within one incarnation the counter
@@ -383,7 +389,7 @@ export class Chat {
       this.#needsReconcile = true;
     }
     // Pending requests are server state: replace wholesale, no diffing.
-    this.#state.setPendingRequests([]);
+    this.#update({ type: "pendingRequestsReplaced", requests: [] });
     for (const request of snapshot.pendingRequests) this.#handleRequest(request);
 
     const activeTurn = snapshot.activeTurn;
@@ -431,9 +437,7 @@ export class Chat {
     for (const prompt of retainedPrompts) {
       if (prompt.seq <= this.#cursor) continue;
       appliedPromptSeq = Math.max(appliedPromptSeq ?? 0, prompt.seq);
-      if (this.#pushUserMessage(prompt.messageId, prompt.parts)) {
-        this.#state.error = undefined;
-      }
+      this.#pushUserMessage(prompt.messageId, prompt.parts);
     }
 
     // Error text is not part of the settled transcript floor. Only the latest
@@ -491,7 +495,8 @@ export class Chat {
             (acceptedPrompt.acceptedTurnId !== null &&
               activeTurn?.complete === true &&
               activeTurn.turnId === acceptedPrompt.acceptedTurnId))));
-    if (this.#promptsInFlight.size === 0) {
+    const submitting = sendingMessage(this.#chatState);
+    if (!submitting) {
       this.#pendingPromptMessageIds.clear();
       for (const prompt of snapshot.pendingPrompts) {
         this.#pendingPromptMessageIds.add(prompt.messageId);
@@ -505,10 +510,9 @@ export class Chat {
       // masks it in activePrompt, so reconnect can still settle this client's
       // in-flight correlation without retaining a stale local id forever.
       const accountsForPendingPrompt =
-        this.#promptsInFlight.size === 1 &&
         acceptedPrompt !== null &&
         acceptedPrompt.acceptedTurnId !== null &&
-        this.#promptsInFlight.has(acceptedPrompt.messageId);
+        submitting.message.id === acceptedPrompt.messageId;
       if (accountsForPendingPrompt) {
         this.#pendingPromptMessageIds.clear();
         this.#lastEndedTurnId = snapshotLastEndedTurnId;
@@ -569,12 +573,14 @@ export class Chat {
   // ---------------------------------------------------------------------
 
   #captureChunkError(chunk: UIMessageChunk): void {
-    if (chunk.type === "error") this.#state.error = new Error(chunk.errorText);
+    if (chunk.type === "error") {
+      this.#update({ type: "errorChanged", error: new Error(chunk.errorText) });
+    }
   }
 
   #pushUserMessage(messageId: string, parts: ReadonlyArray<PromptPart>): boolean {
-    if (this.#state.messages.some((message) => message.id === messageId)) return false;
-    this.#state.pushMessage(toUserMessage(messageId, parts));
+    if (hasMessage(this.#chatState, messageId)) return false;
+    this.#update({ type: "userMessageReceived", message: toUserMessage(messageId, parts) });
     return true;
   }
 
@@ -586,11 +592,11 @@ export class Chat {
         .respondToAgentRequest(request.id, { type: "plan", behavior: "allow" })
         .catch((error: unknown) => {
           console.error("Failed to auto-approve empty plan request", error);
-          this.#state.addPendingRequest(request);
+          this.#update({ type: "requestAdded", request });
         });
       return;
     }
-    this.#state.addPendingRequest(request);
+    this.#update({ type: "requestAdded", request });
   }
 
   // The live view may have diverged from the settled transcript — re-read
@@ -600,27 +606,31 @@ export class Chat {
   async #reconcileHistory(): Promise<void> {
     // Settled history cannot contain a prompt that has not reached the server.
     // Leave #needsReconcile set so a later turn boundary or attach retries it.
-    if (this.#promptsInFlight.size > 0) return;
+    if (hasSendingMessage(this.#chatState)) return;
     const promptRevision = this.#promptRevision;
     try {
       const history = await this.#transport.getMessages();
       // The read is stale if a prompt began while it was in flight — including
       // the case where that prompt settled before this older response arrived.
-      if (promptRevision !== this.#promptRevision || this.#promptsInFlight.size > 0) return;
-      // Same read as the floor's, so it answers the same question: a reconcile
-      // that lands clears a floor read that failed earlier.
-      this.#state.historyStatus = history === null ? "unavailable" : "settled";
+      if (promptRevision !== this.#promptRevision || hasSendingMessage(this.#chatState)) return;
+      const canReplaceMessages =
+        history !== null &&
+        history.length > 0 &&
+        this.#chatState.status !== "streaming" &&
+        this.#chatState.status !== "submitted" &&
+        this.#turnFolds.size === 0;
+      this.#update({
+        type: "historyReadFinished",
+        history,
+        replaceMessages: canReplaceMessages,
+      });
       if (history === null) {
         // Capability absent: no settled transcript will ever materialize, so
         // a deferred reconcile must not retry forever.
         this.#needsReconcile = false;
         return;
       }
-      if (history.length === 0) return;
-      if (this.#state.status === "streaming" || this.#state.status === "submitted") return;
-      if (this.#turnFolds.size > 0) return;
-      this.#state.messages = Array.from(history);
-      this.#needsReconcile = false;
+      if (canReplaceMessages) this.#needsReconcile = false;
     } catch (reconcileError) {
       console.error("Failed to reconcile session history", reconcileError);
     }
@@ -644,7 +654,7 @@ export class Chat {
         // overrides this seed.
         const seed = { id: `turn-${turnId}`, role: "assistant", parts: [] } as UIMessage;
         for await (const message of readUIMessageStream({ message: seed, stream })) {
-          this.#state.upsertMessage(message as UIMessage);
+          this.#update({ type: "assistantMessageUpdated", message: message as UIMessage });
         }
       } catch (foldError) {
         console.error("Failed to fold turn", foldError);
@@ -666,7 +676,7 @@ export class Chat {
   }
 
   #setStatus(status: "submitted" | "streaming" | "ready" | "error"): void {
-    if (this.#state.status !== status) this.#state.status = status;
+    this.#update({ type: "statusChanged", status });
   }
 
   #resumeAfterPromptSettlement(): void {
@@ -677,55 +687,68 @@ export class Chat {
   }
 
   #maybeDispatchPrompt(): void {
+    const next = firstQueuedMessage(this.#chatState);
     if (
-      this.#terminated ||
-      this.#disposed ||
-      this.#promptQueue.isDispatching ||
+      !isChatActive(this.#chatState) ||
+      hasSendingMessage(this.#chatState) ||
       !this.#historyLoaded ||
       this.#queuedEvents !== null ||
       !this.#promptBoundaryOpen ||
-      !this.#promptQueue.hasWaiting
+      !next
     ) {
       return;
     }
-    const dispatch = this.#promptQueue.dispatchNext((prompt) => this.#submitPrompt(prompt));
-    if (dispatch) void dispatch.finally(() => this.#maybeDispatchPrompt());
+    this.#update({ type: "messageSubmissionStarted", messageId: next.message.id });
+    void this.#submitPrompt(next).finally(() => this.#maybeDispatchPrompt());
   }
 
-  async #submitPrompt(item: ClientQueuedPrompt): Promise<void> {
+  async #submitPrompt(item: OutgoingMessage): Promise<void> {
     const messageId = item.message.id;
     this.#pendingPromptMessageIds.add(messageId);
     this.#promptBoundaryOpen = false;
     this.#promptRevision += 1;
-    this.#promptsInFlight.add(messageId);
-    this.#state.error = undefined;
-    this.#state.pushMessage(item.message);
-    this.#setStatus("submitted");
+    let failed = false;
     try {
       await this.#transport.prompt({ messageId, parts: item.parts });
+      this.#resolvePrompt(messageId);
     } catch (promptError) {
-      if (!this.#terminated && !this.#disposed) {
-        this.#state.error =
-          promptError instanceof Error ? promptError : new Error(String(promptError));
+      failed = true;
+      const error = promptError instanceof Error ? promptError : new Error(String(promptError));
+      this.#rejectPrompt(messageId, error);
+      if (isChatActive(this.#chatState)) {
         this.#deferredSnapshotPhase = null;
-        this.#setStatus("error");
+        this.#update({ type: "messageSubmissionFailed", messageId, error });
       }
-      throw promptError;
     } finally {
-      this.#promptsInFlight.delete(messageId);
+      if (!failed) this.#update({ type: "messageSubmissionFinished", messageId });
       if (
-        !this.#terminated &&
-        !this.#disposed &&
-        this.#promptsInFlight.size === 0 &&
-        this.#state.status !== "error"
+        isChatActive(this.#chatState) &&
+        !hasSendingMessage(this.#chatState) &&
+        this.#chatState.status !== "error"
       ) {
         this.#resumeAfterPromptSettlement();
       }
     }
   }
 
-  #rejectLocalPromptQueue(error: Error): void {
-    this.#promptQueue.rejectAll(error);
+  #resolvePrompt(messageId: string): void {
+    const promise = this.#promptPromises.get(messageId);
+    if (!promise) return;
+    this.#promptPromises.delete(messageId);
+    promise.resolve();
+  }
+
+  #rejectPrompt(messageId: string, error: Error): void {
+    const promise = this.#promptPromises.get(messageId);
+    if (!promise) return;
+    this.#promptPromises.delete(messageId);
+    promise.reject(error);
+  }
+
+  #rejectOutgoingMessages(error: Error): void {
+    for (const message of this.#chatState.outgoing) {
+      this.#rejectPrompt(message.message.id, error);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -733,14 +756,21 @@ export class Chat {
   // ---------------------------------------------------------------------
 
   // Enqueue locally. The returned promise settles only when this item reaches
-  // the head and the server prompt RPC settles; queued items remain visible in
-  // a separate store slice so history reconciliation cannot erase them.
+  // the head and the server prompt RPC settles. ChatView derives queued items
+  // from ChatState.outgoing, independently of transcript reconciliation.
   prompt = (text: string): Promise<void> => {
-    if (this.#terminated) return Promise.reject(new Error("Session is no longer available"));
-    if (this.#disposed) return Promise.reject(new Error("Chat disposed"));
+    if (this.#chatState.lifecycle.session === "terminated") {
+      return Promise.reject(new Error("Session is no longer available"));
+    }
+    if (this.#chatState.lifecycle.instance === "disposed") {
+      return Promise.reject(new Error("Chat disposed"));
+    }
     const parts: PromptPart[] = [{ type: "text", text }];
     const message = toUserMessage(generateId(), parts);
-    const submitted = this.#promptQueue.enqueue({ message, parts });
+    const submitted = new Promise<void>((resolve, reject) => {
+      this.#promptPromises.set(message.id, { resolve, reject });
+    });
+    this.#update({ type: "messageQueued", message, parts });
     this.#maybeDispatchPrompt();
     return submitted;
   };
@@ -760,23 +790,23 @@ export class Chat {
   };
 
   respondToAgentRequest = async (requestId: string, response: AgentResponse): Promise<void> => {
-    const request = this.store.getState().pendingRequests.find((r) => r.id === requestId);
-    this.#state.removePendingRequest(requestId); // optimistic: the card closes immediately
+    const request = this.#chatState.session.pendingRequests.find((item) => item.id === requestId);
+    this.#update({ type: "requestRemoved", requestId }); // optimistic: close immediately
     try {
       await this.#transport.respondToAgentRequest(requestId, response);
     } catch (respondError) {
       // Failure = the request is still pending server-side: restore the card so
-      // the user can answer again (addPendingRequest is idempotent by id).
+      // the user can answer again (requestAdded is idempotent by id).
       console.error("Failed to respond to agent request", respondError);
-      if (request) this.#state.addPendingRequest(request);
+      if (request) this.#update({ type: "requestAdded", request });
     }
   };
 
   dispose = (): void => {
-    if (this.#disposed) return;
-    this.#disposed = true;
+    if (this.#chatState.lifecycle.instance === "disposed") return;
     this.#unsubscribe();
-    this.#rejectLocalPromptQueue(new Error("Chat disposed"));
+    this.#rejectOutgoingMessages(new Error("Chat disposed"));
+    this.#update({ type: "chatDisposed" });
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
   };

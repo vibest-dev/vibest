@@ -44,7 +44,7 @@ export class ChatManager implements ChatManagerApi {
   // this session right now still holds the instance and needs its terminal
   // error on screen. That view keeps working, the transcript is collected once
   // it unmounts, and a session restored later gets a Chat built from scratch —
-  // which is also what un-sticks `#terminated`, a flag nothing ever clears.
+  // which is also what replaces the terminal ChatState with a fresh instance.
   //
   // Safe to look the entry up rather than compare identities: `closed` reaches
   // a Chat only from inside the subscription's async loop, so the `set` below

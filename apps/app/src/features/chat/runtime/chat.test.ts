@@ -1289,9 +1289,10 @@ describe("Chat stream errors", () => {
   });
 
   it("lets a newer retained prompt clear an older completed-turn error", async () => {
-    const { chat, attach } = makeChat();
+    const { chat, transport, attach } = makeChat();
     await attach({});
-    chat.store.setState({ error: new Error("older local failure") });
+    transport.promptError = new Error("older local failure");
+    await expect(chat.prompt("fail first")).rejects.toThrow("older local failure");
 
     await attach({
       status: { phase: "idle" },
@@ -1322,11 +1323,18 @@ describe("Chat stream errors", () => {
   });
 
   it("clears a stale error for unseen broadcast and retained prompts", async () => {
-    const { chat, attach, live } = makeChat();
+    const { chat, transport, attach, live } = makeChat();
     await attach({});
-    chat.store.setState({ error: new Error("old failure") });
-
+    transport.promptError = new Error("old failure");
+    await expect(chat.prompt("fail first")).rejects.toThrow("old failure");
     live(1, {
+      type: "session.prompt.rejected",
+      messageId: transport.promptCalls[0]!.messageId,
+      reason: "failed",
+      phase: "idle",
+    });
+
+    live(2, {
       type: "session.prompt.submitted",
       messageId: "remote-1",
       parts: [{ type: "text", text: "remote" }],
@@ -1334,17 +1342,24 @@ describe("Chat stream errors", () => {
     });
     expect(chat.store.getState().error).toBeUndefined();
 
-    chat.store.setState({ error: new Error("another old failure") });
+    live(3, {
+      type: "session.prompt.rejected",
+      messageId: "remote-1",
+      reason: "busy",
+      phase: "idle",
+    });
+    transport.promptError = new Error("another old failure");
+    await expect(chat.prompt("fail again")).rejects.toThrow("another old failure");
     await attach({
       status: { phase: "running" },
       activePrompt: {
         messageId: "remote-2",
         parts: [{ type: "text", text: "retained" }],
-        seq: 2,
+        seq: 4,
         acceptedTurnId: "turn-2",
       },
       activeTurn: activeTurn({ turnId: "turn-2", chunks: [] }),
-      cursor: 3,
+      cursor: 4,
     });
     expect(chat.store.getState().error).toBeUndefined();
   });

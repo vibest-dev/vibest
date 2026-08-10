@@ -48,7 +48,7 @@ describe("ChatManager", () => {
     expect(transports).toHaveLength(2);
   });
 
-  it("evicts and unsubscribes a Chat once the session closes", () => {
+  it("evicts and unsubscribes a Chat once the session closes", async () => {
     const { manager, transports } = makeManager();
     const chat = manager.chatFor(refFor("session-1"));
     const transport = transports[0];
@@ -59,6 +59,7 @@ describe("ChatManager", () => {
     // The evicted instance keeps its terminal state for whoever is still
     // rendering it — eviction only stops it being handed out again.
     expect(chat.store.getState().error?.message).toBe("Session closed");
+    await expect(chat.prompt("after close")).rejects.toThrow("Session is no longer available");
   });
 
   it("builds a fresh Chat when a closed session is opened again", () => {

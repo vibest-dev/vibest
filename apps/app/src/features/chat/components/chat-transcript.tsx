@@ -8,7 +8,8 @@ import {
   ConversationScrollButton,
 } from "@/components/conversation";
 import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
-import type { ChatStoreState, HistoryStatus } from "@/features/chat/runtime/chat-state";
+import type { HistoryStatus } from "@/features/chat/runtime/chat-state";
+import type { ChatView } from "@/features/chat/runtime/chat-view";
 
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";
@@ -41,7 +42,7 @@ function ChatTranscriptView({
   snapshot,
   onRespond,
 }: {
-  snapshot: ChatStoreState;
+  snapshot: ChatView;
   onRespond: (requestId: string, response: AgentResponse) => void;
 }) {
   const lastIndex = snapshot.messages.length - 1;

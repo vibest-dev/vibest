@@ -8,13 +8,13 @@ import { createContext, useContext } from "react";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
-import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
+import type { ChatView } from "@/features/chat/runtime/chat-view";
 
 export interface ChatSessionValue {
   sessionId: string;
   harnessAgentId: HarnessAgentId;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
-  store: StoreApi<ChatStoreState>;
+  store: StoreApi<ChatView>;
   /** Resolves when the locally queued prompt reaches the server. */
   prompt: (text: string) => Promise<void>;
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;

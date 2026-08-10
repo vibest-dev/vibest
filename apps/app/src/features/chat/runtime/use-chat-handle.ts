@@ -3,12 +3,12 @@ import { useMemo } from "react";
 
 import type { Chat } from "./chat";
 import { useChatManager } from "./chat-context";
-import type { ChatStoreState } from "./chat-state";
+import type { ChatView } from "./chat-view";
 
 // Whether the turn is producing a reply (submitted / streaming). Used as a
 // useStore selector so consumers that only care about this bit (the composer)
 // don't re-render per streamed token.
-export const selectTurnInProgress = (s: ChatStoreState): boolean =>
+export const selectTurnInProgress = (s: ChatView): boolean =>
   s.status === "submitted" || s.status === "streaming";
 
 // Get-or-create a Chat by SessionRef and return it with a stable identity.
