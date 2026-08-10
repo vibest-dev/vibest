@@ -201,34 +201,19 @@ export const makeClaudeCodeAgent = ({
         Effect.provideService(FileSystem.FileSystem, fileSystem),
       ),
     );
-    /**
-     * The `claude` CLI's own stderr, routed into the server's log instead of
-     * the process's. It used to be a bare `console.error`, which in the daemon
-     * meant it landed in `daemon.log` — a different file from everything else,
-     * unstructured, and with nothing to say which session produced it.
-     *
-     * The SDK hands these to a synchronous callback with no fiber of its own,
-     * so the context is captured here and provided per line. Unlike the warning
-     * above, this context never reaches a caller's effect — it is provided to a
-     * log effect built right here — so it cannot override anyone's scope.
-     */
-    const telemetryContext = yield* Effect.context<never>();
-    const logSdkStderr = (line: string, annotations: Record<string, unknown>): void => {
+    const sdkStderr = (line: string, annotations: Record<string, unknown>) => {
       const text = line.trimEnd();
-      if (text.length === 0) return;
-      Effect.runFork(
-        // Debug: this is the CLI's diagnostic chatter, not a server error. It
-        // stays out of the way until someone sets VIBEST_LOG_LEVEL=Debug.
-        Effect.logDebug(text).pipe(
-          Effect.annotateLogs({
-            event: "harness.stderr",
-            harnessAgentId: "claude-code",
-            ...annotations,
-          }),
-          Effect.provide(telemetryContext),
-        ),
-      );
+      return text.length === 0
+        ? Effect.void
+        : Effect.logDebug(text).pipe(
+            Effect.annotateLogs({
+              event: "harness.stderr",
+              harnessAgentId: "claude-code",
+              ...annotations,
+            }),
+          );
     };
+    const rootTelemetryContext = yield* Effect.context<never>();
 
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
@@ -355,7 +340,9 @@ export const makeClaudeCodeAgent = ({
             // at runtime (setPermissionMode). This only enables the capability;
             // the active mode stays whatever `permissionMode` currently is.
             allowDangerouslySkipPermissions: true,
-            stderr: (error) => logSdkStderr(error, { sessionId }),
+            stderr: (error) => {
+              runCallback(sdkStderr(error, { harnessSessionId: sessionId }));
+            },
             executable: process.execPath as "node",
             pathToClaudeCodeExecutable: yield* claudeExecutable,
             env: { ...env },
@@ -592,7 +579,11 @@ export const makeClaudeCodeAgent = ({
                   mcpServers: {},
                   strictMcpConfig: true,
                   settingSources: ["user", "project", "local"],
-                  stderr: (error) => logSdkStderr(error, { probe: "list-models" }),
+                  stderr: (error) => {
+                    void Effect.runSyncExitWith(rootTelemetryContext)(
+                      sdkStderr(error, { probe: "list-models" }),
+                    );
+                  },
                   executable: process.execPath as "node",
                   pathToClaudeCodeExecutable,
                   env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
@@ -742,7 +733,7 @@ export const makeClaudeCodeAgent = ({
                     Effect.annotateLogs({
                       event: "harness.transcript.miss",
                       harnessAgentId: "claude-code",
-                      sessionId,
+                      harnessSessionId: sessionId,
                       candidate,
                       reason: cause.reason._tag,
                     }),

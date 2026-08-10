@@ -1,7 +1,7 @@
-import { type Context, Effect, Option } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { makeTelemetryContext, resolveTelemetryConfig } from "../telemetry";
+import { makeTelemetryRuntime, resolveTelemetryConfig, type TelemetryRuntime } from "../telemetry";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
 import { createServer, ServerStartupError } from "./server";
@@ -82,7 +82,7 @@ export function resolveServeConfig(input: ServeInput): {
  * `NodeRuntime.runMain`'s SIGINT/SIGTERM interrupt tears it down through the
  * release finalizer.
  *
- * This is where the process's one telemetry context is built, which is what
+ * This is where the process's one telemetry runtime is built, which is what
  * makes logging identical whether the server runs in the foreground
  * (`vibest serve`, `pnpm dev`) or detached as the daemon: both paths run this
  * body, so both persist to `$VIBEST_HOME/logs` rather than only the daemon
@@ -92,11 +92,19 @@ export const runServe = (input: ServeInput) =>
   Effect.gen(function* () {
     // Built in the ambient scope, so its batch fiber lives as long as the
     // server and its final flush runs on the same interrupt that stops it.
-    const telemetry = yield* makeTelemetryContext(resolveTelemetryConfig());
-    return yield* serveWith(input, telemetry).pipe(Effect.provide(telemetry));
+    const telemetry = yield* makeTelemetryRuntime(resolveTelemetryConfig());
+    return yield* telemetry.provide(
+      serveWith(input, telemetry).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("server startup failed", Cause.fail(error)).pipe(
+            Effect.annotateLogs({ event: "server.startup_failed", phase: error.phase }),
+          ),
+        ),
+      ),
+    );
   });
 
-const serveWith = (input: ServeInput, telemetry: Context.Context<never>) =>
+const serveWith = (input: ServeInput, telemetry: TelemetryRuntime) =>
   Effect.gen(function* () {
     const authToken = takeAuthToken();
     const { port: requestedPort, corsOrigins, allowedHosts } = resolveServeConfig(input);
@@ -144,7 +152,7 @@ const serveWith = (input: ServeInput, telemetry: Context.Context<never>) =>
 
     // Machine-readable first, for the desktop supervisor; human-readable
     // second. Both go to stdout, which stays clear of logging because the
-    // telemetry context sets `Logger.LogToStderr` — Effect 4 defaults that to
+    // telemetry sets `Logger.LogToStderr` — Effect 4 defaults that to
     // `false`, i.e. stdout, so this separation is configured, not inherent.
     console.log(formatReadyLine({ port }));
     console.log(`vibest listening on http://127.0.0.1:${port}`);

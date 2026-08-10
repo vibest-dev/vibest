@@ -1,8 +1,6 @@
-import path from "node:path";
-
 import type * as LogLevel from "effect/LogLevel";
 
-import { resolveVibestHome } from "../config/paths";
+import { logsDirectory, resolveVibestHome } from "../config/paths";
 
 /**
  * How the human-facing console stream is rendered — or silenced. The daemon
@@ -68,7 +66,7 @@ const parseDays = (raw: string | undefined, fallback: number): number => {
  */
 export function resolveTelemetryConfig(env: NodeJS.ProcessEnv = process.env): TelemetryConfig {
   return {
-    logsDir: path.join(resolveVibestHome(env), "logs"),
+    logsDir: logsDirectory(resolveVibestHome(env)),
     minimumLogLevel: parseFrom(LOG_LEVELS, env.VIBEST_LOG_LEVEL, "Info"),
     consoleFormat: parseFrom(CONSOLE_FORMATS, env.VIBEST_LOG_CONSOLE, "pretty"),
     retentionDays: parseDays(env.VIBEST_LOG_RETENTION_DAYS, 30),

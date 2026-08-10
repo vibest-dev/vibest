@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { layer } from "@effect/vitest";
-import { Effect, FileSystem, Logger } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Logger, Ref, Scope } from "effect";
 
-import { makeFileLogger, structured, type LogRecord } from "../../src/telemetry";
+import { makeFileLogger } from "../../src/telemetry/file-sink";
+import { jsonl, structured, type LogRecord } from "../../src/telemetry/format";
 import { NodePlatformLayer } from "../platform";
 
 /** Collect `LogRecord`s instead of writing them anywhere. */
@@ -77,6 +78,29 @@ layer(NodePlatformLayer, { excludeTestServices: true })("telemetry logging", (it
     }),
   );
 
+  it.effect("encodes circular values and nested bigint without failing the log", () =>
+    Effect.gen(function* () {
+      const lines: string[] = [];
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+
+      yield* Effect.log("safe").pipe(
+        Effect.annotateLogs({ circular, nested: { value: 1n } }),
+        Effect.provide(
+          Logger.layer([
+            Logger.map(jsonl, (line) => {
+              lines.push(line);
+            }),
+          ]),
+        ),
+      );
+
+      const parsed = JSON.parse(lines[0] ?? "") as LogRecord;
+      assert.deepEqual(parsed.annotations.circular, {});
+      assert.deepEqual(parsed.annotations.nested, { value: "1" });
+    }),
+  );
+
   it.effect("writes JSON lines to a per-day file and flushes on scope close", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -143,6 +167,33 @@ layer(NodePlatformLayer, { excludeTestServices: true })("telemetry logging", (it
       // `mode` carries the file type bits too; mask down to the permissions.
       assert.equal((Number(file.mode) & 0o777).toString(8), "600");
       assert.equal((Number(dir.mode) & 0o777).toString(8), "700");
+    }),
+  );
+
+  it.effect("waits for an in-flight batch before its scope closes", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const completed = yield* Ref.make(false);
+      const fs = FileSystem.makeNoop({
+        makeDirectory: () => Effect.void,
+        readDirectory: () => Effect.succeed([]),
+        writeFileString: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.sleep(50)),
+            Effect.andThen(Ref.set(completed, true)),
+          ),
+      });
+      const scope = Scope.makeUnsafe();
+      const logger = yield* makeFileLogger({ directory: "/logs", retentionDays: 30 }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Scope.Scope, scope),
+      );
+
+      yield* Effect.log("persist me").pipe(Effect.provide(Logger.layer([logger])));
+      yield* Deferred.await(started);
+      yield* Scope.close(scope, Exit.void);
+
+      assert.equal(yield* Ref.get(completed), true);
     }),
   );
 

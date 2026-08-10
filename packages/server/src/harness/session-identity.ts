@@ -20,7 +20,7 @@ import { Effect } from "effect";
  *
  * Both channels because a span line and a log line are read the same way and
  * need the same key: `annotateSpans` is what puts `sessionId` on `harness.open`
- * and therefore on the line `telemetry/tracer.ts` writes when it closes.
+ * and therefore on the completion line `withLoggedSpan` writes.
  *
  * The RPC wrapper is the other candidate seam and cannot be one: oRPC hands it
  * the procedure path and nothing else — the decoded input, where the ref lives,

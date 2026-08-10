@@ -8,6 +8,7 @@ import type {
 import { Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
+import { withLoggedSpan } from "../telemetry";
 import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
 import {
   AgentOpenError,
@@ -235,16 +236,13 @@ export const makeHarnessAgentSessionManager = (
     /**
      * The heaviest thing this server does: `open`/`resume` is where an agent
      * CLI is actually spawned or an SDK handle established. It is also the
-    /**
-     * The heaviest thing this server does: `open`/`resume` is where an agent
-     * CLI is actually spawned or an SDK handle established. It is also the
      * likeliest to fail — a CLI that is not installed, an expired login, a cwd
      * that vanished — and the failure reaches the user as a session that "does
      * nothing".
      *
-     * `withSpan` is the whole instrumentation on both. `telemetry/tracer.ts`
-     * turns it into a line carrying the duration (seconds here are normal, tens
-     * of seconds are not, and that is invisible from anywhere else) and the
+     * `withLoggedSpan` turns each acquisition into a line carrying the duration
+     * (seconds here are normal, tens of seconds are not, and that is invisible
+     * from anywhere else) and the
      * outcome, raising a failed acquisition to `warn` on its own. Which session
      * and which harness come from the caller's `inSession`; the harness's own
      * id is attached after the fact because it does not exist until the adapter
@@ -257,14 +255,14 @@ export const makeHarnessAgentSessionManager = (
       checkAvailable(harnessAgentId).pipe(
         Effect.flatMap((adapter) => adapter.open(input)),
         Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
-        Effect.withSpan("harness.open"),
+        withLoggedSpan("harness.open"),
       );
 
     const acquireResume = (input: ResumeManagedSessionInput): AcquireRuntime =>
       checkAvailable(input.harnessAgentId).pipe(
         Effect.flatMap((adapter) => adapter.resume({ sessionId: input.sessionId, cwd: input.cwd })),
         Effect.tap((runtime) => Effect.annotateCurrentSpan("harnessSessionId", runtime.sessionId)),
-        Effect.withSpan("harness.resume"),
+        withLoggedSpan("harness.resume"),
       );
 
     /** Acquire through a session, retrying against a fresh one when the session

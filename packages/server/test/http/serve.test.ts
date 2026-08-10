@@ -102,6 +102,20 @@ describe("runServe", () => {
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
       expect(error).toBeInstanceOf(ServerStartupError);
       expect((error as ServerStartupError).phase).toBe("listen");
+
+      const logsDir = path.join(home, "logs");
+      const logFile = (await fs.readdir(logsDir)).find((entry) => entry.endsWith(".jsonl"));
+      const records = JSON.parse(
+        `[${(await fs.readFile(path.join(logsDir, logFile ?? ""), "utf8"))
+          .trim()
+          .split("\n")
+          .join(",")}]`,
+      ) as Array<{ annotations: Record<string, unknown>; cause?: string }>;
+      const startupFailure = records.find(
+        (record) => record.annotations.event === "server.startup_failed",
+      );
+      expect(startupFailure?.annotations.phase).toBe("listen");
+      expect(startupFailure?.cause).toContain("ServerStartupError");
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
       await fs.rm(home, { recursive: true, force: true });

@@ -1,7 +1,8 @@
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Effect, Layer, ManagedRuntime } from "effect";
 import type { WebSocket } from "ws";
 
+import { defaultTelemetryRuntime, type TelemetryRuntime, withLoggedSpan } from "../telemetry";
 import type { RpcContext } from "./context";
 import { router } from "./router";
 import { AgentRuntimeLayer } from "./runtime";
@@ -23,13 +24,13 @@ import { AgentRuntimeLayer } from "./runtime";
  * The span does two jobs and neither is stated at any call site. It makes the
  * JSONL navigable — every line a procedure produces, through the session
  * service, the repositories, an adapter, carries this call's `traceId`, so one
- * request reassembles with `jq 'select(.traceId=="…")'`. And because
- * `telemetry/tracer.ts` logs spans as they close, it *is* the per-call record:
- * name, duration and outcome, with no clock read or `onExit` written here.
+ * request reassembles with `jq 'select(.traceId=="…")'`. `withLoggedSpan`
+ * writes the per-call completion record before the span closes: name, duration,
+ * and outcome, without clock or lifecycle code here.
  *
  * What remains below is the one thing a span cannot carry: the failure's cause.
  */
-export function makeRpcWrap(telemetry: Context.Context<never>) {
+export function makeRpcWrap(telemetry: TelemetryRuntime) {
   return <A, E>(effect: Effect.Effect<A, E>, options: { readonly path: ReadonlyArray<string> }) => {
     const procedure = options.path.join(".");
     return effect.pipe(
@@ -40,10 +41,9 @@ export function makeRpcWrap(telemetry: Context.Context<never>) {
               Effect.annotateLogs({ event: "rpc.failed", procedure }),
             ),
       ),
-      // Inside `provide` so the span sees the telemetry context, and outside
-      // the tap so a failure is logged with the span it failed in.
-      Effect.withSpan(`rpc.${procedure}`),
-      Effect.provide(telemetry),
+      // Outside the tap so a failure is logged inside the span it failed in.
+      withLoggedSpan(`rpc.${procedure}`),
+      telemetry.provide,
     );
   };
 }
@@ -64,23 +64,13 @@ export type RpcRuntime = {
 type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 
 /**
- * @param telemetry the process's one logging context (see
- * `telemetry/runtime.ts`). Merged into this runtime rather than rebuilt,
- * because `CurrentLoggers` is a per-context reference: building a second
- * telemetry layer here would put a second set of loggers on the same file.
- * Defaults to empty so tests get the plain Effect logger.
+ * @param telemetry the process's one telemetry runtime. Defaults to Effect's
+ * standard context in tests.
  */
 export async function createRpcRuntime(
-  telemetry: Context.Context<never> = Context.empty(),
+  telemetry: TelemetryRuntime = defaultTelemetryRuntime,
 ): Promise<RpcRuntime> {
-  // `provideMerge`, not `mergeAll`: merging would put telemetry *beside*
-  // `AgentRuntimeLayer` and leave everything built inside it — including any
-  // context a service captures for a synchronous callback — on the default
-  // logger. Providing pushes the references down the whole tree, and the
-  // `Merge` half keeps them in the output context for the RPC handlers.
-  const runtime = ManagedRuntime.make(
-    AgentRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(telemetry))),
-  );
+  const runtime = ManagedRuntime.make(telemetry.provideToLayer(AgentRuntimeLayer));
   const context: RpcContext = {
     "effect/context": await runtime.runPromise(runtime.contextEffect),
     "effect/wrap": makeRpcWrap(telemetry),

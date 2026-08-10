@@ -24,9 +24,6 @@ export const dayKey = (date: Date): string => {
 export const logFileFor = (directory: string, date: Date): string =>
   path.join(directory, `${FILE_PREFIX}${dayKey(date)}${FILE_SUFFIX}`);
 
-/** `$VIBEST_HOME/logs` — the one place any vibest process writes a log. */
-export const logsDirectory = (home: string): string => path.join(home, "logs");
-
 /**
  * Owner-only, matching `daemon.pid` (which holds the auth token). Log lines
  * carry working directories, project and session ids, and whatever an agent

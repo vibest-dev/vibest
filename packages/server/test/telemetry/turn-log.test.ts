@@ -6,7 +6,7 @@ import { Effect, Layer, Logger } from "effect";
 
 import { EventBus, EventBusLayer } from "../../src/events";
 import { makeHarnessAgentSession } from "../../src/harness/session";
-import { structured, type LogRecord } from "../../src/telemetry";
+import { structured, type LogRecord } from "../../src/telemetry/format";
 
 const ref: SessionRef = {
   projectId: "project-1",

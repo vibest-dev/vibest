@@ -4,64 +4,55 @@ import type { TelemetryConfig } from "./config";
 import { installCrashHandler } from "./crash";
 import { makeFileLogger } from "./file-sink";
 import { jsonl } from "./format";
-import { SpanLoggerLayer } from "./tracer";
+
+/** The process-wide telemetry runtime, exposing only what other roots need. */
+export type TelemetryRuntime = {
+  readonly provide: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  readonly provideToLayer: <A, E, R>(layer: Layer.Layer<A, E, R>) => Layer.Layer<A, E, R>;
+  /** Run a synchronous callback log without allowing telemetry defects to escape. */
+  readonly emit: (effect: Effect.Effect<void>) => void;
+};
+
+export const telemetryRuntimeFromContext = (context: Context.Context<never>): TelemetryRuntime => ({
+  provide: (effect) => effect.pipe(Effect.provide(context)),
+  provideToLayer: (layer) => layer.pipe(Layer.provideMerge(Layer.succeedContext(context))),
+  emit: (effect) => {
+    void Effect.runSyncExitWith(context)(effect);
+  },
+});
+
+export const defaultTelemetryRuntime = telemetryRuntimeFromContext(Context.empty());
 
 const consoleLogger = (config: TelemetryConfig): Logger.Logger<unknown, void> | undefined => {
   switch (config.consoleFormat) {
     case "quiet":
       return undefined;
-    // Reads `LogToStderr` itself, so it lands on stderr like the rest.
     case "pretty":
       return Logger.consolePretty();
-    // `withConsoleError` rather than `withConsoleLog`: stdout carries the
-    // `vibest:ready` handshake the desktop supervisor parses, and structured
-    // logs must not share that channel.
     case "json":
+      // stdout carries the `vibest:ready` handshake.
       return Logger.withConsoleError(jsonl);
   }
 };
 
-/**
- * Build this process's logging context — once.
- *
- * `CurrentLoggers` (and later `Tracer.Tracer`) are per-context references, not
- * process globals, so every independently-created runtime must be handed this
- * same `Context` or the work it runs logs into the void. There are three such
- * runtimes inside one daemon process alone (`http/main.ts`'s `runMain`,
- * `rpc/handlers.ts`'s `ManagedRuntime`, and the bare `Effect.runPromise` calls
- * in `http/server.ts`), which is why this returns a `Context` to pass down
- * rather than a `Layer` for each of them to build: a second build would mean a
- * second set of loggers writing the same file.
- *
- * Scoped — the file sink's batch fiber and its final flush live in the scope,
- * so the caller must keep it open for the life of the process.
- */
-export const makeTelemetryContext = (
+/** Build this process's one scoped telemetry runtime. */
+export const makeTelemetryRuntime = (
   config: TelemetryConfig,
-): Effect.Effect<Context.Context<never>, never, FileSystem.FileSystem | Scope.Scope> =>
+): Effect.Effect<TelemetryRuntime, never, FileSystem.FileSystem | Scope.Scope> =>
   Effect.gen(function* () {
     const fileLogger = yield* makeFileLogger({
       directory: config.logsDir,
       retentionDays: config.retentionDays,
     });
-    // So a crash is a line in the log rather than the log simply stopping.
     yield* installCrashHandler(config.logsDir);
+
     const console = consoleLogger(config);
     const loggers = console === undefined ? [fileLogger] : [console, fileLogger];
-
     const logging = Layer.mergeAll(
-      // Not `mergeWithExisting` — the default logger would otherwise print
-      // every line a second time, unstructured.
       Logger.layer(loggers),
       Layer.succeed(References.MinimumLogLevel, config.minimumLogLevel),
-      // Effect 4 defaults this to `false`, i.e. the built-in loggers write to
-      // stdout. That channel belongs to the `vibest:ready` handshake.
       Layer.succeed(Logger.LogToStderr, true),
     );
 
-    // The span logger is built *over* the loggers so it can capture them for
-    // its detached fibers, and merged back in so the result carries both. The
-    // order is load-bearing in one direction only: loggers do not need a
-    // tracer, a tracer that logs needs the loggers.
-    return yield* Layer.build(Layer.merge(logging, SpanLoggerLayer.pipe(Layer.provide(logging))));
+    return telemetryRuntimeFromContext(yield* Layer.build(logging));
   });

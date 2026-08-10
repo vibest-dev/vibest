@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import { Effect, type Scope } from "effect";
 
-import { logFileFor } from "./paths";
+import { LOG_FILE_MODE, logFileFor } from "./paths";
 
 /**
  * Deliberately `node:fs` and deliberately synchronous.
@@ -22,14 +22,13 @@ const writeCrashLine = (directory: string, error: unknown): void => {
       level: "FATAL",
       timestamp: now.toISOString(),
       annotations: { event: "process.crashed" },
-      spans: {},
       pid: process.pid,
       fiberId: "#0",
       cause: error instanceof Error ? (error.stack ?? error.message) : String(error),
     });
     // Same owner-only mode as the batched sink: this appends to the very same
     // file, and whichever of the two creates it decides the permissions.
-    fs.appendFileSync(logFileFor(directory, now), `${line}\n`, { mode: 0o600 });
+    fs.appendFileSync(logFileFor(directory, now), `${line}\n`, { mode: LOG_FILE_MODE });
   } catch {
     // Nothing sensible is left to do — the process is going down regardless,
     // and Node still prints the stack to stderr on its way out.

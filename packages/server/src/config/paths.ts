@@ -87,6 +87,9 @@ export function resolveDaemonDirectory(env: NodeJS.ProcessEnv = process.env): st
   return resolveDaemonLocation(env).daemonDir;
 }
 
+/** `$VIBEST_HOME/logs` — the one directory every server process writes logs to. */
+export const logsDirectory = (home: string): string => path.join(home, "logs");
+
 /** Point the runtime at an explicit home directory (used in tests). */
 export const layerPaths = (home: string): Layer.Layer<Paths> => Layer.succeed(Paths, resolve(home));
 

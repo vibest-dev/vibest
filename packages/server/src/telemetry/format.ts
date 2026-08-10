@@ -1,4 +1,4 @@
-import { Logger, Option } from "effect";
+import { Formatter, Logger, Option, Redactable } from "effect";
 import type * as Tracer from "effect/Tracer";
 
 /**
@@ -84,7 +84,33 @@ export const structured: Logger.Logger<unknown, LogRecord> = Logger.make((option
   return { ...base, traceId: span.traceId, spanId: span.spanId, span: spanPath(span) };
 });
 
-/** One JSON object per line — the on-disk format, and what `jq` reads. */
-export const jsonl: Logger.Logger<unknown, string> = Logger.map(structured, (record) =>
-  JSON.stringify(record),
-);
+const encodeJson = (record: LogRecord): string => {
+  const ancestors: Array<object> = [];
+  try {
+    return (
+      JSON.stringify(record, function (_key, value: unknown) {
+        const safe = Redactable.redact(value);
+        if (typeof safe === "bigint" || typeof safe === "function" || typeof safe === "symbol") {
+          return String(safe);
+        }
+        if (typeof safe !== "object" || safe === null) return safe;
+        while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) ancestors.pop();
+        if (ancestors.includes(safe)) return undefined;
+        ancestors.push(safe);
+        return safe;
+      }) ?? Formatter.formatJson({ message: "empty log record" })
+    );
+  } catch {
+    return Formatter.formatJson({
+      level: record.level,
+      timestamp: record.timestamp,
+      message: "log record could not be encoded",
+      annotations: { event: "telemetry.encoding_failed" },
+      fiberId: record.fiberId,
+      pid: record.pid,
+    });
+  }
+};
+
+/** One safely encoded JSON object per line — the on-disk format. */
+export const jsonl: Logger.Logger<unknown, string> = Logger.map(structured, encodeJson);

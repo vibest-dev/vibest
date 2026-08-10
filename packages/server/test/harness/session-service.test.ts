@@ -24,7 +24,7 @@ import {
   type HarnessAgentSessionServiceShape,
   makeHarnessAgentSessionService,
 } from "../../src/harness/session-service";
-import { structured, type LogRecord } from "../../src/telemetry";
+import { structured, type LogRecord } from "../../src/telemetry/format";
 import { NodePlatformLayer } from "../platform";
 
 type Spy = {
@@ -734,9 +734,8 @@ describe("HarnessAgentSessionService", () => {
       ),
     );
 
-    // Only the events. Spawning the agent is a *span* — `harness.open`, timed
-    // and reported by `telemetry/tracer.ts`, which this fixture does not
-    // install — so it is absent here by design rather than missing.
+    // Only the events. The successful `harness.open` span is debug-level, so it
+    // is absent from this default-info capture by design rather than missing.
     expect(records.map((record) => record.annotations.event)).toEqual([
       "session.created",
       "session.archived",

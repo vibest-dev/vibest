@@ -66,9 +66,9 @@ const reportOnce = (
  * reopen, hand off, or leak. Batching keeps that to roughly one `write` per
  * second.
  *
- * A batch is filed under the day it is *flushed*, so an entry can land in the
- * previous day's file for up to one flush window either side of midnight.
- * Every line carries its own `timestamp`, so this costs nothing when reading.
+ * A batch is filed under the day it is *flushed*, so a line emitted just before
+ * midnight can land in the next day's file. Every line carries its own
+ * `timestamp`, so this costs nothing when reading.
  */
 export const makeFileLogger = (options: {
   readonly directory: string;
@@ -86,6 +86,8 @@ export const makeFileLogger = (options: {
 
     return yield* Logger.batched(jsonl, {
       window: FLUSH_WINDOW_MS,
+      // `Logger.batched` clears its buffer before calling `flush`. If the scope
+      // closes during this write, interrupting it would lose that whole batch.
       flush: (lines) =>
         Effect.gen(function* () {
           if (lines.length === 0) return;
@@ -93,6 +95,6 @@ export const makeFileLogger = (options: {
           yield* fs
             .writeFileString(file, `${lines.join("\n")}\n`, { flag: "a", mode: LOG_FILE_MODE })
             .pipe(Effect.catchCause((cause) => reportOnce(reported, file, cause)));
-        }),
+        }).pipe(Effect.uninterruptible),
     });
   });

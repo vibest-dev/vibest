@@ -2,11 +2,12 @@ import type { RequestListener, Server } from "node:http";
 import http from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Context, Data, Effect, Exit, Scope } from "effect";
+import { Cause, Data, Effect, Exit, Scope } from "effect";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
 import { createRpcRuntime, createWsRPCHandler, type RpcRuntime } from "../rpc";
+import { defaultTelemetryRuntime, type TelemetryRuntime } from "../telemetry";
 import { makeRequestApp } from "./app";
 import { createTicketStore, type TicketStore } from "./auth";
 import { isAllowedOrigin, isLoopbackHost } from "./cors";
@@ -35,15 +36,8 @@ export type CreateServerOptions = {
    * preserves the tailnet MagicDNS Host). Unset in the common case.
    */
   allowedHosts?: readonly string[] | undefined;
-  /**
-   * The process's logging context (`telemetry/runtime.ts`). Threaded in rather
-   * than built here: `CurrentLoggers` is a per-context reference, and this
-   * function stands up a runtime of its own *plus* two bare `Effect.runPromise`
-   * roots — all three must share the one context, or a second set of loggers
-   * ends up appending to the same file. Unset in tests, which then get the
-   * plain Effect logger.
-   */
-  telemetry?: Context.Context<never> | undefined;
+  /** The process-wide telemetry runtime. Unset in tests uses Effect defaults. */
+  telemetry?: TelemetryRuntime | undefined;
 };
 
 /** Startup failed for an operational reason: building the server or binding. */
@@ -57,7 +51,7 @@ export class ServerStartupError extends Data.TaggedError("ServerStartupError")<{
  * and assert that every earlier stage's finalizer still runs (issue #155).
  */
 export type ServerStages = {
-  readonly createRpcRuntime: (telemetry: Context.Context<never>) => Promise<RpcRuntime>;
+  readonly createRpcRuntime: (telemetry: TelemetryRuntime) => Promise<RpcRuntime>;
   readonly createUI: (runtime: RpcRuntime) => Promise<UIApp>;
   readonly createRequestHandler: (
     runtime: RpcRuntime,
@@ -231,7 +225,12 @@ const buildServer = (
   stages: ServerStages,
 ): Effect.Effect<Server, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const { authToken, corsOrigins = [], allowedHosts = [], telemetry = Context.empty() } = options;
+    const {
+      authToken,
+      corsOrigins = [],
+      allowedHosts = [],
+      telemetry = defaultTelemetryRuntime,
+    } = options;
 
     const rpcRuntime = yield* Effect.acquireRelease(
       Effect.promise(() => stages.createRpcRuntime(telemetry)),
@@ -267,9 +266,7 @@ const buildServer = (
           tickets,
           wsHandler,
           handleRequest,
-          runLog: (effect) => {
-            Effect.runFork(effect.pipe(Effect.provide(telemetry)));
-          },
+          runLog: telemetry.emit,
         }),
       ),
       closeWiredServer,
@@ -281,11 +278,8 @@ export async function createServer(
   options: CreateServerOptions = {},
   stages: ServerStages = defaultStages,
 ): Promise<ManagedServer> {
-  const telemetry = options.telemetry ?? Context.empty();
-  // This function is the process's third Effect root — bare `runPromise` with
-  // no layer of its own. Without the `provide`, every startup and shutdown
-  // failure below would go to the default logger and never reach the log file.
-  const onRoot = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.provide(telemetry));
+  const telemetry = options.telemetry ?? defaultTelemetryRuntime;
+  const onRoot = telemetry.provide;
 
   const scope = Scope.makeUnsafe();
   let disposing: Promise<void> | undefined;

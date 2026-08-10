@@ -14,8 +14,7 @@
     "./git": "./src/git/index.ts",
     "./rpc": "./src/rpc/index.ts",
     "./http": "./src/http/index.ts",
-    "./daemon": "./src/daemon/index.ts",
-    "./telemetry": "./src/telemetry/index.ts"
+    "./daemon": "./src/daemon/index.ts"
   },
   "scripts": {
     "build": "tsdown",

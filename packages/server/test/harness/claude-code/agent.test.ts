@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Logger, References, Stream } from "effect";
 import { beforeEach, describe, vi } from "vitest";
 
 import { makeClaudeCodeAdapter } from "../../../src/harness/claude-code/adapter";
 import { makeClaudeCodeAgent } from "../../../src/harness/claude-code/agent";
+import { structured, type LogRecord } from "../../../src/telemetry/format";
 import { NodePlatformLayer } from "../../platform";
 
 const mockQuery = vi.hoisted(() =>
@@ -95,6 +96,34 @@ describe("ClaudeCodeAgent", () => {
       return queryInstance;
     });
     mockGetSessionInfo.mockReset();
+  });
+
+  it.effect("keeps Vibest and Claude session identities distinct in SDK stderr", () => {
+    const records: Array<LogRecord> = [];
+    const capture = Layer.merge(
+      Logger.layer([
+        Logger.map(structured, (record) => {
+          records.push(record);
+        }),
+      ]),
+      Layer.succeed(References.MinimumLogLevel, "Debug"),
+    );
+
+    return Effect.gen(function* () {
+      const agent = yield* claudeAgent();
+      const { sessionId: harnessSessionId } = yield* agent.session.create();
+      lastOptions().stderr?.("sdk diagnostic");
+      yield* Effect.yieldNow;
+
+      const record = records.find((candidate) => candidate.message === "sdk diagnostic");
+      assert.equal(record?.annotations.sessionId, "vibest-session");
+      assert.equal(record?.annotations.projectId, "project-1");
+      assert.equal(record?.annotations.harnessSessionId, harnessSessionId);
+      yield* agent.session.abort(harnessSessionId);
+    }).pipe(
+      Effect.annotateLogs({ sessionId: "vibest-session", projectId: "project-1" }),
+      Effect.provide(capture),
+    );
   });
 
   it.effect("passes the server environment to the Claude Code process", () =>

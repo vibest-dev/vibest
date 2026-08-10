@@ -3,7 +3,8 @@ import fs from "node:fs";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
-import { LOG_DIRECTORY_MODE, LOG_FILE_MODE, logsDirectory, stdioLogFile } from "../telemetry/paths";
+import { logsDirectory } from "../config/paths";
+import { LOG_DIRECTORY_MODE, LOG_FILE_MODE, stdioLogFile } from "../telemetry/paths";
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
