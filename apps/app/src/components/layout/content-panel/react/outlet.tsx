@@ -1,6 +1,7 @@
 import { Button } from "@vibest/ui/components/button";
 import { Empty, EmptyContent, EmptyDescription } from "@vibest/ui/components/empty";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@vibest/ui/components/menu";
+import { useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
 import { Maximize2Icon, Minimize2Icon, PlusIcon, XIcon } from "lucide-react";
 import { type ComponentProps, useEffect, useRef, type ReactNode } from "react";
@@ -17,6 +18,12 @@ import type { AnyPanelView } from "./view";
  * A card beside the chat. Its enclosing shell panel owns width and spacing.
  */
 export type ContentPanelOutletProps = ComponentProps<"aside">;
+
+function restoreContentPanelToggleFocus(): void {
+  requestAnimationFrame(() => {
+    document.querySelector<HTMLButtonElement>('[data-slot="content-panel-toggle"]')?.focus();
+  });
+}
 
 export function ContentPanelOutlet({ className, ...props }: ContentPanelOutletProps): ReactNode {
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
@@ -50,6 +57,7 @@ function TabStrip({
   presentation: "docked" | "maximized";
   session: ContentPanelSession;
 }): ReactNode {
+  const { isMobile } = useSidebar();
   const panels = usePanelSnapshot((snapshot) => snapshot.panels);
   const activeId = usePanelSnapshot((snapshot) => snapshot.active?.id ?? null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -77,30 +85,49 @@ function TabStrip({
         className="scrollbar-hide flex min-w-0 items-center gap-0.5 overflow-x-auto"
       >
         {panels.map((panel) => (
-          <Tab key={panel.id} panel={panel} active={panel.id === activeId} session={session} />
+          <Tab
+            key={panel.id}
+            panel={panel}
+            active={panel.id === activeId}
+            onClose={() => {
+              session.close(panel.id);
+              if (isMobile && panels.length === 1) restoreContentPanelToggleFocus();
+            }}
+            session={session}
+          />
         ))}
       </div>
       {panels.length > 0 ? <AddPanelMenu session={session} /> : null}
       <Button
+        autoFocus={isMobile}
         className="ms-auto"
         variant="ghost"
         size="icon-xs"
-        aria-label={presentation === "maximized" ? "Restore panel size" : "Maximize panel"}
-        onClick={() =>
-          session.setPresentation(presentation === "maximized" ? "docked" : "maximized")
+        aria-label={
+          isMobile
+            ? "Close panel"
+            : presentation === "maximized"
+              ? "Restore panel size"
+              : "Maximize panel"
         }
+        onClick={() => {
+          if (isMobile) {
+            session.setPresentation("hidden");
+            restoreContentPanelToggleFocus();
+            return;
+          }
+          session.setPresentation(presentation === "maximized" ? "docked" : "maximized");
+        }}
       >
-        {presentation === "maximized" ? (
+        {isMobile ? (
+          <XIcon className="size-3.5" />
+        ) : presentation === "maximized" ? (
           <Minimize2Icon className="size-3.5" />
         ) : (
           <Maximize2Icon className="size-3.5" />
         )}
       </Button>
-      {/*
-       * No hide button here: `ContentPanelToggle` already is one, and it has to
-       * live outside the panel anyway to bring it back. Two controls for one
-       * boolean is the duplication that button would be.
-       */}
+      {/* On desktop, `ContentPanelToggle` remains the single hide control. */}
     </div>
   );
 }
@@ -108,10 +135,12 @@ function TabStrip({
 function Tab({
   panel,
   active,
+  onClose,
   session,
 }: {
   panel: OpenPanel<AnyPanelView>;
   active: boolean;
+  onClose: () => void;
   session: ContentPanelSession;
 }): ReactNode {
   const Icon = panel.view.icon;
@@ -131,7 +160,7 @@ function Tab({
       onAuxClick={(event) => {
         if (event.button !== 1) return;
         event.preventDefault();
-        session.close(panel.id);
+        onClose();
       }}
     >
       <button
@@ -149,7 +178,7 @@ function Tab({
         type="button"
         className="hover:bg-muted flex size-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
         aria-label={`Close ${panel.label}`}
-        onClick={() => session.close(panel.id)}
+        onClick={onClose}
       >
         <XIcon className="size-3" />
       </button>
