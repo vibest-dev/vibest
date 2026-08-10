@@ -11,6 +11,7 @@ const snapshot: SessionRuntimeSnapshot = {
     sessionId: "session-1",
   },
   status: { phase: "idle" },
+  recovery: null,
   activeTurn: null,
   activePrompt: null,
   acceptedPrompt: null,

@@ -15,7 +15,12 @@ import type {
 } from "../../src/harness/adapter";
 import { AgentOpenError, TurnAlreadyRunning } from "../../src/harness/errors";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { makeHarnessAgentSession } from "../../src/harness/session";
 import { makeHarnessAgentSessionManager } from "../../src/harness/session-manager";
+import {
+  makeSessionRecoveryStore,
+  type SessionRecoveryStoreShape,
+} from "../../src/harness/session-recovery";
 import {
   type HarnessAgentSessionRepositoryShape,
   makeHarnessAgentSessionRepository,
@@ -30,15 +35,19 @@ type Spy = {
   open: Array<{ cwd: string }>;
   resume: Array<{ sessionId: string; cwd: string | undefined }>;
   close: Array<string>;
+  promptCalls: number;
 };
 
 type Fixture = {
   readonly service: HarnessAgentSessionServiceShape;
   readonly repo: HarnessAgentSessionRepositoryShape;
   readonly bus: EventBusShape;
+  readonly recovery: SessionRecoveryStoreShape;
   readonly spy: Spy;
   readonly waitForPromptStart: Effect.Effect<void>;
   readonly releasePrompt: Effect.Effect<void>;
+  readonly waitForCloseStart: Effect.Effect<void>;
+  readonly releaseClose: Effect.Effect<void>;
   /**
    * A second service over the same storage and the same adapter — what a
    * server restart looks like from the session domain: the records survive,
@@ -75,15 +84,19 @@ describe("HarnessAgentSessionService", () => {
       // Runtime reacquisition fails before runtime.prompt is available.
       resumeFails?: boolean;
       steerFails?: boolean;
+      // Hold runtime.close until the test releases it.
+      closeWaits?: boolean;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
     Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const spy: Spy = { open: [], resume: [], close: [] };
+          const spy: Spy = { open: [], resume: [], close: [], promptCalls: 0 };
           const promptStarted = yield* Deferred.make<void>();
           const promptGate = yield* Deferred.make<void>();
+          const closeStarted = yield* Deferred.make<void>();
+          const closeGate = yield* Deferred.make<void>();
           let opened = 0;
           const turnEvents = (sessionId: string) => {
             if (opts.turn === undefined) return Stream.empty;
@@ -117,15 +130,21 @@ describe("HarnessAgentSessionService", () => {
             sessionId,
             harnessAgentId: "claude-code",
             events: turnEvents(sessionId),
-            prompt: opts.promptFails
-              ? () => Effect.fail(new TurnAlreadyRunning({ sessionId }))
-              : opts.promptWaits
-                ? () =>
-                    Deferred.succeed(promptStarted, undefined).pipe(
-                      Effect.andThen(Deferred.await(promptGate)),
-                      Effect.as({ turnId: "turn-1" }),
-                    )
-                : () => Effect.succeed({ turnId: "turn-1" }),
+            prompt: () =>
+              Effect.sync(() => {
+                spy.promptCalls += 1;
+              }).pipe(
+                Effect.andThen(
+                  opts.promptFails
+                    ? Effect.fail(new TurnAlreadyRunning({ sessionId }))
+                    : opts.promptWaits
+                      ? Deferred.succeed(promptStarted, undefined).pipe(
+                          Effect.andThen(Deferred.await(promptGate)),
+                          Effect.as({ turnId: "turn-1" }),
+                        )
+                      : Effect.succeed({ turnId: "turn-1" }),
+                ),
+              ),
             steer: (_expectedTurnId) =>
               opts.steerFails
                 ? Effect.fail(new TurnAlreadyRunning({ sessionId, turnId: "turn-other" }))
@@ -142,7 +161,15 @@ describe("HarnessAgentSessionService", () => {
             ...(opts.history !== undefined ? { getMessages: Effect.succeed(opts.history) } : {}),
             close: Effect.sync(() => {
               spy.close.push(sessionId);
-            }),
+            }).pipe(
+              Effect.andThen(
+                opts.closeWaits
+                  ? Deferred.succeed(closeStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(closeGate)),
+                    )
+                  : Effect.void,
+              ),
+            ),
           });
           const adapter = {
             id: "claude-code",
@@ -181,9 +208,19 @@ describe("HarnessAgentSessionService", () => {
           const build: Effect.Effect<Fixture, never, Scope.Scope | FileSystem.FileSystem> =
             Effect.gen(function* () {
               const bus = yield* makeEventBus();
-              const manager = yield* makeHarnessAgentSessionManager(registry, bus).pipe(
-                Effect.provideService(Crypto.Crypto, crypto),
+              const recovery = yield* makeSessionRecoveryStore(
+                path.join(home, "storage", "session-recovery"),
+                yield* crypto.randomUUIDv4.pipe(Effect.orDie),
+                crypto.randomUUIDv4.pipe(Effect.orDie),
               );
+              const manager = yield* makeHarnessAgentSessionManager(
+                registry,
+                bus,
+                (ref, streamId, eventBus) =>
+                  makeHarnessAgentSession(ref, streamId, eventBus, (eventRef, body) =>
+                    recovery.beforePublish(eventRef, body).pipe(Effect.orDie),
+                  ),
+              ).pipe(Effect.provideService(Crypto.Crypto, crypto));
               const repo = yield* makeHarnessAgentSessionRepository(
                 path.join(home, "storage", "sessions"),
               );
@@ -192,15 +229,19 @@ describe("HarnessAgentSessionService", () => {
                 registry,
                 repo,
                 bus,
+                recovery,
                 newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
               });
               return {
                 service,
                 repo,
                 bus,
+                recovery,
                 spy,
                 waitForPromptStart: Deferred.await(promptStarted),
                 releasePrompt: Deferred.succeed(promptGate, undefined).pipe(Effect.asVoid),
+                waitForCloseStart: Deferred.await(closeStarted),
+                releaseClose: Deferred.succeed(closeGate, undefined).pipe(Effect.asVoid),
                 restart: build,
               };
             });
@@ -300,6 +341,77 @@ describe("HarnessAgentSessionService", () => {
     expect(closeSpy).toEqual(["native-1"]);
   });
 
+  it("serializes close behind an already-authorized prompt receipt", async () => {
+    const result = await run({ promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-before-close",
+            parts: [{ type: "text", text: "finish authorization first" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const close = yield* Effect.forkChild(fixture.service.close(ref));
+        yield* Effect.yieldNow;
+        const closeBeforeReceipt = close.pollUnsafe();
+        const recoveryBeforeReceipt = yield* fixture.recovery.read(ref);
+
+        yield* fixture.releasePrompt;
+        yield* Fiber.join(prompt);
+        yield* Fiber.join(close);
+        return {
+          closeBeforeReceipt,
+          recoveryBeforeReceipt,
+          metadata: yield* fixture.repo.read(ref.projectId, ref.sessionId),
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.closeBeforeReceipt).toBeUndefined();
+    expect(result.recoveryBeforeReceipt?.prompts[0]?.messageId).toBe("prompt-before-close");
+    expect(result.metadata.sessionId).toBeTruthy();
+    expect(result.recovery).toBeNull();
+    expect(result.promptCalls).toBe(1);
+  });
+
+  it("lets a prompt waiting behind close create a newer recovery record after close clears", async () => {
+    const result = await run({ turn: "open", closeWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const close = yield* Effect.forkChild(fixture.service.close(ref));
+        yield* fixture.waitForCloseStart;
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-after-close",
+            parts: [{ type: "text", text: "newer work" }],
+          }),
+        );
+        yield* Effect.yieldNow;
+        const promptWhileCloseHeld = prompt.pollUnsafe();
+
+        yield* fixture.releaseClose;
+        yield* Fiber.join(close);
+        yield* Fiber.join(prompt);
+        return {
+          promptWhileCloseHeld,
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.promptWhileCloseHeld).toBeUndefined();
+    expect(result.recovery?.prompts).toMatchObject([
+      { messageId: "prompt-after-close", turnId: "turn-1" },
+    ]);
+    expect(result.promptCalls).toBe(1);
+  });
+
   it("delete closes the native session and removes its metadata", async () => {
     const result = await run({}, (fixture) =>
       Effect.gen(function* () {
@@ -311,6 +423,47 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(result.closeSpy).toEqual(["native-1"]);
     expect(result.listed).toHaveLength(0);
+  });
+
+  it("serializes delete behind an already-authorized prompt receipt", async () => {
+    const result = await run({ promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-before-delete",
+            parts: [{ type: "text", text: "finish authorization first" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const deletion = yield* Effect.forkChild(fixture.service.delete(ref));
+        yield* Effect.yieldNow;
+        const deleteBeforeReceipt = deletion.pollUnsafe();
+        const metadataBeforeReceipt = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+        const recoveryBeforeReceipt = yield* fixture.recovery.read(ref);
+
+        yield* fixture.releasePrompt;
+        yield* Fiber.join(prompt);
+        yield* Fiber.join(deletion);
+        const metadataError = yield* Effect.flip(fixture.repo.read(ref.projectId, ref.sessionId));
+        return {
+          deleteBeforeReceipt,
+          metadataBeforeReceipt,
+          recoveryBeforeReceipt,
+          metadataError,
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.deleteBeforeReceipt).toBeUndefined();
+    expect(result.metadataBeforeReceipt.sessionId).toBeTruthy();
+    expect(result.recoveryBeforeReceipt?.prompts[0]?.messageId).toBe("prompt-before-delete");
+    expect(result.metadataError._tag).toBe("SessionNotFound");
+    expect(result.recovery).toBeNull();
+    expect(result.promptCalls).toBe(1);
   });
 
   it("list returns one summary per session, keyed by server sessionId", async () => {
@@ -401,9 +554,10 @@ describe("HarnessAgentSessionService", () => {
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       while (true) {
-        const turn = yield* fixture.service
-          .getSnapshot(ref)
-          .pipe(Effect.map((snapshot) => snapshot.activeTurn));
+        const turn = yield* fixture.service.getSnapshot(ref).pipe(
+          Effect.orDie,
+          Effect.map((snapshot) => snapshot.activeTurn),
+        );
         if (done(turn)) return;
         yield* Effect.sleep("10 millis");
       }
@@ -414,10 +568,20 @@ describe("HarnessAgentSessionService", () => {
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* waitForTurn(fixture, ref, (turn) => turn !== null && !turn.complete);
+        yield* fixture.recovery.beforePublish(ref, {
+          type: "session.prompt.submitted",
+          messageId: "active-before-archive",
+          parts: [{ type: "text", text: "active" }],
+        });
         yield* fixture.service.archive(ref, true);
         const active = yield* fixture.service.list("proj-a", false);
         const archived = yield* fixture.service.list("proj-a", true);
-        return { active, archived, closed: fixture.spy.close.slice() };
+        return {
+          active,
+          archived,
+          closed: fixture.spy.close.slice(),
+          recovery: yield* fixture.recovery.read(ref),
+        };
       }),
     );
 
@@ -425,6 +589,7 @@ describe("HarnessAgentSessionService", () => {
     expect(result.archived).toHaveLength(1);
     expect(result.archived[0]?.status).toBeUndefined();
     expect(result.closed).toEqual(["native-1"]);
+    expect(result.recovery).toBeNull();
   });
 
   it("getMessages trims the last user segment while a turn is in flight", async () => {
@@ -550,6 +715,100 @@ describe("HarnessAgentSessionService", () => {
     // … and none of it started an agent. `open` is the one at create time.
     expect(result.spy.open).toHaveLength(1);
     expect(result.spy.resume).toEqual([]);
+  });
+
+  it("restores an unresolved turn as a fail-closed barrier until explicit acknowledgement", async () => {
+    const history: UIMessage[] = [
+      { id: "committed-user", role: "user", parts: [{ type: "text", text: "before restart" }] },
+    ];
+    const result = await run({ coldHistory: history, promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* Effect.forkScoped(
+          fixture.service.prompt({
+            ref,
+            messageId: "uncertain-message",
+            parts: [{ type: "text", text: "may have caused side effects" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const resumesBeforeRestart = fixture.spy.resume.length;
+
+        const restarted = yield* fixture.restart;
+        const status = yield* restarted.service.getStatus(ref);
+        const snapshot = yield* restarted.service.getSnapshot(ref);
+        const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
+        const blocked = yield* Effect.flip(
+          restarted.service.prompt({
+            ref,
+            messageId: "must-not-run",
+            parts: [{ type: "text", text: "do not replay" }],
+          }),
+        );
+
+        const recoveryId = snapshot.recovery?.recoveryId;
+        if (recoveryId === undefined) return yield* Effect.die("missing recovery barrier");
+        const acknowledged = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* restarted.bus.subscribe({ kind: "session", ref });
+            const eventFiber = yield* Effect.forkChild(
+              Stream.runCollect(
+                Stream.take(
+                  Stream.filter(
+                    stream,
+                    (item) =>
+                      item.type === "event" && item.event.type === "session.recovery.acknowledged",
+                  ),
+                  1,
+                ),
+              ),
+            );
+            yield* restarted.service.acknowledgeRecovery(ref, recoveryId);
+            return Array.from(yield* Fiber.join(eventFiber))[0];
+          }),
+        );
+        const after = yield* restarted.service.getSnapshot(ref);
+        yield* fixture.releasePrompt;
+
+        return {
+          status,
+          snapshot,
+          messages,
+          blocked,
+          acknowledged,
+          after,
+          promptCalls: fixture.spy.promptCalls,
+          resumesBeforeRestart,
+          resumesAfterRecovery: fixture.spy.resume.length,
+        };
+      }),
+    );
+
+    expect(result.status).toEqual({ phase: "recovery_required" });
+    expect(result.snapshot).toMatchObject({
+      status: { phase: "recovery_required" },
+      recovery: {
+        reason: "server_restart",
+        prompts: [
+          {
+            messageId: "uncertain-message",
+            parts: [{ type: "text", text: "may have caused side effects" }],
+          },
+        ],
+      },
+      activeTurn: null,
+      pendingRequests: [],
+    });
+    expect(result.messages).toEqual(history);
+    expect(result.blocked._tag).toBe("RecoveryRequired");
+    expect(result.acknowledged).toMatchObject({
+      type: "event",
+      event: { type: "session.recovery.acknowledged" },
+    });
+    expect(result.after.recovery).toBeNull();
+    expect(result.after.status).toEqual({ phase: "idle" });
+    expect(result.promptCalls).toBe(1);
+    expect(result.resumesAfterRecovery).toBe(result.resumesBeforeRestart);
   });
 
   // `turn: "finished"` keeps the fake's event stream open, which is what a real

@@ -36,6 +36,7 @@ type SessionClient = Pick<
   | "getSnapshot"
   | "getMessages"
 > & {
+  acknowledgeRecovery?: VibestSessionClient["acknowledgeRecovery"];
   subscribe: (
     ...args: Parameters<VibestSessionClient["subscribe"]>
   ) => Promise<AsyncIterable<SubscribeStreamEvent>>;
@@ -103,6 +104,15 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
     options?: ChatTransportCallOptions,
   ): Promise<void> => {
     await this.client.session.steer({ ref: this.#ref, ...input }, options);
+  };
+
+  acknowledgeRecovery = async (
+    recoveryId: string,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    const acknowledge = this.client.session.acknowledgeRecovery;
+    if (!acknowledge) throw new Error("Recovery acknowledgement is unavailable");
+    await acknowledge({ ref: this.#ref, recoveryId }, options);
   };
 
   getMessages = async (

@@ -63,6 +63,21 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
     return { state: next, effects };
   }
 
+  if (input.type === "promptRequested" && state.recovery.snapshot !== null) {
+    return {
+      state,
+      effects: [
+        {
+          type: "rejectPrompt",
+          messageId: input.message.id,
+          error: new Error(
+            "A server restart left the previous turn uncertain. Acknowledge recovery before sending another prompt.",
+          ),
+        },
+      ],
+    };
+  }
+
   if (input.type === "promptRequested" && !isChatActive(state)) {
     return {
       state,

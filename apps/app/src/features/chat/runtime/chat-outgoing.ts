@@ -101,6 +101,8 @@ function maybeDispatchFollowUp(state: ChatDraft, effects: ChatEffects): void {
     sendingDelivery(state, "follow-up") !== undefined ||
     !state.sync.historyLoaded ||
     state.sync.floor !== null ||
+    state.recovery.snapshot !== null ||
+    state.recovery.historyPending ||
     !state.prompt.boundaryOpen ||
     nextIndex === -1
   ) {

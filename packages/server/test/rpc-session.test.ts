@@ -21,6 +21,7 @@ import {
 import type { HarnessAgentAdapter, HarnessAgentRuntime } from "../src/harness/adapter";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
 import { SessionClosed } from "../src/harness/errors";
+import { SessionRecoveryStoreLayer } from "../src/harness/session-recovery";
 import * as Observability from "../src/observability";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../src/pty";
@@ -81,16 +82,22 @@ async function setup() {
 
   // EventBusLayer is one reference so publish (manager/service) and subscribe
   // (RPC) share the single bus instance.
+  const recoveryLayer = SessionRecoveryStoreLayer.pipe(
+    Layer.provide(pathsLayer),
+    Layer.provide(NodeServices.layer),
+  );
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
     Layer.provide(
       HarnessAgentSessionManagerLayer.pipe(
         Layer.provide(registryLayer),
         Layer.provide(EventBusLayer),
+        Layer.provide(recoveryLayer),
         Layer.provide(NodeServices.layer),
       ),
     ),
     Layer.provide(registryLayer),
     Layer.provide(EventBusLayer),
+    Layer.provide(recoveryLayer),
     Layer.provide(pathsLayer),
     Layer.provide(NodeServices.layer),
   );

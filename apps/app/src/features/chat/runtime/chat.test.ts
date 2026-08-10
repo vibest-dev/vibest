@@ -39,6 +39,7 @@ class FakeTransport implements ChatSessionTransport {
   // When set, getMessages blocks on it — for tests that race the history
   // floor against live traffic.
   historyGate: Promise<void> | null = null;
+  historyError: unknown = null;
   getMessagesCalls = 0;
   historySignals: AbortSignal[] = [];
   promptCalls: Array<{ messageId: string; parts: ReadonlyArray<PromptPart> }> = [];
@@ -59,6 +60,8 @@ class FakeTransport implements ChatSessionTransport {
   responseSignals: AbortSignal[] = [];
   responseGate: Promise<void> | null = null;
   configSignals: AbortSignal[] = [];
+  recoveryAcknowledgements: string[] = [];
+  recoveryAcknowledgementError: unknown = null;
 
   subscribe(onEvent: (event: ChatTransportEvent) => void): () => void {
     this.onEvent = onEvent;
@@ -94,13 +97,20 @@ class FakeTransport implements ChatSessionTransport {
     if (this.steerError) throw this.steerError;
   };
 
+  acknowledgeRecovery = async (recoveryId: string, options?: ChatTransportCallOptions) => {
+    this.recoveryAcknowledgements.push(recoveryId);
+    options?.signal?.throwIfAborted();
+    if (this.recoveryAcknowledgementError) throw this.recoveryAcknowledgementError;
+  };
   getMessages = async (options?: ChatTransportCallOptions) => {
     this.getMessagesCalls += 1;
     if (options?.signal) this.historySignals.push(options.signal);
     options?.signal?.throwIfAborted();
     const history = this.history;
     const gate = this.historyGate;
+    const error = this.historyError;
     if (gate) await gate;
+    if (error) throw error;
     return history;
   };
   respondToAgentRequest = async (
@@ -135,6 +145,7 @@ const makeChat = (options?: { onTerminated?: () => void }) => {
       ref,
       streamId: attachedStreamId,
       status: { phase: "idle" },
+      recovery: null,
       activeTurn: null,
       activePrompt: null,
       acceptedPrompt: null,
@@ -255,7 +266,7 @@ describe("Chat hydration", () => {
       cursor: 10,
     });
 
-    expect(chat.store.getState().messages.map((message) => message.id)).toContain(
+    expect(chat.store.getState().session.messages.map((message) => message.id)).toContain(
       "new-stream-prompt",
     );
   });
@@ -277,10 +288,10 @@ describe("Chat hydration", () => {
     });
     live(7, { type: "session.turn.started", turnId: "stale-turn", phase: "running" });
 
-    expect(chat.store.getState().messages.map((message) => message.id)).not.toContain(
+    expect(chat.store.getState().session.messages.map((message) => message.id)).not.toContain(
       "already-past",
     );
-    expect(chat.store.getState().status).toBe("ready");
+    expect(chat.store.getState().session.status).toBe("ready");
   });
 
   it("ignores an old-stream live event after a new attach wins", async () => {
@@ -289,10 +300,10 @@ describe("Chat hydration", () => {
     await attach({ streamId: "stream-2", cursor: 10 });
 
     live(100, { type: "session.turn.started", turnId: "old-turn", phase: "running" }, "stream-1");
-    expect(chat.store.getState().status).toBe("ready");
+    expect(chat.store.getState().session.status).toBe("ready");
 
     live(11, { type: "session.turn.started", turnId: "new-turn", phase: "running" });
-    expect(chat.store.getState().status).toBe("streaming");
+    expect(chat.store.getState().session.status).toBe("streaming");
   });
 
   it("drops buffered old-stream events when a new attach wins during the history floor", async () => {
@@ -466,6 +477,7 @@ describe("Chat hydration", () => {
     const [start, delta] = textChunks("t", "buffered");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(1, "turn-1", start!), chunkEvent(2, "turn-1", delta!)],
@@ -491,6 +503,7 @@ describe("Chat hydration", () => {
     const [start, delta] = textChunks("t", "once");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(1, "turn-1", start!), chunkEvent(2, "turn-1", delta!)],
@@ -545,6 +558,7 @@ describe("Chat hydration", () => {
     // running turn. The floor is still in flight.
     await attach({
       status: { phase: "requires_action" },
+      recovery: null,
       activePrompt: {
         messageId: "m2",
         parts: [{ type: "text", text: "hi" }],
@@ -580,6 +594,7 @@ describe("Chat hydration", () => {
     const [start] = textChunks("t2", "");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activePrompt: {
         messageId: "m2",
         parts: [{ type: "text", text: "second" }],
@@ -609,6 +624,7 @@ describe("Chat hydration", () => {
     const [start] = textChunks("t", "");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activePrompt: {
         messageId: "prompt-1",
         parts: [{ type: "text", text: "run it" }],
@@ -952,6 +968,170 @@ describe("Chat steering", () => {
   });
 });
 
+describe("Chat recovery barrier", () => {
+  const recovery = {
+    recoveryId: "recovery-1",
+    reason: "server_restart" as const,
+    prompts: [
+      {
+        messageId: "uncertain-message",
+        parts: [{ type: "text" as const, text: "possibly completed" }],
+      },
+    ],
+  };
+
+  it("publishes recovery before a slow initial history floor and uses that floor once", async () => {
+    const { chat, transport, attach } = makeChat();
+    let releaseHistory: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+    transport.history = [];
+
+    await attach({ status: { phase: "recovery_required" }, recovery });
+    expect(chat.store.getState()).toMatchObject({
+      recovery: { snapshot: recovery },
+      session: { historyStatus: "loading" },
+    });
+    expect(transport.getMessagesCalls).toBe(1);
+    await expect(chat.prompt("blocked while history hangs")).rejects.toThrow(
+      "Acknowledge recovery before sending another prompt",
+    );
+
+    releaseHistory();
+    await settle();
+    expect(chat.store.getState()).toMatchObject({
+      recovery: { snapshot: recovery },
+      session: { historyStatus: "settled" },
+    });
+    expect(transport.getMessagesCalls).toBe(1);
+  });
+
+  it("rejects new prompts locally while recovery is unresolved", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = [];
+    await attach({ status: { phase: "recovery_required" }, recovery });
+
+    await expect(chat.prompt("must wait")).rejects.toThrow(
+      "Acknowledge recovery before sending another prompt",
+    );
+    expect(transport.promptCalls).toEqual([]);
+    expect(chat.store.getState().outgoing).toEqual([]);
+    expect(chat.store.getState().recovery.snapshot).toEqual(recovery);
+  });
+
+  it("releases a pre-existing queued prompt after failed history recovery and broadcast ack", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    transport.history = [];
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
+      cursor: 3,
+    });
+    const queued = chat.prompt("future work");
+    expect(transport.promptCalls).toEqual([]);
+    expect(chat.store.getState().outgoing).toHaveLength(1);
+
+    transport.historyError = new Error("history unavailable after restart");
+    await attach({
+      streamId: "stream-2",
+      status: { phase: "recovery_required" },
+      recovery,
+      activeTurn: null,
+      cursor: 0,
+    });
+    expect(chat.store.getState().recovery.snapshot).toEqual(recovery);
+    expect(transport.promptCalls).toEqual([]);
+
+    await chat.acknowledgeRecovery(recovery.recoveryId);
+    expect(transport.recoveryAcknowledgements).toEqual(["recovery-1"]);
+    expect(chat.store.getState().recovery.snapshot).toEqual(recovery);
+    expect(transport.promptCalls).toEqual([]);
+
+    live(1, {
+      type: "session.recovery.acknowledged",
+      recoveryId: recovery.recoveryId,
+      phase: "idle",
+    });
+    await queued;
+    expect(chat.store.getState().recovery.snapshot).toBeNull();
+    expect(transport.promptCalls).toEqual([
+      { messageId: expect.any(String), parts: [{ type: "text", text: "future work" }] },
+    ]);
+  });
+
+  it("keeps queued work paused when recovery is acknowledged during a running turn", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    transport.history = [];
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
+      cursor: 3,
+    });
+    const queued = chat.prompt("future work");
+
+    await attach({
+      streamId: "stream-2",
+      status: { phase: "recovery_required" },
+      recovery,
+      activeTurn: null,
+      cursor: 0,
+    });
+    live(1, {
+      type: "session.recovery.acknowledged",
+      recoveryId: recovery.recoveryId,
+      phase: "running",
+    });
+    expect(chat.store.getState().recovery.snapshot).toBeNull();
+    expect(transport.promptCalls).toEqual([]);
+
+    live(2, {
+      type: "session.turn.ended",
+      turnId: "turn-current",
+      outcome: "completed",
+      phase: "idle",
+    });
+    await queued;
+    expect(transport.promptCalls).toEqual([
+      { messageId: expect.any(String), parts: [{ type: "text", text: "future work" }] },
+    ]);
+  });
+
+  it("rejects an in-flight local prompt instead of replaying it after restart", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = [];
+    await attach({});
+    let releasePrompt: () => void = () => undefined;
+    transport.promptGate = new Promise((resolve) => {
+      releasePrompt = resolve;
+    });
+    const sending = chat.prompt("uncertain work");
+    const sendingError = sending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+
+    await attach({
+      streamId: "stream-2",
+      status: { phase: "recovery_required" },
+      recovery,
+      activeTurn: null,
+      cursor: 0,
+    });
+    expect(await sendingError).toEqual(
+      expect.objectContaining({ message: expect.stringContaining("It was not replayed") }),
+    );
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(chat.store.getState().outgoing).toEqual([]);
+
+    releasePrompt();
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+});
+
 describe("Chat prompting", () => {
   it("hydrates every unresolved prompt when multiple candidates are pending", async () => {
     const { chat, attach, live } = makeChat();
@@ -969,6 +1149,7 @@ describe("Chat prompting", () => {
     };
     await attach({
       status: { phase: "idle" },
+      recovery: null,
       activePrompt: pendingB,
       pendingPrompts: [pendingA, pendingB],
       activeTurn: activeTurn({ turnId: "turn-old", chunks: [], complete: true }),
@@ -1217,6 +1398,7 @@ describe("Chat prompting", () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
       cursor: 3,
     });
@@ -1224,6 +1406,7 @@ describe("Chat prompting", () => {
 
     await attach({
       status: { phase: "idle" },
+      recovery: null,
       activePrompt: {
         messageId: "remote-prompt",
         parts: [{ type: "text", text: "remote next" }],
@@ -1264,6 +1447,7 @@ describe("Chat prompting", () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
       cursor: 3,
     });
@@ -1271,6 +1455,7 @@ describe("Chat prompting", () => {
 
     await attach({
       status: { phase: "idle" },
+      recovery: null,
       activePrompt: {
         messageId: "remote-prompt",
         parts: [{ type: "text", text: "remote next" }],
@@ -1360,6 +1545,7 @@ describe("Chat prompting", () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-old", chunks: [] }),
       cursor: 3,
     });
@@ -1416,6 +1602,7 @@ describe("Chat prompting", () => {
 
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activePrompt: {
         messageId: "remote-pending",
         parts: [{ type: "text", text: "remote" }],
@@ -1463,6 +1650,7 @@ describe("Chat prompting", () => {
     const { chat, transport, attach } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
       cursor: 4,
     });
@@ -1482,6 +1670,7 @@ describe("Chat prompting", () => {
     await attach({
       streamId: "stream-2",
       status: { phase: "idle" },
+      recovery: null,
       activeTurn: null,
       cursor: 0,
     });
@@ -1594,7 +1783,13 @@ describe("Chat prompting", () => {
     ).toHaveLength(1);
 
     transport.promptError = null;
-    await attach({ status: { phase: "idle" }, activePrompt: null, activeTurn: null, cursor: 0 });
+    await attach({
+      status: { phase: "idle" },
+      recovery: null,
+      activePrompt: null,
+      activeTurn: null,
+      cursor: 0,
+    });
     await second;
 
     expect(transport.promptCalls).toHaveLength(2);
@@ -1856,6 +2051,7 @@ describe("Chat stream errors", () => {
 
     await attach({
       status: { phase: "idle" },
+      recovery: null,
       activePrompt: {
         messageId: "prompt-1",
         parts: [{ type: "text", text: "go" }],
@@ -1886,6 +2082,7 @@ describe("Chat stream errors", () => {
 
     await attach({
       status: { phase: "idle" },
+      recovery: null,
       activePrompt: {
         messageId: "prompt-new",
         parts: [{ type: "text", text: "try again" }],
@@ -1942,6 +2139,7 @@ describe("Chat stream errors", () => {
     await expect(chat.prompt("fail again")).rejects.toThrow("another old failure");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activePrompt: {
         messageId: "remote-2",
         parts: [{ type: "text", text: "retained" }],
@@ -1974,6 +2172,7 @@ describe("Chat agent requests", () => {
     const { chat, attach, live } = makeChat();
     await attach({
       status: { phase: "requires_action" },
+      recovery: null,
       pendingRequests: [toolRequest],
       cursor: 1,
     });
@@ -2012,6 +2211,7 @@ describe("Chat agent requests", () => {
     const { chat, attach, live } = makeChat();
     await attach({
       status: { phase: "requires_action" },
+      recovery: null,
       pendingRequests: [toolRequest],
       cursor: 1,
     });
@@ -2128,6 +2328,7 @@ describe("Chat truncated buffers", () => {
     const [start, delta] = textChunks("kept", "tail");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [
@@ -2165,6 +2366,7 @@ describe("Chat truncated buffers", () => {
     const [start, delta] = textChunks("t", "seen");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(1, "turn-1", start!), chunkEvent(2, "turn-1", delta!)],
@@ -2179,6 +2381,7 @@ describe("Chat truncated buffers", () => {
     // gone. Splicing the tail would fabricate a seamless-looking message.
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(10, "turn-1", { type: "text-delta", id: "t", delta: "LATE" })],
@@ -2206,6 +2409,7 @@ describe("Chat truncated buffers", () => {
     const [start, delta] = textChunks("t", "seen");
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(1, "turn-1", start!), chunkEvent(2, "turn-1", delta!)],
@@ -2217,6 +2421,7 @@ describe("Chat truncated buffers", () => {
     // Drop + truncation while away flags the turn…
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({
         turnId: "turn-1",
         chunks: [chunkEvent(10, "turn-1", { type: "text-delta", id: "t", delta: "LATE" })],
@@ -2228,7 +2433,7 @@ describe("Chat truncated buffers", () => {
     // …and the next drop straddles the turn's end: the ended event (and its
     // reconcile) never arrives, so the re-attach must recover it.
     transport.history = [userMessage("assistant-1", "whole turn")];
-    await attach({ status: { phase: "idle" }, activeTurn: null, cursor: 12 });
+    await attach({ status: { phase: "idle" }, recovery: null, activeTurn: null, cursor: 12 });
     await settle();
     expect(chat.store.getState().session.messages.map((m) => m.id)).toEqual(["assistant-1"]);
     void live;
@@ -2240,6 +2445,7 @@ describe("Chat lifecycle", () => {
     const { chat, emit, attach, live } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
     });
     const queued = chat.prompt("later");
@@ -2309,6 +2515,7 @@ describe("Chat lifecycle", () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
     });
     live(1, {
@@ -2351,7 +2558,7 @@ describe("Chat lifecycle", () => {
 
     // The terminal state is final: nothing may hydrate or fold over it.
     live(2, { type: "session.turn.started", turnId: "turn-late", phase: "running" });
-    await attach({ status: { phase: "idle" } });
+    await attach({ status: { phase: "idle" }, recovery: null });
     expect(chat.store.getState().session.status).toBe("error");
   });
 
@@ -2433,6 +2640,7 @@ describe("Chat lifecycle", () => {
     const { chat, emit, attach } = makeChat();
     await attach({
       status: { phase: "running" },
+      recovery: null,
       activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
     });
     const queued = chat.prompt("never sent");

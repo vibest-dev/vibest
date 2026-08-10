@@ -19,6 +19,7 @@ export interface ChatSessionValue {
   prompt: (text: string) => Promise<void>;
   /** Marks an existing queued follow-up for delivery into the active turn. */
   steer: (messageId: string) => void;
+  acknowledgeRecovery: (recoveryId: string) => Promise<void>;
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;
   /** A turn is producing a reply (submitted / streaming). */
   turnInProgress: boolean;

@@ -283,6 +283,8 @@ export const foldSessionEvent = (
         pendingRequests.size > 0 ? "requires_action" : current.activeTurn ? "running" : "idle";
       return { ...base, phase, pendingRequests };
     }
+    case "session.recovery.acknowledged":
+      return base;
     case "session.crashed":
       return {
         ...base,
@@ -311,6 +313,7 @@ export const toSnapshot = (
   ref,
   streamId,
   status: toStatus(state),
+  recovery: null,
   pendingRequests: [...state.pendingRequests.values()],
   activeTurn: state.activeTurn
     ? {

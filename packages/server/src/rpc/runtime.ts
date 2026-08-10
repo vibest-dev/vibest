@@ -25,6 +25,7 @@ import {
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
 import { makeGrokAdapter, makeGrokAgent, type GrokAgent } from "../harness/grok";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
+import { SessionRecoveryStoreLayer } from "../harness/session-recovery";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
 import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../pty";
 
@@ -126,15 +127,21 @@ const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer)
 // layers by reference, so publish (manager/service) and subscribe (RPC) share
 // the single bus instance. A second reference (or Layer.fresh) would split the
 // bus and silently drop events.
+const SessionRecoveryProvided = SessionRecoveryStoreLayer.pipe(
+  Layer.provide(PathsLayer),
+  Layer.provide(PlatformLayer),
+);
 const HarnessSessionManagerProvided = HarnessAgentSessionManagerLayer.pipe(
   Layer.provide(RegistryLayer),
   Layer.provide(EventBusLayer),
+  Layer.provide(SessionRecoveryProvided),
   Layer.provide(PlatformLayer),
 );
 const HarnessSessionServiceProvided = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(HarnessSessionManagerProvided),
   Layer.provide(RegistryLayer),
   Layer.provide(EventBusLayer),
+  Layer.provide(SessionRecoveryProvided),
   Layer.provide(PathsLayer),
   Layer.provide(PlatformLayer),
 );

@@ -38,6 +38,7 @@ import {
 } from "./session";
 import { initialSessionState, toSnapshot, toStatus } from "./session-fold";
 import type { ResumeManagedSessionInput, SessionConfig } from "./session-io";
+import { SessionRecoveryStore } from "./session-recovery";
 
 /**
  * The sole owner of live session state: one {@link HarnessAgentSessionShape}
@@ -447,6 +448,11 @@ export const HarnessAgentSessionManagerLayer = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* HarnessAgentRegistry;
     const bus = yield* EventBus;
-    return yield* makeHarnessAgentSessionManager(registry, bus);
+    const recovery = yield* SessionRecoveryStore;
+    return yield* makeHarnessAgentSessionManager(registry, bus, (ref, streamId, eventBus) =>
+      makeHarnessAgentSession(ref, streamId, eventBus, (eventRef, body) =>
+        recovery.beforePublish(eventRef, body).pipe(Effect.orDie),
+      ),
+    );
   }),
 );

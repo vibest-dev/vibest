@@ -31,6 +31,9 @@ export class Chat {
 
   steer = (messageId: string): void => this.#runtime.steer(messageId);
 
+  acknowledgeRecovery = (recoveryId: string): Promise<void> =>
+    this.#runtime.acknowledgeRecovery(recoveryId);
+
   setModel = (providerId: string, modelId: string): Promise<void> =>
     this.#runtime.setModel(providerId, modelId);
 

@@ -1,6 +1,7 @@
 import type {
   PromptPart,
   SessionPhase,
+  SessionRecoverySnapshot,
   SessionRuntimeSnapshot,
   SessionScopedEvent,
 } from "@vibest/contract";
@@ -51,6 +52,10 @@ export type ChatState = {
     activeTurnId: string | null;
   };
   outgoing: OutgoingMessage[];
+  recovery: {
+    snapshot: SessionRecoverySnapshot | null;
+    historyPending: boolean;
+  };
   lifecycle: {
     session: "available" | "terminated";
     instance: "active" | "disposed";
@@ -91,6 +96,7 @@ export function createChatState(): ChatState {
       activeTurnId: null,
     },
     outgoing: [],
+    recovery: { snapshot: null, historyPending: false },
     lifecycle: { session: "available", instance: "active" },
     sync: {
       streamId: null,
@@ -127,6 +133,7 @@ export function copyChatState(state: ChatState): ChatState {
       pendingRequests: state.session.pendingRequests.slice(),
     },
     outgoing: state.outgoing.slice(),
+    recovery: { ...state.recovery },
     lifecycle: { ...state.lifecycle },
     sync: {
       ...state.sync,
@@ -155,6 +162,7 @@ export const isChatActive = (state: ChatState): boolean =>
 export const statusFromPhase = (phase: SessionPhase): "streaming" | "ready" | "error" => {
   switch (phase) {
     case "idle":
+    case "recovery_required":
       return "ready";
     case "crashed":
       return "error";

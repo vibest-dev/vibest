@@ -204,7 +204,24 @@ export const sessionRouter = orpc.router({
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         TurnAlreadyRunning: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
+        RecoveryRequired: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
         AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
+  }),
+  acknowledgeRecovery: orpc.acknowledgeRecovery.effect(function* ({ input, errors }) {
+    const sessions = yield* HarnessAgentSessionService;
+    yield* sessions.acknowledgeRecovery(input.ref, input.recoveryId).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        StaleRecovery: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
+        StoreReadError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+        StoreWriteError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
       }),
     );
   }),
@@ -276,13 +293,25 @@ export const sessionRouter = orpc.router({
   // after a server restart used to get that error on every snapshot and retry
   // forever, because nothing on the observation path could ever make it go
   // away.
-  getStatus: orpc.getStatus.effect(function* ({ input }) {
+  getStatus: orpc.getStatus.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getStatus(input.ref);
+    return yield* sessions
+      .getStatus(input.ref)
+      .pipe(
+        Effect.catchTag("StoreReadError", (e) =>
+          Effect.fail(errors.INTERNAL({ message: e.message })),
+        ),
+      );
   }),
-  getSnapshot: orpc.getSnapshot.effect(function* ({ input }) {
+  getSnapshot: orpc.getSnapshot.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    return yield* sessions.getSnapshot(input.ref);
+    return yield* sessions
+      .getSnapshot(input.ref)
+      .pipe(
+        Effect.catchTag("StoreReadError", (e) =>
+          Effect.fail(errors.INTERNAL({ message: e.message })),
+        ),
+      );
   }),
 
   // events --------------------------------------------------------------------

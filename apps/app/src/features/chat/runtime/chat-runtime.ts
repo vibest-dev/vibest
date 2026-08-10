@@ -306,6 +306,11 @@ export class ChatRuntime {
     this.#send({ type: "steerRequested", messageId });
   }
 
+  acknowledgeRecovery(recoveryId: string): Promise<void> {
+    const signal = this.#lifetimeController.signal;
+    return raceWithSignal(this.#transport.acknowledgeRecovery(recoveryId, { signal }), signal);
+  }
+
   setModel(providerId: string, modelId: string): Promise<void> {
     const signal = this.#lifetimeController.signal;
     return raceWithSignal(this.#transport.setModel(providerId, modelId, { signal }), signal);

@@ -40,6 +40,42 @@ export function addRequest(state: ChatDraft, effects: ChatEffects, request: Agen
   else state.session.pendingRequests[index] = request;
 }
 
+function exposeRecovery(
+  state: ChatDraft,
+  effects: ChatEffects,
+  recovery: SessionRuntimeSnapshot["recovery"],
+): void {
+  const previousRecoveryId = state.recovery.snapshot?.recoveryId;
+  state.recovery.snapshot = recovery;
+  if (recovery === null) {
+    state.recovery.historyPending = false;
+    return;
+  }
+  state.prompt.boundaryOpen = false;
+  state.session.status = "ready";
+  state.session.pendingRequests = [];
+  if (recovery.recoveryId === previousRecoveryId) return;
+
+  state.recovery.historyPending = true;
+  const submitting = sendingMessage(state);
+  if (submitting) {
+    state.outgoing = state.outgoing.filter(
+      (outgoing) => outgoing.message.id !== submitting.message.id,
+    );
+    removeValue(state.prompt.pendingMessageIds, submitting.message.id);
+    effects.push({
+      type: "rejectPrompt",
+      messageId: submitting.message.id,
+      error: new Error(
+        "The server restarted before this prompt's outcome was known. It was not replayed.",
+      ),
+    });
+  }
+  // The initial floor already reads the authoritative history. Only a recovery
+  // discovered after that floor needs a separate reconcile operation.
+  if (state.sync.historyLoaded && state.sync.floor === null) state.sync.needsReconcile = true;
+}
+
 export function hydrateSnapshot(
   state: ChatDraft,
   effects: ChatEffects,
@@ -47,6 +83,8 @@ export function hydrateSnapshot(
   skipGapCheck: boolean,
 ): void {
   if (!isChatActive(state)) return;
+
+  exposeRecovery(state, effects, snapshot.recovery);
 
   state.session.pendingRequests = [];
   for (const request of snapshot.pendingRequests) addRequest(state, effects, request);
@@ -157,6 +195,11 @@ export function hydrateSnapshot(
         ? snapshot.status.phase
         : null;
   }
+  if (snapshot.recovery !== null) {
+    state.prompt.boundaryOpen = false;
+    state.session.status = "ready";
+    state.session.pendingRequests = [];
+  }
   startReconcile(state, effects);
   maybeDispatchOutgoing(state, effects);
 }
@@ -213,6 +256,14 @@ export function applyEvent(
         state.prompt.pendingMessageIds.length === 0 &&
         (event.phase === "idle" || event.phase === "crashed");
       break;
+    case "session.recovery.acknowledged":
+      if (state.recovery.snapshot?.recoveryId === event.recoveryId) {
+        state.recovery.snapshot = null;
+        state.prompt.boundaryOpen =
+          state.prompt.pendingMessageIds.length === 0 &&
+          (event.phase === "idle" || event.phase === "crashed");
+      }
+      break;
     case "session.crashed":
       state.session.activeTurnId = null;
       state.prompt.pendingMessageIds = [];
@@ -266,6 +317,8 @@ export function applyEvent(
       state.session.pendingRequests = state.session.pendingRequests.filter(
         (request) => request.id !== event.requestId,
       );
+      break;
+    case "session.recovery.acknowledged":
       break;
     case "session.crashed":
       for (const turnId of Object.keys(state.turns.folds)) abandonFold(state, effects, turnId);
@@ -352,6 +405,7 @@ export function handleTransportEvent(
       state.sync.reconcile = null;
       effects.push({ type: "cancelHistory", id: reconcile.id });
     }
+    exposeRecovery(state, effects, event.snapshot.recovery);
     const changedStream = attachStream(state, effects, event.snapshot);
     if (!state.sync.historyLoaded) {
       startHistoryFloor(state, effects, event.snapshot);

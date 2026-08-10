@@ -11,7 +11,7 @@ import type {
   SessionSummary,
 } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Context, Crypto, Effect, FileSystem, Layer } from "effect";
+import { Context, Crypto, Effect, FileSystem, Layer, Semaphore } from "effect";
 
 import { Paths } from "../config/paths";
 import {
@@ -30,8 +30,10 @@ import type {
   CreateSessionError,
   HarnessAgentNotFound,
   HarnessSessionNotFound,
+  RecoveryRequired,
   ResumeSessionError,
   SessionClosed,
+  StaleRecovery,
   TurnAlreadyRunning,
 } from "./errors";
 import {
@@ -45,6 +47,7 @@ import { HarnessAgentRegistry } from "./registry";
 import type { SessionConfig } from "./session-io";
 import type { HarnessAgentSessionManagerShape } from "./session-manager";
 import { HarnessAgentSessionManager } from "./session-manager";
+import { SessionRecoveryStore, type SessionRecoveryStoreShape } from "./session-recovery";
 import {
   type HarnessAgentSessionRepositoryShape,
   makeHarnessAgentSessionRepository,
@@ -178,7 +181,15 @@ export type HarnessAgentSessionServiceShape = {
     | ResumeSessionError
     | SessionClosed
     | TurnAlreadyRunning
+    | RecoveryRequired
     | AgentOperationError
+  >;
+  readonly acknowledgeRecovery: (
+    ref: SessionRef,
+    recoveryId: string,
+  ) => Effect.Effect<
+    void,
+    SessionNotFound | SessionRefMismatch | StoreReadError | StoreWriteError | StaleRecovery
   >;
   /**
    * Stop the active turn. A session with nothing running succeeds without
@@ -285,8 +296,8 @@ export type HarnessAgentSessionServiceShape = {
    * memory reads as idle, so attaching after a restart neither fails nor
    * starts anything.
    */
-  readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus>;
-  readonly getSnapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot>;
+  readonly getStatus: (ref: SessionRef) => Effect.Effect<SessionStatus, StoreReadError>;
+  readonly getSnapshot: (ref: SessionRef) => Effect.Effect<SessionRuntimeSnapshot, StoreReadError>;
   /** Reverse a bare sessionId back into its full SessionRef. */
   readonly resolveRef: (
     sessionId: string,
@@ -303,10 +314,26 @@ export const makeHarnessAgentSessionService = (deps: {
   readonly registry: HarnessAgentRegistryShape;
   readonly repo: HarnessAgentSessionRepositoryShape;
   readonly bus: EventBusShape;
+  readonly recovery: SessionRecoveryStoreShape;
   /** Mints a session id; RNG failure is a defect, so the effect never fails. */
   readonly newSessionId: Effect.Effect<string>;
 }): HarnessAgentSessionServiceShape => {
-  const { manager, registry, repo, bus, newSessionId } = deps;
+  const { manager, registry, repo, bus, recovery, newSessionId } = deps;
+  const lifecycleLocks = new Map<string, ReturnType<typeof Semaphore.makeUnsafe>>();
+  const lifecycleKey = (ref: SessionRef) =>
+    JSON.stringify([ref.projectId, ref.harnessAgentId, ref.sessionId]);
+  const withLifecycleWrite = <A, E, R>(
+    ref: SessionRef,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> => {
+    const key = lifecycleKey(ref);
+    let lock = lifecycleLocks.get(key);
+    if (lock === undefined) {
+      lock = Semaphore.makeUnsafe(1);
+      lifecycleLocks.set(key, lock);
+    }
+    return lock.withPermit(effect);
+  };
 
   // The permission mode is our closed vocabulary, so membership in the
   // harness's declared subset is checked here — the boundary between the
@@ -469,17 +496,25 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     close: (ref) =>
-      resolveHarnessSessionId(ref).pipe(
-        Effect.andThen(manager.close(ref)),
-        Effect.andThen(bus.closeSession(ref, "session_closed")),
+      withLifecycleWrite(
+        ref,
+        resolveHarnessSessionId(ref).pipe(
+          Effect.andThen(manager.close(ref)),
+          Effect.andThen(recovery.clear(ref).pipe(Effect.orDie)),
+          Effect.andThen(bus.closeSession(ref, "session_closed")),
+        ),
       ),
 
     delete: (ref) =>
-      readChecked(ref).pipe(
-        Effect.andThen(manager.close(ref)),
-        Effect.andThen(bus.closeSession(ref, "session_deleted")),
-        Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
-        Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+      withLifecycleWrite(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(manager.close(ref)),
+          Effect.andThen(bus.closeSession(ref, "session_deleted")),
+          Effect.andThen(recovery.clear(ref)),
+          Effect.andThen(repo.remove(ref.projectId, ref.sessionId)),
+          Effect.andThen(bus.publish({ ref, type: "session.deleted" })),
+        ),
       ),
 
     rename: (ref, title) =>
@@ -494,20 +529,28 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     archive: (ref, archived) =>
-      readChecked(ref).pipe(
-        Effect.flatMap((metadata) => {
-          const changed = (metadata.archived ?? false) !== archived;
-          const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
-          // Archive is also a lifecycle boundary: persist first so a failed
-          // metadata write never kills live work. Restore stays cold until open.
-          const close = archived
-            ? manager.close(ref).pipe(Effect.andThen(bus.closeSession(ref, "session_closed")))
-            : Effect.void;
-          const publish = changed
-            ? bus.publish({ ref, type: "session.archived", archived })
-            : Effect.void;
-          return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
-        }),
+      withLifecycleWrite(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) => {
+            const changed = (metadata.archived ?? false) !== archived;
+            const persist = changed ? repo.write({ ...metadata, archived }) : Effect.void;
+            // Archive is also a lifecycle boundary: persist first so a failed
+            // metadata write never kills live work. Restore stays cold until open.
+            const close = archived
+              ? manager
+                  .close(ref)
+                  .pipe(
+                    Effect.andThen(bus.closeSession(ref, "session_closed")),
+                    Effect.andThen(recovery.clear(ref)),
+                  )
+              : Effect.void;
+            const publish = changed
+              ? bus.publish({ ref, type: "session.archived", archived })
+              : Effect.void;
+            return persist.pipe(Effect.andThen(close), Effect.andThen(publish));
+          }),
+        ),
       ),
 
     // A pure read of our own records — display data is self-owned (title from
@@ -581,64 +624,86 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     prompt: (input) =>
-      Effect.gen(function* () {
-        const metadata = yield* readChecked(input.ref);
-        const userInput = yield* toUserInput(input.parts);
-        // The first prompt names the session before it reaches the harness.
-        yield* stampTitleFromFirstPrompt(metadata, input.parts);
-        const messageId = input.messageId ?? (yield* newSessionId);
+      withLifecycleWrite(
+        input.ref,
+        Effect.gen(function* () {
+          const metadata = yield* readChecked(input.ref);
+          yield* recovery.requireClear(input.ref);
+          const userInput = yield* toUserInput(input.parts);
+          // The first prompt names the session before it reaches the harness.
+          yield* stampTitleFromFirstPrompt(metadata, input.parts);
+          const messageId = input.messageId ?? (yield* newSessionId);
 
-        // Broadcast the received prompt *before* the harness call so it always
-        // precedes the turn's own events in seq order. If the harness then
-        // rejects the prompt, `session.prompt.rejected` compensates — clients
-        // drop the phantom user message and the runtime clears the retained
-        // activePrompt.
-        // A user message is the one thing that justifies starting an agent, so
-        // this is where a runtime is acquired if the session has none — after
-        // the submitted event, so a failed acquisition is compensated by the
-        // same `prompt.rejected` that a harness-side rejection uses.
-        return yield* Effect.uninterruptible(
-          manager
-            .emit(input.ref, {
-              type: "session.prompt.submitted",
-              messageId,
-              parts: input.parts,
-            })
-            .pipe(
-              Effect.andThen(
-                manager.ensureRuntime(
-                  {
-                    sessionId: metadata.harnessSessionId,
-                    harnessAgentId: input.ref.harnessAgentId,
-                    ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
-                  },
-                  input.ref,
+          // Broadcast the received prompt *before* the harness call so it always
+          // precedes the turn's own events in seq order. If the harness then
+          // rejects the prompt, `session.prompt.rejected` compensates — clients
+          // drop the phantom user message and the runtime clears the retained
+          // activePrompt.
+          // A user message is the one thing that justifies starting an agent, so
+          // this is where a runtime is acquired if the session has none — after
+          // the submitted event, so a failed acquisition is compensated by the
+          // same `prompt.rejected` that a harness-side rejection uses.
+          return yield* Effect.uninterruptible(
+            manager
+              .emit(input.ref, {
+                type: "session.prompt.submitted",
+                messageId,
+                parts: input.parts,
+              })
+              .pipe(
+                Effect.andThen(
+                  manager.ensureRuntime(
+                    {
+                      sessionId: metadata.harnessSessionId,
+                      harnessAgentId: input.ref.harnessAgentId,
+                      ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
+                    },
+                    input.ref,
+                  ),
+                ),
+                Effect.flatMap((runtime) => runtime.prompt(userInput)),
+                // Acquisition and prompt rejection are the same visible outcome:
+                // both must compensate the submitted candidate retained above.
+                Effect.tapError((promptError) =>
+                  manager.emit(input.ref, {
+                    type: "session.prompt.rejected",
+                    messageId,
+                    reason: promptError.message,
+                  }),
+                ),
+                // Once submitted is visible, interruption must not leave the
+                // candidate without a terminal correlation. Runtime prompt
+                // receipts are short-lived; finish this emit before honoring a
+                // disconnected caller's cancellation.
+                Effect.tap((receipt) =>
+                  manager.emit(input.ref, {
+                    type: "session.prompt.accepted",
+                    messageId,
+                    turnId: receipt.turnId,
+                  }),
                 ),
               ),
-              Effect.flatMap((runtime) => runtime.prompt(userInput)),
-              // Acquisition and prompt rejection are the same visible outcome:
-              // both must compensate the submitted candidate retained above.
-              Effect.tapError((promptError) =>
-                manager.emit(input.ref, {
-                  type: "session.prompt.rejected",
-                  messageId,
-                  reason: promptError.message,
-                }),
-              ),
-              // Once submitted is visible, interruption must not leave the
-              // candidate without a terminal correlation. Runtime prompt
-              // receipts are short-lived; finish this emit before honoring a
-              // disconnected caller's cancellation.
-              Effect.tap((receipt) =>
-                manager.emit(input.ref, {
-                  type: "session.prompt.accepted",
-                  messageId,
-                  turnId: receipt.turnId,
-                }),
-              ),
+          );
+        }),
+      ),
+
+    acknowledgeRecovery: (ref, recoveryId) =>
+      withLifecycleWrite(
+        ref,
+        readChecked(ref).pipe(
+          Effect.andThen(
+            Effect.uninterruptible(
+              recovery
+                .acknowledge(ref, recoveryId)
+                .pipe(
+                  Effect.andThen(
+                    manager.emit(ref, { type: "session.recovery.acknowledged", recoveryId }),
+                  ),
+                ),
             ),
-        );
-      }),
+          ),
+        ),
+      ),
 
     steer: (input) =>
       Effect.gen(function* () {
@@ -734,8 +799,26 @@ export const makeHarnessAgentSessionService = (deps: {
         ),
       ),
 
-    getStatus: (ref) => manager.status(ref),
-    getSnapshot: (ref) => manager.snapshot(ref),
+    getStatus: (ref) =>
+      Effect.all([manager.status(ref), recovery.barrier(ref)]).pipe(
+        Effect.map(([status, barrier]) =>
+          barrier === null ? status : { phase: "recovery_required" as const },
+        ),
+      ),
+    getSnapshot: (ref) =>
+      Effect.all([manager.snapshot(ref), recovery.barrier(ref)]).pipe(
+        Effect.map(([snapshot, barrier]) =>
+          barrier === null
+            ? snapshot
+            : {
+                ...snapshot,
+                status: { phase: "recovery_required" as const },
+                recovery: barrier,
+                pendingRequests: [],
+                activeTurn: null,
+              },
+        ),
+      ),
 
     resolveRef: (sessionId) =>
       repo.findBySessionId(sessionId).pipe(
@@ -756,6 +839,7 @@ export const HarnessAgentSessionServiceLayer: Layer.Layer<
   | HarnessAgentSessionManager
   | HarnessAgentRegistry
   | EventBus
+  | SessionRecoveryStore
   | Paths
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -765,6 +849,7 @@ export const HarnessAgentSessionServiceLayer: Layer.Layer<
     const manager = yield* HarnessAgentSessionManager;
     const registry = yield* HarnessAgentRegistry;
     const bus = yield* EventBus;
+    const recovery = yield* SessionRecoveryStore;
     const paths = yield* Paths;
     const crypto = yield* Crypto.Crypto;
     const repo = yield* makeHarnessAgentSessionRepository(paths.sessionsDir);
@@ -773,6 +858,7 @@ export const HarnessAgentSessionServiceLayer: Layer.Layer<
       registry,
       repo,
       bus,
+      recovery,
       // A platform RNG that cannot produce a uuid is a defect, not a domain
       // failure — keep it out of the service's error channel. Tag-specific so
       // a future recoverable error on this channel stays typed instead of dying.

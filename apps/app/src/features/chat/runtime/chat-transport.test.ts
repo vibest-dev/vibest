@@ -15,6 +15,7 @@ const snapshot: SessionRuntimeSnapshot = {
   ref,
   streamId: "stream-1",
   status: { phase: "idle" },
+  recovery: null,
   activeTurn: null,
   activePrompt: null,
   acceptedPrompt: null,
@@ -290,6 +291,9 @@ describe("OrpcChatSessionTransport RPC mapping", () => {
           record("getMessages", options);
           return { messages: [] };
         },
+        acknowledgeRecovery: async (_input: unknown, options?: unknown) => {
+          record("acknowledgeRecovery", options);
+        },
         respondToAgentRequest: async (_input: unknown, options?: unknown) => {
           record("respondToAgentRequest", options);
         },
@@ -312,6 +316,7 @@ describe("OrpcChatSessionTransport RPC mapping", () => {
       { signal },
     );
     await transport.getMessages({ signal });
+    await transport.acknowledgeRecovery("recovery-1", { signal });
     await transport.respondToAgentRequest(
       "request-1",
       { type: "tool", behavior: "allow" },
@@ -324,13 +329,14 @@ describe("OrpcChatSessionTransport RPC mapping", () => {
     expect(calls.map((call) => call.name)).toEqual([
       "prompt",
       "getMessages",
+      "acknowledgeRecovery",
       "respondToAgentRequest",
       "setModel",
       "setReasoningEffort",
       "setPermissionMode",
     ]);
     expect(calls.map((call) => call.options)).toEqual(
-      Array.from({ length: 6 }, () => ({ signal })),
+      Array.from({ length: 7 }, () => ({ signal })),
     );
   });
 

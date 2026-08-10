@@ -68,6 +68,7 @@ export function handleHistoryCompleted(
       }
     }
     state.sync.floor = null;
+    state.recovery.historyPending = false;
     recovery.hydrateSnapshot(state, effects, floor.snapshot, true);
     for (const event of floor.events) recovery.applyEvent(state, effects, event);
     startReconcile(state, effects);
@@ -77,6 +78,7 @@ export function handleHistoryCompleted(
   const reconcile = state.sync.reconcile;
   if (!reconcile || reconcile.id !== input.id) return false;
   state.sync.reconcile = null;
+  state.recovery.historyPending = false;
   if (input.error !== undefined) {
     effects.push({
       type: "logError",

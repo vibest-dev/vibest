@@ -92,6 +92,24 @@ export class SessionClosed extends Schema.TaggedError<SessionClosed>()("SessionC
   }
 }
 
+export class RecoveryRequired extends Schema.TaggedError<RecoveryRequired>()("RecoveryRequired", {
+  sessionId: Schema.String,
+  recoveryId: Schema.String,
+}) {
+  override get message() {
+    return `Session '${this.sessionId}' requires acknowledgement of recovery '${this.recoveryId}'.`;
+  }
+}
+
+export class StaleRecovery extends Schema.TaggedError<StaleRecovery>()("StaleRecovery", {
+  sessionId: Schema.String,
+  recoveryId: Schema.String,
+}) {
+  override get message() {
+    return `Recovery '${this.recoveryId}' is no longer pending for session '${this.sessionId}'.`;
+  }
+}
+
 export class TurnAlreadyRunning extends Schema.TaggedError<TurnAlreadyRunning>()(
   "TurnAlreadyRunning",
   {

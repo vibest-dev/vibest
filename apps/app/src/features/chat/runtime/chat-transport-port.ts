@@ -86,6 +86,7 @@ export interface ChatSessionTransport {
    * degraded path, not the common one.
    */
   getMessages(options?: ChatTransportCallOptions): Promise<readonly UIMessage[] | null>;
+  acknowledgeRecovery(recoveryId: string, options?: ChatTransportCallOptions): Promise<void>;
   /**
    * Resolves normally when the request is no longer pending — including when
    * another client answered it first (the server's "not pending" is an

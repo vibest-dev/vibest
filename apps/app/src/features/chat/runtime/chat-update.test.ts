@@ -15,6 +15,7 @@ const snapshot = (overrides: Partial<SessionRuntimeSnapshot> = {}): SessionRunti
   ref,
   streamId: "stream-1",
   status: { phase: "idle" },
+  recovery: null,
   activeTurn: null,
   activePrompt: null,
   acceptedPrompt: null,

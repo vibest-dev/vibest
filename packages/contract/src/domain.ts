@@ -162,6 +162,7 @@ export const SessionPhaseSchema = Schema.Literals([
   "idle",
   "running",
   "requires_action",
+  "recovery_required",
   "crashed",
 ]);
 export type SessionPhase = typeof SessionPhaseSchema.Type;
@@ -192,6 +193,7 @@ export const SessionScopedEventTypes = [
   "session.request.asked",
   "session.request.replied",
   "session.request.rejected",
+  "session.recovery.acknowledged",
   "session.crashed",
 ] as const;
 export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
@@ -253,6 +255,10 @@ export type SessionScopedEventBody =
       readonly type: "session.request.rejected";
       readonly requestId: string;
       readonly reason?: string;
+    }
+  | {
+      readonly type: "session.recovery.acknowledged";
+      readonly recoveryId: string;
     }
   | { readonly type: "session.crashed"; readonly reason: string };
 
@@ -486,11 +492,23 @@ export const HarnessProbeOutputSchema = Schema.Struct({
 });
 export type HarnessProbeOutput = typeof HarnessProbeOutputSchema.Type;
 
+export type SessionRecoverySnapshot = {
+  readonly recoveryId: string;
+  readonly reason: "server_restart";
+  readonly prompts: ReadonlyArray<{
+    readonly messageId: string;
+    readonly parts: ReadonlyArray<PromptPart>;
+    readonly turnId?: string;
+  }>;
+};
+
 export type SessionRuntimeSnapshot = {
   readonly ref: SessionRef;
   /** Process-local incarnation whose cursor and retained events this snapshot describes. */
   readonly streamId: string;
   readonly status: SessionStatus;
+  /** Durable uncertainty from an unresolved turn owned by an earlier server boot. */
+  readonly recovery: SessionRecoverySnapshot | null;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;
   // Newest prompt to render for reconnect (an unresolved candidate wins).
@@ -565,6 +583,12 @@ export type SteerInput = typeof SteerInputSchema.Type;
 
 export const PromptOutputSchema = Schema.Struct({ turnId: Schema.String });
 export type PromptOutput = typeof PromptOutputSchema.Type;
+
+export const AcknowledgeRecoveryInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  recoveryId: Schema.NonEmptyString,
+});
+export type AcknowledgeRecoveryInput = typeof AcknowledgeRecoveryInputSchema.Type;
 
 // ---------------------------------------------------------------------------
 // Session capabilities (unchanged; setModel/config remains out of scope)

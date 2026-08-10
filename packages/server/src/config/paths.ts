@@ -18,6 +18,8 @@ export class Paths extends Context.Service<
     readonly sessionsDir: string;
     /** `$VIBEST_HOME/logs` — process log and daemon stdio. */
     readonly logsDir: string;
+    /** `storage/session-recovery/` — durable unresolved-turn barriers. */
+    readonly sessionRecoveryDir: string;
   }
 >()("Paths") {}
 
@@ -33,6 +35,7 @@ const resolve = (home: string) => ({
   projectsFile: path.join(home, "storage", "projects.json"),
   sessionsDir: path.join(home, "storage", "sessions"),
   logsDir: logsDirectory(home),
+  sessionRecoveryDir: path.join(home, "storage", "session-recovery"),
 });
 
 /**

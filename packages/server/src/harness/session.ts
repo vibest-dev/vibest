@@ -208,6 +208,8 @@ export const makeHarnessAgentSession = (
   ref: SessionRef,
   streamId: string,
   bus: EventBusShape,
+  beforePublish: (ref: SessionRef, body: SessionScopedEventBody) => Effect.Effect<void> = () =>
+    Effect.void,
 ): Effect.Effect<HarnessAgentSessionShape, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
@@ -270,7 +272,8 @@ export const makeHarnessAgentSession = (
               // event types. (The buffered chunk copy inside `next` keeps the
               // un-stamped draft — snapshot replays read phase from the
               // snapshot's own status.)
-              return Ref.set(state, next).pipe(
+              return beforePublish(ref, wireBody).pipe(
+                Effect.andThen(Ref.set(state, next)),
                 Effect.andThen(bus.publish({ ...event, phase: next.phase })),
                 Effect.andThen(logTurn(wireBody, event.seq)),
               );
