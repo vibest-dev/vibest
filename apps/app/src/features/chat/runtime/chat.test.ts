@@ -129,6 +129,27 @@ const toolRequest: AgentRequest = {
 };
 
 describe("Chat hydration", () => {
+  it("hydrates and incrementally updates the session model pair", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({ providerId: "provider/one", modelId: "model:one" });
+
+    expect(chat.store.getState()).toMatchObject({
+      providerId: "provider/one",
+      modelId: "model:one",
+    });
+
+    live(1, {
+      type: "session.model.updated",
+      providerId: "provider/two",
+      modelId: "model:two",
+    });
+
+    expect(chat.store.getState()).toMatchObject({
+      providerId: "provider/two",
+      modelId: "model:two",
+    });
+  });
+
   // Reattaching across a server restart: the session's seq counter is rebuilt
   // from scratch, so the next turn's events all land below the cursor we were
   // holding. Keeping that cursor drops the entire turn and the page sits on a

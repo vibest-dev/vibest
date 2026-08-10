@@ -1,9 +1,10 @@
 import type {
   AgentResponse,
   HarnessAgentId,
+  HarnessGetDefaultModelOutput,
   InspectorTarget,
   PermissionMode,
-  ModelInfo,
+  ProviderInfo,
   ReasoningEffort,
   SessionCapabilities,
 } from "@vibest/contract";
@@ -16,8 +17,9 @@ import type {
   AgentOperationError,
   AgentRequestUnavailable,
   AgentUnavailable,
-  CapabilityProbeFailed,
   CapabilityUnsupported,
+  DefaultModelFailed,
+  ModelListFailed,
   ExecutableNotFound,
   SessionClosed,
   SessionNotResumable,
@@ -99,10 +101,23 @@ export interface HarnessAgentRuntime {
   readonly prompt: (
     input: UserInput,
   ) => Effect.Effect<PromptReceipt, SessionClosed | TurnAlreadyRunning | AgentOperationError>;
-  // Session-scoped config setters. `model` is the provider-local model id —
-  // the server resolves and validates the providerId before it ever
-  // reaches an adapter. Harnesses without a knob accept the call and no-op.
-  readonly setModel: (model: string) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  // Session-scoped config setters. Provider and model ids stay separate and
+  // opaque all the way to the adapter; each harness decides which providers it
+  // can consume. Harnesses without a knob accept the call and no-op.
+  readonly setModel: (
+    providerId: string,
+    modelId: string,
+  ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  /** List models through this exact live runtime when the harness supports it. */
+  readonly listModelProviders?: Effect.Effect<
+    ReadonlyArray<ProviderInfo>,
+    SessionClosed | AgentOperationError
+  >;
+  /** The concrete model this exact runtime currently has selected. */
+  readonly getModel: Effect.Effect<
+    HarnessGetDefaultModelOutput,
+    SessionClosed | AgentOperationError
+  >;
   readonly setReasoningEffort: (
     reasoningEffort: ReasoningEffort,
   ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
@@ -158,24 +173,33 @@ export interface HarnessAgentAdapter {
   readonly permissionModes: ReadonlyArray<PermissionMode>;
   readonly defaultPermissionMode?: PermissionMode;
   /**
-   * Probe this harness's built-in model provider in one working directory. It
-   * follows the signed-in account, the installed version *and* the directory's
-   * own config, so it can only be probed — never hardcoded, and never probed
-   * once for everyone. Absent for harnesses with no model catalogue (pi).
-   *
-   * `cwd` is honoured where it matters: claude-code passes it to the SDK
-   * because a project's settings can remap what a model id resolves to. Codex
-   * ignores it — its `model/list` is app-server-global — but still takes it, so
-   * callers never have to know which is which.
-   *
-   * The error channel is the point: a probe that fails has to stay
-   * distinguishable from a harness that genuinely has no models, otherwise an
-   * expired login gets cached as "this harness has no model picker".
-   * {@link HarnessProbeService} owns the timeout, caching and de-duplication.
+   * Whether this harness can route a provider id other than its own built-in
+   * provider. Omitted means only `providerId === adapter.id` is accepted.
    */
-  readonly probeModels?: (
+  readonly acceptsModelProvider?: (providerId: string) => boolean;
+  /**
+   * List the model providers available in one working directory without
+   * opening a managed session. It follows the signed-in account, installed
+   * version, and directory-local configuration, so the answer is never
+   * hardcoded or process-global.
+   *
+   * `cwd` is honoured where it matters: Claude Code and Pi can load project
+   * configuration; Codex currently answers from its app-server-wide catalog.
+   *
+   * The error channel keeps a failed query distinguishable from an empty
+   * model list. {@link HarnessModelService} owns timeout, caching, and
+   * concurrent request de-duplication for this short-lived path.
+   */
+  readonly listModelProviders?: (
     cwd: string,
-  ) => Effect.Effect<ReadonlyArray<ModelInfo>, CapabilityProbeFailed>;
+  ) => Effect.Effect<ReadonlyArray<ProviderInfo>, ModelListFailed>;
+  /**
+   * Resolve the concrete provider/model pair a fresh session would use in this
+   * directory, after the harness applies its own native fallback rules.
+   */
+  readonly getDefaultModel: (
+    cwd: string,
+  ) => Effect.Effect<HarnessGetDefaultModelOutput, DefaultModelFailed>;
   readonly open: (
     input: CreateSessionInput,
   ) => Effect.Effect<

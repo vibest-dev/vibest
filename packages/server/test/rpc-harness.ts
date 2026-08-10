@@ -9,7 +9,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelLayer,
   makeHarnessAgentRegistry,
   type HarnessAgentAdapter,
 } from "../src/harness";
@@ -32,14 +32,13 @@ export async function makeRpcTestHarness(
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
   // EventBusLayer is one reference so publish (manager/service) and subscribe
   // (RPC) share the single bus instance; same for registryLayer.
+  const harnessManagerLayer = HarnessAgentSessionManagerLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(EventBusLayer),
+    Layer.provide(NodePlatformLayer),
+  );
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
-    Layer.provide(
-      HarnessAgentSessionManagerLayer.pipe(
-        Layer.provide(registryLayer),
-        Layer.provide(EventBusLayer),
-        Layer.provide(NodePlatformLayer),
-      ),
-    ),
+    Layer.provide(harnessManagerLayer),
     Layer.provide(registryLayer),
     Layer.provide(EventBusLayer),
     Layer.provide(paths),
@@ -49,7 +48,10 @@ export async function makeRpcTestHarness(
     Layer.provide(registryLayer),
     Layer.provide(NodePlatformLayer),
   );
-  const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
+  const modelsLayer = HarnessModelLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(harnessManagerLayer),
+  );
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
@@ -58,7 +60,7 @@ export async function makeRpcTestHarness(
       projectLayer,
       registryLayer,
       listLayer,
-      probeLayer,
+      modelsLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
       NodePlatformLayer,
     ),

@@ -12,7 +12,7 @@ import {
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
-import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
+import type { PiModel, PiModels, RpcExtensionUIResponse, SessionEntries } from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
 import { createPiTransform } from "./transform";
 import { makePiTransport, type PiTransport, type PiTransportFailure } from "./transport";
@@ -58,6 +58,16 @@ type TurnDecision =
 
 export type PiSessionFailure = PiTransportFailure | AgentOperationError;
 
+export type PiModelAddress = {
+  readonly provider: string;
+  readonly id: string;
+};
+
+type PiModelState = {
+  readonly sessionId: string;
+  readonly model?: PiModelAddress;
+};
+
 type SessionState = {
   readonly sessionId: string;
   readonly scope: Scope.Closeable;
@@ -77,12 +87,19 @@ export interface PiAgentOptions {
 
 export interface PiAgentDependencies<R> {
   readonly makeTransport: (config: {
-    readonly sessionId: string;
+    readonly sessionId?: string;
     readonly cwd?: string;
+    readonly args?: ReadonlyArray<string>;
   }) => Effect.Effect<PiTransport, PiTransportError, R | Scope.Scope>;
 }
 
 export interface PiAgent {
+  /** List models without creating or resuming a managed Pi session. */
+  readonly listModels: (cwd: string) => Effect.Effect<PiModels, PiTransportFailure>;
+  /** Let a temporary no-session child run Pi's native default/fallback logic. */
+  readonly getDefaultModel: (
+    cwd: string,
+  ) => Effect.Effect<PiModelAddress | undefined, PiTransportFailure>;
   readonly session: {
     readonly create: (config: {
       readonly cwd: string;
@@ -110,6 +127,18 @@ export interface PiAgent {
     readonly getEntries: (
       sessionId: string,
     ) => Effect.Effect<SessionEntries, HarnessSessionNotFound | PiTransportFailure>;
+    /** Query models through the exact live Pi child. */
+    readonly listModels: (
+      sessionId: string,
+    ) => Effect.Effect<PiModels, HarnessSessionNotFound | PiTransportFailure>;
+    readonly getState: (
+      sessionId: string,
+    ) => Effect.Effect<PiModelState, HarnessSessionNotFound | PiTransportFailure>;
+    readonly setModel: (
+      sessionId: string,
+      providerId: string,
+      modelId: string,
+    ) => Effect.Effect<void, HarnessSessionNotFound | PiTransportFailure>;
     readonly requestPermission: (
       sessionId: string,
     ) => Stream.Stream<AgentRequest, HarnessSessionNotFound>;
@@ -142,6 +171,96 @@ export const makePiAgentWithDependencies = <R>(
           return session
             ? Effect.succeed(session)
             : Effect.fail(new HarnessSessionNotFound({ sessionId }));
+        }),
+      );
+
+    const decodeSessionState = (value: unknown): Effect.Effect<PiModelState, PiTransportError> => {
+      if (typeof value !== "object" || value === null) {
+        return Effect.fail(
+          new PiTransportError({
+            operation: "decode-session-state",
+            cause: new Error("Pi returned an incompatible session-state response"),
+          }),
+        );
+      }
+      const candidate = value as {
+        readonly sessionId?: unknown;
+        readonly model?: unknown;
+      };
+      if (typeof candidate.sessionId !== "string") {
+        return Effect.fail(
+          new PiTransportError({
+            operation: "decode-session-state",
+            cause: new Error("Pi returned a session state without a session id"),
+          }),
+        );
+      }
+      if (candidate.model === undefined || candidate.model === null) {
+        return Effect.succeed({ sessionId: candidate.sessionId });
+      }
+      if (
+        typeof candidate.model !== "object" ||
+        typeof (candidate.model as { readonly provider?: unknown }).provider !== "string" ||
+        typeof (candidate.model as { readonly id?: unknown }).id !== "string"
+      ) {
+        return Effect.fail(
+          new PiTransportError({
+            operation: "decode-session-state",
+            cause: new Error("Pi returned an incompatible session model"),
+          }),
+        );
+      }
+      return Effect.succeed({
+        sessionId: candidate.sessionId,
+        model: {
+          provider: (candidate.model as { readonly provider: string }).provider,
+          id: (candidate.model as { readonly id: string }).id,
+        },
+      });
+    };
+
+    const awaitReady = (transport: PiTransport) =>
+      transport.command<unknown>({ type: "get_state" }).pipe(
+        Effect.flatMap(decodeSessionState),
+        Effect.timeoutOrElse({
+          duration: HANDSHAKE_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new PiTransportError({
+                operation: "handshake-timeout",
+                cause: new Error("Pi RPC get_state handshake timed out"),
+              }),
+            ),
+        }),
+      );
+
+    const isPiModel = (value: unknown): value is PiModel => {
+      if (typeof value !== "object" || value === null) return false;
+      const model = value as Record<string, unknown>;
+      return (
+        typeof model.provider === "string" &&
+        typeof model.id === "string" &&
+        typeof model.name === "string" &&
+        Array.isArray(model.input) &&
+        model.input.every((input) => input === "text" || input === "image")
+      );
+    };
+
+    const listTransportModels = (transport: PiTransport) =>
+      transport.command<unknown>({ type: "get_available_models" }).pipe(
+        Effect.flatMap((data) => {
+          const models =
+            typeof data === "object" && data !== null && "models" in data
+              ? (data as { readonly models?: unknown }).models
+              : undefined;
+          return Array.isArray(models) && models.every(isPiModel)
+            ? Effect.succeed(models)
+            : Effect.fail(
+                new PiTransportError({
+                  operation: "decode-model-list",
+                  cause: new Error("Pi returned an incompatible model-list response"),
+                }),
+              );
         }),
       );
 
@@ -318,20 +437,10 @@ export const makePiAgentWithDependencies = <R>(
             .makeTransport({ sessionId, ...(cwd ? { cwd } : {}) })
             .pipe(Effect.provideService(Scope.Scope, scope), Effect.provideContext(buildContext));
 
-          // Readiness handshake: pi's CLI front-end resolves the session (and
-          // may exit with a human-readable error) before the RPC loop starts.
-          yield* transport.command<RpcSessionState>({ type: "get_state" }).pipe(
-            Effect.timeoutOrElse({
-              duration: HANDSHAKE_TIMEOUT,
-              orElse: () =>
-                Effect.fail(
-                  new PiTransportError({
-                    operation: "handshake-timeout",
-                    cause: new Error("Pi RPC get_state handshake timed out"),
-                  }),
-                ),
-            }),
-          );
+          // Pi resolves the requested session before the RPC loop starts and
+          // may print a human-readable failure first. A correlated command is
+          // the readiness boundary for both managed and temporary children.
+          yield* awaitReady(transport);
 
           const session: SessionState = {
             sessionId,
@@ -399,6 +508,22 @@ export const makePiAgentWithDependencies = <R>(
       );
 
     return {
+      listModels: (cwd) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const transport = yield* dependencies.makeTransport({ cwd, args: ["--no-session"] });
+            yield* awaitReady(transport);
+            return yield* listTransportModels(transport);
+          }).pipe(Effect.provideContext(buildContext)),
+        ),
+      getDefaultModel: (cwd) =>
+        Effect.scoped(
+          dependencies.makeTransport({ cwd, args: ["--no-session"] }).pipe(
+            Effect.flatMap(awaitReady),
+            Effect.map((state) => state.model),
+            Effect.provideContext(buildContext),
+          ),
+        ),
       session: {
         create: (config) => openSession(uuid(), config.cwd),
         resume: (config) => openSession(config.sessionId, config.cwd),
@@ -549,6 +674,29 @@ export const makePiAgentWithDependencies = <R>(
               session.transport.command<SessionEntries>({ type: "get_entries" }),
             ),
           ),
+        listModels: (sessionId) =>
+          getSession(sessionId).pipe(
+            Effect.flatMap((session) => listTransportModels(session.transport)),
+          ),
+        getState: (sessionId) =>
+          getSession(sessionId).pipe(
+            Effect.flatMap((session) =>
+              session.transport
+                .command<unknown>({ type: "get_state" })
+                .pipe(Effect.flatMap(decodeSessionState)),
+            ),
+          ),
+        setModel: (sessionId, providerId, modelId) =>
+          getSession(sessionId).pipe(
+            Effect.flatMap((session) =>
+              session.transport.command({
+                type: "set_model",
+                provider: providerId,
+                modelId,
+              }),
+            ),
+            Effect.asVoid,
+          ),
         requestPermission: (sessionId) =>
           Stream.unwrap(
             getSession(sessionId).pipe(
@@ -588,8 +736,10 @@ export const makePiAgent = (
     makeTransport: (config) =>
       makePiTransport({
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
-        ...(options.args ? { args: options.args } : {}),
-        sessionId: config.sessionId,
+        ...((options.args?.length ?? 0) + (config.args?.length ?? 0) > 0
+          ? { args: [...(options.args ?? []), ...(config.args ?? [])] }
+          : {}),
+        ...(config.sessionId ? { sessionId: config.sessionId } : {}),
         ...(config.cwd ? { cwd: config.cwd } : {}),
       }),
   });

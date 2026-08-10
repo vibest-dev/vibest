@@ -89,6 +89,7 @@ export type HarnessAgentSessionManagerShape = {
     ref: SessionRef,
     patch: SessionConfig,
   ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  readonly primeConfig: (ref: SessionRef, patch: SessionConfig) => Effect.Effect<void>;
   /**
    * Close and forget a session — runtime and session state alike; idempotent.
    * This is the only path that discards a crashed session (a crash alone
@@ -209,7 +210,11 @@ export const makeHarnessAgentSessionManager = (
       Ref.get(sessions).pipe(
         Effect.flatMap((current) => {
           const entry = current.get(ref.sessionId);
-          return entry?._tag === "Live" ? use(entry.session) : Effect.succeed(absent);
+          const matches =
+            entry?._tag === "Live" &&
+            entry.session.ref.projectId === ref.projectId &&
+            entry.session.ref.harnessAgentId === ref.harnessAgentId;
+          return matches ? use(entry.session) : Effect.succeed(absent);
         }),
       );
 
@@ -341,6 +346,8 @@ export const makeHarnessAgentSessionManager = (
       peek,
       setConfig: (ref, patch) =>
         sessionFor(ref).pipe(Effect.flatMap((session) => session.setConfig(patch))),
+      primeConfig: (ref, patch) =>
+        sessionFor(ref).pipe(Effect.flatMap((session) => session.primeConfig(patch))),
       close,
       status: (ref) => withSession(ref, (session) => session.status, toStatus(initialSessionState)),
       snapshot: (ref) =>

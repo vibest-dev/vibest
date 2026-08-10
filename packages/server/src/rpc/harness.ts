@@ -2,7 +2,7 @@ import "@orpc/experimental-effect/extensions/effect";
 import { implement } from "@orpc/server";
 import { harnessContract } from "@vibest/contract/harness";
 
-import { HarnessListService, HarnessProbeService } from "../harness";
+import { HarnessListService, HarnessModelService } from "../harness";
 import type { RpcContext } from "./context";
 
 const orpc = implement(harnessContract).$context<RpcContext>();
@@ -15,13 +15,16 @@ export const harnessRouter = orpc.router({
     const list = yield* HarnessListService;
     return yield* list.list;
   }),
-  // Probed data, per directory: costs a CLI spawn, so caching, in-flight
-  // de-duplication and the timeout all live in the service — this route is just
-  // the wire. A failed probe fails the call; collapsing it into an empty result
-  // would cache "no models" over what is actually "login expired".
-  probe: orpc.probe.effect(function* ({ input }) {
-    const probe = yield* HarnessProbeService;
-    return yield* probe.probe(input);
+  // A live session is queried through its existing runtime. Otherwise the
+  // model module performs the cached, short-lived directory query. This route
+  // only binds that behavior to the wire.
+  listModels: orpc.listModels.effect(function* ({ input }) {
+    const models = yield* HarnessModelService;
+    return yield* models.listModels(input);
+  }),
+  getDefaultModel: orpc.getDefaultModel.effect(function* ({ input }) {
+    const models = yield* HarnessModelService;
+    return yield* models.getDefaultModel(input);
   }),
 });
 

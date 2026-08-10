@@ -76,6 +76,8 @@ export type SessionState = {
   readonly seq: number;
   readonly cursor: number;
   readonly phase: SessionPhase;
+  readonly providerId?: string;
+  readonly modelId?: string;
   readonly activeTurn: ActiveTurn | null;
   readonly activePrompt: ActivePrompt | null;
   readonly pendingRequests: ReadonlyMap<string, AgentRequest>;
@@ -231,6 +233,12 @@ export const foldSessionEvent = (
         pendingRequests.size > 0 ? "requires_action" : current.activeTurn ? "running" : "idle";
       return { ...base, phase, pendingRequests };
     }
+    case "session.model.updated":
+      return {
+        ...base,
+        providerId: event.providerId,
+        modelId: event.modelId,
+      };
     case "session.crashed":
       return {
         ...base,
@@ -252,6 +260,9 @@ export const toStatus = (state: SessionState): SessionStatus => ({
 export const toSnapshot = (ref: SessionRef, state: SessionState): SessionRuntimeSnapshot => ({
   ref,
   status: toStatus(state),
+  ...(state.providerId !== undefined && state.modelId !== undefined
+    ? { providerId: state.providerId, modelId: state.modelId }
+    : {}),
   pendingRequests: [...state.pendingRequests.values()],
   activeTurn: state.activeTurn
     ? {

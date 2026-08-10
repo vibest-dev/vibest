@@ -26,9 +26,10 @@ const adapter = (over: {
   ),
   permissionModes: ["ask"],
   defaultPermissionMode: "ask",
-  // Listing must never reach for one of these: declaring a model probe
+  // Listing must never reach for one of these: declaring model listing
   // changes nothing about what this call returns.
-  probeModels: () => Effect.die("list must not probe models"),
+  listModelProviders: () => Effect.die("list must not query models"),
+  getDefaultModel: () => Effect.die("list must not resolve a default model"),
   open: () => Effect.die("list must not open a session"),
   resume: () => Effect.die("list must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),

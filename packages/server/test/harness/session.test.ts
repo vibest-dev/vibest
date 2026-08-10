@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
 import type { SessionRef } from "@vibest/contract";
-import { Context, Effect, Layer, Queue, Ref, Stream } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import { EventBus, EventBusLayer } from "../../src/events";
@@ -44,7 +44,11 @@ type EventQueue = Effect.Success<typeof makeQueue>;
  * session under test never calls anything else on it. */
 const runtimeFrom = (
   queue: EventQueue,
-  options: { readonly closes?: Ref.Ref<number>; readonly models?: Ref.Ref<Array<string>> } = {},
+  options: {
+    readonly closes?: Ref.Ref<number>;
+    readonly models?: Ref.Ref<Array<string>>;
+    readonly failModel?: string;
+  } = {},
 ): HarnessAgentRuntime => ({
   sessionId: nativeId,
   harnessAgentId: "claude-code",
@@ -52,8 +56,26 @@ const runtimeFrom = (
     Stream.map((body) => ({ harnessAgentId: "claude-code" as const, sessionId: nativeId, body })),
   ),
   prompt: () => Effect.succeed({ turnId: "turn-1" }),
-  setModel: (model) =>
-    options.models ? Ref.update(options.models, (seen) => [...seen, model]) : Effect.void,
+  getModel: Effect.succeed({}),
+  setModel: (providerId, modelId) => {
+    const address = `${providerId}/${modelId}`;
+    const record = options.models
+      ? Ref.update(options.models, (seen) => [...seen, address])
+      : Effect.void;
+    return record.pipe(
+      Effect.andThen(
+        options.failModel === address
+          ? Effect.fail(
+              new AgentOperationError({
+                sessionId: nativeId,
+                operation: "set-model",
+                cause: "rejected",
+              }),
+            )
+          : Effect.void,
+      ),
+    );
+  },
   setReasoningEffort: () => Effect.void,
   setPermissionMode: () => Effect.void,
   interrupt: Effect.void,
@@ -115,6 +137,24 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
   ),
 );
 
+it.effect("folds a model update into the authoritative session snapshot", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      yield* session.emit({
+        type: "session.model.updated",
+        providerId: "provider/one",
+        modelId: "model:one",
+      });
+
+      const snapshot = yield* session.snapshot;
+      assert.equal(snapshot.providerId, "provider/one");
+      assert.equal(snapshot.modelId, "model:one");
+      assert.equal(snapshot.cursor, 1);
+    }),
+  ),
+);
+
 it.effect("seeds every runtime it acquires with the config it was told to keep", () =>
   run(
     Effect.gen(function* () {
@@ -122,16 +162,16 @@ it.effect("seeds every runtime it acquires with the config it was told to keep",
       const models = yield* Ref.make<Array<string>>([]);
       // Nothing is running, so this only records — and it must still succeed:
       // picking a model for a session you have not written to yet is ordinary.
-      yield* session.setConfig({ model: "opus" });
+      yield* session.setConfig({ providerId: "claude-code", modelId: "opus" });
       assert.deepEqual(yield* Ref.get(models), []);
 
       const first = yield* makeQueue;
       yield* session.ensureRuntime(Effect.succeed(runtimeFrom(first, { models })));
-      assert.deepEqual(yield* Ref.get(models), ["opus"]);
+      assert.deepEqual(yield* Ref.get(models), ["claude-code/opus"]);
 
       // A live runtime takes the change immediately …
-      yield* session.setConfig({ model: "sonnet" });
-      assert.deepEqual(yield* Ref.get(models), ["opus", "sonnet"]);
+      yield* session.setConfig({ providerId: "claude-code", modelId: "sonnet" });
+      assert.deepEqual(yield* Ref.get(models), ["claude-code/opus", "claude-code/sonnet"]);
 
       // … and the accumulated choice — not the create-time one — is what the
       // replacement is seeded with, so a crash does not quietly revert the
@@ -141,7 +181,66 @@ it.effect("seeds every runtime it acquires with the config it was told to keep",
       const replacement = yield* Ref.make<Array<string>>([]);
       const second = yield* makeQueue;
       yield* session.ensureRuntime(Effect.succeed(runtimeFrom(second, { models: replacement })));
-      assert.deepEqual(yield* Ref.get(replacement), ["sonnet"]);
+      assert.deepEqual(yield* Ref.get(replacement), ["claude-code/sonnet"]);
+    }),
+  ),
+);
+
+it.effect("rolls back desired config when a live model change fails", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      yield* session.setConfig({ providerId: "claude-code", modelId: "opus" });
+
+      const models = yield* Ref.make<Array<string>>([]);
+      const first = yield* makeQueue;
+      yield* session.ensureRuntime(
+        Effect.succeed(
+          runtimeFrom(first, {
+            models,
+            failModel: "claude-code/sonnet",
+          }),
+        ),
+      );
+      const failure = yield* Effect.flip(
+        session.setConfig({ providerId: "claude-code", modelId: "sonnet" }),
+      );
+      assert.equal(failure._tag, "AgentOperationError");
+
+      yield* crashQueue(first);
+      yield* awaitPhase(session, "crashed");
+      const replacement = yield* Ref.make<Array<string>>([]);
+      const second = yield* makeQueue;
+      yield* session.ensureRuntime(Effect.succeed(runtimeFrom(second, { models: replacement })));
+      assert.deepEqual(yield* Ref.get(replacement), ["claude-code/opus"]);
+    }),
+  ),
+);
+
+it.effect("applies a config change made while the runtime is opening", () =>
+  run(
+    Effect.gen(function* () {
+      const session = yield* SessionService;
+      const models = yield* Ref.make<Array<string>>([]);
+      const queue = yield* makeQueue;
+      const opening = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      const acquired = yield* session
+        .ensureRuntime(
+          Deferred.succeed(opening, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(runtimeFrom(queue, { models })),
+          ),
+        )
+        .pipe(Effect.forkChild);
+
+      yield* Deferred.await(opening);
+      yield* session.setConfig({ providerId: "claude-code", modelId: "sonnet" });
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(acquired);
+
+      assert.deepEqual(yield* Ref.get(models), ["claude-code/sonnet"]);
     }),
   ),
 );

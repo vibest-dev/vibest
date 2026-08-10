@@ -11,6 +11,7 @@ const claude = {
   descriptor: { id: "claude-code", name: "Claude Code" },
   checkAvailability: Effect.succeed({ available: true }),
   permissionModes: [],
+  getDefaultModel: () => Effect.succeed({}),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
   open: () => Effect.die("not used"),
   resume: () => Effect.die("not used"),

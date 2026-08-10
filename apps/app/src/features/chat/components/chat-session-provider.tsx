@@ -6,10 +6,9 @@ import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
 import {
   findModelInfo,
   resolveReasoningEffort,
-  resolveModel,
   resolvePermissionMode,
 } from "@/features/chat/harness/session-config";
-import { useHarnessAgent, useHarnessProbe } from "@/features/chat/harness/use-harness";
+import { useHarnessAgent, useHarnessModels } from "@/features/chat/harness/use-harness";
 import { selectTurnInProgress, useChatHandle } from "@/features/chat/runtime/use-chat-handle";
 
 import { ChatSessionContext, type ChatSessionValue } from "./chat-session-context";
@@ -34,41 +33,45 @@ export function ChatSessionProvider({
   children: ReactNode;
 }) {
   const chat = useChatHandle(sessionRef);
-  // Only what the user changed in this session lives in state; anything unset
-  // follows the harness's declared default. Session config isn't persisted yet
-  // (see docs/design/harness-agent-selection-design.md §7), so after a reload
-  // these show the harness defaults rather than what the session actually runs
-  // with — but never a value the harness doesn't offer.
   const [picked, setPicked] = useState<{
-    providerId?: string;
-    modelId?: string;
     reasoningEffort?: ReasoningEffort;
     permissionMode?: PermissionMode;
   }>({});
   const harnessAgent = useHarnessAgent(chat.harnessAgentId);
-  // What this harness offers *in this session's directory* — a project's own
-  // settings can remap what a model id resolves to, so the providers have to
-  // be probed per project, not once per harness.
-  const probe = useHarnessProbe(chat.harnessAgentId, cwd);
-  const providers = probe.data?.providers ?? NO_PROVIDERS;
-  // Each dimension resolves on its own; reasoningEffort cascades from the resolved model.
-  const model = resolveModel(providers, picked.providerId, picked.modelId);
-  const modelInfo = findModelInfo(providers, model?.providerId, model?.modelId);
   const turnInProgress = useStore(chat.store, selectTurnInProgress);
+  const providerId = useStore(chat.store, (state) => state.providerId);
+  const modelId = useStore(chat.store, (state) => state.modelId);
+  const historyStatus = useStore(chat.store, (state) => state.historyStatus);
+  // A live session answers through its current runtime. A cold session falls
+  // back to the directory-aware model list without starting the managed
+  // session solely for this control. Turn transitions force the cold answer to
+  // be replaced once the first runtime exists.
+  const {
+    data: modelData,
+    isError: modelListFailed,
+    refetch: refetchModels,
+  } = useHarnessModels(
+    chat.harnessAgentId,
+    historyStatus === "loading" ? undefined : cwd,
+    sessionRef,
+    turnInProgress,
+  );
+  const providers = modelData?.providers ?? NO_PROVIDERS;
+  const retryModelList = useCallback(() => {
+    void refetchModels();
+  }, [refetchModels]);
+  // The snapshot/event stream owns the pair. The catalog only enriches it
+  // with display data and normalized traits; a missing row never erases the
+  // session's stored selection.
+  const modelInfo = findModelInfo(providers, providerId, modelId);
 
-  // Config changes are separate session calls, applied optimistically to the
-  // local picks so the control stays responsive.
   const setModel = useCallback(
-    (providerId: string, modelId: string) => {
-      // Mirrors the server: switching models drops the reasoningEffort override, so the
-      // new model runs on its own default until the user picks again.
-      setPicked(({ reasoningEffort: _dropped, ...current }) => ({
-        ...current,
-        providerId,
-        modelId,
-      }));
+    (nextProviderId: string, nextModelId: string) => {
+      setPicked(({ reasoningEffort: _dropped, ...current }) => current);
+      // The session event is authoritative. Avoid optimistic model writes so
+      // an older failed request cannot roll back a newer event or selection.
       void chat
-        .setModel(providerId, modelId)
+        .setModel(nextProviderId, nextModelId)
         .catch((error) => console.error("Failed to set model", error));
     },
     [chat],
@@ -95,14 +98,12 @@ export function ChatSessionProvider({
 
   const reasoningEfforts = modelInfo?.reasoningEfforts ?? NO_REASONING_EFFORTS;
   // orderPermissionModes builds a new array on every call, so it is memoised on
-  // the harness's declared list — which only changes when the probe does.
+  // the harness's declared list — which only changes when model data changes.
   const declaredPermissionModes = harnessAgent?.permissionModes;
   const permissionModes = useMemo(
     () => orderPermissionModes(declaredPermissionModes ?? []),
     [declaredPermissionModes],
   );
-  const providerId = model?.providerId;
-  const modelId = model?.modelId;
   const reasoningEffort = resolveReasoningEffort(modelInfo, picked.reasoningEffort);
   const permissionMode = resolvePermissionMode(harnessAgent, picked.permissionMode);
 
@@ -118,6 +119,8 @@ export function ChatSessionProvider({
       respondToRequest: chat.respondToAgentRequest,
       turnInProgress,
       providers,
+      modelListFailed,
+      retryModelList,
       providerId,
       modelId,
       setModel,
@@ -134,6 +137,8 @@ export function ChatSessionProvider({
       prompt,
       turnInProgress,
       providers,
+      modelListFailed,
+      retryModelList,
       providerId,
       modelId,
       setModel,

@@ -4,7 +4,7 @@ import type { ReasoningEffort } from "@vibest/contract";
  * Display knowledge for the reasoning-reasoningEffort union. Like permission modes,
  * reasoningEffort names are vibest's vocabulary — adapters translate native levels into
  * it — so their labels and ordering are client-owned. Which members a given
- * model offers comes from that model's probed traits (`ModelInfo.reasoningEfforts`).
+ * model offers comes from that model's listed traits (`ModelInfo.reasoningEfforts`).
  */
 export const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   minimal: "Minimal",

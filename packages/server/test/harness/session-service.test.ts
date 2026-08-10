@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
+import { Crypto, Deferred, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -13,8 +13,9 @@ import type {
   HarnessAgentRuntime,
   SessionInfoResult,
 } from "../../src/harness/adapter";
-import { TurnAlreadyRunning } from "../../src/harness/errors";
+import { AgentOpenError, AgentOperationError, TurnAlreadyRunning } from "../../src/harness/errors";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import type { SessionConfig } from "../../src/harness/session-io";
 import { makeHarnessAgentSessionManager } from "../../src/harness/session-manager";
 import {
   type HarnessAgentSessionRepositoryShape,
@@ -70,6 +71,19 @@ describe("HarnessAgentSessionService", () => {
       promptFails?: boolean;
       // Optional close hook for exercising lifecycle contention.
       close?: (sessionId: string) => Promise<void>;
+      // Runtime acquisition fails after a process restart.
+      resumeFails?: boolean;
+      // The runtime cannot verify its actual model after opening.
+      modelUnavailable?: boolean;
+      getModel?: (
+        sessionId: string,
+      ) => Effect.Effect<
+        { readonly providerId?: string; readonly modelId?: string },
+        AgentOperationError
+      >;
+      onSetModel?: (providerId: string, modelId: string) => void;
+      beforePrime?: (config: SessionConfig) => Effect.Effect<void>;
+      afterSetConfig?: (config: SessionConfig) => void;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
@@ -113,7 +127,19 @@ describe("HarnessAgentSessionService", () => {
             prompt: opts.promptFails
               ? () => Effect.fail(new TurnAlreadyRunning({ sessionId }))
               : () => Effect.succeed({ turnId: "turn-1" }),
-            setModel: () => Effect.void,
+            getModel:
+              opts.getModel?.(sessionId) ??
+              (opts.modelUnavailable
+                ? Effect.fail(
+                    new AgentOperationError({
+                      sessionId,
+                      operation: "get-model",
+                      cause: "unavailable",
+                    }),
+                  )
+                : Effect.succeed({ providerId: "claude-code", modelId: "default" })),
+            setModel: (providerId, modelId) =>
+              Effect.sync(() => opts.onSetModel?.(providerId, modelId)),
             setReasoningEffort: () => Effect.void,
             setPermissionMode: () => Effect.void,
             interrupt: Effect.void,
@@ -143,6 +169,8 @@ describe("HarnessAgentSessionService", () => {
                 : { available: true },
             ),
             permissionModes: [],
+            getDefaultModel: () =>
+              Effect.succeed({ providerId: "claude-code", modelId: "default" }),
             open: ({ cwd }) =>
               Effect.sync(() => {
                 spy.open.push({ cwd });
@@ -152,8 +180,15 @@ describe("HarnessAgentSessionService", () => {
             resume: ({ sessionId, cwd }) =>
               Effect.sync(() => {
                 spy.resume.push({ sessionId, cwd });
-                return makeSession(sessionId);
-              }),
+              }).pipe(
+                Effect.andThen(
+                  opts.resumeFails
+                    ? Effect.fail(
+                        new AgentOpenError({ harnessAgentId: "claude-code", cause: "boom" }),
+                      )
+                    : Effect.succeed(makeSession(sessionId)),
+                ),
+              ),
             ...(opts.coldHistory !== undefined
               ? { getMessages: () => Effect.succeed(opts.coldHistory ?? []) }
               : {}),
@@ -168,8 +203,25 @@ describe("HarnessAgentSessionService", () => {
               const repo = yield* makeHarnessAgentSessionRepository(
                 path.join(home, "storage", "sessions"),
               );
+              const beforePrime = opts.beforePrime;
+              const afterSetConfig = opts.afterSetConfig;
+              const serviceManager = {
+                ...manager,
+                primeConfig:
+                  beforePrime === undefined
+                    ? manager.primeConfig
+                    : (ref: SessionRef, config: SessionConfig) =>
+                        beforePrime(config).pipe(Effect.andThen(manager.primeConfig(ref, config))),
+                setConfig:
+                  afterSetConfig === undefined
+                    ? manager.setConfig
+                    : (ref: SessionRef, config: SessionConfig) =>
+                        manager
+                          .setConfig(ref, config)
+                          .pipe(Effect.tap(() => Effect.sync(() => afterSetConfig(config)))),
+              };
               const service = makeHarnessAgentSessionService({
-                manager,
+                manager: serviceManager,
                 registry,
                 repo,
                 bus,
@@ -201,6 +253,18 @@ describe("HarnessAgentSessionService", () => {
     expect(result.stored.projectId).toBe("proj-a");
     expect(result.stored.cwd).toBe("/tmp/vibest-app");
     expect(result.stored.archived).toBe(false);
+  });
+
+  it("does not persist an unverified desired model after create", async () => {
+    const stored = await run({ modelUnavailable: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* fixture.repo.read(ref.projectId, ref.sessionId);
+      }),
+    );
+
+    expect(stored.providerId).toBeUndefined();
+    expect(stored.modelId).toBeUndefined();
   });
 
   it("create surfaces AgentUnavailable and writes no metadata", async () => {
@@ -236,6 +300,129 @@ describe("HarnessAgentSessionService", () => {
     // Opening a session page costs no process — the whole point of `prepare`.
     expect(result.resume).toEqual([]);
     expect(result.open).toHaveLength(1);
+  });
+
+  it("persists a selected model and publishes it through snapshots", async () => {
+    const result = await run({}, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.setModel(ref, "claude-code", "opus");
+        const stored = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+        const snapshot = yield* fixture.service.getSnapshot(ref);
+        return { stored, snapshot };
+      }),
+    );
+
+    expect(result.stored.providerId).toBe("claude-code");
+    expect(result.stored.modelId).toBe("opus");
+    expect(result.snapshot.providerId).toBe("claude-code");
+    expect(result.snapshot.modelId).toBe("opus");
+  });
+
+  it("serializes runtime-model reconciliation with a newer model selection", async () => {
+    let readStarted!: Deferred.Deferred<void>;
+    let releaseRead!: Deferred.Deferred<void>;
+    let modelApplied!: Deferred.Deferred<void>;
+    let reads = 0;
+    const result = await run(
+      {
+        history: [],
+        getModel: () =>
+          Effect.suspend(() => {
+            reads += 1;
+            if (reads === 1) {
+              return Effect.succeed({ providerId: "claude-code", modelId: "default" });
+            }
+            return Deferred.succeed(readStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseRead)),
+              Effect.as({ providerId: "claude-code", modelId: "default" }),
+            );
+          }),
+        onSetModel: (_providerId, modelId) => {
+          if (modelId === "opus") Deferred.doneUnsafe(modelApplied, Effect.void);
+        },
+      },
+      (fixture) =>
+        Effect.gen(function* () {
+          readStarted = yield* Deferred.make<void>();
+          releaseRead = yield* Deferred.make<void>();
+          modelApplied = yield* Deferred.make<void>();
+          const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+
+          const history = yield* fixture.service
+            .getMessages(ref, "/tmp/vibest-app")
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(readStarted);
+          const selection = yield* fixture.service
+            .setModel(ref, "claude-code", "opus")
+            .pipe(Effect.forkChild);
+          const appliedBeforeRelease = yield* Effect.race(
+            Deferred.await(modelApplied).pipe(Effect.as(true)),
+            Effect.sleep("100 millis").pipe(Effect.as(false)),
+          );
+          yield* Deferred.succeed(releaseRead, undefined);
+          yield* Fiber.join(history);
+          yield* Fiber.join(selection);
+          const stored = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+          return { appliedBeforeRelease, stored };
+        }),
+    );
+
+    expect(result.appliedBeforeRelease).toBe(false);
+    expect(result.stored.providerId).toBe("claude-code");
+    expect(result.stored.modelId).toBe("opus");
+  });
+
+  it("serializes persisted model priming with a newer model selection", async () => {
+    let primeStarted!: Deferred.Deferred<void>;
+    let releasePrime!: Deferred.Deferred<void>;
+    let selectionApplied!: Deferred.Deferred<void>;
+    let currentModel = "default";
+    const result = await run(
+      {
+        history: [],
+        getModel: () => Effect.sync(() => ({ providerId: "claude-code", modelId: currentModel })),
+        onSetModel: (_providerId, modelId) => {
+          currentModel = modelId;
+        },
+        beforePrime: () =>
+          Deferred.succeed(primeStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releasePrime)),
+          ),
+        afterSetConfig: ({ modelId }) => {
+          if (modelId === "opus") Deferred.doneUnsafe(selectionApplied, Effect.void);
+        },
+      },
+      (fixture) =>
+        Effect.gen(function* () {
+          primeStarted = yield* Deferred.make<void>();
+          releasePrime = yield* Deferred.make<void>();
+          selectionApplied = yield* Deferred.make<void>();
+          const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+          yield* fixture.service.close(ref);
+
+          const history = yield* fixture.service
+            .getMessages(ref, "/tmp/vibest-app")
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(primeStarted);
+          const selection = yield* fixture.service
+            .setModel(ref, "claude-code", "opus")
+            .pipe(Effect.forkChild);
+          const appliedBeforeRelease = yield* Effect.race(
+            Deferred.await(selectionApplied).pipe(Effect.as(true)),
+            Effect.sleep("100 millis").pipe(Effect.as(false)),
+          );
+          yield* Deferred.succeed(releasePrime, undefined);
+          yield* Fiber.join(history);
+          yield* Fiber.join(selection);
+          const stored = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+          return { appliedBeforeRelease, stored };
+        }),
+    );
+
+    expect(result.appliedBeforeRelease).toBe(false);
+    expect(result.stored.providerId).toBe("claude-code");
+    expect(result.stored.modelId).toBe("opus");
   });
 
   it("prepare fails with SessionNotFound for an unknown session", async () => {
@@ -501,6 +688,8 @@ describe("HarnessAgentSessionService", () => {
     // Everything a reattaching client asks for is answerable …
     expect(result.status).toEqual({ phase: "idle" });
     expect(result.snapshot.cursor).toBe(0);
+    expect(result.snapshot.providerId).toBe("claude-code");
+    expect(result.snapshot.modelId).toBe("default");
     expect(result.snapshot.activeTurn).toBeNull();
     expect(result.messages).toEqual(history);
     // … a session nothing has touched carries no status at all, so the sidebar
@@ -675,6 +864,51 @@ describe("HarnessAgentSessionService", () => {
     // The submit broadcast still precedes the harness call (seq-order
     // invariant), so the rejection must compensate it — and the snapshot must
     // not retain the phantom for mid-turn joiners.
+    expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
+    expect(result.activePrompt).toBeNull();
+  });
+
+  it("compensates a prompt when runtime acquisition fails after restart", async () => {
+    const result = await run({ resumeFails: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const restarted = yield* fixture.restart;
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* restarted.bus.subscribe({ kind: "session", ref });
+            const failure = yield* Effect.flip(
+              restarted.service.prompt({
+                ref,
+                parts: [{ type: "text", text: "resume me" }],
+                messageId: "resume-msg",
+              }),
+            );
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            const snapshot = yield* restarted.service.getSnapshot(ref);
+            return {
+              failure,
+              broadcast: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+              activePrompt: snapshot.activePrompt,
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.failure._tag).toBe("AgentOpenError");
     expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
     expect(result.activePrompt).toBeNull();
   });

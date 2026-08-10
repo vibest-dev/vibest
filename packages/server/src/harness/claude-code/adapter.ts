@@ -16,7 +16,8 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
-  CapabilityProbeFailed,
+  DefaultModelFailed,
+  ModelListFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -173,6 +174,7 @@ const makeRuntime = (
       EVENT_QUEUE_CAPACITY,
     );
     const closed = yield* Ref.make(false);
+    const currentModel = yield* Ref.make<string | undefined>(undefined);
     const activeTurn = yield* Ref.make<string | undefined>(undefined);
     const pendingPermissions = yield* Ref.make<ReadonlyMap<string, ToolPermissionRequest>>(
       new Map(),
@@ -270,12 +272,20 @@ const makeRuntime = (
         .pipe(Effect.mapError((cause) => operationError(sessionId, "interrupt", cause)));
     });
 
-    const setModel: HarnessAgentRuntime["setModel"] = (model) =>
+    const setModel: HarnessAgentRuntime["setModel"] = (providerId, modelId) =>
       Effect.gen(function* () {
         if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        if (providerId !== "claude-code") {
+          return yield* operationError(
+            sessionId,
+            "set-model",
+            new Error(`unsupported provider: ${providerId}`),
+          );
+        }
         yield* agent.session
-          .setModel(sessionId, model)
+          .setModel(sessionId, modelId)
           .pipe(Effect.mapError((cause) => operationError(sessionId, "set-model", cause)));
+        yield* Ref.set(currentModel, modelId);
       });
 
     const setPermissionMode: HarnessAgentRuntime["setPermissionMode"] = (mode) =>
@@ -372,6 +382,9 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      getModel: Ref.get(currentModel).pipe(
+        Effect.map((modelId) => (modelId ? { providerId: "claude-code", modelId } : {})),
+      ),
       setModel,
       setReasoningEffort,
       setPermissionMode,
@@ -420,7 +433,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   // Codex defaults lower because its "full" also drops the sandbox; this one
   // only bypasses the prompts.
   defaultPermissionMode: "full",
-  probeModels: (cwd) =>
+  listModelProviders: (cwd) =>
     agent.listModels(cwd).pipe(
       // No `reasoningEfforts` traits on purpose: the SDK exposes the levels in its
       // catalogue but offers no runtime call to apply one, and declaring a
@@ -428,12 +441,22 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
       // "Default (recommended)" row passes through as an ordinary pickable
       // model — it is an option whose meaning is "let the CLI decide", not a
       // preselection marker.
-      Effect.map((models) =>
-        models.map((model) => ({ id: model.value, label: model.displayName })),
-      ),
-      Effect.mapError(
-        (cause) => new CapabilityProbeFailed({ harnessAgentId: "claude-code", cause }),
-      ),
+      Effect.map((models) => [
+        {
+          id: "claude-code",
+          label: "Claude Code",
+          models: models.map((model) => ({ id: model.value, label: model.displayName })),
+        },
+      ]),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "claude-code", cause })),
+    ),
+  getDefaultModel: (cwd) =>
+    agent.listModels(cwd).pipe(
+      Effect.map((models) => {
+        const model = models.find((candidate) => candidate.value === "default");
+        return model ? { providerId: "claude-code", modelId: model.value } : {};
+      }),
+      Effect.mapError((cause) => new DefaultModelFailed({ harnessAgentId: "claude-code", cause })),
     ),
   // Present AND new enough: a resolvable binary that is older than the version
   // the SDK bundles reports as unavailable, so a too-old install fails fast

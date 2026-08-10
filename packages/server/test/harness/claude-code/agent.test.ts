@@ -224,7 +224,7 @@ describe("ClaudeCodeAgent", () => {
       const session = yield* makeClaudeCodeAdapter(agent).open({ cwd: "/tmp" });
       // The session seeds a runtime it has just acquired by calling the very
       // same setter, so driving it directly is what that path exercises.
-      yield* session.setModel("opus");
+      yield* session.setModel("claude-code", "opus");
       const collected = yield* Effect.forkChild(
         Stream.runCollect(
           session.events.pipe(

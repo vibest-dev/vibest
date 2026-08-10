@@ -91,6 +91,7 @@ const makeFixture = Effect.gen(function* () {
             });
             return { turnId: "turn-1" };
           }),
+        getModel: Effect.succeed({}),
         setModel: () => Effect.void,
         setReasoningEffort: () => Effect.void,
         setPermissionMode: () => Effect.void,
@@ -110,6 +111,7 @@ const makeFixture = Effect.gen(function* () {
     descriptor: { id: "claude-code", name: "Claude Code" },
     checkAvailability: Effect.succeed({ available: true }),
     permissionModes: [],
+    getDefaultModel: () => Effect.succeed({}),
     open: () => makeRuntime("created-session"),
     resume: ({ sessionId }) =>
       Ref.update(resumeCalls, (current) => current + 1).pipe(
@@ -138,7 +140,7 @@ const makeFixture = Effect.gen(function* () {
 
 type Fixture = Effect.Success<typeof makeFixture>;
 
-/** Liveness probe: `get` succeeds while a session has a runtime, fails once torn down. */
+/** Liveness check: `get` succeeds while a session has a runtime, fails once torn down. */
 const isActive = (fixture: Fixture, ref: SessionRef) =>
   fixture.manager.get(ref).pipe(Effect.exit, Effect.map(Exit.isSuccess));
 

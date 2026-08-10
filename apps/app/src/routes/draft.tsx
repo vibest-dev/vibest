@@ -46,7 +46,8 @@ import {
 import {
   useHarnessAgent,
   useHarnessAgents,
-  useHarnessProbe,
+  useHarnessDefaultModel,
+  useHarnessModels,
 } from "@/features/chat/harness/use-harness";
 import { useChatManager } from "@/features/chat/runtime/chat-context";
 import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
@@ -63,7 +64,8 @@ const PREFERRED_HARNESS_AGENT_ID: HarnessAgentId = "claude-code";
 /**
  * The draft config lives in the URL, and only what the user explicitly picked
  * is written there. Everything absent follows the selected harness's declared
- * default, which is the same thing "omit the field" means to `session.create`.
+ * default. The model default is resolved separately from the catalog and is
+ * persisted as a concrete pair when the session is created.
  *
  * That is what makes switching harness free of reset logic: navigating with a
  * new `harness` simply drops the other params, so everything falls back to the
@@ -129,15 +131,23 @@ function DraftRoute() {
   const harnessAgent = useHarnessAgent(harnessAgentId);
   // The selected project's directory decides what its harness can offer — a
   // project's own settings can remap what a model id resolves to. No project
-  // picked means no cwd to probe, so the model picker has nothing to offer;
-  // the composer blocks on project selection anyway. Undefined until the probe
-  // lands is not a wait either: submitting meanwhile omits `model` — which is
-  // exactly what "the user didn't pick one" already means.
-  const probe = useHarnessProbe(harnessAgentId, selected?.path);
-  // Each dimension resolves on its own — a stale URL pick is dropped, an
-  // absent one falls back to the declared default.
-  const providers = probe.data?.providers ?? [];
-  const model = resolveModel(providers, search.provider, search.model);
+  // picked means no cwd to query, so the model picker has nothing to offer;
+  // the composer blocks on project selection anyway. Catalog and default-model
+  // resolution are separate queries even though the adapter may share work.
+  const models = useHarnessModels(harnessAgentId, selected?.path);
+  const defaultModel = useHarnessDefaultModel(harnessAgentId, selected?.path);
+  // Explicit URL selection wins. Otherwise the harness resolves the concrete
+  // pair a fresh session would use; the UI never guesses from list order.
+  const providers = models.data?.providers ?? [];
+  const explicitModel = resolveModel(providers, search.provider, search.model);
+  const defaultPair =
+    defaultModel.data?.providerId !== undefined && defaultModel.data.modelId !== undefined
+      ? {
+          providerId: defaultModel.data.providerId,
+          modelId: defaultModel.data.modelId,
+        }
+      : undefined;
+  const model = explicitModel ?? defaultPair;
   const permissionModes = orderPermissionModes(harnessAgent?.permissionModes ?? []);
   const permissionMode = resolvePermissionMode(harnessAgent, search.permission);
 
@@ -150,8 +160,8 @@ function DraftRoute() {
       const ref = await orpcQueryUtils.session.create.call({
         projectId: selected.id,
         harnessAgentId,
-        // Omitted when the harness declares no such dimension, which is how it
-        // ends up using its own configured default.
+        // If these are not ready yet, create resolves the concrete default on
+        // the server before writing the session record.
         ...(model !== undefined ? { providerId: model.providerId, modelId: model.modelId } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
@@ -344,6 +354,11 @@ function DraftRoute() {
                       search: (prev) => ({ ...prev, provider: providerId, model: modelId }),
                     })
                   }
+                  failed={models.isError}
+                  onRetry={() => {
+                    void models.refetch();
+                    void defaultModel.refetch();
+                  }}
                 />
                 <PermissionModeSelect
                   permissionModes={permissionModes}

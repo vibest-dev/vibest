@@ -15,7 +15,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelLayer,
   makeHarnessAgentRegistry,
 } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
@@ -31,7 +31,8 @@ const send = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.method === "initialize") send({ id: msg.id, result: {} });
-  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "th_1" } } });
+  if (msg.method === "config/read") send({ id: msg.id, result: { config: { model: "gpt-test" }, origins: {}, layers: null } });
+  if (msg.method === "thread/start") send({ id: msg.id, result: { thread: { id: "th_1" }, model: "gpt-test", modelProvider: "openai", cwd: process.cwd() } });
   if (msg.method === "thread/read") send({ id: msg.id, result: { thread: { id: "th_1", name: "Fake thread", preview: "hi", updatedAt: 1700000000 } } });
   if (msg.method === "turn/start") {
     send({ id: msg.id, result: { turn: { id: "turn_1" } } });
@@ -76,14 +77,13 @@ async function setup() {
 
   // EventBusLayer is one reference so publish (manager/service) and subscribe
   // (RPC) share the single bus instance.
+  const harnessManagerLayer = HarnessAgentSessionManagerLayer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(EventBusLayer),
+    Layer.provide(NodeServices.layer),
+  );
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
-    Layer.provide(
-      HarnessAgentSessionManagerLayer.pipe(
-        Layer.provide(registryLayer),
-        Layer.provide(EventBusLayer),
-        Layer.provide(NodeServices.layer),
-      ),
-    ),
+    Layer.provide(harnessManagerLayer),
     Layer.provide(registryLayer),
     Layer.provide(EventBusLayer),
     Layer.provide(pathsLayer),
@@ -100,7 +100,7 @@ async function setup() {
     projectServiceLayer,
     registryLayer,
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
-    HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
+    HarnessModelLayer.pipe(Layer.provide(registryLayer), Layer.provide(harnessManagerLayer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
   );
@@ -146,6 +146,23 @@ describe("session router", () => {
       const snapshot = await client.session.getSnapshot({ ref });
       expect(snapshot.cursor).toBeGreaterThan(0);
       await client.session.close({ ref });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("rejects a provider the selected harness cannot consume", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      await expect(
+        client.session.create({
+          projectId: project.id,
+          harnessAgentId: "codex",
+          providerId: "anthropic",
+          modelId: "claude-sonnet",
+        }),
+      ).rejects.toThrow(/provider anthropic is not consumable by codex/);
     } finally {
       await dispose();
     }

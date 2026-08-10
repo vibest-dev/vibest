@@ -37,6 +37,9 @@ export interface Session {
   readonly projectId: string;
   readonly harnessAgentId: HarnessAgentId;
   readonly harnessSessionId: string;
+  /** Concrete model last resolved for this session; both fields travel together. */
+  readonly providerId?: string;
+  readonly modelId?: string;
   readonly createdAt: string;
   /**
    * Working directory. Our input at `create` (currently the project path).

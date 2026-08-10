@@ -5,13 +5,24 @@ import { ModelSelect } from "./model-select";
 // context so it can be composed anywhere inside ChatSessionProvider (e.g. the
 // composer toolbar). Renders nothing when the harness has no model switch.
 export function ChatModelSelect() {
-  const { providers, providerId, modelId, setModel } = useChatSession();
+  const {
+    providers,
+    providerId,
+    modelId,
+    setModel,
+    turnInProgress,
+    modelListFailed,
+    retryModelList,
+  } = useChatSession();
   return (
     <ModelSelect
       providers={providers}
       providerId={providerId}
       modelId={modelId}
       onChange={setModel}
+      disabled={turnInProgress}
+      failed={modelListFailed}
+      onRetry={retryModelList}
     />
   );
 }
