@@ -15,8 +15,8 @@ export type { ChatEffect, ChatInput, ChatTransition } from "./chat-runtime-types
 
 const historyRecovery = { hydrateSnapshot, applyEvent };
 
-// Pure at the module interface: copy the current state once, let the focused
-// update helpers mutate only that private draft, and return state + effects.
+// Pure at the module interface: reject known no-ops before allocating, copy only
+// the branches touched by hot updates, and use a private full draft for complex paths.
 export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
   if (input.type === "requestResponseCompleted") {
     const pending = state.pendingResponses[input.operationId];
@@ -85,6 +85,47 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
     return { state, effects: [] };
   }
 
+  if (
+    input.type === "transportEvent" &&
+    input.event.type !== "attached" &&
+    input.event.type !== "closed" &&
+    input.event.seq <= state.sync.cursor
+  ) {
+    return { state, effects: [] };
+  }
+  if (
+    input.type === "historyCompleted" &&
+    (input.purpose === "floor" ? state.sync.floor : state.sync.reconcile)?.id !== input.id
+  ) {
+    return { state, effects: [] };
+  }
+  if (
+    input.type === "promptCompleted" &&
+    !state.outgoing.some(
+      (message) => message.message.id === input.messageId && message.status === "sending",
+    )
+  ) {
+    return { state, effects: [] };
+  }
+  if (
+    (input.type === "foldUpdated" || input.type === "foldFinished") &&
+    state.turns.folds[input.turnId]?.generation !== input.generation
+  ) {
+    return { state, effects: [] };
+  }
+
+  if (input.type === "foldUpdated") {
+    const next: ChatState = {
+      ...state,
+      session: {
+        ...state.session,
+        messages: state.session.messages.slice(),
+      },
+    };
+    upsertAssistantMessage(next, input.message);
+    return { state: next, effects: [] };
+  }
+
   const next = copyChatState(state);
   const effects: ChatEffects = [];
   switch (input.type) {
@@ -145,15 +186,7 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
         return { state, effects: [] };
       }
       break;
-    case "foldUpdated": {
-      const fold = next.turns.folds[input.turnId];
-      if (!fold || fold.generation !== input.generation) return { state, effects: [] };
-      upsertAssistantMessage(next, input.message);
-      break;
-    }
     case "foldFinished": {
-      const fold = next.turns.folds[input.turnId];
-      if (!fold || fold.generation !== input.generation) return { state, effects: [] };
       delete next.turns.folds[input.turnId];
       if (input.error !== undefined) {
         effects.push({ type: "logError", message: "Failed to fold turn", error: input.error });

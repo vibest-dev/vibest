@@ -3,7 +3,8 @@ import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { createChatState, type ChatState } from "./chat-state";
-import { updateChat } from "./chat-update";
+import { type ChatInput, updateChat } from "./chat-update";
+import { deriveChatView } from "./chat-view";
 
 const ref = {
   projectId: "project-1",
@@ -27,6 +28,12 @@ const snapshot = (overrides: Partial<SessionRuntimeSnapshot> = {}): SessionRunti
 const userMessage = (id: string, text: string): UIMessage => ({
   id,
   role: "user",
+  parts: [{ type: "text", text }],
+});
+
+const assistantMessage = (id: string, text: string): UIMessage => ({
+  id,
+  role: "assistant",
   parts: [{ type: "text", text }],
 });
 
@@ -363,5 +370,121 @@ describe("updateChat", () => {
     });
     expect(transition.state.session.messages).toEqual([]);
     expect(transition.state.sync.needsReconcile).toBe(false);
+  });
+
+  it("returns the original state for stale sequenced and asynchronous inputs", () => {
+    const expectIgnored = (state: ChatState, input: ChatInput): void => {
+      const transition = updateChat(state, input);
+      expect(transition.state).toBe(state);
+      expect(transition.effects).toEqual([]);
+    };
+
+    const sequenced = createChatState();
+    sequenced.sync.cursor = 10;
+    expectIgnored(sequenced, {
+      type: "transportEvent",
+      event: {
+        seq: 10,
+        ref,
+        type: "session.turn.started",
+        turnId: "late",
+        phase: "running",
+      },
+    });
+
+    const flooring = createChatState();
+    flooring.sync.floor = { id: 1, snapshot: snapshot(), events: [] };
+    expectIgnored(flooring, {
+      type: "historyCompleted",
+      id: 99,
+      purpose: "floor",
+      history: [userMessage("late-floor", "late")],
+    });
+
+    const reconciling = createChatState();
+    reconciling.sync.reconcile = { id: 2, promptRevision: 0 };
+    expectIgnored(reconciling, {
+      type: "historyCompleted",
+      id: 99,
+      purpose: "reconcile",
+      history: [userMessage("late-reconcile", "late")],
+    });
+
+    const prompting = createChatState();
+    const pending = requested("sending", "in flight");
+    prompting.outgoing = [{ message: pending.message, parts: pending.parts, status: "sending" }];
+    expectIgnored(prompting, { type: "promptCompleted", messageId: "late" });
+
+    const folding = createChatState();
+    folding.turns.folds.active = { generation: 3, status: "open" };
+    expectIgnored(folding, {
+      type: "foldUpdated",
+      turnId: "active",
+      generation: 2,
+      message: assistantMessage("late-fold", "late"),
+    });
+    expectIgnored(folding, { type: "foldFinished", turnId: "active", generation: 2 });
+  });
+
+  it("updates a fold without mutating state or copying unrelated branches", () => {
+    const initial = createChatState();
+    const previous = assistantMessage("assistant-1", "partial");
+    const state: ChatState = {
+      ...initial,
+      session: { ...initial.session, messages: [previous] },
+      turns: {
+        ...initial.turns,
+        folds: { "turn-1": { generation: 4, status: "open" } },
+      },
+    };
+    const before = structuredClone(state);
+    const completed = assistantMessage("assistant-1", "complete");
+
+    const transition = updateChat(state, {
+      type: "foldUpdated",
+      turnId: "turn-1",
+      generation: 4,
+      message: completed,
+    });
+
+    expect(state).toEqual(before);
+    expect(transition.state).not.toBe(state);
+    expect(transition.state.session).not.toBe(state.session);
+    expect(transition.state.session.messages).not.toBe(state.session.messages);
+    expect(transition.state.session.messages).toEqual([completed]);
+    expect(transition.state.session.messages[0]).not.toBe(completed);
+    expect(transition.state.session.pendingRequests).toBe(state.session.pendingRequests);
+    expect(transition.state.outgoing).toBe(state.outgoing);
+    expect(transition.state.lifecycle).toBe(state.lifecycle);
+    expect(transition.state.sync).toBe(state.sync);
+    expect(transition.state.prompt).toBe(state.prompt);
+    expect(transition.state.turns).toBe(state.turns);
+    expect(transition.state.pendingResponses).toBe(state.pendingResponses);
+    expect(transition.effects).toEqual([]);
+  });
+
+  it("publishes the complete terminal shape in one transition and ignores later events", () => {
+    let transition = updateChat(createChatState(), requested("queued", "later"));
+    transition = updateChat(transition.state, {
+      type: "transportEvent",
+      event: { type: "closed", reason: "session_deleted" },
+    });
+
+    expect(deriveChatView(transition.state)).toMatchObject({
+      queuedMessages: [],
+      pendingRequests: [],
+      historyStatus: "settled",
+      status: "error",
+      error: new Error("Session deleted"),
+    });
+    const terminal = transition.state;
+    expect(
+      updateChat(terminal, {
+        type: "foldUpdated",
+        turnId: "late",
+        generation: 1,
+        message: { id: "late", role: "assistant", parts: [] },
+      }),
+    ).toEqual({ state: terminal, effects: [] });
   });
 });
