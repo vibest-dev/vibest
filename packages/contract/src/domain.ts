@@ -156,12 +156,11 @@ export type TurnError = typeof TurnErrorSchema.Type;
 
 /** Transient retry state for one active turn. Counts retries, not the initial request. */
 export type TurnRetryState = {
-  readonly turnId: string;
-  /** One-based retry number. */
-  readonly retryNumber: number;
-  readonly maxRetries: number;
+  /** One-based retry attempt. */
+  readonly attempt: number;
+  readonly maxAttempts: number;
   /** Server epoch milliseconds when the next provider attempt is expected to start. */
-  readonly nextAttemptAt: number;
+  readonly retryAt: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -198,7 +197,6 @@ export const SessionScopedEventTypes = [
   "session.prompt.rejected",
   "session.turn.started",
   "session.turn.retry.started",
-  "session.turn.retry.ended",
   "session.turn.ended",
   "session.request.asked",
   "session.request.replied",
@@ -243,8 +241,7 @@ export type SessionScopedEventBody =
       readonly reason?: string;
     }
   | { readonly type: "session.turn.started"; readonly turnId: string }
-  | ({ readonly type: "session.turn.retry.started" } & TurnRetryState)
-  | { readonly type: "session.turn.retry.ended"; readonly turnId: string }
+  | ({ readonly type: "session.turn.retry.started"; readonly turnId: string } & TurnRetryState)
   | {
       readonly type: "session.turn.ended";
       readonly turnId: string;

@@ -140,6 +140,7 @@ export class Chat {
     let copyPhase = true;
     switch (event.type) {
       case "session.message.chunk":
+        if (this.#activeTurnId === event.turnId) this.#state.retry = null;
         this.#captureChunkError(event.chunk);
         if (!this.#recoverTurnIds.has(event.turnId)) {
           if (event.chunk.type === "error") this.#erroredTurnIds.add(event.turnId);
@@ -169,14 +170,10 @@ export class Chat {
       case "session.turn.retry.started":
         if (this.#activeTurnId !== event.turnId) break;
         this.#state.retry = {
-          turnId: event.turnId,
-          retryNumber: event.retryNumber,
-          maxRetries: event.maxRetries,
-          nextAttemptAt: event.nextAttemptAt,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          retryAt: event.retryAt,
         };
-        break;
-      case "session.turn.retry.ended":
-        if (this.#state.retry?.turnId === event.turnId) this.#state.retry = null;
         break;
       case "session.turn.ended": {
         const endedActiveTurn = this.#activeTurnId === event.turnId;
@@ -196,7 +193,7 @@ export class Chat {
           break;
         }
         this.#activeTurnId = undefined;
-        if (this.#state.retry?.turnId === event.turnId) this.#state.retry = null;
+        this.#state.retry = null;
         // Unanswered requests are stale once their active turn ends — no ghost cards.
         this.#state.clearPendingRequests();
         // The settled transcript may hold more than the live stream carried:

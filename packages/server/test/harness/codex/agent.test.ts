@@ -437,7 +437,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     }),
   );
 
-  it.effect("keeps a retryable error inside the active turn", () =>
+  it.effect("keeps a retryable error silent inside the active turn", () =>
     Effect.gen(function* () {
       const cwd = yield* makeTempDirectory("codex-agent-");
       const agent = yield* makeFakeAgent;
@@ -445,7 +445,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const prompt = yield* agent.session.prompt({ sessionId, text: "retry" });
       const chunks = yield* Stream.runCollect(prompt.output);
 
-      assert.ok(Array.from(chunks).some((chunk) => chunk.type === "error"));
+      assert.ok(Array.from(chunks).every((chunk) => chunk.type !== "error"));
       assert.equal(chunks.at(-1)?.type, "finish");
       yield* agent.session.abort(sessionId);
     }),

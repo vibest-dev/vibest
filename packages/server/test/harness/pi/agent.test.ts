@@ -322,7 +322,7 @@ layer(NodeServices.layer)("PiAgent", (it) => {
     }),
   );
 
-  it.effect("publishes retry lifecycle without surfacing the transient provider error", () =>
+  it.effect("publishes retry state without surfacing the transient provider error", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const session = yield* makePiAdapter(agent).open({ cwd: "/tmp" });
@@ -345,16 +345,15 @@ layer(NodeServices.layer)("PiAgent", (it) => {
           "text-start",
           "text-delta",
           "text-end",
-          "session.turn.retry.ended",
           "finish",
           "session.turn.ended",
         ],
       );
       const retry = events.find((event) => event.body.type === "session.turn.retry.started");
       assert.ok(retry?.body.type === "session.turn.retry.started");
-      assert.equal(retry.body.retryNumber, 1);
-      assert.equal(retry.body.maxRetries, 3);
-      assert.equal(retry.body.nextAttemptAt, 5000);
+      assert.equal(retry.body.attempt, 1);
+      assert.equal(retry.body.maxAttempts, 3);
+      assert.equal(retry.body.retryAt, 5000);
       yield* session.close;
     }),
   );

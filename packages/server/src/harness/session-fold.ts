@@ -110,12 +110,10 @@ export const toWireBody = (
       return {
         type: "session.turn.retry.started",
         turnId: event.turnId,
-        retryNumber: event.retryNumber,
-        maxRetries: event.maxRetries,
-        nextAttemptAt: event.nextAttemptAt,
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        retryAt: event.retryAt,
       };
-    case "session.turn.retry.ended":
-      return { type: "session.turn.retry.ended", turnId: event.turnId };
     case "session.turn.ended":
       return {
         type: "session.turn.ended",
@@ -226,22 +224,12 @@ export const foldSessionEvent = (
         activeTurn: {
           ...current.activeTurn,
           retry: {
-            turnId: event.turnId,
-            retryNumber: event.retryNumber,
-            maxRetries: event.maxRetries,
-            nextAttemptAt: event.nextAttemptAt,
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            retryAt: event.retryAt,
           },
         },
       };
-    case "session.turn.retry.ended":
-      if (
-        !current.activeTurn ||
-        current.activeTurn.complete ||
-        current.activeTurn.turnId !== event.turnId
-      ) {
-        return base;
-      }
-      return { ...base, activeTurn: { ...current.activeTurn, retry: null } };
     case "session.message.chunk": {
       if (
         !current.activeTurn ||
@@ -250,7 +238,10 @@ export const foldSessionEvent = (
       ) {
         return base;
       }
-      return { ...base, activeTurn: appendChunk(current.activeTurn, event) };
+      return {
+        ...base,
+        activeTurn: appendChunk({ ...current.activeTurn, retry: null }, event),
+      };
     }
     case "session.turn.ended":
       if (!current.activeTurn || current.activeTurn.turnId !== event.turnId) return base;

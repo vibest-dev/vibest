@@ -162,20 +162,14 @@ const makeRuntime = (
           const publishOutput = (output: PiTurnOutput): Effect.Effect<void, AgentOperationError> =>
             Effect.gen(function* () {
               switch (output._tag) {
-                case "RetryStarted":
+                case "Retry":
                   return yield* emit({
                     type: "session.turn.retry.started",
                     sessionId,
                     turnId: prompt.turnId,
-                    retryNumber: output.retryNumber,
-                    maxRetries: output.maxRetries,
-                    nextAttemptAt: (yield* Clock.currentTimeMillis) + output.delayMs,
-                  });
-                case "RetryEnded":
-                  return yield* emit({
-                    type: "session.turn.retry.ended",
-                    sessionId,
-                    turnId: prompt.turnId,
+                    attempt: output.attempt,
+                    maxAttempts: output.maxAttempts,
+                    retryAt: (yield* Clock.currentTimeMillis) + output.delayMs,
                   });
                 case "Chunk": {
                   const chunk = output.chunk;

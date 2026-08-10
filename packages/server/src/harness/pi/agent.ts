@@ -61,12 +61,11 @@ export type PiSessionFailure = PiTransportFailure | AgentOperationError;
 export type PiTurnOutput =
   | { readonly _tag: "Chunk"; readonly chunk: PiUIMessageChunk }
   | {
-      readonly _tag: "RetryStarted";
-      readonly retryNumber: number;
-      readonly maxRetries: number;
+      readonly _tag: "Retry";
+      readonly attempt: number;
+      readonly maxAttempts: number;
       readonly delayMs: number;
-    }
-  | { readonly _tag: "RetryEnded" };
+    };
 
 type SessionState = {
   readonly sessionId: string;
@@ -249,19 +248,16 @@ export const makePiAgentWithDependencies = <R>(
             ),
           );
 
-        if (event.type === "auto_retry_start") {
-          if (
-            !(yield* offer({
-              _tag: "RetryStarted",
-              retryNumber: event.attempt,
-              maxRetries: event.maxAttempts,
-              delayMs: event.delayMs,
-            }))
-          ) {
-            return;
-          }
-        } else if (event.type === "auto_retry_end") {
-          if (!(yield* offer({ _tag: "RetryEnded" }))) return;
+        if (
+          event.type === "auto_retry_start" &&
+          !(yield* offer({
+            _tag: "Retry",
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: event.delayMs,
+          }))
+        ) {
+          return;
         }
 
         for (const chunk of session.transform(event)) {

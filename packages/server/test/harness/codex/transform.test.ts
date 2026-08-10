@@ -71,7 +71,7 @@ describe("createCodexTransform", () => {
     expect([...t(n("item/completed", { threadId: "th", item: activity }))]).toEqual([]);
   });
 
-  it("turn/completed → finish; terminal error → error + finish", () => {
+  it("turn/completed → finish; only terminal errors surface", () => {
     const t = createCodexTransform();
     expect(
       types([
@@ -91,6 +91,6 @@ describe("createCodexTransform", () => {
           n("error", { threadId: "th", turnId: "t1", willRetry: true, error: { message: "x" } }),
         ),
       ]),
-    ).toEqual(["error"]);
+    ).toEqual([]);
   });
 });
