@@ -56,6 +56,7 @@ export type ChatState = {
     instance: "active" | "disposed";
   };
   sync: {
+    streamId: string | null;
     cursor: number;
     historyLoaded: boolean;
     floor: HistoryFloorState | null;
@@ -92,6 +93,7 @@ export function createChatState(): ChatState {
     outgoing: [],
     lifecycle: { session: "available", instance: "active" },
     sync: {
+      streamId: null,
       cursor: 0,
       historyLoaded: false,
       floor: null,

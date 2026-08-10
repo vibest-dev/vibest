@@ -5,7 +5,17 @@ import type {
   SessionScopedEventBody,
   SessionStatus,
 } from "@vibest/contract";
-import { Context, Deferred, Effect, FileSystem, Layer, Ref, Scope } from "effect";
+import {
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Ref,
+  Scope,
+  Semaphore,
+} from "effect";
 
 import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { CreateSessionInput, HarnessAgentRuntime } from "./adapter";
@@ -136,7 +146,11 @@ export class HarnessAgentSessionManager extends Context.Service<
  */
 type SessionEntry =
   | { readonly _tag: "Live"; readonly session: HarnessAgentSessionShape }
-  | { readonly _tag: "Closing"; readonly done: Deferred.Deferred<void> };
+  | {
+      readonly _tag: "Closing";
+      readonly done: Deferred.Deferred<void>;
+      readonly streamId: string;
+    };
 
 type CloseStep =
   | {
@@ -147,10 +161,21 @@ type CloseStep =
   | { readonly _tag: "Await"; readonly done: Deferred.Deferred<void> }
   | { readonly _tag: "Done" };
 
+type SessionForStep =
+  | { readonly _tag: "Ready"; readonly session: HarnessAgentSessionShape }
+  | { readonly _tag: "AwaitClose"; readonly done: Deferred.Deferred<void> };
+
+type MakeSession = typeof makeHarnessAgentSession;
+
 export const makeHarnessAgentSessionManager = (
   registry: HarnessAgentRegistryShape,
   bus: EventBusShape,
-): Effect.Effect<HarnessAgentSessionManagerShape, never, Scope.Scope | FileSystem.FileSystem> =>
+  makeSession: MakeSession = makeHarnessAgentSession,
+): Effect.Effect<
+  HarnessAgentSessionManagerShape,
+  never,
+  Scope.Scope | FileSystem.FileSystem | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
     // An adapter's availability check reads the filesystem; bind it once here
@@ -158,45 +183,68 @@ export const makeHarnessAgentSessionManager = (
     // `provide(Effect.context())` — the latter captures the whole layer-build
     // context, `ownerScope` included, and wins the merge over a caller's.
     const fileSystem = yield* FileSystem.FileSystem;
+    const crypto = yield* Crypto.Crypto;
+    const serverStreamId = yield* crypto.randomUUIDv4.pipe(
+      Effect.catchTag("PlatformError", (cause) =>
+        Effect.die(new Error("invariant: platform RNG failed minting a stream id", { cause })),
+      ),
+    );
+    // The server id changes on process/manager restart. A session's epoch stays
+    // stable while it is absent and across its first materialization, then
+    // advances exactly once when that live session closes.
+    const streamEpochs = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+    const streamIdFor = (ref: SessionRef): Effect.Effect<string> =>
+      Ref.get(streamEpochs).pipe(
+        Effect.map((epochs) => {
+          const epoch = epochs.get(ref.sessionId) ?? 0;
+          return `${serverStreamId}:${ref.sessionId.length}:${ref.sessionId}:${epoch}`;
+        }),
+      );
+    const advanceStreamEpoch = (ref: SessionRef): Effect.Effect<void> =>
+      Ref.update(streamEpochs, (current) => {
+        const next = new Map(current);
+        next.set(ref.sessionId, (current.get(ref.sessionId) ?? 0) + 1);
+        return next;
+      });
     // Our sessionId → the session that owns its observable state.
     const sessions = yield* Ref.make<ReadonlyMap<string, SessionEntry>>(new Map());
+    // Session construction is only a handful of Refs. Keep lookup, construction,
+    // and install under one permit so close cannot observe an absent table entry
+    // and return while an already-started materialization installs afterwards.
+    const sessionTableLock = Semaphore.makeUnsafe(1);
 
-    /** The session for a ref, on the write paths that are allowed to create
-     * one. A session is a few Refs, so losing the creation race and discarding
-     * the loser costs nothing — cheaper than serializing every lookup. */
     const sessionFor = (ref: SessionRef): Effect.Effect<HarnessAgentSessionShape> =>
       Effect.suspend(() =>
-        Ref.get(sessions).pipe(
-          Effect.flatMap((current) => {
-            const entry = current.get(ref.sessionId);
-            if (entry?._tag === "Live") return Effect.succeed(entry.session);
-            if (entry?._tag === "Closing")
-              return Deferred.await(entry.done).pipe(Effect.andThen(sessionFor(ref)));
-            return makeHarnessAgentSession(ref, bus).pipe(
-              Effect.provideService(Scope.Scope, ownerScope),
-              Effect.flatMap((candidate) =>
-                Ref.modify(
-                  sessions,
-                  (
-                    latest,
-                  ): readonly [
-                    HarnessAgentSessionShape | undefined,
-                    ReadonlyMap<string, SessionEntry>,
-                  ] => {
-                    const raced = latest.get(ref.sessionId);
-                    if (raced?._tag === "Live") return [raced.session, latest];
-                    if (raced?._tag === "Closing") return [undefined, latest];
-                    return [
-                      candidate,
-                      new Map(latest).set(ref.sessionId, { _tag: "Live", session: candidate }),
-                    ];
-                  },
-                ),
-              ),
-              Effect.flatMap((session) => (session ? Effect.succeed(session) : sessionFor(ref))),
-            );
-          }),
-        ),
+        sessionTableLock
+          .withPermit(
+            Ref.get(sessions).pipe(
+              Effect.flatMap((current): Effect.Effect<SessionForStep> => {
+                const entry = current.get(ref.sessionId);
+                if (entry?._tag === "Live") {
+                  return Effect.succeed({ _tag: "Ready", session: entry.session });
+                }
+                if (entry?._tag === "Closing") {
+                  return Effect.succeed({ _tag: "AwaitClose", done: entry.done });
+                }
+                return streamIdFor(ref).pipe(
+                  Effect.flatMap((streamId) => makeSession(ref, streamId, bus)),
+                  Effect.provideService(Scope.Scope, ownerScope),
+                  Effect.flatMap((session) =>
+                    Ref.update(sessions, (latest) =>
+                      new Map(latest).set(ref.sessionId, { _tag: "Live", session }),
+                    ).pipe(Effect.as({ _tag: "Ready", session } as const)),
+                  ),
+                );
+              }),
+            ),
+          )
+          .pipe(
+            Effect.flatMap((step) =>
+              step._tag === "Ready"
+                ? Effect.succeed(step.session)
+                : Deferred.await(step.done).pipe(Effect.andThen(sessionFor(ref))),
+            ),
+          ),
       );
 
     /** Read through a live session, or answer for one that isn't there. One on
@@ -284,29 +332,55 @@ export const makeHarnessAgentSessionManager = (
     // gone: removing it first would let a concurrent write build a second
     // session for the same ref and resume it alongside the one still dying.
     const close = (ref: SessionRef): Effect.Effect<void> =>
-      Ref.modify(sessions, (current): readonly [CloseStep, ReadonlyMap<string, SessionEntry>] => {
-        const entry = current.get(ref.sessionId);
-        if (!entry) return [{ _tag: "Done" }, current];
-        if (entry._tag === "Closing") return [{ _tag: "Await", done: entry.done }, current];
-        const done = Deferred.makeUnsafe<void>();
-        return [
-          { _tag: "Release", session: entry.session, done },
-          new Map(current).set(ref.sessionId, { _tag: "Closing", done }),
-        ];
-      }).pipe(
-        Effect.flatMap((step) => {
-          if (step._tag === "Done") return Effect.void;
-          if (step._tag === "Await") return Deferred.await(step.done);
-          return step.session.releaseRuntime.pipe(
-            Effect.ensuring(
-              Ref.update(sessions, (current) => {
-                const entry = current.get(ref.sessionId);
-                if (entry?._tag !== "Closing" || entry.done !== step.done) return current;
-                const next = new Map(current);
-                next.delete(ref.sessionId);
-                return next;
-              }).pipe(Effect.andThen(Deferred.succeed(step.done, undefined))),
-            ),
+      sessionTableLock
+        .withPermit(
+          Ref.modify(
+            sessions,
+            (current): readonly [CloseStep, ReadonlyMap<string, SessionEntry>] => {
+              const entry = current.get(ref.sessionId);
+              if (!entry) return [{ _tag: "Done" }, current];
+              if (entry._tag === "Closing") return [{ _tag: "Await", done: entry.done }, current];
+              const done = Deferred.makeUnsafe<void>();
+              return [
+                { _tag: "Release", session: entry.session, done },
+                new Map(current).set(ref.sessionId, {
+                  _tag: "Closing",
+                  done,
+                  streamId: entry.session.streamId,
+                }),
+              ];
+            },
+          ),
+        )
+        .pipe(
+          Effect.flatMap((step) => {
+            if (step._tag === "Done") return Effect.void;
+            if (step._tag === "Await") return Deferred.await(step.done);
+            return advanceStreamEpoch(ref).pipe(
+              Effect.andThen(step.session.releaseRuntime),
+              Effect.ensuring(
+                Ref.update(sessions, (current) => {
+                  const entry = current.get(ref.sessionId);
+                  if (entry?._tag !== "Closing" || entry.done !== step.done) return current;
+                  const next = new Map(current);
+                  next.delete(ref.sessionId);
+                  return next;
+                }).pipe(Effect.andThen(Deferred.succeed(step.done, undefined))),
+              ),
+            );
+          }),
+        );
+
+    const snapshot = (ref: SessionRef): Effect.Effect<SessionRuntimeSnapshot> =>
+      Ref.get(sessions).pipe(
+        Effect.flatMap((current) => {
+          const entry = current.get(ref.sessionId);
+          if (entry?._tag === "Live") return entry.session.snapshot;
+          if (entry?._tag === "Closing") {
+            return Effect.succeed(toSnapshot(ref, entry.streamId, initialSessionState));
+          }
+          return streamIdFor(ref).pipe(
+            Effect.map((streamId) => toSnapshot(ref, streamId, initialSessionState)),
           );
         }),
       );
@@ -361,8 +435,7 @@ export const makeHarnessAgentSessionManager = (
         sessionFor(ref).pipe(Effect.flatMap((session) => session.setConfig(patch))),
       close,
       status: (ref) => withSession(ref, (session) => session.status, toStatus(initialSessionState)),
-      snapshot: (ref) =>
-        withSession(ref, (session) => session.snapshot, toSnapshot(ref, initialSessionState)),
+      snapshot,
       liveStatus: (ref) =>
         withSession<SessionStatus | undefined>(ref, (session) => session.status, undefined),
       emit: (ref, body) => sessionFor(ref).pipe(Effect.flatMap((session) => session.emit(body))),

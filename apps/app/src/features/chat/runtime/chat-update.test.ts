@@ -13,6 +13,7 @@ const ref = {
 
 const snapshot = (overrides: Partial<SessionRuntimeSnapshot> = {}): SessionRuntimeSnapshot => ({
   ref,
+  streamId: "stream-1",
   status: { phase: "idle" },
   activeTurn: null,
   activePrompt: null,
@@ -379,10 +380,12 @@ describe("updateChat", () => {
     };
 
     const sequenced = createChatState();
+    sequenced.sync.streamId = "stream-1";
     sequenced.sync.cursor = 10;
     expectIgnored(sequenced, {
       type: "transportEvent",
       event: {
+        streamId: "stream-1",
         seq: 10,
         ref,
         type: "session.turn.started",

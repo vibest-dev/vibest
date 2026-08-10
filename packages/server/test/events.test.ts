@@ -13,6 +13,7 @@ const ref = (sessionId: string): SessionRef => ({
 });
 
 const started = (sessionId: string, seq: number): SessionScopedEvent => ({
+  streamId: "stream-1",
   seq,
   ref: ref(sessionId),
   type: "session.turn.started",

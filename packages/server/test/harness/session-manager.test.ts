@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { it } from "@effect/vitest";
 import type { SessionRef } from "@vibest/contract";
 import type { ClaudeCodeUIMessageChunk } from "@vibest/contract/claude-code";
-import { Deferred, Effect, Exit, Fiber, Queue, Ref, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import { makeEventBus } from "../../src/events/event-bus";
@@ -17,6 +17,7 @@ import { AgentOperationError } from "../../src/harness/errors";
 import type { SessionEnvelopeDraft, SessionEvent } from "../../src/harness/events/framework";
 import { streamFromQueueOne } from "../../src/harness/queue-stream";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { makeHarnessAgentSession } from "../../src/harness/session";
 import { makeHarnessAgentSessionManager } from "../../src/harness/session-manager";
 import { NodePlatformLayer } from "../platform";
 
@@ -127,6 +128,7 @@ const makeFixture = Effect.gen(function* () {
 
   return {
     manager,
+    bus,
     resumeGate,
     resumeCalls,
     closeCalls,
@@ -135,7 +137,6 @@ const makeFixture = Effect.gen(function* () {
     crashGate,
   };
 });
-
 type Fixture = Effect.Success<typeof makeFixture>;
 
 /** Liveness probe: `get` succeeds while a session has a runtime, fails once torn down. */
@@ -172,6 +173,86 @@ it.effect("drains the native stream into the session and tears down on close", (
   }),
 );
 
+it.effect("keeps one stream id per session generation", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeFixture;
+    const ref = refFor("generation");
+
+    const firstAbsent = yield* fixture.manager.snapshot(ref);
+    const secondAbsent = yield* fixture.manager.snapshot(ref);
+    assert.equal(secondAbsent.streamId, firstAbsent.streamId);
+
+    yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, {}, ref);
+    const firstLive = yield* fixture.manager.snapshot(ref);
+    assert.equal(firstLive.streamId, firstAbsent.streamId);
+
+    const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+    const eventFiber = yield* Effect.forkChild(Stream.runHead(stream));
+    yield* fixture.manager.emit(ref, { type: "session.turn.started", turnId: "turn-1" });
+    const item = yield* Fiber.join(eventFiber);
+    assert.equal(item._tag, "Some");
+    const event =
+      item._tag === "Some" && item.value.type === "event" ? item.value.event : undefined;
+    assert.equal(event && "streamId" in event ? event.streamId : undefined, firstLive.streamId);
+    assert.equal((yield* fixture.manager.snapshot(ref)).streamId, firstLive.streamId);
+
+    yield* fixture.manager.close(ref);
+    const secondAbsentGeneration = yield* fixture.manager.snapshot(ref);
+    assert.notEqual(secondAbsentGeneration.streamId, firstLive.streamId);
+    assert.equal((yield* fixture.manager.snapshot(ref)).streamId, secondAbsentGeneration.streamId);
+
+    yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, {}, ref);
+    const secondLive = yield* fixture.manager.snapshot(ref);
+    assert.equal(secondLive.streamId, secondAbsentGeneration.streamId);
+    yield* fixture.manager.close(ref);
+
+    const restarted = yield* makeFixture;
+    assert.notEqual((yield* restarted.manager.snapshot(ref)).streamId, firstAbsent.streamId);
+  }),
+);
+
+const makeCreationRaceManager = (
+  started: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>,
+) =>
+  Effect.gen(function* () {
+    const registry = makeHarnessAgentRegistry([]);
+    const bus = yield* makeEventBus();
+    const makeSession: typeof makeHarnessAgentSession = (...args) =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.andThen(makeHarnessAgentSession(...args)),
+      );
+    return yield* makeHarnessAgentSessionManager(registry, bus, makeSession).pipe(
+      Effect.provide(NodePlatformLayer),
+    );
+  });
+
+it.effect("close waits for a session materialization that already owns the table permit", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const manager = yield* makeCreationRaceManager(started, release);
+    const ref = refFor("creation-close-race");
+
+    const materialize = yield* Effect.forkChild(
+      manager.emit(ref, { type: "session.turn.started", turnId: "turn-1" }),
+    );
+    yield* Deferred.await(started);
+
+    const close = yield* Effect.forkChild(manager.close(ref));
+    yield* Effect.yieldNow;
+    assert.equal(close.pollUnsafe(), undefined);
+
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(materialize);
+    yield* Fiber.join(close);
+
+    assert.equal(yield* manager.liveStatus(ref), undefined);
+    assert.equal((yield* manager.snapshot(ref)).cursor, 0);
+  }),
+);
+
 it.effect("single-flights ensure in owner scope when the first waiter cancels", () =>
   Effect.gen(function* () {
     const fixture = yield* makeFixture;
@@ -203,6 +284,7 @@ it.effect("waits for an in-flight close before reopening the same session id", (
     const fixture = yield* makeFixture;
     const ref = refFor("created");
     const session = yield* fixture.manager.open("claude-code", { cwd: "/tmp" }, {}, ref);
+    const closingStreamId = (yield* fixture.manager.snapshot(ref)).streamId;
     yield* Ref.set(fixture.holdClose, true);
     const close = yield* Effect.forkChild(fixture.manager.close(ref));
     yield* Effect.eventually(
@@ -213,6 +295,7 @@ it.effect("waits for an in-flight close before reopening the same session id", (
         ),
       ),
     );
+    assert.equal((yield* fixture.manager.snapshot(ref)).streamId, closingStreamId);
     const resume = yield* Effect.forkChild(
       fixture.manager.ensureRuntime(
         { sessionId: session.sessionId, harnessAgentId: "claude-code" },
@@ -236,6 +319,7 @@ it.effect("waits for an in-flight close before reopening the same session id", (
     yield* Fiber.join(resume);
 
     assert.equal(yield* isActive(fixture, ref), true);
+    assert.notEqual((yield* fixture.manager.snapshot(ref)).streamId, closingStreamId);
     yield* fixture.manager.close(ref);
   }),
 );

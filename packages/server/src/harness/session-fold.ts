@@ -303,8 +303,13 @@ export const toStatus = (state: SessionState): SessionStatus => ({
     : {}),
 });
 
-export const toSnapshot = (ref: SessionRef, state: SessionState): SessionRuntimeSnapshot => ({
+export const toSnapshot = (
+  ref: SessionRef,
+  streamId: string,
+  state: SessionState,
+): SessionRuntimeSnapshot => ({
   ref,
+  streamId,
   status: toStatus(state),
   pendingRequests: [...state.pendingRequests.values()],
   activeTurn: state.activeTurn

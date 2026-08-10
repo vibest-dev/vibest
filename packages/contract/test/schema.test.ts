@@ -154,6 +154,7 @@ describe("event partition", () => {
   it("isSessionScopedEvent splits the union", () => {
     const chunk: ServerEvent = {
       ref,
+      streamId: "stream-1",
       seq: 1,
       type: "session.turn.started",
       turnId: "t1",

@@ -181,7 +181,9 @@ describe("HarnessAgentSessionService", () => {
           const build: Effect.Effect<Fixture, never, Scope.Scope | FileSystem.FileSystem> =
             Effect.gen(function* () {
               const bus = yield* makeEventBus();
-              const manager = yield* makeHarnessAgentSessionManager(registry, bus);
+              const manager = yield* makeHarnessAgentSessionManager(registry, bus).pipe(
+                Effect.provideService(Crypto.Crypto, crypto),
+              );
               const repo = yield* makeHarnessAgentSessionRepository(
                 path.join(home, "storage", "sessions"),
               );
@@ -512,14 +514,25 @@ describe("HarnessAgentSessionService", () => {
     const result = await run({ coldHistory: history }, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const originalSnapshot = yield* fixture.service.getSnapshot(ref);
         const restarted = yield* fixture.restart;
 
         yield* restarted.service.prepare(ref, "/tmp/vibest-app");
         const status = yield* restarted.service.getStatus(ref);
         const snapshot = yield* restarted.service.getSnapshot(ref);
+        const repeatedSnapshot = yield* restarted.service.getSnapshot(ref);
         const listed = yield* restarted.service.list("proj-a", false);
         const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
-        return { ref, status, snapshot, listed, messages, spy: fixture.spy };
+        return {
+          ref,
+          originalSnapshot,
+          status,
+          snapshot,
+          repeatedSnapshot,
+          listed,
+          messages,
+          spy: fixture.spy,
+        };
       }),
     );
 
@@ -527,6 +540,8 @@ describe("HarnessAgentSessionService", () => {
     expect(result.status).toEqual({ phase: "idle" });
     expect(result.snapshot.cursor).toBe(0);
     expect(result.snapshot.activeTurn).toBeNull();
+    expect(result.snapshot.streamId).toBe(result.repeatedSnapshot.streamId);
+    expect(result.snapshot.streamId).not.toBe(result.originalSnapshot.streamId);
     expect(result.messages).toEqual(history);
     // … a session nothing has touched carries no status at all, so the sidebar
     // does not light up every row as active …

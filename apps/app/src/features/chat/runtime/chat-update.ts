@@ -94,7 +94,7 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
     input.type === "transportEvent" &&
     input.event.type !== "attached" &&
     input.event.type !== "closed" &&
-    input.event.seq <= state.sync.cursor
+    (input.event.streamId !== state.sync.streamId || input.event.seq <= state.sync.cursor)
   ) {
     return { state, effects: [] };
   }

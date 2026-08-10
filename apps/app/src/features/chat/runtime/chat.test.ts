@@ -129,31 +129,47 @@ const makeChat = (options?: { onTerminated?: () => void }) => {
   const transport = new FakeTransport();
   const chat = new Chat({ sessionRef: ref, transport, onTerminated: options?.onTerminated });
   const emit = (event: ChatTransportEvent) => transport.onEvent?.(event);
+  let attachedStreamId = "stream-1";
   const attach = async (snapshot: Partial<SessionRuntimeSnapshot>) => {
-    emit({
-      type: "attached",
-      snapshot: {
-        ref,
-        status: { phase: "idle" },
-        activeTurn: null,
-        activePrompt: null,
-        acceptedPrompt: null,
-        acceptedPrompts: [],
-        pendingPrompts: [],
-        pendingRequests: [],
-        cursor: 0,
-        ...snapshot,
-      },
-    });
+    const nextSnapshot: SessionRuntimeSnapshot = {
+      ref,
+      streamId: attachedStreamId,
+      status: { phase: "idle" },
+      activeTurn: null,
+      activePrompt: null,
+      acceptedPrompt: null,
+      acceptedPrompts: [],
+      pendingPrompts: [],
+      pendingRequests: [],
+      cursor: 0,
+      ...snapshot,
+    };
+    attachedStreamId = nextSnapshot.streamId;
+    emit({ type: "attached", snapshot: nextSnapshot });
     await settle();
   };
-  const live = (seq: number, body: SessionScopedEventBody & { phase?: SessionPhase }) =>
-    emit({ seq, ref, ...body } as SessionScopedEvent);
+  const live = (
+    seq: number,
+    body: SessionScopedEventBody & { phase?: SessionPhase },
+    streamId = attachedStreamId,
+  ) => emit({ streamId, seq, ref, ...body } as SessionScopedEvent);
   return { chat, transport, attach, live, emit };
 };
 
-const chunkEvent = (seq: number, turnId: string, chunk: UIMessageChunk): SessionMessageChunkEvent =>
-  ({ seq, ref, type: "session.message.chunk", turnId, chunk }) as SessionMessageChunkEvent;
+const chunkEvent = (
+  seq: number,
+  turnId: string,
+  chunk: UIMessageChunk,
+  streamId = "stream-1",
+): SessionMessageChunkEvent =>
+  ({
+    streamId,
+    seq,
+    ref,
+    type: "session.message.chunk",
+    turnId,
+    chunk,
+  }) as SessionMessageChunkEvent;
 
 type ActiveTurnInit = Partial<NonNullable<SessionRuntimeSnapshot["activeTurn"]>> & {
   turnId: string;
@@ -193,18 +209,17 @@ const toolRequest: AgentRequest = {
 };
 
 describe("Chat hydration", () => {
-  // Reattaching across a server restart: the session's seq counter is rebuilt
-  // from scratch, so the next turn's events all land below the cursor we were
-  // holding. Keeping that cursor drops the entire turn and the page sits on a
-  // spinner forever — the exact failure a live restart produced.
-  it("rejoins from scratch when the server's seq counter has restarted", async () => {
+  // Reattaching across a server restart changes the explicit stream
+  // generation. Cursor values from the old process are irrelevant even when
+  // the replacement starts above them.
+  it("rejoins from scratch when the server stream changes", async () => {
     const { chat, transport, attach, live } = makeChat();
     transport.history = [userMessage("user-1", "hello")];
     await attach({ cursor: 8 });
     expect(chat.store.getState().session.messages).toHaveLength(1);
 
     transport.history = [userMessage("user-1", "hello")];
-    await attach({ cursor: 0 });
+    await attach({ streamId: "stream-2", cursor: 0 });
 
     const [start, delta, end] = textChunks("t", "after the restart");
     for (const [seq, chunk] of [start!, delta!, end!].entries()) {
@@ -215,6 +230,107 @@ describe("Chat hydration", () => {
     const last = chat.store.getState().session.messages.at(-1)!;
     expect(last.role).toBe("assistant");
     expect(assistantText(last)).toBe("after the restart");
+  });
+
+  it("resets cursor gating for a new stream even when its cursor is higher", async () => {
+    const { chat, attach } = makeChat();
+    await attach({ cursor: 8 });
+
+    await attach({
+      streamId: "stream-2",
+      activePrompt: {
+        messageId: "new-stream-prompt",
+        parts: [{ type: "text", text: "new generation" }],
+        seq: 2,
+        acceptedTurnId: null,
+      },
+      pendingPrompts: [
+        {
+          messageId: "new-stream-prompt",
+          parts: [{ type: "text", text: "new generation" }],
+          seq: 2,
+          acceptedTurnId: null,
+        },
+      ],
+      cursor: 10,
+    });
+
+    expect(chat.store.getState().messages.map((message) => message.id)).toContain(
+      "new-stream-prompt",
+    );
+  });
+
+  it("does not reset cursor gating for a lower snapshot on the same stream", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({ cursor: 8 });
+
+    await attach({
+      pendingPrompts: [
+        {
+          messageId: "already-past",
+          parts: [{ type: "text", text: "stale retained prompt" }],
+          seq: 3,
+          acceptedTurnId: null,
+        },
+      ],
+      cursor: 2,
+    });
+    live(7, { type: "session.turn.started", turnId: "stale-turn", phase: "running" });
+
+    expect(chat.store.getState().messages.map((message) => message.id)).not.toContain(
+      "already-past",
+    );
+    expect(chat.store.getState().status).toBe("ready");
+  });
+
+  it("ignores an old-stream live event after a new attach wins", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({ cursor: 8 });
+    await attach({ streamId: "stream-2", cursor: 10 });
+
+    live(100, { type: "session.turn.started", turnId: "old-turn", phase: "running" }, "stream-1");
+    expect(chat.store.getState().status).toBe("ready");
+
+    live(11, { type: "session.turn.started", turnId: "new-turn", phase: "running" });
+    expect(chat.store.getState().status).toBe("streaming");
+  });
+
+  it("drops buffered old-stream events when a new attach wins during the history floor", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    let releaseHistory: () => void = () => undefined;
+    transport.history = [];
+    transport.historyGate = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+
+    await attach({});
+    live(1, {
+      type: "session.request.asked",
+      request: { ...toolRequest, id: "old-buffered" },
+      phase: "requires_action",
+    });
+    await attach({ streamId: "stream-2" });
+    live(
+      2,
+      {
+        type: "session.request.asked",
+        request: { ...toolRequest, id: "old-late" },
+        phase: "requires_action",
+      },
+      "stream-1",
+    );
+    live(1, {
+      type: "session.request.asked",
+      request: { ...toolRequest, id: "new-buffered" },
+      phase: "requires_action",
+    });
+
+    releaseHistory();
+    await settle();
+
+    expect(chat.store.getState().pendingRequests.map((request) => request.id)).toEqual([
+      "new-buffered",
+    ]);
   });
 
   it("keeps a pending prompt across a restarted server snapshot", async () => {
@@ -232,7 +348,7 @@ describe("Chat hydration", () => {
     // The rebuilt server starts at cursor zero and has not accepted the prompt
     // yet, so neither its idle phase nor its settled history may erase the
     // optimistic bubble.
-    await attach({ cursor: 0 });
+    await attach({ streamId: "stream-2", cursor: 0 });
     expect(chat.store.getState().session.messages.map((message) => message.role)).toEqual([
       "user",
       "user",
@@ -276,6 +392,7 @@ describe("Chat hydration", () => {
       },
     ];
     await attach({
+      streamId: "stream-2",
       activePrompt: {
         messageId,
         parts: [{ type: "text", text: "still queued" }],
@@ -1360,9 +1477,14 @@ describe("Chat prompting", () => {
         .map((message) => message.message),
     ).toHaveLength(1);
 
-    // The queue belongs to the Chat, so a server-side runtime rebuild does not
-    // erase it. The fresh idle snapshot is the next safe dispatch boundary.
-    await attach({ status: { phase: "idle" }, activeTurn: null, cursor: 0 });
+    // The queue belongs to the Chat, so a new server-side session incarnation
+    // does not erase it. The fresh idle snapshot is the next safe boundary.
+    await attach({
+      streamId: "stream-2",
+      status: { phase: "idle" },
+      activeTurn: null,
+      cursor: 0,
+    });
     await queued;
 
     expect(transport.promptCalls).toHaveLength(1);

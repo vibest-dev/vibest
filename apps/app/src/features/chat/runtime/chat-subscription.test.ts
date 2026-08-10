@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { RecoveringSubscription } from "./chat-subscription";
 
 const snapshot: SessionRuntimeSnapshot = {
+  streamId: "stream-1",
   ref: {
     projectId: "project-1",
     harnessAgentId: "claude-code",

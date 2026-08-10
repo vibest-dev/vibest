@@ -256,10 +256,12 @@ export type SessionScopedEventBody =
     }
   | { readonly type: "session.crashed"; readonly reason: string };
 
-/** A session-scoped event before the server's `HarnessAgentSession` stamps its `seq`. */
+/** A session-scoped event before `HarnessAgentSession` stamps its `streamId` and `seq`. */
 export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
 
 export type SessionScopedEvent = {
+  /** Process-local incarnation of this ref's server-side session state. */
+  readonly streamId: string;
   readonly seq: number;
   /**
    * The session's phase *after* this event applied, stamped by the server's
@@ -486,6 +488,8 @@ export type HarnessProbeOutput = typeof HarnessProbeOutputSchema.Type;
 
 export type SessionRuntimeSnapshot = {
   readonly ref: SessionRef;
+  /** Process-local incarnation whose cursor and retained events this snapshot describes. */
+  readonly streamId: string;
   readonly status: SessionStatus;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;

@@ -156,6 +156,7 @@ const pushConfig = (
 
 export type HarnessAgentSessionShape = {
   readonly ref: SessionRef;
+  readonly streamId: string;
   /**
    * What this session is doing, always answerable. A session that has never
    * had a runtime reads as idle at cursor 0 — which is the truth, not a
@@ -205,6 +206,7 @@ export type HarnessAgentSessionShape = {
 
 export const makeHarnessAgentSession = (
   ref: SessionRef,
+  streamId: string,
   bus: EventBusShape,
 ): Effect.Effect<HarnessAgentSessionShape, never, Scope.Scope> =>
   Effect.gen(function* () {
@@ -256,7 +258,12 @@ export const makeHarnessAgentSession = (
             Effect.flatMap((current) => {
               const wireBody = make(current);
               if (!wireBody) return Effect.void;
-              const event: SessionScopedEvent = { seq: current.seq + 1, ref, ...wireBody };
+              const event: SessionScopedEvent = {
+                streamId,
+                seq: current.seq + 1,
+                ref,
+                ...wireBody,
+              };
               const next = foldSessionEvent(current, event);
               // Publish with the post-fold phase stamped on: consumers copy the
               // session's phase off the event instead of re-deriving it from
@@ -441,7 +448,8 @@ export const makeHarnessAgentSession = (
 
     return {
       ref,
-      snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
+      streamId,
+      snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, streamId, current))),
       status: Ref.get(state).pipe(Effect.map(toStatus)),
       emit: (body) => applyWith(() => body),
       setConfig,

@@ -9,6 +9,7 @@ import { makeEventBus } from "../src/events";
 const ref: SessionRef = { projectId: "p1", harnessAgentId: "claude-code", sessionId: "s1" };
 
 const started = (seq: number): SessionScopedEvent => ({
+  streamId: "stream-1",
   seq,
   ref,
   type: "session.turn.started",

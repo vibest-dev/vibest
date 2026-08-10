@@ -13,6 +13,7 @@ const ref = {
 
 const snapshot: SessionRuntimeSnapshot = {
   ref,
+  streamId: "stream-1",
   status: { phase: "idle" },
   activeTurn: null,
   activePrompt: null,
@@ -99,12 +100,22 @@ describe("OrpcChatSessionTransport subscription", () => {
     let subscriptionCalls = 0;
     let snapshotSawSubscription = false;
     const items: SubscribeStreamEvent[] = [
-      { type: "event", event: { seq: 1, ref, type: "session.turn.started", turnId: "turn-1" } },
+      {
+        type: "event",
+        event: {
+          streamId: "stream-1",
+          seq: 1,
+          ref,
+          type: "session.turn.started",
+          turnId: "turn-1",
+        },
+      },
       // Collection events ride the same stream but are not session-scoped.
       { type: "event", event: { ref, type: "session.updated", title: "t" } },
       {
         type: "event",
         event: {
+          streamId: "stream-1",
           seq: 2,
           ref,
           type: "session.turn.ended",
@@ -157,7 +168,13 @@ describe("OrpcChatSessionTransport subscription", () => {
                 [
                   {
                     type: "event",
-                    event: { seq: 5, ref, type: "session.turn.started", turnId: "turn-2" },
+                    event: {
+                      streamId: "stream-1",
+                      seq: 5,
+                      ref,
+                      type: "session.turn.started",
+                      turnId: "turn-2",
+                    },
                   },
                 ],
                 drained,

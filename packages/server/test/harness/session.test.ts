@@ -28,7 +28,7 @@ const SessionServiceLayer = Layer.effect(
   SessionService,
   Effect.gen(function* () {
     const bus = yield* EventBus;
-    return yield* makeHarnessAgentSession(ref, bus);
+    return yield* makeHarnessAgentSession(ref, "stream-1", bus);
   }),
 );
 
@@ -106,6 +106,7 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
       const session = yield* SessionService;
       assert.equal(yield* session.peekRuntime, undefined);
       const snapshot = yield* session.snapshot;
+      assert.equal(snapshot.streamId, "stream-1");
       assert.equal(snapshot.status.phase, "idle");
       assert.equal(snapshot.cursor, 0);
       assert.equal(snapshot.activeTurn, null);

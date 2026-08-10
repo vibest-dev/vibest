@@ -47,10 +47,6 @@ export function hydrateSnapshot(
   skipGapCheck: boolean,
 ): void {
   if (!isChatActive(state)) return;
-  if (snapshot.cursor < state.sync.cursor) {
-    state.sync.cursor = 0;
-    state.sync.needsReconcile = true;
-  }
 
   state.session.pendingRequests = [];
   for (const request of snapshot.pendingRequests) addRequest(state, effects, request);
@@ -170,7 +166,13 @@ export function applyEvent(
   effects: ChatEffects,
   event: SessionScopedEvent,
 ): void {
-  if (!isChatActive(state) || event.seq <= state.sync.cursor) return;
+  if (
+    !isChatActive(state) ||
+    event.streamId !== state.sync.streamId ||
+    event.seq <= state.sync.cursor
+  ) {
+    return;
+  }
   state.sync.cursor = event.seq;
 
   switch (event.type) {
@@ -317,6 +319,23 @@ function terminate(
   effects.push({ type: "abortLifetime" }, { type: "unsubscribe" }, { type: "notifyTerminated" });
 }
 
+const attachStream = (
+  state: ChatDraft,
+  effects: ChatEffects,
+  snapshot: SessionRuntimeSnapshot,
+): boolean => {
+  const previousStreamId = state.sync.streamId;
+  state.sync.streamId = snapshot.streamId;
+  if (previousStreamId === null || previousStreamId === snapshot.streamId) return false;
+
+  for (const turnId of Object.keys(state.turns.folds)) abandonFold(state, effects, turnId);
+  state.turns.recoverTurnIds = [];
+  state.turns.erroredTurnIds = [];
+  state.sync.cursor = 0;
+  state.sync.needsReconcile = true;
+  return true;
+};
+
 export function handleTransportEvent(
   state: ChatDraft,
   effects: ChatEffects,
@@ -333,15 +352,21 @@ export function handleTransportEvent(
       state.sync.reconcile = null;
       effects.push({ type: "cancelHistory", id: reconcile.id });
     }
+    const changedStream = attachStream(state, effects, event.snapshot);
     if (!state.sync.historyLoaded) {
       startHistoryFloor(state, effects, event.snapshot);
     } else if (state.sync.floor) {
-      state.sync.floor = { ...state.sync.floor, snapshot: event.snapshot };
+      state.sync.floor = {
+        ...state.sync.floor,
+        snapshot: event.snapshot,
+        events: changedStream ? [] : state.sync.floor.events,
+      };
     } else {
       hydrateSnapshot(state, effects, event.snapshot, false);
     }
     return;
   }
+  if (event.streamId !== state.sync.streamId) return;
   if (state.sync.floor) {
     state.sync.floor = { ...state.sync.floor, events: [...state.sync.floor.events, event] };
     return;

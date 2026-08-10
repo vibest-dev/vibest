@@ -12,6 +12,7 @@ const ref: SessionRef = {
 const event = (seq: number, body: SessionScopedEventBody): SessionScopedEvent => ({
   ...body,
   ref,
+  streamId: "stream-1",
   seq,
 });
 
@@ -42,7 +43,7 @@ describe("session prompt projection", () => {
       }),
     );
 
-    expect(toSnapshot(ref, state)).toMatchObject({
+    expect(toSnapshot(ref, "stream-1", state)).toMatchObject({
       activePrompt: { messageId: "prompt-b", acceptedTurnId: null },
       acceptedPrompt: { messageId: "prompt-a", acceptedTurnId: "turn-a" },
       acceptedPrompts: [{ messageId: "prompt-a", acceptedTurnId: "turn-a" }],
@@ -58,7 +59,7 @@ describe("session prompt projection", () => {
       }),
     );
 
-    expect(toSnapshot(ref, state).activePrompt).toMatchObject({
+    expect(toSnapshot(ref, "stream-1", state).activePrompt).toMatchObject({
       messageId: "prompt-a",
       acceptedTurnId: "turn-a",
     });
