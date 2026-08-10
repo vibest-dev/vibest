@@ -3,12 +3,10 @@ import { SidebarInset, SidebarTrigger, useSidebar } from "@vibest/ui/components/
 import { cn } from "@vibest/ui/lib/utils";
 
 import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
+import { usePlatform } from "@/platform-context";
 
-export interface CardPanelProps {
-  hasTrafficLights: boolean;
-}
-
-export function CardPanel({ hasTrafficLights }: CardPanelProps) {
+export function CardPanel() {
+  const { os } = usePlatform();
   const { state, isMobile } = useSidebar();
   const collapsedDesktop = !isMobile && state === "collapsed";
   const ownsToggle = isMobile || collapsedDesktop;
@@ -18,7 +16,7 @@ export function CardPanel({ hasTrafficLights }: CardPanelProps) {
       <header
         className={cn(
           "flex h-10 shrink-0 items-center gap-2 px-4 shadow-[inset_0_-1px_0_var(--color-border)] [-webkit-app-region:drag]",
-          collapsedDesktop && hasTrafficLights && "ps-20",
+          collapsedDesktop && os === "macos" && "ps-20",
         )}
       >
         {ownsToggle && (

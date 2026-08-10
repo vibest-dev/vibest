@@ -1,6 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, useMatch, useNavigate } from "@tanstack/react-router";
-import { SidebarProvider } from "@vibest/ui/components/sidebar";
+import { createRootRouteWithContext, useMatch } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
@@ -8,7 +7,6 @@ import { RegisterPanels } from "@/components/layout/content-panel/react/register
 import { contentPanel, STATIC_PANELS } from "@/content-panel";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
 import type { AppClients } from "@/lib/orpc";
-import { usePlatform } from "@/platform-context";
 
 export interface RouterAppContext {
   orpcClient: AppClients["orpcClient"];
@@ -27,18 +25,11 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
   component: RootLayout,
 });
 
-/** Restore the state persisted by SidebarProvider. */
-function readSidebarCookie(): boolean {
-  return !document.cookie.includes("sidebar_state=false");
-}
-
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
   // Keeps every `session.list` cache converged from the server's events
   // (multi-tab / desktop), independent of which route is mounted.
   useSessionListSync();
-  const navigate = useNavigate();
-  const { os } = usePlatform();
 
   // The content panel is session-scoped, but it is bound here rather than in the
   // session route: it is a card of the shell, peer to the chat's, and maximizing
@@ -55,21 +46,10 @@ function RootLayout() {
     select: (match) => match.loaderData?.sessionId ?? null,
   });
 
-  const handleNewChat = () => navigate({ to: "/draft" });
-
   return (
-    // -webkit-app-region drags the desktop window (no-op in the browser).
-    // h-svh pins the shell to the viewport: the provider's own min-h-svh leaves
-    // the height auto, so a long transcript would stretch the whole card and
-    // scroll the document instead of the message list.
-    <SidebarProvider
-      className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
-      defaultOpen={readSidebarCookie()}
-    >
-      <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionId ?? null}>
-        <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell hasTrafficLights={os === "macos"} onNewChat={handleNewChat} />
-      </ContentPanelProvider>
-    </SidebarProvider>
+    <ContentPanelProvider contentPanel={contentPanel} sessionId={sessionId ?? null}>
+      <RegisterPanels definitions={STATIC_PANELS} />
+      <AppShell />
+    </ContentPanelProvider>
   );
 }

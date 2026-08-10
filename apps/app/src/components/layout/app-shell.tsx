@@ -1,4 +1,4 @@
-import { useSidebar } from "@vibest/ui/components/sidebar";
+import { SidebarProvider, useSidebar } from "@vibest/ui/components/sidebar";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CardPanel } from "@/components/layout/card-panel";
@@ -12,29 +12,44 @@ import {
   ShellSidebarPanel,
 } from "@/components/layout/shell-panels";
 
-export interface AppShellProps {
-  hasTrafficLights: boolean;
-  onNewChat: () => void;
+/** Restore the state persisted by SidebarProvider. */
+function readSidebarCookie(): boolean {
+  return !document.cookie.includes("sidebar_state=false");
 }
 
-export function AppShell(props: AppShellProps) {
+export function AppShell() {
+  return (
+    // -webkit-app-region drags the desktop window (no-op in the browser).
+    // h-svh pins the shell to the viewport: the provider's own min-h-svh leaves
+    // the height auto, so a long transcript would stretch the whole card and
+    // scroll the document instead of the message list.
+    <SidebarProvider
+      className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
+      defaultOpen={readSidebarCookie()}
+    >
+      <ResponsiveAppShell />
+    </SidebarProvider>
+  );
+}
+
+function ResponsiveAppShell() {
   const { isMobile } = useSidebar();
-  return isMobile ? <MobileAppShell {...props} /> : <ResizableAppShell {...props} />;
+  return isMobile ? <MobileAppShell /> : <ResizableAppShell />;
 }
 
-function MobileAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
+function MobileAppShell() {
   const contentVisible = usePanelSnapshot((snapshot) => snapshot.presentation !== "hidden");
 
   return (
     <>
-      <AppSidebar onNewChat={onNewChat} />
+      <AppSidebar />
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div
           aria-hidden={contentVisible || undefined}
           className="flex min-h-0 min-w-0 flex-1"
           inert={contentVisible || undefined}
         >
-          <CardPanel hasTrafficLights={hasTrafficLights} />
+          <CardPanel />
         </div>
         {contentVisible && (
           <div className="bg-background absolute inset-0 z-10 flex min-h-0 min-w-0">
@@ -46,7 +61,7 @@ function MobileAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
   );
 }
 
-function ResizableAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
+function ResizableAppShell() {
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const contentVisible = presentation !== "hidden" && session !== null;
@@ -55,7 +70,7 @@ function ResizableAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
   return (
     <ShellGroup hasContentPanel={contentVisible} hasSidebar>
       <ShellSidebarPanel>
-        <AppSidebar onNewChat={onNewChat} />
+        <AppSidebar />
       </ShellSidebarPanel>
       <ShellSeparator disabled={maximized} />
       <ShellMainPanel
@@ -66,7 +81,7 @@ function ResizableAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
           session?.setPresentation(collapsed ? "maximized" : "docked")
         }
       >
-        <CardPanel hasTrafficLights={hasTrafficLights} />
+        <CardPanel />
       </ShellMainPanel>
       {contentVisible && (
         <>

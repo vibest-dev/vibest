@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
   Sidebar,
   SidebarContent,
@@ -18,8 +19,9 @@ import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
 import { ProjectList } from "@/features/projects/project-list";
 import { usePlatform } from "@/platform-context";
 
-export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
+export function AppSidebar() {
   const [importOpen, setImportOpen] = useState(false);
+  const navigate = useNavigate();
   const { os } = usePlatform();
   const { isMobile, state } = useSidebar();
 
@@ -43,7 +45,7 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={onNewChat}>
+                <SidebarMenuButton onClick={() => navigate({ to: "/draft" })}>
                   <SquarePen />
                   <span>New chat</span>
                 </SidebarMenuButton>
