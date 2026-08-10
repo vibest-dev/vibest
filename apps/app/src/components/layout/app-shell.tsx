@@ -13,7 +13,6 @@ import {
 
 interface AppShellContextValue {
   readonly contentVisible: boolean;
-  readonly isMobile: boolean;
   readonly maximized: boolean;
   readonly setMainCollapsed: (collapsed: boolean) => void;
 }
@@ -31,7 +30,8 @@ export interface AppShellSlotProps {
 }
 
 export function AppShellSidebar({ children }: AppShellSlotProps) {
-  const { isMobile, maximized } = useAppShell();
+  const { isMobile } = useSidebar();
+  const { maximized } = useAppShell();
   if (isMobile) return <>{children}</>;
   return (
     <>
@@ -42,7 +42,8 @@ export function AppShellSidebar({ children }: AppShellSlotProps) {
 }
 
 export function AppShellMain({ children }: AppShellSlotProps) {
-  const { contentVisible, isMobile, maximized, setMainCollapsed } = useAppShell();
+  const { isMobile } = useSidebar();
+  const { contentVisible, maximized, setMainCollapsed } = useAppShell();
   return (
     <ShellMainPanel
       hasContentPanel={contentVisible}
@@ -71,8 +72,8 @@ export function AppShell({ children }: AppShellRootProps) {
     [session],
   );
   const context = useMemo(
-    () => ({ contentVisible, isMobile, maximized, setMainCollapsed }),
-    [contentVisible, isMobile, maximized, setMainCollapsed],
+    () => ({ contentVisible, maximized, setMainCollapsed }),
+    [contentVisible, maximized, setMainCollapsed],
   );
 
   return (
