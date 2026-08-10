@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { layer } from "@effect/vitest";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 
+import { makePiAdapter } from "../../../src/harness/pi/adapter";
 import { makePiAgent } from "../../../src/harness/pi/agent";
 
 layer(NodeServices.layer)("pi live smoke", (it) => {
@@ -12,22 +13,26 @@ layer(NodeServices.layer)("pi live smoke", (it) => {
     () =>
       Effect.gen(function* () {
         const agent = yield* makePiAgent();
-        const { sessionId } = yield* agent.session.create({ cwd: process.cwd() });
-        const prompt = yield* agent.session.prompt({
-          sessionId,
-          text: "Reply with exactly: PONG",
-        });
-        const outputs = Array.from(yield* Stream.runCollect(prompt.output));
-        const chunks = outputs.flatMap((output) => (output._tag === "Chunk" ? [output.chunk] : []));
+        const session = yield* makePiAdapter(agent).open({ cwd: process.cwd() });
+        const collected = yield* Effect.forkChild(
+          Stream.runCollect(
+            session.events.pipe(
+              Stream.takeUntil((event) => event.body.type === "session.turn.ended"),
+            ),
+          ),
+        );
+        yield* session.prompt({ parts: [{ type: "text", text: "Reply with exactly: PONG" }] });
+        const events = Array.from(yield* Fiber.join(collected));
         // A failed model call also ends in `finish` (the run settles either
         // way), so finish alone proves nothing — require actual assistant text.
-        const text = chunks
-          .filter((chunk) => chunk.type === "text-delta")
-          .map((chunk) => ("delta" in chunk ? chunk.delta : ""))
+        const text = events
+          .map((event) => event.body)
+          .filter((body) => body.type === "text-delta")
+          .map((chunk) => chunk.delta)
           .join("");
         assert.match(text, /PONG/i);
-        assert.equal(chunks.at(-1)?.type, "finish");
-        yield* agent.session.abort(sessionId);
+        assert.ok(events.some((event) => event.body.type === "finish"));
+        yield* session.close;
       }),
     120_000,
   );

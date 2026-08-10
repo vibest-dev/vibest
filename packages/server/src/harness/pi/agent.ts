@@ -12,11 +12,14 @@ import {
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
-import type { RpcExtensionUIResponse, RpcSessionState, SessionEntries } from "./protocol";
+import type {
+  AgentSessionEvent,
+  RpcExtensionUIResponse,
+  RpcSessionState,
+  SessionEntries,
+} from "./protocol";
 import { buildUiRequest, declineUiResponse, mapUiResponse } from "./request";
-import { createPiTransform } from "./transform";
 import { makePiTransport, type PiTransport, type PiTransportFailure } from "./transport";
-import type { PiUIMessageChunk } from "./ui-message";
 
 // Pi facade: one `pi --mode rpc` child per session (pi's RPC mode hosts a
 // single session), unlike codex's shared app-server with thread demuxing.
@@ -58,25 +61,15 @@ type TurnDecision =
 
 export type PiSessionFailure = PiTransportFailure | AgentOperationError;
 
-export type PiTurnOutput =
-  | { readonly _tag: "Chunk"; readonly chunk: PiUIMessageChunk }
-  | {
-      readonly _tag: "Retry";
-      readonly attempt: number;
-      readonly maxAttempts: number;
-      readonly delayMs: number;
-    };
-
 type SessionState = {
   readonly sessionId: string;
   readonly scope: Scope.Closeable;
   readonly transport: PiTransport;
   readonly termination: Deferred.Deferred<never, PiSessionFailure>;
-  readonly chunks: Queue.Queue<PiTurnOutput, Cause.Done | AgentOperationError>;
+  readonly events: Queue.Queue<AgentSessionEvent, Cause.Done | AgentOperationError>;
   readonly requests: Queue.Queue<AgentRequest, Cause.Done>;
   readonly pending: Ref.Ref<ReadonlyMap<string, PendingRequest>>;
   readonly turnState: Ref.Ref<PiTurnState>;
-  readonly transform: ReturnType<typeof createPiTransform>;
 };
 
 export interface PiAgentOptions {
@@ -107,7 +100,8 @@ export interface PiAgent {
       {
         readonly turnId: string;
         readonly started: boolean;
-        readonly output: Stream.Stream<PiTurnOutput, AgentOperationError>;
+        /** Ordered native events for this turn; UI rendering belongs to the adapter. */
+        readonly events: Stream.Stream<AgentSessionEvent, AgentOperationError>;
       },
       HarnessSessionNotFound | PiTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
@@ -200,7 +194,7 @@ export const makePiAgentWithDependencies = <R>(
         Effect.andThen(settlePending(session)),
         Effect.andThen(completeTurn(session)),
         Effect.andThen(Queue.end(session.requests)),
-        Effect.andThen(Queue.fail(session.chunks, error)),
+        Effect.andThen(Queue.fail(session.events, error)),
         Effect.andThen(closeScope(session)),
         Effect.asVoid,
       );
@@ -215,15 +209,14 @@ export const makePiAgentWithDependencies = <R>(
             Effect.andThen(completeTurn(session)),
             Effect.andThen(Queue.end(session.requests)),
             Effect.andThen(
-              Queue.offer(session.chunks, {
-                _tag: "Chunk",
-                chunk: { type: "error", errorText: failure.message },
-              }),
-            ),
-            Effect.flatMap((accepted) =>
-              accepted
-                ? Queue.end(session.chunks).pipe(Effect.asVoid)
-                : Queue.fail(session.chunks, overflowError(session)).pipe(Effect.asVoid),
+              Queue.fail(
+                session.events,
+                new AgentOperationError({
+                  sessionId: session.sessionId,
+                  operation: "event-stream",
+                  cause: failure,
+                }),
+              ),
             ),
             Effect.andThen(closeScope(session)),
           );
@@ -234,58 +227,35 @@ export const makePiAgentWithDependencies = <R>(
     const reportCrash = (session: SessionState, failure: PiSessionFailure) =>
       Effect.forkIn(crashSession(session, failure), ownerScope).pipe(Effect.asVoid);
 
-    const routeEvent = (
-      session: SessionState,
-      event: Parameters<SessionState["transform"]>[0],
-    ): Effect.Effect<void> =>
+    const routeEvent = (session: SessionState, event: AgentSessionEvent): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const offer = (output: PiTurnOutput) =>
-          Queue.offer(session.chunks, output).pipe(
-            Effect.flatMap((accepted) =>
-              accepted
-                ? Effect.succeed(true)
-                : evictOverflowedSession(session).pipe(Effect.as(false)),
-            ),
+        if (event.type === "agent_settled") {
+          const transition = yield* Ref.modify<PiTurnState, FinishTransition>(
+            session.turnState,
+            (current) => {
+              if (current._tag !== "Active") {
+                return [{ deliver: false, ended: undefined }, current] as const;
+              }
+              return current.abandoned
+                ? ([{ deliver: false, ended: current.ended }, { _tag: "Idle" } as const] as const)
+                : ([
+                    { deliver: true, ended: undefined },
+                    {
+                      _tag: "Finishing",
+                      turnId: current.turnId,
+                      ended: current.ended,
+                    } as const,
+                  ] as const);
+            },
           );
-
-        if (
-          event.type === "auto_retry_start" &&
-          !(yield* offer({
-            _tag: "Retry",
-            attempt: event.attempt,
-            maxAttempts: event.maxAttempts,
-            delayMs: event.delayMs,
-          }))
-        ) {
+          if (transition.ended) yield* Deferred.succeed(transition.ended, undefined);
+          if (!transition.deliver) return;
+        } else if ((yield* Ref.get(session.turnState))._tag !== "Active") {
           return;
         }
 
-        for (const chunk of session.transform(event)) {
-          if (chunk.type === "finish") {
-            const transition = yield* Ref.modify<PiTurnState, FinishTransition>(
-              session.turnState,
-              (current) => {
-                if (current._tag !== "Active") {
-                  return [{ deliver: false, ended: undefined }, current] as const;
-                }
-                return current.abandoned
-                  ? ([{ deliver: false, ended: current.ended }, { _tag: "Idle" } as const] as const)
-                  : ([
-                      { deliver: true, ended: undefined },
-                      {
-                        _tag: "Finishing",
-                        turnId: current.turnId,
-                        ended: current.ended,
-                      } as const,
-                    ] as const);
-              },
-            );
-            if (transition.ended) yield* Deferred.succeed(transition.ended, undefined);
-            if (!transition.deliver) continue;
-          }
-
-          if (!(yield* offer({ _tag: "Chunk", chunk }))) return;
-        }
+        const accepted = yield* Queue.offer(session.events, event);
+        if (!accepted) yield* evictOverflowedSession(session);
       });
 
     const awaitAgentResponse = (
@@ -367,13 +337,12 @@ export const makePiAgentWithDependencies = <R>(
             scope,
             transport,
             termination: yield* Deferred.make<never, PiSessionFailure>(),
-            chunks: yield* Queue.dropping<PiTurnOutput, Cause.Done | AgentOperationError>(
+            events: yield* Queue.dropping<AgentSessionEvent, Cause.Done | AgentOperationError>(
               SESSION_QUEUE_CAPACITY,
             ),
             requests: yield* Queue.bounded<AgentRequest, Cause.Done>(SESSION_QUEUE_CAPACITY),
             pending: yield* Ref.make<ReadonlyMap<string, PendingRequest>>(new Map()),
             turnState: yield* Ref.make<PiTurnState>({ _tag: "Idle" }),
-            transform: createPiTransform(sessionId),
           };
           yield* Ref.update(sessions, (current) => new Map(current).set(sessionId, session));
 
@@ -420,7 +389,7 @@ export const makePiAgentWithDependencies = <R>(
             Effect.andThen(settlePending(session)),
             Effect.andThen(completeTurn(session)),
             Effect.andThen(Queue.end(session.requests)),
-            Effect.andThen(Queue.end(session.chunks)),
+            Effect.andThen(Queue.end(session.events)),
             Effect.andThen(closeScope(session)),
             Effect.asVoid,
           ),
@@ -439,7 +408,7 @@ export const makePiAgentWithDependencies = <R>(
               {
                 readonly turnId: string;
                 readonly started: boolean;
-                readonly output: Stream.Stream<PiTurnOutput, AgentOperationError>;
+                readonly events: Stream.Stream<AgentSessionEvent, AgentOperationError>;
               },
               PiTransportFailure | AgentOperationError | TurnAlreadyRunning
             > =>
@@ -491,7 +460,7 @@ export const makePiAgentWithDependencies = <R>(
                       return {
                         turnId: decision.turn.turnId,
                         started: false,
-                        output: Stream.empty,
+                        events: Stream.empty,
                       };
                     }
                     yield* restore(Deferred.await(decision.turn.ended)).pipe(
@@ -510,7 +479,7 @@ export const makePiAgentWithDependencies = <R>(
                     return yield* Effect.suspend(prepareTurn);
                   }
 
-                  yield* drainQueue(session.chunks);
+                  yield* drainQueue(session.events);
                   yield* session.transport
                     .command({ type: "prompt", message: input.text })
                     .pipe(
@@ -555,15 +524,11 @@ export const makePiAgentWithDependencies = <R>(
                   return {
                     turnId,
                     started: true,
-                    output: streamFromQueueOne(session.chunks).pipe(
-                      Stream.tap((output) =>
-                        output._tag === "Chunk" && output.chunk.type === "finish"
-                          ? finishConsumed
-                          : Effect.void,
+                    events: streamFromQueueOne(session.events).pipe(
+                      Stream.tap((event) =>
+                        event.type === "agent_settled" ? finishConsumed : Effect.void,
                       ),
-                      Stream.takeUntil(
-                        (output) => output._tag === "Chunk" && output.chunk.type === "finish",
-                      ),
+                      Stream.takeUntil((event) => event.type === "agent_settled"),
                       Stream.ensuring(abandonTurn),
                     ),
                   };
