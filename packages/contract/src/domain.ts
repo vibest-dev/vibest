@@ -18,7 +18,8 @@ export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSc
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Server-generated, opaque to clients; unique within a project.
+  // Server-generated, opaque to clients, and globally unique for reverse lookup.
+  // Session operations still use the complete ref rather than this field alone.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;
@@ -272,7 +273,7 @@ export type CollectionEvent = { readonly ref: SessionRef } & (
   | { readonly type: "session.updated"; readonly title?: string }
   | { readonly type: "session.archived"; readonly archived: boolean }
   | { readonly type: "session.deleted" }
-  | { readonly type: "session.renamed"; readonly name: string }
+  | { readonly type: "session.renamed"; readonly title: string }
 );
 
 export type ServerEvent = SessionScopedEvent | CollectionEvent;
@@ -628,9 +629,23 @@ export type SessionSummary = {
 /** `session.list` returns the summaries directly — one shape, no wrapper. */
 export type ListSessionsOutput = ReadonlyArray<SessionSummary>;
 
+/**
+ * Longest title a client may give a session. The title is persisted on the
+ * session record and broadcast to every client on rename, so it is bounded
+ * here rather than left to whatever a caller sends.
+ */
+export const MAX_SESSION_TITLE_CHARS = 120;
+
 export const RenameSessionInputSchema = Schema.Struct({
   ref: SessionRefSchema,
-  name: Schema.NonEmptyString,
+  // `isTrimmed` with `isNonEmpty` is what rejects a whitespace-only title: the
+  // server stores the string as given, and a blank title would render as an
+  // unnamed row that no amount of renaming visibly fixes.
+  title: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_SESSION_TITLE_CHARS),
+  ),
 });
 export type RenameSessionInput = typeof RenameSessionInputSchema.Type;
 

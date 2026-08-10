@@ -49,9 +49,9 @@ function DiffPanelView() {
         ))}
       </ul>
       <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
-        {MOCK_HUNK.map((line, index) => (
+        {MOCK_HUNK.map((line) => (
           <div
-            key={index}
+            key={`${line.sign}:${line.text}`}
             className={
               line.sign === "+"
                 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"

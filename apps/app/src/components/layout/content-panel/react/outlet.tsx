@@ -14,10 +14,7 @@ import type { AnyPanelView } from "./view";
  * and the empty state. Knows nothing about any particular panel — everything it
  * shows comes off the snapshot.
  *
- * A card, not a column inside the chat's: the two are siblings that each own
- * their chrome, so the panel's tab strip is its own header line rather than a
- * tenant of the chat's. The margins mirror `SidebarInset`'s so the gap between
- * the cards matches the gap to the sidebar.
+ * A card beside the chat. Its enclosing shell panel owns width and spacing.
  */
 export type ContentPanelOutletProps = ComponentProps<"aside">;
 
@@ -34,9 +31,8 @@ export function ContentPanelOutlet({ className, ...props }: ContentPanelOutletPr
       data-slot="content-panel"
       data-state={presentation}
       className={cn(
-        "bg-background relative flex min-h-0 min-w-0 flex-col overflow-hidden border [-webkit-app-region:no-drag]",
-        "md:my-1.5 md:me-1.5 md:rounded-xl md:shadow-sm/5",
-        presentation === "maximized" ? "flex-1" : "w-112 shrink-0",
+        "bg-background relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border [-webkit-app-region:no-drag]",
+        "md:rounded-xl md:shadow-sm/5",
         className,
       )}
       {...props}

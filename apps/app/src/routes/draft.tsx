@@ -14,6 +14,7 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
+import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
 import {
   Empty,
   EmptyContent,
@@ -289,26 +290,32 @@ function DraftRoute() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <div className="flex w-full max-w-2xl flex-col gap-2">
-        <ProjectSelect
-          // Harness config survives a project switch — it says how the session
-          // runs, not what it is about. A pick the new project's catalog doesn't
-          // offer is dropped by the resolvers, not carried into the session.
-          onChange={(next) =>
-            navigate({
-              to: "/draft",
-              search: (prev) => ({ ...prev, projectId: next }),
-              replace: true,
-            })
+      <CardFrame className="w-full max-w-2xl">
+        <CardFrameHeader className="py-2">
+          <ProjectSelect
+            // Harness config survives a project switch — it says how the session
+            // runs, not what it is about. A pick the new project's catalog doesn't
+            // offer is dropped by the resolvers, not carried into the session.
+            onChange={(next) =>
+              navigate({
+                to: "/draft",
+                search: (prev) => ({ ...prev, projectId: next }),
+                replace: true,
+              })
+            }
+            projects={projects.data}
+            value={selected?.id ?? null}
+          />
+        </CardFrameHeader>
+        <Card
+          render={
+            <PromptInput
+              onSubmit={(e) => {
+                e.preventDefault();
+                void controller?.submit();
+              }}
+            />
           }
-          projects={projects.data}
-          value={selected?.id ?? null}
-        />
-        <PromptInput
-          onSubmit={(e) => {
-            e.preventDefault();
-            void controller?.submit();
-          }}
         >
           <ChatInputProvider controller={controller}>
             <ChatInput />
@@ -349,8 +356,8 @@ function DraftRoute() {
               <PromptInputSubmit disabled={!hasContent || !selected || startSession.isPending} />
             </PromptInputToolbar>
           </ChatInputProvider>
-        </PromptInput>
-      </div>
+        </Card>
+      </CardFrame>
     </div>
   );
 }

@@ -6,6 +6,8 @@ import {
   PromptInputModelSelectTrigger,
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
+import { Button } from "@vibest/ui/components/button";
+import { ChevronDownIcon } from "lucide-react";
 
 import { useHarnessAgents } from "@/features/chat/harness/use-harness";
 
@@ -41,12 +43,24 @@ export function HarnessSelect({
         if (next) onChange(next as HarnessAgentId);
       }}
     >
-      <PromptInputModelSelectTrigger className="min-h-8 py-0">
-        <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
-          <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
-          <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
-        </PromptInputModelSelectValue>
-      </PromptInputModelSelectTrigger>
+      {/* The render callback preserves Base UI's Select behavior while replacing
+          the field-style trigger chrome and its hard-coded up/down icon. */}
+      <PromptInputModelSelectTrigger
+        render={({ children: _children, className: _className, ...triggerProps }) => (
+          <Button
+            {...triggerProps}
+            className="text-foreground gap-1.5 px-3 font-normal"
+            size="default"
+            variant="ghost"
+          >
+            <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
+              <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
+              <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
+            </PromptInputModelSelectValue>
+            <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 opacity-70" />
+          </Button>
+        )}
+      />
       <PromptInputModelSelectContent>
         {harnessAgents.map((harnessAgent) => (
           <PromptInputModelSelectItem

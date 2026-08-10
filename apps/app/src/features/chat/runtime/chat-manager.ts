@@ -1,5 +1,7 @@
 import type { SessionRef } from "@vibest/contract";
 
+import { sessionRefKey } from "@/lib/session-ref";
+
 import { Chat } from "./chat";
 import type { ChatSessionTransportFactory } from "./chat-transport-port";
 
@@ -9,7 +11,7 @@ export interface ChatManagerApi {
   chatFor(sessionRef: SessionRef): Chat;
 }
 
-// Owns the live Chat instances keyed by the session's uuid. Sessions survive
+// Owns the live Chat instances keyed by the complete SessionRef. Sessions survive
 // route switches: chatFor() is get-or-create, and nothing disposes a Chat on
 // navigation — its store keeps the transcript for the next mount. The one
 // exception is eviction below. Each Chat gets its own transport, minted from
@@ -27,14 +29,15 @@ export class ChatManager implements ChatManagerApi {
   // on the SessionRef, so cold-loaded session routes and the session-creating
   // caller alike carry the real harness rather than a default.
   chatFor(sessionRef: SessionRef): Chat {
-    const existing = this.#chats.get(sessionRef.sessionId);
+    const key = sessionRefKey(sessionRef);
+    const existing = this.#chats.get(key);
     if (existing) return existing;
     const chat = new Chat({
       sessionRef,
       transport: this.createTransport(sessionRef),
-      onTerminated: () => this.#evict(sessionRef.sessionId),
+      onTerminated: () => this.#evict(key),
     });
-    this.#chats.set(sessionRef.sessionId, chat);
+    this.#chats.set(key, chat);
     return chat;
   }
 
@@ -49,10 +52,10 @@ export class ChatManager implements ChatManagerApi {
   // Safe to look the entry up rather than compare identities: `closed` reaches
   // a Chat only from inside the subscription's async loop, so the `set` below
   // has always run by the time this fires.
-  #evict(sessionId: string): void {
-    const chat = this.#chats.get(sessionId);
+  #evict(key: string): void {
+    const chat = this.#chats.get(key);
     if (!chat) return;
-    this.#chats.delete(sessionId);
+    this.#chats.delete(key);
     chat.dispose();
   }
 }

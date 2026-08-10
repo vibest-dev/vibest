@@ -5,10 +5,11 @@ import type { AgentResponse } from "./agent-requests";
 import { ChatManager } from "./chat-manager";
 import type { ChatSessionTransport, ChatTransportEvent } from "./chat-transport-port";
 
-const refFor = (sessionId: string): SessionRef => ({
+const refFor = (sessionId: string, overrides: Partial<SessionRef> = {}): SessionRef => ({
   projectId: "project-1",
   harnessAgentId: "claude-code",
   sessionId,
+  ...overrides,
 });
 
 class FakeTransport implements ChatSessionTransport {
@@ -40,12 +41,13 @@ const makeManager = () => {
 };
 
 describe("ChatManager", () => {
-  it("hands out one Chat per session across calls", () => {
+  it("hands out one Chat per complete SessionRef across calls", () => {
     const { manager, transports } = makeManager();
     const first = manager.chatFor(refFor("session-1"));
     expect(manager.chatFor(refFor("session-1"))).toBe(first);
     expect(manager.chatFor(refFor("session-2"))).not.toBe(first);
-    expect(transports).toHaveLength(2);
+    expect(manager.chatFor(refFor("session-1", { projectId: "project-2" }))).not.toBe(first);
+    expect(transports).toHaveLength(3);
   });
 
   it("evicts and unsubscribes a Chat once the session closes", () => {

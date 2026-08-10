@@ -1,7 +1,6 @@
 import { Button } from "@vibest/ui/components/button";
 import { Input } from "@vibest/ui/components/input";
 import { GlobeIcon, RotateCwIcon } from "lucide-react";
-import { useState } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
@@ -74,7 +73,6 @@ function hostOf(url: string): string {
 
 function BrowserPanelView({ instance }: { instance: BrowserInstance }) {
   const { loading, title } = useStore(instance.store);
-  const [draft, setDraft] = useState(instance.payload.url);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -82,12 +80,13 @@ function BrowserPanelView({ instance }: { instance: BrowserInstance }) {
         className="flex shrink-0 items-center gap-1 border-b p-1.5"
         onSubmit={(event) => {
           event.preventDefault();
-          instance.navigate(draft);
+          const draft = new FormData(event.currentTarget).get("url");
+          if (typeof draft === "string") instance.navigate(draft);
         }}
       >
         <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          name="url"
+          defaultValue={instance.payload.url}
           className="h-7 text-xs"
           aria-label="Address"
         />

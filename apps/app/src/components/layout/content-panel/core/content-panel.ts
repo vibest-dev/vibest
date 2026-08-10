@@ -1,5 +1,8 @@
+import type { SessionRef } from "@vibest/contract";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createStore, type StoreApi } from "zustand/vanilla";
+
+import { sessionRefKey } from "@/lib/session-ref";
 
 import {
   type AnyPanelDefinition,
@@ -31,7 +34,7 @@ interface SessionPanels {
  * panel loading its content never re-renders the tab strip.
  */
 export interface ContentPanelState {
-  readonly bySessionId: Readonly<Record<string, SessionPanels>>;
+  readonly bySessionKey: Readonly<Record<string, SessionPanels>>;
   /**
    * Definitions live in the host's Map: they carry components, they are not UI
    * state. This counter is the only part of the registry the UI reacts to, and
@@ -40,7 +43,7 @@ export interface ContentPanelState {
   readonly registryVersion: number;
 }
 
-type PersistedState = Pick<ContentPanelState, "bySessionId">;
+type PersistedState = Pick<ContentPanelState, "bySessionKey">;
 
 export interface OpenPanel<View> {
   readonly id: string;
@@ -79,13 +82,14 @@ export interface ContentPanelOptions {
   readonly storage?: Storage;
 }
 
+const STORAGE_NAME = "vibest:content-panel";
+
 const EMPTY_SESSION: SessionPanels = { presentation: "hidden", activeId: null, panels: [] };
 /** Shared so an empty strip is `Object.is`-stable without costing a cache entry. */
 const NO_PANELS: readonly never[] = [];
 
-// NUL occurs in neither half, so the two never collide and `forget` can match a
-// session by prefix. A panel id may well contain a space; a separator may not.
-const instanceKey = (sessionId: string, id: string): string => `${sessionId}\0${id}`;
+// NUL cannot occur in the JSON key, so `forget` can match a session by prefix.
+const instanceKey = (ref: SessionRef, id: string): string => `${sessionRefKey(ref)}\0${id}`;
 
 /**
  * The global instance: it owns the registry, the live panel instances, and a
@@ -112,15 +116,14 @@ export class ContentPanel<View = unknown> {
   #openable: { registryVersion: number; entries: readonly OpenablePanel<View>[] } | null = null;
 
   constructor(options: ContentPanelOptions = {}) {
-    const initial: ContentPanelState = { bySessionId: {}, registryVersion: 0 };
+    const initial: ContentPanelState = { bySessionKey: {}, registryVersion: 0 };
     const { storage } = options;
     this.store = storage
       ? createStore<ContentPanelState>()(
           persist<ContentPanelState, [], [], PersistedState>(() => initial, {
-            name: "vibest:content-panel",
-            version: 1,
+            name: STORAGE_NAME,
             storage: createJSONStorage(() => storage),
-            partialize: (state) => ({ bySessionId: state.bySessionId }),
+            partialize: (state) => ({ bySessionKey: state.bySessionKey }),
           }),
         )
       : createStore<ContentPanelState>(() => initial);
@@ -153,12 +156,12 @@ export class ContentPanel<View = unknown> {
    * (then told via `reopen`) rather than duplicated. Returns the live instance.
    */
   open<Type extends string, Payload, Extra extends object>(
-    sessionId: string,
+    sessionRef: SessionRef,
     definition: PanelDefinition<Type, Payload, Extra, View>,
     ...payloadArgs: PayloadArgs<Payload>
   ): PanelInstance<Payload, Extra> {
     return this.#openWith(
-      sessionId,
+      sessionRef,
       definition as AnyPanelDefinition<View>,
       payloadArgs[0],
     ) as PanelInstance<Payload, Extra>;
@@ -169,16 +172,16 @@ export class ContentPanel<View = unknown> {
    * type rather than by definition so `openable` stays plain data, shareable
    * across sessions instead of one bound closure per session per definition.
    */
-  openNew(sessionId: string, type: string): void {
+  openNew(sessionRef: SessionRef, type: string): void {
     const definition = this.#definitions.get(type);
     if (!definition) return;
-    this.#openWith(sessionId, definition, definition.newPayload?.());
+    this.#openWith(sessionRef, definition, definition.newPayload?.());
   }
 
-  activate(sessionId: string, id: string): void {
-    const session = this.#sessionOf(sessionId);
+  activate(sessionRef: SessionRef, id: string): void {
+    const session = this.#sessionOf(sessionRef);
     if (!session.panels.some((panel) => panel.id === id)) return;
-    this.#writeSession(sessionId, {
+    this.#writeSession(sessionRef, {
       ...session,
       presentation: session.presentation === "hidden" ? "docked" : session.presentation,
       activeId: id,
@@ -189,31 +192,31 @@ export class ContentPanel<View = unknown> {
    * The low-level door. `instance.close()` comes through here, and it is also
    * how an unresolved record left over from a retired panel type gets purged.
    */
-  close(sessionId: string, id: string): void {
-    const session = this.#sessionOf(sessionId);
+  close(sessionRef: SessionRef, id: string): void {
+    const session = this.#sessionOf(sessionRef);
     const index = session.panels.findIndex((panel) => panel.id === id);
     if (index < 0) return;
-    this.#disposeInstance(sessionId, id);
+    this.#disposeInstance(sessionRef, id);
     const panels = session.panels.filter((panel) => panel.id !== id);
     // Closing the active tab lands on its neighbour, the way an editor does.
     const fallback = panels[Math.min(index, panels.length - 1)] ?? null;
-    this.#writeSession(sessionId, {
+    this.#writeSession(sessionRef, {
       presentation: panels.length === 0 ? "hidden" : session.presentation,
       activeId: session.activeId === id ? (fallback?.id ?? null) : session.activeId,
       panels,
     });
   }
 
-  setPresentation(sessionId: string, presentation: PanelPresentation): void {
-    const session = this.#sessionOf(sessionId);
+  setPresentation(sessionRef: SessionRef, presentation: PanelPresentation): void {
+    const session = this.#sessionOf(sessionRef);
     if (session.presentation === presentation) return;
-    this.#writeSession(sessionId, { ...session, presentation });
+    this.#writeSession(sessionRef, { ...session, presentation });
   }
 
   /** Hidden → docked, anything else → hidden. */
-  toggleVisibility(sessionId: string): void {
-    const { presentation } = this.#sessionOf(sessionId);
-    this.setPresentation(sessionId, presentation === "hidden" ? "docked" : "hidden");
+  toggleVisibility(sessionRef: SessionRef): void {
+    const { presentation } = this.#sessionOf(sessionRef);
+    this.setPresentation(sessionRef, presentation === "hidden" ? "docked" : "hidden");
   }
 
   /**
@@ -221,24 +224,25 @@ export class ContentPanel<View = unknown> {
    * session. No caller yet: nothing in the app hard-deletes a session, and
    * archiving is reversible, so forgetting there would lose a user's tabs.
    */
-  forget(sessionId: string): void {
-    const prefix = `${sessionId}\0`;
+  forget(sessionRef: SessionRef): void {
+    const sessionKey = sessionRefKey(sessionRef);
+    const prefix = `${sessionKey}\0`;
     for (const [key, instance] of this.#instances) {
       if (!key.startsWith(prefix)) continue;
       instance.dispose?.();
       this.#instances.delete(key);
     }
-    this.#tabs.delete(sessionId);
+    this.#tabs.delete(sessionKey);
     this.store.setState((state) => {
-      if (!(sessionId in state.bySessionId)) return state;
-      const { [sessionId]: _removed, ...rest } = state.bySessionId;
-      return { bySessionId: rest };
+      if (!(sessionKey in state.bySessionKey)) return state;
+      const { [sessionKey]: _forgotten, ...bySessionKey } = state.bySessionKey;
+      return { bySessionKey };
     });
   }
 
   /** The test seam: asserts on instance lifetime without going through a render. */
-  instanceFor(sessionId: string, id: string): PanelHandle<unknown> | undefined {
-    return this.#instances.get(instanceKey(sessionId, id));
+  instanceFor(sessionRef: SessionRef, id: string): PanelHandle<unknown> | undefined {
+    return this.#instances.get(instanceKey(sessionRef, id));
   }
 
   /**
@@ -247,13 +251,14 @@ export class ContentPanel<View = unknown> {
    * identical array — which is what lets `useStore` decide, by `Object.is`, not
    * to re-render. Select fields off this; the wrapper itself is cheap and fresh.
    */
-  snapshot(state: ContentPanelState, sessionId: string | null): PanelSnapshot<View> {
+  snapshot(state: ContentPanelState, sessionRef: SessionRef | null): PanelSnapshot<View> {
     const openable = this.#openableFor(state.registryVersion);
-    if (sessionId === null) {
+    if (sessionRef === null) {
       return { presentation: "hidden", panels: NO_PANELS, active: null, openable };
     }
-    const session = state.bySessionId[sessionId] ?? EMPTY_SESSION;
-    const panels = this.#tabsFor(sessionId, session.panels, state.registryVersion);
+    const sessionKey = sessionRefKey(sessionRef);
+    const session = state.bySessionKey[sessionKey] ?? EMPTY_SESSION;
+    const panels = this.#tabsFor(sessionRef, session.panels, state.registryVersion);
     return {
       presentation: session.presentation,
       panels,
@@ -263,14 +268,15 @@ export class ContentPanel<View = unknown> {
   }
 
   #tabsFor(
-    sessionId: string,
+    sessionRef: SessionRef,
     records: readonly PanelRecord[],
     registryVersion: number,
   ): readonly OpenPanel<View>[] {
     // Sessions merely visited never reach the cache, so it stays the size of
     // what the user actually opened.
     if (records.length === 0) return NO_PANELS;
-    const cached = this.#tabs.get(sessionId);
+    const sessionKey = sessionRefKey(sessionRef);
+    const cached = this.#tabs.get(sessionKey);
     if (cached && cached.records === records && cached.registryVersion === registryVersion) {
       return cached.panels;
     }
@@ -281,7 +287,7 @@ export class ContentPanel<View = unknown> {
       const payload = definition.parse ? definition.parse(record.payload) : record.payload;
       if (payload === null) continue;
       // Arrow, so `this` is the host without aliasing it into the literal.
-      const materialize = () => this.#ensureInstance(sessionId, record.id, definition);
+      const materialize = () => this.#ensureInstance(sessionRef, record.id, definition);
       panels.push({
         id: record.id,
         label: definition.label(payload),
@@ -291,7 +297,7 @@ export class ContentPanel<View = unknown> {
         },
       });
     }
-    this.#tabs.set(sessionId, { records, registryVersion, panels });
+    this.#tabs.set(sessionKey, { records, registryVersion, panels });
     return panels;
   }
 
@@ -319,21 +325,21 @@ export class ContentPanel<View = unknown> {
    * conditional collapses to a union and the spread stops type-checking.
    */
   #openWith(
-    sessionId: string,
+    sessionRef: SessionRef,
     definition: AnyPanelDefinition<View>,
     payload: unknown,
   ): PanelHandle<unknown> {
     const id = panelId(definition, payload);
-    const session = this.#sessionOf(sessionId);
+    const session = this.#sessionOf(sessionRef);
     const isOpen = session.panels.some((panel) => panel.id === id);
-    this.#writeSession(sessionId, {
+    this.#writeSession(sessionRef, {
       presentation: session.presentation === "hidden" ? "docked" : session.presentation,
       activeId: id,
       panels: isOpen
         ? session.panels.map((panel) => (panel.id === id ? { ...panel, payload } : panel))
         : [...session.panels, { id, type: definition.type, payload }],
     });
-    const instance = this.#ensureInstance(sessionId, id, definition);
+    const instance = this.#ensureInstance(sessionRef, id, definition);
     // The payload is written first, so `reopen` sees it on the handle too.
     if (isOpen) instance.reopen(payload);
     return instance;
@@ -361,19 +367,21 @@ export class ContentPanel<View = unknown> {
     this.store.setState((state) => ({ registryVersion: state.registryVersion + 1 }));
   }
 
-  #sessionOf(sessionId: string): SessionPanels {
-    return this.store.getState().bySessionId[sessionId] ?? EMPTY_SESSION;
+  #sessionOf(sessionRef: SessionRef): SessionPanels {
+    const state = this.store.getState();
+    return state.bySessionKey[sessionRefKey(sessionRef)] ?? EMPTY_SESSION;
   }
 
-  #writeSession(sessionId: string, session: SessionPanels): void {
+  #writeSession(sessionRef: SessionRef, session: SessionPanels): void {
+    const sessionKey = sessionRefKey(sessionRef);
     this.store.setState((state) => ({
-      bySessionId: { ...state.bySessionId, [sessionId]: session },
+      bySessionKey: { ...state.bySessionKey, [sessionKey]: session },
     }));
   }
 
-  #setPayload(sessionId: string, id: string, next: unknown): void {
-    const session = this.#sessionOf(sessionId);
-    this.#writeSession(sessionId, {
+  #setPayload(sessionRef: SessionRef, id: string, next: unknown): void {
+    const session = this.#sessionOf(sessionRef);
+    this.#writeSession(sessionRef, {
       ...session,
       panels: session.panels.map((panel) =>
         panel.id === id
@@ -391,8 +399,8 @@ export class ContentPanel<View = unknown> {
     });
   }
 
-  #disposeInstance(sessionId: string, id: string): void {
-    const key = instanceKey(sessionId, id);
+  #disposeInstance(sessionRef: SessionRef, id: string): void {
+    const key = instanceKey(sessionRef, id);
     this.#instances.get(key)?.dispose?.();
     this.#instances.delete(key);
   }
@@ -403,14 +411,14 @@ export class ContentPanel<View = unknown> {
    * moment it is rendered — and not before.
    */
   #ensureInstance(
-    sessionId: string,
+    sessionRef: SessionRef,
     id: string,
     definition: AnyPanelDefinition<View>,
   ): PanelHandle<unknown> {
-    const key = instanceKey(sessionId, id);
+    const key = instanceKey(sessionRef, id);
     const existing = this.#instances.get(key);
     if (existing) return existing;
-    const handle = this.#createHandle(sessionId, id);
+    const handle = this.#createHandle(sessionRef, id);
     // Prototype-linked, not spread: `payload` is an accessor on the handle, and
     // copying it would freeze the value it had the moment the panel opened.
     const instance: PanelHandle<unknown> = definition.create
@@ -420,20 +428,20 @@ export class ContentPanel<View = unknown> {
     return instance;
   }
 
-  #createHandle(sessionId: string, id: string): PanelHandle<unknown> {
+  #createHandle(sessionRef: SessionRef, id: string): PanelHandle<unknown> {
     // Arrows throughout: they close over `this` lexically, so the getter below
     // can reach the host without aliasing it.
     const payloadOf = (): unknown =>
-      this.#sessionOf(sessionId).panels.find((panel) => panel.id === id)?.payload;
+      this.#sessionOf(sessionRef).panels.find((panel) => panel.id === id)?.payload;
     return {
       id,
-      sessionId,
+      sessionRef,
       get payload(): unknown {
         return payloadOf();
       },
-      activate: () => this.activate(sessionId, id),
-      close: () => this.close(sessionId, id),
-      setPayload: (next) => this.#setPayload(sessionId, id, next),
+      activate: () => this.activate(sessionRef, id),
+      close: () => this.close(sessionRef, id),
+      setPayload: (next) => this.#setPayload(sessionRef, id, next),
       reopen: () => {},
     };
   }

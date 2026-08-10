@@ -9,8 +9,8 @@ A working directory the user has registered with the server, identified by a ser
 _Avoid_: workspace, repo, cwd (for the Project field)
 
 **SessionRef**:
-The composite identity `{ projectId, harnessAgentId, sessionId }` that every session operation addresses. `sessionId` is a server-generated opaque UUID, unique within a project.
-_Avoid_: bare sessionId as a wire identity
+The composite identity `{ projectId, harnessAgentId, sessionId }` that every session operation addresses. `sessionId` is a server-generated, globally unique opaque UUID so a bookmarked URL can reverse-resolve its complete ref; clients still use the complete ref for operations, caches, and persisted state.
+_Avoid_: bare sessionId as a wire identity or client-state key
 
 **Harness session id**:
 The agent-native session identity (Claude session UUID, Codex thread ID) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
@@ -79,7 +79,7 @@ What `definePanel` / `definePanelFamily` produce — the type, how to label it, 
 _Avoid_: PanelSpec, panel config, panel registration
 
 **PanelHandle / PanelInstance**:
-The handle is what every panel gets: id, sessionId, live `payload`, and `activate` / `close` / `setPayload` / `reopen`. A definition's `create` returns _extra_ members, which the host prototype-links onto the handle to make the **instance**. Instance state is live and unpersisted (a scrollback, a spinner); it outlives navigation and dies on `close`, never on unmount. Materialized lazily — the tab strip draws a restored tab without one, so reopening ten tabs spawns nothing until each is rendered.
+The handle is what every panel gets: id, the complete `SessionRef`, live `payload`, and `activate` / `close` / `setPayload` / `reopen`. The host keys persisted tabs and live instances by that complete ref — never by a bare sessionId. A definition's `create` returns _extra_ members, which the host prototype-links onto the handle to make the **instance**. Instance state is live and unpersisted (a scrollback, a spinner); it outlives navigation and dies on `close`, never on unmount. Materialized lazily — the tab strip draws a restored tab without one, so reopening ten tabs spawns nothing until each is rendered.
 _Avoid_: panel object, panel controller
 
 **Tab strip**:

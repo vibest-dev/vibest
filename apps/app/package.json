@@ -36,6 +36,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-error-boundary": "catalog:",
+    "react-resizable-panels": "^4.12.2",
     "sonner": "^2.0.7",
     "tailwindcss": "catalog:",
     "tw-animate-css": "catalog:",

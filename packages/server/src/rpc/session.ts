@@ -118,7 +118,7 @@ export const sessionRouter = orpc.router({
   }),
   rename: orpc.rename.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
-    yield* sessions.rename(input.ref, input.name).pipe(
+    yield* sessions.rename(input.ref, input.title).pipe(
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
