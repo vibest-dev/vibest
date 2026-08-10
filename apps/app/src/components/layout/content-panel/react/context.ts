@@ -15,7 +15,7 @@ export const ContentPanelContext = createContext<ContentPanelContextValue | null
 export function useContentPanelContext(): ContentPanelContextValue {
   const value = use(ContentPanelContext);
   if (value === null) {
-    throw new Error("Content panel hooks need a <ContentPanelProvider> above them.");
+    throw new Error("Content panel hooks need a <ContentPanelSessionProvider> above them.");
   }
   return value;
 }

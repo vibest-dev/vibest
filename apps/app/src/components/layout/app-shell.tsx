@@ -1,4 +1,4 @@
-import { useSidebar } from "@vibest/ui/components/sidebar";
+import { SidebarProvider, useSidebar } from "@vibest/ui/components/sidebar";
 import { createContext, type ReactNode, use, useCallback, useMemo } from "react";
 
 import { useContentPanel, usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
@@ -61,12 +61,29 @@ export function AppShellMain({ children }: AppShellSlotProps) {
   );
 }
 
+/** Restore the state persisted by SidebarProvider. */
+const readSidebarCookie = (): boolean => !document.cookie.includes("sidebar_state=false");
+
 /** Structural shell only; the root composition owns the semantic surfaces. */
 export interface AppShellRootProps {
   readonly children: ReactNode;
 }
 
 export function AppShell({ children }: AppShellRootProps) {
+  return (
+    // The provider is shell-owned: it supplies responsive/sidebar state and is
+    // also the viewport wrapper. The app-region rule drags desktop windows;
+    // h-svh keeps long transcripts scrolling inside the card, not the document.
+    <SidebarProvider
+      className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
+      defaultOpen={readSidebarCookie()}
+    >
+      <AppShellLayout>{children}</AppShellLayout>
+    </SidebarProvider>
+  );
+}
+
+function AppShellLayout({ children }: AppShellRootProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);

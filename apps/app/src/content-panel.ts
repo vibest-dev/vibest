@@ -1,5 +1,4 @@
 import { ContentPanel } from "@/components/layout/content-panel/core/content-panel";
-import type { AnyPanelDefinition } from "@/components/layout/content-panel/core/panel";
 import { browserPanel } from "@/components/layout/content-panel/panels/browser-panel";
 import { diffPanel } from "@/components/layout/content-panel/panels/diff-panel";
 import { filePanel } from "@/components/layout/content-panel/panels/file-panel";
@@ -13,17 +12,8 @@ import type { AnyPanelView } from "@/components/layout/content-panel/react/view"
  */
 export const contentPanel = new ContentPanel<AnyPanelView>({ storage: window.localStorage });
 
-/**
- * Registered unconditionally at mount. Definitions are a few bytes of data, so
- * they register eagerly even when their content is code-split — a panel that
- * registers late has its tab pop in, and worse, an active panel restored from
- * storage leaves the container blank until it arrives. Conditional
- * registration is for panels that genuinely may not exist (harness-specific,
- * git-only), not for deferring load.
- */
-export const STATIC_PANELS: readonly AnyPanelDefinition<AnyPanelView>[] = [
-  terminalPanel,
-  filePanel,
-  diffPanel,
-  browserPanel,
-];
+// These definitions are unconditional application configuration, so register
+// them with the app-lifetime host rather than making a route finish bootstrap.
+// A future conditional panel should register with lifecycle at the boundary
+// that owns its availability condition.
+contentPanel.registerAll([terminalPanel, filePanel, diffPanel, browserPanel]);

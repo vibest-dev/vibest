@@ -1,4 +1,3 @@
-import type { SessionRef } from "@vibest/contract";
 import { useMemo } from "react";
 import { useStore } from "zustand";
 
@@ -9,7 +8,6 @@ import type { AnyPanelView } from "./view";
 
 /** Session-level operations, with the session already bound. Panel-level ones live on the instance. */
 export interface ContentPanelSession {
-  readonly sessionRef: SessionRef;
   open<Type extends string, Payload, Extra extends object>(
     definition: PanelDefinition<Type, Payload, Extra, AnyPanelView>,
     ...payload: PayloadArgs<Payload>
@@ -34,7 +32,6 @@ export function useContentPanel(): ContentPanelSession | null {
   return useMemo(() => {
     if (sessionRef === null) return null;
     return {
-      sessionRef,
       open: (definition, ...payload) => contentPanel.open(sessionRef, definition, ...payload),
       openNew: (type) => contentPanel.openNew(sessionRef, type),
       activate: (id) => contentPanel.activate(sessionRef, id),

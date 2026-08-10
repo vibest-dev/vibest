@@ -13,14 +13,14 @@ import type { AnyPanelView } from "./view";
  * The ref is identity, not an ambient data bag: panel-specific values such as a
  * workspace path or git ref still belong in that panel's own payload/model.
  */
-export interface ContentPanelProviderProps {
+export interface ContentPanelSessionProviderProps {
   readonly contentPanel: ContentPanel<AnyPanelView>;
   /** null off a session route; every panel hook below degrades to a no-op. */
   readonly sessionRef: SessionRef | null;
   readonly children: ReactNode;
 }
 
-export function ContentPanelProvider(props: ContentPanelProviderProps): ReactNode {
+export function ContentPanelSessionProvider(props: ContentPanelSessionProviderProps): ReactNode {
   const { contentPanel, sessionRef, children } = props;
   const value = useMemo(() => ({ contentPanel, sessionRef }), [contentPanel, sessionRef]);
   return <ContentPanelContext value={value}>{children}</ContentPanelContext>;

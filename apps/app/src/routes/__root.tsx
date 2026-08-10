@@ -6,15 +6,13 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import type { SessionRef } from "@vibest/contract";
-import { SidebarProvider } from "@vibest/ui/components/sidebar";
 import { useCallback } from "react";
 
 import { AppShell, AppShellMain, AppShellSidebar } from "@/components/layout/app-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CardPanel } from "@/components/layout/card-panel";
-import { ContentPanelProvider } from "@/components/layout/content-panel/react/provider";
-import { RegisterPanels } from "@/components/layout/content-panel/react/register";
-import { contentPanel, STATIC_PANELS } from "@/content-panel";
+import { ContentPanelSessionProvider } from "@/components/layout/content-panel/react/session-provider";
+import { contentPanel } from "@/content-panel";
 import { useProjectSessionTitle } from "@/features/projects/use-project-sessions";
 import { useProject } from "@/features/projects/use-projects";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
@@ -38,11 +36,6 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
     ),
   component: RootLayout,
 });
-
-/** Restore the state persisted by SidebarProvider. */
-function readSidebarCookie(): boolean {
-  return !document.cookie.includes("sidebar_state=false");
-}
 
 // Global shell: left sidebar + floating card panel; every route renders in the card.
 function RootLayout() {
@@ -90,29 +83,19 @@ function RootLayout() {
   const handleNewChat = () => navigate({ to: "/draft" });
 
   return (
-    // -webkit-app-region drags the desktop window (no-op in the browser).
-    // h-svh pins the shell to the viewport: the provider's own min-h-svh leaves
-    // the height auto, so a long transcript would stretch the whole card and
-    // scroll the document instead of the message list.
-    <SidebarProvider
-      className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
-      defaultOpen={readSidebarCookie()}
-    >
-      <ContentPanelProvider contentPanel={contentPanel} sessionRef={sessionRef}>
-        <RegisterPanels definitions={STATIC_PANELS} />
-        <AppShell>
-          <AppShellSidebar>
-            <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
-          </AppShellSidebar>
-          <AppShellMain>
-            <CardPanel
-              hasTrafficLights={os === "macos"}
-              heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
-              supportingText={project?.name}
-            />
-          </AppShellMain>
-        </AppShell>
-      </ContentPanelProvider>
-    </SidebarProvider>
+    <ContentPanelSessionProvider contentPanel={contentPanel} sessionRef={sessionRef}>
+      <AppShell>
+        <AppShellSidebar>
+          <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
+        </AppShellSidebar>
+        <AppShellMain>
+          <CardPanel
+            hasTrafficLights={os === "macos"}
+            heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
+            supportingText={project?.name}
+          />
+        </AppShellMain>
+      </AppShell>
+    </ContentPanelSessionProvider>
   );
 }
