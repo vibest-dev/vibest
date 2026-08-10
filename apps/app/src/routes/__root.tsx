@@ -8,7 +8,12 @@ import {
 import type { SessionRef } from "@vibest/contract";
 import { useCallback } from "react";
 
-import { AppShell, AppShellMain, AppShellSidebar } from "@/components/layout/app-shell";
+import {
+  AppShell,
+  AppShellBody,
+  AppShellMain,
+  AppShellSidebar,
+} from "@/components/layout/app-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CardPanel } from "@/components/layout/card-panel";
 import { ContentPanelSessionProvider } from "@/components/layout/content-panel/react/session-provider";
@@ -83,19 +88,21 @@ function RootLayout() {
   const handleNewChat = () => navigate({ to: "/draft" });
 
   return (
-    <ContentPanelSessionProvider contentPanel={contentPanel} sessionRef={sessionRef}>
-      <AppShell>
-        <AppShellSidebar>
-          <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
-        </AppShellSidebar>
-        <AppShellMain>
-          <CardPanel
-            hasTrafficLights={os === "macos"}
-            heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
-            supportingText={project?.name}
-          />
-        </AppShellMain>
-      </AppShell>
-    </ContentPanelSessionProvider>
+    <AppShell>
+      <ContentPanelSessionProvider contentPanel={contentPanel} sessionRef={sessionRef}>
+        <AppShellBody>
+          <AppShellSidebar>
+            <AppSidebar isSessionActive={isSessionActive} onNewChat={handleNewChat} />
+          </AppShellSidebar>
+          <AppShellMain>
+            <CardPanel
+              hasTrafficLights={os === "macos"}
+              heading={sessionRef === null ? "New chat" : (sessionTitle ?? "New chat")}
+              supportingText={project?.name}
+            />
+          </AppShellMain>
+        </AppShellBody>
+      </ContentPanelSessionProvider>
+    </AppShell>
   );
 }

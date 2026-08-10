@@ -26,15 +26,17 @@ const AppShellContext = createContext<AppShellContextValue | null>(null);
 
 const useAppShell = (): AppShellContextValue => {
   const value = use(AppShellContext);
-  if (value === null) throw new Error("AppShell composition must be rendered inside AppShell");
+  if (value === null) {
+    throw new Error("AppShellSidebar and AppShellMain must be rendered inside AppShellBody");
+  }
   return value;
 };
 
-export interface AppShellSlotProps {
+export interface AppShellSidebarProps {
   readonly children: ReactNode;
 }
 
-export function AppShellSidebar({ children }: AppShellSlotProps) {
+export function AppShellSidebar({ children }: AppShellSidebarProps) {
   const { isMobile } = useSidebar();
   const { contentPanel } = useAppShell();
   if (isMobile) return <>{children}</>;
@@ -46,7 +48,11 @@ export function AppShellSidebar({ children }: AppShellSlotProps) {
   );
 }
 
-export function AppShellMain({ children }: AppShellSlotProps) {
+export interface AppShellMainProps {
+  readonly children: ReactNode;
+}
+
+export function AppShellMain({ children }: AppShellMainProps) {
   const { isMobile } = useSidebar();
   const { contentPanel } = useAppShell();
   return (
@@ -65,11 +71,11 @@ export function AppShellMain({ children }: AppShellSlotProps) {
 const readSidebarCookie = (): boolean => !document.cookie.includes("sidebar_state=false");
 
 /** Structural shell only; the root composition owns the semantic surfaces. */
-export interface AppShellRootProps {
+export interface AppShellProps {
   readonly children: ReactNode;
 }
 
-export function AppShell({ children }: AppShellRootProps) {
+export function AppShell({ children }: AppShellProps) {
   return (
     // The provider is shell-owned: it supplies responsive/sidebar state and is
     // also the viewport wrapper. The app-region rule drags desktop windows;
@@ -78,12 +84,16 @@ export function AppShell({ children }: AppShellRootProps) {
       className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
       defaultOpen={readSidebarCookie()}
     >
-      <AppShellLayout>{children}</AppShellLayout>
+      {children}
     </SidebarProvider>
   );
 }
 
-function AppShellLayout({ children }: AppShellRootProps) {
+export interface AppShellBodyProps {
+  readonly children: ReactNode;
+}
+
+export function AppShellBody({ children }: AppShellBodyProps) {
   const { isMobile } = useSidebar();
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);

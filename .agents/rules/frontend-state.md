@@ -35,12 +35,13 @@ for per-agent tool rendering.
   route-identity seam: it reads the authoritative session-route loader ref and
   composes the project sidebar, card heading, and `ContentPanelSessionProvider`
   binding from it. `AppShell` owns `SidebarProvider`, its viewport wrapper, and
-  sidebar persistence because those are shell implementation details. It stays
-  structural through `AppShellSidebar`/`AppShellMain` children; child components
-  are composed as JSX children and consume shared layout state from the shell
-  context. Never pass them through named props, attach them as static properties,
-  or inspect `children` to extract slots. `CardPanel` receives display primitives
-  and neither component interprets routes or Project state.
+  sidebar persistence because those are shell implementation details; the
+  session-bound content provider is composed beneath it around `AppShellBody`.
+  The body stays structural through `AppShellSidebar`/`AppShellMain` children;
+  child components are composed as JSX children and consume shared layout state
+  from the shell context. Never pass them through named props, attach them as
+  static properties, or inspect `children` to extract slots. `CardPanel` receives
+  display primitives and no shell component interprets routes or Project state.
 - **`components/` is for what no single feature owns** — the shell
   (`layout/`) and generic pieces (`loader.tsx`). Base and composite UI belongs
   in `@vibest/ui`, not here.
