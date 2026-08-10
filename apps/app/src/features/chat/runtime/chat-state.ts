@@ -110,3 +110,62 @@ export function createChatState(): ChatState {
     nextOperationId: 1,
   };
 }
+
+export function copyChatState(state: ChatState): ChatState {
+  return {
+    ...state,
+    session: {
+      ...state.session,
+      messages: state.session.messages.slice(),
+      pendingRequests: state.session.pendingRequests.slice(),
+    },
+    outgoing: state.outgoing.slice(),
+    lifecycle: { ...state.lifecycle },
+    sync: {
+      ...state.sync,
+      floor: state.sync.floor
+        ? { ...state.sync.floor, events: state.sync.floor.events.slice() }
+        : null,
+      reconcile: state.sync.reconcile ? { ...state.sync.reconcile } : null,
+    },
+    prompt: {
+      ...state.prompt,
+      pendingMessageIds: state.prompt.pendingMessageIds.slice(),
+    },
+    turns: {
+      ...state.turns,
+      folds: { ...state.turns.folds },
+      recoverTurnIds: state.turns.recoverTurnIds.slice(),
+      erroredTurnIds: state.turns.erroredTurnIds.slice(),
+    },
+    pendingResponses: { ...state.pendingResponses },
+  };
+}
+
+export const isChatActive = (state: ChatState): boolean =>
+  state.lifecycle.session === "available" && state.lifecycle.instance === "active";
+
+export const statusFromPhase = (phase: SessionPhase): "streaming" | "ready" | "error" => {
+  switch (phase) {
+    case "idle":
+      return "ready";
+    case "crashed":
+      return "error";
+    default:
+      return "streaming";
+  }
+};
+
+export const includesValue = (values: ReadonlyArray<string>, value: string): boolean =>
+  values.includes(value);
+
+export function addUnique(values: string[], value: string): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+export function removeValue(values: string[], value: string): boolean {
+  const index = values.indexOf(value);
+  if (index === -1) return false;
+  values.splice(index, 1);
+  return true;
+}

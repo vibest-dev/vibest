@@ -13,7 +13,8 @@ export type ChatView = {
   historyStatus: HistoryStatus;
 };
 
-export function buildChatView(state: ChatState): ChatView {
+// Derive the UI snapshot from runtime facts; no runtime decision reads it back.
+export function deriveChatView(state: ChatState): ChatView {
   const queuedMessages: UIMessage[] = [];
   for (const outgoing of state.outgoing) {
     if (outgoing.status === "queued") queuedMessages.push(outgoing.message);

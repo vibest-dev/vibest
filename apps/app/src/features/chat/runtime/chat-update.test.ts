@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createChatState, type ChatState } from "./chat-state";
 import { updateChat } from "./chat-update";
-import { buildChatView } from "./chat-view";
+import { deriveChatView } from "./chat-view";
 
 const ref = {
   projectId: "project-1",
@@ -38,7 +38,7 @@ const requested = (id: string, text: string) => ({
 
 describe("updateChat", () => {
   it("builds the initial view from one complete state", () => {
-    expect(buildChatView(createChatState())).toEqual({
+    expect(deriveChatView(createChatState())).toEqual({
       messages: [],
       queuedMessages: [],
       status: "ready",
@@ -50,7 +50,7 @@ describe("updateChat", () => {
 
   it("keeps a prompt queued until the history floor commits, then dispatches atomically", () => {
     let transition = updateChat(createChatState(), requested("message-1", "hello"));
-    expect(buildChatView(transition.state).queuedMessages.map((message) => message.id)).toEqual([
+    expect(deriveChatView(transition.state).queuedMessages.map((message) => message.id)).toEqual([
       "message-1",
     ]);
     expect(transition.effects).toEqual([]);
@@ -68,7 +68,7 @@ describe("updateChat", () => {
       purpose: "floor",
       history: [],
     });
-    expect(buildChatView(transition.state)).toMatchObject({
+    expect(deriveChatView(transition.state)).toMatchObject({
       status: "submitted",
       queuedMessages: [],
       messages: [userMessage("message-1", "hello")],
@@ -138,7 +138,7 @@ describe("updateChat", () => {
       event: { type: "closed", reason: "session_deleted" },
     });
 
-    expect(buildChatView(transition.state)).toMatchObject({
+    expect(deriveChatView(transition.state)).toMatchObject({
       queuedMessages: [],
       pendingRequests: [],
       historyStatus: "settled",

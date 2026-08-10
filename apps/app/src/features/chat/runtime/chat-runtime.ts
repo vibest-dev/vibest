@@ -9,10 +9,11 @@ import { generateId, readUIMessageStream, type UIMessage, type UIMessageChunk } 
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
+import type { ChatEffect, ChatInput } from "./chat-runtime-types";
 import { createChatState, type ChatState } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
-import { updateChat, type ChatEffect, type ChatInput } from "./chat-update";
-import { buildChatView, ChatViewStore, type ChatView } from "./chat-view";
+import { updateChat } from "./chat-update";
+import { ChatViewStore, deriveChatView, type ChatView } from "./chat-view";
 
 type PromptPromise = {
   readonly resolve: () => void;
@@ -51,7 +52,7 @@ export class ChatRuntime {
     this.#transport = transport;
     this.#onTerminated = onTerminated;
     this.#state = createChatState();
-    this.#viewStore = new ChatViewStore(buildChatView(this.#state));
+    this.#viewStore = new ChatViewStore(deriveChatView(this.#state));
     this.store = this.#viewStore.store;
 
     const unsubscribe = transport.subscribe((event) => {
@@ -71,7 +72,7 @@ export class ChatRuntime {
         const transition = updateChat(this.#state, current);
         if (transition.state !== this.#state) {
           this.#state = transition.state;
-          this.#viewStore.publish(buildChatView(this.#state));
+          this.#viewStore.publish(deriveChatView(this.#state));
         }
         for (const effect of transition.effects) this.#runEffect(effect);
       }
