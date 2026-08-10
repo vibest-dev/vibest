@@ -17,11 +17,14 @@ export interface AppShellProps {
   onNewChat: () => void;
 }
 
-interface MobileAppShellProps extends AppShellProps {
-  contentVisible: boolean;
+export function AppShell(props: AppShellProps) {
+  const { isMobile } = useSidebar();
+  return isMobile ? <MobileAppShell {...props} /> : <ResizableAppShell {...props} />;
 }
 
-function MobileAppShell({ contentVisible, hasTrafficLights, onNewChat }: MobileAppShellProps) {
+function MobileAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
+  const contentVisible = usePanelSnapshot((snapshot) => snapshot.presentation !== "hidden");
+
   return (
     <>
       <AppSidebar onNewChat={onNewChat} />
@@ -43,22 +46,11 @@ function MobileAppShell({ contentVisible, hasTrafficLights, onNewChat }: MobileA
   );
 }
 
-export function AppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
-  const { isMobile } = useSidebar();
+function ResizableAppShell({ hasTrafficLights, onNewChat }: AppShellProps) {
   const session = useContentPanel();
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const contentVisible = presentation !== "hidden" && session !== null;
   const maximized = presentation === "maximized";
-
-  if (isMobile) {
-    return (
-      <MobileAppShell
-        contentVisible={contentVisible}
-        hasTrafficLights={hasTrafficLights}
-        onNewChat={onNewChat}
-      />
-    );
-  }
 
   return (
     <ShellGroup hasContentPanel={contentVisible} hasSidebar>
