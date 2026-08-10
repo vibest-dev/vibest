@@ -28,7 +28,6 @@ function restoreContentPanelToggleFocus(): void {
 export function ContentPanelOutlet({ className, ...props }: ContentPanelOutletProps): ReactNode {
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const session = useContentPanel();
-  const { isMobile } = useSidebar();
 
   // Off a session the snapshot is always hidden, so the first clause covers it;
   // the second is what narrows `session` for everything below.
@@ -45,21 +44,20 @@ export function ContentPanelOutlet({ className, ...props }: ContentPanelOutletPr
       )}
       {...props}
     >
-      <TabStrip isMobile={isMobile} presentation={presentation} session={session} />
+      <TabStrip presentation={presentation} session={session} />
       <PanelBody session={session} />
     </aside>
   );
 }
 
 function TabStrip({
-  isMobile,
   presentation,
   session,
 }: {
-  isMobile: boolean;
   presentation: "docked" | "maximized";
   session: ContentPanelSession;
 }): ReactNode {
+  const { isMobile } = useSidebar();
   const panels = usePanelSnapshot((snapshot) => snapshot.panels);
   const activeId = usePanelSnapshot((snapshot) => snapshot.active?.id ?? null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -91,7 +89,10 @@ function TabStrip({
             key={panel.id}
             panel={panel}
             active={panel.id === activeId}
-            restoreFocusOnClose={isMobile && panels.length === 1}
+            onClose={() => {
+              session.close(panel.id);
+              if (isMobile && panels.length === 1) restoreContentPanelToggleFocus();
+            }}
             session={session}
           />
         ))}
@@ -134,19 +135,15 @@ function TabStrip({
 function Tab({
   panel,
   active,
-  restoreFocusOnClose,
+  onClose,
   session,
 }: {
   panel: OpenPanel<AnyPanelView>;
   active: boolean;
-  restoreFocusOnClose: boolean;
+  onClose: () => void;
   session: ContentPanelSession;
 }): ReactNode {
   const Icon = panel.view.icon;
-  const close = () => {
-    session.close(panel.id);
-    if (restoreFocusOnClose) restoreContentPanelToggleFocus();
-  };
   return (
     <div
       data-slot="content-panel-tab"
@@ -163,7 +160,7 @@ function Tab({
       onAuxClick={(event) => {
         if (event.button !== 1) return;
         event.preventDefault();
-        close();
+        onClose();
       }}
     >
       <button
@@ -181,7 +178,7 @@ function Tab({
         type="button"
         className="hover:bg-muted flex size-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
         aria-label={`Close ${panel.label}`}
-        onClick={close}
+        onClick={onClose}
       >
         <XIcon className="size-3" />
       </button>
