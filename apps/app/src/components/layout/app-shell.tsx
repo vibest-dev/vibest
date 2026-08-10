@@ -1,5 +1,5 @@
 import { useSidebar } from "@vibest/ui/components/sidebar";
-import { Children, isValidElement, type ReactNode } from "react";
+import { createContext, type ReactNode, use, useCallback, useMemo } from "react";
 
 import { useContentPanel, usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
 import { ContentPanelOutlet } from "@/components/layout/content-panel/react/outlet";
@@ -11,29 +11,49 @@ import {
   ShellSidebarPanel,
 } from "@/components/layout/shell-panels";
 
+interface AppShellContextValue {
+  readonly contentVisible: boolean;
+  readonly isMobile: boolean;
+  readonly maximized: boolean;
+  readonly setMainCollapsed: (collapsed: boolean) => void;
+}
+
+const AppShellContext = createContext<AppShellContextValue | null>(null);
+
+const useAppShell = (): AppShellContextValue => {
+  const value = use(AppShellContext);
+  if (value === null) throw new Error("AppShell composition must be rendered inside AppShell");
+  return value;
+};
+
 export interface AppShellSlotProps {
   readonly children: ReactNode;
 }
 
 export function AppShellSidebar({ children }: AppShellSlotProps) {
-  return <>{children}</>;
+  const { isMobile, maximized } = useAppShell();
+  if (isMobile) return <>{children}</>;
+  return (
+    <>
+      <ShellSidebarPanel>{children}</ShellSidebarPanel>
+      <ShellSeparator disabled={maximized} />
+    </>
+  );
 }
 
 export function AppShellMain({ children }: AppShellSlotProps) {
-  return <>{children}</>;
+  const { contentVisible, isMobile, maximized, setMainCollapsed } = useAppShell();
+  return (
+    <ShellMainPanel
+      hasContentPanel={contentVisible}
+      collapsed={maximized}
+      collapsible={maximized || (contentVisible && !isMobile)}
+      onCollapsedChange={setMainCollapsed}
+    >
+      {children}
+    </ShellMainPanel>
+  );
 }
-
-const contentOf = (
-  children: ReactNode,
-  Slot: (props: AppShellSlotProps) => ReactNode,
-): ReactNode => {
-  for (const child of Children.toArray(children)) {
-    if (isValidElement<AppShellSlotProps>(child) && child.type === Slot) {
-      return child.props.children;
-    }
-  }
-  return null;
-};
 
 /** Structural shell only; the root composition owns the semantic surfaces. */
 export interface AppShellRootProps {
@@ -46,29 +66,19 @@ export function AppShell({ children }: AppShellRootProps) {
   const presentation = usePanelSnapshot((snapshot) => snapshot.presentation);
   const contentVisible = presentation !== "hidden" && session !== null;
   const maximized = presentation === "maximized";
-  const sidebar = contentOf(children, AppShellSidebar);
-  const main = contentOf(children, AppShellMain);
+  const setMainCollapsed = useCallback(
+    (collapsed: boolean) => session?.setPresentation(collapsed ? "maximized" : "docked"),
+    [session],
+  );
+  const context = useMemo(
+    () => ({ contentVisible, isMobile, maximized, setMainCollapsed }),
+    [contentVisible, isMobile, maximized, setMainCollapsed],
+  );
 
   return (
-    <>
-      {isMobile && sidebar}
+    <AppShellContext value={context}>
       <ShellGroup hasContentPanel={contentVisible} hasSidebar={!isMobile}>
-        {!isMobile && (
-          <>
-            <ShellSidebarPanel>{sidebar}</ShellSidebarPanel>
-            <ShellSeparator disabled={maximized} />
-          </>
-        )}
-        <ShellMainPanel
-          hasContentPanel={contentVisible}
-          collapsed={maximized}
-          collapsible={maximized || (contentVisible && !isMobile)}
-          onCollapsedChange={(collapsed) =>
-            session?.setPresentation(collapsed ? "maximized" : "docked")
-          }
-        >
-          {main}
-        </ShellMainPanel>
+        {children}
         {contentVisible && (
           <>
             <ShellSeparator />
@@ -78,6 +88,6 @@ export function AppShell({ children }: AppShellRootProps) {
           </>
         )}
       </ShellGroup>
-    </>
+    </AppShellContext>
   );
 }
