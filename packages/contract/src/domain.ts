@@ -241,7 +241,7 @@ export type SessionScopedEventBody =
       readonly reason?: string;
     }
   | { readonly type: "session.turn.started"; readonly turnId: string }
-  | ({ readonly type: "session.turn.retry.started"; readonly turnId: string } & TurnRetryState)
+  | ({ readonly type: "session.turn.retry.started" } & TurnRetryState)
   | {
       readonly type: "session.turn.ended";
       readonly turnId: string;

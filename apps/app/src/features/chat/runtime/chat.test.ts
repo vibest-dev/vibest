@@ -428,13 +428,12 @@ describe("Chat prompting", () => {
 });
 
 describe("Chat retry state", () => {
-  it("applies retry state only to the active turn and clears it when output resumes", async () => {
+  it("applies retry state to the active turn and clears it when output resumes", async () => {
     const { chat, attach, live } = makeChat();
     await attach({});
     live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
     live(2, {
       type: "session.turn.retry.started",
-      turnId: "turn-1",
       attempt: 1,
       maxAttempts: 3,
       retryAt: 10_000,
@@ -446,29 +445,18 @@ describe("Chat retry state", () => {
       retryAt: 10_000,
     });
 
-    live(3, {
-      type: "session.turn.retry.started",
-      turnId: "stale-turn",
-      attempt: 2,
-      maxAttempts: 3,
-      retryAt: 20_000,
-      phase: "running",
-    });
-    expect(chat.store.getState().retry?.attempt).toBe(1);
-
     const [start] = textChunks("text-1", "recovered");
-    live(4, { type: "session.message.chunk", turnId: "turn-1", chunk: start! });
+    live(3, { type: "session.message.chunk", turnId: "turn-1", chunk: start! });
     expect(chat.store.getState().retry).toBeNull();
 
-    live(5, {
+    live(4, {
       type: "session.turn.retry.started",
-      turnId: "turn-1",
       attempt: 2,
       maxAttempts: 3,
       retryAt: 20_000,
       phase: "running",
     });
-    live(6, {
+    live(5, {
       type: "session.turn.ended",
       turnId: "turn-1",
       outcome: "failed",
@@ -484,7 +472,6 @@ describe("Chat retry state", () => {
     live(2, { type: "session.turn.started", turnId: "turn-2", phase: "running" });
     live(3, {
       type: "session.turn.retry.started",
-      turnId: "turn-2",
       attempt: 1,
       maxAttempts: 3,
       retryAt: 10_000,

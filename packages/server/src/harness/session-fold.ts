@@ -107,9 +107,9 @@ export const toWireBody = (
     case "session.turn.started":
       return { type: "session.turn.started", turnId: event.turnId };
     case "session.turn.retry.started":
+      if (event.turnId !== activeTurnId) return null;
       return {
         type: "session.turn.retry.started",
-        turnId: event.turnId,
         attempt: event.attempt,
         maxAttempts: event.maxAttempts,
         retryAt: event.retryAt,
@@ -212,13 +212,7 @@ export const foldSessionEvent = (
         },
       };
     case "session.turn.retry.started":
-      if (
-        !current.activeTurn ||
-        current.activeTurn.complete ||
-        current.activeTurn.turnId !== event.turnId
-      ) {
-        return base;
-      }
+      if (!current.activeTurn || current.activeTurn.complete) return base;
       return {
         ...base,
         activeTurn: {

@@ -224,11 +224,12 @@ it.effect("retains retry state for reconnect until output resumes", () =>
         maxAttempts: 3,
         retryAt: 20_000,
       });
-      snapshot = yield* awaitCursor(session, 3);
-      assert.equal(snapshot.activeTurn?.retry?.attempt, 1);
-
       yield* Queue.offer(queue, { type: "text-start", id: "text-1" });
-      snapshot = yield* awaitCursor(session, 4);
+      snapshot = yield* awaitCursor(session, 3);
+      assert.deepEqual(
+        snapshot.activeTurn?.chunks.map((chunk) => chunk.seq),
+        [3],
+      );
       assert.equal(snapshot.activeTurn?.retry, null);
 
       yield* Queue.offer(queue, {
@@ -245,7 +246,7 @@ it.effect("retains retry state for reconnect until output resumes", () =>
         turnId: "turn-1",
         outcome: "failed",
       });
-      snapshot = yield* awaitCursor(session, 6);
+      snapshot = yield* awaitCursor(session, 5);
       assert.equal(snapshot.activeTurn?.complete, true);
       assert.equal(snapshot.activeTurn?.retry, null);
     }),

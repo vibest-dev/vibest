@@ -168,7 +168,6 @@ export class Chat {
         this.#state.retry = null;
         break;
       case "session.turn.retry.started":
-        if (this.#activeTurnId !== event.turnId) break;
         this.#state.retry = {
           attempt: event.attempt,
           maxAttempts: event.maxAttempts,
