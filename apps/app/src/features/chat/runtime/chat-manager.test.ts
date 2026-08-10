@@ -5,10 +5,11 @@ import type { AgentResponse } from "./agent-requests";
 import { ChatManager } from "./chat-manager";
 import type { ChatSessionTransport, ChatTransportEvent } from "./chat-transport-port";
 
-const refFor = (sessionId: string): SessionRef => ({
+const refFor = (sessionId: string, overrides: Partial<SessionRef> = {}): SessionRef => ({
   projectId: "project-1",
   harnessAgentId: "claude-code",
   sessionId,
+  ...overrides,
 });
 
 class FakeTransport implements ChatSessionTransport {
@@ -45,6 +46,40 @@ describe("ChatManager", () => {
     const first = manager.chatFor(refFor("session-1"));
     expect(manager.chatFor(refFor("session-1"))).toBe(first);
     expect(manager.chatFor(refFor("session-2"))).not.toBe(first);
+    expect(transports).toHaveLength(2);
+  });
+
+  it("keys Chats by the complete SessionRef identity", () => {
+    const { manager, transports } = makeManager();
+    const first = manager.chatFor(refFor("shared"));
+    const otherProject = manager.chatFor(refFor("shared", { projectId: "project-2" }));
+    const otherHarness = manager.chatFor(refFor("shared", { harnessAgentId: "codex" }));
+
+    expect(otherProject).not.toBe(first);
+    expect(otherHarness).not.toBe(first);
+    expect(otherHarness).not.toBe(otherProject);
+    expect(transports).toHaveLength(3);
+  });
+
+  it("handles a stream that terminates synchronously during construction", () => {
+    const transports: FakeTransport[] = [];
+    const manager = new ChatManager(() => {
+      const transport = new FakeTransport();
+      transport.subscribe = (onEvent) => {
+        transport.onEvent = onEvent;
+        onEvent({ type: "closed", reason: "session_closed" });
+        return () => {
+          transport.disposed += 1;
+        };
+      };
+      transports.push(transport);
+      return transport;
+    });
+
+    const closed = manager.chatFor(refFor("session-1"));
+    expect(closed.store.getState().error?.message).toBe("Session closed");
+    expect(transports[0]?.disposed).toBe(1);
+    expect(manager.chatFor(refFor("session-1"))).not.toBe(closed);
     expect(transports).toHaveLength(2);
   });
 

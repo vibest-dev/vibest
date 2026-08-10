@@ -1,11 +1,28 @@
-import type { PromptPart } from "@vibest/contract";
+import type { SessionRuntimeSnapshot } from "@vibest/contract";
 import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import type { AgentRequest } from "./agent-requests";
 import { createChatState, type ChatState } from "./chat-state";
-import { firstQueuedMessage, hasMessage, hasSendingMessage, updateChat } from "./chat-update";
+import { updateChat } from "./chat-update";
 import { buildChatView } from "./chat-view";
+
+const ref = {
+  projectId: "project-1",
+  harnessAgentId: "claude-code",
+  sessionId: "session-1",
+} as const;
+
+const snapshot = (overrides: Partial<SessionRuntimeSnapshot> = {}): SessionRuntimeSnapshot => ({
+  ref,
+  status: { phase: "idle" },
+  activeTurn: null,
+  activePrompt: null,
+  acceptedPrompt: null,
+  pendingPrompts: [],
+  pendingRequests: [],
+  cursor: 0,
+  ...overrides,
+});
 
 const userMessage = (id: string, text: string): UIMessage => ({
   id,
@@ -13,10 +30,14 @@ const userMessage = (id: string, text: string): UIMessage => ({
   parts: [{ type: "text", text }],
 });
 
-const parts = (text: string): PromptPart[] => [{ type: "text", text }];
+const requested = (id: string, text: string) => ({
+  type: "promptRequested" as const,
+  message: userMessage(id, text),
+  parts: [{ type: "text" as const, text }],
+});
 
-describe("Chat state updates", () => {
-  it("builds the initial Chat view", () => {
+describe("updateChat", () => {
+  it("builds the initial view from one complete state", () => {
     expect(buildChatView(createChatState())).toEqual({
       messages: [],
       queuedMessages: [],
@@ -27,135 +48,111 @@ describe("Chat state updates", () => {
     });
   });
 
-  it("keeps outgoing messages FIFO while hiding the sending item from the queue view", () => {
-    let state = createChatState();
-    state = updateChat(state, {
-      type: "messageQueued",
-      message: userMessage("a", "A"),
-      parts: parts("A"),
+  it("keeps a prompt queued until the history floor commits, then dispatches atomically", () => {
+    let transition = updateChat(createChatState(), requested("message-1", "hello"));
+    expect(buildChatView(transition.state).queuedMessages.map((message) => message.id)).toEqual([
+      "message-1",
+    ]);
+    expect(transition.effects).toEqual([]);
+
+    transition = updateChat(transition.state, {
+      type: "transportEvent",
+      event: { type: "attached", snapshot: snapshot() },
     });
-    state = updateChat(state, {
-      type: "messageQueued",
-      message: userMessage("b", "B"),
-      parts: parts("B"),
+    const floor = transition.effects.find((effect) => effect.type === "readHistory");
+    expect(floor).toMatchObject({ purpose: "floor" });
+
+    transition = updateChat(transition.state, {
+      type: "historyCompleted",
+      id: floor && floor.type === "readHistory" ? floor.id : -1,
+      purpose: "floor",
+      history: [],
     });
-
-    expect(firstQueuedMessage(state)?.message.id).toBe("a");
-    expect(buildChatView(state).queuedMessages.map((message) => message.id)).toEqual(["a", "b"]);
-
-    state = updateChat(state, { type: "messageSubmissionStarted", messageId: "a" });
-    expect(hasSendingMessage(state)).toBe(true);
-    expect(buildChatView(state).queuedMessages.map((message) => message.id)).toEqual(["b"]);
-    expect(state.session.messages.map((message) => message.id)).toEqual(["a"]);
-
-    state = updateChat(state, { type: "messageSubmissionFinished", messageId: "a" });
-    expect(hasSendingMessage(state)).toBe(false);
-    expect(firstQueuedMessage(state)?.message.id).toBe("b");
+    expect(buildChatView(transition.state)).toMatchObject({
+      status: "submitted",
+      queuedMessages: [],
+      messages: [userMessage("message-1", "hello")],
+    });
+    expect(transition.effects).toContainEqual({
+      type: "submitPrompt",
+      messageId: "message-1",
+      parts: [{ type: "text", text: "hello" }],
+    });
   });
 
-  it("does not let a history replacement erase outgoing messages", () => {
-    let state = createChatState();
-    state = updateChat(state, {
-      type: "messageQueued",
-      message: userMessage("queued", "later"),
-      parts: parts("later"),
-    });
-    state = updateChat(state, {
-      type: "historyReadFinished",
-      history: [userMessage("settled", "before")],
-      replaceMessages: true,
-    });
-
-    expect(state.session.messages.map((message) => message.id)).toEqual(["settled"]);
-    expect(buildChatView(state).queuedMessages.map((message) => message.id)).toEqual(["queued"]);
-    expect(state.session.historyStatus).toBe("settled");
-  });
-
-  it("deduplicates user messages and only clears an error for an unseen message", () => {
-    const existing = userMessage("same", "same");
-    let state: ChatState = {
-      ...createChatState([existing]),
-      error: new Error("newer failure"),
+  it("allows an authoritative empty reconciliation to clear a stale transcript", () => {
+    const state: ChatState = {
+      ...createChatState(),
+      session: {
+        ...createChatState().session,
+        messages: [userMessage("stale", "stale")],
+        historyStatus: "settled",
+      },
+      sync: {
+        ...createChatState().sync,
+        historyLoaded: true,
+        needsReconcile: true,
+        reconcile: { id: 7, promptRevision: 0 },
+      },
     };
 
-    state = updateChat(state, { type: "userMessageReceived", message: existing });
-    expect(state.error?.message).toBe("newer failure");
-
-    state = updateChat(state, {
-      type: "userMessageReceived",
-      message: userMessage("remote", "remote"),
+    const transition = updateChat(state, {
+      type: "historyCompleted",
+      id: 7,
+      purpose: "reconcile",
+      history: [],
     });
-    expect(state.error).toBeUndefined();
-    expect(hasMessage(state, "remote")).toBe(true);
+
+    expect(transition.state.session.messages).toEqual([]);
+    expect(transition.state.sync.needsReconcile).toBe(false);
   });
 
-  it("upserts assistant snapshots with fresh message and parts identities", () => {
-    const first: UIMessage = {
-      id: "assistant",
-      role: "assistant",
-      parts: [{ type: "text", text: "one" }],
-    };
-    let state = updateChat(createChatState(), {
-      type: "assistantMessageUpdated",
-      message: first,
+  it("ignores stale history, prompt and fold completions", () => {
+    const state = createChatState();
+    expect(
+      updateChat(state, {
+        type: "historyCompleted",
+        id: 99,
+        purpose: "reconcile",
+        history: [userMessage("late", "late")],
+      }),
+    ).toEqual({ state, effects: [] });
+    expect(updateChat(state, { type: "promptCompleted", messageId: "late" })).toEqual({
+      state,
+      effects: [],
     });
-    const storedFirst = state.session.messages[0]!;
-    expect(storedFirst).not.toBe(first);
-    expect(storedFirst.parts).not.toBe(first.parts);
-
-    const second: UIMessage = {
-      id: "assistant",
-      role: "assistant",
-      parts: [{ type: "text", text: "two" }],
-    };
-    state = updateChat(state, { type: "assistantMessageUpdated", message: second });
-    expect(state.session.messages).toHaveLength(1);
-    expect(state.session.messages[0]?.parts).toEqual(second.parts);
-    expect(state.session.messages[0]).not.toBe(storedFirst);
+    expect(
+      updateChat(state, {
+        type: "foldUpdated",
+        turnId: "late",
+        generation: 1,
+        message: { id: "late", role: "assistant", parts: [] },
+      }),
+    ).toEqual({ state, effects: [] });
   });
 
-  it("adds, replaces, removes, and clears pending requests by id", () => {
-    const first: AgentRequest = {
-      type: "plan",
-      id: "request",
-      harnessAgentId: "claude-code",
-      plan: "first",
-      native: null,
-    };
-    const replacement = { ...first, plan: "replacement" };
-    let state = updateChat(createChatState(), { type: "requestAdded", request: first });
-    state = updateChat(state, { type: "requestAdded", request: replacement });
-    expect(state.session.pendingRequests).toEqual([replacement]);
-
-    state = updateChat(state, { type: "requestRemoved", requestId: first.id });
-    expect(state.session.pendingRequests).toEqual([]);
-
-    state = updateChat(state, { type: "requestAdded", request: first });
-    state = updateChat(state, { type: "requestsCleared" });
-    expect(state.session.pendingRequests).toEqual([]);
-  });
-
-  it("atomically terminates the view and ignores late updates", () => {
-    let state = updateChat(createChatState(), {
-      type: "messageQueued",
-      message: userMessage("queued", "later"),
-      parts: parts("later"),
+  it("publishes the complete terminal shape in one transition and ignores later events", () => {
+    let transition = updateChat(createChatState(), requested("queued", "later"));
+    transition = updateChat(transition.state, {
+      type: "transportEvent",
+      event: { type: "closed", reason: "session_deleted" },
     });
-    const terminalError = new Error("Session closed");
-    state = updateChat(state, { type: "sessionTerminated", error: terminalError });
 
-    expect(buildChatView(state)).toMatchObject({
+    expect(buildChatView(transition.state)).toMatchObject({
       queuedMessages: [],
       pendingRequests: [],
       historyStatus: "settled",
       status: "error",
-      error: terminalError,
+      error: new Error("Session deleted"),
     });
-
-    const late = updateChat(state, {
-      type: "assistantMessageUpdated",
-      message: { id: "late", role: "assistant", parts: [{ type: "text", text: "late" }] },
-    });
-    expect(late).toBe(state);
+    const terminal = transition.state;
+    expect(
+      updateChat(terminal, {
+        type: "foldUpdated",
+        turnId: "late",
+        generation: 1,
+        message: { id: "late", role: "assistant", parts: [] },
+      }),
+    ).toEqual({ state: terminal, effects: [] });
   });
 });

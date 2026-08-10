@@ -1591,6 +1591,62 @@ describe("Chat truncated buffers", () => {
 });
 
 describe("Chat lifecycle", () => {
+  it("publishes one complete view before terminal effects run", async () => {
+    const { chat, emit, attach, live } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
+    });
+    const queued = chat.prompt("later");
+    void queued.catch(() => undefined);
+    live(1, { type: "session.request.asked", request: toolRequest, phase: "requires_action" });
+
+    const views: unknown[] = [];
+    const unsubscribe = chat.store.subscribe((view) => views.push(view));
+    emit({ type: "closed", reason: "session_deleted" });
+    unsubscribe();
+
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({
+      queuedMessages: [],
+      pendingRequests: [],
+      historyStatus: "settled",
+      status: "error",
+      error: new Error("Session deleted"),
+    });
+    await expect(queued).rejects.toThrow("Session is no longer available");
+  });
+
+  it("serializes inputs enqueued reentrantly from a store subscriber", async () => {
+    const { chat, attach } = makeChat();
+    await attach({});
+    await chat.prompt("first");
+
+    let reentered = false;
+    let third: Promise<void> | undefined;
+    const unsubscribe = chat.store.subscribe((view) => {
+      if (!reentered && view.queuedMessages.length === 1) {
+        reentered = true;
+        third = chat.prompt("third");
+        void third.catch(() => undefined);
+      }
+    });
+    const second = chat.prompt("second");
+    void second.catch(() => undefined);
+
+    const queuedTexts = chat.store
+      .getState()
+      .queuedMessages.map((message) =>
+        message.parts.map((part) => (part.type === "text" ? part.text : "")).join(""),
+      );
+    expect(queuedTexts).toEqual(["second", "third"]);
+
+    unsubscribe();
+    chat.dispose();
+    await expect(second).rejects.toThrow("Chat disposed");
+    await expect(third).rejects.toThrow("Chat disposed");
+  });
+
   it("copies the crashed phase into an error status", async () => {
     const { chat, attach, live } = makeChat();
     await attach({});

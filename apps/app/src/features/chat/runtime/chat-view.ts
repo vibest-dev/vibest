@@ -4,8 +4,6 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { AgentRequest } from "./agent-requests";
 import type { ChatState, HistoryStatus } from "./chat-state";
 
-// The complete snapshot React renders. It is derived from ChatState and never
-// used by the runtime to make protocol or queue decisions.
 export type ChatView = {
   messages: UIMessage[];
   queuedMessages: UIMessage[];
@@ -16,20 +14,20 @@ export type ChatView = {
 };
 
 export function buildChatView(state: ChatState): ChatView {
+  const queuedMessages: UIMessage[] = [];
+  for (const outgoing of state.outgoing) {
+    if (outgoing.status === "queued") queuedMessages.push(outgoing.message);
+  }
   return {
     messages: state.session.messages,
-    queuedMessages: state.outgoing
-      .filter((message) => message.status === "queued")
-      .map((message) => message.message),
-    status: state.status,
-    error: state.error,
+    queuedMessages,
+    status: state.session.status,
+    error: state.session.error,
     pendingRequests: state.session.pendingRequests,
     historyStatus: state.session.historyStatus,
   };
 }
 
-// Zustand is only the publication mechanism. Chat owns business state and
-// publishes one complete view after each state update.
 export class ChatViewStore {
   readonly store: StoreApi<ChatView>;
 

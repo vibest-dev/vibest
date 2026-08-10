@@ -1,17 +1,14 @@
-import type { PromptPart } from "@vibest/contract";
+import type {
+  PromptPart,
+  SessionPhase,
+  SessionRuntimeSnapshot,
+  SessionScopedEvent,
+} from "@vibest/contract";
 import type { ChatStatus, UIMessage } from "ai";
 
-import type { AgentRequest } from "./agent-requests";
+import type { AgentRequest, AgentResponse } from "./agent-requests";
 
-// Where the settled-history floor stands. A Chat is born "loading", so an
-// empty transcript means "not read yet" rather than "nothing was ever said".
 export type HistoryStatus = "loading" | "settled" | "unavailable";
-
-export type SessionState = {
-  messages: UIMessage[];
-  pendingRequests: AgentRequest[];
-  historyStatus: HistoryStatus;
-};
 
 export type OutgoingMessage = {
   readonly message: UIMessage;
@@ -19,32 +16,97 @@ export type OutgoingMessage = {
   readonly status: "queued" | "sending";
 };
 
-export type ChatLifecycle = {
-  session: "available" | "terminated";
-  instance: "active" | "disposed";
+export type TurnFoldState = {
+  readonly generation: number;
+  readonly status: "open" | "closing";
 };
 
-// The runtime's single source of truth for user-observable chat state. Protocol
-// synchronization details such as cursors and attach buffering still belong to
-// Chat; they move here only once their whole state machine can move together.
+export type HistoryReadState = {
+  readonly id: number;
+  readonly promptRevision: number;
+};
+
+export type HistoryFloorState = {
+  readonly id: number;
+  readonly snapshot: SessionRuntimeSnapshot;
+  readonly events: ReadonlyArray<SessionScopedEvent>;
+};
+
+export type PendingResponse = {
+  readonly request: AgentRequest | undefined;
+  readonly restoreOnFailure: boolean;
+  readonly response: AgentResponse;
+};
+
 export type ChatState = {
-  session: SessionState;
+  session: {
+    messages: UIMessage[];
+    pendingRequests: AgentRequest[];
+    historyStatus: HistoryStatus;
+    status: ChatStatus;
+    error: Error | undefined;
+  };
   outgoing: OutgoingMessage[];
-  status: ChatStatus;
-  error: Error | undefined;
-  lifecycle: ChatLifecycle;
+  lifecycle: {
+    session: "available" | "terminated";
+    instance: "active" | "disposed";
+  };
+  sync: {
+    cursor: number;
+    historyLoaded: boolean;
+    floor: HistoryFloorState | null;
+    reconcile: HistoryReadState | null;
+    needsReconcile: boolean;
+  };
+  prompt: {
+    revision: number;
+    deferredPhase: SessionPhase | null;
+    boundaryOpen: boolean;
+    pendingMessageIds: string[];
+    lastEndedTurnId: string | null;
+  };
+  turns: {
+    folds: Record<string, TurnFoldState>;
+    recoverTurnIds: string[];
+    erroredTurnIds: string[];
+    nextGeneration: number;
+  };
+  pendingResponses: Record<string, PendingResponse>;
+  nextOperationId: number;
 };
 
-export function createChatState(initialMessages: UIMessage[] = []): ChatState {
+export function createChatState(): ChatState {
   return {
     session: {
-      messages: initialMessages,
+      messages: [],
       pendingRequests: [],
       historyStatus: "loading",
+      status: "ready",
+      error: undefined,
     },
     outgoing: [],
-    status: "ready",
-    error: undefined,
     lifecycle: { session: "available", instance: "active" },
+    sync: {
+      cursor: 0,
+      historyLoaded: false,
+      floor: null,
+      reconcile: null,
+      needsReconcile: false,
+    },
+    prompt: {
+      revision: 0,
+      deferredPhase: null,
+      boundaryOpen: false,
+      pendingMessageIds: [],
+      lastEndedTurnId: null,
+    },
+    turns: {
+      folds: {},
+      recoverTurnIds: [],
+      erroredTurnIds: [],
+      nextGeneration: 1,
+    },
+    pendingResponses: {},
+    nextOperationId: 1,
   };
 }

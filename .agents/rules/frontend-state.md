@@ -56,10 +56,12 @@ for per-agent tool rendering.
   a comment so nobody "simplifies" the `useCallback` away.
 - Zustand here is not a global store: each `Chat` instance owns a plain internal
   `ChatState` and publishes a derived `ChatView` to its own vanilla store. The
-  store is output-only — transport callbacks update `ChatState`, then publish one
-  complete view; runtime decisions never read back from Zustand. `ChatManager`
-  caches Chat instances by sessionId so transcripts survive navigation, and is
-  constructed at App mount (module scope has no host connection yet).
+  store is output-only. Public calls, transport deliveries, RPC completions, and
+  message-fold output enter one serialized mailbox; its pure transition updates
+  the complete `ChatState`, publishes one view, then starts returned effects.
+  Runtime decisions never read back from Zustand. `ChatManager` caches Chat
+  instances by the complete `SessionRef` so transcripts survive navigation, and
+  is constructed at App mount (module scope has no host connection yet).
 - `useSessionListSync` is the only consumer of the global event firehose; session
   events (chunks, requests) belong to the per-session chat transport.
 - The live stream has no replay: subscribe before `session.prompt`, and recover
