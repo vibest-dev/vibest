@@ -8,7 +8,6 @@ import type {
 import { Deferred, Effect, Exit, Fiber, Ref, Scope, Semaphore, Stream } from "effect";
 
 import type { EventBusShape } from "../events/event-bus";
-import { withLoggedSpan } from "../telemetry";
 import type { HarnessAgentRuntime } from "./adapter";
 import {
   AgentOpenError,
@@ -409,7 +408,7 @@ export const makeHarnessAgentSession = (
             // The `identified` wrap around this is what replaces the lost
             // parentage: `sessionId` is the join key, and unlike a span link it
             // survives into the JSONL without a collector we do not run yet.
-            withLoggedSpan("session.drain", { root: true }),
+            Effect.withSpan("session.drain", { root: true }),
           ),
         );
         const fiber = yield* Effect.forkIn(drain, ownerScope);

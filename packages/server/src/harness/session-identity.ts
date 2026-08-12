@@ -18,9 +18,8 @@ import { Effect } from "effect";
  * `cwd` and has never heard of a `SessionRef`. Without it only the places that
  * remembered to spell out `sessionId` could be found by one.
  *
- * Both channels because a span line and a log line are read the same way and
- * need the same key: `annotateSpans` is what puts `sessionId` on `harness.open`
- * and therefore on the completion line `withLoggedSpan` writes.
+ * Both channels because local logs need stable join keys while native span
+ * attributes must carry the same identity for any tracing exporter.
  *
  * The RPC wrapper is the other candidate seam and cannot be one: oRPC hands it
  * the procedure path and nothing else — the decoded input, where the ref lives,

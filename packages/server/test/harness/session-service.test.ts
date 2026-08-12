@@ -752,8 +752,8 @@ describe("HarnessAgentSessionService", () => {
       ),
     );
 
-    // Only the events. The successful `harness.open` span is debug-level, so it
-    // is absent from this default-info capture by design rather than missing.
+    // Only lifecycle events are logs. The native `harness.open` span correlates
+    // logs inside it but does not synthesize its own completion record.
     expect(records.map((record) => record.annotations.event)).toEqual([
       "session.created",
       "session.archived",

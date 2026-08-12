@@ -15,7 +15,7 @@ const ENV_KEYS = [
   "VIBEST_PORT",
   "VIBEST_CORS_ORIGINS",
   "NODE_ENV",
-  // `runServe` builds the telemetry context, which creates `$VIBEST_HOME/logs`
+  // `runServe` provides the telemetry layer, which creates `$VIBEST_HOME/logs`
   // and writes to it. Both are pinned per test so the suite never touches the
   // developer's real `~/.vibest`.
   "VIBEST_HOME",

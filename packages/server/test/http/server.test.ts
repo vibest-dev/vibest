@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { Context, Effect, Scope } from "effect";
+import { Context, Effect, Layer, Logger, Scope } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { createServer, type ManagedServer } from "../../src/http/server";
 import type { UIApp } from "../../src/http/ui";
 import type { RpcRuntime } from "../../src/rpc";
+import { structured, type LogRecord } from "../../src/telemetry/format";
 
 const TOKEN = "test-token-0000";
 
@@ -141,6 +142,28 @@ describe("createServer WebSocket ticket", () => {
   it("rejects an upgrade with no ticket", async () => {
     const base = await start({ authToken: TOKEN });
     expect(await connect(base, "")).toBe(401);
+  });
+
+  it("runs WebSocket callback logs on the supplied Effect context", async () => {
+    const records: Array<LogRecord> = [];
+    const telemetryContext = await Effect.runPromise(
+      Layer.build(
+        Logger.layer([
+          Logger.map(structured, (record) => {
+            records.push(record);
+          }),
+        ]),
+      ).pipe(Effect.scoped),
+    );
+    const base = await start({ authToken: TOKEN, telemetryContext });
+
+    expect(await connect(base, "")).toBe(401);
+    await expect.poll(() => records.length).toBeGreaterThan(0);
+
+    const record = records.find(
+      (candidate) => candidate.annotations.event === "ws.upgrade_rejected",
+    );
+    expect(record?.annotations.reason).toBe("invalid_ticket");
   });
 
   it("only upgrades the WebSocket RPC path without consuming the ticket", async () => {

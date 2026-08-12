@@ -1,7 +1,7 @@
-import { Cause, Effect, Option } from "effect";
+import { Cause, Context, Effect, Option, Scope } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { makeTelemetryRuntime, resolveTelemetryConfig, type TelemetryRuntime } from "../telemetry";
+import { layer as telemetryLayer, resolveTelemetryConfig } from "../telemetry";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
 import { createServer, ServerStartupError } from "./server";
@@ -82,29 +82,21 @@ export function resolveServeConfig(input: ServeInput): {
  * `NodeRuntime.runMain`'s SIGINT/SIGTERM interrupt tears it down through the
  * release finalizer.
  *
- * This is where the process's one telemetry runtime is built, which is what
- * makes logging identical whether the server runs in the foreground
- * (`vibest serve`, `pnpm dev`) or detached as the daemon: both paths run this
- * body, so both persist to `$VIBEST_HOME/logs` rather than only the daemon
- * getting a log through its redirected stdio.
+ * This is the process composition root for telemetry. The layer is provided
+ * once around the complete server lifecycle, so foreground and daemon runs
+ * share the same scoped sinks and shutdown flush behavior.
  */
 export const runServe = (input: ServeInput) =>
-  Effect.gen(function* () {
-    // Built in the ambient scope, so its batch fiber lives as long as the
-    // server and its final flush runs on the same interrupt that stops it.
-    const telemetry = yield* makeTelemetryRuntime(resolveTelemetryConfig());
-    return yield* telemetry.provide(
-      serveWith(input, telemetry).pipe(
-        Effect.tapError((error) =>
-          Effect.logError("server startup failed", Cause.fail(error)).pipe(
-            Effect.annotateLogs({ event: "server.startup_failed", phase: error.phase }),
-          ),
-        ),
+  serveWith(input).pipe(
+    Effect.tapError((error) =>
+      Effect.logError("server startup failed", Cause.fail(error)).pipe(
+        Effect.annotateLogs({ event: "server.startup_failed", phase: error.phase }),
       ),
-    );
-  });
+    ),
+    Effect.provide(telemetryLayer(resolveTelemetryConfig())),
+  );
 
-const serveWith = (input: ServeInput, telemetry: TelemetryRuntime) =>
+const serveWith = (input: ServeInput) =>
   Effect.gen(function* () {
     const authToken = takeAuthToken();
     const { port: requestedPort, corsOrigins, allowedHosts } = resolveServeConfig(input);
@@ -125,9 +117,10 @@ const serveWith = (input: ServeInput, telemetry: TelemetryRuntime) =>
       }),
     );
 
+    const telemetryContext = Context.omit(Scope.Scope)(yield* Effect.context<never>());
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => createServer({ authToken, corsOrigins, allowedHosts, telemetry }),
+        try: () => createServer({ authToken, corsOrigins, allowedHosts, telemetryContext }),
         catch: (cause) => new ServerStartupError({ phase: "create", cause }),
       }),
       // A shutdown failure is logged, not thrown: the process is exiting, and
@@ -152,7 +145,7 @@ const serveWith = (input: ServeInput, telemetry: TelemetryRuntime) =>
 
     // Machine-readable first, for the desktop supervisor; human-readable
     // second. Both go to stdout, which stays clear of logging because the
-    // telemetry sets `Logger.LogToStderr` — Effect 4 defaults that to
+    // telemetry layer sets `Logger.LogToStderr` — Effect 4 defaults that to
     // `false`, i.e. stdout, so this separation is configured, not inherent.
     console.log(formatReadyLine({ port }));
     console.log(`vibest listening on http://127.0.0.1:${port}`);

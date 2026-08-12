@@ -428,10 +428,9 @@ export const makeHarnessAgentSessionService = (deps: {
 
   /**
    * The lifecycle boundaries, at `info` — a session appearing, going away, or
-   * being put aside. There are a few dozen of these in a working day, against
-   * thousands of span lines at `debug`, which is why they sit at a level that
-   * shows by default: read on their own they are the story of what was worked
-   * on and when.
+   * being put aside. There are only a few dozen in a working day, so they sit
+   * at a level that shows by default: read on their own they are the story of
+   * what was worked on and when.
    *
    * Identity comes from the method's own `inSession`, so what is named here is
    * only what this particular boundary adds.

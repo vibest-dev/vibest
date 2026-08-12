@@ -1,29 +1,25 @@
 import assert from "node:assert/strict";
 
 import { layer } from "@effect/vitest";
-import { Effect, Layer, Logger, References } from "effect";
+import { Context, Effect, Layer, Logger } from "effect";
 
 import { makeRpcWrap } from "../../src/rpc/handlers";
 import { structured, type LogRecord } from "../../src/telemetry/format";
-import { telemetryRuntimeFromContext } from "../../src/telemetry/runtime";
 
-const captureRuntime = (into: Array<LogRecord>, minimumLogLevel?: "Debug") => {
-  const logging = Logger.layer([
-    Logger.map(structured, (record) => {
-      into.push(record);
-    }),
-  ]);
-  const capture = minimumLogLevel
-    ? Layer.merge(logging, Layer.succeed(References.MinimumLogLevel, minimumLogLevel))
-    : logging;
-  return Effect.map(Layer.build(capture), telemetryRuntimeFromContext);
-};
+const captureContext = (into: Array<LogRecord>) =>
+  Layer.build(
+    Logger.layer([
+      Logger.map(structured, (record) => {
+        into.push(record);
+      }),
+    ]),
+  );
 
 layer(Layer.empty)("rpc effect/wrap", (it) => {
   it.effect("reports a defect with the procedure path", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       const exit = yield* Effect.exit(
         wrap(Effect.die(new Error("boom")), { path: ["session", "prompt"] }),
@@ -35,13 +31,15 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
       assert.equal(record.level, "ERROR");
       assert.equal(record.annotations.procedure, "session.prompt");
       assert.ok(String(record.cause).includes("boom"));
+      assert.equal(record.span, "rpc.session.prompt");
+      assert.equal(typeof record.traceId, "string");
     }),
   );
 
   it.effect("reports a typed failure the router did not map", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       yield* Effect.exit(wrap(Effect.fail("store unavailable"), { path: ["project", "list"] }));
 
@@ -50,10 +48,27 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
     }),
   );
 
+  it.effect("matches oRPC's inner context provision order", () =>
+    Effect.gen(function* () {
+      const records: Array<LogRecord> = [];
+      const telemetryContext = yield* captureContext(records);
+      const wrap = makeRpcWrap(telemetryContext);
+      const innerContext = Context.empty();
+
+      yield* Effect.exit(
+        wrap(Effect.fail("store unavailable").pipe(Effect.provide(innerContext)), {
+          path: ["project", "list"],
+        }),
+      );
+
+      assert.equal(records[0]?.annotations.event, "rpc.failed");
+    }),
+  );
+
   it.effect("stays silent when the caller disconnects", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       const exit = yield* Effect.exit(wrap(Effect.interrupt, { path: ["session", "subscribe"] }));
 
@@ -65,7 +80,7 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
   it.effect("stamps a shared traceId on every line the procedure produces", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       yield* wrap(
         Effect.gen(function* () {
@@ -83,69 +98,10 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
     }),
   );
 
-  it.effect("records every call as a timed span", () =>
+  it.effect("does not emit a synthetic record for a successful span", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records, "Debug"));
-
-      yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
-      yield* Effect.exit(wrap(Effect.fail("nope"), { path: ["session", "prompt"] }));
-      yield* Effect.exit(wrap(Effect.interrupt, { path: ["session", "subscribe"] }));
-
-      const spans = records.filter((record) => record.annotations.event === "span");
-      assert.deepEqual(
-        spans.map((span) => [span.message, span.annotations.outcome, span.level]),
-        [
-          ["rpc.project.list", "ok", "DEBUG"],
-          ["rpc.session.prompt", "error", "WARN"],
-          ["rpc.session.subscribe", "interrupted", "DEBUG"],
-        ],
-      );
-      assert.ok(spans.every((span) => typeof span.annotations.durationMs === "number"));
-      assert.ok(spans.every((span) => typeof span.traceId === "string"));
-      assert.ok(spans.every((span) => span.span === span.message));
-    }),
-  );
-
-  it.effect("carries the caller's span annotations onto the span line", () =>
-    Effect.gen(function* () {
-      const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records, "Debug"));
-
-      yield* wrap(Effect.void, { path: ["session", "close"] }).pipe(
-        Effect.annotateSpans({ sessionId: "session-1" }),
-      );
-
-      const span = records.find((record) => record.annotations.event === "span");
-      assert.equal(span?.annotations.sessionId, "session-1");
-      assert.equal(typeof span?.traceId, "string");
-      assert.equal(span?.span, "rpc.session.close");
-    }),
-  );
-
-  it.effect("keeps telemetry failures from changing the procedure exit", () =>
-    Effect.gen(function* () {
-      const context = yield* Layer.build(
-        Layer.merge(
-          Logger.layer([
-            Logger.make(() => {
-              throw new Error("logger failed");
-            }),
-          ]),
-          Layer.succeed(References.MinimumLogLevel, "Debug"),
-        ),
-      );
-      const wrap = makeRpcWrap(telemetryRuntimeFromContext(context));
-
-      const value = yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
-      assert.equal(value, 1);
-    }),
-  );
-
-  it.effect("stays quiet at the default level", () =>
-    Effect.gen(function* () {
-      const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
 
@@ -153,10 +109,25 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
     }),
   );
 
+  it.effect("does not invoke the logger for a silent success", () =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        Logger.layer([
+          Logger.make(() => {
+            throw new Error("logger failed");
+          }),
+        ]),
+      );
+      const wrap = makeRpcWrap(context);
+      const value = yield* wrap(Effect.succeed(1), { path: ["project", "list"] });
+      assert.equal(value, 1);
+    }),
+  );
+
   it.effect("leaves a successful procedure's value untouched", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureRuntime(records));
+      const wrap = makeRpcWrap(yield* captureContext(records));
 
       const value = yield* wrap(Effect.succeed({ ok: true }), { path: ["harness", "list"] });
 

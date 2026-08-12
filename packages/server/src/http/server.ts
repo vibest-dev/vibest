@@ -2,12 +2,11 @@ import type { RequestListener, Server } from "node:http";
 import http from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { Cause, Data, Effect, Exit, Scope } from "effect";
+import { Cause, Context, Data, Effect, Exit, Scope } from "effect";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 
 import { createRpcRuntime, createWsRPCHandler, type RpcRuntime } from "../rpc";
-import { defaultTelemetryRuntime, type TelemetryRuntime } from "../telemetry";
 import { makeRequestApp } from "./app";
 import { createTicketStore, type TicketStore } from "./auth";
 import { isAllowedOrigin, isLoopbackHost } from "./cors";
@@ -36,8 +35,8 @@ export type CreateServerOptions = {
    * preserves the tailnet MagicDNS Host). Unset in the common case.
    */
   allowedHosts?: readonly string[] | undefined;
-  /** The process-wide telemetry runtime. Unset in tests uses Effect defaults. */
-  telemetry?: TelemetryRuntime | undefined;
+  /** The process logging context. Unset in tests uses Effect defaults. */
+  telemetryContext?: Context.Context<never> | undefined;
 };
 
 /** Startup failed for an operational reason: building the server or binding. */
@@ -51,7 +50,7 @@ export class ServerStartupError extends Data.TaggedError("ServerStartupError")<{
  * and assert that every earlier stage's finalizer still runs (issue #155).
  */
 export type ServerStages = {
-  readonly createRpcRuntime: (telemetry: TelemetryRuntime) => Promise<RpcRuntime>;
+  readonly createRpcRuntime: (telemetryContext: Context.Context<never>) => Promise<RpcRuntime>;
   readonly createUI: (runtime: RpcRuntime) => Promise<UIApp>;
   readonly createRequestHandler: (
     runtime: RpcRuntime,
@@ -229,11 +228,12 @@ const buildServer = (
       authToken,
       corsOrigins = [],
       allowedHosts = [],
-      telemetry = defaultTelemetryRuntime,
+      telemetryContext = Context.empty(),
     } = options;
+    const runInContext = Effect.runForkWith(telemetryContext);
 
     const rpcRuntime = yield* Effect.acquireRelease(
-      Effect.promise(() => stages.createRpcRuntime(telemetry)),
+      Effect.promise(() => stages.createRpcRuntime(telemetryContext)),
       (runtime) => Effect.promise(() => runtime.dispose()),
     );
     const wsHandler = createWsRPCHandler(rpcRuntime.context);
@@ -266,7 +266,9 @@ const buildServer = (
           tickets,
           wsHandler,
           handleRequest,
-          runLog: telemetry.emit,
+          runLog: (effect) => {
+            runInContext(effect);
+          },
         }),
       ),
       closeWiredServer,
@@ -278,28 +280,28 @@ export async function createServer(
   options: CreateServerOptions = {},
   stages: ServerStages = defaultStages,
 ): Promise<ManagedServer> {
-  const telemetry = options.telemetry ?? defaultTelemetryRuntime;
-  const onRoot = telemetry.provide;
+  const telemetryContext = options.telemetryContext ?? Context.empty();
+  // `createServer` is Promise-shaped, so the root Layer cannot cross this seam
+  // implicitly. Context-bound runners keep startup, cleanup, and callbacks on
+  // the one process-owned logger without constructing another telemetry Layer.
+  const runPromise = Effect.runPromiseWith(telemetryContext);
+  const runPromiseExit = Effect.runPromiseExitWith(telemetryContext);
 
   const scope = Scope.makeUnsafe();
   let disposing: Promise<void> | undefined;
   // Still `runPromise`, not `runPromiseExit`: `runServe` catches a disposal
   // failure and logs it, so this must keep rejecting.
-  const dispose = () => (disposing ??= Effect.runPromise(onRoot(Scope.close(scope, Exit.void))));
+  const dispose = () => (disposing ??= runPromise(Scope.close(scope, Exit.void)));
 
-  const built = await Effect.runPromiseExit(
-    onRoot(buildServer(options, stages).pipe(Scope.provide(scope))),
-  );
+  const built = await runPromiseExit(buildServer(options, stages).pipe(Scope.provide(scope)));
   if (Exit.isFailure(built)) {
     // A later stage failed: release every stage that already succeeded, then
     // surface the original failure. A cleanup failure must not mask it.
-    const cleanup = await Effect.runPromiseExit(onRoot(Scope.close(scope, built)));
+    const cleanup = await runPromiseExit(Scope.close(scope, built));
     if (Exit.isFailure(cleanup)) {
-      await Effect.runPromise(
-        onRoot(
-          Effect.logError("server cleanup after failed startup", cleanup.cause).pipe(
-            Effect.annotateLogs({ event: "server.cleanup_failed" }),
-          ),
+      await runPromise(
+        Effect.logError("server cleanup after failed startup", cleanup.cause).pipe(
+          Effect.annotateLogs({ event: "server.cleanup_failed" }),
         ),
       );
     }
