@@ -16,8 +16,13 @@ import {
 } from "@/components/layout/app-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CardPanel } from "@/components/layout/card-panel";
+import { browserPanel } from "@/components/layout/content-panel/panels/browser-panel";
+import { diffPanel } from "@/components/layout/content-panel/panels/diff-panel";
+import { terminalPanel } from "@/components/layout/content-panel/panels/terminal-panel";
 import { ContentPanelSessionProvider } from "@/components/layout/content-panel/react/session-provider";
 import { contentPanel } from "@/content-panel";
+import { filePanel } from "@/features/files/file-panel";
+import { filesPanel } from "@/features/files/files-panel";
 import { useProjectSessionTitle } from "@/features/projects/use-project-sessions";
 import { useProject } from "@/features/projects/use-projects";
 import { useSessionListSync } from "@/features/projects/use-session-list-sync";
@@ -30,6 +35,8 @@ export interface RouterAppContext {
   orpcQueryUtils: AppClients["orpcQueryUtils"];
   queryClient: QueryClient;
 }
+
+contentPanel.registerAll([filesPanel, filePanel, terminalPanel, diffPanel, browserPanel]);
 
 export const Route = createRootRouteWithContext<RouterAppContext>()({
   // Fetch the harness list once, right after the client connects and before

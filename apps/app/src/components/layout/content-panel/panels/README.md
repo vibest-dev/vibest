@@ -1,14 +1,15 @@
 # Placeholder panels
 
-Mock content, real wiring. These exist to exercise the four shapes a panel can
-take, so the host is proven against all of them before anything real is built:
+Mock content, real wiring. These remain to exercise the panel shapes that do not
+yet have real features behind them:
 
 |            | arity                 | `create` | what it demonstrates                                  |
 | ---------- | --------------------- | -------- | ----------------------------------------------------- |
 | `diff`     | singleton             | —        | the thin default handle; opening twice is one panel   |
-| `file`     | family (`key: path`)  | —        | one tab per key, opened with a payload from elsewhere |
 | `browser`  | family (`key: tabId`) | ✓        | an instance with its own store (url, loading)         |
 | `terminal` | family (`key: id`)    | ✓        | an instance whose store holds live, unpersisted state |
+
+The real Files entry panel and path-keyed file viewer live in `features/files/`.
 
 There is one tab strip and it belongs to the host. A panel that wants "several
 of a thing" — two shells, two files — opens several panels, so the strip stays

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { useStore } from "zustand";
 
+import { sessionRefKey } from "@/lib/session-ref";
+
 import type { PanelPresentation, PanelSnapshot } from "../core/content-panel";
 import type { PanelDefinition, PanelInstance, PayloadArgs } from "../core/panel";
 import { useContentPanelContext } from "./context";
@@ -8,7 +10,13 @@ import type { AnyPanelView } from "./view";
 
 /** Session-level operations, with the session already bound. Panel-level ones live on the instance. */
 export interface ContentPanelSession {
+  readonly sessionKey: string;
   open<Type extends string, Payload, Extra extends object>(
+    definition: PanelDefinition<Type, Payload, Extra, AnyPanelView>,
+    ...payload: PayloadArgs<Payload>
+  ): PanelInstance<Payload, Extra>;
+  replace<Type extends string, Payload, Extra extends object>(
+    currentId: string,
     definition: PanelDefinition<Type, Payload, Extra, AnyPanelView>,
     ...payload: PayloadArgs<Payload>
   ): PanelInstance<Payload, Extra>;
@@ -32,7 +40,10 @@ export function useContentPanel(): ContentPanelSession | null {
   return useMemo(() => {
     if (sessionRef === null) return null;
     return {
+      sessionKey: sessionRefKey(sessionRef),
       open: (definition, ...payload) => contentPanel.open(sessionRef, definition, ...payload),
+      replace: (currentId, definition, ...payload) =>
+        contentPanel.replace(sessionRef, currentId, definition, ...payload),
       openNew: (type) => contentPanel.openNew(sessionRef, type),
       activate: (id) => contentPanel.activate(sessionRef, id),
       close: (id) => contentPanel.close(sessionRef, id),

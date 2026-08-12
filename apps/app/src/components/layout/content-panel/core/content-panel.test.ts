@@ -77,6 +77,40 @@ describe("ContentPanel", () => {
     expect(snapshotOf(host).panels.map((panel) => panel.id)).toEqual(["file:a.ts", "file:b.ts"]);
   });
 
+  it("replaces an entry panel in place and disposes its old instance", () => {
+    let disposed = 0;
+    const entry = definePanel({
+      type: "entry",
+      label: "Entry",
+      create: () => ({ dispose: () => void disposed++ }),
+      view: null,
+    });
+    const host = withPanels(entry, file);
+    host.open(S, entry);
+    host.open(S, file, { path: "b.ts" });
+    host.activate(S, "entry");
+
+    const replacement = host.replace(S, "entry", file, { path: "a.ts" });
+
+    expect(snapshotOf(host).panels.map((panel) => panel.id)).toEqual(["file:a.ts", "file:b.ts"]);
+    expect(snapshotOf(host).active?.id).toBe("file:a.ts");
+    expect(replacement.id).toBe("file:a.ts");
+    expect(disposed).toBe(1);
+  });
+
+  it("reuses an existing replacement target instead of duplicating it", () => {
+    const host = withPanels(diff, file);
+    host.open(S, diff);
+    const existing = host.open(S, file, { path: "a.ts" });
+    host.activate(S, "diff");
+
+    const replacement = host.replace(S, "diff", file, { path: "a.ts" });
+
+    expect(replacement).toBe(existing);
+    expect(snapshotOf(host).panels.map((panel) => panel.id)).toEqual(["file:a.ts"]);
+    expect(snapshotOf(host).active?.id).toBe("file:a.ts");
+  });
+
   it("reopening a family member reuses its instance and tells it so", () => {
     const reopened: unknown[] = [];
     const tracked = definePanelFamily({

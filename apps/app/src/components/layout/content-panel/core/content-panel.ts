@@ -168,6 +168,65 @@ export class ContentPanel<View = unknown> {
   }
 
   /**
+   * Replace one Tab record in place with another panel definition. This keeps
+   * the Tab strip stable for entry states that materialize into a concrete
+   * panel after the user's first choice. If the target is already open, the
+   * source is removed and the existing target is reused instead of duplicated.
+   */
+  replace<Type extends string, Payload, Extra extends object>(
+    sessionRef: SessionRef,
+    currentId: string,
+    definition: PanelDefinition<Type, Payload, Extra, View>,
+    ...payloadArgs: PayloadArgs<Payload>
+  ): PanelInstance<Payload, Extra> {
+    const payload = payloadArgs[0] as Payload;
+    const nextId = panelId(definition, payload);
+    const session = this.#sessionOf(sessionRef);
+    const currentIndex = session.panels.findIndex((panel) => panel.id === currentId);
+    if (currentIndex < 0) return this.open(sessionRef, definition, ...payloadArgs);
+
+    if (currentId === nextId) {
+      this.#writeSession(sessionRef, {
+        ...session,
+        panels: session.panels.map((panel) =>
+          panel.id === currentId ? { id: nextId, type: definition.type, payload } : panel,
+        ),
+      });
+      const instance = this.#ensureInstance(
+        sessionRef,
+        nextId,
+        definition as AnyPanelDefinition<View>,
+      ) as PanelInstance<Payload, Extra>;
+      instance.reopen(payload);
+      return instance;
+    }
+
+    const targetIsOpen = session.panels.some((panel) => panel.id === nextId);
+    this.#disposeInstance(sessionRef, currentId);
+    const activeId = session.activeId === currentId ? nextId : session.activeId;
+    this.#writeSession(sessionRef, {
+      ...session,
+      activeId,
+      panels: targetIsOpen
+        ? session.panels.flatMap((panel) => {
+            if (panel.id === currentId) return [];
+            return [panel.id === nextId ? { id: nextId, type: definition.type, payload } : panel];
+          })
+        : session.panels.map((panel) =>
+            panel.id === currentId ? { id: nextId, type: definition.type, payload } : panel,
+          ),
+    });
+
+    const instance = this.#ensureInstance(
+      sessionRef,
+      nextId,
+      definition as AnyPanelDefinition<View>,
+    ) as PanelInstance<Payload, Extra>;
+    if (targetIsOpen) instance.reopen(payload);
+    return instance;
+  }
+
+  /**
    * Open a fresh member of a registered type — what a "+" menu entry does. By
    * type rather than by definition so `openable` stays plain data, shareable
    * across sessions instead of one bound closure per session per definition.
