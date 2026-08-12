@@ -99,6 +99,10 @@ export interface HarnessAgentRuntime {
   readonly prompt: (
     input: UserInput,
   ) => Effect.Effect<PromptReceipt, SessionClosed | TurnAlreadyRunning | AgentOperationError>;
+  readonly steer: (
+    expectedTurnId: string,
+    input: UserInput,
+  ) => Effect.Effect<void, SessionClosed | TurnAlreadyRunning | AgentOperationError>;
   // Session-scoped config setters. `model` is the provider-local model id —
   // the server resolves and validates the providerId before it ever
   // reaches an adapter. Harnesses without a knob accept the call and no-op.
@@ -156,6 +160,7 @@ export interface HarnessAgentAdapter {
    * approval policy + sandbox) is the adapter's private knowledge.
    */
   readonly permissionModes: ReadonlyArray<PermissionMode>;
+  readonly supportsSteering: boolean;
   readonly defaultPermissionMode?: PermissionMode;
   /**
    * Probe this harness's built-in model provider in one working directory. It

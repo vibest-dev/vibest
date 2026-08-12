@@ -17,6 +17,7 @@ const snapshot: SessionRuntimeSnapshot = {
   activeTurn: null,
   activePrompt: null,
   acceptedPrompt: null,
+  acceptedPrompts: [],
   pendingPrompts: [],
   pendingRequests: [],
   cursor: 0,
@@ -78,6 +79,7 @@ const throwingIterable = (): AsyncIterable<SubscribeStreamEvent> => ({
 const baseSession = {
   getSnapshot: async () => snapshot,
   prompt: unexpectedCall,
+  steer: unexpectedCall,
   setModel: unexpectedCall,
   setReasoningEffort: unexpectedCall,
   setPermissionMode: unexpectedCall,

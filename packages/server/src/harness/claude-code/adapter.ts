@@ -372,6 +372,14 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      steer: () =>
+        Effect.fail(
+          new AgentOperationError({
+            sessionId,
+            operation: "steer",
+            cause: new Error("Claude Code does not support steering"),
+          }),
+        ),
       setModel,
       setReasoningEffort,
       setPermissionMode,
@@ -416,6 +424,7 @@ export const makeClaudeCodeAdapter = (agent: ClaudeCodeAgent): HarnessAgentAdapt
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
   permissionModes: CLAUDE_PERMISSION_MODE_IDS,
+  supportsSteering: false,
   // Keeps today's behaviour: the first turn shouldn't be gated on approvals.
   // Codex defaults lower because its "full" also drops the sandbox; this one
   // only bypasses the prompts.

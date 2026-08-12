@@ -1,6 +1,5 @@
 import type { SessionRuntimeSnapshot, SessionScopedEvent } from "@vibest/contract";
 
-import { sendingMessage } from "./chat-outgoing";
 import type { ChatDraft, ChatEffects, ChatInput } from "./chat-runtime-types";
 import { isChatActive } from "./chat-state";
 import { hasClosingFolds, hasFolds } from "./chat-turn";
@@ -23,7 +22,9 @@ export function startReconcile(state: ChatDraft, effects: ChatEffects): void {
     !state.sync.needsReconcile ||
     state.sync.floor !== null ||
     state.sync.reconcile !== null ||
-    sendingMessage(state) !== undefined ||
+    state.outgoing.some(
+      (message) => message.delivery === "follow-up" && message.status === "sending",
+    ) ||
     hasClosingFolds(state)
   ) {
     return;
@@ -84,7 +85,14 @@ export function handleHistoryCompleted(
     });
     return true;
   }
-  if (reconcile.promptRevision !== state.prompt.revision || sendingMessage(state)) return true;
+  if (
+    reconcile.promptRevision !== state.prompt.revision ||
+    state.outgoing.some(
+      (message) => message.delivery === "follow-up" && message.status === "sending",
+    )
+  ) {
+    return true;
+  }
   if (input.history === null) {
     state.session.historyStatus = "unavailable";
     state.sync.needsReconcile = false;

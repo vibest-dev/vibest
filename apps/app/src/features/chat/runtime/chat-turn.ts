@@ -12,6 +12,25 @@ export const hasClosingFolds = (state: ChatState): boolean =>
 
 export function upsertAssistantMessage(state: ChatDraft, message: UIMessage): void {
   const snapshot = structuredClone(message);
+  const metadata = snapshot.metadata as { runId?: unknown; segment?: unknown } | undefined;
+  if (typeof metadata?.runId === "string" && typeof metadata.segment === "number") {
+    const runId = metadata.runId;
+    const segment = metadata.segment;
+    const prefixLength = state.session.messages.reduce((total, candidate) => {
+      const candidateMetadata = candidate.metadata as
+        | { runId?: unknown; segment?: unknown }
+        | undefined;
+      return candidate.role === "assistant" &&
+        candidateMetadata?.runId === runId &&
+        typeof candidateMetadata?.segment === "number" &&
+        candidateMetadata.segment < segment
+        ? total + candidate.parts.length
+        : total;
+    }, 0);
+    if (segment > 0 && prefixLength > 0) {
+      snapshot.parts = snapshot.parts.slice(prefixLength);
+    }
+  }
   const index = state.session.messages.findIndex((candidate) => candidate.id === snapshot.id);
   if (index === -1) state.session.messages.push(snapshot);
   else state.session.messages[index] = snapshot;

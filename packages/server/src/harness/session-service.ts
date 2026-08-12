@@ -4,6 +4,7 @@ import type {
   PermissionMode,
   PromptInput,
   ReasoningEffort,
+  SteerInput,
   SessionRef,
   SessionRuntimeSnapshot,
   SessionStatus,
@@ -185,6 +186,21 @@ export type HarnessAgentSessionServiceShape = {
    * with the process, so "stopped" is the truth and starting an agent in order
    * to interrupt it would be absurd.
    */
+  readonly steer: (
+    input: SteerInput,
+  ) => Effect.Effect<
+    void,
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | UnsupportedPromptPart
+    | HarnessAgentNotFound
+    | HarnessSessionNotFound
+    | CapabilityUnsupported
+    | SessionClosed
+    | TurnAlreadyRunning
+    | AgentOperationError
+  >;
   readonly interrupt: (
     ref: SessionRef,
   ) => Effect.Effect<
@@ -613,6 +629,45 @@ export const makeHarnessAgentSessionService = (deps: {
                   type: "session.prompt.accepted",
                   messageId,
                   turnId: receipt.turnId,
+                }),
+              ),
+            ),
+        );
+      }),
+
+    steer: (input) =>
+      Effect.gen(function* () {
+        yield* readChecked(input.ref);
+        const adapter = yield* registry.get(input.ref.harnessAgentId);
+        if (!adapter.supportsSteering) {
+          return yield* new CapabilityUnsupported({
+            harnessAgentId: input.ref.harnessAgentId,
+            capability: "steering",
+          });
+        }
+        const userInput = yield* toUserInput(input.parts);
+        yield* Effect.uninterruptible(
+          manager
+            .emit(input.ref, {
+              type: "session.prompt.submitted",
+              messageId: input.messageId,
+              parts: input.parts,
+            })
+            .pipe(
+              Effect.andThen(manager.get(input.ref)),
+              Effect.flatMap((runtime) => runtime.steer(input.expectedTurnId, userInput)),
+              Effect.tapError((steerError) =>
+                manager.emit(input.ref, {
+                  type: "session.prompt.rejected",
+                  messageId: input.messageId,
+                  reason: steerError.message,
+                }),
+              ),
+              Effect.tap(() =>
+                manager.emit(input.ref, {
+                  type: "session.prompt.accepted",
+                  messageId: input.messageId,
+                  turnId: input.expectedTurnId,
                 }),
               ),
             ),

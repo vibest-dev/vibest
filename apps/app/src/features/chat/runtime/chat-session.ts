@@ -1,4 +1,5 @@
 import type {
+  ActivePromptSnapshot,
   SessionMessageChunkEvent,
   SessionRuntimeSnapshot,
   SessionScopedEvent,
@@ -7,8 +8,10 @@ import type {
 import type { AgentRequest, AgentResponse } from "./agent-requests";
 import { startHistoryFloor, startReconcile } from "./chat-history";
 import {
-  maybeDispatchPrompt,
+  acceptOutgoing,
+  maybeDispatchOutgoing,
   pushUserMessage,
+  rejectOutgoing,
   removeUserMessage,
   sendingMessage,
 } from "./chat-outgoing";
@@ -61,14 +64,24 @@ export function hydrateSnapshot(
   }
   const stale = state.sync.cursor === 0 && activeTurn?.complete === true;
   const activePrompt = snapshot.activePrompt;
-  const acceptedPrompt =
-    snapshot.acceptedPrompt ?? (activePrompt?.acceptedTurnId !== null ? activePrompt : null);
-  const acceptedPromptBelongsToStaleTurn =
-    stale && acceptedPrompt?.acceptedTurnId === activeTurn?.turnId;
-  const promptCandidates = [
-    ...(acceptedPrompt && !acceptedPromptBelongsToStaleTurn ? [acceptedPrompt] : []),
-    ...snapshot.pendingPrompts,
+  const acceptedCorrelations: ActivePromptSnapshot[] = [
+    ...snapshot.acceptedPrompts,
+    ...(snapshot.acceptedPrompt ? [snapshot.acceptedPrompt] : []),
+    ...(activePrompt && activePrompt.acceptedTurnId !== null ? [activePrompt] : []),
   ].filter(
+    (prompt, index, prompts) =>
+      prompts.findIndex((candidate) => candidate.messageId === prompt.messageId) === index,
+  );
+  const acceptedPrompts = acceptedCorrelations.filter(
+    (prompt) => !(stale && prompt.acceptedTurnId === activeTurn?.turnId),
+  );
+  let acceptedFollowUp = false;
+  for (const prompt of acceptedPrompts) {
+    if (acceptOutgoing(state, effects, prompt.messageId)?.delivery === "follow-up") {
+      acceptedFollowUp = true;
+    }
+  }
+  const promptCandidates = [...acceptedPrompts, ...snapshot.pendingPrompts].filter(
     (prompt, index, prompts) =>
       prompts.findIndex((candidate) => candidate.messageId === prompt.messageId) === index,
   );
@@ -111,27 +124,30 @@ export function hydrateSnapshot(
   if (activeTurn && !stale) replayActiveTurn(state, effects, activeTurn);
   state.sync.cursor = Math.max(state.sync.cursor, snapshot.cursor);
 
+  state.session.activeTurnId = activeTurn && !activeTurn.complete ? activeTurn.turnId : null;
   const snapshotLastEndedTurnId = activeTurn?.complete ? activeTurn.turnId : null;
   const snapshotBoundaryOpen =
     snapshot.pendingPrompts.length === 0 &&
     (snapshot.status.phase === "crashed" ||
       (snapshot.status.phase === "idle" &&
-        (acceptedPrompt === null ||
-          (acceptedPrompt.acceptedTurnId !== null &&
+        acceptedCorrelations.every(
+          (prompt) =>
+            prompt.acceptedTurnId !== null &&
             activeTurn?.complete === true &&
-            activeTurn.turnId === acceptedPrompt.acceptedTurnId))));
+            activeTurn.turnId === prompt.acceptedTurnId,
+        )));
   const submitting = sendingMessage(state);
   if (!submitting) {
     state.prompt.pendingMessageIds = snapshot.pendingPrompts.map((prompt) => prompt.messageId);
     state.prompt.lastEndedTurnId = snapshotLastEndedTurnId;
     state.prompt.boundaryOpen = snapshotBoundaryOpen;
+    const phase = acceptedFollowUp ? state.prompt.deferredPhase : null;
     state.prompt.deferredPhase = null;
-    state.session.status = statusFromPhase(snapshot.status.phase);
+    state.session.status = statusFromPhase(phase ?? snapshot.status.phase);
   } else {
-    const accountsForPendingPrompt =
-      acceptedPrompt !== null &&
-      acceptedPrompt.acceptedTurnId !== null &&
-      submitting.message.id === acceptedPrompt.messageId;
+    const accountsForPendingPrompt = acceptedCorrelations.some(
+      (prompt) => prompt.acceptedTurnId !== null && submitting.message.id === prompt.messageId,
+    );
     if (accountsForPendingPrompt) {
       state.prompt.pendingMessageIds = [];
       state.prompt.lastEndedTurnId = snapshotLastEndedTurnId;
@@ -146,7 +162,7 @@ export function hydrateSnapshot(
         : null;
   }
   startReconcile(state, effects);
-  maybeDispatchPrompt(state, effects);
+  maybeDispatchOutgoing(state, effects);
 }
 
 export function applyEvent(
@@ -162,31 +178,41 @@ export function applyEvent(
       addUnique(state.prompt.pendingMessageIds, event.messageId);
       state.prompt.boundaryOpen = false;
       break;
-    case "session.prompt.accepted":
-      if (removeValue(state.prompt.pendingMessageIds, event.messageId)) {
+    case "session.prompt.accepted": {
+      const outgoing = acceptOutgoing(state, effects, event.messageId);
+      const wasPending = removeValue(state.prompt.pendingMessageIds, event.messageId);
+      if (wasPending || outgoing?.delivery === "follow-up") {
         state.prompt.boundaryOpen =
           state.prompt.pendingMessageIds.length === 0 &&
           (event.phase === "crashed" ||
             (event.phase === "idle" && state.prompt.lastEndedTurnId === event.turnId));
       }
       break;
-    case "session.prompt.rejected":
-      if (removeValue(state.prompt.pendingMessageIds, event.messageId)) {
+    }
+    case "session.prompt.rejected": {
+      const error = new Error(event.reason);
+      const outgoing = rejectOutgoing(state, effects, event.messageId, error);
+      const wasPending = removeValue(state.prompt.pendingMessageIds, event.messageId);
+      if (wasPending || outgoing?.delivery === "follow-up") {
         state.prompt.boundaryOpen =
           state.prompt.pendingMessageIds.length === 0 &&
           (event.phase === "idle" || event.phase === "crashed");
       }
       break;
+    }
     case "session.turn.started":
+      state.session.activeTurnId = event.turnId;
       state.prompt.boundaryOpen = false;
       break;
     case "session.turn.ended":
+      if (state.session.activeTurnId === event.turnId) state.session.activeTurnId = null;
       state.prompt.lastEndedTurnId = event.turnId;
       state.prompt.boundaryOpen =
         state.prompt.pendingMessageIds.length === 0 &&
         (event.phase === "idle" || event.phase === "crashed");
       break;
     case "session.crashed":
+      state.session.activeTurnId = null;
       state.prompt.pendingMessageIds = [];
       state.prompt.lastEndedTurnId = null;
       state.prompt.boundaryOpen = true;
@@ -256,7 +282,7 @@ export function applyEvent(
     state.session.status = statusFromPhase(event.phase);
   }
   startReconcile(state, effects);
-  maybeDispatchPrompt(state, effects);
+  maybeDispatchOutgoing(state, effects);
 }
 
 function terminate(
@@ -277,6 +303,7 @@ function terminate(
   }
   state.outgoing = [];
   state.lifecycle.session = "terminated";
+  state.session.activeTurnId = null;
   state.session.pendingRequests = [];
   state.session.historyStatus = "settled";
   state.session.status = "error";

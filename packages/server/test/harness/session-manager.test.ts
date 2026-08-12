@@ -91,6 +91,7 @@ const makeFixture = Effect.gen(function* () {
             });
             return { turnId: "turn-1" };
           }),
+        steer: () => Effect.void,
         setModel: () => Effect.void,
         setReasoningEffort: () => Effect.void,
         setPermissionMode: () => Effect.void,
@@ -110,6 +111,7 @@ const makeFixture = Effect.gen(function* () {
     descriptor: { id: "claude-code", name: "Claude Code" },
     checkAvailability: Effect.succeed({ available: true }),
     permissionModes: [],
+    supportsSteering: false,
     open: () => makeRuntime("created-session"),
     resume: ({ sessionId }) =>
       Ref.update(resumeCalls, (current) => current + 1).pipe(

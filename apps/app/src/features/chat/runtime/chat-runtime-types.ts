@@ -12,9 +12,11 @@ export type ChatInput =
       readonly message: UIMessage;
       readonly parts: ReadonlyArray<PromptPart>;
     }
+  | { readonly type: "steerRequested"; readonly messageId: string }
   | {
-      readonly type: "promptCompleted";
+      readonly type: "outgoingCompleted";
       readonly messageId: string;
+      readonly delivery: "follow-up" | "steer";
       readonly error?: Error;
     }
   | {
@@ -53,6 +55,12 @@ export type ChatEffect =
   | { readonly type: "readHistory"; readonly id: number; readonly purpose: "floor" | "reconcile" }
   | {
       readonly type: "submitPrompt";
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    }
+  | {
+      readonly type: "submitSteer";
+      readonly expectedTurnId: string;
       readonly messageId: string;
       readonly parts: ReadonlyArray<PromptPart>;
     }

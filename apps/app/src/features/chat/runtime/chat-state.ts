@@ -13,7 +13,10 @@ export type HistoryStatus = "loading" | "settled" | "unavailable";
 export type OutgoingMessage = {
   readonly message: UIMessage;
   readonly parts: ReadonlyArray<PromptPart>;
-  readonly status: "queued" | "sending";
+  readonly delivery: "follow-up" | "steer";
+  readonly status: "queued" | "sending" | "failed";
+  readonly expectedTurnId?: string;
+  readonly error?: Error;
 };
 
 export type TurnFoldState = {
@@ -45,6 +48,7 @@ export type ChatState = {
     historyStatus: HistoryStatus;
     status: ChatStatus;
     error: Error | undefined;
+    activeTurnId: string | null;
   };
   outgoing: OutgoingMessage[];
   lifecycle: {
@@ -83,6 +87,7 @@ export function createChatState(): ChatState {
       historyStatus: "loading",
       status: "ready",
       error: undefined,
+      activeTurnId: null,
     },
     outgoing: [],
     lifecycle: { session: "available", instance: "active" },

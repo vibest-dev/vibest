@@ -11,6 +11,7 @@ const unusedAdapter = {
   id: "claude-code",
   descriptor: { id: "claude-code", name: "Claude Code" },
   permissionModes: [],
+  supportsSteering: false,
   open: () => Effect.die("unused"),
   resume: () => Effect.die("unused"),
   getSessionInfo: () => Effect.die("unused"),

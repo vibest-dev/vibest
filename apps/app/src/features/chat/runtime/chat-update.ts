@@ -1,5 +1,5 @@
 import { handleHistoryCompleted, startReconcile } from "./chat-history";
-import { maybeDispatchPrompt } from "./chat-outgoing";
+import { acceptOutgoing, maybeDispatchOutgoing, rejectOutgoing } from "./chat-outgoing";
 import type { ChatEffects, ChatInput, ChatTransition } from "./chat-runtime-types";
 import { addRequest, applyEvent, handleTransportEvent, hydrateSnapshot } from "./chat-session";
 import {
@@ -74,6 +74,9 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
       ],
     };
   }
+  if (input.type === "steerRequested" && !isChatActive(state)) {
+    return { state, effects: [] };
+  }
   if (
     !isChatActive(state) &&
     input.type !== "transportEvent" &&
@@ -89,30 +92,52 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
       handleTransportEvent(next, effects, input.event);
       break;
     case "promptRequested":
-      next.outgoing.push({ message: input.message, parts: input.parts, status: "queued" });
-      maybeDispatchPrompt(next, effects);
+      next.outgoing.push({
+        message: input.message,
+        parts: input.parts,
+        delivery: "follow-up",
+        status: "queued",
+      });
+      maybeDispatchOutgoing(next, effects);
       break;
-    case "promptCompleted": {
+    case "steerRequested": {
+      const index = next.outgoing.findIndex(
+        (message) =>
+          message.message.id === input.messageId &&
+          message.delivery === "follow-up" &&
+          message.status === "queued",
+      );
+      if (index === -1 || !next.session.activeTurnId) return { state, effects: [] };
+      next.outgoing[index] = {
+        ...next.outgoing[index]!,
+        delivery: "steer",
+        expectedTurnId: next.session.activeTurnId,
+        error: undefined,
+      };
+      maybeDispatchOutgoing(next, effects);
+      break;
+    }
+    case "outgoingCompleted": {
       const index = next.outgoing.findIndex(
         (message) => message.message.id === input.messageId && message.status === "sending",
       );
       if (index === -1) return { state, effects: [] };
-      next.outgoing.splice(index, 1);
       if (input.error) {
-        next.prompt.deferredPhase = null;
-        next.session.status = "error";
-        next.session.error = input.error;
-        effects.push({ type: "rejectPrompt", messageId: input.messageId, error: input.error });
+        rejectOutgoing(next, effects, input.messageId, input.error);
+        if (input.delivery === "follow-up") {
+          next.session.status = "error";
+          next.session.error = input.error;
+        }
       } else {
-        effects.push({ type: "resolvePrompt", messageId: input.messageId });
-        if (next.session.status !== "error") {
+        acceptOutgoing(next, effects, input.messageId);
+        if (input.delivery === "follow-up" && next.session.status !== "error") {
           const phase = next.prompt.deferredPhase;
           next.prompt.deferredPhase = null;
           if (phase !== null) next.session.status = statusFromPhase(phase);
         }
       }
       startReconcile(next, effects);
-      maybeDispatchPrompt(next, effects);
+      maybeDispatchOutgoing(next, effects);
       break;
     }
     case "historyCompleted":
@@ -134,7 +159,7 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
         effects.push({ type: "logError", message: "Failed to fold turn", error: input.error });
       }
       startReconcile(next, effects);
-      maybeDispatchPrompt(next, effects);
+      maybeDispatchOutgoing(next, effects);
       break;
     }
     case "requestResponseStarted": {

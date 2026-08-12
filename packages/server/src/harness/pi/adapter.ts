@@ -194,6 +194,19 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      steer: (expectedTurnId, input) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          yield* agent.session
+            .steer({ sessionId, expectedTurnId, text: toPromptText(input) })
+            .pipe(
+              Effect.mapError((cause) =>
+                cause instanceof TurnAlreadyRunning
+                  ? cause
+                  : operationError(sessionId, "steer", cause),
+              ),
+            );
+        }),
       // Pi has neither a model switch, an reasoningEffort switch, nor a permission
       // protocol; accept the config calls and no-op rather than fail the caller.
       setModel: () => Effect.void,
@@ -239,6 +252,7 @@ export const makePiAdapter = (
   // nothing (empty subset, no probe) is what makes the UI render no config
   // controls for it.
   permissionModes: [],
+  supportsSteering: true,
   checkAvailability: findExecutable(options.executablePath ?? "pi").pipe(
     Effect.map((found) =>
       found ? { available: true } : { available: false, reason: "Pi was not found on PATH." },

@@ -13,6 +13,7 @@ const snapshot: SessionRuntimeSnapshot = {
   activeTurn: null,
   activePrompt: null,
   acceptedPrompt: null,
+  acceptedPrompts: [],
   pendingPrompts: [],
   pendingRequests: [],
   cursor: 0,

@@ -54,12 +54,11 @@ for per-agent tool rendering.
   A `select` that closes over a prop must be memoised (`select: useCallback(fn,
 [dep])`) or it re-runs every render and loses referential stability; say so in
   a comment so nobody "simplifies" the `useCallback` away.
-- Zustand here is not a global store: each `Chat` instance owns a plain internal
-  `ChatState` and publishes a derived `ChatView` to its own vanilla store. The
-  store is output-only. Public calls, transport deliveries, RPC completions, and
-  message-fold output enter one serialized mailbox; its pure transition updates
-  the complete `ChatState`, publishes one view, then starts returned effects.
-  Runtime decisions never read back from Zustand. `ChatManager` caches Chat
+- Zustand here is not a global store: each `Chat` instance owns one vanilla Zustand `ChatState`. Public calls,
+  transport deliveries, RPC completions, and message-fold output enter one
+  serialized mailbox; its pure transition reads the current store state, commits
+  one complete next state, then starts returned effects. React reads that same
+  state through narrow selectors; async callbacks never mutate it directly. `ChatManager` caches Chat
   instances by the complete `SessionRef` so transcripts survive navigation, and
   is constructed at App mount (module scope has no host connection yet).
 - `useSessionListSync` is the only consumer of the global event firehose; session

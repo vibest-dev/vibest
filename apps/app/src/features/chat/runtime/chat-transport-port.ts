@@ -64,6 +64,11 @@ export interface ChatSessionTransport {
     readonly messageId: string;
     readonly parts: ReadonlyArray<PromptPart>;
   }): Promise<{ readonly turnId: string }>;
+  steer(input: {
+    readonly expectedTurnId: string;
+    readonly messageId: string;
+    readonly parts: ReadonlyArray<PromptPart>;
+  }): Promise<void>;
   /**
    * The session's native history as final-form UIMessages, or `null` when this
    * harness serves no history — capability absence is a normal outcome here,

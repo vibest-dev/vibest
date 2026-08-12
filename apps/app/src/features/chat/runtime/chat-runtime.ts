@@ -6,14 +6,13 @@ import type {
   SessionRef,
 } from "@vibest/contract";
 import { generateId, readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
-import type { StoreApi } from "zustand/vanilla";
+import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
 import type { ChatEffect, ChatInput } from "./chat-runtime-types";
 import { createChatState, type ChatState } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
 import { updateChat } from "./chat-update";
-import { ChatViewStore, deriveChatView, type ChatView } from "./chat-view";
 
 type PromptPromise = {
   readonly resolve: () => void;
@@ -33,16 +32,14 @@ export interface ChatRuntimeInit {
 
 export class ChatRuntime {
   readonly harnessAgentId: HarnessAgentId;
-  readonly store: StoreApi<ChatView>;
+  readonly store: StoreApi<ChatState>;
 
   readonly #transport: ChatSessionTransport;
   readonly #onTerminated: (() => void) | undefined;
-  readonly #viewStore: ChatViewStore;
   readonly #inputs: ChatInput[] = [];
   readonly #promptPromises = new Map<string, PromptPromise>();
   readonly #responsePromises = new Map<string, () => void>();
   readonly #folds = new Map<string, FoldResource>();
-  #state: ChatState;
   #draining = false;
   #unsubscribe: (() => void) | null = null;
   #unsubscribeRequested = false;
@@ -51,9 +48,7 @@ export class ChatRuntime {
     this.harnessAgentId = sessionRef.harnessAgentId;
     this.#transport = transport;
     this.#onTerminated = onTerminated;
-    this.#state = createChatState();
-    this.#viewStore = new ChatViewStore(deriveChatView(this.#state));
-    this.store = this.#viewStore.store;
+    this.store = createStore<ChatState>()(() => createChatState());
 
     const unsubscribe = transport.subscribe((event) => {
       this.#send({ type: "transportEvent", event });
@@ -68,12 +63,10 @@ export class ChatRuntime {
     this.#draining = true;
     try {
       while (this.#inputs.length > 0) {
-        const current = this.#inputs.shift()!;
-        const transition = updateChat(this.#state, current);
-        if (transition.state !== this.#state) {
-          this.#state = transition.state;
-          this.#viewStore.publish(deriveChatView(this.#state));
-        }
+        const currentInput = this.#inputs.shift()!;
+        const currentState = this.store.getState();
+        const transition = updateChat(currentState, currentInput);
+        if (transition.state !== currentState) this.store.setState(transition.state, true);
         for (const effect of transition.effects) this.#runEffect(effect);
       }
     } finally {
@@ -94,33 +87,53 @@ export class ChatRuntime {
             });
           },
           (error: unknown) => {
-            this.#send({
-              type: "historyCompleted",
-              id: effect.id,
-              purpose: effect.purpose,
-              error,
-            });
+            this.#send({ type: "historyCompleted", id: effect.id, purpose: effect.purpose, error });
           },
         );
         break;
       case "submitPrompt":
         void this.#transport.prompt({ messageId: effect.messageId, parts: effect.parts }).then(
-          () => this.#send({ type: "promptCompleted", messageId: effect.messageId }),
+          () =>
+            this.#send({
+              type: "outgoingCompleted",
+              messageId: effect.messageId,
+              delivery: "follow-up",
+            }),
           (error: unknown) =>
             this.#send({
-              type: "promptCompleted",
+              type: "outgoingCompleted",
               messageId: effect.messageId,
+              delivery: "follow-up",
               error: error instanceof Error ? error : new Error(String(error)),
             }),
         );
         break;
+      case "submitSteer":
+        void this.#transport
+          .steer({
+            expectedTurnId: effect.expectedTurnId,
+            messageId: effect.messageId,
+            parts: effect.parts,
+          })
+          .then(
+            () =>
+              this.#send({
+                type: "outgoingCompleted",
+                messageId: effect.messageId,
+                delivery: "steer",
+              }),
+            (error: unknown) =>
+              this.#send({
+                type: "outgoingCompleted",
+                messageId: effect.messageId,
+                delivery: "steer",
+                error: error instanceof Error ? error : new Error(String(error)),
+              }),
+          );
+        break;
       case "respondToRequest":
         void this.#transport.respondToAgentRequest(effect.requestId, effect.response).then(
-          () =>
-            this.#send({
-              type: "requestResponseCompleted",
-              operationId: effect.operationId,
-            }),
+          () => this.#send({ type: "requestResponseCompleted", operationId: effect.operationId }),
           (error: unknown) =>
             this.#send({
               type: "requestResponseCompleted",
@@ -197,12 +210,7 @@ export class ChatRuntime {
       try {
         const seed = { id: `turn-${turnId}`, role: "assistant", parts: [] } as UIMessage;
         for await (const message of readUIMessageStream({ message: seed, stream })) {
-          this.#send({
-            type: "foldUpdated",
-            turnId,
-            generation,
-            message: message as UIMessage,
-          });
+          this.#send({ type: "foldUpdated", turnId, generation, message: message as UIMessage });
         }
       } catch (error) {
         foldError = error;
@@ -221,6 +229,19 @@ export class ChatRuntime {
     });
     this.#send({ type: "promptRequested", message, parts });
     return promise;
+  }
+
+  steer(messageId: string): void {
+    const state = this.store.getState();
+    const outgoing = state.outgoing.find(
+      (message) =>
+        message.message.id === messageId &&
+        message.delivery === "follow-up" &&
+        message.status === "queued",
+    );
+    if (!outgoing) throw new Error("Only a queued follow-up can be steered");
+    if (!state.session.activeTurnId) throw new Error("There is no active turn to steer");
+    this.#send({ type: "steerRequested", messageId });
   }
 
   setModel(providerId: string, modelId: string): Promise<void> {

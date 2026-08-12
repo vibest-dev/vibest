@@ -24,6 +24,7 @@ type VibestSessionClient = VibestClient["session"];
 type SessionClient = Pick<
   VibestSessionClient,
   | "prompt"
+  | "steer"
   | "respondToAgentRequest"
   | "setReasoningEffort"
   | "setModel"
@@ -81,6 +82,14 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
       parts: input.parts,
       messageId: input.messageId,
     });
+  };
+
+  steer = async (input: {
+    readonly expectedTurnId: string;
+    readonly messageId: string;
+    readonly parts: ReadonlyArray<PromptPart>;
+  }): Promise<void> => {
+    await this.client.session.steer({ ref: this.#ref, ...input });
   };
 
   getMessages = async (): Promise<readonly UIMessage[] | null> => {

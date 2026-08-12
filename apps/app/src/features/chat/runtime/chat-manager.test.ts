@@ -23,6 +23,7 @@ class FakeTransport implements ChatSessionTransport {
     };
   }
   prompt = async () => ({ turnId: "turn-receipt" });
+  steer = async () => {};
   getMessages = async () => null;
   respondToAgentRequest = async (_requestId: string, _response: AgentResponse) => {};
   setModel = async (_providerId: string, _modelId: string) => {};
@@ -77,7 +78,7 @@ describe("ChatManager", () => {
     });
 
     const closed = manager.chatFor(refFor("session-1"));
-    expect(closed.store.getState().error?.message).toBe("Session closed");
+    expect(closed.store.getState().session.error?.message).toBe("Session closed");
     expect(transports[0]?.disposed).toBe(1);
     expect(manager.chatFor(refFor("session-1"))).not.toBe(closed);
     expect(transports).toHaveLength(2);
@@ -93,7 +94,7 @@ describe("ChatManager", () => {
     expect(transport?.disposed).toBe(1);
     // The evicted instance keeps its terminal state for whoever is still
     // rendering it — eviction only stops it being handed out again.
-    expect(chat.store.getState().error?.message).toBe("Session closed");
+    expect(chat.store.getState().session.error?.message).toBe("Session closed");
     await expect(chat.prompt("after close")).rejects.toThrow("Session is no longer available");
   });
 
@@ -108,7 +109,7 @@ describe("ChatManager", () => {
     const reopened = manager.chatFor(refFor("session-1"));
     expect(reopened).not.toBe(closed);
     expect(transports).toHaveLength(2);
-    expect(reopened.store.getState().error).toBeUndefined();
+    expect(reopened.store.getState().session.error).toBeUndefined();
   });
 
   it("evicts once even if the stream closes twice", () => {

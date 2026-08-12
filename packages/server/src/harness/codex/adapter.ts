@@ -283,6 +283,19 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      steer: (expectedTurnId, input) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          yield* agent.session
+            .steer({ sessionId, expectedTurnId, text: toPromptText(input) })
+            .pipe(
+              Effect.mapError((cause) =>
+                cause instanceof TurnAlreadyRunning
+                  ? cause
+                  : operationError(sessionId, "steer", cause),
+              ),
+            );
+        }),
       // Stored, not sent: codex has no standalone set-model call, the override
       // rides on the next `turn/start`. So a mid-session switch takes effect
       // from the next turn — unlike claude-code, where it is immediate.
@@ -332,6 +345,7 @@ export const makeCodexAdapter = (
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
   permissionModes: CODEX_PERMISSION_MODE_IDS,
+  supportsSteering: true,
   // Lower than claude-code's on purpose: codex's "full" is
   // `approvalPolicy: "never"` *plus* `dangerFullAccess`, i.e. no sandbox at
   // all — not a default anyone should land on without asking for it.

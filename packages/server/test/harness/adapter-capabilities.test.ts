@@ -13,6 +13,7 @@ it("claude-code declares plan/ask/acceptEdits/full, defaulting to full", () => {
   const adapter = makeClaudeCodeAdapter(stub<ClaudeCodeAgent>());
 
   expect(adapter.permissionModes).toEqual(["plan", "ask", "acceptEdits", "full"]);
+  expect(adapter.supportsSteering).toBe(false);
   expect(adapter.defaultPermissionMode).toBe("full");
 });
 
@@ -20,6 +21,7 @@ it("codex declares read-only/ask/full (no plan), defaulting to ask", () => {
   const adapter = makeCodexAdapter(stub<CodexAgent>());
 
   expect(adapter.permissionModes).toEqual(["read-only", "ask", "full"]);
+  expect(adapter.supportsSteering).toBe(true);
   // Deliberately not "full": codex's full access also drops the sandbox.
   expect(adapter.defaultPermissionMode).toBe("ask");
 });
@@ -28,6 +30,7 @@ it("pi declares an empty permission subset and no default", () => {
   const adapter = makePiAdapter(stub<PiAgent>());
 
   expect(adapter.permissionModes).toEqual([]);
+  expect(adapter.supportsSteering).toBe(true);
   expect(adapter.defaultPermissionMode).toBeUndefined();
 });
 

@@ -3,8 +3,8 @@ import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "./agent-requests";
 import { ChatRuntime } from "./chat-runtime";
+import type { ChatState } from "./chat-state";
 import type { ChatSessionTransport } from "./chat-transport-port";
-import type { ChatView } from "./chat-view";
 
 export interface ChatInit {
   readonly sessionRef: SessionRef;
@@ -18,7 +18,7 @@ export interface ChatInit {
  */
 export class Chat {
   readonly harnessAgentId: HarnessAgentId;
-  readonly store: StoreApi<ChatView>;
+  readonly store: StoreApi<ChatState>;
   readonly #runtime: ChatRuntime;
 
   constructor(init: ChatInit) {
@@ -28,6 +28,8 @@ export class Chat {
   }
 
   prompt = (text: string): Promise<void> => this.#runtime.prompt(text);
+
+  steer = (messageId: string): void => this.#runtime.steer(messageId);
 
   setModel = (providerId: string, modelId: string): Promise<void> =>
     this.#runtime.setModel(providerId, modelId);

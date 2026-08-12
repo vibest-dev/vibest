@@ -455,6 +455,7 @@ export const HarnessAgentInfoSchema = Schema.Struct({
   available: Schema.Boolean,
   reason: Schema.optionalKey(Schema.String),
   permissionModes: Schema.Array(PermissionModeSchema),
+  supportsSteering: Schema.Boolean,
   defaultPermissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type HarnessAgentInfo = typeof HarnessAgentInfoSchema.Type;
@@ -494,6 +495,9 @@ export type SessionRuntimeSnapshot = {
   // Latest prompt accepted by the harness, exposed independently because a
   // newer unresolved candidate may temporarily mask it in activePrompt.
   readonly acceptedPrompt: ActivePromptSnapshot | null;
+  // Ordered accepted correlations retained through the current authoritative
+  // turn boundary so reconnect can settle every matching local submission.
+  readonly acceptedPrompts: ReadonlyArray<ActivePromptSnapshot>;
   // Every submitted prompt still awaiting its accepted/rejected correlation.
   // activePrompt carries only the newest one; the full list preserves both the
   // boundary and every optimistic user message across reconnect.
@@ -547,6 +551,14 @@ export const PromptInputSchema = Schema.Struct({
   messageId: Schema.optionalKey(Schema.NonEmptyString),
 });
 export type PromptInput = typeof PromptInputSchema.Type;
+
+export const SteerInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  expectedTurnId: Schema.NonEmptyString,
+  parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
+  messageId: Schema.NonEmptyString,
+});
+export type SteerInput = typeof SteerInputSchema.Type;
 
 export const PromptOutputSchema = Schema.Struct({ turnId: Schema.String });
 export type PromptOutput = typeof PromptOutputSchema.Type;

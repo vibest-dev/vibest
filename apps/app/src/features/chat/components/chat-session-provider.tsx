@@ -92,6 +92,7 @@ export function ChatSessionProvider({
     [chat],
   );
   const prompt = useCallback((text: string) => chat.prompt(text), [chat]);
+  const steer = useCallback((messageId: string) => chat.steer(messageId), [chat]);
 
   const reasoningEfforts = modelInfo?.reasoningEfforts ?? NO_REASONING_EFFORTS;
   // orderPermissionModes builds a new array on every call, so it is memoised on
@@ -113,8 +114,10 @@ export function ChatSessionProvider({
     () => ({
       sessionId: sessionRef.sessionId,
       harnessAgentId: chat.harnessAgentId,
+      supportsSteering: harnessAgent?.supportsSteering ?? false,
       store: chat.store,
       prompt,
+      steer,
       respondToRequest: chat.respondToAgentRequest,
       turnInProgress,
       providers,
@@ -131,7 +134,9 @@ export function ChatSessionProvider({
     [
       sessionRef.sessionId,
       chat,
+      harnessAgent?.supportsSteering,
       prompt,
+      steer,
       turnInProgress,
       providers,
       providerId,
