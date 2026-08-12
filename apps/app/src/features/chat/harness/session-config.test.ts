@@ -15,7 +15,6 @@ const claudeCode: HarnessAgentInfo = {
   name: "Claude Code",
   available: true,
   permissionModes: ["plan", "full"],
-  supportsSteering: false,
   defaultPermissionMode: "full",
 };
 
@@ -134,7 +133,6 @@ describe("resolvePermissionMode", () => {
       name: "Pi",
       available: true,
       permissionModes: [],
-      supportsSteering: true,
     };
     expect(resolvePermissionMode(pi, "full")).toBeUndefined();
   });
@@ -155,7 +153,6 @@ const harness = (id: HarnessAgentId, available: boolean): HarnessAgentInfo => ({
   name: id,
   available,
   permissionModes: [],
-  supportsSteering: false,
 });
 
 it("starts a draft on the preferred harness when it is installed", () => {

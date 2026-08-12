@@ -74,7 +74,6 @@ describe("HarnessAgentSessionService", () => {
       promptWaits?: boolean;
       // Runtime reacquisition fails before runtime.prompt is available.
       resumeFails?: boolean;
-      supportsSteering?: boolean;
       steerFails?: boolean;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
@@ -138,7 +137,6 @@ describe("HarnessAgentSessionService", () => {
             respondToAgentRequest: () => Effect.void,
             getCapabilities: Effect.succeed({
               supportsResume: true,
-              supportsSteering: false,
               supportsPermissions: false,
             }),
             ...(opts.history !== undefined ? { getMessages: Effect.succeed(opts.history) } : {}),
@@ -155,7 +153,6 @@ describe("HarnessAgentSessionService", () => {
                 : { available: true },
             ),
             permissionModes: [],
-            supportsSteering: opts.supportsSteering ?? false,
             open: ({ cwd }) =>
               Effect.sync(() => {
                 spy.open.push({ cwd });
@@ -663,7 +660,7 @@ describe("HarnessAgentSessionService", () => {
   });
 
   it("emits exactly submitted and accepted for an explicit steer", async () => {
-    const events = await run({ turn: "open", supportsSteering: true }, (fixture) =>
+    const events = await run({ turn: "open" }, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         return yield* Effect.scoped(
@@ -699,7 +696,7 @@ describe("HarnessAgentSessionService", () => {
   });
 
   it("retains multiple accepted steers for reconnect in acceptance order", async () => {
-    const snapshot = await run({ turn: "open", supportsSteering: true }, (fixture) =>
+    const snapshot = await run({ turn: "open" }, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* fixture.service.steer({
@@ -730,51 +727,7 @@ describe("HarnessAgentSessionService", () => {
   });
 
   it("emits exactly submitted and rejected when an explicit steer fails", async () => {
-    const result = await run(
-      { turn: "open", supportsSteering: true, steerFails: true },
-      (fixture) =>
-        Effect.gen(function* () {
-          const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-          return yield* Effect.scoped(
-            Effect.gen(function* () {
-              const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
-              const rejection = yield* fixture.service
-                .steer({
-                  ref,
-                  expectedTurnId: "turn-1",
-                  parts: [{ type: "text", text: "change direction" }],
-                  messageId: "steer-msg",
-                })
-                .pipe(Effect.flip);
-              const items = yield* Stream.runCollect(
-                Stream.take(
-                  Stream.filter(
-                    stream,
-                    (item) =>
-                      item.type === "event" &&
-                      (item.event.type === "session.prompt.submitted" ||
-                        item.event.type === "session.prompt.accepted" ||
-                        item.event.type === "session.prompt.rejected"),
-                  ),
-                  2,
-                ),
-              );
-              return {
-                rejection,
-                events: Array.from(items).map((item) =>
-                  item.type === "event" ? item.event.type : item.type,
-                ),
-              };
-            }),
-          );
-        }),
-    );
-    expect(result.rejection._tag).toBe("TurnAlreadyRunning");
-    expect(result.events).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
-  });
-
-  it("rejects unsupported steering before publishing a submitted candidate", async () => {
-    const result = await run({ turn: "open", supportsSteering: false }, (fixture) =>
+    const result = await run({ turn: "open", steerFails: true }, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         return yield* Effect.scoped(
@@ -788,14 +741,31 @@ describe("HarnessAgentSessionService", () => {
                 messageId: "steer-msg",
               })
               .pipe(Effect.flip);
-            const first = yield* Stream.runHead(stream).pipe(Effect.timeoutOption("50 millis"));
-            return { rejection, first };
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return {
+              rejection,
+              events: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+            };
           }),
         );
       }),
     );
-    expect(result.rejection._tag).toBe("CapabilityUnsupported");
-    expect(result.first._tag).toBe("None");
+    expect(result.rejection._tag).toBe("TurnAlreadyRunning");
+    expect(result.events).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
   });
 
   it("compensates a harness-rejected prompt: rejected event follows, no retained phantom", async () => {

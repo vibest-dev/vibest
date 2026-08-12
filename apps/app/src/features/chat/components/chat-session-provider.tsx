@@ -114,7 +114,6 @@ export function ChatSessionProvider({
     () => ({
       sessionId: sessionRef.sessionId,
       harnessAgentId: chat.harnessAgentId,
-      supportsSteering: harnessAgent?.supportsSteering ?? false,
       store: chat.store,
       prompt,
       steer,
@@ -134,7 +133,6 @@ export function ChatSessionProvider({
     [
       sessionRef.sessionId,
       chat,
-      harnessAgent?.supportsSteering,
       prompt,
       steer,
       turnInProgress,

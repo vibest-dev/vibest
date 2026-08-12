@@ -99,7 +99,6 @@ const makeFixture = Effect.gen(function* () {
         respondToAgentRequest: () => Effect.void,
         getCapabilities: Effect.succeed({
           supportsResume: true,
-          supportsSteering: false,
           supportsPermissions: false,
         }),
         close,
@@ -111,7 +110,6 @@ const makeFixture = Effect.gen(function* () {
     descriptor: { id: "claude-code", name: "Claude Code" },
     checkAvailability: Effect.succeed({ available: true }),
     permissionModes: [],
-    supportsSteering: false,
     open: () => makeRuntime("created-session"),
     resume: ({ sessionId }) =>
       Ref.update(resumeCalls, (current) => current + 1).pipe(

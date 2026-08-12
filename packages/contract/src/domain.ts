@@ -455,7 +455,6 @@ export const HarnessAgentInfoSchema = Schema.Struct({
   available: Schema.Boolean,
   reason: Schema.optionalKey(Schema.String),
   permissionModes: Schema.Array(PermissionModeSchema),
-  supportsSteering: Schema.Boolean,
   defaultPermissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type HarnessAgentInfo = typeof HarnessAgentInfoSchema.Type;
@@ -580,7 +579,6 @@ export const SessionCapabilitiesSchema = Schema.Struct({
     Schema.Array(Schema.Struct({ name: Schema.String, status: Schema.String })),
   ),
   supportsResume: Schema.Boolean,
-  supportsSteering: Schema.Boolean,
   supportsPermissions: Schema.Boolean,
 });
 export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;

@@ -25,7 +25,6 @@ const adapter = (over: {
       : { available: true },
   ),
   permissionModes: ["ask"],
-  supportsSteering: false,
   defaultPermissionMode: "ask",
   // Listing must never reach for one of these: declaring a model probe
   // changes nothing about what this call returns.
@@ -48,7 +47,6 @@ it.effect("declares each harness's availability and permission subset", () =>
       name: "claude-code",
       available: true,
       permissionModes: ["ask"],
-      supportsSteering: false,
       defaultPermissionMode: "ask",
     });
   }),

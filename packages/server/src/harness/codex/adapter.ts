@@ -329,7 +329,6 @@ const makeRuntime = (
         ),
       getCapabilities: Effect.succeed({
         supportsResume: true,
-        supportsSteering: true,
         supportsPermissions: true,
       }),
       // No `getMessages` here: `thread/read` answers off the shared
@@ -345,7 +344,6 @@ export const makeCodexAdapter = (
   id: "codex",
   descriptor: { id: "codex", name: "Codex" },
   permissionModes: CODEX_PERMISSION_MODE_IDS,
-  supportsSteering: true,
   // Lower than claude-code's on purpose: codex's "full" is
   // `approvalPolicy: "never"` *plus* `dangerFullAccess`, i.e. no sandbox at
   // all — not a default anyone should land on without asking for it.

@@ -249,7 +249,6 @@ export const sessionRouter = orpc.router({
         UnsupportedPromptPart: (e) =>
           Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
         HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        CapabilityUnsupported: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         TurnAlreadyRunning: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),

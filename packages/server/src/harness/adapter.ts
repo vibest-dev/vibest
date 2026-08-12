@@ -160,7 +160,6 @@ export interface HarnessAgentAdapter {
    * approval policy + sandbox) is the adapter's private knowledge.
    */
   readonly permissionModes: ReadonlyArray<PermissionMode>;
-  readonly supportsSteering: boolean;
   readonly defaultPermissionMode?: PermissionMode;
   /**
    * Probe this harness's built-in model provider in one working directory. It

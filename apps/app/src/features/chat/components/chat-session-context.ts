@@ -13,7 +13,6 @@ import type { ChatState } from "@/features/chat/runtime/chat-state";
 export interface ChatSessionValue {
   sessionId: string;
   harnessAgentId: HarnessAgentId;
-  supportsSteering: boolean;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
   store: StoreApi<ChatState>;
   /** Resolves when the locally queued prompt reaches the server. */

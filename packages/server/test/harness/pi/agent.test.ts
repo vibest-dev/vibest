@@ -368,7 +368,6 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const capabilities = yield* session.getCapabilities;
       assert.deepEqual(capabilities, {
         supportsResume: true,
-        supportsSteering: true,
         supportsPermissions: false,
       });
       yield* session.close;

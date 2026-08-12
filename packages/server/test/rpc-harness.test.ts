@@ -17,7 +17,6 @@ const fakeAdapter = (over: {
   available: boolean;
   reason?: string;
   permissionModes?: ReadonlyArray<PermissionMode>;
-  supportsSteering?: boolean;
 }): HarnessAgentAdapter => ({
   id: over.id,
   descriptor: { id: over.id, name: over.name },
@@ -27,7 +26,6 @@ const fakeAdapter = (over: {
       : { available: over.available },
   ),
   permissionModes: over.permissionModes ?? [],
-  supportsSteering: over.supportsSteering ?? false,
   open: () => Effect.die("list must not open a session"),
   resume: () => Effect.die("list must not resume a session"),
   getSessionInfo: () => Effect.succeed({ _tag: "unsupported" as const }),
@@ -41,7 +39,6 @@ describe("harness router", () => {
         name: "Claude Code",
         available: true,
         permissionModes: ["plan", "ask", "acceptEdits", "full"],
-        supportsSteering: false,
       }),
       fakeAdapter({
         id: "codex",
@@ -49,9 +46,8 @@ describe("harness router", () => {
         available: false,
         reason: "codex CLI not found",
         permissionModes: ["read-only", "ask", "full"],
-        supportsSteering: true,
       }),
-      fakeAdapter({ id: "pi", name: "Pi", available: true, supportsSteering: true }),
+      fakeAdapter({ id: "pi", name: "Pi", available: true }),
     ];
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-rpc-harness-"));
     const { client, dispose } = await makeRpcTestHarness(home, adapters);
@@ -64,18 +60,15 @@ describe("harness router", () => {
       expect(claude).toMatchObject({ name: "Claude Code", available: true });
       expect(claude?.reason).toBeUndefined();
       expect(claude?.permissionModes).toEqual(["plan", "ask", "acceptEdits", "full"]);
-      expect(claude?.supportsSteering).toBe(false);
 
       const codex = harnessAgents.find((agent) => agent.id === "codex");
       expect(codex).toMatchObject({
         available: false,
         reason: "codex CLI not found",
-        supportsSteering: true,
       });
 
       const pi = harnessAgents.find((agent) => agent.id === "pi");
       expect(pi?.available).toBe(true);
-      expect(pi?.supportsSteering).toBe(true);
       // Empty, not undefined: "no permission protocol" is an answer.
       expect(pi?.permissionModes).toEqual([]);
     } finally {

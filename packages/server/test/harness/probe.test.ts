@@ -16,7 +16,6 @@ const adapter = (over: {
   descriptor: { id: over.id, name: over.id },
   checkAvailability: Effect.succeed({ available: true }),
   permissionModes: [],
-  supportsSteering: false,
   ...(over.probeModels ? { probeModels: over.probeModels } : {}),
   open: () => Effect.die("probe must not open a session"),
   resume: () => Effect.die("probe must not resume a session"),

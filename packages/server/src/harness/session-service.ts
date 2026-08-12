@@ -196,7 +196,6 @@ export type HarnessAgentSessionServiceShape = {
     | UnsupportedPromptPart
     | HarnessAgentNotFound
     | HarnessSessionNotFound
-    | CapabilityUnsupported
     | SessionClosed
     | TurnAlreadyRunning
     | AgentOperationError
@@ -638,13 +637,6 @@ export const makeHarnessAgentSessionService = (deps: {
     steer: (input) =>
       Effect.gen(function* () {
         yield* readChecked(input.ref);
-        const adapter = yield* registry.get(input.ref.harnessAgentId);
-        if (!adapter.supportsSteering) {
-          return yield* new CapabilityUnsupported({
-            harnessAgentId: input.ref.harnessAgentId,
-            capability: "steering",
-          });
-        }
         const userInput = yield* toUserInput(input.parts);
         yield* Effect.uninterruptible(
           manager

@@ -57,7 +57,6 @@ export const makeHarnessList = (registry: HarnessAgentRegistryShape) => ({
               // harness greyed out with its reason, and the reason it can't be
               // used has nothing to do with what it would be able to do.
               permissionModes: adapter.permissionModes,
-              supportsSteering: adapter.supportsSteering,
               ...(adapter.defaultPermissionMode
                 ? { defaultPermissionMode: adapter.defaultPermissionMode }
                 : {}),

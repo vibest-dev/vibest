@@ -85,7 +85,7 @@ function QueuedPromptList({
 }
 
 export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
-  const { prompt, steer, supportsSteering, turnInProgress, store } = useChatSession();
+  const { prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
   const outgoing = useStore(store, (state) => state.outgoing);
@@ -102,7 +102,7 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
   });
 
   const hasContent = useChatInputHasContent(controller);
-  const canSteer = supportsSteering && activeTurnId !== null;
+  const canSteer = activeTurnId !== null;
 
   return (
     <CardFrame>

@@ -153,7 +153,6 @@ describe("HarnessListOutput", () => {
         HarnessListOutputSchema,
         listing({
           permissionModes: ["read-only", "ask", "full"],
-          supportsSteering: true,
           defaultPermissionMode: "ask",
         }),
       ),
@@ -161,9 +160,7 @@ describe("HarnessListOutput", () => {
   });
 
   it("accepts an empty subset — how a harness says it has no permission protocol", () => {
-    expect(
-      accepts(HarnessListOutputSchema, listing({ permissionModes: [], supportsSteering: false })),
-    ).toBe(true);
+    expect(accepts(HarnessListOutputSchema, listing({ permissionModes: [] }))).toBe(true);
   });
 
   it("rejects a mode outside the vocabulary — labels and native ids never travel", () => {

@@ -224,7 +224,6 @@ const makeRuntime = (
         ),
       getCapabilities: Effect.succeed({
         supportsResume: true,
-        supportsSteering: true,
         // Pi has no native tool gating — tools run unguarded; agent requests
         // only surface when a pi extension asks via ctx.ui.*.
         supportsPermissions: false,
@@ -252,7 +251,6 @@ export const makePiAdapter = (
   // nothing (empty subset, no probe) is what makes the UI render no config
   // controls for it.
   permissionModes: [],
-  supportsSteering: true,
   checkAvailability: findExecutable(options.executablePath ?? "pi").pipe(
     Effect.map((found) =>
       found ? { available: true } : { available: false, reason: "Pi was not found on PATH." },

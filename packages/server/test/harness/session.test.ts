@@ -61,7 +61,6 @@ const runtimeFrom = (
   respondToAgentRequest: () => Effect.void,
   getCapabilities: Effect.succeed({
     supportsResume: true,
-    supportsSteering: false,
     supportsPermissions: false,
   }),
   close: options.closes ? Ref.update(options.closes, (count) => count + 1) : Effect.void,
