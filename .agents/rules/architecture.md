@@ -39,9 +39,15 @@
   (via `ProjectService`) and error-code mapping. Adapters see `cwd`, never
   `projectId`; the manager receives a `SessionRef` but only carries it (event
   stamping), never interprets it.
-- `EventBusLayer` must stay a single Layer reference across publish and
-  subscribe wiring — Effect memoizes layers by reference, and a second
-  reference (or `Layer.fresh`) silently splits the bus.
+- **Layer equivalence is not instance identity.** Effect memoizes layers by
+  reference, so a stateful shared service — the event bus, the harness
+  registry (and its availability cache), the session manager — exists once
+  only while every consumer reuses the same Layer value; a reconstructed
+  twin (or `Layer.fresh`) typechecks and silently splits the state.
+  `makeAgentRuntimeLayer` in `packages/server/src/rpc/runtime.ts` is the one
+  composition shape, shared by production and the RPC test harness;
+  `packages/server/test/runtime-composition.test.ts` is the regression gate.
+  Stateless layers (platform, adapters) may be built independently.
 - `packages/contract/src/codex/protocol/**` is ts-rs–generated (`codex
 app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit.
 - `packages/ui/src/components/*` is vendored from the coss registry and refreshed
