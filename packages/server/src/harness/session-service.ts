@@ -23,7 +23,13 @@ import {
 } from "../errors";
 import { EventBus, type EventBusShape } from "../events/event-bus";
 import type { Session } from "../types";
-import type { PromptReceipt, SessionCapabilities, SessionInfoResult, UserInput } from "./adapter";
+import type {
+  HarnessAgentRuntime,
+  PromptReceipt,
+  SessionCapabilities,
+  SessionInfoResult,
+  UserInput,
+} from "./adapter";
 import type {
   AgentOperationError,
   CreateSessionError,
@@ -200,14 +206,20 @@ export type HarnessAgentSessionServiceShape = {
   // Session-scoped config setters. They record the choice on the session and
   // push it to the runtime only if one is live: picking a model for a session
   // that isn't running succeeds, and the choice is seeded onto whatever runtime
-  // the session acquires next. `model` is the provider-local model id — the RPC
-  // boundary unpacked and validated the providerId/modelId pair already.
+  // the session acquires next. Provider and model ids stay separate so the
+  // adapter can translate the exact native pair.
   readonly setModel: (
     ref: SessionRef,
-    model: string,
+    providerId: string,
+    modelId: string,
   ) => Effect.Effect<
     void,
-    SessionNotFound | SessionRefMismatch | StoreReadError | SessionClosed | AgentOperationError
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
+    | StoreWriteError
+    | SessionClosed
+    | AgentOperationError
   >;
   readonly setReasoningEffort: (
     ref: SessionRef,
@@ -298,7 +310,6 @@ export const makeHarnessAgentSessionService = (deps: {
   readonly newSessionId: Effect.Effect<string>;
 }): HarnessAgentSessionServiceShape => {
   const { manager, registry, repo, bus, newSessionId } = deps;
-
   // Metadata updates are read-modify-write operations over one JSON record.
   // Serialize each session independently so two fields changed at once cannot
   // overwrite each other from stale snapshots, while a slow harness shutdown
@@ -334,6 +345,23 @@ export const makeHarnessAgentSessionService = (deps: {
             ),
           );
 
+  const storedModelConfig = (metadata: Session): SessionConfig =>
+    metadata.providerId !== undefined && metadata.modelId !== undefined
+      ? { providerId: metadata.providerId, modelId: metadata.modelId }
+      : {};
+
+  const resolveCreateConfig = (
+    harnessAgentId: HarnessAgentId,
+    cwd: string,
+    config: SessionConfig,
+  ) =>
+    config.providerId !== undefined && config.modelId !== undefined
+      ? Effect.succeed(config)
+      : registry.get(harnessAgentId).pipe(
+          Effect.flatMap((adapter) => adapter.getDefaultModel(cwd)),
+          Effect.map((model) => ({ ...config, ...model })),
+        );
+
   /**
    * The two ways a harness can produce history. Which one applies is structural
    * — what the adapter and the runtime implement — not a flag: a cold read
@@ -352,34 +380,53 @@ export const makeHarnessAgentSessionService = (deps: {
     cwd: string,
   ): Effect.Effect<
     ReadonlyArray<UIMessage>,
-    ResumeSessionError | CapabilityUnsupported | SessionClosed | AgentOperationError
+    | ResumeSessionError
+    | CapabilityUnsupported
+    | SessionClosed
+    | AgentOperationError
+    | SessionNotFound
+    | SessionRefMismatch
+    | StoreReadError
   > =>
     registry.get(ref.harnessAgentId).pipe(
       Effect.flatMap((adapter) => {
         const cold = adapter.getMessages;
         if (cold) return cold(harnessSessionId, cwd);
-        return manager
-          .ensureRuntime(
-            { sessionId: harnessSessionId, harnessAgentId: ref.harnessAgentId, cwd },
-            ref,
-          )
-          .pipe(
-            Effect.flatMap(
-              (
-                runtime,
-              ): Effect.Effect<
-                ReadonlyArray<UIMessage>,
-                CapabilityUnsupported | SessionClosed | AgentOperationError
-              > =>
-                runtime.getMessages ??
-                Effect.fail(
-                  new CapabilityUnsupported({
-                    harnessAgentId: ref.harnessAgentId,
-                    capability: "getMessages",
-                  }),
+        return withMetadataMutation(
+          ref,
+          readChecked(ref).pipe(
+            Effect.flatMap((metadata) =>
+              manager.primeConfig(ref, storedModelConfig(metadata)).pipe(
+                Effect.andThen(
+                  manager.ensureRuntime(
+                    {
+                      sessionId: metadata.harnessSessionId,
+                      harnessAgentId: ref.harnessAgentId,
+                      cwd,
+                    },
+                    ref,
+                  ),
                 ),
+              ),
             ),
-          );
+          ),
+        ).pipe(
+          Effect.flatMap(
+            (
+              runtime,
+            ): Effect.Effect<
+              ReadonlyArray<UIMessage>,
+              CapabilityUnsupported | SessionClosed | AgentOperationError
+            > =>
+              runtime.getMessages ??
+              Effect.fail(
+                new CapabilityUnsupported({
+                  harnessAgentId: ref.harnessAgentId,
+                  capability: "getMessages",
+                }),
+              ),
+          ),
+        );
       }),
     );
 
@@ -395,6 +442,39 @@ export const makeHarnessAgentSessionService = (deps: {
               ),
         ),
       );
+
+  const syncRuntimeModel = (ref: SessionRef, runtime: HarnessAgentRuntime) =>
+    withMetadataMutation(
+      ref,
+      // Read the native model under the same permit as persistence. Otherwise
+      // a slow read of A can finish after setModel has applied B and overwrite
+      // the newer selection with its stale result.
+      runtime.getModel.pipe(
+        Effect.flatMap(({ providerId, modelId }) => {
+          if (providerId === undefined || modelId === undefined) return Effect.void;
+          return readChecked(ref).pipe(
+            Effect.flatMap((current) => {
+              if (current.providerId === providerId && current.modelId === modelId) {
+                return Effect.void;
+              }
+              return repo.write({ ...current, providerId, modelId }).pipe(
+                Effect.andThen(
+                  manager.emit(ref, {
+                    type: "session.model.updated",
+                    providerId,
+                    modelId,
+                  }),
+                ),
+              );
+            }),
+          );
+        }),
+      ),
+    ).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("failed to persist the runtime's resolved model", cause),
+      ),
+    );
 
   const resolveHarnessSessionId = (ref: SessionRef) =>
     readChecked(ref).pipe(Effect.map((metadata) => metadata.harnessSessionId));
@@ -427,34 +507,43 @@ export const makeHarnessAgentSessionService = (deps: {
 
   return {
     create: (projectId, harnessAgentId, cwd, config) =>
-      checkPermissionMode(harnessAgentId, config?.permissionMode).pipe(
-        Effect.andThen(newSessionId),
-        Effect.flatMap((sessionId) => {
-          const ref: SessionRef = { projectId, harnessAgentId, sessionId };
-          return manager.open(harnessAgentId, { cwd }, config ?? {}, ref).pipe(
-            Effect.flatMap((session) => {
-              const metadata: Session = {
-                sessionId,
-                projectId,
-                harnessAgentId,
-                harnessSessionId: session.sessionId,
-                createdAt: new Date().toISOString(),
-                // Our own floor field: the session's working directory. Stored
-                // so an imported/rehomed session stays self-contained and a
-                // resume has cwd before it can call getSessionInfo.
-                cwd,
-                archived: false,
-              };
-              return repo.write(metadata).pipe(
-                // A failed metadata write must not leak the native session.
-                Effect.tapError(() => manager.close(ref)),
-                Effect.andThen(bus.publish({ ref, type: "session.created" })),
-                Effect.as(ref),
-              );
-            }),
-          );
-        }),
-      ),
+      Effect.gen(function* () {
+        yield* checkPermissionMode(harnessAgentId, config?.permissionMode);
+        const desired = yield* resolveCreateConfig(harnessAgentId, cwd, config ?? {});
+        const sessionId = yield* newSessionId;
+        const ref: SessionRef = { projectId, harnessAgentId, sessionId };
+        const runtime = yield* manager.open(harnessAgentId, { cwd }, desired, ref);
+        const actual = yield* runtime.getModel.pipe(
+          Effect.catch(() => Effect.succeed({ providerId: undefined, modelId: undefined })),
+        );
+        // Only persist what the runtime can verify. A desired pair whose
+        // native setter failed must not be published as the active model.
+        const providerId = actual.providerId;
+        const modelId = actual.modelId;
+        const metadata: Session = {
+          sessionId,
+          projectId,
+          harnessAgentId,
+          harnessSessionId: runtime.sessionId,
+          ...(providerId !== undefined && modelId !== undefined ? { providerId, modelId } : {}),
+          createdAt: new Date().toISOString(),
+          // Our own floor field: the session's working directory. Stored
+          // so an imported/rehomed session stays self-contained and a
+          // resume has cwd before it can call getSessionInfo.
+          cwd,
+          archived: false,
+        };
+        yield* repo.write(metadata).pipe(Effect.tapError(() => manager.close(ref)));
+        yield* bus.publish({ ref, type: "session.created" });
+        if (providerId !== undefined && modelId !== undefined) {
+          yield* manager.emit(ref, {
+            type: "session.model.updated",
+            providerId,
+            modelId,
+          });
+        }
+        return ref;
+      }),
 
     prepare: (ref, cwd) =>
       withMetadataMutation(
@@ -586,6 +675,15 @@ export const makeHarnessAgentSessionService = (deps: {
       readChecked(ref).pipe(
         Effect.flatMap((metadata) =>
           readHistory(ref, metadata.harnessSessionId, cwd).pipe(
+            Effect.tap(() =>
+              manager
+                .peek(ref)
+                .pipe(
+                  Effect.flatMap((runtime) =>
+                    runtime ? syncRuntimeModel(ref, runtime) : Effect.void,
+                  ),
+                ),
+            ),
             Effect.flatMap((messages) =>
               // History includes the in-flight turn's user entry; the live
               // stream replays that turn, so drop the last user segment while
@@ -613,7 +711,7 @@ export const makeHarnessAgentSessionService = (deps: {
       Effect.gen(function* () {
         const userInput = yield* toUserInput(input.parts);
         // The first prompt names the session before it reaches the harness.
-        const metadata = yield* readAndStampTitleFromFirstPrompt(input.ref, input.parts);
+        yield* readAndStampTitleFromFirstPrompt(input.ref, input.parts);
         const messageId = input.messageId ?? (yield* newSessionId);
 
         // Broadcast the accepted prompt *before* the harness call so it always
@@ -630,15 +728,27 @@ export const makeHarnessAgentSessionService = (deps: {
         // this is where a runtime is acquired if the session has none — after
         // the submitted event, so a failed acquisition is compensated by the
         // same `prompt.rejected` that a harness-side rejection uses.
-        const runtime = yield* manager.ensureRuntime(
-          {
-            sessionId: metadata.harnessSessionId,
-            harnessAgentId: input.ref.harnessAgentId,
-            ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
-          },
+        return yield* withMetadataMutation(
           input.ref,
-        );
-        return yield* runtime.prompt(userInput).pipe(
+          readChecked(input.ref).pipe(
+            Effect.flatMap((metadata) =>
+              manager.primeConfig(input.ref, storedModelConfig(metadata)).pipe(
+                Effect.andThen(
+                  manager.ensureRuntime(
+                    {
+                      sessionId: metadata.harnessSessionId,
+                      harnessAgentId: input.ref.harnessAgentId,
+                      ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
+                    },
+                    input.ref,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ).pipe(
+          Effect.tap((runtime) => syncRuntimeModel(input.ref, runtime)),
+          Effect.flatMap((runtime) => runtime.prompt(userInput)),
           Effect.tapError((promptError) =>
             manager.emit(input.ref, {
               type: "session.prompt.rejected",
@@ -655,8 +765,39 @@ export const makeHarnessAgentSessionService = (deps: {
         Effect.flatMap((runtime) => runtime?.interrupt ?? Effect.void),
       ),
 
-    setModel: (ref, model) =>
-      readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { model }))),
+    setModel: (ref, providerId, modelId) =>
+      withMetadataMutation(
+        ref,
+        readChecked(ref).pipe(
+          Effect.flatMap((metadata) => {
+            const next = { ...metadata, providerId, modelId };
+            return repo
+              .write(next)
+              .pipe(
+                Effect.andThen(
+                  manager
+                    .setConfig(ref, { providerId, modelId, reasoningEffort: undefined })
+                    .pipe(
+                      Effect.tapError(() =>
+                        repo
+                          .write(metadata)
+                          .pipe(
+                            Effect.catch((cause) =>
+                              Effect.die(
+                                new Error("failed to roll back persisted session model", { cause }),
+                              ),
+                            ),
+                          ),
+                      ),
+                    ),
+                ),
+                Effect.andThen(
+                  manager.emit(ref, { type: "session.model.updated", providerId, modelId }),
+                ),
+              );
+          }),
+        ),
+      ),
 
     setReasoningEffort: (ref, reasoningEffort) =>
       readChecked(ref).pipe(Effect.andThen(manager.setConfig(ref, { reasoningEffort }))),
@@ -712,7 +853,23 @@ export const makeHarnessAgentSessionService = (deps: {
       ),
 
     getStatus: (ref) => manager.status(ref),
-    getSnapshot: (ref) => manager.snapshot(ref),
+    getSnapshot: (ref) =>
+      manager.snapshot(ref).pipe(
+        Effect.flatMap((snapshot) =>
+          repo.read(ref.projectId, ref.sessionId).pipe(
+            Effect.map((metadata) =>
+              metadata.providerId !== undefined && metadata.modelId !== undefined
+                ? {
+                    ...snapshot,
+                    providerId: metadata.providerId,
+                    modelId: metadata.modelId,
+                  }
+                : snapshot,
+            ),
+            Effect.catch(() => Effect.succeed(snapshot)),
+          ),
+        ),
+      ),
 
     resolveRef: (sessionId) =>
       repo.findBySessionId(sessionId).pipe(

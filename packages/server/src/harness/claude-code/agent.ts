@@ -75,8 +75,8 @@ type ResumeDecision =
 export interface ClaudeCodeAgent {
   /**
    * The models a session started in `cwd` could run, read without opening a
-   * session. The catalog follows the user's account and the resolved CLI, so
-   * it can only be probed — never hardcoded. The directory is not incidental:
+   * session. The catalog follows the user's account and resolved CLI, so it
+   * must be queried rather than hardcoded. The directory is not incidental:
    * a project's `.claude/settings.json` can remap what an id resolves to, so
    * the same `sonnet` is a different model in two projects.
    */
@@ -530,10 +530,10 @@ export const makeClaudeCodeAgent = ({
     // `settingSources` it is what makes the answer specific to the project the
     // user is about to work in: a project that sets
     // `env.ANTHROPIC_DEFAULT_SONNET_MODEL` (or runs through Bedrock/Vertex)
-    // keeps the same ids but changes what they resolve to, so a catalog probed
-    // in some other directory is a catalog for someone else's project.
+    // keeps the same ids but changes what they resolve to, so a catalog read in
+    // another directory belongs to someone else's project.
     //
-    // Two things *are* stripped, because a probe should cost as little as a
+    // Two things *are* stripped, because this query should cost as little as a
     // question. Medians of five runs on a developer machine:
     //
     //   4.3s  a session's own options
@@ -572,14 +572,14 @@ export const makeClaudeCodeAgent = ({
             catch: (cause) => sdkError("list-models", cause),
           }),
         ),
-        (probe) =>
+        (listing) =>
           Effect.tryPromise({
-            try: () => probe.supportedModels(),
+            try: () => listing.supportedModels(),
             catch: (cause) => sdkError("list-models", cause),
           }),
-        // Returning the generator is what tears the child process down; a probe
-        // that leaked one per call would be a process leak per directory.
-        (probe) => Effect.promise(() => probe.return()).pipe(Effect.ignore),
+        // Returning the generator tears the child process down; leaking one per
+        // call would be a process leak per directory.
+        (listing) => Effect.promise(() => listing.return()).pipe(Effect.ignore),
       );
 
     return {

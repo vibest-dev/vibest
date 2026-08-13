@@ -4,7 +4,7 @@ import { sessionContract } from "@vibest/contract/session";
 import { Effect } from "effect";
 
 import { EventBus } from "../events";
-import { HarnessAgentSessionService } from "../harness";
+import { HarnessAgentRegistry, HarnessAgentSessionService } from "../harness";
 import { ProjectService } from "../project";
 import type { RpcContext } from "./context";
 import { openScopedSubscription } from "./session-stream";
@@ -23,12 +23,11 @@ export const sessionRouter = orpc.router({
   // lifecycle -----------------------------------------------------------------
   create: orpc.create.effect(function* ({ input, errors }) {
     const projects = yield* ProjectService;
+    const registry = yield* HarnessAgentRegistry;
     const sessions = yield* HarnessAgentSessionService;
-    // The providerId/modelId pair is validated and unpacked here: the two are
-    // only meaningful together (a half pair is a client bug), and today a
-    // harness can only consume its own built-in provider, so anything else is
-    // a request this server cannot honour. Past this point the model travels
-    // as a provider-local id.
+    // The providerId/modelId pair is only meaningful together. Both values
+    // remain opaque and travel to the adapter, which owns native provider
+    // compatibility.
     if ((input.providerId === undefined) !== (input.modelId === undefined)) {
       return yield* Effect.fail(
         errors.INVALID_ARGUMENT({
@@ -36,17 +35,26 @@ export const sessionRouter = orpc.router({
         }),
       );
     }
-    if (input.providerId !== undefined && input.providerId !== input.harnessAgentId) {
-      return yield* Effect.fail(
-        errors.UNSUPPORTED({
-          message: `provider ${input.providerId} is not consumable by ${input.harnessAgentId}`,
-        }),
-      );
+    if (input.providerId !== undefined) {
+      const adapter = yield* registry
+        .get(input.harnessAgentId)
+        .pipe(Effect.mapError((cause) => errors.UNSUPPORTED({ message: cause.message })));
+      const accepted =
+        adapter.acceptsModelProvider?.(input.providerId) ?? input.providerId === adapter.id;
+      if (!accepted) {
+        return yield* Effect.fail(
+          errors.UNSUPPORTED({
+            message: `provider ${input.providerId} is not consumable by ${input.harnessAgentId}`,
+          }),
+        );
+      }
     }
     return yield* projects.findById(input.projectId).pipe(
       Effect.flatMap((project) =>
         sessions.create(input.projectId, input.harnessAgentId, project.path, {
-          ...(input.modelId !== undefined ? { model: input.modelId } : {}),
+          ...(input.providerId !== undefined && input.modelId !== undefined
+            ? { providerId: input.providerId, modelId: input.modelId }
+            : {}),
           ...(input.reasoningEffort !== undefined
             ? { reasoningEffort: input.reasoningEffort }
             : {}),
@@ -62,6 +70,7 @@ export const sessionRouter = orpc.router({
         ExecutableNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
         PermissionModeUnsupported: (e) =>
           Effect.fail(errors.INVALID_ARGUMENT({ message: e.message })),
+        DefaultModelFailed: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
         AgentOpenError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
       }),
     );
@@ -249,17 +258,21 @@ export const sessionRouter = orpc.router({
     );
   }),
   setModel: orpc.setModel.effect(function* ({ input, errors }) {
+    const registry = yield* HarnessAgentRegistry;
     const sessions = yield* HarnessAgentSessionService;
-    // Same providerId gate as `create`: a harness only consumes its own
-    // built-in provider today.
-    if (input.providerId !== input.ref.harnessAgentId) {
+    const adapter = yield* registry
+      .get(input.ref.harnessAgentId)
+      .pipe(Effect.mapError((cause) => errors.UNSUPPORTED({ message: cause.message })));
+    const accepted =
+      adapter.acceptsModelProvider?.(input.providerId) ?? input.providerId === adapter.id;
+    if (!accepted) {
       return yield* Effect.fail(
         errors.UNSUPPORTED({
           message: `provider ${input.providerId} is not consumable by ${input.ref.harnessAgentId}`,
         }),
       );
     }
-    yield* sessions.setModel(input.ref, input.modelId).pipe(
+    yield* sessions.setModel(input.ref, input.providerId, input.modelId).pipe(
       Effect.catchTags({
         SessionNotFound: (e) =>
           Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),

@@ -3,6 +3,7 @@ import type { CodexUIMessageChunk } from "@vibest/contract/codex";
 import type { ServerNotification, ServerRequest } from "@vibest/contract/codex/protocol";
 import type {
   AskForApproval,
+  ConfigReadResponse,
   Model,
   ModelListResponse,
   SandboxPolicy,
@@ -122,17 +123,26 @@ export interface CodexAgent {
   /**
    * The model catalog for the signed-in account, read straight from the
    * app-server. Follows the account and the installed codex version, so it can
-   * only be probed — never hardcoded.
+   * must be queried rather than hardcoded.
    */
   readonly listModels: Effect.Effect<ReadonlyArray<Model>, CodexTransportFailure>;
+  readonly getDefaultModel: (
+    cwd: string,
+  ) => Effect.Effect<string | undefined, CodexTransportFailure>;
   readonly session: {
     readonly create: (config: {
       readonly cwd: string;
-    }) => Effect.Effect<{ readonly sessionId: string }, CodexTransportFailure>;
+    }) => Effect.Effect<
+      { readonly sessionId: string; readonly model: string },
+      CodexTransportFailure
+    >;
     readonly resume: (config: {
       readonly sessionId: string;
       readonly cwd?: string;
-    }) => Effect.Effect<{ readonly sessionId: string }, CodexTransportFailure>;
+    }) => Effect.Effect<
+      { readonly sessionId: string; readonly model: string },
+      CodexTransportFailure
+    >;
     /**
      * Reads a thread's stored metadata (title, recency) straight from the
      * app-server's history — works for threads that aren't loaded as live
@@ -552,31 +562,35 @@ export const makeCodexAgentWithDependencies = <R>(
         return { sessionId: threadId };
       });
 
+    // `includeHidden` is deliberately not sent: the app-server already filters
+    // the picker list down to what this account can actually run, which is
+    // exactly what the UI should offer. Pagination is followed to completion;
+    // the cap is only a runaway guard.
+    const listModels = Effect.gen(function* () {
+      const transport = yield* holder.ensure;
+      const models: Model[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < MAX_MODEL_PAGES; page++) {
+        const response: ModelListResponse = yield* transport.request<ModelListResponse>(
+          "model/list",
+          cursor === null ? {} : { cursor },
+        );
+        models.push(...response.data);
+        cursor = response.nextCursor;
+        if (cursor === null) break;
+      }
+      return models;
+    });
+
     return {
-      // `includeHidden` is deliberately not sent: the app-server already filters
-      // the picker list down to what this account can actually run, which is
-      // exactly what the UI should offer.
-      //
-      // `model/list` is paginated with a server-chosen page size, so a single
-      // call is not the catalog — it is the first page of one. Follow the
-      // cursor: a truncated list is invisible, the user simply never sees the
-      // model they wanted. The page cap is a runaway guard, not a limit anyone
-      // is expected to hit.
-      listModels: Effect.gen(function* () {
-        const transport = yield* holder.ensure;
-        const models: Model[] = [];
-        let cursor: string | null = null;
-        for (let page = 0; page < MAX_MODEL_PAGES; page++) {
-          const response: ModelListResponse = yield* transport.request<ModelListResponse>(
-            "model/list",
-            cursor === null ? {} : { cursor },
-          );
-          models.push(...response.data);
-          cursor = response.nextCursor;
-          if (cursor === null) break;
-        }
-        return models;
-      }),
+      listModels,
+      getDefaultModel: (cwd) =>
+        Effect.gen(function* () {
+          const transport = yield* holder.ensure;
+          const response = yield* transport.request<ConfigReadResponse>("config/read", { cwd });
+          if (response.config.model) return response.config.model;
+          return (yield* listModels).find((model) => model.isDefault)?.model;
+        }),
       session: {
         create: (config) =>
           Effect.gen(function* () {
@@ -587,7 +601,8 @@ export const makeCodexAgentWithDependencies = <R>(
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });
-            return yield* registerSession(response.thread.id, generation);
+            const registered = yield* registerSession(response.thread.id, generation);
+            return { ...registered, model: response.model };
           }),
         resume: (config) =>
           Effect.gen(function* () {
@@ -599,7 +614,8 @@ export const makeCodexAgentWithDependencies = <R>(
               approvalPolicy: "on-request",
               sandbox: "workspace-write",
             });
-            return yield* registerSession(response.thread.id, generation);
+            const registered = yield* registerSession(response.thread.id, generation);
+            return { ...registered, model: response.model };
           }),
         read: (config) =>
           Effect.gen(function* () {

@@ -21,7 +21,7 @@ const makeController = (html?: string) => {
   return controller;
 };
 
-function Probe({ controller }: { controller: ChatInputController | null }) {
+function Observer({ controller }: { controller: ChatInputController | null }) {
   return createElement("span", null, String(useChatInputHasContent(controller)));
 }
 
@@ -35,7 +35,7 @@ const render = (controller: ChatInputController | null): string => {
     root = createRoot(host);
   }
   const mounted = root;
-  act(() => mounted?.render(createElement(Probe, { controller })));
+  act(() => mounted?.render(createElement(Observer, { controller })));
   return host.textContent ?? "";
 };
 

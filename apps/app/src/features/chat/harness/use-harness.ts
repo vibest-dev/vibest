@@ -3,8 +3,10 @@ import { useRouteContext } from "@tanstack/react-router";
 import type {
   HarnessAgentId,
   HarnessAgentInfo,
+  HarnessGetDefaultModelOutput,
+  HarnessListModelsOutput,
   HarnessListOutput,
-  HarnessProbeOutput,
+  SessionRef,
 } from "@vibest/contract";
 import { useCallback } from "react";
 
@@ -44,32 +46,46 @@ export function useHarnessAgent(harnessAgentId: HarnessAgentId): HarnessAgentInf
 }
 
 /**
- * The probed model providers for one harness in one directory. Returns the
- * whole query, because its failure is meaningful: a failed probe must stay
- * distinguishable from "this harness has no models" (empty providers), so the
- * UI can render a retryable degraded state instead of silently hiding the
- * picker.
+ * The model providers for one harness. A managed session ref lets the server
+ * use that session's existing runtime; without one, it performs the cached
+ * directory query. Failures remain distinct from an empty provider list.
  *
  * While `cwd` is unknown the input is `skipToken`, not a fabricated value:
  * unlike `enabled: false`, a skipped query cannot be forced to run by
- * `refetch()`, so the retry affordance can never fire a probe against a
- * made-up directory.
- *
- * Unlike the list this is fetched lazily and costs a CLI spawn, so it is held
- * far longer than TanStack's defaults would: without a `staleTime` every
- * window focus would re-probe. The server de-duplicates concurrent asks and
- * holds its own short-lived answer, so a stale read here is cheap to correct
- * and an eager one is not.
+ * `refetch()` against a made-up directory.
  */
-export function useHarnessProbe(
+export function useHarnessDefaultModel(
   harnessAgentId: HarnessAgentId,
   cwd: string | undefined,
-): UseQueryResult<HarnessProbeOutput> {
+): UseQueryResult<HarnessGetDefaultModelOutput> {
   const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
   return useQuery({
-    ...orpcQueryUtils.harness.probe.queryOptions({
+    ...orpcQueryUtils.harness.getDefaultModel.queryOptions({
       input: cwd === undefined ? skipToken : { harnessAgentId, cwd },
     }),
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useHarnessModels(
+  harnessAgentId: HarnessAgentId,
+  cwd: string | undefined,
+  ref?: SessionRef,
+  runtimeActive = false,
+): UseQueryResult<HarnessListModelsOutput> {
+  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
+  const options = orpcQueryUtils.harness.listModels.queryOptions({
+    input:
+      cwd === undefined
+        ? skipToken
+        : { harnessAgentId, cwd, ...(ref ? { ref, runtimeActive } : {}) },
+  });
+  return useQuery({
+    ...options,
+    // Runtime phase participates in the generated query key. Zero GC prevents
+    // the old directory answer from resurfacing when the first turn settles.
+    gcTime: ref ? 0 : undefined,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });

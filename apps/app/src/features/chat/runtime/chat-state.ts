@@ -19,6 +19,8 @@ export type ChatStoreState = {
   error?: Error;
   pendingRequests: AgentRequest[];
   historyStatus: HistoryStatus;
+  providerId?: string;
+  modelId?: string;
 };
 
 // The slice of ai-sdk's ChatState this runtime still honors — the shared data
@@ -41,6 +43,8 @@ export class ChatState implements AiChatStateSlice {
       error: undefined,
       pendingRequests: [],
       historyStatus: "loading",
+      providerId: undefined,
+      modelId: undefined,
     }));
   }
 
@@ -71,6 +75,10 @@ export class ChatState implements AiChatStateSlice {
   set error(error: Error | undefined) {
     this.store.setState({ error });
   }
+
+  setModel = (providerId: string | undefined, modelId: string | undefined) => {
+    this.store.setState({ providerId, modelId });
+  };
 
   pushMessage = (message: UIMessage) => {
     this.store.setState((s) => ({ messages: [...s.messages, message] }));

@@ -27,7 +27,18 @@ const settle = (last) => { send({ type: "agent_end", messages: [last || assistan
 let holding = false;
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
-  if (msg.type === "get_state") { send({ id: msg.id, type: "response", command: "get_state", success: true, data: { sessionId } }); return; }
+  if (msg.type === "get_state") { send({ id: msg.id, type: "response", command: "get_state", success: true, data: sessionId === "bad-state" ? { sessionId, model: { provider: 42, id: "model:one" } } : { sessionId, model: { provider: "provider/one", id: "model:one" } } }); return; }
+  if (msg.type === "get_available_models") {
+    send({ id: msg.id, type: "response", command: "get_available_models", success: true, data: { models: [
+      { provider: "provider/one", id: "model:one", name: process.argv.includes("--no-session") ? "Temporary model" : "Live model", api: "openai-completions", baseUrl: "http://localhost", reasoning: false, input: ["text"], contextWindow: 1000, maxTokens: 100, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
+    ] } });
+    return;
+  }
+  if (msg.type === "set_model") {
+    const exact = msg.provider === "provider/one" && msg.modelId === "model:one";
+    send({ id: msg.id, type: "response", command: "set_model", success: exact, ...(exact ? { data: {} } : { error: "wrong model pair" }) });
+    return;
+  }
   if (msg.type === "extension_ui_response") {
     upd({ type: "start" });
     upd({ type: "text_start", contentIndex: 0 });
@@ -101,6 +112,17 @@ layer(NodeServices.layer)("PiAgent", (it) => {
     }),
   );
 
+  it.effect("rejects an incompatible session model during the readiness handshake", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const error = yield* Effect.flip(
+        agent.session.resume({ sessionId: "bad-state", cwd: "/tmp" }),
+      );
+
+      assert.equal(error._tag, "PiTransportError");
+    }),
+  );
+
   it.effect("resume keeps the caller-provided session id", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
@@ -109,6 +131,44 @@ layer(NodeServices.layer)("PiAgent", (it) => {
         cwd: "/tmp",
       });
       assert.equal(sessionId, "custom-id");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("lets a temporary no-session child resolve Pi's default model", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const model = yield* agent.getDefaultModel("/tmp");
+
+      assert.equal(model?.provider, "provider/one");
+      assert.equal(model?.id, "model:one");
+    }),
+  );
+
+  it.effect("lists directory models through a temporary no-session child", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const models = yield* agent.listModels("/tmp");
+
+      assert.equal(models[0]?.provider, "provider/one");
+      assert.equal(models[0]?.id, "model:one");
+      assert.equal(models[0]?.name, "Temporary model");
+    }),
+  );
+
+  it.effect("lists models and switches through the current live child", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+
+      const models = yield* agent.session.listModels(sessionId);
+      assert.equal(models[0]?.name, "Live model");
+
+      yield* agent.session.setModel(sessionId, "provider/one", "model:one");
+      const error = yield* agent.session
+        .setModel(sessionId, "provider/one", "wrong")
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "PiRpcError");
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -266,6 +326,26 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const siblingChunks = yield* Stream.runCollect(sibling.output);
       assert.equal(Array.from(siblingChunks).at(-1)?.type, "finish");
       yield* agent.session.abort(healthy.sessionId);
+    }),
+  );
+
+  it.effect("maps Pi providers for temporary and live model listing", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const adapter = makePiAdapter(agent);
+      if (!adapter.listModelProviders) assert.fail("Pi adapter did not declare model listing");
+
+      const temporary = yield* adapter.listModelProviders("/tmp");
+      assert.equal(temporary?.[0]?.id, "provider/one");
+      assert.equal(temporary?.[0]?.models[0]?.id, "model:one");
+      assert.equal(temporary?.[0]?.models[0]?.label, "Temporary model");
+
+      const session = yield* adapter.open({ cwd: "/tmp" });
+      if (!session.listModelProviders) assert.fail("Pi runtime did not declare model listing");
+      const live = yield* session.listModelProviders;
+      assert.equal(live?.[0]?.models[0]?.label, "Live model");
+      yield* session.setModel("provider/one", "model:one");
+      yield* session.close;
     }),
   );
 

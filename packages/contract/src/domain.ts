@@ -192,6 +192,7 @@ export const SessionScopedEventTypes = [
   "session.request.asked",
   "session.request.replied",
   "session.request.rejected",
+  "session.model.updated",
   "session.crashed",
 ] as const;
 export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
@@ -245,6 +246,11 @@ export type SessionScopedEventBody =
       readonly type: "session.request.rejected";
       readonly requestId: string;
       readonly reason?: string;
+    }
+  | {
+      readonly type: "session.model.updated";
+      readonly providerId: string;
+      readonly modelId: string;
     }
   | { readonly type: "session.crashed"; readonly reason: string };
 
@@ -411,14 +417,14 @@ export const ModelInfoSchema = Schema.Struct({
 });
 export type ModelInfo = typeof ModelInfoSchema.Type;
 
-// A source of models. Today every harness doubles as exactly one built-in
-// provider (`id === harnessAgentId`); user-configured providers join the same
-// shape later. Models never leave their provider — flattening loses the half
-// of the composite key that makes `modelId` meaningful.
+// A source of models. Claude Code and Codex expose one harness-owned provider;
+// Pi can expose several native providers. Models never leave their provider —
+// flattening loses the half of the composite key that makes `modelId`
+// meaningful.
 // No default marker on purpose: a catalog's "default" flag is the provider's
 // suggestion, not what an unconfigured session actually runs (the harness's
-// own user config decides that, and it is not probeable). The default is
-// expressed by absence — no pick on the wire means the harness decides.
+// own user config decides that, and the catalog cannot reveal it). That is a
+// separate getDefaultModel query, never a marker mixed into this list.
 export const ProviderInfoSchema = Schema.Struct({
   id: Schema.String,
   label: Schema.optionalKey(Schema.String),
@@ -456,25 +462,54 @@ export type HarnessListOutput = typeof HarnessListOutputSchema.Type;
 // what a project is (see `session/port.ts` — "the port speaks ... a resolved
 // `cwd` only"), and the directory is what the answer actually depends on. It
 // also makes the cache key right for free: two projects registered at the same
-// path share one probe instead of spawning twice for the same answer.
-export const HarnessProbeInputSchema = Schema.Struct({
+// path share one cached query instead of spawning twice for the same answer.
+export const HarnessListModelsInputSchema = Schema.Struct({
+  harnessAgentId: HarnessAgentIdSchema,
+  cwd: Schema.String,
+  // When this managed session currently owns a runtime, the server asks that
+  // exact instance. Otherwise it performs a short-lived directory query.
+  ref: Schema.optionalKey(SessionRefSchema),
+  // Runtime transitions change where the answer comes from. The server still
+  // checks the actual runtime; this field keeps client caching aligned with the
+  // lifecycle transition.
+  runtimeActive: Schema.optionalKey(Schema.Boolean),
+});
+export type HarnessListModelsInput = typeof HarnessListModelsInputSchema.Type;
+
+// What one harness can run in one directory or current session. Empty
+// `providers` means there are no selectable models. A failed query is an
+// error, never an empty result — an expired login must stay distinguishable
+// from "there are no models".
+export const HarnessListModelsOutputSchema = Schema.Struct({
+  providers: Schema.Array(ProviderInfoSchema),
+});
+export type HarnessListModelsOutput = typeof HarnessListModelsOutputSchema.Type;
+
+export const HarnessGetDefaultModelInputSchema = Schema.Struct({
   harnessAgentId: HarnessAgentIdSchema,
   cwd: Schema.String,
 });
-export type HarnessProbeInput = typeof HarnessProbeInputSchema.Type;
+export type HarnessGetDefaultModelInput = typeof HarnessGetDefaultModelInputSchema.Type;
 
-// What probing one harness in one directory yielded. Empty `providers` means
-// the harness has no model catalogue at all (pi). A failed probe is an error,
-// never an empty result — an expired login must stay distinguishable from
-// "this harness has no model picker".
-export const HarnessProbeOutputSchema = Schema.Struct({
-  providers: Schema.Array(ProviderInfoSchema),
-});
-export type HarnessProbeOutput = typeof HarnessProbeOutputSchema.Type;
+// Both fields are present when the harness can resolve the model a fresh
+// session would use, and both are absent when it currently has no model.
+export const HarnessGetDefaultModelOutputSchema = Schema.Struct({
+  providerId: Schema.optionalKey(Schema.String),
+  modelId: Schema.optionalKey(Schema.String),
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      (value.providerId === undefined) === (value.modelId === undefined) ||
+      "providerId and modelId must be present together",
+  ),
+);
+export type HarnessGetDefaultModelOutput = typeof HarnessGetDefaultModelOutputSchema.Type;
 
 export type SessionRuntimeSnapshot = {
   readonly ref: SessionRef;
   readonly status: SessionStatus;
+  readonly providerId?: string;
+  readonly modelId?: string;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;
   readonly activePrompt: ActivePromptSnapshot | null;
@@ -594,7 +629,7 @@ export const BrowseResultSchema = Schema.Struct({
 // via the dedicated setters — never carried on a prompt turn. The two channels
 // fail differently on purpose: `permissionMode` is our closed union (a bad
 // value is a client bug → INVALID_ARGUMENT), while the model pair and `reasoningEffort`
-// come from probed lists that go stale, so applying them is best-effort — a
+// come from model lists that go stale, so applying them is best-effort — a
 // miss falls back to the harness default and the session still opens.
 // `providerId`/`modelId` must be given together; a half pair is a client bug
 // the RPC boundary rejects.

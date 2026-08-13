@@ -1,3 +1,4 @@
+import type { ProviderInfo } from "@vibest/contract";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -11,6 +12,8 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
+  DefaultModelFailed,
+  ModelListFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -20,12 +23,32 @@ import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
 import { entriesToUIMessages } from "./history";
+import type { PiModels } from "./protocol";
 import type { PiUIMessageChunk } from "./ui-message";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 
 const operationError = (sessionId: string, operation: string, cause: unknown) =>
   new AgentOperationError({ sessionId, operation, cause });
+
+const toModelProviders = (models: PiModels): ReadonlyArray<ProviderInfo> => {
+  const providers = new Map<string, ProviderInfo>();
+  for (const model of models) {
+    const current = providers.get(model.provider);
+    const info = {
+      id: model.id,
+      label: model.name,
+      modalities: Array.from(model.input),
+    };
+    providers.set(
+      model.provider,
+      current
+        ? { ...current, models: [...current.models, info] }
+        : { id: model.provider, models: [info] },
+    );
+  }
+  return Array.from(providers.values());
+};
 
 const toPromptText = (input: UserInput): string =>
   input.parts
@@ -194,9 +217,29 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
-      // Pi has neither a model switch, an reasoningEffort switch, nor a permission
-      // protocol; accept the config calls and no-op rather than fail the caller.
-      setModel: () => Effect.void,
+      listModelProviders: Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        return yield* agent.session.listModels(sessionId).pipe(
+          Effect.map(toModelProviders),
+          Effect.mapError((cause) => operationError(sessionId, "list-models", cause)),
+        );
+      }),
+      getModel: Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+        const state = yield* agent.session
+          .getState(sessionId)
+          .pipe(Effect.mapError((cause) => operationError(sessionId, "get-model", cause)));
+        return state.model ? { providerId: state.model.provider, modelId: state.model.id } : {};
+      }),
+      setModel: (providerId, modelId) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          yield* agent.session
+            .setModel(sessionId, providerId, modelId)
+            .pipe(Effect.mapError((cause) => operationError(sessionId, "set-model", cause)));
+        }),
+      // Thinking-level switching is separate from model selection and is not
+      // exposed until its normalized contract is implemented.
       setReasoningEffort: () => Effect.void,
       setPermissionMode: () => Effect.void,
       interrupt,
@@ -235,10 +278,20 @@ export const makePiAdapter = (
 ): HarnessAgentAdapter => ({
   id: "pi",
   descriptor: { id: "pi", name: "Pi" },
-  // Pi has neither a permission protocol nor a model catalogue — declaring
-  // nothing (empty subset, no probe) is what makes the UI render no config
-  // controls for it.
+  // Pi has no native permission protocol. Its model providers are discovered
+  // through the RPC model-list command below.
   permissionModes: [],
+  acceptsModelProvider: () => true,
+  listModelProviders: (cwd) =>
+    agent.listModels(cwd).pipe(
+      Effect.map(toModelProviders),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "pi", cause })),
+    ),
+  getDefaultModel: (cwd) =>
+    agent.getDefaultModel(cwd).pipe(
+      Effect.map((model) => (model ? { providerId: model.provider, modelId: model.id } : {})),
+      Effect.mapError((cause) => new DefaultModelFailed({ harnessAgentId: "pi", cause })),
+    ),
   checkAvailability: findExecutable(options.executablePath ?? "pi").pipe(
     Effect.map((found) =>
       found ? { available: true } : { available: false, reason: "Pi was not found on PATH." },

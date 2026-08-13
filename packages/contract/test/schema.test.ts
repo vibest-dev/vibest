@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import {
   ArchiveSessionInputSchema,
   CollectionEventTypes,
+  HarnessGetDefaultModelInputSchema,
+  HarnessGetDefaultModelOutputSchema,
+  HarnessListModelsInputSchema,
+  HarnessListModelsOutputSchema,
   HarnessListOutputSchema,
-  HarnessProbeInputSchema,
-  HarnessProbeOutputSchema,
   ListSessionsInputSchema,
   MAX_SESSION_TITLE_CHARS,
   RenameSessionInputSchema,
@@ -185,26 +187,45 @@ describe("HarnessListOutput", () => {
   });
 });
 
-describe("HarnessProbeOutput", () => {
+describe("HarnessGetDefaultModel", () => {
+  it("accepts a complete pair or no resolved model", () => {
+    expect(
+      accepts(HarnessGetDefaultModelInputSchema, {
+        harnessAgentId: "pi",
+        cwd: "/work/app",
+      }),
+    ).toBe(true);
+    expect(
+      accepts(HarnessGetDefaultModelOutputSchema, {
+        providerId: "anthropic",
+        modelId: "claude-sonnet",
+      }),
+    ).toBe(true);
+    expect(accepts(HarnessGetDefaultModelOutputSchema, {})).toBe(true);
+    expect(accepts(HarnessGetDefaultModelOutputSchema, { providerId: "anthropic" })).toBe(false);
+  });
+});
+
+describe("HarnessListModelsOutput", () => {
   const output = (providers: unknown) => ({ providers });
 
   it("keeps models inside their provider", () => {
     expect(
       accepts(
-        HarnessProbeOutputSchema,
+        HarnessListModelsOutputSchema,
         output([{ id: "codex", models: [{ id: "gpt-5.6-sol", label: "GPT 5.6 Sol" }] }]),
       ),
     ).toBe(true);
   });
 
-  it("accepts an empty provider list — how a harness says it has no model switch", () => {
-    expect(accepts(HarnessProbeOutputSchema, output([]))).toBe(true);
+  it("accepts an empty provider list", () => {
+    expect(accepts(HarnessListModelsOutputSchema, output([]))).toBe(true);
   });
 
   it("carries normalized traits next to the opaque id", () => {
     expect(
       accepts(
-        HarnessProbeOutputSchema,
+        HarnessListModelsOutputSchema,
         output([
           {
             id: "codex",
@@ -225,7 +246,7 @@ describe("HarnessProbeOutput", () => {
   it("rejects an reasoningEffort outside the vocabulary — adapters must drop what they can't translate", () => {
     expect(
       accepts(
-        HarnessProbeOutputSchema,
+        HarnessListModelsOutputSchema,
         output([{ id: "codex", models: [{ id: "m", reasoningEfforts: ["turbo"] }] }]),
       ),
     ).toBe(false);
@@ -233,14 +254,22 @@ describe("HarnessProbeOutput", () => {
 
   it("rejects a model without an id", () => {
     expect(
-      accepts(HarnessProbeOutputSchema, output([{ id: "codex", models: [{ label: "Sonnet" }] }])),
+      accepts(
+        HarnessListModelsOutputSchema,
+        output([{ id: "codex", models: [{ label: "Sonnet" }] }]),
+      ),
     ).toBe(false);
   });
 
-  it("addresses a probe by directory, not by project", () => {
-    expect(accepts(HarnessProbeInputSchema, { harnessAgentId: "codex", cwd: "/work/app" })).toBe(
-      true,
-    );
-    expect(accepts(HarnessProbeInputSchema, { harnessAgentId: "codex" })).toBe(false);
+  it("addresses a model list by directory and optional managed session", () => {
+    expect(
+      accepts(HarnessListModelsInputSchema, {
+        harnessAgentId: "claude-code",
+        cwd: "/work/app",
+        ref,
+        runtimeActive: true,
+      }),
+    ).toBe(true);
+    expect(accepts(HarnessListModelsInputSchema, { harnessAgentId: "codex" })).toBe(false);
   });
 });

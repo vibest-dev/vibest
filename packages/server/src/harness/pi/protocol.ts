@@ -3,6 +3,7 @@ import type {
   RpcCommand,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcResponse,
   RpcSessionState,
   SessionEntry,
   SessionMessageEntry,
@@ -22,10 +23,18 @@ export type {
   RpcCommand,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcResponse,
   RpcSessionState,
   SessionEntry,
   SessionMessageEntry,
 };
+
+export type PiModel = Extract<
+  RpcResponse,
+  { command: "get_available_models"; success: true }
+>["data"]["models"][number];
+
+export type PiModels = ReadonlyArray<PiModel>;
 
 /** `get_entries` response data: the session's whole entry tree plus its leaf. */
 export type SessionEntries = {

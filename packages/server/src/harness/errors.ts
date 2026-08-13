@@ -228,15 +228,24 @@ export class PermissionModeUnsupported extends Schema.TaggedErrorClass<Permissio
   }
 }
 
-export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
-  "CapabilityProbeFailed",
+export class ModelListFailed extends Schema.TaggedErrorClass<ModelListFailed>()("ModelListFailed", {
+  harnessAgentId: HarnessAgentIdSchema,
+  cause: Schema.Defect(),
+}) {
+  override get message() {
+    return `Failed to list models for '${this.harnessAgentId}': ${causeSummary(this.cause)}`;
+  }
+}
+
+export class DefaultModelFailed extends Schema.TaggedErrorClass<DefaultModelFailed>()(
+  "DefaultModelFailed",
   {
     harnessAgentId: HarnessAgentIdSchema,
     cause: Schema.Defect(),
   },
 ) {
   override get message() {
-    return `Failed to probe '${this.harnessAgentId}' capabilities: ${causeSummary(this.cause)}`;
+    return `Failed to resolve the default model for '${this.harnessAgentId}': ${causeSummary(this.cause)}`;
   }
 }
 
@@ -257,6 +266,7 @@ export type CreateSessionError =
   | AgentUnavailable
   | ExecutableNotFound
   | PermissionModeUnsupported
+  | DefaultModelFailed
   | AgentOpenError;
 
 export type ResumeSessionError =

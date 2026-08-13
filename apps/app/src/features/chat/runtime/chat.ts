@@ -191,6 +191,9 @@ export class Chat {
       case "session.request.rejected":
         this.#state.removePendingRequest(event.requestId);
         break;
+      case "session.model.updated":
+        this.#state.setModel(event.providerId, event.modelId);
+        break;
       case "session.crashed":
         for (const fold of this.#turnFolds.values()) fold.close();
         this.#turnFolds.clear();
@@ -309,6 +312,7 @@ export class Chat {
       this.#cursor = 0;
       this.#needsReconcile = true;
     }
+    this.#state.setModel(snapshot.providerId, snapshot.modelId);
     // Pending requests are server state: replace wholesale, no diffing.
     this.#state.setPendingRequests([]);
     for (const request of snapshot.pendingRequests) this.#handleRequest(request);

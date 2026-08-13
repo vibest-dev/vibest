@@ -15,8 +15,9 @@ import {
   AgentOpenError,
   AgentOperationError,
   AgentRequestUnavailable,
-  CapabilityProbeFailed,
   CodexRpcError,
+  DefaultModelFailed,
+  ModelListFailed,
   SessionClosed,
   SessionNotResumable,
   TurnAlreadyRunning,
@@ -108,6 +109,7 @@ const toModelInfo = (model: Model): ModelInfo => {
 const makeRuntime = (
   agent: CodexAgent,
   sessionId: string,
+  initialModel: string,
 ): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
@@ -125,7 +127,7 @@ const makeRuntime = (
     // lets create-time selection work at all — the session seeds a runtime it
     // has just acquired, so setModel lands before the first prompt and that
     // first turn carries it.
-    const model = yield* Ref.make<string | undefined>(undefined);
+    const model = yield* Ref.make<string | undefined>(initialModel);
     // ReasoningEffort rides `turn/start` the same way. Cleared on setModel: an reasoningEffort
     // picked for one model must not survive onto another — no override means
     // codex applies the new model's own default.
@@ -283,13 +285,24 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      getModel: Ref.get(model).pipe(
+        Effect.map((modelId) => (modelId ? { providerId: "codex", modelId } : {})),
+      ),
       // Stored, not sent: codex has no standalone set-model call, the override
       // rides on the next `turn/start`. So a mid-session switch takes effect
       // from the next turn — unlike claude-code, where it is immediate.
       // Switching the model also clears the reasoningEffort override, so the next turn
       // runs on the new model's own default reasoningEffort.
-      setModel: (next) =>
-        Ref.set(model, next).pipe(Effect.andThen(Ref.set(reasoningEffort, undefined))),
+      setModel: (providerId, next) =>
+        providerId === "codex"
+          ? Ref.set(model, next).pipe(Effect.andThen(Ref.set(reasoningEffort, undefined)))
+          : Effect.fail(
+              operationError(
+                sessionId,
+                "set-model",
+                new Error(`unsupported provider: ${providerId}`),
+              ),
+            ),
       setReasoningEffort: (next) => Ref.set(reasoningEffort, next),
       setPermissionMode: (mode) =>
         Effect.gen(function* () {
@@ -340,14 +353,17 @@ export const makeCodexAdapter = (
   // it answers for the whole app-server. Taking the argument anyway keeps the
   // seam uniform, so callers never branch on which harness cares, and the day
   // codex grows per-project config this is a one-line change here.
-  probeModels: (_cwd) =>
+  listModelProviders: (_cwd) =>
     agent.listModels.pipe(
-      // The catalog's `isDefault` flag is deliberately not forwarded: it is
-      // the API's suggestion, while an unconfigured session actually runs
-      // whatever the user's own config.toml says — which is not probeable.
-      // The default is expressed by absence, not by a marker.
-      Effect.map((models) => models.map(toModelInfo)),
-      Effect.mapError((cause) => new CapabilityProbeFailed({ harnessAgentId: "codex", cause })),
+      // The catalog's `isDefault` flag is deliberately not forwarded: default
+      // resolution is a separate operation and may also consult config.toml.
+      Effect.map((models) => [{ id: "codex", label: "Codex", models: models.map(toModelInfo) }]),
+      Effect.mapError((cause) => new ModelListFailed({ harnessAgentId: "codex", cause })),
+    ),
+  getDefaultModel: (cwd) =>
+    agent.getDefaultModel(cwd).pipe(
+      Effect.map((modelId) => (modelId ? { providerId: "codex", modelId } : {})),
+      Effect.mapError((cause) => new DefaultModelFailed({ harnessAgentId: "codex", cause })),
     ),
   // A PATH lookup, not a spawn: negotiate has to stay cheap on machines where
   // codex simply isn't installed, which is the common case.
@@ -359,7 +375,7 @@ export const makeCodexAdapter = (
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),
-      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
+      Effect.flatMap(({ sessionId, model }) => makeRuntime(agent, sessionId, model)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
@@ -368,7 +384,7 @@ export const makeCodexAdapter = (
           ? cause
           : new AgentOpenError({ harnessAgentId: "codex", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
+      Effect.flatMap(({ sessionId, model }) => makeRuntime(agent, sessionId, model)),
     ),
   // Cold history read: `thread/read` returns the stored turns in the same
   // ThreadItem vocabulary the live transform streams, so the cold fold and the

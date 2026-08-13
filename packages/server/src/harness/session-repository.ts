@@ -14,13 +14,21 @@ const SessionSchema = Schema.Struct({
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
   harnessSessionId: Schema.String,
+  providerId: Schema.optionalKey(Schema.String),
+  modelId: Schema.optionalKey(Schema.String),
   createdAt: Schema.String,
   cwd: Schema.optionalKey(Schema.String),
   title: Schema.optionalKey(Schema.String),
   archived: Schema.optionalKey(Schema.Boolean),
   updatedAt: Schema.optionalKey(Schema.String),
   historyAvailable: Schema.optionalKey(Schema.Boolean),
-});
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      (value.providerId === undefined) === (value.modelId === undefined) ||
+      "providerId and modelId must be present together",
+  ),
+);
 
 /**
  * Data access for `storage/sessions/<projectId>/<sessionId>.json`. The filename

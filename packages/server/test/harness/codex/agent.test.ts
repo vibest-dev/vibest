@@ -214,7 +214,7 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
       const agent = yield* makeFakeAgent;
       const session = yield* makeCodexAdapter(agent).open({ cwd: workspace });
 
-      yield* session.setModel("gpt-5.6-luna");
+      yield* session.setModel("codex", "gpt-5.6-luna");
       yield* session.prompt({ parts: [{ type: "text", text: "ping" }] });
 
       assert.equal(fs.readFileSync(path.join(workspace, "turn-model"), "utf8"), "gpt-5.6-luna");

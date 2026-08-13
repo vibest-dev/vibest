@@ -14,7 +14,7 @@ import {
   HarnessAgentSessionManagerLayer,
   HarnessAgentSessionServiceLayer,
   HarnessListLayer,
-  HarnessProbeLayer,
+  HarnessModelLayer,
   makeHarnessAgentRegistry,
 } from "../harness";
 import {
@@ -96,14 +96,12 @@ const RegistryLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ProvidersLayer), Layer.provide(PlatformLayer));
 
-// Both harness routes read the same registry instance. It matters most for the
-// probe: one cache, shared by every connecting client, so N tabs on the same
-// directory still cost one CLI spawn.
+// Both harness routes read the same registry instance. Directory-based model
+// queries also share one cache across every connecting client.
 const HarnessListProvided = HarnessListLayer.pipe(
   Layer.provide(RegistryLayer),
   Layer.provide(PlatformLayer),
 );
-const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer));
 
 // The session stack: the manager owns all live state (instances + projections,
 // publishing wire events onto the bus); the outward façade on top does the
@@ -117,6 +115,11 @@ const HarnessSessionManagerProvided = HarnessAgentSessionManagerLayer.pipe(
   Layer.provide(EventBusLayer),
   Layer.provide(PlatformLayer),
 );
+const HarnessModelProvided = HarnessModelLayer.pipe(
+  Layer.provide(RegistryLayer),
+  Layer.provide(HarnessSessionManagerProvided),
+);
+
 const HarnessSessionServiceProvided = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(HarnessSessionManagerProvided),
   Layer.provide(RegistryLayer),
@@ -140,7 +143,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   ProjectServiceProvided,
   RegistryLayer,
   HarnessListProvided,
-  HarnessProbeProvided,
+  HarnessModelProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a

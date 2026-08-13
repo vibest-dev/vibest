@@ -98,7 +98,7 @@ type AcquireDecision =
 // The two channels fail differently on purpose (harness-concept-ownership §3.3):
 // `permissionMode` was validated at the RPC boundary, so failing to apply it is
 // a real fault and the acquisition fails with it. `model`/`reasoningEffort` come
-// from probed lists that go stale (an old URL, a re-mapped alias), so they are
+// from model lists that go stale (an old URL, a re-mapped alias), so they are
 // best-effort: a miss is logged and the session runs on the harness default
 // rather than turning "the list was a bit old" into "the session cannot start".
 const seedConfig = (
@@ -115,9 +115,9 @@ const seedConfig = (
           ),
         );
     }
-    if (config.model) {
+    if (config.providerId && config.modelId) {
       yield* runtime
-        .setModel(config.model)
+        .setModel(config.providerId, config.modelId)
         .pipe(
           Effect.catch((cause) =>
             Effect.logWarning("session model apply failed; using the harness default", cause),
@@ -149,7 +149,9 @@ const pushConfig = (
 ): Effect.Effect<void, SessionClosed | AgentOperationError> =>
   Effect.gen(function* () {
     if (patch.permissionMode) yield* runtime.setPermissionMode(patch.permissionMode);
-    if (patch.model) yield* runtime.setModel(patch.model);
+    if (patch.providerId && patch.modelId) {
+      yield* runtime.setModel(patch.providerId, patch.modelId);
+    }
     if (patch.reasoningEffort) yield* runtime.setReasoningEffort(patch.reasoningEffort);
   });
 
@@ -177,6 +179,8 @@ export type HarnessAgentSessionShape = {
   readonly setConfig: (
     patch: SessionConfig,
   ) => Effect.Effect<void, SessionClosed | AgentOperationError>;
+  /** Seed desired config from persisted metadata without touching a live runtime. */
+  readonly primeConfig: (patch: SessionConfig) => Effect.Effect<void>;
   /** The runtime this session holds, or `undefined`. Never acquires one. */
   readonly peekRuntime: Effect.Effect<HarnessAgentRuntime | undefined>;
   /**
@@ -220,6 +224,10 @@ export const makeHarnessAgentSession = (
     // without it two fibers could stamp seqs n/n+1 but publish n+1 first, and
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
+    // Serializes desired-config writes with the moment a newly acquired runtime
+    // is seeded and installed. Without it, a selection made while the native
+    // process is opening can miss both the old seed and the not-yet-held runtime.
+    const configLock = Semaphore.makeUnsafe(1);
 
     // The body builder runs under the same permit as the fold+publish so both
     // read one consistent state — deriving the active turn from a read outside
@@ -302,28 +310,21 @@ export const makeHarnessAgentSession = (
     const runAcquire = (acquire: AcquireRuntime, ticket: Ticket): Effect.Effect<void> =>
       Effect.gen(function* () {
         const scope = yield* Scope.fork(ownerScope, "sequential");
-        const desired = yield* Ref.get(config);
-        const outcome = yield* acquire.pipe(
+        const acquired = yield* acquire.pipe(
           Effect.provideService(Scope.Scope, scope),
-          // Seeded as part of the acquisition, so a runtime whose config can't
-          // be applied never becomes this session's — closing the scope takes
-          // it back down the same way a failed open does.
-          Effect.tap((runtime) => seedConfig(runtime, desired)),
-          Effect.onError(() => Scope.close(scope, Exit.void)),
           Effect.exit,
         );
-        if (Exit.isFailure(outcome)) {
+        if (Exit.isFailure(acquired)) {
+          yield* Scope.close(scope, Exit.void);
           // Nothing is held on failure: the session stays observable and the
           // next call gets to try again.
           yield* Ref.update(lifecycle, (current) =>
             current.acquiring === ticket ? { ...current, acquiring: undefined } : current,
           );
-          yield* Deferred.done(ticket, outcome);
+          yield* Deferred.done(ticket, acquired);
           return;
         }
-        const runtime = outcome.value;
-        yield* clearCrash;
-
+        const runtime = acquired.value;
         const token = {};
         const release = clearHeld(token).pipe(
           Effect.flatMap((owned) => (owned ? dispose(owned) : Effect.void)),
@@ -338,14 +339,40 @@ export const makeHarnessAgentSession = (
           Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
         );
         const fiber = yield* Effect.forkIn(drain, ownerScope);
-        // A release that started while this was in flight leaves `acquiring`
-        // in place precisely so the runtime lands here first — it then takes
-        // it back out and shuts it down, instead of losing track of it.
-        yield* Ref.update(lifecycle, (current) =>
-          current.acquiring === ticket
-            ? { ...current, acquiring: undefined, held: { token, runtime, scope, fiber } }
-            : current,
-        );
+
+        const installed = yield* configLock
+          .withPermit(
+            Effect.gen(function* () {
+              // Read under the same permit that protects setConfig, after the
+              // native runtime exists but before callers can observe it as held.
+              const desired = yield* Ref.get(config);
+              yield* seedConfig(runtime, desired);
+              yield* clearCrash;
+              // A release that started while this was in flight leaves
+              // `acquiring` in place precisely so the runtime lands here first —
+              // it then takes it back out and shuts it down.
+              yield* Ref.update(lifecycle, (current) =>
+                current.acquiring === ticket
+                  ? { ...current, acquiring: undefined, held: { token, runtime, scope, fiber } }
+                  : current,
+              );
+            }),
+          )
+          .pipe(Effect.exit);
+
+        if (Exit.isFailure(installed)) {
+          yield* Fiber.interrupt(fiber);
+          yield* Scope.close(scope, Exit.void);
+          yield* Ref.update(lifecycle, (current) =>
+            current.acquiring === ticket ? { ...current, acquiring: undefined } : current,
+          );
+          yield* Deferred.done(
+            ticket,
+            Exit.map(installed, () => runtime),
+          );
+          return;
+        }
+
         yield* Deferred.succeed(ticket, runtime);
         yield* Deferred.succeed(registered, undefined);
       });
@@ -404,11 +431,16 @@ export const makeHarnessAgentSession = (
     );
 
     const setConfig: HarnessAgentSessionShape["setConfig"] = (patch) =>
-      Ref.update(config, (current) => ({ ...current, ...patch })).pipe(
-        Effect.andThen(Ref.get(lifecycle)),
-        Effect.flatMap((current) =>
-          current.held ? pushConfig(current.held.runtime, patch) : Effect.void,
-        ),
+      configLock.withPermit(
+        Effect.gen(function* () {
+          const previous = yield* Ref.get(config);
+          yield* Ref.set(config, { ...previous, ...patch });
+          const current = yield* Ref.get(lifecycle);
+          if (!current.held) return;
+          yield* pushConfig(current.held.runtime, patch).pipe(
+            Effect.onError(() => Ref.set(config, previous)),
+          );
+        }),
       );
 
     return {
@@ -417,6 +449,20 @@ export const makeHarnessAgentSession = (
       status: Ref.get(state).pipe(Effect.map(toStatus)),
       emit: (body) => applyWith(() => body),
       setConfig,
+      primeConfig: (patch) =>
+        configLock.withPermit(
+          Ref.update(config, (current) => ({ ...current, ...patch })).pipe(
+            Effect.andThen(
+              patch.providerId !== undefined && patch.modelId !== undefined
+                ? Ref.update(state, (current) => ({
+                    ...current,
+                    providerId: patch.providerId,
+                    modelId: patch.modelId,
+                  }))
+                : Effect.void,
+            ),
+          ),
+        ),
       peekRuntime: Ref.get(lifecycle).pipe(Effect.map((current) => current.held?.runtime)),
       ensureRuntime,
       releaseRuntime,

@@ -7,7 +7,7 @@ import type {
   HarnessAgentRegistry,
   HarnessAgentSessionService,
   HarnessListService,
-  HarnessProbeService,
+  HarnessModelService,
 } from "../harness";
 import type { ProjectService } from "../project";
 
@@ -18,7 +18,7 @@ export type RpcContext = WithEffectContext<
   | HarnessAgentRegistry
   | HarnessAgentSessionService
   | HarnessListService
-  | HarnessProbeService
+  | HarnessModelService
   | ProjectService
   | FileSystemService
 >;
