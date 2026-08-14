@@ -6,9 +6,9 @@ import path from "node:path";
  * `resolveDaemonLocation` in `config/paths.ts`.
  *
  * All three are *state*, not output. The daemon's stdout/stderr used to be a
- * fourth file here; it now sits with the rest of the logging under
- * `$VIBEST_HOME/logs` (`telemetry/paths.ts`'s `stdioLogFile`), so there is one
- * place to look when something needs investigating.
+ * fourth file here; it now sits with the process log under
+ * `$VIBEST_HOME/logs`, so there is one place to look when something needs
+ * investigating.
  */
 
 /** Discovery record — pid, address, and the daemon's auth token. */

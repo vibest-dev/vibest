@@ -398,16 +398,10 @@ export const makeHarnessAgentSession = (
             Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
             Effect.andThen(release),
             Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
-            // `root`, because a forked fiber inherits the span of whoever forked
-            // it. This drain outlives that caller by every turn that follows, so
-            // without it the runtime's whole lifetime — every later turn — would
-            // be stamped with the `traceId` of the one RPC that happened to
-            // acquire it. A wrong trace is worse than none: it makes `jq` on a
-            // traceId return another request's output.
-            //
-            // The `identified` wrap around this is what replaces the lost
-            // parentage: `sessionId` is the join key, and unlike a span link it
-            // survives into the JSONL without a collector we do not run yet.
+            // `root`, because a forked fiber inherits the span of whoever
+            // forked it. This drain outlives that caller by every later turn, so
+            // retaining the acquisition span would make the tracing graph lie.
+            // Local logs use `identified`'s stable `sessionId` as their join key.
             Effect.withSpan("session.drain", { root: true }),
           ),
         );

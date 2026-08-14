@@ -34,7 +34,7 @@ import {
   type HarnessAgentSessionServiceShape,
   makeHarnessAgentSessionService,
 } from "../../src/harness/session-service";
-import { structured, type LogRecord } from "../../src/telemetry/format";
+import { structured, type LogRecord } from "../log-record";
 import { NodePlatformLayer } from "../platform";
 
 type Spy = {

@@ -6,7 +6,7 @@ import { Effect, Layer, Logger } from "effect";
 
 import { EventBus, EventBusLayer } from "../../src/events";
 import { makeHarnessAgentSession } from "../../src/harness/session";
-import { structured, type LogRecord } from "../../src/telemetry/format";
+import { structured, type LogRecord } from "../log-record";
 
 const ref: SessionRef = {
   projectId: "project-1",
@@ -34,7 +34,7 @@ layer(EventBusLayer)("turn logging", (it) => {
   it.effect("logs the two bookends and nothing in between", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const telemetry = yield* Layer.build(capture(records));
+      const context = yield* Layer.build(capture(records));
       const live = yield* session;
 
       yield* Effect.gen(function* () {
@@ -51,7 +51,7 @@ layer(EventBusLayer)("turn logging", (it) => {
           outcome: "completed",
           usage: { inputTokens: 12, outputTokens: 34 },
         });
-      }).pipe(Effect.provide(telemetry));
+      }).pipe(Effect.provide(context));
 
       assert.equal(records.length, 2);
       const [started, ended] = records;
@@ -75,7 +75,7 @@ layer(EventBusLayer)("turn logging", (it) => {
   it.effect("raises a failed turn to warn and carries the category", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const telemetry = yield* Layer.build(capture(records));
+      const context = yield* Layer.build(capture(records));
       const live = yield* session;
 
       yield* Effect.gen(function* () {
@@ -86,7 +86,7 @@ layer(EventBusLayer)("turn logging", (it) => {
           outcome: "failed",
           error: { category: "rate_limited", message: "slow down" },
         });
-      }).pipe(Effect.provide(telemetry));
+      }).pipe(Effect.provide(context));
 
       const ended = records[1];
       assert.ok(ended !== undefined);
@@ -100,12 +100,12 @@ layer(EventBusLayer)("turn logging", (it) => {
   it.effect("keeps a canceled turn at info", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const telemetry = yield* Layer.build(capture(records));
+      const context = yield* Layer.build(capture(records));
       const live = yield* session;
 
       yield* live
         .emit({ type: "session.turn.ended", turnId: "turn-3", outcome: "canceled" })
-        .pipe(Effect.provide(telemetry));
+        .pipe(Effect.provide(context));
 
       assert.equal(records[0]?.level, "INFO");
       assert.equal(records[0]?.annotations.outcome, "canceled");

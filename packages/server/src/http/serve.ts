@@ -1,7 +1,7 @@
 import { Cause, Context, Effect, Option, Scope } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { layer as telemetryLayer, resolveTelemetryConfig } from "../telemetry";
+import * as Observability from "../observability";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
 import { createServer, ServerStartupError } from "./server";
@@ -82,9 +82,9 @@ export function resolveServeConfig(input: ServeInput): {
  * `NodeRuntime.runMain`'s SIGINT/SIGTERM interrupt tears it down through the
  * release finalizer.
  *
- * This is the process composition root for telemetry. The layer is provided
- * once around the complete server lifecycle, so foreground and daemon runs
- * share the same scoped sinks and shutdown flush behavior.
+ * This is the process composition root for observability. The layer is
+ * provided once around the complete server lifecycle, so foreground and
+ * daemon runs share the same local logger.
  */
 export const runServe = (input: ServeInput) =>
   serveWith(input).pipe(
@@ -93,7 +93,7 @@ export const runServe = (input: ServeInput) =>
         Effect.annotateLogs({ event: "server.startup_failed", phase: error.phase }),
       ),
     ),
-    Effect.provide(telemetryLayer(resolveTelemetryConfig())),
+    Effect.provide(Observability.layer()),
   );
 
 const serveWith = (input: ServeInput) =>
@@ -117,10 +117,10 @@ const serveWith = (input: ServeInput) =>
       }),
     );
 
-    const telemetryContext = Context.omit(Scope.Scope)(yield* Effect.context<never>());
+    const effectContext = Context.omit(Scope.Scope)(yield* Effect.context<never>());
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => createServer({ authToken, corsOrigins, allowedHosts, telemetryContext }),
+        try: () => createServer({ authToken, corsOrigins, allowedHosts, effectContext }),
         catch: (cause) => new ServerStartupError({ phase: "create", cause }),
       }),
       // A shutdown failure is logged, not thrown: the process is exiting, and
@@ -144,9 +144,8 @@ const serveWith = (input: ServeInput) =>
     });
 
     // Machine-readable first, for the desktop supervisor; human-readable
-    // second. Both go to stdout, which stays clear of logging because the
-    // telemetry layer sets `Logger.LogToStderr` — Effect 4 defaults that to
-    // `false`, i.e. stdout, so this separation is configured, not inherent.
+    // second. Both go to stdout; observability writes to the local log file and
+    // only mirrors to stderr when `VIBEST_PRINT_LOGS=1`.
     console.log(formatReadyLine({ port }));
     console.log(`vibest listening on http://127.0.0.1:${port}`);
 

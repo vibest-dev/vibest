@@ -9,7 +9,7 @@ import { AgentRuntimeLayer } from "./runtime";
 /**
  * Wrap every `.effect()` procedure. The oRPC effect bridge applies
  * `effect/context` before this wrapper, so the wrapper must re-provide the
- * logging context around its own failure tap and span.
+ * process context around its own failure tap and span.
  *
  * One function here instruments all ~25 procedures at once: no router file
  * knows about logging, and none can forget to.
@@ -19,12 +19,10 @@ import { AgentRuntimeLayer } from "./runtime";
  * defect or a client that disconnected mid-call. The latter is routine and
  * must not be reported as a server error.
  *
- * The span makes the JSONL navigable: every line a procedure produces,
- * through the session service, repositories, and adapters, carries this call's
- * `traceId`. The failure tap adds the one thing a span cannot carry locally:
- * the failure cause.
+ * The native span names the procedure for any configured tracer. The failure
+ * tap writes the actionable local record, including the procedure and cause.
  */
-export function makeRpcWrap(telemetryContext: Context.Context<never> = Context.empty()) {
+export function makeRpcWrap(effectContext: Context.Context<never> = Context.empty()) {
   return <A, E>(effect: Effect.Effect<A, E>, options: { readonly path: ReadonlyArray<string> }) => {
     const procedure = options.path.join(".");
     return effect.pipe(
@@ -37,7 +35,7 @@ export function makeRpcWrap(telemetryContext: Context.Context<never> = Context.e
       ),
       // Outside the tap so a failure is logged inside the span it failed in.
       Effect.withSpan(`rpc.${procedure}`),
-      Effect.provide(telemetryContext),
+      Effect.provide(effectContext),
     );
   };
 }
@@ -57,16 +55,16 @@ export type RpcRuntime = {
 /** Everything `AgentRuntimeLayer` provides, as a requirement. */
 type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 
-/** The process logging context is provided while constructing and running the graph. */
+/** The process context is provided while constructing and running the graph. */
 export async function createRpcRuntime(
-  telemetryContext: Context.Context<never> = Context.empty(),
+  effectContext: Context.Context<never> = Context.empty(),
 ): Promise<RpcRuntime> {
   const runtime = ManagedRuntime.make(
-    AgentRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(telemetryContext))),
+    AgentRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(effectContext))),
   );
   const context: RpcContext = {
     "effect/context": await runtime.runPromise(runtime.contextEffect),
-    "effect/wrap": makeRpcWrap(telemetryContext),
+    "effect/wrap": makeRpcWrap(effectContext),
   };
   let disposing: Promise<void> | undefined;
   return {

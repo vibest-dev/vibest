@@ -4,7 +4,7 @@ import { layer } from "@effect/vitest";
 import { Context, Effect, Layer, Logger } from "effect";
 
 import { makeRpcWrap } from "../../src/rpc/handlers";
-import { structured, type LogRecord } from "../../src/telemetry/format";
+import { structured, type LogRecord } from "../log-record";
 
 const captureContext = (into: Array<LogRecord>) =>
   Layer.build(
@@ -31,8 +31,6 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
       assert.equal(record.level, "ERROR");
       assert.equal(record.annotations.procedure, "session.prompt");
       assert.ok(String(record.cause).includes("boom"));
-      assert.equal(record.span, "rpc.session.prompt");
-      assert.equal(typeof record.traceId, "string");
     }),
   );
 
@@ -51,8 +49,8 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
   it.effect("matches oRPC's inner context provision order", () =>
     Effect.gen(function* () {
       const records: Array<LogRecord> = [];
-      const telemetryContext = yield* captureContext(records);
-      const wrap = makeRpcWrap(telemetryContext);
+      const effectContext = yield* captureContext(records);
+      const wrap = makeRpcWrap(effectContext);
       const innerContext = Context.empty();
 
       yield* Effect.exit(
@@ -74,27 +72,6 @@ layer(Layer.empty)("rpc effect/wrap", (it) => {
 
       assert.ok(exit._tag === "Failure");
       assert.deepEqual(records, []);
-    }),
-  );
-
-  it.effect("stamps a shared traceId on every line the procedure produces", () =>
-    Effect.gen(function* () {
-      const records: Array<LogRecord> = [];
-      const wrap = makeRpcWrap(yield* captureContext(records));
-
-      yield* wrap(
-        Effect.gen(function* () {
-          yield* Effect.logInfo("reading the store").pipe(Effect.withSpan("store.read"));
-          yield* Effect.logInfo("opening the harness");
-        }),
-        { path: ["session", "prompt"] },
-      );
-
-      const [inner, outer] = records;
-      assert.ok(inner !== undefined && outer !== undefined);
-      assert.equal(inner.traceId, outer.traceId);
-      assert.equal(inner.span, "rpc.session.prompt > store.read");
-      assert.equal(outer.span, "rpc.session.prompt");
     }),
   );
 

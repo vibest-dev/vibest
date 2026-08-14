@@ -213,7 +213,7 @@ export const makeClaudeCodeAgent = ({
             }),
           );
     };
-    const rootTelemetryContext = yield* Effect.context<never>();
+    const rootEffectContext = yield* Effect.context<never>();
 
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
@@ -580,7 +580,7 @@ export const makeClaudeCodeAgent = ({
                   strictMcpConfig: true,
                   settingSources: ["user", "project", "local"],
                   stderr: (error) => {
-                    void Effect.runSyncExitWith(rootTelemetryContext)(
+                    void Effect.runSyncExitWith(rootEffectContext)(
                       sdkStderr(error, { probe: "list-models" }),
                     );
                   },

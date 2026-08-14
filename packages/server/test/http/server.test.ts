@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { createServer, type ManagedServer } from "../../src/http/server";
 import type { UIApp } from "../../src/http/ui";
 import type { RpcRuntime } from "../../src/rpc";
-import { structured, type LogRecord } from "../../src/telemetry/format";
+import { structured, type LogRecord } from "../log-record";
 
 const TOKEN = "test-token-0000";
 
@@ -146,7 +146,7 @@ describe("createServer WebSocket ticket", () => {
 
   it("runs WebSocket callback logs on the supplied Effect context", async () => {
     const records: Array<LogRecord> = [];
-    const telemetryContext = await Effect.runPromise(
+    const effectContext = await Effect.runPromise(
       Layer.build(
         Logger.layer([
           Logger.map(structured, (record) => {
@@ -155,7 +155,7 @@ describe("createServer WebSocket ticket", () => {
         ]),
       ).pipe(Effect.scoped),
     );
-    const base = await start({ authToken: TOKEN, telemetryContext });
+    const base = await start({ authToken: TOKEN, effectContext });
 
     expect(await connect(base, "")).toBe(401);
     await expect.poll(() => records.length).toBeGreaterThan(0);

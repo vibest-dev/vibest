@@ -15,11 +15,9 @@ const ENV_KEYS = [
   "VIBEST_PORT",
   "VIBEST_CORS_ORIGINS",
   "NODE_ENV",
-  // `runServe` provides the telemetry layer, which creates `$VIBEST_HOME/logs`
-  // and writes to it. Both are pinned per test so the suite never touches the
-  // developer's real `~/.vibest`.
+  // `runServe` provides observability, which writes below `$VIBEST_HOME/logs`.
+  // Pin it per test so the suite never touches the developer's real home.
   "VIBEST_HOME",
-  "VIBEST_LOG_CONSOLE",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -91,7 +89,6 @@ describe("runServe", () => {
 
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-serve-"));
     process.env.VIBEST_HOME = home;
-    process.env.VIBEST_LOG_CONSOLE = "quiet";
 
     try {
       const exit = await Effect.runPromiseExit(
@@ -103,19 +100,14 @@ describe("runServe", () => {
       expect(error).toBeInstanceOf(ServerStartupError);
       expect((error as ServerStartupError).phase).toBe("listen");
 
-      const logsDir = path.join(home, "logs");
-      const logFile = (await fs.readdir(logsDir)).find((entry) => entry.endsWith(".jsonl"));
-      const records = JSON.parse(
-        `[${(await fs.readFile(path.join(logsDir, logFile ?? ""), "utf8"))
-          .trim()
-          .split("\n")
-          .join(",")}]`,
-      ) as Array<{ annotations: Record<string, unknown>; cause?: string }>;
-      const startupFailure = records.find(
-        (record) => record.annotations.event === "server.startup_failed",
-      );
-      expect(startupFailure?.annotations.phase).toBe("listen");
-      expect(startupFailure?.cause).toContain("ServerStartupError");
+      const content = await fs.readFile(path.join(home, "logs", "vibest.log"), "utf8");
+      const startupFailure = content
+        .trim()
+        .split("\n")
+        .find((line) => line.includes("event=server.startup_failed"));
+      expect(startupFailure).toContain("phase=listen");
+      expect(startupFailure).toContain("cause=");
+      expect(startupFailure).toContain("ServerStartupError");
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
       await fs.rm(home, { recursive: true, force: true });

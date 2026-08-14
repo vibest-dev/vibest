@@ -258,8 +258,8 @@ _additional plane_, added when wanted, with no rework of the current work.
    `$VIBEST_DAEMON_DIR/daemon.pid` (default
    `$VIBEST_HOME/daemon/daemon.pid`), does the pid-alive + health-check reuse,
    spawns the foreground server detached (stdio streamed to
-   `$VIBEST_HOME/logs/daemon-stdio.log`, alongside the structured
-   `server-<date>.jsonl` the process itself writes), and applies two-signal
+   `$VIBEST_HOME/logs/daemon-stdio.log`, alongside the `vibest.log` process log),
+   and applies two-signal
    readiness (pid alive + `/api/health`) and the `:4000 → :0` fallback. The local twin
    of the SSH launch script; the server itself is untouched. The daemon process is
    `vibest serve` re-launched from this same CLI argv — no second bundle. Bare `vibest`

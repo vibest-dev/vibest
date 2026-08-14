@@ -56,8 +56,8 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   persistent roots: `resolveVibestHome` for Projects and Sessions,
   `resolveDaemonDirectory` for lifecycle state, and `logsDirectory` for
   `$VIBEST_HOME/logs`. The daemon directory holds only `daemon.pid`, `.lock`, and
-  `.stopped`; every log the server writes goes to the logs directory, so there is
-  one place to look. The single-daemon
+  `.stopped`; the process-owned observability Layer appends to
+  `$VIBEST_HOME/logs/vibest.log`, so there is one place to look. The single-daemon
   invariant is keyed on the daemon directory, so every front door resolves it
   there and passes it down — `packages/server/src/daemon/paths.ts` names files
   inside a directory it is handed and deliberately has no default of its own.

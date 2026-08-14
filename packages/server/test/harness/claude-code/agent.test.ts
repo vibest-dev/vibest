@@ -7,7 +7,7 @@ import { beforeEach, describe, vi } from "vitest";
 
 import { makeClaudeCodeAdapter } from "../../../src/harness/claude-code/adapter";
 import { makeClaudeCodeAgent } from "../../../src/harness/claude-code/agent";
-import { structured, type LogRecord } from "../../../src/telemetry/format";
+import { structured, type LogRecord } from "../../log-record";
 import { NodePlatformLayer } from "../../platform";
 
 const mockQuery = vi.hoisted(() =>

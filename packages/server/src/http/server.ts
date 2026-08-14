@@ -35,8 +35,8 @@ export type CreateServerOptions = {
    * preserves the tailnet MagicDNS Host). Unset in the common case.
    */
   allowedHosts?: readonly string[] | undefined;
-  /** The process logging context. Unset in tests uses Effect defaults. */
-  telemetryContext?: Context.Context<never> | undefined;
+  /** The process Effect context. Unset in tests uses Effect defaults. */
+  effectContext?: Context.Context<never> | undefined;
 };
 
 /** Startup failed for an operational reason: building the server or binding. */
@@ -50,7 +50,7 @@ export class ServerStartupError extends Data.TaggedError("ServerStartupError")<{
  * and assert that every earlier stage's finalizer still runs (issue #155).
  */
 export type ServerStages = {
-  readonly createRpcRuntime: (telemetryContext: Context.Context<never>) => Promise<RpcRuntime>;
+  readonly createRpcRuntime: (effectContext: Context.Context<never>) => Promise<RpcRuntime>;
   readonly createUI: (runtime: RpcRuntime) => Promise<UIApp>;
   readonly createRequestHandler: (
     runtime: RpcRuntime,
@@ -60,7 +60,7 @@ export type ServerStages = {
 };
 
 const defaultStages: ServerStages = {
-  createRpcRuntime: (telemetry) => createRpcRuntime(telemetry),
+  createRpcRuntime: (context) => createRpcRuntime(context),
   createUI: (runtime) => runtime.run(createUIHandler()),
   // The request half is Effect-native and runs on the RPC runtime, which
   // already carries FileSystem/Path/HttpPlatform. `makeHandler` gives back a
@@ -228,12 +228,12 @@ const buildServer = (
       authToken,
       corsOrigins = [],
       allowedHosts = [],
-      telemetryContext = Context.empty(),
+      effectContext = Context.empty(),
     } = options;
-    const runInContext = Effect.runForkWith(telemetryContext);
+    const runInContext = Effect.runForkWith(effectContext);
 
     const rpcRuntime = yield* Effect.acquireRelease(
-      Effect.promise(() => stages.createRpcRuntime(telemetryContext)),
+      Effect.promise(() => stages.createRpcRuntime(effectContext)),
       (runtime) => Effect.promise(() => runtime.dispose()),
     );
     const wsHandler = createWsRPCHandler(rpcRuntime.context);
@@ -280,12 +280,12 @@ export async function createServer(
   options: CreateServerOptions = {},
   stages: ServerStages = defaultStages,
 ): Promise<ManagedServer> {
-  const telemetryContext = options.telemetryContext ?? Context.empty();
+  const effectContext = options.effectContext ?? Context.empty();
   // `createServer` is Promise-shaped, so the root Layer cannot cross this seam
   // implicitly. Context-bound runners keep startup, cleanup, and callbacks on
-  // the one process-owned logger without constructing another telemetry Layer.
-  const runPromise = Effect.runPromiseWith(telemetryContext);
-  const runPromiseExit = Effect.runPromiseExitWith(telemetryContext);
+  // the process-owned Effect services without constructing another Layer.
+  const runPromise = Effect.runPromiseWith(effectContext);
+  const runPromiseExit = Effect.runPromiseExitWith(effectContext);
 
   const scope = Scope.makeUnsafe();
   let disposing: Promise<void> | undefined;
