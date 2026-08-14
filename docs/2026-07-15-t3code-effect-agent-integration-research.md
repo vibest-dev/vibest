@@ -79,7 +79,7 @@ Notable choices:
 - IDs and bounded numeric/domain values are branded or filtered schemas.
 - Runtime events optionally include provider references and a raw native payload for diagnostics.
 - RPC payload, success, error, and stream item schemas all come from Effect Schema.
-- Tagged errors in protocol packages use `Schema.TaggedErrorClass`.
+- Tagged errors in protocol packages use `Schema.TaggedError`.
 
 ### Relevance to Vibest
 

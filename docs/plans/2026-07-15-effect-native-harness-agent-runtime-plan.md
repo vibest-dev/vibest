@@ -231,7 +231,7 @@ schema["~standard"].jsonSchema.input;
   - `Deferred<A, E>`;
   - `SynchronizedRef`;
   - `Stream.fromQueue`, `Stream.fromAsyncIterable`, `Stream.toAsyncIterable`, `Stream.flatMap`, `Stream.filterMap`;
-  - `Schema.TaggedErrorClass`;
+  - `Schema.TaggedError`;
   - `effect/unstable/process/ChildProcess` and `ChildProcessSpawner`;
   - `@effect/platform-node/NodeServices`.
 - [ ] Spawn a fake JSONL child process through ChildProcessSpawner and verify scoped termination, stdio Streams/Sinks, exit status, and `forceKillAfter`.

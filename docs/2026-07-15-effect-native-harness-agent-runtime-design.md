@@ -940,7 +940,7 @@ type ResumeSessionError =
   SessionNotFound | SessionNotResumable | AgentUnavailable | ExecutableNotFound | AgentOpenError;
 ```
 
-Runtime 第一阶段使用 `Data.TaggedError`。需要跨 RPC 暴露的 error data 在 §11 Standard Schema spike 通过后使用当前 Effect v4 的 `Schema.TaggedErrorClass`，并通过 oRPC error map 显式映射。
+Runtime 第一阶段使用 `Data.TaggedError`。需要跨 RPC 暴露的 error data 在 §11 Standard Schema spike 通过后使用当前 Effect v4 的 `Schema.TaggedError`，并通过 oRPC error map 显式映射。
 
 禁止继续使用：
 

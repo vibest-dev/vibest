@@ -1,12 +1,14 @@
 # Toolchain constraints
 
 - **Dependencies:** `pnpm-workspace.yaml` has three catalogs (`catalog:`,
-  `catalog:orpc`, `catalog:tiptap`) plus `overrides` that pull _transitive_ deps
-  onto catalog versions — bumping a package's own `package.json` for `vite`,
-  `vitest`, `effect`, or `@effect/*` does nothing. Several pins are caret-free
-  because a caret breaks the runtime. The reasons are commented inline; read them
-  before changing versions. `packages/server` pins the Claude SDK as a literal
-  while `packages/vibest` uses `catalog:` — bump both together.
+  `catalog:orpc`, `catalog:tiptap`). Effect packages are exact-pinned together in
+  the main catalog and intentionally not overridden; keep the family aligned and
+  verify the lockfile resolves one Effect runtime. `overrides` pull transitive
+  Vite/Vitest dependencies onto catalog versions. Bumping a package's own
+  `package.json` for catalog dependencies does nothing. Several pins are
+  caret-free because a caret breaks the runtime. The reasons are commented
+  inline; read them before changing versions. `packages/server` pins the Claude
+  SDK as a literal while `packages/vibest` uses `catalog:` — bump both together.
 - **Lint:** `lint:check` runs `--deny-warnings`, so the whole `suspicious`
   category fails CI while only warning locally. oxfmt reorders imports.
 - **Commits rewrite files:** pre-commit runs lint-staged (`oxlint --fix` + `oxfmt`)
