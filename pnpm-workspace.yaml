@@ -90,9 +90,8 @@ overrides:
   "@effect/platform-node-shared": "catalog:effect"
   "@effect/vitest": "catalog:effect"
   effect: "catalog:effect"
-# pnpm 11 defaults minimumReleaseAge to 24h; disable it — the same-day
-# dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked,
-# and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.
+# pnpm 11+ defaults minimumReleaseAge to 24h; disable it — the same-day
+# dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked.
 minimumReleaseAge: 0
 allowBuilds:
   # Its postinstall only probes node-pty's spawn-helper and logs — it builds
