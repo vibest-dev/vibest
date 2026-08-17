@@ -37,16 +37,16 @@ catalog:
   zod: ^4.4.3
   zustand: ^5.0.14
 catalogs:
-  # Effect v4 ecosystem is versioned in lockstep. One pin; every `effect` /
-  # `@effect/*` package must move together or you get two runtimes. The
-  # YAML anchor is the single version number — bump it, not the aliases.
+  # Effect v4 ecosystem is versioned in lockstep. Every `effect` / `@effect/*`
+  # package must move together or you get two runtimes. Exact pins (no caret)
+  # because a prerelease caret would admit a later RC or the 4.0.0 stable.
   # `@effect/platform-node-shared` is transitive-only and is listed so the
   # override below can pin it; no workspace package.json depends on it.
   effect:
-    effect: &effect_version 4.0.0-rc.110
-    "@effect/platform-node": *effect_version
-    "@effect/platform-node-shared": *effect_version
-    "@effect/vitest": *effect_version
+    effect: 4.0.0-rc.110
+    "@effect/platform-node": 4.0.0-rc.110
+    "@effect/platform-node-shared": 4.0.0-rc.110
+    "@effect/vitest": 4.0.0-rc.110
   # oRPC must move as one family: exact pins (no caret) because prerelease
   # caret ranges admit the 2.0.0 stable release, and a mixed tree crashes at
   # runtime (stable client imports ORPC_HEADER, absent from the beta contract).
