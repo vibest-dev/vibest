@@ -39,11 +39,11 @@
     "embla-carousel-react": "^8.6.0",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "lucide-react": "catalog:",
-    "react": "catalog:",
-    "react-dom": "catalog:",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
     "shiki": "4.3.1",
     "tailwind-merge": "catalog:",
-    "tailwindcss": "catalog:",
+    "tailwindcss": "catalog:tailwind",
     "tw-animate-css": "catalog:",
     "use-stick-to-bottom": "^1.1.6"
   }

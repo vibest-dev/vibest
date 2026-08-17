@@ -37,7 +37,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@orpc/tanstack-query": "catalog:orpc",
     "@playwright/test": "^1.61.1",
-    "@tailwindcss/vite": "catalog:",
+    "@tailwindcss/vite": "catalog:tailwind",
     "@tanstack/react-query": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",
@@ -51,9 +51,9 @@
     "lucide-react": "catalog:",
     "nanoid": "^5.1.16",
     "p-queue": "catalog:",
-    "react": "catalog:",
-    "react-dom": "catalog:",
-    "tailwindcss": "catalog:",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "tailwindcss": "catalog:tailwind",
     "zod": "catalog:",
     "zustand": "catalog:"
   }
