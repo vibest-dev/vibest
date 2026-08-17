@@ -38,8 +38,8 @@
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "react-error-boundary": "catalog:",
-    "react-resizable-panels": "^4.12.2",
-    "sonner": "^2.0.7",
+    "react-resizable-panels": "^4.12.3",
+    "sonner": "^2.0.8",
     "tailwindcss": "catalog:tailwind",
     "tw-animate-css": "catalog:",
     "tw-shimmer": "^0.4.12",
@@ -54,8 +54,8 @@
     "@vibest/typescript": "workspace:*",
     "@vitejs/plugin-react": "catalog:",
     "code-inspector-plugin": "latest",
-    "react-doctor": "^0.9.2",
-    "react-grab": "^0.1.48",
+    "react-doctor": "^0.9.12",
+    "react-grab": "^0.1.50",
     "react-scan": "catalog:"
   }
 }
