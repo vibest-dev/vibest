@@ -8,8 +8,8 @@ onlyBuiltDependencies:
   - "@swc/core"
 catalog:
   "@anthropic-ai/claude-agent-sdk": 0.3.220
-  "@effect/platform-node": 4.0.0-beta.102
-  "@effect/vitest": 4.0.0-beta.102
+  "@effect/platform-node": 4.0.0-rc.110
+  "@effect/vitest": 4.0.0-rc.110
   "@tailwindcss/vite": ^4.3.3
   "@tanstack/react-query": ^5.101.2
   "@tanstack/router-plugin": ^1.168.22
@@ -20,7 +20,7 @@ catalog:
   "@vitejs/plugin-react": ^6.0.3
   ai: ^7.0.31
   clsx: ^2.1.1
-  effect: 4.0.0-beta.102
+  effect: 4.0.0-rc.110
   lucide-react: ^1.25.0
   p-queue: ^9.3.1
   react: ^19.2.7
@@ -66,7 +66,7 @@ catalogs:
 overrides:
   # These overrides force TRANSITIVE deps onto the catalog version — the
   # catalog alone only governs workspace package.json entries. Load-bearing:
-  # e.g. @effect/platform-node-shared@beta.98 peer-wants effect@^4.0.0-beta.98,
+  # e.g. @effect/platform-node-shared@rc.110 peer-wants effect@^4.0.0-rc.110,
   # which without the override would auto-install a second effect runtime;
   # electron-vite/vite-plus would similarly resolve their own vite/vitest.
   vite: "catalog:"
