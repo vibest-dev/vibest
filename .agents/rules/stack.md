@@ -99,15 +99,16 @@ exactly one `Path.Path`, in `http/ui.ts`, and it is not ours —
 Exempt, deliberately — these are boundaries Effect doesn't model, and "it's
 already written" is not a reason to add to the list:
 
-| Location                                                                  | Why                                                                                                  |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `daemon/launcher.ts`'s `spawnDetached`                                    | detached + unref + stdio to a log fd is the opposite of `ChildProcessSpawner`'s supervised semantics |
-| `http/server.ts`'s `upgrade` path                                         | oRPC owns that event; Effect's own websocket handler would fight it for the listener                 |
-| Call sites inside an exempt file                                          | e.g. `http/auth.ts`'s ticket `randomUUID`, called synchronously from Promise-shaped `http/server.ts` |
-| `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle      |
-| `node:os.homedir` (`config/paths.ts`, `rpc/fs.ts`)                        | Effect has no OS/home-directory service                                                              |
-| `node:module.createRequire` (`harness/claude-code/executable.ts`)         | no Effect equivalent                                                                                 |
-| `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no port-probe or process-signal service                                                   |
+| Location                                                                  | Why                                                                                                   |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `daemon/launcher.ts`'s `spawnDetached`                                    | detached + unref + stdio to a log fd is the opposite of `ChildProcessSpawner`'s supervised semantics  |
+| `http/server.ts`'s `upgrade` path                                         | oRPC owns that event; Effect's own websocket handler would fight it for the listener                  |
+| Call sites inside an exempt file                                          | e.g. `http/auth.ts`'s ticket `randomUUID`, called synchronously from Promise-shaped `http/server.ts`  |
+| `apps/desktop/src/main`'s Electron-bound files                            | `app-protocol`, `main-window`, `desktop-config`, `lib/utils` are tied to the Electron lifecycle       |
+| `node:os.homedir` (`config/paths.ts`, `rpc/fs.ts`)                        | Effect has no OS/home-directory service                                                               |
+| `node:module.createRequire` (`harness/claude-code/executable.ts`)         | no Effect equivalent                                                                                  |
+| `packages/server/src/pty/spawn.ts`                                        | node-pty allocates a real TTY; `ChildProcessSpawner` is piped stdio and cannot resize or drive curses |
+| `daemon/port.ts`, and the `process.kill` signals in `liveness`/`launcher` | Effect has no port-probe or process-signal service                                                    |
 
 `node:path` is not on this list because it never needed an exemption — see
 "Where the boundary is" above. Path math is pure, so it stays `node:path`

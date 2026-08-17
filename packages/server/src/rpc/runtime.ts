@@ -25,6 +25,7 @@ import {
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
+import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../pty";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
@@ -131,6 +132,15 @@ const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(PlatformLayer),
 );
 
+const PtyManagerProvided = PtyManagerLayer.pipe(
+  Layer.provide(NodePtySpawnerLayer),
+  Layer.provide(PlatformLayer),
+);
+const PtyServiceProvided = PtyServiceLayer.pipe(
+  Layer.provide(PtyManagerProvided),
+  Layer.provide(ProjectServiceProvided),
+);
+
 // RegistryLayer is merged in as well as provided into the session stack;
 // Effect memoizes it by reference, so both see the one registry instance while
 // the harness route can resolve capabilities directly off it.
@@ -142,6 +152,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   HarnessListProvided,
   HarnessProbeProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
+  PtyServiceProvided,
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a
   // response. Sealed by the vendor layer, hence no `Layer.provide` here.

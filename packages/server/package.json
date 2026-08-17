@@ -12,6 +12,7 @@
     "./events": "./src/events/index.ts",
     "./fs": "./src/fs/index.ts",
     "./git": "./src/git/index.ts",
+    "./pty": "./src/pty/index.ts",
     "./rpc": "./src/rpc/index.ts",
     "./http": "./src/http/index.ts",
     "./daemon": "./src/daemon/index.ts"
@@ -33,6 +34,7 @@
     "@vibest/effect-json-store": "workspace:*",
     "ai": "catalog:",
     "effect": "catalog:effect",
+    "node-pty": "^1.0.0",
     "simple-git": "catalog:",
     "uuid": "catalog:",
     "ws": "catalog:",
