@@ -8,8 +8,6 @@ onlyBuiltDependencies:
   - "@swc/core"
 catalog:
   "@anthropic-ai/claude-agent-sdk": 0.3.220
-  "@effect/platform-node": 4.0.0-rc.110
-  "@effect/vitest": 4.0.0-rc.110
   "@tailwindcss/vite": ^4.3.3
   "@tanstack/react-query": ^5.101.2
   "@tanstack/router-plugin": ^1.168.22
@@ -20,7 +18,6 @@ catalog:
   "@vitejs/plugin-react": ^6.0.3
   ai: ^7.0.31
   clsx: ^2.1.1
-  effect: 4.0.0-rc.110
   lucide-react: ^1.25.0
   p-queue: ^9.3.1
   react: ^19.2.7
@@ -40,6 +37,16 @@ catalog:
   zod: ^4.4.3
   zustand: ^5.0.14
 catalogs:
+  # Effect v4 ecosystem is versioned in lockstep. One pin; every `effect` /
+  # `@effect/*` package must move together or you get two runtimes. The
+  # YAML anchor is the single version number — bump it, not the aliases.
+  # `@effect/platform-node-shared` is transitive-only and is listed so the
+  # override below can pin it; no workspace package.json depends on it.
+  effect:
+    effect: &effect_version 4.0.0-rc.110
+    "@effect/platform-node": *effect_version
+    "@effect/platform-node-shared": *effect_version
+    "@effect/vitest": *effect_version
   # oRPC must move as one family: exact pins (no caret) because prerelease
   # caret ranges admit the 2.0.0 stable release, and a mixed tree crashes at
   # runtime (stable client imports ORPC_HEADER, absent from the beta contract).
@@ -71,9 +78,10 @@ overrides:
   # electron-vite/vite-plus would similarly resolve their own vite/vitest.
   vite: "catalog:"
   vitest: "catalog:"
-  "@effect/platform-node": "catalog:"
-  "@effect/vitest": "catalog:"
-  effect: "catalog:"
+  "@effect/platform-node": "catalog:effect"
+  "@effect/platform-node-shared": "catalog:effect"
+  "@effect/vitest": "catalog:effect"
+  effect: "catalog:effect"
 # pnpm 11 defaults minimumReleaseAge to 24h; disable it — the same-day
 # dependency bumps this repo does (e.g. claude-agent-sdk) would be blocked,
 # and its publish-time verification deadlocks pnpm 11.11.0 behind proxies.

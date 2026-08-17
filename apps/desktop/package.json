@@ -21,7 +21,7 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "@effect/platform-node": "catalog:",
+    "@effect/platform-node": "catalog:effect",
     "@electron-toolkit/utils": "^4.0.0",
     "@orpc/client": "catalog:orpc",
     "@orpc/contract": "catalog:orpc",
@@ -29,11 +29,11 @@
     "@orpc/server": "catalog:orpc",
     "@vibest/app": "workspace:*",
     "@vibest/server": "workspace:*",
-    "effect": "catalog:",
+    "effect": "catalog:effect",
     "react-error-boundary": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
+    "@effect/vitest": "catalog:effect",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@orpc/tanstack-query": "catalog:orpc",
     "@playwright/test": "^1.61.1",

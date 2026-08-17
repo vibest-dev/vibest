@@ -26,11 +26,11 @@
     "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@orpc/contract": "catalog:orpc",
     "ai": "catalog:",
-    "effect": "catalog:",
+    "effect": "catalog:effect",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
+    "@effect/vitest": "catalog:effect",
     "@vibest/typescript": "workspace:*",
     "typescript": "^7.0.2",
     "vitest": "catalog:"

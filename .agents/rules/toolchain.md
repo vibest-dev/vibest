@@ -1,9 +1,9 @@
 # Toolchain constraints
 
-- **Dependencies:** `pnpm-workspace.yaml` has three catalogs (`catalog:`,
-  `catalog:orpc`, `catalog:tiptap`) plus `overrides` that pull _transitive_ deps
-  onto catalog versions — bumping a package's own `package.json` for `vite`,
-  `vitest`, `effect`, or `@effect/*` does nothing. Several pins are caret-free
+- **Dependencies:** `pnpm-workspace.yaml` has four catalogs (`catalog:`,
+  `catalog:effect`, `catalog:orpc`, `catalog:tiptap`) plus `overrides` that pull
+  _transitive_ deps onto catalog versions — bumping a package's own
+  `package.json` for `vite`, `vitest`, `effect`, or `@effect/*` does nothing. Several pins are caret-free
   because a caret breaks the runtime. The reasons are commented inline; read them
   before changing versions. `packages/server` pins the Claude SDK as a literal
   while `packages/vibest` uses `catalog:` — bump both together.
