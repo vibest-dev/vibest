@@ -59,6 +59,10 @@ type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 export async function createRpcRuntime(
   effectContext: Context.Context<never> = Context.empty(),
 ): Promise<RpcRuntime> {
+  // `provideMerge`, not `mergeAll`: the process context carries the
+  // observability loggers, and fibers forked while `AgentRuntimeLayer` is
+  // building must see them. `mergeAll` leaves those forks on Effect's default
+  // logger (OpenCode #34730).
   const runtime = ManagedRuntime.make(
     AgentRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(effectContext))),
   );

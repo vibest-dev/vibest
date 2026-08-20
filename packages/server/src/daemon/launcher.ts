@@ -1,10 +1,14 @@
 import childProcess from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 
 import { Clock, Crypto, Effect, Encoding, FileSystem, type PlatformError } from "effect";
 
-import { logsDirectory } from "../config/paths";
+import {
+  daemonStdioLogPath,
+  LOG_FILE_MODE,
+  LOGS_DIRECTORY_MODE,
+  logsDirectory,
+} from "../config/paths";
 import { DaemonLaunchError, DaemonStoppedError } from "./errors";
 import { daemonAlive, healthy, pidAlive } from "./liveness";
 import { lockExists, readLockPid, releaseLock, tryAcquireLock } from "./lock";
@@ -17,8 +21,6 @@ const READY_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_INTERVAL_MS = 150;
 const STOP_GRACE_MS = 5_000;
 const LOCK_ATTEMPTS = 10;
-const STDIO_LOG_DIRECTORY_MODE = 0o700;
-const STDIO_LOG_FILE_MODE = 0o600;
 
 export type DaemonHandle = {
   readonly address: string;
@@ -327,14 +329,18 @@ const STDIO_LOG_MAX_BYTES = 1_000_000;
 
 function openStdioLog(home: string): number {
   const logsDir = logsDirectory(home);
-  fs.mkdirSync(logsDir, { recursive: true, mode: STDIO_LOG_DIRECTORY_MODE });
-  const file = path.join(logsDir, "daemon-stdio.log");
+  // Same modes and directory as `Paths.logsDir`. This process is the launcher,
+  // not the daemon — the child does not exist yet, so the observability Layer
+  // cannot have created `logs/`. Whichever path creates the directory first
+  // wins the mode; both must spell the same numbers.
+  fs.mkdirSync(logsDir, { recursive: true, mode: LOGS_DIRECTORY_MODE });
+  const file = daemonStdioLogPath(logsDir);
   try {
     if (fs.statSync(file).size > STDIO_LOG_MAX_BYTES) fs.truncateSync(file, 0);
   } catch {
     // No file yet, or it cannot be stat'd — `openSync` below decides.
   }
-  return fs.openSync(file, "a", STDIO_LOG_FILE_MODE);
+  return fs.openSync(file, "a", LOG_FILE_MODE);
 }
 
 /**

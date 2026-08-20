@@ -1,12 +1,8 @@
-import path from "node:path";
-
 import { Effect, FileSystem, Formatter, Logger, type LogLevel } from "effect";
 
-import { logsDirectory, resolveVibestHome } from "../config/paths";
+import { LOG_FILE_MODE, LOGS_DIRECTORY_MODE, vibestLogPath } from "../config/paths";
 
-const runId = crypto.randomUUID().slice(0, 8);
-
-function formatter(id: string = runId) {
+function formatter(id: string) {
   return Logger.map(Logger.formatStructured, (output) => {
     const messages = Array.isArray(output.message) ? output.message : [output.message];
     return [
@@ -51,21 +47,27 @@ function format(input: unknown): string {
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value);
 }
 
-export function file(directory = logsDirectory(resolveVibestHome())): string {
-  return path.join(directory, "vibest.log");
-}
-
-export function fileLogger(target = file(), id: string = runId) {
-  return Effect.gen(function* () {
+export const ensureLogsDirectory = (
+  directory: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(path.dirname(target), { recursive: true });
-    return yield* Logger.toFile(formatter(id), target, { flag: "a" });
-  });
+    yield* fs.makeDirectory(directory, { recursive: true, mode: LOGS_DIRECTORY_MODE });
+  }).pipe(
+    // A logs directory we cannot create is a defect: the process has nowhere
+    // to write, and mapping that into a typed error would force every
+    // composition root to handle "the disk refused the log dir".
+    Effect.orDie,
+  );
+
+function fileLogger(target: string, id: string) {
+  // Do not set batchWindow to 0; it causes high idle CPU usage.
+  return Logger.toFile(formatter(id), target, { flag: "a", mode: LOG_FILE_MODE });
 }
 
-const stderrLogger = Logger.make((options) =>
-  process.stderr.write(`${formatter().log(options)}\n`),
-);
+function stderrLogger(id: string) {
+  return Logger.make((options) => process.stderr.write(`${formatter(id).log(options)}\n`));
+}
 
 export function minimumLogLevel(): LogLevel.LogLevel {
   const value = process.env.VIBEST_LOG_LEVEL?.toUpperCase();
@@ -78,7 +80,7 @@ export function minimumLogLevel(): LogLevel.LogLevel {
   return value && value in levels ? levels[value as keyof typeof levels] : levels.INFO;
 }
 
-export function loggers(directory = logsDirectory(resolveVibestHome())) {
-  const logger = fileLogger(file(directory));
-  return process.env.VIBEST_PRINT_LOGS === "1" ? [logger, stderrLogger] : [logger];
+export function loggers(logsDir: string, id: string) {
+  const logger = fileLogger(vibestLogPath(logsDir), id);
+  return process.env.VIBEST_PRINT_LOGS === "1" ? [logger, stderrLogger(id)] : [logger];
 }

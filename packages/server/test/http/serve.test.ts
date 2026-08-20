@@ -4,12 +4,12 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { resolveServeConfig, runServe } from "../../src/http/serve";
 import { ServerStartupError } from "../../src/http/server";
+import { NodePlatformLayer } from "../platform";
 
 const ENV_KEYS = [
   "VIBEST_PORT",
@@ -93,7 +93,7 @@ describe("runServe", () => {
     try {
       const exit = await Effect.runPromiseExit(
         Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })).pipe(
-          Effect.provide(NodeFileSystem.layer),
+          Effect.provide(NodePlatformLayer),
         ),
       );
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;

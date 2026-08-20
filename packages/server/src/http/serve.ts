@@ -1,6 +1,7 @@
 import { Cause, Context, Effect, Option, Scope } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
+import { PathsLayer } from "../config/paths";
 import * as Observability from "../observability";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
@@ -84,7 +85,15 @@ export function resolveServeConfig(input: ServeInput): {
  *
  * This is the process composition root for observability. The layer is
  * provided once around the complete server lifecycle, so foreground and
- * daemon runs share the same local logger.
+ * daemon runs share the same local logger. FileSystem and Crypto stay on
+ * the outer `NodeServices.layer`; Paths is provided here so the log
+ * directory is the same `logsDir` the rest of the process uses.
+ *
+ * `createServer` is Promise-shaped, so `serveWith` captures the process
+ * context (logger included) and `createRpcRuntime` `provideMerge`s it into
+ * `AgentRuntimeLayer`. That merge must stay `provideMerge`, not `mergeAll`:
+ * fibers forked while the graph is building would otherwise capture Effect's
+ * default logger.
  */
 export const runServe = (input: ServeInput) =>
   serveWith(input).pipe(
@@ -94,6 +103,7 @@ export const runServe = (input: ServeInput) =>
       ),
     ),
     Effect.provide(Observability.layer()),
+    Effect.provide(PathsLayer),
   );
 
 const serveWith = (input: ServeInput) =>

@@ -10,13 +10,17 @@ import { createServer, type ManagedServer } from "../../src/http/server";
 import type { UIApp } from "../../src/http/ui";
 import type { RpcRuntime } from "../../src/rpc";
 import { structured, type LogRecord } from "../log-record";
+import { discardContext } from "../platform";
 
 const TOKEN = "test-token-0000";
 
 let server: ManagedServer | undefined;
 
-async function start(options: Parameters<typeof createServer>[0]): Promise<string> {
-  server = await createServer(options);
+async function start(options: Parameters<typeof createServer>[0] = {}): Promise<string> {
+  server = await createServer({
+    ...options,
+    effectContext: options.effectContext ?? (await discardContext()),
+  });
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;

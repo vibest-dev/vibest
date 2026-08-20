@@ -19,6 +19,7 @@ import {
   makeHarnessAgentRegistry,
 } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
+import * as Observability from "../src/observability";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
@@ -103,6 +104,7 @@ async function setup() {
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
+    Observability.discard,
   );
   const runtime = ManagedRuntime.make(appLayer);
   // Layer construction does file I/O now (the project document loads eagerly),

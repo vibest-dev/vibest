@@ -3,7 +3,13 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveDaemonDirectory, resolveVibestHome } from "../src/config/paths";
+import {
+  daemonStdioLogPath,
+  logsDirectory,
+  resolveDaemonDirectory,
+  resolveVibestHome,
+  vibestLogPath,
+} from "../src/config/paths";
 
 describe("resolveVibestHome", () => {
   it("prefers an explicit VIBEST_HOME over any default", () => {
@@ -26,6 +32,15 @@ describe("resolveVibestHome", () => {
   it("treats an empty VIBEST_HOME as unset", () => {
     expect(resolveVibestHome({ VIBEST_HOME: "" })).toBe(path.join(os.homedir(), ".vibest"));
     expect(resolveVibestHome({ VIBEST_HOME: "   " })).toBe(path.join(os.homedir(), ".vibest"));
+  });
+});
+
+describe("logsDirectory", () => {
+  it("is $VIBEST_HOME/logs, with the process log and daemon stdio named beside it", () => {
+    const logsDir = logsDirectory("/tmp/data");
+    expect(logsDir).toBe(path.join("/tmp/data", "logs"));
+    expect(vibestLogPath(logsDir)).toBe(path.join("/tmp/data", "logs", "vibest.log"));
+    expect(daemonStdioLogPath(logsDir)).toBe(path.join("/tmp/data", "logs", "daemon-stdio.log"));
   });
 });
 

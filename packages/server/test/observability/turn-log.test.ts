@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { layer } from "@effect/vitest";
 import type { SessionRef } from "@vibest/contract";
-import { Effect, Layer, Logger } from "effect";
+import { Context, Effect, Layer, Logger } from "effect";
 
 import { EventBus, EventBusLayer } from "../../src/events";
 import { makeHarnessAgentSession } from "../../src/harness/session";
@@ -26,9 +26,12 @@ const capture = (into: Array<LogRecord>) =>
  * way: the temptation to log "just one more" event inside a turn is what turns
  * a readable log into a transcript nobody reads.
  */
-layer(EventBusLayer)("turn logging", (it) => {
+layer(Layer.empty)("turn logging", (it) => {
+  // Per-test `Layer.build`: `layer(EventBusLayer)` would memoize one bus for
+  // the whole block.
   const session = Effect.gen(function* () {
-    return yield* makeHarnessAgentSession(ref, yield* EventBus);
+    const bus = Context.get(yield* Layer.build(EventBusLayer), EventBus);
+    return yield* makeHarnessAgentSession(ref, bus);
   });
 
   it.effect("logs the two bookends and nothing in between", () =>
