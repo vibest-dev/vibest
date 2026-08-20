@@ -19,7 +19,7 @@ export type GrokTransportFailure =
   | AgentProtocolError;
 
 export interface GrokTransportOptions {
-  readonly executablePath?: string;
+  readonly executablePath: string;
   readonly cwd?: string;
   readonly args?: ReadonlyArray<string>;
   readonly queueCapacity?: number;
@@ -76,7 +76,7 @@ const normalizeFailure = (operation: string, error: unknown): GrokTransportFailu
 };
 
 export const makeGrokTransport = (
-  options: GrokTransportOptions = {},
+  options: GrokTransportOptions,
 ): Effect.Effect<
   GrokTransport,
   GrokTransportError,
@@ -93,7 +93,7 @@ export const makeGrokTransport = (
     const child = yield* spawner
       .spawn(
         ChildProcess.make(
-          options.executablePath ?? "grok",
+          options.executablePath,
           ["agent", "--no-leader", "stdio", ...(options.args ?? [])],
           {
             ...(options.cwd ? { cwd: options.cwd } : {}),
@@ -189,10 +189,10 @@ export const makeGrokTransport = (
           return;
         }
         if (!isRpcFrame(decoded)) {
-          return yield* new AgentProtocolError({
-            harnessAgentId: "grok",
-            reason: "Received an invalid ACP frame",
-          });
+          // Banners, log lines, and future `_x.ai/*` notices that aren't a
+          // JSON-RPC frame: skip. Killing the child here would turn a protocol
+          // extension into a session crash.
+          return;
         }
 
         if ("method" in decoded) {
@@ -293,7 +293,7 @@ export const makeGrokTransport = (
           jsonrpc: "2.0",
           method,
           id,
-          params: params ?? {},
+          ...(params !== undefined ? { params } : {}),
         }).pipe(
           Effect.tapError(() => removePending(id)),
           Effect.andThen(Deferred.await(deferred)),

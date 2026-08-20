@@ -16,7 +16,10 @@ const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
 process.stdout.write("grok startup banner (not json)\\n");
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
-  if (msg.method === "echo") send({ jsonrpc: "2.0", id: msg.id, result: msg.params });
+  if (msg.method === "echo") {
+    process.stdout.write(JSON.stringify({ not: "rpc" }) + "\\n");
+    send({ jsonrpc: "2.0", id: msg.id, result: msg.params });
+  }
   if (msg.method === "boom") send({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "kaboom" } });
   if (msg.method === "stderrFlood") {
     process.stderr.write("x".repeat(1024 * 1024), () => send({ jsonrpc: "2.0", id: msg.id, result: "drained" }));

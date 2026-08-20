@@ -9,7 +9,7 @@ const update = (sessionUpdate: string, extra: Record<string, unknown> = {}): Rpc
 });
 
 it("streams text and reasoning deltas, then finishes on turn_completed", () => {
-  const transform = createGrokTransform();
+  const transform = createGrokTransform("s1");
   const chunks = [
     ...transform(update("agent_thought_chunk", { content: { type: "text", text: "hmm" } })),
     ...transform(update("agent_message_chunk", { content: { type: "text", text: "hi" } })),
@@ -34,7 +34,7 @@ it("streams text and reasoning deltas, then finishes on turn_completed", () => {
 });
 
 it("emits typed tool input from tool_call", () => {
-  const transform = createGrokTransform();
+  const transform = createGrokTransform("s1");
   const chunks = [
     ...transform(
       update("tool_call", {
@@ -52,8 +52,8 @@ it("emits typed tool input from tool_call", () => {
       }),
     ),
   ];
-  expect(chunks).toEqual([
-    { type: "start" },
+  expect(chunks[0]).toMatchObject({ type: "start", messageMetadata: { sessionId: "s1" } });
+  expect(chunks.slice(1)).toEqual([
     {
       type: "tool-input-available",
       toolCallId: "c1",
@@ -72,8 +72,31 @@ it("emits typed tool input from tool_call", () => {
   ]);
 });
 
+it("keeps use_tool dynamic on input and output", () => {
+  const transform = createGrokTransform("s1");
+  const chunks = [
+    ...transform(
+      update("tool_call", {
+        toolCallId: "c1",
+        title: "use_tool",
+        rawInput: { tool_name: "foo", tool_input: {} },
+        _meta: { "x.ai/tool": { name: "use_tool" } },
+      }),
+    ),
+    ...transform(
+      update("tool_call_update", {
+        toolCallId: "c1",
+        status: "completed",
+        rawOutput: { ok: true },
+      }),
+    ),
+  ];
+  expect(chunks[1]).toMatchObject({ type: "tool-input-available", dynamic: true });
+  expect(chunks[2]).toMatchObject({ type: "tool-output-available", dynamic: true });
+});
+
 it("skips user echoes and command list updates", () => {
-  const transform = createGrokTransform();
+  const transform = createGrokTransform("s1");
   const chunks = [
     ...transform(update("user_message_chunk", { content: { type: "text", text: "hello" } })),
     ...transform(update("available_commands_update", { availableCommands: [] })),

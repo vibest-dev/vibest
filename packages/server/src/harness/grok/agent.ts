@@ -1,6 +1,6 @@
-import type { AgentRequest, AgentResponse } from "@vibest/contract";
+import type { AgentRequest, AgentResponse, TokenUsage } from "@vibest/contract";
 import type { GrokUIMessageChunk } from "@vibest/contract/grok";
-import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { v7 as uuid } from "uuid";
@@ -8,16 +8,22 @@ import { v7 as uuid } from "uuid";
 import {
   AgentOperationError,
   AgentRequestUnavailable,
+  GrokRpcError,
   GrokTransportError,
   HarnessSessionNotFound,
   SessionNotResumable,
   TurnAlreadyRunning,
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
+import { resolveGrokExecutable } from "./executable";
 import {
   CLIENT_INFO,
   isRequestPermission,
+  isXaiSessionNotification,
+  sessionIdOf,
+  unwrapModels,
   type ModelsListResult,
+  type RpcNotification,
   type RpcServerRequest,
 } from "./protocol";
 import {
@@ -43,17 +49,11 @@ type GrokTurnState =
       readonly _tag: "Active";
       readonly turnId: string;
       readonly ended: Deferred.Deferred<void>;
-      readonly abandoned: boolean;
-    }
-  | {
-      readonly _tag: "Finishing";
-      readonly turnId: string;
-      readonly ended: Deferred.Deferred<void>;
     };
 
-type FinishTransition = {
-  readonly deliver: boolean;
-  readonly ended: Deferred.Deferred<void> | undefined;
+type TurnEnd = {
+  readonly outcome: "completed" | "canceled";
+  readonly usage?: TokenUsage;
 };
 
 export type GrokSessionFailure = GrokTransportFailure | AgentOperationError;
@@ -67,6 +67,7 @@ type SessionState = {
   readonly requests: Queue.Queue<AgentRequest, Cause.Done>;
   readonly pending: Ref.Ref<ReadonlyMap<string, PendingRequest>>;
   readonly turnState: Ref.Ref<GrokTurnState>;
+  readonly turnEnd: Ref.Ref<TurnEnd | undefined>;
   readonly transform: ReturnType<typeof createGrokTransform>;
 };
 
@@ -89,7 +90,7 @@ export interface GrokAgent {
     }) => Effect.Effect<{ readonly sessionId: string }, GrokTransportFailure>;
     readonly resume: (config: {
       readonly sessionId: string;
-      readonly cwd?: string;
+      readonly cwd: string;
     }) => Effect.Effect<{ readonly sessionId: string }, GrokTransportFailure | SessionNotResumable>;
     readonly prompt: (input: {
       readonly sessionId: string;
@@ -99,6 +100,7 @@ export interface GrokAgent {
         readonly turnId: string;
         readonly started: boolean;
         readonly output: Stream.Stream<GrokUIMessageChunk, AgentOperationError>;
+        readonly completion: Effect.Effect<TurnEnd>;
       },
       HarnessSessionNotFound | GrokTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
@@ -131,29 +133,6 @@ const initializeParams = {
   clientInfo: CLIENT_INFO,
   clientCapabilities: {},
 } as const;
-
-const unwrapModels = (value: unknown): ModelsListResult => {
-  if (typeof value !== "object" || value === null) return {};
-  const record = value as Record<string, unknown>;
-  const inner =
-    typeof record["result"] === "object" && record["result"] !== null
-      ? (record["result"] as Record<string, unknown>)
-      : record;
-  return {
-    ...(typeof inner["currentModelId"] === "string"
-      ? { currentModelId: inner["currentModelId"] }
-      : {}),
-    ...(Array.isArray(inner["availableModels"])
-      ? { availableModels: inner["availableModels"] as ModelsListResult["availableModels"] }
-      : {}),
-  };
-};
-
-const sessionIdOf = (value: unknown): string | undefined => {
-  if (typeof value !== "object" || value === null) return undefined;
-  const id = (value as { sessionId?: unknown }).sessionId;
-  return typeof id === "string" && id.length > 0 ? id : undefined;
-};
 
 /** @internal */
 export const makeGrokAgentWithDependencies = <R>(
@@ -254,33 +233,63 @@ export const makeGrokAgentWithDependencies = <R>(
         Effect.flatMap((accepted) => (accepted ? Effect.void : evictOverflowedSession(session))),
       );
 
+    const recordTurnEnd = (session: SessionState, notification: RpcNotification) => {
+      if (!isXaiSessionNotification(notification)) return Effect.void;
+      const update = notification.params.update;
+      if (update?.sessionUpdate !== "turn_completed") return Effect.void;
+      const cancelled = update.stop_reason === "cancelled" || update.stop_reason === "canceled";
+      const usage = update.usage;
+      return Ref.set(session.turnEnd, {
+        outcome: cancelled ? ("canceled" as const) : ("completed" as const),
+        ...(usage
+          ? {
+              usage: {
+                inputTokens: usage.inputTokens ?? 0,
+                outputTokens: usage.outputTokens ?? 0,
+                ...(usage.cachedReadTokens !== undefined
+                  ? { cacheReadTokens: usage.cachedReadTokens }
+                  : {}),
+                ...(usage.cacheCreationTokens !== undefined
+                  ? { cacheCreationTokens: usage.cacheCreationTokens }
+                  : {}),
+              },
+            }
+          : {}),
+      });
+    };
+
+    const settleTurn = (session: SessionState, turnId: string) =>
+      Ref.modify<GrokTurnState, Deferred.Deferred<void> | undefined>(
+        session.turnState,
+        (current) => {
+          if (current._tag !== "Active" || current.turnId !== turnId) {
+            return [undefined, current] as const;
+          }
+          return [current.ended, { _tag: "Idle" } as const] as const;
+        },
+      ).pipe(
+        Effect.flatMap((ended) =>
+          ended ? Deferred.succeed(ended, undefined).pipe(Effect.asVoid) : Effect.void,
+        ),
+      );
+
     const routeNotification = (
       session: SessionState,
       notification: Parameters<SessionState["transform"]>[0],
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
+        yield* recordTurnEnd(session, notification);
         for (const chunk of session.transform(notification)) {
           if (chunk.type === "finish") {
-            const transition = yield* Ref.modify<GrokTurnState, FinishTransition>(
+            const ended = yield* Ref.modify<GrokTurnState, Deferred.Deferred<void> | undefined>(
               session.turnState,
               (current) => {
-                if (current._tag !== "Active") {
-                  return [{ deliver: false, ended: undefined }, current] as const;
-                }
-                return current.abandoned
-                  ? ([{ deliver: false, ended: current.ended }, { _tag: "Idle" } as const] as const)
-                  : ([
-                      { deliver: true, ended: undefined },
-                      {
-                        _tag: "Finishing",
-                        turnId: current.turnId,
-                        ended: current.ended,
-                      } as const,
-                    ] as const);
+                if (current._tag !== "Active") return [undefined, current] as const;
+                return [current.ended, { _tag: "Idle" } as const] as const;
               },
             );
-            if (transition.ended) yield* Deferred.succeed(transition.ended, undefined);
-            if (!transition.deliver) continue;
+            if (!ended) continue;
+            yield* Deferred.succeed(ended, undefined);
           }
           yield* offerChunk(session, chunk);
         }
@@ -365,7 +374,8 @@ export const makeGrokAgentWithDependencies = <R>(
           requests: yield* Queue.bounded<AgentRequest, Cause.Done>(SESSION_QUEUE_CAPACITY),
           pending: yield* Ref.make<ReadonlyMap<string, PendingRequest>>(new Map()),
           turnState: yield* Ref.make<GrokTurnState>({ _tag: "Idle" }),
-          transform: createGrokTransform(),
+          turnEnd: yield* Ref.make<TurnEnd | undefined>(undefined),
+          transform: createGrokTransform(sessionId),
         };
         yield* Ref.update(sessions, (current) => new Map(current).set(sessionId, session));
         yield* Stream.runForEach(transport.notifications, (notification) =>
@@ -406,12 +416,13 @@ export const makeGrokAgentWithDependencies = <R>(
                   mcpServers: [],
                 })
                 .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new SessionNotResumable({
-                        sessionId: config.resumeId!,
-                        reason: cause.message,
-                      }),
+                  Effect.mapError((cause) =>
+                    cause instanceof GrokRpcError
+                      ? new SessionNotResumable({
+                          sessionId: config.resumeId!,
+                          reason: cause.message,
+                        })
+                      : cause,
                   ),
                 )
             : yield* transport.request("session/new", { cwd: config.cwd, mcpServers: [] });
@@ -425,14 +436,20 @@ export const makeGrokAgentWithDependencies = <R>(
           yield* registerSession(sessionId, transport, scope);
           return { sessionId };
         }).pipe(
-          Effect.mapError((error) =>
-            error instanceof SessionNotResumable
-              ? error
-              : error instanceof GrokTransportError ||
-                  (typeof error === "object" && error !== null && "_tag" in error)
-                ? (error as GrokTransportFailure)
-                : new GrokTransportError({ operation: "open-session", cause: error }),
-          ),
+          Effect.mapError((error) => {
+            if (error instanceof SessionNotResumable) return error;
+            if (
+              error instanceof GrokTransportError ||
+              error instanceof GrokRpcError ||
+              (typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error._tag === "AgentProcessExited" || error._tag === "AgentProtocolError"))
+            ) {
+              return error as GrokTransportFailure;
+            }
+            return new GrokTransportError({ operation: "open-session", cause: error });
+          }),
           Effect.onError(() => Scope.close(scope, Exit.void)),
         );
       });
@@ -467,13 +484,25 @@ export const makeGrokAgentWithDependencies = <R>(
       );
 
     const injectFinish = (session: SessionState, turnId: string) =>
-      Ref.modify<GrokTurnState, boolean>(session.turnState, (current) => {
-        if (current._tag !== "Active" || current.turnId !== turnId)
-          return [false, current] as const;
-        return [true, { _tag: "Finishing", turnId, ended: current.ended } as const] as const;
-      }).pipe(
-        Effect.flatMap((needed) =>
-          needed ? offerChunk(session, { type: "finish" }) : Effect.void,
+      Ref.modify<GrokTurnState, Deferred.Deferred<void> | undefined>(
+        session.turnState,
+        (current) => {
+          if (current._tag !== "Active" || current.turnId !== turnId) {
+            return [undefined, current] as const;
+          }
+          return [current.ended, { _tag: "Idle" } as const] as const;
+        },
+      ).pipe(
+        Effect.flatMap((ended) =>
+          ended
+            ? Ref.update(
+                session.turnEnd,
+                (current) => current ?? { outcome: "completed" as const },
+              ).pipe(
+                Effect.andThen(offerChunk(session, { type: "finish" })),
+                Effect.andThen(Deferred.succeed(ended, undefined)),
+              )
+            : Effect.void,
         ),
       );
 
@@ -485,7 +514,7 @@ export const makeGrokAgentWithDependencies = <R>(
             .makeTransport({})
             .pipe(Effect.provideService(Scope.Scope, scope), Effect.provideContext(buildContext));
           yield* handshake(transport);
-          return unwrapModels(yield* transport.request("_x.ai/models/list"));
+          return unwrapModels(yield* transport.request("_x.ai/models/list", {}));
         }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)));
       }),
       session: {
@@ -495,96 +524,60 @@ export const makeGrokAgentWithDependencies = <R>(
               Effect.fail(new GrokTransportError({ operation: "session/new", cause: error })),
             ),
           ),
-        resume: (config) =>
-          openSession({ cwd: config.cwd ?? process.cwd(), resumeId: config.sessionId }),
+        resume: (config) => openSession({ cwd: config.cwd, resumeId: config.sessionId }),
         prompt: (input) =>
-          Effect.gen(function* () {
-            const session = yield* getSession(input.sessionId);
-            const turnId = uuid();
-            const ended = yield* Deferred.make<void>();
-            const taken = yield* Ref.modify<GrokTurnState, boolean>(
-              session.turnState,
-              (current) => {
-                if (current._tag !== "Idle") return [false, current] as const;
-                return [true, { _tag: "Active", turnId, ended, abandoned: false }];
-              },
-            );
-            if (!taken) {
-              return yield* new TurnAlreadyRunning({ sessionId: input.sessionId, turnId });
-            }
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const session = yield* getSession(input.sessionId);
+              const turnId = uuid();
+              const ended = yield* Deferred.make<void>();
+              const taken = yield* Ref.modify<GrokTurnState, boolean>(
+                session.turnState,
+                (current) => {
+                  if (current._tag !== "Idle") return [false, current] as const;
+                  return [true, { _tag: "Active", turnId, ended }] as const;
+                },
+              );
+              if (!taken) {
+                return yield* new TurnAlreadyRunning({ sessionId: input.sessionId, turnId });
+              }
 
-            yield* drainQueue(session.chunks);
-            yield* Effect.forkIn(
-              session.transport
-                .request("session/prompt", {
-                  sessionId: input.sessionId,
-                  prompt: [{ type: "text", text: input.text }],
-                })
-                .pipe(
-                  Effect.catch((error) =>
-                    offerChunk(session, { type: "error", errorText: error.message }).pipe(
-                      Effect.asVoid,
-                    ),
-                  ),
-                  Effect.andThen(
-                    Ref.get(session.turnState).pipe(
-                      Effect.flatMap((state) =>
-                        state._tag === "Active" && state.turnId === turnId
-                          ? Deferred.await(state.ended).pipe(
-                              Effect.timeoutOrElse({
-                                duration: "2 seconds",
-                                orElse: () => injectFinish(session, turnId),
-                              }),
-                            )
-                          : Effect.void,
+              yield* Ref.set(session.turnEnd, undefined);
+              yield* drainQueue(session.chunks);
+              yield* Effect.forkIn(
+                session.transport
+                  .request("session/prompt", {
+                    sessionId: input.sessionId,
+                    prompt: [{ type: "text", text: input.text }],
+                  })
+                  .pipe(
+                    Effect.catch((error) =>
+                      offerChunk(session, { type: "error", errorText: error.message }).pipe(
+                        Effect.andThen(injectFinish(session, turnId)),
                       ),
                     ),
                   ),
+                session.scope,
+              );
+
+              const abandonTurn = settleTurn(session, turnId);
+
+              return {
+                turnId,
+                started: true,
+                output: streamFromQueueOne(session.chunks).pipe(
+                  Stream.takeUntil((chunk) => chunk.type === "finish"),
+                  Stream.ensuring(abandonTurn),
                 ),
-              session.scope,
-            );
-
-            const finishConsumed = Ref.modify(session.turnState, (current) => {
-              if (current._tag !== "Idle" && current.turnId === turnId) {
-                return [current.ended, { _tag: "Idle" } as const] as const;
-              }
-              return [undefined, current] as const;
+                completion: Deferred.await(ended).pipe(
+                  Effect.andThen(Ref.get(session.turnEnd)),
+                  Effect.map((end) => end ?? { outcome: "completed" as const }),
+                ),
+              };
             }).pipe(
-              Effect.flatMap((pendingEnd) =>
-                pendingEnd
-                  ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
-                  : Effect.void,
+              Effect.onInterrupt(() =>
+                restore(interrupt(input.sessionId)).pipe(Effect.catch(() => Effect.void)),
               ),
-            );
-
-            const abandonTurn = Ref.modify(session.turnState, (current) => {
-              if (current._tag === "Idle" || current.turnId !== turnId) {
-                return [undefined, current] as const;
-              }
-              if (current._tag === "Finishing") {
-                return [current.ended, { _tag: "Idle" } as const] as const;
-              }
-              return [undefined, { ...current, abandoned: true } as const] as const;
-            }).pipe(
-              Effect.flatMap((pendingEnd) =>
-                pendingEnd
-                  ? Deferred.succeed(pendingEnd, undefined).pipe(Effect.asVoid)
-                  : Effect.void,
-              ),
-            );
-
-            return {
-              turnId,
-              started: true,
-              output: streamFromQueueOne(session.chunks).pipe(
-                Stream.tap((chunk) => (chunk.type === "finish" ? finishConsumed : Effect.void)),
-                Stream.takeUntil((chunk) => chunk.type === "finish"),
-                Stream.ensuring(abandonTurn),
-              ),
-            };
-          }).pipe(
-            Effect.onInterrupt(() =>
-              interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void)),
             ),
           ),
         setModel: (sessionId, model) =>
@@ -637,12 +630,31 @@ export const makeGrokAgentWithDependencies = <R>(
 
 export const makeGrokAgent = (
   options: GrokAgentOptions = {},
-): Effect.Effect<GrokAgent, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
-  makeGrokAgentWithDependencies({
-    makeTransport: (config) =>
-      makeGrokTransport({
-        ...(options.executablePath ? { executablePath: options.executablePath } : {}),
-        ...(options.args ? { args: options.args } : {}),
-        ...(config.cwd ? { cwd: config.cwd } : {}),
-      }),
+): Effect.Effect<
+  GrokAgent,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const executablePath =
+      options.executablePath ??
+      (yield* resolveGrokExecutable().pipe(
+        Effect.flatMap((found) =>
+          found
+            ? Effect.succeed(found)
+            : Effect.die(
+                new Error(
+                  "invariant: the grok executable vanished after the availability check gated on it",
+                ),
+              ),
+        ),
+      ));
+    return yield* makeGrokAgentWithDependencies({
+      makeTransport: (config) =>
+        makeGrokTransport({
+          executablePath,
+          ...(options.args ? { args: options.args } : {}),
+          ...(config.cwd ? { cwd: config.cwd } : {}),
+        }),
+    });
   });

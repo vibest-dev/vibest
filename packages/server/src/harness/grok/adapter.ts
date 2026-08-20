@@ -1,5 +1,4 @@
-import type { ModelInfo, PermissionMode, ReasoningEffort } from "@vibest/contract";
-import { ReasoningEffortSchema } from "@vibest/contract";
+import type { ModelInfo, PermissionMode } from "@vibest/contract";
 import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
@@ -48,36 +47,12 @@ const GROK_PERMISSION_MODE_IDS = Object.keys(
   GROK_PERMISSION_MODES,
 ) as ReadonlyArray<PermissionMode>;
 const toGrokPermissionMode = (mode: PermissionMode): string | undefined =>
-  (GROK_PERMISSION_MODES as Partial<Record<PermissionMode, string>>)[mode];
+  GROK_PERMISSION_MODES[mode as keyof typeof GROK_PERMISSION_MODES];
 
-const toReasoningEffort = (value: string): ReasoningEffort | undefined =>
-  (ReasoningEffortSchema.literals as ReadonlyArray<string>).includes(value)
-    ? (value as ReasoningEffort)
-    : undefined;
-
-const toModelInfo = (model: ModelInfoNative): ModelInfo => {
-  const meta = model["_meta"];
-  const reasoningEfforts = (meta?.reasoningEfforts ?? [])
-    .map((option) =>
-      typeof option.value === "string" ? toReasoningEffort(option.value) : undefined,
-    )
-    .filter((effort): effort is ReasoningEffort => effort !== undefined);
-  const defaultReasoningEffort =
-    typeof meta?.reasoningEffort === "string" ? toReasoningEffort(meta.reasoningEffort) : undefined;
-  return {
-    id: model.modelId,
-    ...(model.name !== undefined ? { label: model.name } : {}),
-    ...(reasoningEfforts.length > 0
-      ? {
-          reasoningEfforts,
-          ...(defaultReasoningEffort !== undefined &&
-          reasoningEfforts.includes(defaultReasoningEffort)
-            ? { defaultReasoningEffort }
-            : {}),
-        }
-      : {}),
-  };
-};
+const toModelInfo = (model: ModelInfoNative): ModelInfo => ({
+  id: model.modelId,
+  ...(model.name !== undefined ? { label: model.name } : {}),
+});
 
 const makeRuntime = (
   agent: GrokAgent,
@@ -204,19 +179,20 @@ const makeRuntime = (
             emit(chunk).pipe(
               Effect.andThen(
                 chunk.type === "finish"
-                  ? Ref.set(finished, true).pipe(
-                      Effect.andThen(
+                  ? prompt.completion.pipe(
+                      Effect.flatMap((completion) =>
                         emit({
                           type: "session.turn.ended",
                           sessionId,
                           turnId: prompt.turnId,
-                          outcome: "completed",
-                        }).pipe(
-                          Effect.andThen(
-                            Ref.update(activeTurn, (current) =>
-                              current === prompt.turnId ? undefined : current,
-                            ),
-                          ),
+                          outcome: completion.outcome,
+                          ...(completion.usage ? { usage: completion.usage } : {}),
+                        }),
+                      ),
+                      Effect.andThen(Ref.set(finished, true)),
+                      Effect.andThen(
+                        Ref.update(activeTurn, (current) =>
+                          current === prompt.turnId ? undefined : current,
                         ),
                       ),
                     )
@@ -304,17 +280,24 @@ export const makeGrokAdapter = (
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "grok", cause })),
       Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
-  resume: (input) =>
-    agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
+  resume: (input) => {
+    const cwd = input.cwd;
+    if (cwd === undefined) {
+      return Effect.fail(
+        new AgentOpenError({
+          harnessAgentId: "grok",
+          cause: new Error("resume requires cwd"),
+        }),
+      );
+    }
+    return agent.session.resume({ sessionId: input.sessionId, cwd }).pipe(
       Effect.mapError((cause) =>
         cause instanceof SessionNotResumable
           ? cause
           : new AgentOpenError({ harnessAgentId: "grok", cause }),
       ),
       Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
-    ),
+    );
+  },
   getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
-  // History fold is a follow-up; an empty floor lets attach succeed instead of
-  // failing getMessages with CapabilityUnsupported.
-  getMessages: () => Effect.succeed([]),
 });

@@ -57,6 +57,7 @@ export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
 
 export const GrokLayer: Layer.Layer<Grok> = Layer.effect(Grok, makeGrokAgent()).pipe(
   Layer.provide(NodeProcessLayer),
+  Layer.provide(PlatformLayer),
 );
 
 const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer, GrokLayer);

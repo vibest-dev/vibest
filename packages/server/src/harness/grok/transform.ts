@@ -1,4 +1,5 @@
-import { grokTools, isGrokTool, type GrokUIMessageChunk } from "@vibest/contract/grok";
+import { isGrokTool, type GrokUIMessageChunk } from "@vibest/contract/grok";
+import { v7 as uuid } from "uuid";
 
 import {
   isSessionUpdate,
@@ -14,23 +15,28 @@ const REASONING_ID = "reasoning";
 const isDynamicTool = (toolName: string): boolean =>
   !isGrokTool(toolName) || toolName === "use_tool" || toolName === "search_tool";
 
+type SeenTool = {
+  readonly toolName: string;
+  readonly dynamic: boolean;
+};
+
 // ACP session/update → UI-chunk transform. One factory per session; the
 // returned generator holds open text/reasoning blocks so deltas and the
 // turn-end close agree. Non-render updates (commands, recap, hooks, queue)
 // are skipped — no `data-*` parts on the chunk track.
 
-export function createGrokTransform(): (
-  notification: RpcNotification,
-) => Generator<GrokUIMessageChunk> {
+export function createGrokTransform(
+  sessionId: string,
+): (notification: RpcNotification) => Generator<GrokUIMessageChunk> {
   let turnOpen = false;
   let textOpen = false;
   let reasoningOpen = false;
-  const seenTools = new Set<string>();
+  const seenTools = new Map<string, SeenTool>();
 
   function* ensureTurn(): Generator<GrokUIMessageChunk> {
     if (turnOpen) return;
     turnOpen = true;
-    yield { type: "start" };
+    yield { type: "start", messageId: uuid(), messageMetadata: { sessionId } };
   }
 
   function* closeBlocks(): Generator<GrokUIMessageChunk> {
@@ -77,15 +83,16 @@ export function createGrokTransform(): (
         if (typeof toolCallId !== "string") return;
         yield* ensureTurn();
         if (seenTools.has(toolCallId)) return;
-        seenTools.add(toolCallId);
-        const toolName = toolNameOf(update);
+        const toolName = toolNameOf(update["_meta"], update.title);
+        const dynamic = isDynamicTool(toolName);
+        seenTools.set(toolCallId, { toolName, dynamic });
         yield {
           type: "tool-input-available",
           toolCallId,
           toolName,
           input: update.rawInput ?? {},
           providerExecuted: true,
-          dynamic: isDynamicTool(toolName) || !(toolName in grokTools),
+          dynamic,
         };
         return;
       }
@@ -93,24 +100,27 @@ export function createGrokTransform(): (
         const toolCallId = update.toolCallId;
         if (typeof toolCallId !== "string") return;
         yield* ensureTurn();
-        if (!seenTools.has(toolCallId) && update.rawInput !== undefined) {
-          seenTools.add(toolCallId);
-          const toolName = toolNameOf(update);
+        let seen = seenTools.get(toolCallId);
+        if (!seen && update.rawInput !== undefined) {
+          const toolName = toolNameOf(update["_meta"], update.title);
+          seen = { toolName, dynamic: isDynamicTool(toolName) };
+          seenTools.set(toolCallId, seen);
           yield {
             type: "tool-input-available",
             toolCallId,
             toolName,
             input: update.rawInput,
             providerExecuted: true,
-            dynamic: isDynamicTool(toolName),
+            dynamic: seen.dynamic,
           };
         }
+        const dynamic = seen?.dynamic ?? true;
         if (update.status === "failed") {
           yield {
             type: "tool-output-error",
             toolCallId,
             errorText: typeof update.rawOutput === "string" ? update.rawOutput : "tool failed",
-            dynamic: false,
+            dynamic,
           };
           return;
         }
@@ -120,7 +130,7 @@ export function createGrokTransform(): (
             toolCallId,
             output: update.rawOutput ?? {},
             providerExecuted: true,
-            dynamic: false,
+            dynamic,
           };
         }
         return;
@@ -131,12 +141,12 @@ export function createGrokTransform(): (
   }
 
   return function* transform(notification: RpcNotification): Generator<GrokUIMessageChunk> {
-    if (isSessionUpdate(notification)) {
+    if (isSessionUpdate(notification) && notification.params.update) {
       yield* onUpdate(notification.params.update);
       return;
     }
     if (isXaiSessionNotification(notification)) {
-      const kind = notification.params.update.sessionUpdate;
+      const kind = notification.params.update?.sessionUpdate;
       if (kind === "turn_completed") {
         yield* closeBlocks();
         if (turnOpen) {

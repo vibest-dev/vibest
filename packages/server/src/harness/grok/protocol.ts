@@ -122,32 +122,61 @@ export const CLIENT_INFO = { name: "vibest", title: "Vibest", version: "0.0.0" }
 export function isSessionUpdate(
   notification: RpcNotification,
 ): notification is SessionUpdateNotification {
-  return notification.method === "session/update";
+  return notification.method === "session/update" && notification.params !== undefined;
 }
 
 export function isXaiSessionNotification(
   notification: RpcNotification,
 ): notification is XaiSessionNotification {
   return (
-    notification.method === "_x.ai/session/update" ||
-    notification.method === "_x.ai/session_notification"
+    (notification.method === "_x.ai/session/update" ||
+      notification.method === "_x.ai/session_notification") &&
+    notification.params !== undefined
   );
 }
 
-export function isRequestPermission(request: RpcServerRequest): boolean {
+export function isRequestPermission(
+  request: RpcServerRequest,
+): request is RpcServerRequest & { readonly params: RequestPermissionParams } {
   return request.method === "session/request_permission";
 }
 
-export function toolNameOf(update: AcpSessionUpdate): string {
-  const meta = update["_meta"];
+export function toolNameOf(meta: unknown, title?: string): string {
   if (typeof meta === "object" && meta !== null) {
     const tool = (meta as { "x.ai/tool"?: { name?: unknown } })["x.ai/tool"];
     if (typeof tool?.name === "string" && tool.name.length > 0) return tool.name;
   }
-  if (typeof update.title === "string" && update.title.length > 0) {
-    // Backend web search arrives titled "Web search:" with no x.ai/tool name.
-    if (update.title.startsWith("Web search")) return "web_search";
-    return update.title;
-  }
+  if (typeof title === "string" && title.length > 0) return title;
   return "tool";
 }
+
+export const ModelsListResultSchema = Schema.Struct({
+  currentModelId: Schema.optionalKey(Schema.String),
+  availableModels: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        modelId: Schema.String,
+        name: Schema.optionalKey(Schema.String),
+        description: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+});
+
+export const unwrapModels = (value: unknown): ModelsListResult => {
+  try {
+    return Schema.decodeUnknownSync(ModelsListResultSchema)(value);
+  } catch {
+    return {};
+  }
+};
+
+const OpenedSessionSchema = Schema.Struct({ sessionId: Schema.NonEmptyString });
+
+export const sessionIdOf = (value: unknown): string | undefined => {
+  try {
+    return Schema.decodeUnknownSync(OpenedSessionSchema)(value).sessionId;
+  } catch {
+    return undefined;
+  }
+};

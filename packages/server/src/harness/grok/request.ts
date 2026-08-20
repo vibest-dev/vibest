@@ -1,6 +1,11 @@
 import type { AgentRequest, AgentRequestAction, AgentResponse } from "@vibest/contract";
 
-import type { PermissionOption, RequestPermissionParams, RpcServerRequest } from "./protocol";
+import {
+  toolNameOf as toolNameFromMeta,
+  type PermissionOption,
+  type RequestPermissionParams,
+  type RpcServerRequest,
+} from "./protocol";
 
 const FALLBACK_ACTIONS: AgentRequestAction[] = [
   { id: "allow-once", label: "Allow", behavior: "allow", variant: "primary" },
@@ -19,15 +24,6 @@ const toAction = (option: PermissionOption): AgentRequestAction => ({
     : {}),
 });
 
-const toolNameOf = (params: RequestPermissionParams): string => {
-  const meta = params.toolCall?.["_meta"];
-  if (typeof meta === "object" && meta !== null) {
-    const tool = (meta as { "x.ai/tool"?: { name?: unknown } })["x.ai/tool"];
-    if (typeof tool?.name === "string") return tool.name;
-  }
-  return params.toolCall?.title ?? "tool";
-};
-
 export function buildPermissionRequest(request: RpcServerRequest): AgentRequest {
   const params = (request.params ?? {}) as RequestPermissionParams;
   const options = params.options ?? [];
@@ -36,7 +32,7 @@ export function buildPermissionRequest(request: RpcServerRequest): AgentRequest 
     type: "tool",
     id: String(request.id),
     harnessAgentId: "grok",
-    toolName: toolNameOf(params),
+    toolName: toolNameFromMeta(params.toolCall?.["_meta"], params.toolCall?.title),
     input:
       typeof params.toolCall?.rawInput === "object" && params.toolCall.rawInput !== null
         ? (params.toolCall.rawInput as Record<string, unknown>)
