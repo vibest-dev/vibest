@@ -23,6 +23,7 @@ import {
   type ClaudeCodeAgent,
 } from "../harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
+import { makeGrokAdapter, makeGrokAgent, type GrokAgent } from "../harness/grok";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
 import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../pty";
@@ -30,6 +31,7 @@ import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../pty";
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
 export class Pi extends Context.Service<Pi, PiAgent>()("Pi") {}
+export class Grok extends Context.Service<Grok, GrokAgent>()("Grok") {}
 
 /**
  * The Node platform services. Every effect that touches disk, paths, or random
@@ -53,7 +55,11 @@ export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
   Layer.provide(NodeProcessLayer),
 );
 
-const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
+export const GrokLayer: Layer.Layer<Grok> = Layer.effect(Grok, makeGrokAgent()).pipe(
+  Layer.provide(NodeProcessLayer),
+);
+
+const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer, GrokLayer);
 
 /**
  * Which CLI is installed, and whether it is new enough, is fixed for the life
@@ -89,8 +95,14 @@ const RegistryLayer = Layer.effect(
     const claudeCode = yield* ClaudeCode;
     const codex = yield* Codex;
     const pi = yield* Pi;
+    const grok = yield* Grok;
     const adapters = yield* Effect.forEach(
-      [makeClaudeCodeAdapter(claudeCode), makeCodexAdapter(codex), makePiAdapter(pi)],
+      [
+        makeClaudeCodeAdapter(claudeCode),
+        makeCodexAdapter(codex),
+        makePiAdapter(pi),
+        makeGrokAdapter(grok),
+      ],
       cacheAvailability,
     );
     return makeHarnessAgentRegistry(adapters);

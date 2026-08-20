@@ -172,6 +172,29 @@ export class PiRpcError extends Schema.TaggedError<PiRpcError>()("PiRpcError", {
   }
 }
 
+export class GrokTransportError extends Schema.TaggedError<GrokTransportError>()(
+  "GrokTransportError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Grok transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
+  }
+}
+
+export class GrokRpcError extends Schema.TaggedError<GrokRpcError>()("GrokRpcError", {
+  method: Schema.String,
+  code: Schema.Number,
+  errorMessage: Schema.String,
+  data: Schema.optionalKey(Schema.Unknown),
+}) {
+  override get message() {
+    return `Grok RPC '${this.method}' failed (${this.code}): ${this.errorMessage}`;
+  }
+}
+
 export class AgentProcessExited extends Schema.TaggedError<AgentProcessExited>()(
   "AgentProcessExited",
   {

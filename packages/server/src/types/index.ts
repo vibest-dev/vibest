@@ -5,10 +5,11 @@
  * (Context.Service + Layer) live in each module; DTOs like these stay plain.
  */
 
-/** Identifies an agent backend adapter. */
-export type HarnessAgentId = "claude-code" | "codex" | "pi";
+import { HARNESS_AGENT_IDS, type HarnessAgentId } from "@vibest/contract";
 
-export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = ["claude-code", "codex", "pi"];
+/** Identifies an agent backend adapter. The closed set lives on the contract. */
+export type { HarnessAgentId };
+export { HARNESS_AGENT_IDS };
 
 export const isHarnessAgentId = (value: string): value is HarnessAgentId =>
   (HARNESS_AGENT_IDS as ReadonlyArray<string>).includes(value);

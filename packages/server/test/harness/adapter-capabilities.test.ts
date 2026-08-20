@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import { makeClaudeCodeAdapter, type ClaudeCodeAgent } from "../../src/harness/claude-code";
 import { makeCodexAdapter, type CodexAgent } from "../../src/harness/codex";
+import { makeGrokAdapter, type GrokAgent } from "../../src/harness/grok";
 import { makePiAdapter, type PiAgent } from "../../src/harness/pi";
 
 // Permission declarations are pure values that never touch the agent, so a
@@ -31,9 +32,17 @@ it("pi declares an empty permission subset and no default", () => {
   expect(adapter.defaultPermissionMode).toBeUndefined();
 });
 
+it("grok declares ask/full, defaulting to ask", () => {
+  const adapter = makeGrokAdapter(stub<GrokAgent>());
+
+  expect(adapter.permissionModes).toEqual(["ask", "full"]);
+  expect(adapter.defaultPermissionMode).toBe("ask");
+});
+
 it("only the harnesses with a model catalogue declare a probe", () => {
   expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).probeModels).toBeDefined();
   expect(makeCodexAdapter(stub<CodexAgent>()).probeModels).toBeDefined();
+  expect(makeGrokAdapter(stub<GrokAgent>()).probeModels).toBeDefined();
   // Absent, not empty: pi has no model switch, so the client renders no picker.
   expect(makePiAdapter(stub<PiAgent>()).probeModels).toBeUndefined();
 });
@@ -43,4 +52,5 @@ it("declaring an adapter never touches its agent", () => {
   // on any property access if a probe were built eagerly rather than per call.
   expect(() => makeClaudeCodeAdapter(stub<ClaudeCodeAgent>())).not.toThrow();
   expect(() => makeCodexAdapter(stub<CodexAgent>())).not.toThrow();
+  expect(() => makeGrokAdapter(stub<GrokAgent>())).not.toThrow();
 });

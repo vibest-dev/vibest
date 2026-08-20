@@ -1,3 +1,4 @@
+import { HarnessAgentIdSchema } from "@vibest/contract";
 import { type JsonStoreLoadError, makeJsonCollection } from "@vibest/effect-json-store";
 import { Effect, Option, Schema } from "effect";
 
@@ -12,7 +13,7 @@ import type { Session } from "../types";
 const SessionSchema = Schema.Struct({
   sessionId: Schema.String,
   projectId: Schema.String,
-  harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
+  harnessAgentId: HarnessAgentIdSchema,
   harnessSessionId: Schema.String,
   createdAt: Schema.String,
   cwd: Schema.optionalKey(Schema.String),

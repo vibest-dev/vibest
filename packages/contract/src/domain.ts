@@ -4,7 +4,7 @@ import { Schema } from "effect";
 export const toStandardSchema = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) =>
   Schema.toStandardJSONSchemaV1(Schema.toStandardSchemaV1(schema));
 
-export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi"]);
+export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi", "grok"]);
 export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
 // Derived from the schema rather than written out a second time: clients that
 // need the ids as data (narrowing a URL param, say) would otherwise keep their

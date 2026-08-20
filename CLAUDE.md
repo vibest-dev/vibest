@@ -1,7 +1,7 @@
 # vibest
 
 In-browser tooling for AI coding agents: a web chat UI over local agents
-(Claude Code, Codex, pi), served by a local Node daemon and also shipped as an
+(Claude Code, Codex, pi, Grok), served by a local Node daemon and also shipped as an
 Electron app. pnpm + Turborepo, TypeScript everywhere.
 
 ## Commands

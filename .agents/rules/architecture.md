@@ -2,15 +2,15 @@
 
 `contract ← server ← cli|desktop` and `contract ← client ← app ← desktop`.
 
-| dir                 | name                         | role                                                                                                                                                                                                                                                              |
-| ------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/contract` | `@vibest/contract`           | oRPC contract + Effect `Schema` domain types — the shared wire vocabulary. Also the browser-safe agent UI surface: `@vibest/contract/{claude-code,codex}` tool schemas + UI-message types and `codex/protocol` (ts-rs types). Leaf; nothing may point back at it. |
-| `packages/server`   | `@vibest/server`             | All runtime: domain services, session runtime, harness transforms + adapters, oRPC router, HTTP/WS, daemon.                                                                                                                                                       |
-| `packages/client`   | `@vibest/client`             | ~60-LOC factory for a typed oRPC WebSocket client.                                                                                                                                                                                                                |
-| `packages/ui`       | `@vibest/ui`                 | React components. Subpath-only exports, no barrel.                                                                                                                                                                                                                |
-| `apps/app`          | `@vibest/app`                | The SPA — **also a library**: Desktop mounts `PlatformProvider` + `AppInterface` from the root export only.                                                                                                                                                       |
-| `apps/desktop`      | `desktop` (unscoped)         | Electron shell supervising a forked server over MessagePort oRPC.                                                                                                                                                                                                 |
-| `packages/vibest`   | `@vibest/cli` (bin `vibest`) | Thin CLI over `@vibest/server/{daemon,http}`.                                                                                                                                                                                                                     |
+| dir                 | name                         | role                                                                                                                                                                                                                                                                   |
+| ------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/contract` | `@vibest/contract`           | oRPC contract + Effect `Schema` domain types — the shared wire vocabulary. Also the browser-safe agent UI surface: `@vibest/contract/{claude-code,codex,grok}` tool schemas + UI-message types and `codex/protocol` (ts-rs types). Leaf; nothing may point back at it. |
+| `packages/server`   | `@vibest/server`             | All runtime: domain services, session runtime, harness transforms + adapters, oRPC router, HTTP/WS, daemon.                                                                                                                                                            |
+| `packages/client`   | `@vibest/client`             | ~60-LOC factory for a typed oRPC WebSocket client.                                                                                                                                                                                                                     |
+| `packages/ui`       | `@vibest/ui`                 | React components. Subpath-only exports, no barrel.                                                                                                                                                                                                                     |
+| `apps/app`          | `@vibest/app`                | The SPA — **also a library**: Desktop mounts `PlatformProvider` + `AppInterface` from the root export only.                                                                                                                                                            |
+| `apps/desktop`      | `desktop` (unscoped)         | Electron shell supervising a forked server over MessagePort oRPC.                                                                                                                                                                                                      |
+| `packages/vibest`   | `@vibest/cli` (bin `vibest`) | Thin CLI over `@vibest/server/{daemon,http}`.                                                                                                                                                                                                                          |
 
 ## Boundaries
 
@@ -70,7 +70,7 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   `packages/server/src/daemon/paths.ts` names files inside a directory it is
   handed and deliberately has no default of its own.
 - `HarnessAgentIdSchema` in `packages/contract/src/domain.ts` is the whitelist:
-  `claude-code`, `codex`, `pi` and nothing else. A fourth harness needs a literal
+  `claude-code`, `codex`, `pi`, `grok` and nothing else. A fifth harness needs a literal
   there, a `packages/server/src/harness/<agent>/` transform, and its adapter added
   to the `RegistryLayer` in `packages/server/src/rpc/runtime.ts` — all three, or it
   is unreachable at runtime. `harness/registry.ts` is only the lookup table's
