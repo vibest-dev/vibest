@@ -80,6 +80,11 @@ export default defineConfig({
   },
   renderer: {
     root: url.fileURLToPath(new URL("./src/renderer/", import.meta.url)),
+    experimental: {
+      // Same opt-in as apps/app: Rolldown serves a bundle during `vite dev`.
+      // Renderer-only — main/preload are already bundled in both modes.
+      bundledDev: true,
+    },
     define: {
       "import.meta.env.VIBEST_RUN_IN_AGENT": JSON.stringify(RUNNING_IN_AGENT),
     },
