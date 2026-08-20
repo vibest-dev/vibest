@@ -26,9 +26,6 @@ const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
 
 export default defineConfig({
   experimental: {
-    // Vite 8 bundled dev: Rolldown serves a bundle during `vite dev` instead
-    // of unbundled ESM. Still experimental — HMR acceptance is runtime-only,
-    // and third-party plugins may not work.
     bundledDev: true,
   },
   define: {
