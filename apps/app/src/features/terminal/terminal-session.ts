@@ -2,7 +2,7 @@ import type { VibestClient } from "@vibest/client";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
-import type { PanelHandle } from "@/components/layout/content-panel/core/panel";
+import type { PanelHandle } from "@/components/layout/content-panel/model/panel";
 
 import type { TerminalPayload } from "./terminal-payload";
 import { readTerminalTheme } from "./terminal-theme";

@@ -1,4 +1,4 @@
-import { asRecord } from "@/components/layout/content-panel/core/panel";
+import { asRecord } from "@/components/layout/content-panel/model/panel";
 
 export interface TerminalPayload {
   readonly terminalId: string;

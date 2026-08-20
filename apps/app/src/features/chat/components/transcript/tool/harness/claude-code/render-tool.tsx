@@ -102,9 +102,11 @@ export function renderClaudeCodeTool(part: AnyToolPart, message: UIMessage): Rea
     case "tool-REPL":
     case "tool-Projects":
     case "tool-ShowOnboardingRolePicker":
+    case "tool-ReadNotifications":
     case "tool-RefreshMcpTools":
     case "tool-SendFeedback":
     case "tool-propose_skills":
+    case "tool-ProposeGoal":
       return generic();
 
     default:

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 priority: p1
 issue_id: "003"
 tags: [code-review, security, electron]
@@ -16,57 +16,23 @@ The Electron webPreferences explicitly disable the sandbox, removing a critical 
 
 ## Findings
 
-**Location:** `apps/desktop/src/main/index.ts:23-26`
+**Location:** `apps/desktop/src/main/electron/main-window.ts`
+
+Previously reported at `apps/desktop/src/main/index.ts` before the desktop runtime refactor.
+
+## Resolution
+
+Sandbox is enabled in production BrowserWindow configuration:
 
 ```typescript
 webPreferences: {
-  preload: join(__dirname, "../preload/index.mjs"),
-  sandbox: false,  // <-- PROBLEM
-},
-```
-
-## Proposed Solutions
-
-### Option A: Enable sandbox (Recommended)
-
-- **Pros:** Significantly reduces attack surface
-- **Cons:** May require refactoring preload script to use contextBridge
-- **Effort:** Medium
-- **Risk:** Low (standard Electron security practice)
-
-```typescript
-webPreferences: {
-  preload: join(__dirname, "../preload/index.mjs"),
   sandbox: true,
-  contextIsolation: true,  // Verify this is enabled
-  nodeIntegration: false,  // Explicit
+  contextIsolation: true,
+  nodeIntegration: false,
 },
 ```
 
-### Option B: Document the exception
-
-- **Pros:** None
-- **Cons:** Leaves security gap, bad practice
-- **Effort:** Small
-- **Risk:** High (security debt)
-
-## Recommended Action
-
-_(To be filled during triage)_
-
-## Technical Details
-
-**Affected files:**
-
-- `apps/desktop/src/main/index.ts`
-- Potentially `apps/desktop/src/preload/` if refactoring needed
-
-## Acceptance Criteria
-
-- [ ] `sandbox: true` in webPreferences
-- [ ] `contextIsolation: true` verified
-- [ ] Preload script uses contextBridge pattern
-- [ ] App functionality verified after change
+Verified during architecture review 2026-08-20.
 
 ## Work Log
 
@@ -75,6 +41,7 @@ _(To be filled during triage)_
 | 2026-02-01 | Identified via code review                           | Electron security best practices require sandbox                |
 | 2026-02-01 | Fixed: enabled sandbox: true, contextIsolation: true | Preload already uses contextBridge pattern                      |
 | 2026-02-01 | Reverted: sandbox breaks @electron-toolkit/preload   | Need to rewrite preload without external deps to enable sandbox |
+| 2026-08-20 | Verified fixed in main-window.ts                     | Desktop AGENTS.md security section matches current config       |
 
 ## Resources
 

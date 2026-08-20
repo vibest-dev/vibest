@@ -1,4 +1,4 @@
-import { ContentPanel } from "@/components/layout/content-panel/core/content-panel";
+import { ContentPanel } from "@/components/layout/content-panel/model/content-panel";
 import type { AnyPanelView } from "@/components/layout/content-panel/react/view";
 
 /**

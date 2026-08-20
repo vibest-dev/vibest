@@ -10,7 +10,7 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import type { PanelInstance } from "@/components/layout/content-panel/core/panel";
+import type { PanelInstance } from "@/components/layout/content-panel/model/panel";
 import { definePanelFamily } from "@/components/layout/content-panel/react/view";
 
 import {

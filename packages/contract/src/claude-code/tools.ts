@@ -180,6 +180,10 @@ export const ShowOnboardingRolePicker = tool({
   inputSchema: z.custom<st.ShowOnboardingRolePickerInput>(),
   outputSchema: z.custom<st.ShowOnboardingRolePickerOutput>(),
 });
+export const ReadNotifications = tool({
+  inputSchema: z.custom<st.ReadNotificationsInput>(),
+  outputSchema: z.custom<st.ReadNotificationsOutput>(),
+});
 export const RefreshMcpTools = tool({
   inputSchema: z.custom<st.RefreshMcpToolsInput>(),
   outputSchema: z.custom<st.RefreshMcpToolsOutput>(),
@@ -192,6 +196,10 @@ export const ProposeSkills = tool({
   inputSchema: z.custom<st.ProposeSkillsInput>(),
   outputSchema: z.custom<st.ProposeSkillsOutput>(),
 }); // wire name: propose_skills (the sole snake_case tool)
+export const ProposeGoal = tool({
+  inputSchema: z.custom<st.ProposeGoalInput>(),
+  outputSchema: z.custom<st.ProposeGoalOutput>(),
+});
 
 /** Registry of typed Claude Code tools. Keys are the wire tool names. */
 export const claudeCodeTools = {
@@ -235,9 +243,11 @@ export const claudeCodeTools = {
   REPL,
   Projects,
   ShowOnboardingRolePicker,
+  ReadNotifications,
   RefreshMcpTools,
   SendFeedback,
   propose_skills: ProposeSkills, // wire name is snake_case (verified in CLI binary)
+  ProposeGoal,
 } satisfies ToolSet;
 
 /** Discriminated UI tool union, keyed `tool-Bash` | `tool-Read` | … */
@@ -287,6 +297,8 @@ export type ProjectsUIToolInvocation = UIToolInvocation<typeof Projects>;
 export type ShowOnboardingRolePickerUIToolInvocation = UIToolInvocation<
   typeof ShowOnboardingRolePicker
 >;
+export type ReadNotificationsUIToolInvocation = UIToolInvocation<typeof ReadNotifications>;
 export type RefreshMcpToolsUIToolInvocation = UIToolInvocation<typeof RefreshMcpTools>;
 export type SendFeedbackUIToolInvocation = UIToolInvocation<typeof SendFeedback>;
 export type ProposeSkillsUIToolInvocation = UIToolInvocation<typeof ProposeSkills>;
+export type ProposeGoalUIToolInvocation = UIToolInvocation<typeof ProposeGoal>;

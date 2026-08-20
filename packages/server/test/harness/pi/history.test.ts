@@ -78,6 +78,18 @@ const toolCall = (id: string, name: string, args: Record<string, unknown>) => ({
   arguments: args,
 });
 
+function comparableParts(parts: ReadonlyArray<object> | undefined): object[] {
+  return (parts ?? []).map((part) => {
+    const compact: Record<string, unknown> = Object.fromEntries(
+      Object.entries(part).filter(([, value]) => value !== undefined),
+    );
+    if (compact.type === "reasoning" || compact.type === "text") {
+      delete compact.id;
+    }
+    return compact;
+  });
+}
+
 describe("entriesToUIMessages", () => {
   it("folds a single turn into a user and an assistant message", () => {
     const messages = entriesToUIMessages(
@@ -434,6 +446,9 @@ describe("entriesToUIMessages", () => {
     );
 
     expect(history).toHaveLength(2);
-    expect(history[1]?.parts).toEqual(live?.parts);
+    // `readUIMessageStream` (ai 7.0.66) now materializes optional fields as
+    // `undefined` and keeps stream block ids on reasoning parts. History
+    // constructs settled parts directly, so compare the shared fold shape.
+    expect(comparableParts(history[1]?.parts)).toEqual(comparableParts(live?.parts));
   });
 });

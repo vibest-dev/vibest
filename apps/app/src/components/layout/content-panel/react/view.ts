@@ -7,7 +7,7 @@ import {
   type PanelHandle,
   type PanelInstance,
   type SingletonPanelInput,
-} from "../core/panel";
+} from "../model/panel";
 
 /**
  * The half of a panel the core deliberately doesn't understand. It reaches the
