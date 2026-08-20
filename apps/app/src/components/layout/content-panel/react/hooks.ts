@@ -3,8 +3,8 @@ import { useStore } from "zustand";
 
 import { sessionRefKey } from "@/lib/session-ref";
 
-import type { PanelPresentation, PanelSnapshot } from "../core/content-panel";
-import type { PanelDefinition, PanelInstance, PayloadArgs } from "../core/panel";
+import type { PanelPresentation, PanelSnapshot } from "../model/content-panel";
+import type { PanelDefinition, PanelInstance, PayloadArgs } from "../model/panel";
 import { useContentPanelContext } from "./context";
 import type { AnyPanelView } from "./view";
 

@@ -5,7 +5,7 @@ import { cn } from "@vibest/ui/lib/utils";
 import { Maximize2Icon, Minimize2Icon, PlusIcon, XIcon } from "lucide-react";
 import { type ComponentProps, useEffect, useRef, type ReactNode } from "react";
 
-import type { OpenPanel } from "../core/content-panel";
+import type { OpenPanel } from "../model/content-panel";
 import { type ContentPanelSession, useContentPanel, usePanelSnapshot } from "./hooks";
 import type { AnyPanelView } from "./view";
 

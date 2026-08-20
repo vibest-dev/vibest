@@ -1,7 +1,7 @@
 import type { SessionRef } from "@vibest/contract";
 import { createContext, use } from "react";
 
-import type { ContentPanel } from "../core/content-panel";
+import type { ContentPanel } from "../model/content-panel";
 import type { AnyPanelView } from "./view";
 
 export interface ContentPanelContextValue {

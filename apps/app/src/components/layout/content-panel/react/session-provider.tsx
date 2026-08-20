@@ -1,7 +1,7 @@
 import type { SessionRef } from "@vibest/contract";
 import { type ReactNode, useMemo } from "react";
 
-import type { ContentPanel } from "../core/content-panel";
+import type { ContentPanel } from "../model/content-panel";
 import { ContentPanelContext } from "./context";
 import type { AnyPanelView } from "./view";
 

@@ -2,7 +2,7 @@ import { TerminalIcon } from "lucide-react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import { asRecord, type PanelInstance } from "../core/panel";
+import { asRecord, type PanelInstance } from "../model/panel";
 import { definePanelFamily } from "../react/view";
 
 interface TerminalPayload {

@@ -10,7 +10,7 @@ import { Spinner } from "@vibest/ui/components/spinner";
 import { FilesIcon, FileTextIcon } from "lucide-react";
 import { useCallback } from "react";
 
-import type { PanelHandle } from "@/components/layout/content-panel/core/panel";
+import type { PanelHandle } from "@/components/layout/content-panel/model/panel";
 import { useContentPanel } from "@/components/layout/content-panel/react/hooks";
 import { definePanel } from "@/components/layout/content-panel/react/view";
 
