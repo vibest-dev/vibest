@@ -43,9 +43,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # React Doctor runs setup-node internally, so read the declarative tool
+      # version without evaluating hooks from the checked-out mise config.
       - name: Read project Node version
         id: project-node
-        run: echo "version=$(tr -d '[:space:]' < .node-version)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(python3 -c '
+          import re
+          import tomllib
+
+          with open("mise.toml", "rb") as file:
+              version = tomllib.load(file)["tools"]["node"]
+          if not isinstance(version, str) or re.fullmatch(r"\d+(?:\.\d+){0,2}", version) is None:
+              raise SystemExit("mise.toml tools.node must be a numeric Node version")
+          print(version)
+          ')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - uses: millionco/react-doctor@01820bb4fd4d0a4aebcd8df2b2a143a098649cb2 # v2.2.8

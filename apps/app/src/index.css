@@ -65,8 +65,27 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  html,
   body {
+    min-height: 100svh;
+    overscroll-behavior: none;
+  }
+
+  body {
+    height: 100%;
+    overflow: hidden;
     @apply bg-background text-foreground;
+  }
+
+  #root {
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-y: hidden;
+    overscroll-behavior-y: none;
   }
 }
 

@@ -6,12 +6,16 @@ import {
   PromptInputModelSelectTrigger,
   PromptInputModelSelectValue,
 } from "@vibest/ui/ai-elements/prompt-input";
+import { Button } from "@vibest/ui/components/button";
+import { ChevronDownIcon } from "lucide-react";
 
 import { useHarnessAgents } from "@/features/chat/harness/use-harness";
 
+import { HarnessIcon } from "./harness-icon";
+
 // Which agent runs the session. Only offered before the session exists: the
 // harness is part of the SessionRef, so it is fixed at create time (see
-// HarnessBadge for how a live session shows it).
+// ChatHarnessIcon for how a live session shows it).
 //
 // Harnesses whose CLI is missing stay in the list, disabled and labelled with
 // the declared `reason` — hiding them turns "why is Codex not here?" into a
@@ -29,6 +33,7 @@ export function HarnessSelect({
     label: harnessAgent.name,
     value: harnessAgent.id,
   }));
+  const selectedHarnessAgent = harnessAgents.find((harnessAgent) => harnessAgent.id === value);
 
   return (
     <PromptInputModelSelect
@@ -38,9 +43,24 @@ export function HarnessSelect({
         if (next) onChange(next as HarnessAgentId);
       }}
     >
-      <PromptInputModelSelectTrigger className="min-h-8 py-0">
-        <PromptInputModelSelectValue />
-      </PromptInputModelSelectTrigger>
+      {/* The render callback preserves Base UI's Select behavior while replacing
+          the field-style trigger chrome and its hard-coded up/down icon. */}
+      <PromptInputModelSelectTrigger
+        render={({ children: _children, className: _className, ...triggerProps }) => (
+          <Button
+            {...triggerProps}
+            className="text-foreground gap-1.5 px-3 font-normal"
+            size="default"
+            variant="ghost"
+          >
+            <PromptInputModelSelectValue className="flex min-w-0 items-center gap-2">
+              <HarnessIcon className="size-4 shrink-0" harnessAgentId={value} />
+              <span className="truncate">{selectedHarnessAgent?.name ?? value}</span>
+            </PromptInputModelSelectValue>
+            <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 opacity-70" />
+          </Button>
+        )}
+      />
       <PromptInputModelSelectContent>
         {harnessAgents.map((harnessAgent) => (
           <PromptInputModelSelectItem
@@ -48,13 +68,16 @@ export function HarnessSelect({
             value={harnessAgent.id}
             disabled={!harnessAgent.available}
           >
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">{harnessAgent.name}</span>
-              {harnessAgent.reason ? (
-                <span className="text-muted-foreground truncate text-xs">
-                  {harnessAgent.reason}
-                </span>
-              ) : null}
+            <span className="flex min-w-0 items-start gap-2">
+              <HarnessIcon className="mt-0.5 size-4 shrink-0" harnessAgentId={harnessAgent.id} />
+              <span className="min-w-0 truncate">
+                {harnessAgent.name}
+                {harnessAgent.reason ? (
+                  <small className="text-muted-foreground block truncate text-xs">
+                    {harnessAgent.reason}
+                  </small>
+                ) : null}
+              </span>
             </span>
           </PromptInputModelSelectItem>
         ))}

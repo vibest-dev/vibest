@@ -18,11 +18,11 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
-    "@effect/platform-node": "catalog:",
+    "@effect/platform-node": "catalog:effect",
     "@orpc/contract": "catalog:orpc",
     "@orpc/server": "catalog:orpc",
     "ai": "catalog:",
-    "effect": "catalog:",
+    "effect": "catalog:effect",
     "uuid": "catalog:",
     "ws": "catalog:",
     "zod": "catalog:"

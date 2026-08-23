@@ -1,6 +1,8 @@
-import { Effect, Option } from "effect";
+import { Cause, Context, Effect, Option, Scope } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
+import { PathsLayer } from "../config/paths";
+import * as Observability from "../observability";
 import { formatReadyLine } from "./handshake";
 import { listenServer } from "./listen";
 import { createServer, ServerStartupError } from "./server";
@@ -80,21 +82,68 @@ export function resolveServeConfig(input: ServeInput): {
  * The auth token is env-only. The server is acquired in the ambient scope so
  * `NodeRuntime.runMain`'s SIGINT/SIGTERM interrupt tears it down through the
  * release finalizer.
+ *
+ * This is the process composition root for observability. The layer is
+ * provided once around the complete server lifecycle, so foreground and
+ * daemon runs share the same local logger. FileSystem and Crypto stay on
+ * the outer `NodeServices.layer`; Paths is provided here so the log
+ * directory is the same `logsDir` the rest of the process uses.
+ *
+ * `createServer` is Promise-shaped, so `serveWith` captures the process
+ * context (logger included) and `createRpcRuntime` `provideMerge`s it into
+ * `AgentRuntimeLayer`. That merge must stay `provideMerge`, not `mergeAll`:
+ * fibers forked while the graph is building would otherwise capture Effect's
+ * default logger.
  */
 export const runServe = (input: ServeInput) =>
+  serveWith(input).pipe(
+    Effect.tapError((error) =>
+      Effect.logError("server startup failed", Cause.fail(error)).pipe(
+        Effect.annotateLogs({ event: "server.startup_failed", phase: error.phase }),
+      ),
+    ),
+    Effect.provide(Observability.layer()),
+    Effect.provide(PathsLayer),
+  );
+
+const serveWith = (input: ServeInput) =>
   Effect.gen(function* () {
     const authToken = takeAuthToken();
     const { port: requestedPort, corsOrigins, allowedHosts } = resolveServeConfig(input);
 
+    // The first line of every run, and the one that dates the file. It also
+    // records the shape of the run — auth on or off, which origins are allowed
+    // — because a misconfiguration explains failures that otherwise look like
+    // the client's fault.
+    yield* Effect.logInfo("server starting").pipe(
+      Effect.annotateLogs({
+        event: "server.starting",
+        requestedPort,
+        authenticated: authToken !== undefined,
+        corsOrigins,
+        allowedHosts,
+        version: process.env.npm_package_version,
+        node: process.version,
+      }),
+    );
+
+    const effectContext = Context.omit(Scope.Scope)(yield* Effect.context<never>());
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => createServer({ authToken, corsOrigins, allowedHosts }),
+        try: () => createServer({ authToken, corsOrigins, allowedHosts, effectContext }),
         catch: (cause) => new ServerStartupError({ phase: "create", cause }),
       }),
       // A shutdown failure is logged, not thrown: the process is exiting, and
       // a defect here would mask whatever caused the exit in the first place.
+      //
+      // The clean stop is logged too: a log that ends without it ended in a
+      // kill -9, an OOM, or a crash, and knowing which is the first question
+      // when reading back a run that stopped for no visible reason.
       (managed) =>
         Effect.tryPromise(() => managed.dispose()).pipe(
+          Effect.andThen(
+            Effect.logInfo("server stopped").pipe(Effect.annotateLogs({ event: "server.stopped" })),
+          ),
           Effect.catch((error) => Effect.logWarning("server shutdown failed", error)),
         ),
     );
@@ -104,10 +153,15 @@ export const runServe = (input: ServeInput) =>
       catch: (cause) => new ServerStartupError({ phase: "listen", cause }),
     });
 
-    // Machine-readable first, for the desktop supervisor; human-readable second.
-    // Both go to stdout — Effect's logger writes to stderr, so it never mixes in.
+    // Machine-readable first, for the desktop supervisor; human-readable
+    // second. Both go to stdout; observability writes to the local log file and
+    // only mirrors to stderr when `VIBEST_PRINT_LOGS=1`.
     console.log(formatReadyLine({ port }));
     console.log(`vibest listening on http://127.0.0.1:${port}`);
+
+    yield* Effect.logInfo("server listening").pipe(
+      Effect.annotateLogs({ event: "server.listening", port }),
+    );
 
     return yield* Effect.never;
   });

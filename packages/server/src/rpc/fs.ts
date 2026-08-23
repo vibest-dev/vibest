@@ -18,37 +18,48 @@ const IGNORED_DIRS = new Set(["node_modules"]);
 export const fsRouter = orpc.router({
   readFileString: orpc.readFileString.effect(function* ({ input, errors }) {
     const fs = yield* FileSystemService;
-    // Map the service's typed effect errors onto the contract's declared errors,
-    // so the client gets a code + data instead of a generic 500.
     return yield* fs.readFileString(input.cwd, input.path).pipe(
       Effect.catchTags({
-        WorkspacePathEscape: (e) =>
-          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
-        WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
-        WorkspaceFileTooLarge: (e) =>
+        WorkspacePathEscape: (error) =>
+          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: error.cwd, path: error.path } })),
+        WorkspaceFileNotFound: (error) =>
+          Effect.fail(errors.NOT_FOUND({ data: { path: error.path } })),
+        WorkspaceNotFile: (error) => Effect.fail(errors.NOT_FILE({ data: { path: error.path } })),
+        WorkspaceFileTooLarge: (error) =>
           Effect.fail(
-            errors.FILE_TOO_LARGE({ data: { path: e.path, size: e.size, limit: e.limit } }),
+            errors.FILE_TOO_LARGE({
+              data: { path: error.path, size: error.size, limit: error.limit },
+            }),
           ),
-        WorkspaceBinaryFile: (e) => Effect.fail(errors.BINARY_FILE({ data: { path: e.path } })),
-        WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+        WorkspaceBinaryFile: (error) =>
+          Effect.fail(errors.BINARY_FILE({ data: { path: error.path } })),
+        WorkspaceReadError: (error) =>
+          Effect.fail(errors.READ_FAILED({ data: { path: error.path } })),
+      }),
+    );
+  }),
+  readTree: orpc.readTree.effect(function* ({ input, errors }) {
+    const fs = yield* FileSystemService;
+    return yield* fs.readTree(input.cwd).pipe(
+      Effect.catchTags({
+        WorkspacePathEscape: (error) =>
+          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: error.cwd, path: error.path } })),
+        WorkspaceNotDirectory: (error) =>
+          Effect.fail(errors.NOT_DIRECTORY({ data: { path: error.path } })),
+        WorkspaceReadError: (error) =>
+          Effect.fail(errors.READ_FAILED({ data: { path: error.path } })),
       }),
     );
   }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;
-    // Resolving and joining are pure string math, so they stay on `node:path`.
     const dir = path.resolve(input.path ?? os.homedir());
-    // Folder-picker policy (owned here, not a shared fs service): directories
-    // only, hide dotfolders unless requested, always hide node_modules, and
-    // sort by name.
     const names = yield* fs
       .readDirectory(dir)
       .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path: dir } })));
     const candidates = names.filter(
       (name) => (input.includeHidden || !name.startsWith(".")) && !IGNORED_DIRS.has(name),
     );
-    // readDirectory yields names only, so stat each to keep just directories. A
-    // failing stat (e.g. broken symlink) drops that entry rather than the list.
     const flagged = yield* Effect.forEach(
       candidates,
       (name) =>
@@ -57,12 +68,12 @@ export const fsRouter = orpc.router({
           Effect.catch(() => Effect.succeed(false)),
           Effect.map((isDirectory) => ({ name, isDirectory })),
         ),
-      { concurrency: "unbounded" },
+      { concurrency: 32 },
     );
     const directories = flagged
-      .filter((e) => e.isDirectory)
-      .map((e) => ({ name: e.name, path: path.join(dir, e.name) }));
-    directories.sort((a, b) => a.name.localeCompare(b.name));
+      .filter((entry) => entry.isDirectory)
+      .map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }));
+    directories.sort((left, right) => left.name.localeCompare(right.name));
     const parent = path.dirname(dir);
     return { path: dir, parent: parent === dir ? null : parent, directories };
   }),

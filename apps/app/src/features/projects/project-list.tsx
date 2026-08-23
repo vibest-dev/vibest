@@ -1,3 +1,4 @@
+import type { SessionRef } from "@vibest/contract";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -15,7 +16,13 @@ import { ProjectSessionsGroup } from "@/features/projects/project-sessions-group
 import { useProjects } from "@/features/projects/use-projects";
 
 /** Every imported project, each rendering its own session list. */
-export function ProjectList({ onImport }: { onImport: () => void }) {
+export function ProjectList({
+  isSessionActive,
+  onImport,
+}: {
+  readonly isSessionActive: (ref: SessionRef) => boolean;
+  readonly onImport: () => void;
+}) {
   const projects = useProjects();
 
   return (
@@ -37,7 +44,11 @@ export function ProjectList({ onImport }: { onImport: () => void }) {
         <CollapsiblePanel>
           <SidebarGroupContent className="flex flex-col gap-2">
             {(projects.data ?? []).map((project) => (
-              <ProjectSessionsGroup key={project.id} project={project} />
+              <ProjectSessionsGroup
+                key={project.id}
+                isSessionActive={isSessionActive}
+                project={project}
+              />
             ))}
           </SidebarGroupContent>
         </CollapsiblePanel>

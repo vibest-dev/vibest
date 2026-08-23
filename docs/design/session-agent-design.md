@@ -773,7 +773,7 @@ type ListSessionsOutput = {
 };
 
 type RenameSessionInput = SessionRef & {
-  name: string;
+  title: string;
 };
 
 type RenameSessionOutput = void;
@@ -1398,7 +1398,7 @@ type ServerEvent = {
     }
   | {
       type: "session.renamed";
-      name: string;
+      title: string;
     }
   | {
       type: "session.message.chunk";

@@ -47,8 +47,18 @@ export class WorkspacePathEscape extends Data.TaggedError("WorkspacePathEscape")
   readonly path: string;
 }> {}
 
+/** The requested workspace path no longer exists. */
+export class WorkspaceFileNotFound extends Data.TaggedError("WorkspaceFileNotFound")<{
+  readonly path: string;
+}> {}
+
 /** The path exists but is not a regular file (e.g. a directory). */
 export class WorkspaceNotFile extends Data.TaggedError("WorkspaceNotFile")<{
+  readonly path: string;
+}> {}
+
+/** The path exists but is not a directory (e.g. a regular file). */
+export class WorkspaceNotDirectory extends Data.TaggedError("WorkspaceNotDirectory")<{
   readonly path: string;
 }> {}
 

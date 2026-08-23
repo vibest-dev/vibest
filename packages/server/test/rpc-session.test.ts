@@ -19,6 +19,7 @@ import {
   makeHarnessAgentRegistry,
 } from "../src/harness";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
+import * as Observability from "../src/observability";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
@@ -103,6 +104,7 @@ async function setup() {
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
     NodeServices.layer,
+    Observability.discard,
   );
   const runtime = ManagedRuntime.make(appLayer);
   // Layer construction does file I/O now (the project document loads eagerly),
@@ -151,28 +153,96 @@ describe("session router", () => {
     }
   });
 
-  it("lists sessions with live status and drops them on delete", async () => {
+  it("answers for a closed session over the wire instead of SESSION_NOT_ACTIVE", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+      await client.session.close({ ref });
+
+      // What a browser does when it reopens the page after a server restart.
+      // None of it used to be answerable without a live runtime, so the client
+      // retried forever.
+      const prepared = await client.session.prepare({ ref });
+      const status = await client.session.getStatus({ ref });
+      const snapshot = await client.session.getSnapshot({ ref });
+
+      expect(prepared).toEqual(ref);
+      expect(status).toEqual({ phase: "idle" });
+      expect(snapshot.cursor).toBe(0);
+      expect(snapshot.activeTurn).toBeNull();
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("lists, renames, archives, restores, and deletes sessions", async () => {
     const { client, workspace, dispose } = await setup();
     try {
       const project = await client.project.create({ path: workspace });
       const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
 
       // Active session: list carries the live phase from the running runtime.
+      // Omitted `archived` defaults to the active-session listing.
       const active = await client.session.list({ projectId: project.id });
       expect(active).toHaveLength(1);
       expect(active[0]?.sessionId).toBe(ref.sessionId);
       expect(active[0]?.status?.phase).toBeDefined();
+      expect(active[0]?.archived).toBe(false);
+
+      await client.session.rename({ ref, title: "Login bug" });
+      const renamed = await client.session.list({ projectId: project.id });
+      expect(renamed[0]?.title).toBe("Login bug");
+
+      await client.session.archive({ ref, archived: true });
+      const archived = await client.session.list({ projectId: project.id, archived: true });
+      expect(archived[0]?.archived).toBe(true);
+      expect(await client.session.list({ projectId: project.id, archived: false })).toEqual([]);
+
+      await client.session.archive({ ref, archived: false });
+      const restored = await client.session.list({ projectId: project.id, archived: false });
+      expect(restored[0]?.archived).toBe(false);
+      expect(await client.session.list({ projectId: project.id, archived: true })).toEqual([]);
 
       // Closed but not deleted: metadata stays, the runtime is gone → no status.
       await client.session.close({ ref });
-      const idle = await client.session.list({ projectId: project.id });
+      const idle = await client.session.list({ projectId: project.id, archived: false });
       expect(idle).toHaveLength(1);
       expect(idle[0]?.status).toBeUndefined();
 
       // Delete: metadata removed → the session leaves the listing entirely.
       await client.session.delete({ ref });
-      const empty = await client.session.list({ projectId: project.id });
+      const empty = await client.session.list({ projectId: project.id, archived: false });
       expect(empty).toHaveLength(0);
+    } finally {
+      await dispose();
+    }
+  });
+
+  // The renaming client can repaint its own row optimistically; this is the
+  // path it cannot cover — a second client learning the new title without
+  // being told to go re-read the list. The firehose carries the title itself,
+  // which is what lets the fold patch in place instead of invalidating.
+  it("announces a rename on the global firehose, carrying the new title", async () => {
+    const { client, workspace, dispose } = await setup();
+    try {
+      const project = await client.project.create({ path: workspace });
+      const ref = await client.session.create({ projectId: project.id, harnessAgentId: "codex" });
+
+      // Subscribed before the rename: the live stream has no replay, so an
+      // event this observer misses is an event it never learns about.
+      const observer = await client.session.subscribe({ scope: { kind: "global" } });
+      await client.session.rename({ ref, title: "Login bug" });
+
+      let announced: string | undefined;
+      for await (const item of observer) {
+        if (item.type !== "event") continue;
+        if (item.event.type === "session.renamed") {
+          announced = item.event.title;
+          break;
+        }
+      }
+      expect(announced).toBe("Login bug");
     } finally {
       await dispose();
     }

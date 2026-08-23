@@ -1,6 +1,6 @@
 import { Editor, type Extensions } from "@tiptap/react";
 
-import { getChatText } from "./serialize";
+import { getChatText, hasChatContent } from "./serialize";
 
 export interface ChatInputControllerOptions {
   /** Factory receives self so it can close () => self.submit() into keymap extensions. */
@@ -33,6 +33,30 @@ export class ChatInputController {
 
   getText() {
     return getChatText(this.editor);
+  }
+
+  /**
+   * Whether `submit()` would send anything — the same threshold, read off the
+   * same document, so the send button and the send path can't drift apart.
+   *
+   * A disposed controller answers `false` rather than throwing: React can hand
+   * a `useSyncExternalStore` snapshot the outgoing controller *after* this
+   * effect's cleanup has already run (see `useChatInputHasContent`), and
+   * "destroyed editor" is genuinely "nothing to send".
+   */
+  hasContent(): boolean {
+    return this.editor.isDestroyed ? false : hasChatContent(this.editor);
+  }
+
+  /**
+   * Subscribe to document changes. Every transaction fires — callers that only
+   * care about a derived value re-read it and compare there.
+   */
+  onChange(listener: () => void): () => void {
+    this.editor.on("transaction", listener);
+    return () => {
+      this.editor.off("transaction", listener);
+    };
   }
 
   async submit() {

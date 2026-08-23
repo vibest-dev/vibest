@@ -1,5 +1,5 @@
-import { useNavigate, useParams } from "@tanstack/react-router";
-import type { Project } from "@vibest/contract";
+import { useNavigate } from "@tanstack/react-router";
+import type { Project, SessionRef, SessionSummary } from "@vibest/contract";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -10,32 +10,38 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
 } from "@vibest/ui/components/sidebar";
 import { Folder, FolderOpen, SquarePen } from "lucide-react";
 
+import { ProjectSessionRow } from "@/features/projects/project-session-row";
 import { useProjectSessions } from "@/features/projects/use-project-sessions";
+
+const EMPTY_SESSIONS: ReadonlyArray<SessionSummary> = [];
 
 /**
  * One project and the sessions under it, as a collapsible sidebar group. The
  * label is its own collapse trigger; a Folder icon swaps to FolderOpen when the
- * panel is open (two icon entities, not a rotation). Fetching lives in
- * `useProjectSessions`; how a row looks and what a click does are this
- * component's own business.
+ * panel is open (two icon entities, not a rotation). This component owns only
+ * grouping and fetching; each row composes its own navigation and actions.
  */
-export function ProjectSessionsGroup({ project }: { project: Project }) {
+export function ProjectSessionsGroup({
+  isSessionActive,
+  project,
+}: {
+  readonly isSessionActive: (ref: SessionRef) => boolean;
+  readonly project: Project;
+}) {
   const navigate = useNavigate();
-  // strict: false — the sidebar renders on every route, and most have no sessionId.
-  const { sessionId: activeSessionId } = useParams({ strict: false });
   const sessions = useProjectSessions(project.id);
+  const rows = sessions.data ?? EMPTY_SESSIONS;
 
   return (
     <Collapsible defaultOpen>
       <section className="relative min-w-0" aria-labelledby={`project-${project.id}`}>
-        {/* pe-8 keeps a long name from running under the absolutely positioned action. */}
+        {/* pe-8 keeps a long name off the absolutely positioned action; w-full is what
+            makes it and `truncate` bite, since the label renders as a shrink-to-fit <button>. */}
         <SidebarGroupLabel
-          className="text-sidebar-accent-foreground h-7 min-w-0 pe-8 text-sm"
+          className="text-sidebar-accent-foreground h-7 w-full min-w-0 pe-8 text-sm"
           id={`project-${project.id}`}
           title={project.path}
           render={
@@ -59,30 +65,13 @@ export function ProjectSessionsGroup({ project }: { project: Project }) {
         <CollapsiblePanel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {sessions.map((session) => (
-                <SidebarMenuItem key={session.sessionId}>
-                  <SidebarMenuButton
-                    isActive={session.sessionId === activeSessionId}
-                    // The whole ref rides along so the route can resume directly.
-                    onClick={() =>
-                      navigate({
-                        to: "/session/$sessionId",
-                        params: { sessionId: session.sessionId },
-                        search: { projectId: session.projectId, harness: session.harnessAgentId },
-                      })
-                    }
-                  >
-                    <span className="truncate">{session.title ?? "New chat"}</span>
-                    {/* Busy elsewhere too: status is server-derived, so a turn any client is running shows here. requires_action keeps the turn open, so it counts as busy. */}
-                    {(session.status?.phase === "running" ||
-                      session.status?.phase === "requires_action") && (
-                      <span
-                        className="ms-auto size-2 shrink-0 animate-pulse rounded-full bg-emerald-500"
-                        title="A turn is running in this session"
-                      />
-                    )}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+              {rows.map((session) => (
+                <ProjectSessionRow
+                  key={session.sessionId}
+                  active={isSessionActive(session)}
+                  isActive={() => isSessionActive(session)}
+                  session={session}
+                />
               ))}
             </SidebarMenu>
           </SidebarGroupContent>

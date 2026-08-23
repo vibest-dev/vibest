@@ -50,9 +50,11 @@ describe("SDK-typed tools: input/output ARE the sdk-tools types", () => {
     expectTypeOf<
       In<"ShowOnboardingRolePicker">
     >().toEqualTypeOf<st.ShowOnboardingRolePickerInput>();
+    expectTypeOf<In<"ReadNotifications">>().toEqualTypeOf<st.ReadNotificationsInput>();
     expectTypeOf<In<"RefreshMcpTools">>().toEqualTypeOf<st.RefreshMcpToolsInput>();
     expectTypeOf<In<"SendFeedback">>().toEqualTypeOf<st.SendFeedbackInput>();
     expectTypeOf<In<"propose_skills">>().toEqualTypeOf<st.ProposeSkillsInput>();
+    expectTypeOf<In<"ProposeGoal">>().toEqualTypeOf<st.ProposeGoalInput>();
   });
 
   test("outputs", () => {
@@ -87,8 +89,10 @@ describe("SDK-typed tools: input/output ARE the sdk-tools types", () => {
     expectTypeOf<
       Out<"ShowOnboardingRolePicker">
     >().toEqualTypeOf<st.ShowOnboardingRolePickerOutput>();
+    expectTypeOf<Out<"ReadNotifications">>().toEqualTypeOf<st.ReadNotificationsOutput>();
     expectTypeOf<Out<"RefreshMcpTools">>().toEqualTypeOf<st.RefreshMcpToolsOutput>();
     expectTypeOf<Out<"SendFeedback">>().toEqualTypeOf<st.SendFeedbackOutput>();
     expectTypeOf<Out<"propose_skills">>().toEqualTypeOf<st.ProposeSkillsOutput>();
+    expectTypeOf<Out<"ProposeGoal">>().toEqualTypeOf<st.ProposeGoalOutput>();
   });
 });

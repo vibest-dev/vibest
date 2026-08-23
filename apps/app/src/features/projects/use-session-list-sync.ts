@@ -22,11 +22,11 @@ export function useSessionListSync(): void {
   useEffect(() => {
     const abort = new AbortController();
 
-    // The exact key the sidebar's `session.list` query reads — the `queryOptions`
-    // key carries `type: "query"`, which the bare `.key({ input })` omits, so
-    // setQueryData must use this or it writes a phantom entry nothing renders.
-    const listKeyFor = (projectId: string) =>
-      orpcQueryUtils.session.list.queryOptions({ input: { projectId } }).queryKey;
+    // The exact keys the sidebar's active/archived queries read. `queryOptions`
+    // carries `type: "query"`, which the bare `.key({ input })` omits, so cache
+    // writes must use these or they land in phantom entries nothing renders.
+    const listKeyFor = (projectId: string, archived: boolean) =>
+      orpcQueryUtils.session.list.queryOptions({ input: { projectId, archived } }).queryKey;
 
     const run = async () => {
       while (!abort.signal.aborted) {

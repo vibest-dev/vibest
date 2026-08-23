@@ -64,9 +64,9 @@ class FakeTransport implements ChatSessionTransport {
   setPermissionMode = async (_mode: PermissionMode) => {};
 }
 
-const makeChat = () => {
+const makeChat = (options?: { onTerminated?: () => void }) => {
   const transport = new FakeTransport();
-  const chat = new Chat({ sessionRef: ref, transport });
+  const chat = new Chat({ sessionRef: ref, transport, onTerminated: options?.onTerminated });
   const emit = (event: ChatTransportEvent) => transport.onEvent?.(event);
   const attach = async (snapshot: Partial<SessionRuntimeSnapshot>) => {
     emit({
@@ -129,6 +129,30 @@ const toolRequest: AgentRequest = {
 };
 
 describe("Chat hydration", () => {
+  // Reattaching across a server restart: the session's seq counter is rebuilt
+  // from scratch, so the next turn's events all land below the cursor we were
+  // holding. Keeping that cursor drops the entire turn and the page sits on a
+  // spinner forever — the exact failure a live restart produced.
+  it("rejoins from scratch when the server's seq counter has restarted", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 8 });
+    expect(chat.store.getState().messages).toHaveLength(1);
+
+    transport.history = [userMessage("user-1", "hello")];
+    await attach({ cursor: 0 });
+
+    const [start, delta, end] = textChunks("t", "after the restart");
+    for (const [seq, chunk] of [start!, delta!, end!].entries()) {
+      live(seq + 1, { type: "session.message.chunk", turnId: "turn-1", chunk });
+    }
+    await settle();
+
+    const last = chat.store.getState().messages.at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(assistantText(last)).toBe("after the restart");
+  });
+
   it("lays the history floor before folding buffered or live chunks", async () => {
     const { chat, transport, attach, live } = makeChat();
     transport.history = [userMessage("user-1", "hello")];
@@ -276,6 +300,51 @@ describe("Chat hydration", () => {
     const messages = chat.store.getState().messages;
     expect(messages[0]!.role).toBe("user");
     expect(messages[0]!.id).toBe("prompt-1");
+  });
+});
+
+// An empty transcript means two different things before and after the floor
+// lands, and the transcript renders a verdict on it — so the state is asserted
+// rather than inferred from `messages.length`.
+describe("Chat history floor state", () => {
+  it("stays 'loading' until the floor lands, then settles even on an empty read", async () => {
+    const { chat, transport, attach } = makeChat();
+    let openGate: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      openGate = resolve;
+    });
+    transport.history = [];
+    expect(chat.store.getState().historyStatus).toBe("loading");
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("loading");
+    openGate();
+    await settle();
+    expect(chat.store.getState().historyStatus).toBe("settled");
+  });
+
+  // Both ways a read comes back with no floor — capability absent, read threw —
+  // land on the same state: the transcript says so instead of showing a blank
+  // that would read as "nothing was ever said".
+  it("marks the history unavailable when the harness has no read", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.history = null;
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("unavailable");
+  });
+
+  it("marks the history unavailable when the read fails", async () => {
+    const { chat, transport, attach } = makeChat();
+    transport.getMessages = async () => {
+      throw new Error("rpc failed");
+    };
+    await attach({});
+    expect(chat.store.getState().historyStatus).toBe("unavailable");
+  });
+
+  it("stops loading when the session terminates before any floor landed", async () => {
+    const { chat, emit } = makeChat();
+    emit({ type: "closed", reason: "session_deleted" });
+    expect(chat.store.getState().historyStatus).toBe("settled");
   });
 });
 
@@ -721,6 +790,18 @@ describe("Chat lifecycle", () => {
     emit({ type: "closed", reason: "session_closed" });
     expect(chat.store.getState().status).toBe("error");
     expect(chat.store.getState().error?.message).toBe("Session closed");
+  });
+
+  it("hands the owner a one-shot termination signal", async () => {
+    let terminations = 0;
+    const { emit, attach } = makeChat({ onTerminated: () => (terminations += 1) });
+    await attach({});
+
+    emit({ type: "closed", reason: "session_closed" });
+    // A duplicate from the same dead stream is still one termination: the
+    // owner has already released this Chat by then.
+    emit({ type: "closed", reason: "session_deleted" });
+    expect(terminations).toBe(1);
   });
 
   it("dispose tears down the subscription and folds", async () => {

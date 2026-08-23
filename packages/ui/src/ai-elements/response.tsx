@@ -26,7 +26,7 @@ type MarkdownPosition = { start?: MarkdownPoint; end?: MarkdownPoint };
 type MarkdownNode = {
   tagName?: string;
   position?: MarkdownPosition;
-  properties?: { className?: string };
+  properties?: { className?: string | string[] };
 };
 
 type WithNode<T> = T & {

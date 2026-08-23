@@ -16,13 +16,23 @@ export class Paths extends Context.Service<
     readonly projectsFile: string;
     /** `storage/sessions/` — one `<projectId>/` subdir per project. */
     readonly sessionsDir: string;
+    /** `$VIBEST_HOME/logs` — process log and daemon stdio. */
+    readonly logsDir: string;
   }
 >()("Paths") {}
+
+/** Owner-only, matching `daemon.pid`. Shared by the log layer and the launcher. */
+export const LOGS_DIRECTORY_MODE = 0o700;
+export const LOG_FILE_MODE = 0o600;
+
+export const VIBEST_LOG_FILE = "vibest.log";
+export const DAEMON_STDIO_LOG_FILE = "daemon-stdio.log";
 
 const resolve = (home: string) => ({
   home,
   projectsFile: path.join(home, "storage", "projects.json"),
   sessionsDir: path.join(home, "storage", "sessions"),
+  logsDir: logsDirectory(home),
 });
 
 /**
@@ -58,7 +68,8 @@ export function resolveVibestHome(env: NodeJS.ProcessEnv = process.env): string 
 export type DaemonLocation = {
   /** `$VIBEST_HOME` — Projects and Sessions. Handed to the daemon process. */
   readonly home: string;
-  /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.log`, `.stopped`. */
+  /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.stopped`. Lifecycle state
+   * only; the daemon's logs live under `$VIBEST_HOME/logs`. */
   readonly daemonDir: string;
   /**
    * Pre-nested lifecycle directory. Present only for the default layout so
@@ -94,6 +105,14 @@ export function resolveDaemonLocation(env: NodeJS.ProcessEnv = process.env): Dae
 export function resolveDaemonDirectory(env: NodeJS.ProcessEnv = process.env): string {
   return resolveDaemonLocation(env).daemonDir;
 }
+
+/** `$VIBEST_HOME/logs` — the one directory every server process writes logs to. */
+export const logsDirectory = (home: string): string => path.join(home, "logs");
+
+export const vibestLogPath = (logsDir: string): string => path.join(logsDir, VIBEST_LOG_FILE);
+
+export const daemonStdioLogPath = (logsDir: string): string =>
+  path.join(logsDir, DAEMON_STDIO_LOG_FILE);
 
 /** Point the runtime at an explicit home directory (used in tests). */
 export const layerPaths = (home: string): Layer.Layer<Paths> => Layer.succeed(Paths, resolve(home));

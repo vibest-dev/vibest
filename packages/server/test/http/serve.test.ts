@@ -1,13 +1,24 @@
+import fs from "node:fs/promises";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { resolveServeConfig, runServe } from "../../src/http/serve";
 import { ServerStartupError } from "../../src/http/server";
+import { NodePlatformLayer } from "../platform";
 
-const ENV_KEYS = ["VIBEST_PORT", "VIBEST_CORS_ORIGINS", "NODE_ENV"] as const;
+const ENV_KEYS = [
+  "VIBEST_PORT",
+  "VIBEST_CORS_ORIGINS",
+  "NODE_ENV",
+  // `runServe` provides observability, which writes below `$VIBEST_HOME/logs`.
+  // Pin it per test so the suite never touches the developer's real home.
+  "VIBEST_HOME",
+] as const;
 
 let saved: Record<string, string | undefined>;
 
@@ -76,15 +87,30 @@ describe("runServe", () => {
     await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
     const { port } = blocker.address() as AddressInfo;
 
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-serve-"));
+    process.env.VIBEST_HOME = home;
+
     try {
       const exit = await Effect.runPromiseExit(
-        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })),
+        Effect.scoped(runServe({ port: Option.some(port), corsOrigin: [], allowedHost: [] })).pipe(
+          Effect.provide(NodePlatformLayer),
+        ),
       );
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
       expect(error).toBeInstanceOf(ServerStartupError);
       expect((error as ServerStartupError).phase).toBe("listen");
+
+      const content = await fs.readFile(path.join(home, "logs", "vibest.log"), "utf8");
+      const startupFailure = content
+        .trim()
+        .split("\n")
+        .find((line) => line.includes("event=server.startup_failed"));
+      expect(startupFailure).toContain("phase=listen");
+      expect(startupFailure).toContain("cause=");
+      expect(startupFailure).toContain("ServerStartupError");
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
+      await fs.rm(home, { recursive: true, force: true });
     }
   });
 });

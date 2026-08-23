@@ -31,7 +31,17 @@ for per-agent tool rendering.
   projects.
 - **Only composition roots may combine features**: `routes/`,
   `app-interface.tsx`, and the app shell in `components/layout/`. Those four
-  files are the whole allow-list today.
+  files are the whole allow-list today. `routes/__root.tsx` is the shell's one
+  route-identity seam: it reads the authoritative session-route loader ref and
+  composes the project sidebar, card heading, and `ContentPanelSessionProvider`
+  binding from it. `AppShell` owns `SidebarProvider`, its viewport wrapper, and
+  sidebar persistence because those are shell implementation details; the
+  session-bound content provider is composed beneath it around `AppShellBody`.
+  The body stays structural through `AppShellSidebar`/`AppShellMain` children;
+  child components are composed as JSX children and consume shared layout state
+  from the shell context. Never pass them through named props, attach them as
+  static properties, or inspect `children` to extract slots. `CardPanel` receives
+  display primitives and no shell component interprets routes or Project state.
 - **`components/` is for what no single feature owns** — the shell
   (`layout/`) and generic pieces (`loader.tsx`). Base and composite UI belongs
   in `@vibest/ui`, not here.
@@ -55,9 +65,17 @@ for per-agent tool rendering.
 [dep])`) or it re-runs every render and loses referential stability; say so in
   a comment so nobody "simplifies" the `useCallback` away.
 - Zustand here is not a global store: each `Chat` instance creates its own vanilla
-  store as the AI SDK `ChatState`. `ChatManager` caches Chat instances by
-  sessionId so transcripts survive navigation, and is constructed at App mount
-  (module scope has no host connection yet).
+  store as the AI SDK `ChatState`. `ChatManager` caches Chat instances by the
+  complete `SessionRef` so transcripts survive navigation without crossing
+  project/harness identity, and is constructed at App mount (module scope has no
+  host connection yet).
+- Content-panel tabs, live instances, provider bindings, and panel handles use
+  the complete `SessionRef`; shell state is never keyed by a bare sessionId.
+  The app-lifetime host registers unconditional panel definitions beside its
+  construction. A definition whose availability is genuinely conditional must
+  register with lifecycle at the boundary that owns that condition. Content-panel
+  persistence is disposable client state: do not add storage versions or
+  migrations. An incompatible shape may be discarded.
 - `useSessionListSync` is the only consumer of the global event firehose; session
   events (chunks, requests) belong to the per-session chat transport.
 - The live stream has no replay: subscribe before `session.prompt`, and recover

@@ -417,7 +417,7 @@ export const SessionDeleted = defineEvent({
 });
 export const SessionRenamed = defineEvent({
   type: "session.renamed",
-  schema: { sessionId: z.string(), name: z.string() },
+  schema: { sessionId: z.string(), title: z.string() },
 });
 export const ProjectUpdated = defineEvent({
   type: "project.updated",

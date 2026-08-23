@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEditorState } from "@tiptap/react";
 import type { ListSessionsOutput, SessionSummary } from "@vibest/contract";
 import {
   HARNESS_AGENT_IDS,
@@ -15,6 +14,7 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
+import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
 import {
   Empty,
   EmptyContent,
@@ -33,8 +33,8 @@ import { ChatInput } from "@/features/chat/components/input/chat-input";
 import { ChatInputProvider } from "@/features/chat/components/input/chat-input-provider";
 import { createChatBaseExtensions } from "@/features/chat/components/input/extensions/chat-base-extensions";
 import { createSubmitKeymap } from "@/features/chat/components/input/extensions/keymaps";
-import { hasChatContent } from "@/features/chat/components/input/serialize";
 import { useChatInputController } from "@/features/chat/components/input/use-chat-input-controller";
+import { useChatInputHasContent } from "@/features/chat/components/input/use-chat-input-has-content";
 import { ModelSelect } from "@/features/chat/components/model-select";
 import { PermissionModeSelect } from "@/features/chat/components/permission-mode-select";
 import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
@@ -142,7 +142,7 @@ function DraftRoute() {
   const permissionMode = resolvePermissionMode(harnessAgent, search.permission);
 
   // Create the session and start its first turn against the manager's persisted
-  // store, then navigate — the session route re-attaches the same Chat with the
+  // store, then navigate — the session route picks up the same Chat with the
   // turn already streaming.
   const startSession = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
@@ -155,7 +155,7 @@ function DraftRoute() {
         ...(model !== undefined ? { providerId: model.providerId, modelId: model.modelId } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
-      void manager.attach(ref).prompt(text);
+      void manager.chatFor(ref).prompt(text);
       return ref;
     },
     onSuccess: (ref, { text }) => {
@@ -163,7 +163,7 @@ function DraftRoute() {
       // `.key({ input })` — the latter omits `type` and setQueryData would write
       // a phantom entry the sidebar never reads.
       const listKey = orpcQueryUtils.session.list.queryOptions({
-        input: { projectId: ref.projectId },
+        input: { projectId: ref.projectId, archived: false },
       }).queryKey;
 
       // Optimistic title: seed the row with the prompt text so it appears named
@@ -179,6 +179,7 @@ function DraftRoute() {
           harnessAgentId: ref.harnessAgentId,
           sessionId: ref.sessionId,
           title: text,
+          archived: false,
           // Placeholder ordering key (≈ now); the real createdAt loads on reload.
           createdAt: new Date().toISOString(),
           historyAvailable: true,
@@ -224,10 +225,7 @@ function DraftRoute() {
     },
   });
 
-  const hasContent = useEditorState({
-    editor: controller?.editor ?? null,
-    selector: ({ editor }) => (editor ? hasChatContent(editor) : false),
-  });
+  const hasContent = useChatInputHasContent(controller);
 
   // Every branch below renders instead of the composer, because a composer that
   // can never submit is worse than saying why. `data === undefined` must be
@@ -292,26 +290,32 @@ function DraftRoute() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <div className="flex w-full max-w-2xl flex-col gap-2">
-        <ProjectSelect
-          // Harness config survives a project switch — it says how the session
-          // runs, not what it is about. A pick the new project's catalog doesn't
-          // offer is dropped by the resolvers, not carried into the session.
-          onChange={(next) =>
-            navigate({
-              to: "/draft",
-              search: (prev) => ({ ...prev, projectId: next }),
-              replace: true,
-            })
+      <CardFrame className="w-full max-w-2xl">
+        <CardFrameHeader className="py-2">
+          <ProjectSelect
+            // Harness config survives a project switch — it says how the session
+            // runs, not what it is about. A pick the new project's catalog doesn't
+            // offer is dropped by the resolvers, not carried into the session.
+            onChange={(next) =>
+              navigate({
+                to: "/draft",
+                search: (prev) => ({ ...prev, projectId: next }),
+                replace: true,
+              })
+            }
+            projects={projects.data}
+            value={selected?.id ?? null}
+          />
+        </CardFrameHeader>
+        <Card
+          render={
+            <PromptInput
+              onSubmit={(e) => {
+                e.preventDefault();
+                void controller?.submit();
+              }}
+            />
           }
-          projects={projects.data}
-          value={selected?.id ?? null}
-        />
-        <PromptInput
-          onSubmit={(e) => {
-            e.preventDefault();
-            void controller?.submit();
-          }}
         >
           <ChatInputProvider controller={controller}>
             <ChatInput />
@@ -352,8 +356,8 @@ function DraftRoute() {
               <PromptInputSubmit disabled={!hasContent || !selected || startSession.isPending} />
             </PromptInputToolbar>
           </ChatInputProvider>
-        </PromptInput>
-      </div>
+        </Card>
+      </CardFrame>
     </div>
   );
 }

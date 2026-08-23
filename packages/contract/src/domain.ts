@@ -18,7 +18,8 @@ export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSc
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Server-generated, opaque to clients; unique within a project.
+  // Server-generated, opaque to clients, and globally unique for reverse lookup.
+  // Session operations still use the complete ref rather than this field alone.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;
@@ -176,10 +177,10 @@ export type SessionStatus = typeof SessionStatusSchema.Type;
 // Events
 //
 // Session-scoped events carry `seq`: contiguous per session, stamped by the
-// SessionRuntime, starting at 1. Collection events are unnumbered — they are
-// invalidation signals recovered via list methods, never replayed. Events are
-// TypeScript types, not Schemas: they are produced by the server and never
-// validated as RPC input.
+// server's `HarnessAgentSession`, starting at 1. Collection events are
+// unnumbered — they are invalidation signals recovered via list methods, never
+// replayed. Events are TypeScript types, not Schemas: they are produced by the
+// server and never validated as RPC input.
 // ---------------------------------------------------------------------------
 
 export const SessionScopedEventTypes = [
@@ -198,6 +199,7 @@ export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
 export const CollectionEventTypes = [
   "session.created",
   "session.updated",
+  "session.archived",
   "session.deleted",
   "session.renamed",
 ] as const;
@@ -246,16 +248,16 @@ export type SessionScopedEventBody =
     }
   | { readonly type: "session.crashed"; readonly reason: string };
 
-/** A session-scoped event before the SessionRuntime stamps its `seq`. */
+/** A session-scoped event before the server's `HarnessAgentSession` stamps its `seq`. */
 export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
 
 export type SessionScopedEvent = {
   readonly seq: number;
   /**
-   * The session's phase *after* this event applied, stamped by the
-   * SessionRuntime alongside `seq`. Consumers copy it (sidebar status, chat
-   * composer state) instead of re-deriving phase from event types — the
-   * runtime is the only place that knows the full transition table
+   * The session's phase *after* this event applied, stamped by the server's
+   * `HarnessAgentSession` alongside `seq`. Consumers copy it (sidebar status,
+   * chat composer state) instead of re-deriving phase from event types — the
+   * server-side fold is the only place that knows the full transition table
    * (`requires_action` in particular is invisible to a client-side mapping).
    * Absent only on chunk events replayed from a snapshot's retained buffer;
    * there the snapshot's own `status` is the phase source.
@@ -269,8 +271,9 @@ export type CollectionEvent = { readonly ref: SessionRef } & (
   // from the first prompt). Carries the new value so clients patch the row in
   // place instead of clobbering an optimistic title with a refetch.
   | { readonly type: "session.updated"; readonly title?: string }
+  | { readonly type: "session.archived"; readonly archived: boolean }
   | { readonly type: "session.deleted" }
-  | { readonly type: "session.renamed"; readonly name: string }
+  | { readonly type: "session.renamed"; readonly title: string }
 );
 
 export type ServerEvent = SessionScopedEvent | CollectionEvent;
@@ -605,11 +608,9 @@ export const CreateSessionInputSchema = Schema.Struct({
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
-export const ResumeSessionInputSchema = Schema.Struct({ ref: SessionRefSchema });
-export type ResumeSessionInput = typeof ResumeSessionInputSchema.Type;
-
 export const ListSessionsInputSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
+  archived: Schema.optionalKey(Schema.Boolean),
 });
 export type ListSessionsInput = typeof ListSessionsInputSchema.Type;
 
@@ -618,6 +619,7 @@ export type SessionSummary = {
   readonly harnessAgentId: HarnessAgentId;
   readonly sessionId: string;
   readonly title?: string;
+  readonly archived: boolean;
   readonly createdAt: string;
   readonly updatedAt?: string;
   readonly historyAvailable: boolean;
@@ -627,11 +629,31 @@ export type SessionSummary = {
 /** `session.list` returns the summaries directly — one shape, no wrapper. */
 export type ListSessionsOutput = ReadonlyArray<SessionSummary>;
 
+/**
+ * Longest title a client may give a session. The title is persisted on the
+ * session record and broadcast to every client on rename, so it is bounded
+ * here rather than left to whatever a caller sends.
+ */
+export const MAX_SESSION_TITLE_CHARS = 120;
+
 export const RenameSessionInputSchema = Schema.Struct({
   ref: SessionRefSchema,
-  name: Schema.NonEmptyString,
+  // `isTrimmed` with `isNonEmpty` is what rejects a whitespace-only title: the
+  // server stores the string as given, and a blank title would render as an
+  // unnamed row that no amount of renaming visibly fixes.
+  title: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_SESSION_TITLE_CHARS),
+  ),
 });
 export type RenameSessionInput = typeof RenameSessionInputSchema.Type;
+
+export const ArchiveSessionInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  archived: Schema.Boolean,
+});
+export type ArchiveSessionInput = typeof ArchiveSessionInputSchema.Type;
 
 export const RefInputSchema = Schema.Struct({ ref: SessionRefSchema });
 export type RefInput = typeof RefInputSchema.Type;

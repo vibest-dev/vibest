@@ -25,6 +25,7 @@
     "react/react-in-jsx-scope": "off",
     "unicorn/no-empty-file": "off",
     "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off",
     "oxc/no-async-endpoint-handlers": "off",
     "react/iframe-missing-sandbox": "off",
     "no-unused-vars": [

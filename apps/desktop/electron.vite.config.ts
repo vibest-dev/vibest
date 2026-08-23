@@ -80,6 +80,9 @@ export default defineConfig({
   },
   renderer: {
     root: url.fileURLToPath(new URL("./src/renderer/", import.meta.url)),
+    experimental: {
+      bundledDev: true,
+    },
     define: {
       "import.meta.env.VIBEST_RUN_IN_AGENT": JSON.stringify(RUNNING_IN_AGENT),
     },

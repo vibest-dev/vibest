@@ -10,7 +10,7 @@ export function ChatInput({ className }: { className?: string }) {
       editor={editor}
       className={
         className ??
-        "max-h-[6lh] w-full overflow-y-auto text-sm [&_.tiptap]:p-3 [&_.tiptap]:outline-none"
+        "max-h-[6lh] w-full overflow-y-auto text-sm pointer-coarse:text-[16px] [&_.tiptap]:p-3 [&_.tiptap]:outline-none"
       }
     />
   );

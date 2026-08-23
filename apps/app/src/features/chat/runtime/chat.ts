@@ -20,6 +20,13 @@ import { sanitizeTail } from "./sanitize-tail";
 export interface ChatInit {
   sessionRef: SessionRef;
   transport: ChatSessionTransport;
+  /**
+   * Fired once, when the server declares this session's stream over for good
+   * (closed or deleted). The owner's cue to stop caching this Chat — the
+   * instance stays usable for whoever is currently rendering it, showing the
+   * terminal error, and is simply never handed out again.
+   */
+  onTerminated?: () => void;
 }
 
 // Runtime phase → AI-SDK chat status. "submitted" is a sender-local optimistic
@@ -75,6 +82,7 @@ export class Chat {
   readonly store: StoreApi<ChatStoreState>;
   readonly #state: ChatState;
   readonly #transport: ChatSessionTransport;
+  readonly #onTerminated: (() => void) | undefined;
   readonly #unsubscribe: () => void;
   readonly #turnFolds = new Map<string, TurnFold>();
   // Turns whose live rendering was abandoned (buffer truncated, replay gap):
@@ -106,11 +114,12 @@ export class Chat {
   // over it.
   #terminated = false;
 
-  constructor({ sessionRef, transport }: ChatInit) {
+  constructor({ sessionRef, transport, onTerminated }: ChatInit) {
     this.harnessAgentId = sessionRef.harnessAgentId;
     this.#state = new ChatState();
     this.store = this.#state.store;
     this.#transport = transport;
+    this.#onTerminated = onTerminated;
     this.#unsubscribe = transport.subscribe((event) => {
       if (event.type === "attached") this.#hydrate(event.snapshot);
       else if (event.type === "closed") this.#terminate(event.reason);
@@ -210,15 +219,23 @@ export class Chat {
   // so the runtime is gone and prompting or answering could only fail. Enter
   // the same terminal shape a crash does, with the reason on the error.
   #terminate(reason: "session_closed" | "session_deleted"): void {
+    // A second `closed` would re-enter with the same terminal shape, but
+    // `onTerminated` is a one-shot handover — its owner may already have let
+    // this instance go.
+    if (this.#terminated) return;
     this.#terminated = true;
     for (const fold of this.#turnFolds.values()) fold.close();
     this.#turnFolds.clear();
     this.#queuedEvents = null;
+    // Terminal before the floor ever landed (or attached): no history is coming,
+    // so stop rendering a spinner that would never resolve.
+    this.#state.historyStatus = "settled";
     this.#state.clearPendingRequests();
     this.#state.error = new Error(
       reason === "session_deleted" ? "Session deleted" : "Session closed",
     );
     this.#setStatus("error");
+    this.#onTerminated?.();
   }
 
   // ---------------------------------------------------------------------
@@ -256,8 +273,15 @@ export class Chat {
       if (history !== null && history.length > 0 && this.#state.messages.length === 0) {
         this.#state.messages = Array.from(history);
       }
+      // An empty read is still a floor: the session simply has nothing settled
+      // yet. Only the absent capability (null) leaves the transcript unfounded.
+      this.#state.historyStatus = history === null ? "unavailable" : "settled";
     } catch (historyError) {
       console.error("Failed to load session history", historyError);
+      // A failed read is still a finished one — the spinner has to stop — but an
+      // unannotated blank would claim the session is empty. A later reconcile
+      // clears this when the read succeeds.
+      this.#state.historyStatus = "unavailable";
     }
     const snapshot = this.#floorSnapshot;
     this.#floorSnapshot = null;
@@ -274,6 +298,17 @@ export class Chat {
     options?: { readonly skipGapCheck?: boolean },
   ): void {
     if (this.#terminated) return;
+    // A snapshot below our cursor means the server's seq counter restarted —
+    // its in-memory session was rebuilt (a server restart, or a close and
+    // reopen). Nothing else can produce it: within one incarnation the counter
+    // only grows, and an attach applies its snapshot before folding any live
+    // event of that cycle. Keeping the old cursor would silently discard the
+    // whole next turn as "already applied", so rejoin as a newcomer and let
+    // the settled transcript supply what came before.
+    if (snapshot.cursor < this.#cursor) {
+      this.#cursor = 0;
+      this.#needsReconcile = true;
+    }
     // Pending requests are server state: replace wholesale, no diffing.
     this.#state.setPendingRequests([]);
     for (const request of snapshot.pendingRequests) this.#handleRequest(request);
@@ -435,6 +470,9 @@ export class Chat {
   async #reconcileHistory(): Promise<void> {
     try {
       const history = await this.#transport.getMessages();
+      // Same read as the floor's, so it answers the same question: a reconcile
+      // that lands clears a floor read that failed earlier.
+      this.#state.historyStatus = history === null ? "unavailable" : "settled";
       if (history === null) {
         // Capability absent: no settled transcript will ever materialize, so
         // a deferred reconcile must not retry forever.

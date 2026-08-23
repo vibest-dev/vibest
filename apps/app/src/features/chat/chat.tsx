@@ -1,13 +1,13 @@
 import type { SessionRef } from "@vibest/contract";
 import { cn } from "@vibest/ui/lib/utils";
 
+import { ChatHarnessIcon } from "@/features/chat/components/chat-harness-icon";
 import { ChatInputComposer } from "@/features/chat/components/chat-input-composer";
 import { ChatModelSelect } from "@/features/chat/components/chat-model-select";
 import { ChatPermissionModeSelect } from "@/features/chat/components/chat-permission-mode-select";
 import { ChatReasoningEffortSelect } from "@/features/chat/components/chat-reasoning-effort-select";
 import { ChatSessionProvider } from "@/features/chat/components/chat-session-provider";
 import { ChatTranscript } from "@/features/chat/components/chat-transcript";
-import { HarnessBadge } from "@/features/chat/components/harness-badge";
 
 // Default assembly of the compositional chat pieces: ChatSessionProvider owns
 // the session context; transcript, composer, and config slots compose as
@@ -35,8 +35,9 @@ export function Chat({
             toolbar={
               <>
                 {/* Same slot the draft surface puts the harness picker in, so
-                    the toolbar reads the same before and after creation. */}
-                <HarnessBadge />
+                    the toolbar keeps its shape across creation — the picker
+                    collapses to its icon once the choice is settled. */}
+                <ChatHarnessIcon />
                 <ChatModelSelect />
                 {/* Cascades from the model above: appears only when the
                     selected model declares reasoningEffort levels. */}
