@@ -628,6 +628,9 @@ export const makeGrokAgentWithDependencies = <R>(
     } satisfies GrokAgent;
   });
 
+const grokNotFoundMessage =
+  "Grok was not found. Install it from https://x.ai/cli, or set VIBEST_GROK_EXECUTABLE to the path of the `grok` binary.";
+
 export const makeGrokAgent = (
   options: GrokAgentOptions = {},
 ): Effect.Effect<
@@ -635,26 +638,22 @@ export const makeGrokAgent = (
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Scope.Scope
 > =>
-  Effect.gen(function* () {
-    const executablePath =
-      options.executablePath ??
-      (yield* resolveGrokExecutable().pipe(
-        Effect.flatMap((found) =>
-          found
-            ? Effect.succeed(found)
-            : Effect.die(
-                new Error(
-                  "invariant: the grok executable vanished after the availability check gated on it",
-                ),
-              ),
-        ),
-      ));
-    return yield* makeGrokAgentWithDependencies({
-      makeTransport: (config) =>
-        makeGrokTransport({
+  makeGrokAgentWithDependencies({
+    makeTransport: (config) =>
+      Effect.gen(function* () {
+        const executablePath = options.executablePath ?? (yield* resolveGrokExecutable());
+        if (!executablePath) {
+          return yield* Effect.fail(
+            new GrokTransportError({
+              operation: "resolve",
+              cause: new Error(grokNotFoundMessage),
+            }),
+          );
+        }
+        return yield* makeGrokTransport({
           executablePath,
           ...(options.args ? { args: options.args } : {}),
           ...(config.cwd ? { cwd: config.cwd } : {}),
-        }),
-    });
+        });
+      }),
   });
