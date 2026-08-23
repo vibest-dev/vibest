@@ -16,6 +16,7 @@ import {
   isSessionScopedEvent,
   PromptInputSchema,
   SessionRefSchema,
+  SteerInputSchema,
   SessionScopedEventTypes,
   SubscribeInputSchema,
 } from "../src/domain";
@@ -108,6 +109,26 @@ describe("PromptInput", () => {
   });
 });
 
+describe("SteerInput", () => {
+  it("requires the queued message id and the exact active turn", () => {
+    expect(
+      accepts(SteerInputSchema, {
+        ref,
+        expectedTurnId: "turn-1",
+        messageId: "message-1",
+        parts: [{ type: "text", text: "change direction" }],
+      }),
+    ).toBe(true);
+    expect(
+      accepts(SteerInputSchema, {
+        ref,
+        messageId: "message-1",
+        parts: [{ type: "text", text: "change direction" }],
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("SubscribeInput scope", () => {
   it("accepts a session scope", () => {
     expect(accepts(SubscribeInputSchema, { scope: { kind: "session", ref } })).toBe(true);
@@ -158,7 +179,10 @@ describe("HarnessListOutput", () => {
     expect(
       accepts(
         HarnessListOutputSchema,
-        listing({ permissionModes: ["read-only", "ask", "full"], defaultPermissionMode: "ask" }),
+        listing({
+          permissionModes: ["read-only", "ask", "full"],
+          defaultPermissionMode: "ask",
+        }),
       ),
     ).toBe(true);
   });

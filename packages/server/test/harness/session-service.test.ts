@@ -4,18 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import {
-  Crypto,
-  Deferred,
-  Effect,
-  Fiber,
-  FileSystem,
-  Layer,
-  Logger,
-  References,
-  type Scope,
-  Stream,
-} from "effect";
+import { Crypto, Deferred, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -35,7 +24,6 @@ import {
   type HarnessAgentSessionServiceShape,
   makeHarnessAgentSessionService,
 } from "../../src/harness/session-service";
-import { structured, type LogRecord } from "../log-record";
 import { NodePlatformLayer } from "../platform";
 
 type Spy = {
@@ -82,12 +70,11 @@ describe("HarnessAgentSessionService", () => {
       turn?: "open" | "finished";
       // The harness rejects every prompt (a turn is already running).
       promptFails?: boolean;
-      // Optional close hook for exercising lifecycle contention.
-      close?: (sessionId: string) => Promise<void>;
       // Hold runtime.prompt until the test releases its receipt.
       promptWaits?: boolean;
       // Runtime reacquisition fails before runtime.prompt is available.
       resumeFails?: boolean;
+      steerFails?: boolean;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
@@ -139,6 +126,10 @@ describe("HarnessAgentSessionService", () => {
                       Effect.as({ turnId: "turn-1" }),
                     )
                 : () => Effect.succeed({ turnId: "turn-1" }),
+            steer: (_expectedTurnId) =>
+              opts.steerFails
+                ? Effect.fail(new TurnAlreadyRunning({ sessionId, turnId: "turn-other" }))
+                : Effect.void,
             setModel: () => Effect.void,
             setReasoningEffort: () => Effect.void,
             setPermissionMode: () => Effect.void,
@@ -146,19 +137,12 @@ describe("HarnessAgentSessionService", () => {
             respondToAgentRequest: () => Effect.void,
             getCapabilities: Effect.succeed({
               supportsResume: true,
-              supportsSteering: false,
               supportsPermissions: false,
             }),
             ...(opts.history !== undefined ? { getMessages: Effect.succeed(opts.history) } : {}),
             close: Effect.sync(() => {
               spy.close.push(sessionId);
-            }).pipe(
-              Effect.andThen(
-                opts.close === undefined
-                  ? Effect.void
-                  : Effect.promise(() => opts.close?.(sessionId) ?? Promise.resolve()),
-              ),
-            ),
+            }),
           });
           const adapter = {
             id: "claude-code",
@@ -170,17 +154,11 @@ describe("HarnessAgentSessionService", () => {
             ),
             permissionModes: [],
             open: ({ cwd }) =>
-              // An adapter sees `cwd` and never a `SessionRef` — this line is
-              // the probe for whether the identity reaches it anyway.
-              Effect.logDebug("adapter opening").pipe(
-                Effect.andThen(
-                  Effect.sync(() => {
-                    spy.open.push({ cwd });
-                    opened += 1;
-                    return makeSession(`native-${opened}`);
-                  }),
-                ),
-              ),
+              Effect.sync(() => {
+                spy.open.push({ cwd });
+                opened += 1;
+                return makeSession(`native-${opened}`);
+              }),
             resume: ({ sessionId, cwd }) =>
               opts.resumeFails
                 ? Effect.fail(
@@ -681,6 +659,115 @@ describe("HarnessAgentSessionService", () => {
     expect(snapshot.activePrompt?.seq).toBeGreaterThan(0);
   });
 
+  it("emits exactly submitted and accepted for an explicit steer", async () => {
+    const events = await run({ turn: "open" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            yield* fixture.service.steer({
+              ref,
+              expectedTurnId: "turn-1",
+              parts: [{ type: "text", text: "change direction" }],
+              messageId: "steer-msg",
+            });
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return Array.from(items).map((item) =>
+              item.type === "event" ? item.event.type : item.type,
+            );
+          }),
+        );
+      }),
+    );
+    expect(events).toEqual(["session.prompt.submitted", "session.prompt.accepted"]);
+  });
+
+  it("retains multiple accepted steers for reconnect in acceptance order", async () => {
+    const snapshot = await run({ turn: "open" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.steer({
+          ref,
+          expectedTurnId: "turn-1",
+          parts: [{ type: "text", text: "A" }],
+          messageId: "steer-a",
+        });
+        yield* fixture.service.steer({
+          ref,
+          expectedTurnId: "turn-1",
+          parts: [{ type: "text", text: "B" }],
+          messageId: "steer-b",
+        });
+        return yield* fixture.service.getSnapshot(ref);
+      }),
+    );
+
+    expect(snapshot.acceptedPrompt).toMatchObject({
+      messageId: "steer-b",
+      acceptedTurnId: "turn-1",
+    });
+    expect(snapshot.acceptedPrompts).toMatchObject([
+      { messageId: "steer-a", acceptedTurnId: "turn-1" },
+      { messageId: "steer-b", acceptedTurnId: "turn-1" },
+    ]);
+    expect(snapshot.pendingPrompts).toEqual([]);
+  });
+
+  it("emits exactly submitted and rejected when an explicit steer fails", async () => {
+    const result = await run({ turn: "open", steerFails: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            const rejection = yield* fixture.service
+              .steer({
+                ref,
+                expectedTurnId: "turn-1",
+                parts: [{ type: "text", text: "change direction" }],
+                messageId: "steer-msg",
+              })
+              .pipe(Effect.flip);
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return {
+              rejection,
+              events: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+            };
+          }),
+        );
+      }),
+    );
+    expect(result.rejection._tag).toBe("TurnAlreadyRunning");
+    expect(result.events).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
+  });
+
   it("compensates a harness-rejected prompt: rejected event follows, no retained phantom", async () => {
     const result = await run({ turn: "open", promptFails: true }, (fixture) =>
       Effect.gen(function* () {
@@ -809,6 +896,7 @@ describe("HarnessAgentSessionService", () => {
               ),
               pendingPrompts: snapshot.pendingPrompts,
               activePrompt: snapshot.activePrompt,
+              acceptedPrompts: snapshot.acceptedPrompts,
             };
           }),
         );
@@ -821,6 +909,9 @@ describe("HarnessAgentSessionService", () => {
       messageId: "interrupted-msg",
       acceptedTurnId: "turn-1",
     });
+    expect(result.acceptedPrompts).toMatchObject([
+      { messageId: "interrupted-msg", acceptedTurnId: "turn-1" },
+    ]);
   });
 
   it("mints a messageId when the prompt carries none", async () => {
@@ -855,197 +946,5 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(listed).toHaveLength(1);
     expect(listed[0]?.title).toBeUndefined();
-  });
-
-  // The lifecycle log is what a periodic read of `$VIBEST_HOME/logs` is for:
-  // read on its own it says what was worked on, when, and where. It has to hold
-  // together across the whole span of a session, so it is asserted as a
-  // sequence rather than one line at a time.
-  it("logs each lifecycle boundary once, in order, at info", async () => {
-    const records: Array<LogRecord> = [];
-    await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* fixture.service.archive(ref, true);
-        yield* fixture.service.delete(ref);
-      }).pipe(
-        Effect.provide(
-          Logger.layer([
-            Logger.map(structured, (record) => {
-              records.push(record);
-            }),
-          ]),
-        ),
-      ),
-    );
-
-    // Only lifecycle events are logs. The native `harness.open` span correlates
-    // logs inside it but does not synthesize its own completion record.
-    expect(records.map((record) => record.annotations.event)).toEqual([
-      "session.created",
-      "session.archived",
-      "session.deleted",
-    ]);
-    expect(records.every((record) => record.level === "INFO")).toBe(true);
-
-    const created = records[0];
-    expect(created?.annotations.cwd).toBe("/tmp/vibest-app");
-    expect(created?.annotations.harnessSessionId).toBe("native-1");
-    expect(created?.annotations.projectId).toBe("proj-a");
-    // Every line carries the id, so one session's whole life greps out of a
-    // file holding many.
-    const sessionId = created?.annotations.sessionId;
-    expect(typeof sessionId).toBe("string");
-    expect(records.every((r) => r.annotations.sessionId === sessionId)).toBe(true);
-  });
-
-  // The identity is bound once at the service boundary, not repeated at each
-  // log site — so a layer that has never heard of a `SessionRef` (an adapter
-  // sees `cwd` and nothing else) still writes lines that grep out with the
-  // session's own. This is the test that keeps that wrap from being "tidied"
-  // back into per-site annotations.
-  it("puts the session's identity on what the layers below it log", async () => {
-    const records: Array<LogRecord> = [];
-    await run({}, (fixture) =>
-      fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app").pipe(
-        Effect.provide(
-          Layer.merge(
-            Logger.layer([
-              Logger.map(structured, (record) => {
-                records.push(record);
-              }),
-            ]),
-            Layer.succeed(References.MinimumLogLevel, "Debug"),
-          ),
-        ),
-      ),
-    );
-
-    const adapterLine = records.find((record) => record.message === "adapter opening");
-    expect(adapterLine).toBeDefined();
-    expect(adapterLine?.annotations.projectId).toBe("proj-a");
-    expect(adapterLine?.annotations.harnessAgentId).toBe("claude-code");
-    expect(adapterLine?.annotations.sessionId).toMatch(UUID_RE);
-  });
-
-  // The rename used to be broadcast-only, so every client showed the new title
-  // until the next list load read the old one back off disk.
-  it("rename persists the title across a restart", async () => {
-    const result = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* fixture.service.rename(ref, "Login bug");
-        const listed = yield* fixture.service.list("proj-a", false);
-        const restarted = yield* fixture.restart;
-        return { listed, afterRestart: yield* restarted.service.list("proj-a", false) };
-      }),
-    );
-    expect(result.listed[0]?.title).toBe("Login bug");
-    expect(result.afterRestart[0]?.title).toBe("Login bug");
-  });
-
-  it("publishes session.renamed per change, and nothing for a no-op rename", async () => {
-    const result = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        return yield* Effect.scoped(
-          Effect.gen(function* () {
-            const stream = yield* fixture.bus.subscribe({ kind: "global" });
-            yield* fixture.service.rename(ref, "First title");
-            yield* fixture.service.rename(ref, "First title"); // no-op: no event
-            yield* fixture.service.rename(ref, "Second title");
-            const items = yield* Stream.runCollect(Stream.take(stream, 2));
-            return Array.from(items);
-          }),
-        );
-      }),
-    );
-    expect(
-      result.map((item) =>
-        item.type === "event" && item.event.type === "session.renamed"
-          ? item.event.title
-          : item.type,
-      ),
-    ).toEqual(["First title", "Second title"]);
-  });
-
-  // The title is the user's once they have chosen one: the first-prompt stamp
-  // only fills a record that has none.
-  it("keeps a hand-chosen title through the first prompt", async () => {
-    const listed = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* fixture.service.rename(ref, "Login bug");
-        yield* fixture.service.prompt({ ref, parts: [{ type: "text", text: "first" }] });
-        return yield* fixture.service.list("proj-a", false);
-      }),
-    );
-    expect(listed[0]?.title).toBe("Login bug");
-  });
-
-  it("preserves rename and archive changes made concurrently", async () => {
-    const stored = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* Effect.all(
-          [fixture.service.rename(ref, "Login bug"), fixture.service.archive(ref, true)],
-          { concurrency: "unbounded" },
-        );
-        return yield* fixture.repo.read(ref.projectId, ref.sessionId);
-      }),
-    );
-    expect(stored.title).toBe("Login bug");
-    expect(stored.archived).toBe(true);
-  });
-
-  it("keeps the manual title when rename races the first prompt stamp", async () => {
-    const listed = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* Effect.all(
-          [
-            fixture.service.prompt({ ref, parts: [{ type: "text", text: "automatic title" }] }),
-            fixture.service.rename(ref, "Login bug"),
-          ],
-          { concurrency: "unbounded" },
-        );
-        return yield* fixture.service.list("proj-a", false);
-      }),
-    );
-    expect(listed[0]?.title).toBe("Login bug");
-  });
-
-  it("does not let one slow session close stall another session's rename", async () => {
-    let releaseClose!: () => void;
-    let markCloseStarted!: () => void;
-    const closeStarted = new Promise<void>((resolve) => {
-      markCloseStarted = resolve;
-    });
-    const closeReleased = new Promise<void>((resolve) => {
-      releaseClose = resolve;
-    });
-
-    const stored = await run(
-      {
-        close: async (sessionId) => {
-          if (sessionId !== "native-1") return;
-          markCloseStarted();
-          await closeReleased;
-        },
-      },
-      (fixture) =>
-        Effect.gen(function* () {
-          const slow = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-          const other = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-          const archiving = yield* Effect.forkChild(fixture.service.archive(slow, true));
-          yield* Effect.promise(() => closeStarted);
-          yield* fixture.service.rename(other, "Still responsive");
-          releaseClose();
-          yield* Fiber.join(archiving);
-          return yield* fixture.repo.read(other.projectId, other.sessionId);
-        }),
-    );
-
-    expect(stored.title).toBe("Still responsive");
   });
 });

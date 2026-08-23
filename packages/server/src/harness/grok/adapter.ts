@@ -211,6 +211,13 @@ const makeRuntime = (
           yield* Effect.forkIn(pump, scope);
           return receipt;
         }),
+      steer: (_expectedTurnId, _input) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          return yield* Effect.fail(
+            operationError(sessionId, "steer", new Error("steering is not supported by Grok")),
+          );
+        }),
       setModel: (model) =>
         Effect.gen(function* () {
           if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });

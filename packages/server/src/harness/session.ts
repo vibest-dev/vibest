@@ -222,27 +222,8 @@ export const makeHarnessAgentSession = (
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
 
-    // The service binds this per call; a session has to bind it again because
-    // its sources are not one fiber — the drain fiber outlives the RPC that
-    // forked it, and an `emit` arrives on a fiber of its own.
     const identified = inSession(ref);
 
-    /**
-     * The turn's two bookends, and deliberately nothing between them: a turn
-     * emits hundreds of chunk events, and logging those would bury the shape of
-     * a session under its content. Start and end are what answer "did it run,
-     * how long, and how did it go" — which is what a periodic read of the log
-     * is looking for.
-     *
-     * Here rather than in `session-fold.ts` because the fold is a pure function
-     * and is worth keeping that way; this is the effectful side of the same
-     * transition, and every source of turn events — the drain fiber and `emit`
-     * callers alike — passes through here.
-     *
-     * A failed turn is `warn` so that skimming for problems is a level filter
-     * rather than a read of every line. It is not `error`: the agent failing is
-     * news about the agent, not a defect in this server.
-     */
     const logTurn = (body: SessionScopedEventBody, seq: number): Effect.Effect<void> => {
       if (body.type === "session.turn.started") {
         return Effect.logInfo("turn started").pipe(
@@ -269,8 +250,6 @@ export const makeHarnessAgentSession = (
     const applyWith = (
       make: (current: SessionState) => SessionScopedEventBody | null,
     ): Effect.Effect<void> =>
-      // The seam every session event passes through, and therefore where the
-      // identity goes on — an `emit` arriving on an RPC fiber gets it here.
       identified(
         applyLock.withPermit(
           Ref.get(state).pipe(
@@ -286,8 +265,6 @@ export const makeHarnessAgentSession = (
               // snapshot's own status.)
               return Ref.set(state, next).pipe(
                 Effect.andThen(bus.publish({ ...event, phase: next.phase })),
-                // After the publish: subscribers are the ones waiting on this,
-                // and the log must not sit in front of them.
                 Effect.andThen(logTurn(wireBody, event.seq)),
               );
             }),
@@ -305,20 +282,8 @@ export const makeHarnessAgentSession = (
         ),
       );
 
-    // `error`, and the only session event that earns it: the agent's process or
-    // stream died under us. Everything the user sees after this — a session
-    // that stops responding, a turn that never ends — is downstream of this
-    // line, and it is the one that carries the reason.
     const crash = (reason: string) =>
-      identified(
-        apply({ type: "session.crashed", sessionId: ref.sessionId, reason }).pipe(
-          Effect.andThen(
-            Effect.logError("session runtime crashed").pipe(
-              Effect.annotateLogs({ event: "session.crashed", reason }),
-            ),
-          ),
-        ),
-      );
+      apply({ type: "session.crashed", sessionId: ref.sessionId, reason });
 
     // A session that starts over is idle again — the crash was the *runtime*
     // ending, not the session. seq and cursor carry across on purpose: clients
@@ -332,6 +297,7 @@ export const makeHarnessAgentSession = (
               phase: "idle" as const,
               activeTurn: null,
               activePrompt: null,
+              acceptedPrompts: [],
               pendingPrompts: [],
               pendingRequests: new Map(),
             }
@@ -394,17 +360,10 @@ export const makeHarnessAgentSession = (
         // crash. The drain waits to be stored first, so an instantly ending
         // stream cannot clear a slot that was never filled.
         const registered = yield* Deferred.make<void>();
-        const drain = identified(
-          Deferred.await(registered).pipe(
-            Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
-            Effect.andThen(release),
-            Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
-            // `root`, because a forked fiber inherits the span of whoever
-            // forked it. This drain outlives that caller by every later turn, so
-            // retaining the acquisition span would make the tracing graph lie.
-            // Local logs use `identified`'s stable `sessionId` as their join key.
-            Effect.withSpan("session.drain", { root: true }),
-          ),
+        const drain = Deferred.await(registered).pipe(
+          Effect.andThen(Stream.runForEach(runtime.events, (draft) => apply(draft.body))),
+          Effect.andThen(release),
+          Effect.catch((error) => crash(error.message).pipe(Effect.andThen(release))),
         );
         const fiber = yield* Effect.forkIn(drain, ownerScope);
         // A release that started while this was in flight leaves `acquiring`

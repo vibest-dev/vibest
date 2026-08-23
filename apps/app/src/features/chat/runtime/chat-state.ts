@@ -1,122 +1,176 @@
-import type { ChatState as AiChatState, ChatStatus, UIMessage } from "ai";
-import { createStore, type StoreApi } from "zustand/vanilla";
+import type {
+  PromptPart,
+  SessionPhase,
+  SessionRuntimeSnapshot,
+  SessionScopedEvent,
+} from "@vibest/contract";
+import type { ChatStatus, UIMessage } from "ai";
 
-import type { AgentRequest } from "./agent-requests";
+import type { AgentRequest, AgentResponse } from "./agent-requests";
 
-// Where the settled-history floor stands. A Chat is born "loading", so an empty
-// transcript means "not read yet" rather than "nothing was ever said"; only
-// once the floor lands does an empty transcript mean the session really is
-// empty. "unavailable" covers both ways the read can come back with nothing to
-// lay down — the harness has no history read, or the read failed — which are
-// the same fact to a reader: the transcript starts here, the agent's own
-// context does not.
 export type HistoryStatus = "loading" | "settled" | "unavailable";
 
-// Each Chat owns its own store. Queued messages stay separate from the
-// transcript: settled-history reconciliation may replace `messages`, but it
-// must never erase prompts that have not been submitted to the server yet.
-export type ChatStoreState = {
-  messages: UIMessage[];
-  queuedMessages: UIMessage[];
-  status: ChatStatus;
-  error?: Error;
-  pendingRequests: AgentRequest[];
-  historyStatus: HistoryStatus;
+export type OutgoingMessage = {
+  readonly message: UIMessage;
+  readonly parts: ReadonlyArray<PromptPart>;
+  readonly delivery: "follow-up" | "steer";
+  readonly status: "queued" | "sending" | "failed";
+  readonly expectedTurnId?: string;
+  readonly error?: Error;
 };
 
-// The slice of ai-sdk's ChatState this runtime still honors — the shared data
-// vocabulary (messages/status/error) plus the append and snapshot primitives.
-// The index-addressed mutators are omitted deliberately: under multi-client
-// reconcile the transcript is rewritten wholesale, so indexes are unstable and
-// replacement is id-based (upsertMessage). Implementing the remainder keeps
-// this state pinned to the ai-sdk shape — drift in `ai` fails typecheck here.
-type AiChatStateSlice = Omit<AiChatState<UIMessage>, "popMessage" | "replaceMessage">;
+export type TurnFoldState = {
+  readonly generation: number;
+  readonly status: "open" | "closing";
+};
 
-// Chat's state container, backed by the per-Chat store (no global store, no
-// adapter).
-export class ChatState implements AiChatStateSlice {
-  readonly store: StoreApi<ChatStoreState>;
+export type HistoryReadState = {
+  readonly id: number;
+  readonly promptRevision: number;
+};
 
-  constructor(initialMessages: UIMessage[] = []) {
-    this.store = createStore<ChatStoreState>()(() => ({
-      messages: initialMessages,
-      queuedMessages: [],
-      status: "ready",
-      error: undefined,
+export type HistoryFloorState = {
+  readonly id: number;
+  readonly snapshot: SessionRuntimeSnapshot;
+  readonly events: ReadonlyArray<SessionScopedEvent>;
+};
+
+export type PendingResponse = {
+  readonly request: AgentRequest | undefined;
+  readonly restoreOnFailure: boolean;
+  readonly response: AgentResponse;
+};
+
+export type ChatState = {
+  session: {
+    messages: UIMessage[];
+    pendingRequests: AgentRequest[];
+    historyStatus: HistoryStatus;
+    status: ChatStatus;
+    error: Error | undefined;
+    activeTurnId: string | null;
+  };
+  outgoing: OutgoingMessage[];
+  lifecycle: {
+    session: "available" | "terminated";
+    instance: "active" | "disposed";
+  };
+  sync: {
+    cursor: number;
+    historyLoaded: boolean;
+    floor: HistoryFloorState | null;
+    reconcile: HistoryReadState | null;
+    needsReconcile: boolean;
+  };
+  prompt: {
+    revision: number;
+    deferredPhase: SessionPhase | null;
+    boundaryOpen: boolean;
+    pendingMessageIds: string[];
+    lastEndedTurnId: string | null;
+  };
+  turns: {
+    folds: Record<string, TurnFoldState>;
+    recoverTurnIds: string[];
+    erroredTurnIds: string[];
+    nextGeneration: number;
+  };
+  pendingResponses: Record<string, PendingResponse>;
+  nextOperationId: number;
+};
+
+export function createChatState(): ChatState {
+  return {
+    session: {
+      messages: [],
       pendingRequests: [],
       historyStatus: "loading",
-    }));
-  }
-
-  get messages(): UIMessage[] {
-    return this.store.getState().messages;
-  }
-  set messages(messages: UIMessage[]) {
-    this.store.setState({ messages });
-  }
-
-  get status(): ChatStatus {
-    return this.store.getState().status;
-  }
-  set status(status: ChatStatus) {
-    this.store.setState({ status });
-  }
-
-  get historyStatus(): HistoryStatus {
-    return this.store.getState().historyStatus;
-  }
-  set historyStatus(historyStatus: HistoryStatus) {
-    this.store.setState({ historyStatus });
-  }
-
-  get error(): Error | undefined {
-    return this.store.getState().error;
-  }
-  set error(error: Error | undefined) {
-    this.store.setState({ error });
-  }
-
-  pushMessage = (message: UIMessage) => {
-    this.store.setState((s) => ({ messages: [...s.messages, message] }));
+      status: "ready",
+      error: undefined,
+      activeTurnId: null,
+    },
+    outgoing: [],
+    lifecycle: { session: "available", instance: "active" },
+    sync: {
+      cursor: 0,
+      historyLoaded: false,
+      floor: null,
+      reconcile: null,
+      needsReconcile: false,
+    },
+    prompt: {
+      revision: 0,
+      deferredPhase: null,
+      boundaryOpen: false,
+      pendingMessageIds: [],
+      lastEndedTurnId: null,
+    },
+    turns: {
+      folds: {},
+      recoverTurnIds: [],
+      erroredTurnIds: [],
+      nextGeneration: 1,
+    },
+    pendingResponses: {},
+    nextOperationId: 1,
   };
-  // Replace-by-id or append: the turn folds produce message snapshots that
-  // evolve under a stable id, and the reducer mutates one message object in
-  // place across chunks. Clone on write so each update carries fresh part
-  // identities — otherwise memos keyed on `message.parts` never recompute.
-  upsertMessage = (message: UIMessage) => {
-    this.store.setState((s) => {
-      const index = s.messages.findIndex((m) => m.id === message.id);
-      const next = s.messages.slice();
-      if (index === -1) next.push(this.snapshot(message));
-      else next[index] = this.snapshot(message);
-      return { messages: next };
-    });
-  };
-  snapshot = <T>(value: T): T => structuredClone(value);
+}
 
-  setQueuedMessages = (queuedMessages: UIMessage[]) => {
-    this.store.setState({ queuedMessages });
+export function copyChatState(state: ChatState): ChatState {
+  return {
+    ...state,
+    session: {
+      ...state.session,
+      messages: state.session.messages.slice(),
+      pendingRequests: state.session.pendingRequests.slice(),
+    },
+    outgoing: state.outgoing.slice(),
+    lifecycle: { ...state.lifecycle },
+    sync: {
+      ...state.sync,
+      floor: state.sync.floor
+        ? { ...state.sync.floor, events: state.sync.floor.events.slice() }
+        : null,
+      reconcile: state.sync.reconcile ? { ...state.sync.reconcile } : null,
+    },
+    prompt: {
+      ...state.prompt,
+      pendingMessageIds: state.prompt.pendingMessageIds.slice(),
+    },
+    turns: {
+      ...state.turns,
+      folds: { ...state.turns.folds },
+      recoverTurnIds: state.turns.recoverTurnIds.slice(),
+      erroredTurnIds: state.turns.erroredTurnIds.slice(),
+    },
+    pendingResponses: { ...state.pendingResponses },
   };
+}
 
-  // Pending agent requests (cleared when the turn ends). The server owns this
-  // state: a snapshot hydration replaces the list wholesale, live events add
-  // and remove.
-  setPendingRequests = (pendingRequests: AgentRequest[]) => {
-    this.store.setState({ pendingRequests });
-  };
-  addPendingRequest = (request: AgentRequest) => {
-    this.store.setState((s) => ({
-      pendingRequests: s.pendingRequests.some((r) => r.id === request.id)
-        ? s.pendingRequests.map((r) => (r.id === request.id ? request : r))
-        : [...s.pendingRequests, request],
-    }));
-  };
-  removePendingRequest = (requestId: string) => {
-    this.store.setState((s) => ({
-      pendingRequests: s.pendingRequests.filter((r) => r.id !== requestId),
-    }));
-  };
-  clearPendingRequests = () => {
-    this.store.setState({ pendingRequests: [] });
-  };
+export const isChatActive = (state: ChatState): boolean =>
+  state.lifecycle.session === "available" && state.lifecycle.instance === "active";
+
+export const statusFromPhase = (phase: SessionPhase): "streaming" | "ready" | "error" => {
+  switch (phase) {
+    case "idle":
+      return "ready";
+    case "crashed":
+      return "error";
+    default:
+      return "streaming";
+  }
+};
+
+export const includesValue = (values: ReadonlyArray<string>, value: string): boolean =>
+  values.includes(value);
+
+export function addUnique(values: string[], value: string): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+export function removeValue(values: string[], value: string): boolean {
+  const index = values.indexOf(value);
+  if (index === -1) return false;
+  values.splice(index, 1);
+  return true;
 }

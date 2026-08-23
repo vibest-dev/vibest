@@ -18,8 +18,7 @@ export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSc
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Server-generated, opaque to clients, and globally unique for reverse lookup.
-  // Session operations still use the complete ref rather than this field alone.
+  // Server-generated, opaque to clients; unique within a project.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;
@@ -495,6 +494,9 @@ export type SessionRuntimeSnapshot = {
   // Latest prompt accepted by the harness, exposed independently because a
   // newer unresolved candidate may temporarily mask it in activePrompt.
   readonly acceptedPrompt: ActivePromptSnapshot | null;
+  // Ordered accepted correlations retained through the current authoritative
+  // turn boundary so reconnect can settle every matching local submission.
+  readonly acceptedPrompts: ReadonlyArray<ActivePromptSnapshot>;
   // Every submitted prompt still awaiting its accepted/rejected correlation.
   // activePrompt carries only the newest one; the full list preserves both the
   // boundary and every optimistic user message across reconnect.
@@ -549,6 +551,14 @@ export const PromptInputSchema = Schema.Struct({
 });
 export type PromptInput = typeof PromptInputSchema.Type;
 
+export const SteerInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  expectedTurnId: Schema.NonEmptyString,
+  parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
+  messageId: Schema.NonEmptyString,
+});
+export type SteerInput = typeof SteerInputSchema.Type;
+
 export const PromptOutputSchema = Schema.Struct({ turnId: Schema.String });
 export type PromptOutput = typeof PromptOutputSchema.Type;
 
@@ -569,7 +579,6 @@ export const SessionCapabilitiesSchema = Schema.Struct({
     Schema.Array(Schema.Struct({ name: Schema.String, status: Schema.String })),
   ),
   supportsResume: Schema.Boolean,
-  supportsSteering: Schema.Boolean,
   supportsPermissions: Schema.Boolean,
 });
 export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;
@@ -650,11 +659,6 @@ export type SessionSummary = {
 /** `session.list` returns the summaries directly — one shape, no wrapper. */
 export type ListSessionsOutput = ReadonlyArray<SessionSummary>;
 
-/**
- * Longest title a client may give a session. The title is persisted on the
- * session record and broadcast to every client on rename, so it is bounded
- * here rather than left to whatever a caller sends.
- */
 export const MAX_SESSION_TITLE_CHARS = 120;
 
 export const RenameSessionInputSchema = Schema.Struct({

@@ -91,6 +91,7 @@ const makeFixture = Effect.gen(function* () {
             });
             return { turnId: "turn-1" };
           }),
+        steer: () => Effect.void,
         setModel: () => Effect.void,
         setReasoningEffort: () => Effect.void,
         setPermissionMode: () => Effect.void,
@@ -98,7 +99,6 @@ const makeFixture = Effect.gen(function* () {
         respondToAgentRequest: () => Effect.void,
         getCapabilities: Effect.succeed({
           supportsResume: true,
-          supportsSteering: false,
           supportsPermissions: false,
         }),
         close,

@@ -62,7 +62,10 @@ describe("harness router", () => {
       expect(claude?.permissionModes).toEqual(["plan", "ask", "acceptEdits", "full"]);
 
       const codex = harnessAgents.find((agent) => agent.id === "codex");
-      expect(codex).toMatchObject({ available: false, reason: "codex CLI not found" });
+      expect(codex).toMatchObject({
+        available: false,
+        reason: "codex CLI not found",
+      });
 
       const pi = harnessAgents.find((agent) => agent.id === "pi");
       expect(pi?.available).toBe(true);

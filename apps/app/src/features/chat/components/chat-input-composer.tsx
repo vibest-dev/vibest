@@ -4,10 +4,12 @@ import {
   PromptInputToolbar,
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
+import { Button } from "@vibest/ui/components/button";
 import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
-import type { UIMessage } from "ai";
 import type { ReactNode } from "react";
 import { useStore } from "zustand";
+
+import type { OutgoingMessage } from "@/features/chat/runtime/chat-state";
 
 import { useChatSession } from "./chat-session-context";
 import { ChatInput } from "./input/chat-input";
@@ -17,25 +19,64 @@ import { createSubmitKeymap } from "./input/extensions/keymaps";
 import { useChatInputController } from "./input/use-chat-input-controller";
 import { useChatInputHasContent } from "./input/use-chat-input-has-content";
 
-function QueuedPromptList({ messages }: { messages: UIMessage[] }) {
+function QueuedPromptList({
+  messages,
+  canSteer,
+  onSteer,
+}: {
+  messages: OutgoingMessage[];
+  canSteer: boolean;
+  onSteer: (messageId: string) => void;
+}) {
+  let followUpIndex = 0;
   return (
     <ol
       aria-label="Queued prompts"
       aria-live="polite"
       className="max-h-48 w-full scrollbar-thin space-y-2 overflow-y-auto"
     >
-      {messages.map((message, index) => {
-        const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+      {messages.map((outgoing) => {
+        const text = outgoing.message.parts
+          .map((part) => (part.type === "text" ? part.text : ""))
+          .join("");
+        if (outgoing.delivery === "follow-up") followUpIndex += 1;
+        const label =
+          outgoing.status === "failed"
+            ? "Steer failed"
+            : outgoing.delivery === "steer"
+              ? outgoing.status === "sending"
+                ? "Steering…"
+                : "Steer"
+              : `Follow-up · ${followUpIndex}`;
         return (
           <li
-            key={message.id}
+            key={outgoing.message.id}
             data-slot="queued-user-message"
             className="flex min-w-0 items-center gap-3 text-sm"
           >
             <span className="min-w-0 flex-1 truncate" title={text}>
               {text}
             </span>
-            <span className="text-muted-foreground shrink-0 text-xs">Queued · {index + 1}</span>
+            {canSteer && outgoing.delivery === "follow-up" && outgoing.status === "queued" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto shrink-0 px-1.5 py-0 text-xs"
+                onClick={() => onSteer(outgoing.message.id)}
+              >
+                Steer
+              </Button>
+            )}
+            <span
+              className={
+                outgoing.status === "failed"
+                  ? "text-destructive shrink-0 text-xs"
+                  : "text-muted-foreground shrink-0 text-xs"
+              }
+              title={outgoing.error?.message}
+            >
+              {label}
+            </span>
           </li>
         );
       })}
@@ -43,46 +84,38 @@ function QueuedPromptList({ messages }: { messages: UIMessage[] }) {
   );
 }
 
-// Live-session input bar on the TipTap chat-input kit: Enter sends (IME-safe,
-// handled by the submit keymap) / Shift+Enter breaks the line. Prompts submitted
-// during an active turn enter Chat's client-local FIFO instead of being blocked.
-// prompt/turnInProgress come from ChatSessionProvider — not props.
-// toolbar = surface-composed toolbar content (e.g. <ChatModelSelect/>).
 export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
-  const { prompt, turnInProgress, store } = useChatSession();
-  const status = useStore(store, (s) => s.status);
-  const queuedMessages = useStore(store, (s) => s.queuedMessages);
+  const { prompt, steer, turnInProgress, store } = useChatSession();
+  const status = useStore(store, (state) => state.session.status);
+  const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
+  const outgoing = useStore(store, (state) => state.outgoing);
 
   const controller = useChatInputController({
-    // Order is a hard constraint: base extensions first, submit keymap last —
-    // otherwise bare Enter is consumed by the default newline behavior before
-    // the keymap ever sees it.
     extensions: (self) => [
       ...createChatBaseExtensions(),
       createSubmitKeymap({ onSubmit: () => void self.submit() }),
     ],
     onSubmit: (text) => {
-      // The composer clears once the message is accepted into the local queue;
-      // the promise may settle later when this item reaches the server.
       void prompt(text).catch(() => undefined);
       return;
     },
   });
 
   const hasContent = useChatInputHasContent(controller);
+  const canSteer = activeTurnId !== null;
 
   return (
     <CardFrame>
-      {queuedMessages.length > 0 && (
+      {outgoing.length > 0 && (
         <CardFrameHeader className="p-3">
-          <QueuedPromptList messages={queuedMessages} />
+          <QueuedPromptList messages={outgoing} canSteer={canSteer} onSteer={steer} />
         </CardFrameHeader>
       )}
       <Card
         render={
           <PromptInput
-            onSubmit={(e) => {
-              e.preventDefault();
+            onSubmit={(event) => {
+              event.preventDefault();
               void controller?.submit();
             }}
           />
@@ -92,12 +125,7 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
           <ChatInput />
           <PromptInputToolbar>
             <PromptInputTools>{toolbar}</PromptInputTools>
-            <PromptInputSubmit
-              disabled={!hasContent}
-              // During a turn this button enqueues rather than interrupts, so the
-              // send arrow is the truthful affordance instead of the stop square.
-              status={turnInProgress ? "ready" : status}
-            />
+            <PromptInputSubmit disabled={!hasContent} status={turnInProgress ? "ready" : status} />
           </PromptInputToolbar>
         </ChatInputProvider>
       </Card>

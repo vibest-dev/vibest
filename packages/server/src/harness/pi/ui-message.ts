@@ -8,6 +8,10 @@ type PiAssistantHistoryMessage = Extract<SessionMessageEntry["message"], { role:
 export type PiMetadata = {
   /** Pi session id (a uuid we assign via `--session-id`). */
   sessionId: string;
+  /** Identifies one native Pi run; all steer-created assistant segments share it. */
+  runId?: string;
+  /** Monotonic assistant segment within one native run; steer starts a new segment. */
+  segment?: number;
   // History enrichment: only messages folded from disk carry these — the live
   // stream never surfaces usage/model, so live/history metadata is asymmetric
   // by design (docs/design/pi-history-read-design.md §5). Values come from the

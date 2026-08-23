@@ -52,6 +52,7 @@ const runtimeFrom = (
     Stream.map((body) => ({ harnessAgentId: "claude-code" as const, sessionId: nativeId, body })),
   ),
   prompt: () => Effect.succeed({ turnId: "turn-1" }),
+  steer: () => Effect.void,
   setModel: (model) =>
     options.models ? Ref.update(options.models, (seen) => [...seen, model]) : Effect.void,
   setReasoningEffort: () => Effect.void,
@@ -60,7 +61,6 @@ const runtimeFrom = (
   respondToAgentRequest: () => Effect.void,
   getCapabilities: Effect.succeed({
     supportsResume: true,
-    supportsSteering: false,
     supportsPermissions: false,
   }),
   close: options.closes ? Ref.update(options.closes, (count) => count + 1) : Effect.void,

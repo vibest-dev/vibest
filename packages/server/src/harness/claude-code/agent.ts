@@ -3,7 +3,18 @@ import path from "node:path";
 
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
-import { Deferred, Effect, Exit, FiberSet, FileSystem, Queue, Ref, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  FiberSet,
+  FileSystem,
+  Queue,
+  Ref,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect";
 import type * as Cause from "effect/Cause";
 import { v7 as uuid } from "uuid";
 
@@ -45,6 +56,7 @@ type TurnState =
   | { readonly _tag: "Idle" }
   | {
       readonly _tag: "Active";
+      readonly turnId: string;
       readonly token: object;
       readonly abandoned: boolean;
       readonly resultEnqueued: boolean;
@@ -59,6 +71,7 @@ type SessionState = {
   readonly output: Queue.Queue<SessionOutput, Cause.Done | ClaudeSdkError>;
   readonly permissionRequests: Queue.Queue<ToolPermissionRequest, Cause.Done>;
   readonly pendingPermissions: Ref.Ref<ReadonlyMap<string, PendingToolPermission>>;
+  readonly turnPermit: Semaphore.Semaphore;
   readonly turnState: Ref.Ref<TurnState>;
 };
 
@@ -118,6 +131,11 @@ export interface ClaudeCodeAgent {
       },
       ClaudeAgentFailure | TurnAlreadyRunning
     >;
+    readonly steer: (input: {
+      readonly sessionId: string;
+      readonly expectedTurnId: string;
+      readonly message: sdk.SDKUserMessage["message"];
+    }) => Effect.Effect<void, ClaudeAgentFailure | TurnAlreadyRunning>;
     readonly requestPermission: (
       sessionId: string,
     ) => Stream.Stream<ToolPermissionRequest, ClaudeAgentFailure>;
@@ -255,9 +273,10 @@ export const makeClaudeCodeAgent = ({
       Effect.gen(function* () {
         const sessionScope = yield* Scope.fork(ownerScope, "sequential");
         return yield* Effect.gen(function* () {
-          const input = yield* Queue.bounded<sdk.SDKUserMessage, Cause.Done>(
-            SESSION_QUEUE_CAPACITY,
-          );
+          // Active-turn steering must enqueue while holding turnPermit so a result
+          // cannot cross the expectedTurnId check. Keep this queue non-blocking;
+          // backpressure here would retain the permit and deadlock the result boundary.
+          const input = yield* Queue.unbounded<sdk.SDKUserMessage, Cause.Done>();
           const output = yield* Queue.bounded<SessionOutput, Cause.Done | ClaudeSdkError>(
             SESSION_QUEUE_CAPACITY,
           );
@@ -267,6 +286,7 @@ export const makeClaudeCodeAgent = ({
           const pendingPermissions = yield* Ref.make<ReadonlyMap<string, PendingToolPermission>>(
             new Map(),
           );
+          const turnPermit = yield* Semaphore.make(1);
           const turnState = yield* Ref.make<TurnState>({ _tag: "Idle" });
           const termination = yield* Deferred.make<never, ClaudeSdkError>();
           const callbackFibers = yield* FiberSet.make<unknown, never>().pipe(
@@ -368,6 +388,7 @@ export const makeClaudeCodeAgent = ({
             output,
             permissionRequests,
             pendingPermissions,
+            turnPermit,
             turnState,
           };
 
@@ -405,12 +426,14 @@ export const makeClaudeCodeAgent = ({
 
                   const token =
                     value.type === "result"
-                      ? yield* Ref.modify(turnState, (current) => {
-                          if (current._tag !== "Active") return [undefined, current] as const;
-                          return current.abandoned
-                            ? [undefined, { _tag: "Idle" } as const]
-                            : [current.token, { ...current, resultEnqueued: true } as const];
-                        })
+                      ? yield* turnPermit.withPermit(
+                          Ref.modify(turnState, (current) => {
+                            if (current._tag !== "Active") return [undefined, current] as const;
+                            return current.abandoned
+                              ? [undefined, { _tag: "Idle" } as const]
+                              : [current.token, { ...current, resultEnqueued: true } as const];
+                          }),
+                        )
                       : yield* Ref.get(turnState).pipe(
                           Effect.map((current) =>
                             current._tag === "Active" ? current.token : undefined,
@@ -619,64 +642,94 @@ export const makeClaudeCodeAgent = ({
           Effect.gen(function* () {
             const session = yield* ensure(input.sessionId);
             const token = {};
-            const started = yield* Ref.modify(session.turnState, (current) =>
-              current._tag === "Idle"
-                ? [
-                    true,
-                    {
-                      _tag: "Active",
-                      token,
-                      abandoned: false,
-                      resultEnqueued: false,
-                    } as const,
-                  ]
-                : [false, current],
+            const turnId = uuid();
+            yield* session.turnPermit.withPermit(
+              Effect.gen(function* () {
+                const current = yield* Ref.get(session.turnState);
+                if (current._tag !== "Idle") {
+                  return yield* new TurnAlreadyRunning({
+                    sessionId: input.sessionId,
+                    turnId: current.turnId,
+                  });
+                }
+                yield* Ref.set(session.turnState, {
+                  _tag: "Active",
+                  turnId,
+                  token,
+                  abandoned: false,
+                  resultEnqueued: false,
+                });
+                yield* drainQueue(session.output);
+                const accepted = yield* Queue.offer(session.input, {
+                  type: "user",
+                  message: input.message,
+                  parent_tool_use_id: null,
+                  session_id: input.sessionId,
+                });
+                if (accepted) return;
+                yield* Ref.set(session.turnState, { _tag: "Idle" });
+                return yield* sdkError("prompt", new Error("Claude input is closed"));
+              }),
             );
-            if (!started) {
-              return yield* new TurnAlreadyRunning({ sessionId: input.sessionId });
-            }
-
-            yield* drainQueue(session.output);
-            const accepted = yield* Queue.offer(session.input, {
-              type: "user",
-              message: input.message,
-              parent_tool_use_id: null,
-              session_id: input.sessionId,
-            });
-            if (!accepted) {
-              yield* Ref.update(session.turnState, (current) =>
-                current._tag === "Active" && current.token === token
-                  ? ({ _tag: "Idle" } as const)
-                  : current,
-              );
-              return yield* sdkError("prompt", new Error("Claude input is closed"));
-            }
 
             return {
-              turnId: uuid(),
+              turnId,
               output: streamFromQueueOne(session.output).pipe(
                 Stream.filter((output) => output.token === token),
                 Stream.map((output) => output.message),
                 Stream.tap((message) =>
                   message.type === "result"
-                    ? Ref.update(session.turnState, (current) =>
-                        current._tag === "Active" && current.token === token
-                          ? ({ _tag: "Idle" } as const)
-                          : current,
+                    ? session.turnPermit.withPermit(
+                        Ref.update(session.turnState, (current) =>
+                          current._tag === "Active" && current.token === token
+                            ? ({ _tag: "Idle" } as const)
+                            : current,
+                        ),
                       )
                     : Effect.void,
                 ),
                 Stream.takeUntil((message) => message.type === "result"),
                 Stream.ensuring(
-                  Ref.update(session.turnState, (current) => {
-                    if (current._tag !== "Active" || current.token !== token) return current;
-                    return current.resultEnqueued
-                      ? ({ _tag: "Idle" } as const)
-                      : ({ ...current, abandoned: true } as const);
-                  }),
+                  session.turnPermit.withPermit(
+                    Ref.update(session.turnState, (current) => {
+                      if (current._tag !== "Active" || current.token !== token) return current;
+                      return current.resultEnqueued
+                        ? ({ _tag: "Idle" } as const)
+                        : ({ ...current, abandoned: true } as const);
+                    }),
+                  ),
                 ),
               ),
             };
+          }),
+        steer: (input) =>
+          Effect.gen(function* () {
+            const session = yield* ensure(input.sessionId);
+            yield* session.turnPermit.withPermit(
+              Effect.gen(function* () {
+                const current = yield* Ref.get(session.turnState);
+                if (
+                  current._tag !== "Active" ||
+                  current.turnId !== input.expectedTurnId ||
+                  current.abandoned ||
+                  current.resultEnqueued
+                ) {
+                  return yield* new TurnAlreadyRunning({
+                    sessionId: input.sessionId,
+                    ...(current._tag === "Active" ? { turnId: current.turnId } : {}),
+                  });
+                }
+                const accepted = yield* Queue.offer(session.input, {
+                  type: "user",
+                  message: input.message,
+                  parent_tool_use_id: null,
+                  session_id: input.sessionId,
+                });
+                if (!accepted) {
+                  return yield* sdkError("steer", new Error("Claude input is closed"));
+                }
+              }),
+            );
           }),
         requestPermission: (sessionId) =>
           Stream.unwrap(

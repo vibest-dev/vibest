@@ -23,6 +23,7 @@ class FakeTransport implements ChatSessionTransport {
     };
   }
   prompt = async () => ({ turnId: "turn-receipt" });
+  steer = async () => {};
   getMessages = async () => null;
   respondToAgentRequest = async (_requestId: string, _response: AgentResponse) => {};
   setModel = async (_providerId: string, _modelId: string) => {};
@@ -50,7 +51,41 @@ describe("ChatManager", () => {
     expect(transports).toHaveLength(3);
   });
 
-  it("evicts and unsubscribes a Chat once the session closes", () => {
+  it("keys Chats by the complete SessionRef identity", () => {
+    const { manager, transports } = makeManager();
+    const first = manager.chatFor(refFor("shared"));
+    const otherProject = manager.chatFor(refFor("shared", { projectId: "project-2" }));
+    const otherHarness = manager.chatFor(refFor("shared", { harnessAgentId: "codex" }));
+
+    expect(otherProject).not.toBe(first);
+    expect(otherHarness).not.toBe(first);
+    expect(otherHarness).not.toBe(otherProject);
+    expect(transports).toHaveLength(3);
+  });
+
+  it("handles a stream that terminates synchronously during construction", () => {
+    const transports: FakeTransport[] = [];
+    const manager = new ChatManager(() => {
+      const transport = new FakeTransport();
+      transport.subscribe = (onEvent) => {
+        transport.onEvent = onEvent;
+        onEvent({ type: "closed", reason: "session_closed" });
+        return () => {
+          transport.disposed += 1;
+        };
+      };
+      transports.push(transport);
+      return transport;
+    });
+
+    const closed = manager.chatFor(refFor("session-1"));
+    expect(closed.store.getState().session.error?.message).toBe("Session closed");
+    expect(transports[0]?.disposed).toBe(1);
+    expect(manager.chatFor(refFor("session-1"))).not.toBe(closed);
+    expect(transports).toHaveLength(2);
+  });
+
+  it("evicts and unsubscribes a Chat once the session closes", async () => {
     const { manager, transports } = makeManager();
     const chat = manager.chatFor(refFor("session-1"));
     const transport = transports[0];
@@ -60,7 +95,8 @@ describe("ChatManager", () => {
     expect(transport?.disposed).toBe(1);
     // The evicted instance keeps its terminal state for whoever is still
     // rendering it — eviction only stops it being handed out again.
-    expect(chat.store.getState().error?.message).toBe("Session closed");
+    expect(chat.store.getState().session.error?.message).toBe("Session closed");
+    await expect(chat.prompt("after close")).rejects.toThrow("Session is no longer available");
   });
 
   it("builds a fresh Chat when a closed session is opened again", () => {
@@ -74,7 +110,7 @@ describe("ChatManager", () => {
     const reopened = manager.chatFor(refFor("session-1"));
     expect(reopened).not.toBe(closed);
     expect(transports).toHaveLength(2);
-    expect(reopened.store.getState().error).toBeUndefined();
+    expect(reopened.store.getState().session.error).toBeUndefined();
   });
 
   it("evicts once even if the stream closes twice", () => {

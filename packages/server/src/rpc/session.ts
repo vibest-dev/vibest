@@ -184,6 +184,30 @@ export const sessionRouter = orpc.router({
         ),
     });
   }),
+  steer: orpc.steer.effect(function* ({ input, errors }) {
+    const sessions = yield* HarnessAgentSessionService;
+    yield* sessions.steer(input).pipe(
+      Effect.catchTags({
+        SessionNotFound: (e) =>
+          Effect.fail(errors.NOT_FOUND({ message: `session ${e.sessionId} not found` })),
+        HarnessSessionNotFound: (e) =>
+          Effect.fail(
+            errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is not active` }),
+          ),
+        SessionRefMismatch: (e) =>
+          Effect.fail(
+            errors.INVALID_ARGUMENT({ message: `ref mismatch for session ${e.sessionId}` }),
+          ),
+        UnsupportedPromptPart: (e) =>
+          Effect.fail(errors.UNSUPPORTED({ message: `unsupported prompt part: ${e.kind}` })),
+        HarnessAgentNotFound: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
+        SessionClosed: (e) =>
+          Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
+        TurnAlreadyRunning: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
+        AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
+      }),
+    );
+  }),
   interrupt: orpc.interrupt.effect(function* ({ input, errors }) {
     const sessions = yield* HarnessAgentSessionService;
     yield* translateErrors(sessions.interrupt(input.ref), {

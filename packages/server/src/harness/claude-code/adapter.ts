@@ -315,7 +315,6 @@ const makeRuntime = (
         models: models.map((model) => ({ id: model.value, name: model.displayName })),
         mcpServers: mcpServers.map((server) => ({ name: server.name, status: server.status })),
         supportsResume: true,
-        supportsSteering: false,
         supportsPermissions: true,
       } satisfies SessionCapabilities;
     });
@@ -371,6 +370,23 @@ const makeRuntime = (
           );
           yield* Effect.forkIn(pump, scope);
           return receipt;
+        }),
+      steer: (expectedTurnId, input) =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
+          yield* agent.session
+            .steer({
+              sessionId,
+              expectedTurnId,
+              message: toClaudeMessage(input),
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                cause instanceof TurnAlreadyRunning
+                  ? cause
+                  : operationError(sessionId, "steer", cause),
+              ),
+            );
         }),
       setModel,
       setReasoningEffort,

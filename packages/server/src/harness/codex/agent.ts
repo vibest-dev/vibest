@@ -158,6 +158,11 @@ export interface CodexAgent {
       },
       HarnessSessionNotFound | CodexTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
+    readonly steer: (input: {
+      readonly sessionId: string;
+      readonly expectedTurnId: string;
+      readonly text: string;
+    }) => Effect.Effect<void, HarnessSessionNotFound | CodexTransportFailure | TurnAlreadyRunning>;
     readonly requestPermission: (
       sessionId: string,
     ) => Stream.Stream<AgentRequest, HarnessSessionNotFound>;
@@ -477,6 +482,34 @@ export const makeCodexAgentWithDependencies = <R>(
         });
       });
 
+    const steer = (input: {
+      readonly sessionId: string;
+      readonly expectedTurnId: string;
+      readonly text: string;
+    }): Effect.Effect<void, HarnessSessionNotFound | CodexTransportFailure | TurnAlreadyRunning> =>
+      Effect.gen(function* () {
+        const session = yield* getSession(input.sessionId);
+        const current = yield* Ref.get(session.turnState);
+        if (current._tag !== "Active" || current.turnId !== input.expectedTurnId) {
+          return yield* new TurnAlreadyRunning({
+            sessionId: input.sessionId,
+            ...(current._tag === "Active" ? { turnId: current.turnId } : {}),
+          });
+        }
+        const transport = yield* holder.current;
+        if (!transport || transportGenerations.get(transport) !== session.generation) {
+          return yield* new CodexTransportError({
+            operation: "turn/steer",
+            cause: new Error("Codex transport is unavailable"),
+          });
+        }
+        yield* transport.request<TurnSteerResponse>("turn/steer", {
+          threadId: session.threadId,
+          input: [{ type: "text", text: input.text, text_elements: [] }],
+          expectedTurnId: input.expectedTurnId,
+        });
+      });
+
     const interrupt = (sessionId: string): Effect.Effect<void, HarnessSessionNotFound> =>
       Effect.gen(function* () {
         const session = yield* getSession(sessionId);
@@ -675,37 +708,10 @@ export const makeCodexAgentWithDependencies = <R>(
                     return yield* Effect.suspend(prepareTurn);
                   }
                   if (decision._tag === "Steer") {
-                    const steered = yield* restore(
-                      transport.request<TurnSteerResponse>("turn/steer", {
-                        threadId: session.threadId,
-                        input: turnInput,
-                        expectedTurnId: decision.turn.turnId,
-                      }),
-                    ).pipe(
-                      Effect.as(true),
-                      Effect.catch(() => Effect.succeed(false)),
-                    );
-                    if (steered) {
-                      return {
-                        turnId: decision.turn.turnId,
-                        started: false,
-                        output: Stream.empty,
-                      };
-                    }
-                    yield* restore(Deferred.await(decision.turn.ended)).pipe(
-                      Effect.timeoutOrElse({
-                        duration: "2 seconds",
-                        orElse: () =>
-                          Effect.fail(
-                            new AgentOperationError({
-                              sessionId: input.sessionId,
-                              operation: "wait-for-stale-turn",
-                              cause: new Error("Timed out waiting for the previous Codex turn"),
-                            }),
-                          ),
-                      }),
-                    );
-                    return yield* Effect.suspend(prepareTurn);
+                    return yield* new TurnAlreadyRunning({
+                      sessionId: input.sessionId,
+                      turnId: decision.turn.turnId,
+                    });
                   }
 
                   yield* drainQueue(session.chunks);
@@ -831,6 +837,7 @@ export const makeCodexAgentWithDependencies = <R>(
             yield* Deferred.succeed(pending.deferred, pending.settle(response));
             return true;
           }),
+        steer,
         interrupt,
         abort,
       },

@@ -280,6 +280,7 @@ describe("session router", () => {
       harnessAgentId: "pi",
       events: Stream.never,
       prompt: () => Effect.fail(new SessionClosed({ sessionId })),
+      steer: () => Effect.die("steer is not exercised by this test"),
       setModel: () => Effect.void,
       setReasoningEffort: () => Effect.void,
       setPermissionMode: () => Effect.void,

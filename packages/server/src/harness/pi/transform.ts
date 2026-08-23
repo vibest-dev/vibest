@@ -59,9 +59,12 @@ export function createPiTransform(
   // Doubles as "has this run produced assistant output yet" (> 0), which is
   // what tells a delivered steer apart from the prompting input's echo.
   let messageOrdinal = 0;
+  let runId = "";
+  let segment = 0;
   // A steered user message landed mid-run: split before the next assistant
   // message rather than eagerly, so an interrupt right after delivery doesn't
-  // leave an empty trailing UIMessage.
+  // leave an empty trailing UIMessage. This split is not a turn boundary: the
+  // real run ends only at agent_settled.
   let pendingSplit = false;
   // Block ids that streamed at least one delta, so *_end can recover text that
   // only arrived whole (the no-delta fallback, mirroring codex).
@@ -121,8 +124,14 @@ export function createPiTransform(
         if (!turnOpen) {
           turnOpen = true;
           messageOrdinal = 0;
+          runId = uuid();
+          segment = 0;
           pendingSplit = false;
-          yield { type: "start", messageId: uuid(), messageMetadata: { sessionId } };
+          yield {
+            type: "start",
+            messageId: uuid(),
+            messageMetadata: { sessionId, runId, segment },
+          };
         }
         break;
 
@@ -131,8 +140,12 @@ export function createPiTransform(
         if (event.message.role === "assistant") {
           if (pendingSplit) {
             pendingSplit = false;
-            yield { type: "finish" };
-            yield { type: "start", messageId: uuid(), messageMetadata: { sessionId } };
+            segment += 1;
+            yield {
+              type: "start",
+              messageId: uuid(),
+              messageMetadata: { sessionId, runId, segment },
+            };
           }
           messageOrdinal += 1;
         } else if (event.message.role === "user" && messageOrdinal > 0) {

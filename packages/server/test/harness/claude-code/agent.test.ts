@@ -33,10 +33,12 @@ type FakeQuery = sdk.Query & {
   readonly mcpServerStatus: ReturnType<typeof vi.fn>;
   readonly setModel: ReturnType<typeof vi.fn>;
   readonly interrupt: ReturnType<typeof vi.fn>;
+  readonly readInput: ReturnType<typeof vi.fn<() => Promise<sdk.SDKUserMessage | undefined>>>;
 };
 
 let messages: sdk.SDKMessage[];
 let queryInstance: FakeQuery;
+let receivedInputs: sdk.SDKUserMessage[];
 
 const makeFakeQuery = (
   prompt: AsyncIterable<sdk.SDKUserMessage>,
@@ -44,6 +46,12 @@ const makeFakeQuery = (
   failWhileIdle?: () => void,
 ): FakeQuery => {
   const input = prompt[Symbol.asyncIterator]();
+  const readInput = vi.fn<() => Promise<sdk.SDKUserMessage | undefined>>(async () => {
+    const nextInput = await input.next();
+    if (nextInput.done) return undefined;
+    receivedInputs.push(nextInput.value);
+    return nextInput.value;
+  });
   let needsInput = true;
   const query = {
     next: vi.fn<
@@ -56,8 +64,8 @@ const makeFakeQuery = (
         throw new Error("idle query failed");
       }
       if (needsInput) {
-        const nextInput = await input.next();
-        if (nextInput.done) return { done: true as const, value: undefined };
+        const nextInput = await readInput();
+        if (!nextInput) return { done: true as const, value: undefined };
         needsInput = false;
         if (failAfterInput) throw new Error("query failed");
       }
@@ -77,6 +85,7 @@ const makeFakeQuery = (
     ]),
     setModel: vi.fn<(model: string) => Promise<void>>(async () => undefined),
     interrupt: vi.fn<() => Promise<void>>(async () => undefined),
+    readInput,
     [Symbol.asyncIterator]() {
       return query;
     },
@@ -91,6 +100,7 @@ describe("ClaudeCodeAgent", () => {
   beforeEach(() => {
     process.env["VIBEST_CLAUDE_EXECUTABLE"] = "/fake/claude";
     messages = [];
+    receivedInputs = [];
     mockQuery.mockReset().mockImplementation(({ prompt }) => {
       queryInstance = makeFakeQuery(prompt);
       return queryInstance;
@@ -277,6 +287,105 @@ describe("ClaudeCodeAgent", () => {
     }),
   );
 
+  it.effect("steers the active Claude turn through its existing input stream", () =>
+    Effect.gen(function* () {
+      messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
+      const agent = yield* claudeAgent();
+      const { sessionId } = yield* agent.session.create();
+      const prompt = yield* agent.session.prompt({
+        sessionId,
+        message: { role: "user", content: "first" },
+      });
+      yield* Effect.eventually(
+        Effect.sync(() => receivedInputs.length).pipe(
+          Effect.filterOrFail(
+            (length) => length === 1,
+            () => new Error("Claude did not consume the initial prompt"),
+          ),
+        ),
+      );
+
+      yield* agent.session.steer({
+        sessionId,
+        expectedTurnId: prompt.turnId,
+        message: { role: "user", content: "second" },
+      });
+      yield* Effect.promise(() => queryInstance.readInput());
+
+      assert.deepEqual(
+        receivedInputs.map((input) => input.message.content),
+        ["first", "second"],
+      );
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("rejects a Claude steer for a stale turn without offering input", () =>
+    Effect.gen(function* () {
+      messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
+      const agent = yield* claudeAgent();
+      const { sessionId } = yield* agent.session.create();
+      const prompt = yield* agent.session.prompt({
+        sessionId,
+        message: { role: "user", content: "first" },
+      });
+      yield* Effect.eventually(
+        Effect.sync(() => receivedInputs.length).pipe(
+          Effect.filterOrFail(
+            (length) => length === 1,
+            () => new Error("Claude did not consume the initial prompt"),
+          ),
+        ),
+      );
+
+      const error = yield* agent.session
+        .steer({
+          sessionId,
+          expectedTurnId: "stale-turn",
+          message: { role: "user", content: "second" },
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error._tag, "TurnAlreadyRunning");
+      assert.equal(error.turnId, prompt.turnId);
+      assert.deepEqual(
+        receivedInputs.map((input) => input.message.content),
+        ["first"],
+      );
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("exposes Claude steer through the adapter without starting a second turn", () =>
+    Effect.gen(function* () {
+      messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
+      const agent = yield* claudeAgent();
+      const session = yield* makeClaudeCodeAdapter(agent).open({ cwd: "/tmp" });
+      const started = yield* Deferred.make<void>();
+      let startedCount = 0;
+      const events = yield* Stream.runForEach(session.events, (event) =>
+        event.body.type === "session.turn.started"
+          ? Effect.sync(() => {
+              startedCount += 1;
+            }).pipe(Effect.andThen(Deferred.succeed(started, undefined)), Effect.asVoid)
+          : Effect.void,
+      ).pipe(Effect.forkChild);
+
+      const receipt = yield* session.prompt({ parts: [{ type: "text", text: "first" }] });
+      yield* Deferred.await(started);
+      yield* session.steer(receipt.turnId, { parts: [{ type: "text", text: "second" }] });
+      yield* Effect.promise(() => queryInstance.readInput());
+
+      assert.deepEqual(
+        receivedInputs.map((input) => input.message.content),
+        [[{ type: "text", text: "first" }], [{ type: "text", text: "second" }]],
+      );
+      assert.equal(startedCount, 1);
+      yield* Fiber.interrupt(events);
+      yield* session.close;
+    }),
+  );
+
   it.effect("rejects a concurrent turn while the previous turn is unfinished", () =>
     Effect.gen(function* () {
       messages = [{ type: "system", subtype: "init" } as sdk.SDKMessage];
@@ -295,6 +404,7 @@ describe("ClaudeCodeAgent", () => {
         })
         .pipe(Effect.flip);
       assert.equal(error._tag, "TurnAlreadyRunning");
+      assert.equal(error.turnId, first.turnId);
       yield* agent.session.abort(sessionId);
     }),
   );

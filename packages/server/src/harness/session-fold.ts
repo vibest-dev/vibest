@@ -38,6 +38,10 @@ const MAX_BUFFERED_BYTES = 10 * 1024 * 1024;
 // amortizes to O(1) per chunk instead of shifting on every append.
 const EVICT_TO_CHUNKS = Math.floor(MAX_BUFFERED_CHUNKS * 0.75);
 const EVICT_TO_BYTES = Math.floor(MAX_BUFFERED_BYTES * 0.75);
+// Accepted correlations normally expire when their turn reaches an
+// authoritative boundary. Cap them as a safety valve for malformed event
+// streams that never deliver that boundary.
+const MAX_ACCEPTED_PROMPTS = 256;
 
 /** Cheap size estimate: the delta/text payload for streaming chunks, a
  * serialization for the (rare, potentially large) structured ones. */
@@ -80,6 +84,9 @@ export type SessionState = {
   readonly activeTurn: ActiveTurn | null;
   // The latest prompt accepted by the harness, retained for reconnect.
   readonly activePrompt: ActivePrompt | null;
+  // Ordered accepted correlations retained until their turn ends. The cap is a
+  // safety valve; ordinary lifecycle events empty this collection per turn.
+  readonly acceptedPrompts: ReadonlyArray<ActivePrompt>;
   // Concurrent submissions remain candidates until their own accepted/rejected
   // correlation arrives. A rejected newer candidate must reveal, not erase,
   // the accepted prompt currently driving the turn.
@@ -93,6 +100,7 @@ export const initialSessionState: SessionState = {
   phase: "idle",
   activeTurn: null,
   activePrompt: null,
+  acceptedPrompts: [],
   pendingPrompts: [],
   pendingRequests: new Map(),
 };
@@ -198,15 +206,20 @@ export const foldSessionEvent = (
       const accepted = current.pendingPrompts.find(
         (prompt) => prompt.messageId === event.messageId,
       );
-      return accepted
-        ? {
-            ...base,
-            activePrompt: { ...accepted, acceptedTurnId: event.turnId },
-            pendingPrompts: current.pendingPrompts.filter(
-              (prompt) => prompt.messageId !== event.messageId,
-            ),
-          }
-        : base;
+      if (!accepted) return base;
+      const correlation = { ...accepted, acceptedTurnId: event.turnId };
+      const acceptedPrompts = [
+        ...current.acceptedPrompts.filter((prompt) => prompt.messageId !== event.messageId),
+        correlation,
+      ].slice(-MAX_ACCEPTED_PROMPTS);
+      return {
+        ...base,
+        activePrompt: correlation,
+        acceptedPrompts,
+        pendingPrompts: current.pendingPrompts.filter(
+          (prompt) => prompt.messageId !== event.messageId,
+        ),
+      };
     }
     case "session.prompt.rejected":
       return {
@@ -216,10 +229,14 @@ export const foldSessionEvent = (
         ),
       };
     case "session.turn.started":
-      // Starting a turn releases the previous turn's retained buffer.
+      // Starting a turn releases the previous turn's retained buffer and any
+      // accepted correlations that somehow outlived its authoritative end.
       return {
         ...base,
         phase: "running",
+        acceptedPrompts: current.acceptedPrompts.filter(
+          (prompt) => prompt.acceptedTurnId === event.turnId,
+        ),
         activeTurn: {
           turnId: event.turnId,
           messageId: null,
@@ -242,11 +259,17 @@ export const foldSessionEvent = (
     case "session.turn.ended":
       // Keep the finished turn's chunks (marked complete) until the next turn
       // starts: a consumer recovering from a mid-turn disconnect replays the
-      // tail from the snapshot. Real history reads supersede.
+      // tail from the snapshot. The ended event itself is the authoritative
+      // recovery boundary for accepted prompt correlations.
       return {
         ...base,
         phase: "idle",
         activeTurn: current.activeTurn ? { ...current.activeTurn, complete: true } : null,
+        activePrompt:
+          current.activePrompt?.acceptedTurnId === event.turnId ? null : current.activePrompt,
+        acceptedPrompts: current.acceptedPrompts.filter(
+          (prompt) => prompt.acceptedTurnId !== event.turnId,
+        ),
       };
     case "session.request.asked": {
       const pendingRequests = new Map(current.pendingRequests).set(event.request.id, event.request);
@@ -266,6 +289,7 @@ export const foldSessionEvent = (
         phase: "crashed",
         activeTurn: null,
         activePrompt: null,
+        acceptedPrompts: [],
         pendingPrompts: [],
         pendingRequests: new Map(),
       };
@@ -294,6 +318,7 @@ export const toSnapshot = (ref: SessionRef, state: SessionState): SessionRuntime
     : null,
   activePrompt: state.pendingPrompts.at(-1) ?? state.activePrompt,
   acceptedPrompt: state.activePrompt,
+  acceptedPrompts: state.acceptedPrompts,
   pendingPrompts: state.pendingPrompts,
   cursor: state.cursor,
 });
