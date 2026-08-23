@@ -302,6 +302,10 @@ function terminate(
     });
   }
   state.outgoing = [];
+  for (const operationId of Object.keys(state.pendingResponses)) {
+    effects.push({ type: "settleResponse", operationId });
+  }
+  state.pendingResponses = {};
   state.lifecycle.session = "terminated";
   state.session.activeTurnId = null;
   state.session.pendingRequests = [];
@@ -310,7 +314,7 @@ function terminate(
   state.session.error = new Error(
     reason === "session_deleted" ? "Session deleted" : "Session closed",
   );
-  effects.push({ type: "unsubscribe" }, { type: "notifyTerminated" });
+  effects.push({ type: "abortLifetime" }, { type: "unsubscribe" }, { type: "notifyTerminated" });
 }
 
 export function handleTransportEvent(
@@ -324,8 +328,10 @@ export function handleTransportEvent(
   }
   if (!isChatActive(state)) return;
   if (event.type === "attached") {
-    if (state.sync.reconcile && state.sync.reconcile.promptRevision !== state.prompt.revision) {
+    const reconcile = state.sync.reconcile;
+    if (reconcile) {
       state.sync.reconcile = null;
+      effects.push({ type: "cancelHistory", id: reconcile.id });
     }
     if (!state.sync.historyLoaded) {
       startHistoryFloor(state, effects, event.snapshot);

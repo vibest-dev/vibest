@@ -259,6 +259,64 @@ describe("OrpcChatSessionTransport subscription", () => {
 });
 
 describe("OrpcChatSessionTransport RPC mapping", () => {
+  it("forwards abort signals as the oRPC call options", async () => {
+    const calls: Array<{ name: string; options: unknown }> = [];
+    const record = (name: string, options: unknown) => calls.push({ name, options });
+    const client = {
+      session: {
+        ...baseSession,
+        prompt: async (_input: unknown, options?: unknown) => {
+          record("prompt", options);
+          return { turnId: "turn-1" };
+        },
+        getMessages: async (_input: unknown, options?: unknown) => {
+          record("getMessages", options);
+          return { messages: [] };
+        },
+        respondToAgentRequest: async (_input: unknown, options?: unknown) => {
+          record("respondToAgentRequest", options);
+        },
+        setModel: async (_input: unknown, options?: unknown) => {
+          record("setModel", options);
+        },
+        setReasoningEffort: async (_input: unknown, options?: unknown) => {
+          record("setReasoningEffort", options);
+        },
+        setPermissionMode: async (_input: unknown, options?: unknown) => {
+          record("setPermissionMode", options);
+        },
+      },
+    } satisfies ChatTransportClient;
+    const transport = new OrpcChatSessionTransport(client, ref);
+    const signal = new AbortController().signal;
+
+    await transport.prompt(
+      { messageId: "message-1", parts: [{ type: "text", text: "hi" }] },
+      { signal },
+    );
+    await transport.getMessages({ signal });
+    await transport.respondToAgentRequest(
+      "request-1",
+      { type: "tool", behavior: "allow" },
+      { signal },
+    );
+    await transport.setModel("provider", "model", { signal });
+    await transport.setReasoningEffort("high", { signal });
+    await transport.setPermissionMode("ask", { signal });
+
+    expect(calls.map((call) => call.name)).toEqual([
+      "prompt",
+      "getMessages",
+      "respondToAgentRequest",
+      "setModel",
+      "setReasoningEffort",
+      "setPermissionMode",
+    ]);
+    expect(calls.map((call) => call.options)).toEqual(
+      Array.from({ length: 6 }, () => ({ signal })),
+    );
+  });
+
   it("maps UNSUPPORTED history to null (capability absence, not failure)", async () => {
     const client = {
       session: {

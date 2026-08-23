@@ -46,6 +46,10 @@ export type ChatTransportEvent =
   | { readonly type: "closed"; readonly reason: "session_closed" | "session_deleted" }
   | SessionScopedEvent;
 
+export type ChatTransportCallOptions = {
+  readonly signal?: AbortSignal;
+};
+
 export interface ChatSessionTransport {
   /**
    * Persistent subscription (call-to-dispose). Emits "attached" (subscription
@@ -60,35 +64,48 @@ export interface ChatSessionTransport {
    * subscription like everyone else's. `messageId` is the optimistic user
    * message's id; the server echoes it on `session.prompt.submitted` (dedupe).
    */
-  prompt(input: {
-    readonly messageId: string;
-    readonly parts: ReadonlyArray<PromptPart>;
-  }): Promise<{ readonly turnId: string }>;
-  steer(input: {
-    readonly expectedTurnId: string;
-    readonly messageId: string;
-    readonly parts: ReadonlyArray<PromptPart>;
-  }): Promise<void>;
+  prompt(
+    input: {
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    },
+    options?: ChatTransportCallOptions,
+  ): Promise<{ readonly turnId: string }>;
+  steer(
+    input: {
+      readonly expectedTurnId: string;
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    },
+    options?: ChatTransportCallOptions,
+  ): Promise<void>;
   /**
    * The session's native history as final-form UIMessages, or `null` when this
    * harness serves no history — capability absence is a normal outcome here,
    * not an error. All three harnesses serve history today, so `null` is the
    * degraded path, not the common one.
    */
-  getMessages(): Promise<readonly UIMessage[] | null>;
+  getMessages(options?: ChatTransportCallOptions): Promise<readonly UIMessage[] | null>;
   /**
    * Resolves normally when the request is no longer pending — including when
    * another client answered it first (the server's "not pending" is an
    * outcome, not a failure, from the responder's point of view).
    */
-  respondToAgentRequest(requestId: string, response: AgentResponse): Promise<void>;
+  respondToAgentRequest(
+    requestId: string,
+    response: AgentResponse,
+    options?: ChatTransportCallOptions,
+  ): Promise<void>;
   // Session-scoped config setters — separate session calls, never bundled into
   // a prompt turn. The transport already knows its SessionRef. The model is
   // the flat providerId/modelId pair — always together, modelId alone is only
   // unique within its provider.
-  setModel(providerId: string, modelId: string): Promise<void>;
-  setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<void>;
-  setPermissionMode(mode: PermissionMode): Promise<void>;
+  setModel(providerId: string, modelId: string, options?: ChatTransportCallOptions): Promise<void>;
+  setReasoningEffort(
+    reasoningEffort: ReasoningEffort,
+    options?: ChatTransportCallOptions,
+  ): Promise<void>;
+  setPermissionMode(mode: PermissionMode, options?: ChatTransportCallOptions): Promise<void>;
 }
 
 // Binds a SessionRef to a transport. ChatManager holds one of these instead of

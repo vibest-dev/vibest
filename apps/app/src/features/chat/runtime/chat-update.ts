@@ -45,6 +45,7 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
     const next = copyChatState(state);
     const effects: ChatEffects = [];
     next.lifecycle.instance = "disposed";
+    effects.push({ type: "abortLifetime" });
     for (const outgoing of next.outgoing) {
       effects.push({
         type: "rejectPrompt",
@@ -53,6 +54,10 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
       });
     }
     next.outgoing = [];
+    for (const operationId of Object.keys(next.pendingResponses)) {
+      effects.push({ type: "settleResponse", operationId });
+    }
+    next.pendingResponses = {};
     for (const turnId of Object.keys(next.turns.folds)) abandonFold(next, effects, turnId);
     effects.push({ type: "unsubscribe" });
     return { state: next, effects };
@@ -100,7 +105,7 @@ export function updateChat(state: ChatState, input: ChatInput): ChatTransition {
     return { state, effects: [] };
   }
   if (
-    input.type === "promptCompleted" &&
+    input.type === "outgoingCompleted" &&
     !state.outgoing.some(
       (message) => message.message.id === input.messageId && message.status === "sending",
     )

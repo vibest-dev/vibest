@@ -14,7 +14,11 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentResponse } from "./agent-requests";
 import { Chat } from "./chat";
-import type { ChatSessionTransport, ChatTransportEvent } from "./chat-transport-port";
+import type {
+  ChatSessionTransport,
+  ChatTransportCallOptions,
+  ChatTransportEvent,
+} from "./chat-transport-port";
 
 const ref = {
   projectId: "project-1",
@@ -36,12 +40,14 @@ class FakeTransport implements ChatSessionTransport {
   // floor against live traffic.
   historyGate: Promise<void> | null = null;
   getMessagesCalls = 0;
+  historySignals: AbortSignal[] = [];
   promptCalls: Array<{ messageId: string; parts: ReadonlyArray<PromptPart> }> = [];
   steerCalls: Array<{
     expectedTurnId: string;
     messageId: string;
     parts: ReadonlyArray<PromptPart>;
   }> = [];
+  promptSignals: AbortSignal[] = [];
   promptError: unknown = null;
   steerError: unknown = null;
   steerGates: Promise<void>[] = [];
@@ -50,6 +56,9 @@ class FakeTransport implements ChatSessionTransport {
   // reconnect loop to reach the restarted server.
   promptGate: Promise<void> | null = null;
   responded: Array<{ requestId: string; response: AgentResponse }> = [];
+  responseSignals: AbortSignal[] = [];
+  responseGate: Promise<void> | null = null;
+  configSignals: AbortSignal[] = [];
 
   subscribe(onEvent: (event: ChatTransportEvent) => void): () => void {
     this.onEvent = onEvent;
@@ -57,38 +66,63 @@ class FakeTransport implements ChatSessionTransport {
       this.disposed += 1;
     };
   }
-  prompt = async (input: { messageId: string; parts: ReadonlyArray<PromptPart> }) => {
+  prompt = async (
+    input: { messageId: string; parts: ReadonlyArray<PromptPart> },
+    options?: ChatTransportCallOptions,
+  ) => {
     this.promptCalls.push(input);
+    if (options?.signal) this.promptSignals.push(options.signal);
+    options?.signal?.throwIfAborted();
     const gate = this.promptGates.shift() ?? this.promptGate;
     const error = this.promptError;
     if (gate) await gate;
     if (error) throw error;
     return { turnId: "turn-receipt" };
   };
-  steer = async (input: {
-    expectedTurnId: string;
-    messageId: string;
-    parts: ReadonlyArray<PromptPart>;
-  }) => {
+  steer = async (
+    input: {
+      expectedTurnId: string;
+      messageId: string;
+      parts: ReadonlyArray<PromptPart>;
+    },
+    options?: ChatTransportCallOptions,
+  ) => {
     this.steerCalls.push(input);
+    if (options?.signal) options.signal.throwIfAborted();
     const gate = this.steerGates.shift();
     if (gate) await gate;
     if (this.steerError) throw this.steerError;
   };
 
-  getMessages = async () => {
+  getMessages = async (options?: ChatTransportCallOptions) => {
     this.getMessagesCalls += 1;
+    if (options?.signal) this.historySignals.push(options.signal);
+    options?.signal?.throwIfAborted();
     const history = this.history;
     const gate = this.historyGate;
     if (gate) await gate;
     return history;
   };
-  respondToAgentRequest = async (requestId: string, response: AgentResponse) => {
+  respondToAgentRequest = async (
+    requestId: string,
+    response: AgentResponse,
+    options?: ChatTransportCallOptions,
+  ) => {
     this.responded.push({ requestId, response });
+    if (options?.signal) this.responseSignals.push(options.signal);
+    options?.signal?.throwIfAborted();
+    const gate = this.responseGate;
+    if (gate) await gate;
   };
-  setModel = async (_providerId: string, _modelId: string) => {};
-  setReasoningEffort = async (_effort: ReasoningEffort) => {};
-  setPermissionMode = async (_mode: PermissionMode) => {};
+  setModel = async (_providerId: string, _modelId: string, options?: ChatTransportCallOptions) => {
+    if (options?.signal) this.configSignals.push(options.signal);
+  };
+  setReasoningEffort = async (_effort: ReasoningEffort, options?: ChatTransportCallOptions) => {
+    if (options?.signal) this.configSignals.push(options.signal);
+  };
+  setPermissionMode = async (_mode: PermissionMode, options?: ChatTransportCallOptions) => {
+    if (options?.signal) this.configSignals.push(options.signal);
+  };
 }
 
 const makeChat = (options?: { onTerminated?: () => void }) => {
@@ -1899,6 +1933,52 @@ describe("Chat history reconcile", () => {
     ]);
   });
 
+  it("aborts a stale reconcile when a prompt starts without retrying the prompt", async () => {
+    const { chat, transport, attach, live } = makeChat();
+    await attach({});
+    let releaseHistory: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, { type: "session.turn.ended", turnId: "turn-1", outcome: "failed", phase: "idle" });
+    await settle();
+
+    const staleSignal = transport.historySignals[1]!;
+    const prompted = chat.prompt("new turn");
+    await prompted;
+
+    expect(staleSignal.aborted).toBe(true);
+    expect(transport.promptCalls).toHaveLength(1);
+    expect(transport.promptSignals[0]?.aborted).toBe(false);
+
+    releaseHistory();
+    await settle();
+    expect(transport.promptCalls).toHaveLength(1);
+  });
+
+  it("aborts a reconcile invalidated by a newer authoritative snapshot", async () => {
+    const { transport, attach, live } = makeChat();
+    await attach({});
+    let releaseHistory: () => void = () => undefined;
+    transport.historyGate = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, { type: "session.turn.ended", turnId: "turn-1", outcome: "failed", phase: "idle" });
+    await settle();
+
+    const staleSignal = transport.historySignals[1]!;
+    await attach({ cursor: 2 });
+
+    expect(staleSignal.aborted).toBe(true);
+    expect(transport.historySignals[2]).not.toBe(staleSignal);
+    expect(transport.historySignals[2]?.aborted).toBe(false);
+
+    releaseHistory();
+    await settle();
+  });
+
   it("skips the reconcile while a newer turn is already streaming", async () => {
     const { chat, transport, attach, live } = makeChat();
     await attach({});
@@ -2185,11 +2265,47 @@ describe("Chat lifecycle", () => {
 
     emit({ type: "closed", reason: "session_deleted" });
 
+    expect(transport.promptSignals[0]?.aborted).toBe(true);
     await expect(submitting).rejects.toThrow("Session is no longer available");
     releasePrompt();
     await settle();
     expect(chat.store.getState().session.error?.message).toBe("Session deleted");
   });
+
+  it.each(["disposal", "termination"] as const)(
+    "aborts history and response work on %s",
+    async (lifecycle) => {
+      const { chat, transport, emit, attach } = makeChat();
+      let releaseHistory: () => void = () => undefined;
+      transport.historyGate = new Promise((resolve) => {
+        releaseHistory = resolve;
+      });
+      await attach({});
+      let releaseResponse: () => void = () => undefined;
+      transport.responseGate = new Promise((resolve) => {
+        releaseResponse = resolve;
+      });
+      const response = chat.respondToAgentRequest("request-1", {
+        type: "tool",
+        behavior: "allow",
+      });
+      await settle();
+
+      if (lifecycle === "disposal") chat.dispose();
+      else emit({ type: "closed", reason: "session_deleted" });
+
+      expect(transport.historySignals[0]?.aborted).toBe(true);
+      expect(transport.responseSignals[0]?.aborted).toBe(true);
+      await response;
+      await settle();
+      releaseHistory();
+      releaseResponse();
+      await settle();
+      expect(chat.store.getState().session.error?.message).toBe(
+        lifecycle === "termination" ? "Session deleted" : undefined,
+      );
+    },
+  );
 
   it("rejects queued prompts when the session terminates", async () => {
     const { chat, emit, attach } = makeChat();
@@ -2224,11 +2340,25 @@ describe("Chat lifecycle", () => {
 
     chat.dispose();
 
+    expect(transport.promptSignals[0]?.aborted).toBe(true);
     await expect(submitting).rejects.toThrow("Chat disposed");
     await expect(waiting).rejects.toThrow("Chat disposed");
     releasePrompt();
     await settle();
     expect(transport.promptCalls).toHaveLength(1);
     expect(transport.disposed).toBe(1);
+  });
+
+  it("passes an already-aborted lifetime signal to config setters after disposal", async () => {
+    const { chat, transport } = makeChat();
+    chat.dispose();
+
+    await expect(chat.setModel("provider", "model")).rejects.toMatchObject({ name: "AbortError" });
+    await expect(chat.setReasoningEffort("high")).rejects.toMatchObject({ name: "AbortError" });
+    await expect(chat.setPermissionMode("ask")).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(transport.configSignals).toHaveLength(3);
+    expect(transport.configSignals.every((signal) => signal.aborted)).toBe(true);
+    expect(new Set(transport.configSignals).size).toBe(1);
   });
 });

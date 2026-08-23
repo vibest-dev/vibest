@@ -24,6 +24,26 @@ type FoldResource = {
   closed: boolean;
 };
 
+const raceWithSignal = <T>(operation: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason);
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    void operation.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+
 export interface ChatRuntimeInit {
   readonly sessionRef: SessionRef;
   readonly transport: ChatSessionTransport;
@@ -37,6 +57,8 @@ export class ChatRuntime {
   readonly #transport: ChatSessionTransport;
   readonly #onTerminated: (() => void) | undefined;
   readonly #inputs: ChatInput[] = [];
+  readonly #lifetimeController = new AbortController();
+  readonly #historyControllers = new Map<number, AbortController>();
   readonly #promptPromises = new Map<string, PromptPromise>();
   readonly #responsePromises = new Map<string, () => void>();
   readonly #folds = new Map<string, FoldResource>();
@@ -77,22 +99,19 @@ export class ChatRuntime {
   #runEffect(effect: ChatEffect): void {
     switch (effect.type) {
       case "readHistory":
-        void this.#transport.getMessages().then(
-          (history) => {
-            this.#send({
-              type: "historyCompleted",
-              id: effect.id,
-              purpose: effect.purpose,
-              history,
-            });
-          },
-          (error: unknown) => {
-            this.#send({ type: "historyCompleted", id: effect.id, purpose: effect.purpose, error });
-          },
-        );
+        this.#readHistory(effect.id, effect.purpose);
+        break;
+      case "cancelHistory":
+        this.#historyControllers.get(effect.id)?.abort();
         break;
       case "submitPrompt":
-        void this.#transport.prompt({ messageId: effect.messageId, parts: effect.parts }).then(
+        void raceWithSignal(
+          this.#transport.prompt(
+            { messageId: effect.messageId, parts: effect.parts },
+            { signal: this.#lifetimeController.signal },
+          ),
+          this.#lifetimeController.signal,
+        ).then(
           () =>
             this.#send({
               type: "outgoingCompleted",
@@ -109,31 +128,44 @@ export class ChatRuntime {
         );
         break;
       case "submitSteer":
-        void this.#transport
-          .steer({
-            expectedTurnId: effect.expectedTurnId,
-            messageId: effect.messageId,
-            parts: effect.parts,
-          })
-          .then(
-            () =>
-              this.#send({
-                type: "outgoingCompleted",
-                messageId: effect.messageId,
-                delivery: "steer",
-              }),
-            (error: unknown) =>
-              this.#send({
-                type: "outgoingCompleted",
-                messageId: effect.messageId,
-                delivery: "steer",
-                error: error instanceof Error ? error : new Error(String(error)),
-              }),
-          );
+        void raceWithSignal(
+          this.#transport.steer(
+            {
+              expectedTurnId: effect.expectedTurnId,
+              messageId: effect.messageId,
+              parts: effect.parts,
+            },
+            { signal: this.#lifetimeController.signal },
+          ),
+          this.#lifetimeController.signal,
+        ).then(
+          () =>
+            this.#send({
+              type: "outgoingCompleted",
+              messageId: effect.messageId,
+              delivery: "steer",
+            }),
+          (error: unknown) =>
+            this.#send({
+              type: "outgoingCompleted",
+              messageId: effect.messageId,
+              delivery: "steer",
+              error: error instanceof Error ? error : new Error(String(error)),
+            }),
+        );
         break;
       case "respondToRequest":
-        void this.#transport.respondToAgentRequest(effect.requestId, effect.response).then(
-          () => this.#send({ type: "requestResponseCompleted", operationId: effect.operationId }),
+        void raceWithSignal(
+          this.#transport.respondToAgentRequest(effect.requestId, effect.response, {
+            signal: this.#lifetimeController.signal,
+          }),
+          this.#lifetimeController.signal,
+        ).then(
+          () =>
+            this.#send({
+              type: "requestResponseCompleted",
+              operationId: effect.operationId,
+            }),
           (error: unknown) =>
             this.#send({
               type: "requestResponseCompleted",
@@ -176,6 +208,9 @@ export class ChatRuntime {
         resolve?.();
         break;
       }
+      case "abortLifetime":
+        this.#lifetimeController.abort();
+        break;
       case "unsubscribe":
         this.#unsubscribeRequested = true;
         this.#unsubscribe?.();
@@ -188,6 +223,33 @@ export class ChatRuntime {
         console.error(effect.message, effect.error);
         break;
     }
+  }
+
+  #readHistory(id: number, purpose: "floor" | "reconcile"): void {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    this.#historyControllers.set(id, controller);
+    if (this.#lifetimeController.signal.aborted) abort();
+    else this.#lifetimeController.signal.addEventListener("abort", abort, { once: true });
+
+    void raceWithSignal(
+      this.#transport.getMessages({ signal: controller.signal }),
+      controller.signal,
+    )
+      .then(
+        (history) => {
+          this.#send({ type: "historyCompleted", id, purpose, history });
+        },
+        (error: unknown) => {
+          this.#send({ type: "historyCompleted", id, purpose, error });
+        },
+      )
+      .finally(() => {
+        this.#lifetimeController.signal.removeEventListener("abort", abort);
+        if (this.#historyControllers.get(id) === controller) {
+          this.#historyControllers.delete(id);
+        }
+      });
   }
 
   #foldKey(turnId: string, generation: number): string {
@@ -245,15 +307,18 @@ export class ChatRuntime {
   }
 
   setModel(providerId: string, modelId: string): Promise<void> {
-    return this.#transport.setModel(providerId, modelId);
+    const signal = this.#lifetimeController.signal;
+    return raceWithSignal(this.#transport.setModel(providerId, modelId, { signal }), signal);
   }
 
   setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<void> {
-    return this.#transport.setReasoningEffort(reasoningEffort);
+    const signal = this.#lifetimeController.signal;
+    return raceWithSignal(this.#transport.setReasoningEffort(reasoningEffort, { signal }), signal);
   }
 
   setPermissionMode(mode: PermissionMode): Promise<void> {
-    return this.#transport.setPermissionMode(mode);
+    const signal = this.#lifetimeController.signal;
+    return raceWithSignal(this.#transport.setPermissionMode(mode, { signal }), signal);
   }
 
   respondToAgentRequest(requestId: string, response: AgentResponse): Promise<void> {

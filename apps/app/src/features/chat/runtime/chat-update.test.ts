@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import { createChatState, type ChatState } from "./chat-state";
 import { type ChatInput, updateChat } from "./chat-update";
-import { deriveChatView } from "./chat-view";
 
 const ref = {
   projectId: "project-1",
@@ -413,7 +412,11 @@ describe("updateChat", () => {
     const prompting = createChatState();
     const pending = requested("sending", "in flight");
     prompting.outgoing = [{ message: pending.message, parts: pending.parts, status: "sending" }];
-    expectIgnored(prompting, { type: "promptCompleted", messageId: "late" });
+    expectIgnored(prompting, {
+      type: "outgoingCompleted",
+      messageId: "late",
+      delivery: "follow-up",
+    });
 
     const folding = createChatState();
     folding.turns.folds.active = { generation: 3, status: "open" };
@@ -463,20 +466,52 @@ describe("updateChat", () => {
     expect(transition.effects).toEqual([]);
   });
 
+  it("settles and removes pending responses on disposal", () => {
+    const state = createChatState();
+    state.pendingResponses["response-1"] = {
+      request: undefined,
+      restoreOnFailure: true,
+      response: { type: "tool", behavior: "allow" },
+    };
+
+    const transition = updateChat(state, { type: "dispose" });
+
+    expect(transition.state.pendingResponses).toEqual({});
+    expect(transition.effects).toContainEqual({
+      type: "settleResponse",
+      operationId: "response-1",
+    });
+    expect(
+      updateChat(transition.state, {
+        type: "requestResponseCompleted",
+        operationId: "response-1",
+      }),
+    ).toEqual({ state: transition.state, effects: [] });
+  });
+
   it("publishes the complete terminal shape in one transition and ignores later events", () => {
-    let transition = updateChat(createChatState(), requested("queued", "later"));
+    const state = createChatState();
+    state.pendingResponses["response-1"] = {
+      request: undefined,
+      restoreOnFailure: true,
+      response: { type: "tool", behavior: "allow" },
+    };
+    let transition = updateChat(state, requested("queued", "later"));
     transition = updateChat(transition.state, {
       type: "transportEvent",
       event: { type: "closed", reason: "session_deleted" },
     });
 
-    expect(deriveChatView(transition.state)).toMatchObject({
-      queuedMessages: [],
-      pendingRequests: [],
-      historyStatus: "settled",
-      status: "error",
-      error: new Error("Session deleted"),
+    expect(transition.state.pendingResponses).toEqual({});
+    expect(transition.effects).toContainEqual({
+      type: "settleResponse",
+      operationId: "response-1",
     });
+    expect(transition.state.outgoing).toEqual([]);
+    expect(transition.state.session.pendingRequests).toEqual([]);
+    expect(transition.state.session.historyStatus).toBe("settled");
+    expect(transition.state.session.status).toBe("error");
+    expect(transition.state.session.error).toEqual(new Error("Session deleted"));
     const terminal = transition.state;
     expect(
       updateChat(terminal, {

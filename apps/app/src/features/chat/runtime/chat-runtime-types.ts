@@ -53,6 +53,7 @@ export type ChatInput =
 
 export type ChatEffect =
   | { readonly type: "readHistory"; readonly id: number; readonly purpose: "floor" | "reconcile" }
+  | { readonly type: "cancelHistory"; readonly id: number }
   | {
       readonly type: "submitPrompt";
       readonly messageId: string;
@@ -81,6 +82,7 @@ export type ChatEffect =
   | { readonly type: "resolvePrompt"; readonly messageId: string }
   | { readonly type: "rejectPrompt"; readonly messageId: string; readonly error: Error }
   | { readonly type: "settleResponse"; readonly operationId: string }
+  | { readonly type: "abortLifetime" }
   | { readonly type: "unsubscribe" }
   | { readonly type: "notifyTerminated" }
   | { readonly type: "logError"; readonly message: string; readonly error: unknown };

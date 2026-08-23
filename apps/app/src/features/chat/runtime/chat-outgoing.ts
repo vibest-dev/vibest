@@ -107,6 +107,11 @@ function maybeDispatchFollowUp(state: ChatDraft, effects: ChatEffects): void {
     return;
   }
   const next = state.outgoing[nextIndex]!;
+  const reconcile = state.sync.reconcile;
+  if (reconcile) {
+    state.sync.reconcile = null;
+    effects.push({ type: "cancelHistory", id: reconcile.id });
+  }
   state.outgoing[nextIndex] = { ...next, status: "sending" };
   if (!state.session.messages.some((message) => message.id === next.message.id)) {
     state.session.messages.push(next.message);
