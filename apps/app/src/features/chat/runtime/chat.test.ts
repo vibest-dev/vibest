@@ -255,7 +255,7 @@ describe("Chat hydration", () => {
       cursor: 10,
     });
 
-    expect(chat.store.getState().messages.map((message) => message.id)).toContain(
+    expect(chat.store.getState().session.messages.map((message) => message.id)).toContain(
       "new-stream-prompt",
     );
   });
@@ -277,10 +277,10 @@ describe("Chat hydration", () => {
     });
     live(7, { type: "session.turn.started", turnId: "stale-turn", phase: "running" });
 
-    expect(chat.store.getState().messages.map((message) => message.id)).not.toContain(
+    expect(chat.store.getState().session.messages.map((message) => message.id)).not.toContain(
       "already-past",
     );
-    expect(chat.store.getState().status).toBe("ready");
+    expect(chat.store.getState().session.status).toBe("ready");
   });
 
   it("ignores an old-stream live event after a new attach wins", async () => {
@@ -289,10 +289,10 @@ describe("Chat hydration", () => {
     await attach({ streamId: "stream-2", cursor: 10 });
 
     live(100, { type: "session.turn.started", turnId: "old-turn", phase: "running" }, "stream-1");
-    expect(chat.store.getState().status).toBe("ready");
+    expect(chat.store.getState().session.status).toBe("ready");
 
     live(11, { type: "session.turn.started", turnId: "new-turn", phase: "running" });
-    expect(chat.store.getState().status).toBe("streaming");
+    expect(chat.store.getState().session.status).toBe("streaming");
   });
 
   it("drops buffered old-stream events when a new attach wins during the history floor", async () => {
@@ -328,7 +328,7 @@ describe("Chat hydration", () => {
     releaseHistory();
     await settle();
 
-    expect(chat.store.getState().pendingRequests.map((request) => request.id)).toEqual([
+    expect(chat.store.getState().session.pendingRequests.map((request) => request.id)).toEqual([
       "new-buffered",
     ]);
   });
