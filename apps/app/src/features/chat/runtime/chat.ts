@@ -93,6 +93,11 @@ export class Chat {
   // internally and still complete, with the retried tail persisted but never
   // streamed — reconcile from history at turn end regardless of outcome.
   readonly #erroredTurnIds = new Set<string>();
+  // Prompts whose RPC has not settled. The link queues a call across a dropped
+  // socket, so a prompt can outlive the server it was aimed at: nothing the
+  // server says in the meantime — snapshot phase, settled transcript — has
+  // seen it, and neither may erase the optimistic bubble it put on screen.
+  #promptsInFlight = 0;
   #cursor = 0;
   #historyLoaded = false;
   // Non-null while the history floor is loading: live events queue here so
@@ -392,7 +397,11 @@ export class Chat {
     if (this.#needsReconcile) void this.#reconcileHistory();
 
     this.#cursor = Math.max(this.#cursor, snapshot.cursor);
-    this.#setStatus(statusFromPhase(snapshot.status.phase));
+    // A prompt still on the wire is invisible to the server, so this phase
+    // predates it — the same reason `#apply` never copies a phase off the
+    // prompt events. Leave the sender's "submitted" standing; the RPC's own
+    // outcome, and the events it triggers, move the status from here.
+    if (this.#promptsInFlight === 0) this.#setStatus(statusFromPhase(snapshot.status.phase));
   }
 
   #replayActiveTurn(activeTurn: NonNullable<SessionRuntimeSnapshot["activeTurn"]>): void {
@@ -480,6 +489,11 @@ export class Chat {
         return;
       }
       if (history.length === 0) return;
+      // An unacknowledged prompt cannot be in the settled transcript, so a
+      // replace would drop the bubble the sender is looking at. Checked on its
+      // own rather than through the status: a snapshot hydrated mid-flight can
+      // leave the status disagreeing with what is actually pending.
+      if (this.#promptsInFlight > 0) return;
       if (this.#state.status === "streaming" || this.#state.status === "submitted") return;
       if (this.#turnFolds.size > 0) return;
       this.#state.messages = Array.from(history);
@@ -544,6 +558,7 @@ export class Chat {
     this.#state.error = undefined;
     this.#state.pushMessage(toUserMessage(messageId, parts));
     this.#setStatus("submitted");
+    this.#promptsInFlight += 1;
     try {
       await this.#transport.prompt({ messageId, parts });
     } catch (promptError) {
@@ -551,6 +566,8 @@ export class Chat {
         promptError instanceof Error ? promptError : new Error(String(promptError));
       this.#setStatus("error");
       throw promptError;
+    } finally {
+      this.#promptsInFlight -= 1;
     }
   };
 
