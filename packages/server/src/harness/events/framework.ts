@@ -12,7 +12,7 @@ import { Schema } from "effect";
  * Harness-internal event vocabulary. The public `@vibest/contract` wire model is
  * a flat tagged union (`SessionScopedEvent` keyed by `SessionRef`); this module
  * keeps the harness's own ergonomic `defineEvent`/`SessionEnvelope` shape, keyed
- * by the agent-native `sessionId`. The server SessionRuntime translates these
+ * by the agent-native `sessionId`. `HarnessAgentSession` translates these
  * drafts into the wire model at the fan-out boundary (attaching the `SessionRef`
  * and stamping the per-session `seq`).
  */
@@ -81,7 +81,7 @@ export const SessionDeleted = defineEvent({
 });
 export const SessionRenamed = defineEvent({
   type: "session.renamed",
-  schema: { sessionId: Schema.String, name: Schema.String },
+  schema: { sessionId: Schema.String, title: Schema.String },
 });
 export const ProjectUpdated = defineEvent({
   type: "project.updated",

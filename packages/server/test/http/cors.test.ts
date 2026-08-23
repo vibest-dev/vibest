@@ -19,8 +19,27 @@ describe("isAllowedOrigin", () => {
   });
 
   it("accepts extra configured origins (e.g. a hosted web app)", () => {
-    expect(isAllowedOrigin("https://app.vibest.dev", ["https://app.vibest.dev"])).toBe(true);
+    expect(
+      isAllowedOrigin("https://app.vibest.dev", { extraOrigins: ["https://app.vibest.dev"] }),
+    ).toBe(true);
     expect(isAllowedOrigin("https://app.vibest.dev")).toBe(false);
+  });
+
+  it("trusts an origin whose hostname is an allowed Host — the page a trusted proxy serves must be able to connect back", () => {
+    expect(isAllowedOrigin("https://proxy.ts.net", { allowedHosts: ["proxy.ts.net"] })).toBe(true);
+    // Scheme and port do not matter for a trusted hostname…
+    expect(isAllowedOrigin("http://proxy.ts.net:8443", { allowedHosts: ["proxy.ts.net"] })).toBe(
+      true,
+    );
+    // …and an allowlist entry carrying a port still matches.
+    expect(isAllowedOrigin("https://proxy.ts.net", { allowedHosts: ["proxy.ts.net:8443"] })).toBe(
+      true,
+    );
+  });
+
+  it("does not widen to other hostnames when allowed hosts are configured", () => {
+    expect(isAllowedOrigin("https://evil.example", { allowedHosts: ["proxy.ts.net"] })).toBe(false);
+    expect(isAllowedOrigin("not-a-url", { allowedHosts: ["proxy.ts.net"] })).toBe(false);
   });
 });
 
@@ -39,6 +58,15 @@ describe("isLoopbackHost", () => {
 
   it("allows a request with no Host — not a browser, gated elsewhere", () => {
     expect(isLoopbackHost(undefined)).toBe(true);
+  });
+
+  it("accepts an allowlisted proxy Host whether or not the entry carries a port", () => {
+    expect(isLoopbackHost("proxy.ts.net", ["proxy.ts.net"])).toBe(true);
+    expect(isLoopbackHost("proxy.ts.net:443", ["proxy.ts.net"])).toBe(true);
+    // A configured `host:port` entry must not silently never match.
+    expect(isLoopbackHost("proxy.ts.net:8443", ["proxy.ts.net:8443"])).toBe(true);
+    expect(isLoopbackHost("PROXY.TS.NET", ["proxy.ts.net"])).toBe(true);
+    expect(isLoopbackHost("evil.example", ["proxy.ts.net"])).toBe(false);
   });
 });
 

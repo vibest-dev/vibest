@@ -7,6 +7,7 @@
  * - `makeJsonDocument` — a standalone file: seeded defaults, eager load, cache.
  * - `makeJsonCollection` — a directory of keyed entries: get/put/remove/list.
  */
+export { writeFileAtomic } from "./atomic";
 export type { AnySchema, MigrationStep } from "./codec";
 export {
   type JsonCollection,

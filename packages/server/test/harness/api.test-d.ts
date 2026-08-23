@@ -7,7 +7,7 @@ import type {
   AgentUnavailable,
   ExecutableNotFound,
   HarnessAgentAdapter,
-  HarnessAgentSession,
+  HarnessAgentRuntime,
   PromptReceipt,
   SessionClosed,
   TurnAlreadyRunning,
@@ -16,7 +16,7 @@ import type {
 test("adapter acquisition is scoped and effect native", () => {
   expectTypeOf<HarnessAgentAdapter["open"]>().returns.toEqualTypeOf<
     Effect.Effect<
-      HarnessAgentSession,
+      HarnessAgentRuntime,
       AgentUnavailable | ExecutableNotFound | AgentOpenError,
       Scope.Scope
     >
@@ -24,9 +24,9 @@ test("adapter acquisition is scoped and effect native", () => {
 });
 
 test("session operations expose Effect and Stream only", () => {
-  expectTypeOf<HarnessAgentSession["events"]>().toMatchTypeOf<Stream.Stream<unknown, unknown>>();
-  expectTypeOf<ReturnType<HarnessAgentSession["prompt"]>>().toEqualTypeOf<
+  expectTypeOf<HarnessAgentRuntime["events"]>().toMatchTypeOf<Stream.Stream<unknown, unknown>>();
+  expectTypeOf<ReturnType<HarnessAgentRuntime["prompt"]>>().toEqualTypeOf<
     Effect.Effect<PromptReceipt, SessionClosed | TurnAlreadyRunning | AgentOperationError>
   >();
-  expectTypeOf<HarnessAgentSession["close"]>().toEqualTypeOf<Effect.Effect<void>>();
+  expectTypeOf<HarnessAgentRuntime["close"]>().toEqualTypeOf<Effect.Effect<void>>();
 });

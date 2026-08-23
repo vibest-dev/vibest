@@ -13,18 +13,25 @@ import { Schema } from "effect";
  * harness these narrow, native-keyed shapes.
  */
 
+/**
+ * The session-scoped config knobs. Not part of opening a native session: a
+ * session records them and seeds them onto every runtime it acquires, through
+ * the same setters the UI drives mid-session, so a create-time choice and a
+ * later one reach a runtime by one path. `model` is the provider-local model id
+ * — the server unpacked and validated the providerId/modelId pair before the
+ * harness layer ever sees it, and `permissionMode` is vibest's own vocabulary,
+ * checked against this harness's declared subset at the RPC boundary.
+ */
+export const SessionConfigSchema = Schema.Struct({
+  model: Schema.optionalKey(Schema.String),
+  reasoningEffort: Schema.optionalKey(ReasoningEffortSchema),
+  permissionMode: Schema.optionalKey(PermissionModeSchema),
+});
+export type SessionConfig = typeof SessionConfigSchema.Type;
+
 export const CreateSessionInputSchema = Schema.Struct({
   cwd: Schema.String,
   sessionId: Schema.optionalKey(Schema.String),
-  // Session config chosen at create time, applied via the session's own
-  // setters before the first prompt (applyInitialSessionConfig). `model` is
-  // the provider-local model id — the server unpacked and validated the
-  // providerId/modelId pair before the harness layer ever sees it.
-  model: Schema.optionalKey(Schema.String),
-  reasoningEffort: Schema.optionalKey(ReasoningEffortSchema),
-  // Vibest's own permission vocabulary; membership in this harness's declared
-  // subset was checked at the RPC boundary.
-  permissionMode: Schema.optionalKey(PermissionModeSchema),
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 

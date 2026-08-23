@@ -81,11 +81,28 @@ export const makeEventBus = (
           );
         }
         // Bounded queue full: the consumer fell behind. Terminate it.
-        return Queue.offer(subscriber.output, { type: "closed", reason: "slow_consumer" }).pipe(
-          Effect.andThen(Queue.end(subscriber.output)),
-          Effect.andThen(remove(subscriber)),
-          Effect.as([undefined, "closed"] as const),
-        );
+        //
+        // Worth a line of its own: to the user this is a tab that quietly
+        // stopped updating, and the client reconnects, so nothing downstream
+        // ever reports it. Without this the only evidence is the absence of
+        // events. A `warn` because it is the server dropping a client that did
+        // nothing wrong beyond being slow.
+        return Effect.logWarning("evicting a subscriber that fell behind")
+          .pipe(
+            Effect.annotateLogs({
+              event: "eventbus.slow_consumer",
+              subscriberId: subscriber.id,
+              capacity,
+            }),
+            Effect.andThen(
+              Queue.offer(subscriber.output, { type: "closed", reason: "slow_consumer" }),
+            ),
+          )
+          .pipe(
+            Effect.andThen(Queue.end(subscriber.output)),
+            Effect.andThen(remove(subscriber)),
+            Effect.as([undefined, "closed"] as const),
+          );
       }).pipe(Effect.catch(() => Effect.void));
     };
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { layer } from "@effect/vitest";
-import { Context, Effect, FileSystem, Layer } from "effect";
+import { Cause, Context, Crypto, Effect, Exit, FileSystem, Layer, PlatformError } from "effect";
 
 import {
   layerPaths,
@@ -119,6 +119,42 @@ layer(NodePlatformLayer)("ProjectService", (it) => {
       const svc = yield* projects;
       const error = yield* Effect.flip(svc.remove("nope"));
       assert.equal(error._tag, "ProjectNotFound");
+    }),
+  );
+
+  it.effect("an RNG failure minting a project id is a contextual defect, not a typed error", () =>
+    Effect.gen(function* () {
+      // The real Crypto with only `randomUUIDv4` broken: the service treats a
+      // platform RNG failure as an invariant violation, so it must die with
+      // the operation named — never leak into the typed error channel.
+      const brokenCrypto = Layer.effect(
+        Crypto.Crypto,
+        Effect.gen(function* () {
+          const real = yield* Crypto.Crypto;
+          return {
+            ...real,
+            randomUUIDv4: Effect.fail(
+              PlatformError.badArgument({ module: "Crypto", method: "randomUUIDv4" }),
+            ),
+          };
+        }),
+      ).pipe(Layer.provide(NodePlatformLayer));
+
+      const home = yield* tempHome;
+      const svc = yield* Layer.build(
+        ProjectServiceLayer.pipe(
+          Layer.provide(ProjectRepositoryLayer),
+          Layer.provide(layerPaths(home)),
+          Layer.provide(brokenCrypto),
+          Layer.provide(NodePlatformLayer),
+        ),
+      ).pipe(Effect.map((context) => Context.get(context, ProjectService)));
+
+      const exit = yield* Effect.exit(svc.create({ name: "app", path: "/tmp/app" }));
+      assert.equal(Exit.isFailure(exit) && Cause.hasDies(exit.cause), true);
+      assert.equal(Exit.isFailure(exit) && Cause.hasFails(exit.cause), false);
+      const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+      assert.ok(defect instanceof Error && defect.message.includes("project id"));
     }),
   );
 });

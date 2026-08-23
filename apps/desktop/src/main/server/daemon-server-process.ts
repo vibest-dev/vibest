@@ -3,8 +3,8 @@ import {
   type DaemonPlatform,
   healthy,
   pidAlive,
+  resolveDaemonLocation,
   resolveOrSpawnDaemon,
-  resolveVibestHome,
 } from "@vibest/server/daemon";
 import { Effect } from "effect";
 
@@ -20,9 +20,10 @@ export type DaemonServerProcessOptions = {
 
 /**
  * The daemon-backed `SpawnServer`: instead of forking a die-with-app child,
- * attach the one `$VIBEST_HOME` daemon (spawning it detached if absent) via the
- * shared launcher — the same attach-or-spawn the CLI runs, so desktop and CLI
- * always converge on a single backend. Consequences the supervisor inherits:
+ * attach the daemon selected by `$VIBEST_DAEMON_DIR` (defaulting under
+ * `$VIBEST_HOME`) via the shared launcher — the same attach-or-spawn the CLI
+ * runs, so desktop and CLI with the same environment converge on one backend.
+ * Consequences the supervisor inherits:
  *
  * - The daemon outlives the app: closing this process's scope kills nothing.
  * - "Exit" has no child handle to wait on, so it is detected by polling the
@@ -52,7 +53,7 @@ export function makeDaemonServerProcess(
         };
 
         const handle = yield* resolveOrSpawnDaemon({
-          home: resolveVibestHome(config.environment),
+          ...resolveDaemonLocation(config.environment),
           serverArgv: [process.execPath, config.entry],
           // 0 means "no preference" on the first attempt; afterwards the
           // supervisor pins the port it saw, which we pass as preferred.

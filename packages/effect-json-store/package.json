@@ -14,11 +14,11 @@
     "clean": "git clean -xdf node_modules dist .turbo"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:effect"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
-    "@effect/vitest": "catalog:",
+    "@effect/platform-node": "catalog:effect",
+    "@effect/vitest": "catalog:effect",
     "@vibest/typescript": "workspace:*"
   },
   "engines": {

@@ -10,7 +10,6 @@ import type { Session } from "../types";
  * check schema Type → Session.
  */
 const SessionSchema = Schema.Struct({
-  version: Schema.Literal(1),
   sessionId: Schema.String,
   projectId: Schema.String,
   harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
@@ -18,6 +17,7 @@ const SessionSchema = Schema.Struct({
   createdAt: Schema.String,
   cwd: Schema.optionalKey(Schema.String),
   title: Schema.optionalKey(Schema.String),
+  archived: Schema.optionalKey(Schema.Boolean),
   updatedAt: Schema.optionalKey(Schema.String),
   historyAvailable: Schema.optionalKey(Schema.Boolean),
 });
@@ -62,7 +62,8 @@ export const makeHarnessAgentSessionRepository = (sessionsDir: string) =>
     const sessions = yield* makeJsonCollection({
       dir: sessionsDir,
       schema: SessionSchema,
-      // Pre-envelope records are the bare body, already in the v1 shape.
+      // Pre-envelope records are the bare body with the version inlined, from
+      // before the envelope existed to hold it; decoding drops that key.
       legacy: { schema: SessionSchema, migrate: (session) => session },
     });
     const entryId = (projectId: string, sessionId: string) => `${projectId}/${sessionId}`;

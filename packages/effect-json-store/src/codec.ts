@@ -1,7 +1,6 @@
-import path from "node:path";
-
 import { Effect, type FileSystem, Option, Schema } from "effect";
 
+import { writeFileAtomic } from "./atomic";
 import {
   JsonStoreDecodeError,
   JsonStoreEncodeError,
@@ -81,10 +80,7 @@ export const makeFileCodec = (
         try: () => `${JSON.stringify(envelope, null, 2)}\n`,
         catch: (cause) => cause,
       });
-      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
-      const tmp = `${file}.${crypto.randomUUID()}.tmp`;
-      yield* fs.writeFileString(tmp, text);
-      yield* fs.rename(tmp, file);
+      yield* writeFileAtomic(fs, file, text);
     }).pipe(Effect.mapError((cause) => new JsonStoreWriteError({ file, cause })));
 
   const save: FileCodec["save"] = (file, value) =>
@@ -113,7 +109,9 @@ export const makeFileCodec = (
       const toVersion = fromVersion + 1;
       const next = versionSchema(toVersion);
       if (next === undefined) {
-        return yield* Effect.die(new Error(`missing schema for v${toVersion}`));
+        return yield* Effect.die(
+          new Error(`invariant: missing schema for v${toVersion} while migrating ${file}`),
+        );
       }
       const output = yield* Effect.try({
         try: () => step.migrate(input),
@@ -179,13 +177,19 @@ export const makeFileCodec = (
         );
         value = yield* migrateStep(file, legacy, legacyValue, 0);
       } else {
-        return yield* Effect.die(new Error("unreachable: none implies legacy"));
+        return yield* Effect.die(
+          new Error(
+            `invariant: ${file} missed the envelope decode with no legacy schema configured`,
+          ),
+        );
       }
 
       for (let from = Math.max(version, 1); from < latestVersion; from++) {
         const step = migrations[from - 1];
         if (step === undefined) {
-          return yield* Effect.die(new Error(`missing migration for v${from}`));
+          return yield* Effect.die(
+            new Error(`invariant: missing migration for v${from} while migrating ${file}`),
+          );
         }
         value = yield* migrateStep(file, step, value, from);
       }

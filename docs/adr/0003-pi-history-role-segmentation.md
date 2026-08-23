@@ -1,13 +1,19 @@
-# Pi history folds by user-entry segmentation; steer re-segments on refresh
+# Pi history folds by user-entry segmentation; live matches it (amended)
 
 Pi session history (`session.getMessages`) is folded from the agent's native
 `SessionEntry` branch by **role**: every `user` message entry opens a new
 message, and all `assistant`/`toolResult` entries up to the next `user` entry
 collapse into a single assistant `UIMessage`. Message ids are the entry id of
 the segment's first assistant entry (assistant messages) or the user entry id
-(user messages). A conversation that was steered mid-turn therefore renders as
-**more messages after a refresh than it did live** — this divergence is
-accepted, not a bug.
+(user messages).
+
+> **Amended 2026-08-02.** The original decision accepted that a steered
+> conversation renders as more messages after a refresh than it did live. A
+> probe of `pi --mode rpc` disproved the premise: a delivered steer _is_
+> visible on the live wire as `message_start role=user` (full content), at
+> exactly the position of the persisted `user` entry. The live transform now
+> splits its UIMessage on that marker, so live and history segmentation agree.
+> The superseded text below is kept for the reasoning that still stands.
 
 ## Context
 
@@ -22,8 +28,9 @@ accepted, not a bug.
   produce identical on-disk chains `user → assistant → user → assistant`).
 - Our live transform (`packages/server/src/harness/pi/transform.ts`) opens one
   UIMessage per agent run (`agent_start` → `agent_settled`) and does not split
-  on pi's internal `turn_end`/`turn_start`. A steered run streams as **one**
-  assistant message; the vibest pi adapter
+  on pi's internal `turn_end`/`turn_start` (correctly — see Consequences).
+  Since the 2026-08-02 amendment it _does_ split on a delivered steer's
+  `message_start role=user`. The vibest pi adapter
   (`packages/server/src/harness/pi/agent.ts:421`) issues `steer` when a prompt
   arrives while a turn is active, so this occurs in production today.
   (`docs/wayfinder/session-streaming-refactor/map.md` still lists steer as
@@ -37,15 +44,21 @@ accepted, not a bug.
 
 1. Segment by role as described above; ids come from entry ids so refresh
    reconciliation can compare stably.
-2. Keep the live transform untouched. The live path is the only currently
-   stable pipeline, and one-message-per-run is the correct _live_ rendering of
-   a steer (the reply continues in place).
-3. Accept that a steered conversation re-segments on refresh (e.g. 3 messages
-   live → 4 from history). History is the more faithful record: the user did
-   send two inputs.
-4. Parity ("对拍") tests between the live chunk fold and the history fold are
-   scoped to sessions without steer; steered sessions get their own
-   history-side assertions instead.
+2. ~~Keep the live transform untouched.~~ **Amended:** the live transform
+   splits on a mid-run `message_start role=user` — the wire marker of a
+   delivered steer — closing the open UIMessage and starting a fresh one. The
+   echo of the _prompting_ input (which also arrives as
+   `message_start role=user`, but before any assistant output) is still
+   skipped. Verified against the live binary (2026-08-02 probe): RPC mode
+   emits `message_start` per message; the `assistantMessageEvent` `start`
+   delta never appears on this wire, so the per-message block ordinal advances
+   on `message_start role=assistant` too.
+3. ~~Accept that a steered conversation re-segments on refresh.~~ **Amended:**
+   live and history now segment identically (same count, same boundaries).
+   Ids still differ (live: generated uuids; history: entry ids) — refresh
+   reconciliation remains id-replacing, not id-stable.
+4. Parity ("对拍") tests between the live chunk fold and the history fold no
+   longer need to exclude steered sessions.
 
 Two further asymmetries ride along and are likewise accepted:
 
@@ -59,12 +72,12 @@ Two further asymmetries ride along and are likewise accepted:
 
 ## Consequences
 
-- Refreshing a steered conversation visibly changes its segmentation. If this
-  ever needs to converge, the fix is splitting the _live_ transform on
-  `turn_end`/`turn_start` (aligning it with history), never the reverse —
-  history segmentation follows pi's persisted ground truth.
-- The parity test suite must document its no-steer scope so a future reader
-  doesn't "fix" the exclusion.
+- ~~If this ever needs to converge, the fix is splitting the _live_ transform
+  on `turn_end`/`turn_start`.~~ **Corrected:** that direction was wrong — a
+  pi "turn" is one LLM round-trip (one assistant response + its tool results),
+  so a single prompt with N tool calls spans N turns; splitting there would
+  shatter one reply into N messages. The correct boundary is the user-message
+  marker, which is what the live transform now uses.
 - Reasoning visibility differs by provider family (Anthropic plaintext
   survives refresh; openai-responses does not). This is pi's storage
   limitation, not ours.

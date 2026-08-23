@@ -8,6 +8,28 @@
 >
 > 2026-07-30 适配 #153「dissolve @vibest/harness into contract + server」：纯转换层
 > 不再是独立包，落点改为 `packages/server/src/harness/pi/`；`ai` 已是 server 直接依赖。
+>
+> **勘误（2026-08-04，`fix/lazy-harness-agent-runtime`）**：§9 里两条否决结论已被
+> 有意反转，走的正是本文自己预留的出口——§9 末条写明「claude-code / codex 的无进程
+> 冷读留给 ticket 10/11：届时若确需 adapter 级读法，再在门面里做『adapter 有冷读实现
+> 则用之、否则 ensure + session 能力』的分派——分派点不变」。现在就是那个届时：
+>
+> 1. **`HarnessAgentAdapter.getMessages?`（冷读）已加**，claude-code 读 CLI 自己的
+>    transcript 文件、codex 走共享 app-server 的 `thread/read`。**pi 不实现它**，
+>    所以本文对 pi 的全部结论原样成立：pi 读历史仍然就是打开进程，仍然由
+>    manager 这唯一调用方去 ensure，`PiAgent.openSession` 的单调用方不变量
+>    （§3.3）没有被绕开——当年反对 adapter 级冷读的理由全在 pi 那一侧，而 pi 这条路
+>    没变。门面的分派是结构性的：adapter 有冷读就用冷读，否则谁的 runtime 能读谁就
+>    先被拉起来。
+> 2. **「发信息才 resume」已成立**，但不是因为「无进程也能读历史」这个前提被推翻，
+>    而是因为**拉起 runtime 的触发条件本就该按 harness 各论**（用户 2026-08-04）。
+>    对 pi 而言行为与今天等价：打开会话页仍是一个进程、仍是 169MB——只是触发点从
+>    loader 的 `resume` 挪到了客户端拉 `getMessages` 的那一刻。对 claude-code /
+>    codex 则是净收益：打开会话页零进程。
+>
+> 同批：路由 loader 的 `resume` 改名 `session.attach` 并抽掉了启动能力（校验 ref +
+> 回填 cwd + 冷查存在性），`getStatus`/`getSnapshot` 成为全函数。§8 落点清单里
+> 「客户端：loader 的 `resume` 保持不动」一条随之作废。
 
 ## 1. 目标与范围
 

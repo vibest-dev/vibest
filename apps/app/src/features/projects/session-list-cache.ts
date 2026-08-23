@@ -1,0 +1,153 @@
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import type { ListSessionsOutput, ServerEvent } from "@vibest/contract";
+import { isSessionScopedEvent } from "@vibest/contract";
+
+type SessionRow = ListSessionsOutput[number];
+
+export type ListKeyFor = (projectId: string, archived: boolean) => QueryKey;
+
+// One in-place row edit. Returns whether the row existed; an `update` that
+// returns the same row leaves the previous array untouched, so query
+// subscribers don't re-render on a no-op.
+const patchRow = (
+  queryClient: QueryClient,
+  listKey: QueryKey,
+  sessionId: string,
+  update: (row: SessionRow) => SessionRow,
+): boolean => {
+  let found = false;
+  queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) => {
+    if (!prev) return prev;
+    const index = prev.findIndex((s) => s.sessionId === sessionId);
+    const row = index === -1 ? undefined : prev[index];
+    if (!row) return prev;
+    found = true;
+    const next = update(row);
+    if (next === row) return prev;
+    const copy = prev.slice();
+    copy[index] = next;
+    return copy;
+  });
+  return found;
+};
+
+const patchLists = (
+  queryClient: QueryClient,
+  listKeys: ReadonlyArray<QueryKey>,
+  sessionId: string,
+  update: (row: SessionRow) => SessionRow,
+): boolean => {
+  let found = false;
+  for (const listKey of listKeys) {
+    found = patchRow(queryClient, listKey, sessionId, update) || found;
+  }
+  return found;
+};
+
+const invalidateLists = (queryClient: QueryClient, listKeys: ReadonlyArray<QueryKey>): void => {
+  for (const listKey of listKeys) {
+    void queryClient.invalidateQueries({ queryKey: listKey });
+  }
+};
+
+const removeFromLists = (
+  queryClient: QueryClient,
+  listKeys: ReadonlyArray<QueryKey>,
+  sessionId: string,
+) => {
+  for (const listKey of listKeys) {
+    queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) =>
+      prev?.filter((row) => row.sessionId !== sessionId),
+    );
+  }
+};
+
+/**
+ * Fold one firehose event into the `session.list` caches. Pure with respect to
+ * React — the hook owns the subscription, this owns what an event means.
+ *
+ * Session-scoped events contribute only their server-stamped `phase` (the
+ * runtime stamps its post-event phase, so this copies rather than re-derives);
+ * chunk events are skipped for traffic — their phase never differs from the
+ * lifecycle event that opened the turn. A title for a row we don't hold is
+ * resolved by one list refetch — the authoritative read carries the summary.
+ */
+export const applySessionListEvent = (
+  queryClient: QueryClient,
+  listKeyFor: ListKeyFor,
+  event: ServerEvent,
+): void => {
+  const listKeys = [listKeyFor(event.ref.projectId, false), listKeyFor(event.ref.projectId, true)];
+  if (isSessionScopedEvent(event)) {
+    const phase = event.phase;
+    if (phase === undefined || event.type === "session.message.chunk") return;
+    patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
+      row.status?.phase === phase ? row : { ...row, status: { phase } },
+    );
+    return;
+  }
+  switch (event.type) {
+    case "session.updated": {
+      // Merge the new title into the existing row, preserving an optimistic
+      // one's live status/createdAt. A row we don't hold yet (another client
+      // created this session) → pull the authoritative list once; the read is
+      // a cheap pure-storage query.
+      const found = patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
+        event.title !== undefined ? { ...row, title: event.title } : row,
+      );
+      if (!found) invalidateLists(queryClient, listKeys);
+      break;
+    }
+    case "session.renamed": {
+      // Same-title short-circuit as the phase patch above: a row already
+      // carrying this title keeps its identity, so duplicate delivery stays
+      // idempotent and does not re-render the whole list. A missing row means
+      // another client may have created and renamed the session before this
+      // client ever listed it, so pull the complete summary once.
+      const found = patchLists(queryClient, listKeys, event.ref.sessionId, (row) =>
+        row.title === event.title ? row : { ...row, title: event.title },
+      );
+      if (!found) invalidateLists(queryClient, listKeys);
+      break;
+    }
+    case "session.archived": {
+      const sourceKey = listKeyFor(event.ref.projectId, !event.archived);
+      const destinationKey = listKeyFor(event.ref.projectId, event.archived);
+      removeFromLists(queryClient, [sourceKey], event.ref.sessionId);
+      // The event carries no full summary. An open destination query refetches
+      // now; a disabled archived query remains lazy until its panel opens.
+      void queryClient.invalidateQueries({ queryKey: destinationKey });
+      break;
+    }
+    case "session.deleted":
+      removeFromLists(queryClient, listKeys, event.ref.sessionId);
+      break;
+    case "session.created":
+      // The creating tab already seeded this row optimistically; a title-less
+      // row elsewhere has nothing to show yet. Other clients pick the session
+      // up on its first prompt's `session.updated`, a manual rename, or their
+      // next list load.
+      break;
+  }
+};
+
+/**
+ * Reconcile the initiating tab after a successful rename RPC. The firehose is
+ * still the primary path, but it has no replay: if this response lands during
+ * a subscription gap, patch the row that still carries the dialog's starting
+ * title. A different current title is treated as a newer event and preserved.
+ */
+export const reconcileSessionRenameSuccess = (
+  queryClient: QueryClient,
+  listKeyFor: ListKeyFor,
+  ref: ServerEvent["ref"],
+  previousTitle: string | undefined,
+  title: string,
+): void => {
+  const listKeys = [listKeyFor(ref.projectId, false), listKeyFor(ref.projectId, true)];
+  const found = patchLists(queryClient, listKeys, ref.sessionId, (row) => {
+    if (row.title === title || row.title !== previousTitle) return row;
+    return { ...row, title };
+  });
+  if (!found) invalidateLists(queryClient, listKeys);
+};

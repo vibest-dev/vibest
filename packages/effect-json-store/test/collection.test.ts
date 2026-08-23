@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { it } from "@effect/vitest";
-import { Effect, FileSystem, Option, Schema } from "effect";
+import { Cause, Effect, Exit, FileSystem, Option, Schema } from "effect";
 
 import { makeJsonCollection } from "../src";
 import { withTmp } from "./helpers";
@@ -200,6 +200,29 @@ it.effect("a corrupt entry fails get and list loudly", () =>
       assert.equal(getError._tag, "JsonStoreParseError");
       const listError = yield* Effect.flip(sessions.list());
       assert.equal(listError._tag, "JsonStoreParseError");
+    }),
+  ),
+);
+
+it.effect("an invalid id dies with the id in the defect, never as a typed failure", () =>
+  withTmp((dir) =>
+    Effect.gen(function* () {
+      const sessions = yield* makeJsonCollection({ dir: path.join(dir, "sessions"), schema: V2 });
+
+      // The documented defect boundary: ids are the caller's responsibility,
+      // so an unsanitized id is a caller bug — a defect that names the id,
+      // never a typed store error a caller could mistake for a disk problem.
+      const getExit = yield* Effect.exit(sessions.get("../escape"));
+      assert.equal(Exit.isFailure(getExit) && Cause.hasDies(getExit.cause), true);
+      assert.equal(Exit.isFailure(getExit) && Cause.hasFails(getExit.cause), false);
+      const defect = Exit.isFailure(getExit) ? Cause.squash(getExit.cause) : undefined;
+      assert.ok(defect instanceof Error && defect.message.includes("../escape"));
+
+      const putExit = yield* Effect.exit(sessions.put("", { title: "x", starred: false }));
+      assert.equal(Exit.isFailure(putExit) && Cause.hasDies(putExit.cause), true);
+
+      const idsExit = yield* Effect.exit(sessions.ids({ under: "/absolute" }));
+      assert.equal(Exit.isFailure(idsExit) && Cause.hasDies(idsExit.cause), true);
     }),
   ),
 );

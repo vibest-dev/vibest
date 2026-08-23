@@ -24,6 +24,7 @@ export const fsRouter = orpc.router({
     return yield* translateErrors(fs.readFileString(input.cwd, input.path), {
       WorkspacePathEscape: (e) =>
         Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+      WorkspaceFileNotFound: (e) => Effect.fail(errors.NOT_FOUND({ data: { path: e.path } })),
       WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
       WorkspaceFileTooLarge: (e) =>
         Effect.fail(
@@ -33,18 +34,25 @@ export const fsRouter = orpc.router({
       WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
     });
   }),
+  readTree: orpc.readTree.effect(function* ({ input, errors }) {
+    const fs = yield* FileSystemService;
+    return yield* translateErrors(fs.readTree(input.cwd), {
+      WorkspacePathEscape: (e) =>
+        Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+      WorkspaceNotDirectory: (e) =>
+        Effect.fail(errors.NOT_DIRECTORY({ data: { path: e.path } })),
+      WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+    });
+  }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;
-    // Resolving and joining are pure string math, so they stay on `node:path`.
     const dir = path.resolve(input.path ?? os.homedir());
-    // Folder-picker policy (owned here, not a shared fs service): directories
-    // only, hide dotfolders and node_modules, sorted by name.
     const names = yield* fs
       .readDirectory(dir)
       .pipe(Effect.mapError(() => errors.READ_FAILED({ data: { path: dir } })));
-    const candidates = names.filter((name) => !name.startsWith(".") && !IGNORED_DIRS.has(name));
-    // readDirectory yields names only, so stat each to keep just directories. A
-    // failing stat (e.g. broken symlink) drops that entry rather than the list.
+    const candidates = names.filter(
+      (name) => (input.includeHidden || !name.startsWith(".")) && !IGNORED_DIRS.has(name),
+    );
     const flagged = yield* Effect.forEach(
       candidates,
       (name) =>
@@ -53,12 +61,12 @@ export const fsRouter = orpc.router({
           Effect.catch(() => Effect.succeed(false)),
           Effect.map((isDirectory) => ({ name, isDirectory })),
         ),
-      { concurrency: "unbounded" },
+      { concurrency: 32 },
     );
     const directories = flagged
-      .filter((e) => e.isDirectory)
-      .map((e) => ({ name: e.name, path: path.join(dir, e.name) }));
-    directories.sort((a, b) => a.name.localeCompare(b.name));
+      .filter((entry) => entry.isDirectory)
+      .map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }));
+    directories.sort((left, right) => left.name.localeCompare(right.name));
     const parent = path.dirname(dir);
     return { path: dir, parent: parent === dir ? null : parent, directories };
   }),

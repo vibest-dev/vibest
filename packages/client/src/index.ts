@@ -49,6 +49,13 @@ export function createWsConnect(options: CreateVibestClientOptions): () => Promi
 export function createVibestClient(options: CreateVibestClientOptions = {}): VibestClient {
   const link = new WebSocketRPCLink({
     connect: createWsConnect(options),
+    // Reconnect is opt-in in oRPC and OFF by default. Without it the link
+    // holds the dead socket after a drop and every later call hangs on a
+    // send into it — one network blip kills the client until a full page
+    // reload. Enabled, the next call after a drop re-invokes `connect` (and
+    // so mints a fresh ticket); in-flight calls still reject on the drop,
+    // which consumers (e.g. the chat transport's retry loop) recover from.
+    reconnect: { enabled: true },
   });
   return createORPCClient(link);
 }

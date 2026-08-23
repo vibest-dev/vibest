@@ -19,9 +19,21 @@ labels: [wayfinder:map]
 2. **一个全局 EventBus**，纯 fan-out + 过滤，不承担发号；订阅只有两个维度：`{kind:'session'; ref}`（单会话，有 cursor/重放语义）和 `{kind:'global'}`（firehose，透传所有事件，无 after、无重放、断线不补）。**没有 project 维度。**
 3. **snapshot 主动获取**（`session.getSnapshot`），不在订阅流里返回。无丢失边界靠固定顺序：先 subscribe 缓冲 → 后 getSnapshot 拿 cursor → 丢弃缓冲中 `seq ≤ cursor` → 排干 → live。
 4. **只有 session 事件带 seq**：由各 SessionRuntime 在 projection 折叠处自增（会话内连续），global/集合事件不带序号、不重放。`StreamingCursor = { turnId, lastAppliedSeq }`。
+   **勘误（2026-08-05）**：决策本身不变，两个词已改名。发号者现在叫
+   `HarnessAgentSession`（`harness/session.ts`，每个 SessionRef 一个，可选持有
+   runtime）；折叠不叫 projection 而是 `harness/session-fold.ts` 的纯 fold——见
+   `CONTEXT.md` 的 _Avoid_ 清单。自增仍在 fold 处，且与 publish 同持一个信号量，
+   否则两个 fiber 可能先发 n+1 再发 n，客户端的 `seq ≤ cursor` 守卫会永久丢掉 n。
 5. **慢消费者**：订阅者有界队列满 → 发终止性 `closed(slow_consumer)` 踢掉，删除现有 gap 折叠 / `degraded` / `REPLAY_CAPACITY` 机制；active-turn buffer 不设上限，只记 count/bytes 指标，turn 结束释放。
 6. **create**：入参 `{projectId, harnessAgentId, ...}` → 出参 `SessionRef {projectId, harnessAgentId, sessionId}`；sessionId 由 server 生成，adapter 原生 ID 降级为元数据字段 `harnessSessionId`；元数据文件 `~/.vibest/storage/sessions/<projectId>/<sessionId>.json` 原子写；adapter 只见 cwd 不见 projectId；任一步失败不留半初始化状态。
 7. **恢复三路径**：刷新（无 cursor，全量重建）/ 短暂断线（带 cursor 续传，turn 变更先用历史收敛旧 projection）/ 服务重启（`SESSION_NOT_ACTIVE` → resume → 走刷新路径），客户端收敛为单个 reconcile 入口。
+   **勘误（2026-08-04）**：第三条的服务端一半已被 `fix/lazy-harness-agent-runtime`
+   取代。`getStatus`/`getSnapshot` 现在是全函数——本进程没碰过的持久化会话读作
+   idle@cursor 0，观测路径上再不会出现 `SESSION_NOT_ACTIVE`（该错误码保留，只用于
+   操作途中 runtime 死掉的 `SessionClosed`）。原设计里「客户端拿到该错误后去
+   resume」的环节因此消失：重启后重连本来就直接走刷新路径，且不起任何进程。
+   `session.resume` 同批改名 `session.attach` 并抽掉了启动 runtime 的能力。
+   客户端 reconcile 入口不变。
 8. chunk 消费算法：`seq ≤ lastApplied` 幂等忽略；`== +1` 应用并推进；`> +1` 视为缺口重订。
 9. **破坏性直改，不做新旧类型并存**（2026-07-16 用户定案，推翻 ticket 01 原本的 additive 前提）：contract 直接重写，下游 server/harness/client/app 随 impl ticket 一次性迁移，中间不维持双份类型。
 
@@ -55,6 +67,10 @@ labels: [wayfinder:map]
 
 - JSON-RPC 2.0 协议更换——用户明确否决，保留 oRPC。
 - setModel、配置目录（get/setConfigOption）、元数据 config 持久化与 resume 配置重放——单独立项。
+  **部分勘误（2026-08-04）**：「resume 配置重放」已在 `fix/lazy-harness-agent-runtime`
+  内顺带落地——config 归 `HarnessAgentSession` 所有，它获取的每个 runtime 都被重新
+  seed，create 时选的 model/permissionMode 因此不再在重启后退回 harness 默认值
+  （旧行为只在 `adapter.open` 里套一次）。元数据持久化仍未做：config 只活在内存里。
 - steer（turn 进行中 prompt 追加输入）——**勘误（2026-07-31）**：本条写下时为「现状
   `TurnAlreadyRunning` 拒绝」，但 pi 已实现 steer（`harness/pi/agent.ts` 的 prompt 在
   Active 态下走 `steer` 命令）；claude-code / codex 仍拒绝。历史读的分段影响见

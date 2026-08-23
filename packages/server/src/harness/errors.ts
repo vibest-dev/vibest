@@ -14,7 +14,7 @@ const causeSummary = (cause: unknown): string => {
   return String(cause);
 };
 
-export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNotFound>()(
+export class HarnessAgentNotFound extends Schema.TaggedError<HarnessAgentNotFound>()(
   "HarnessAgentNotFound",
   { harnessAgentId: HarnessAgentIdSchema },
 ) {
@@ -23,19 +23,16 @@ export class HarnessAgentNotFound extends Schema.TaggedErrorClass<HarnessAgentNo
   }
 }
 
-export class AgentUnavailable extends Schema.TaggedErrorClass<AgentUnavailable>()(
-  "AgentUnavailable",
-  {
-    harnessAgentId: HarnessAgentIdSchema,
-    reason: Schema.String,
-  },
-) {
+export class AgentUnavailable extends Schema.TaggedError<AgentUnavailable>()("AgentUnavailable", {
+  harnessAgentId: HarnessAgentIdSchema,
+  reason: Schema.String,
+}) {
   override get message() {
     return `Harness agent '${this.harnessAgentId}' is unavailable: ${this.reason}`;
   }
 }
 
-export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFound>()(
+export class ExecutableNotFound extends Schema.TaggedError<ExecutableNotFound>()(
   "ExecutableNotFound",
   {
     harnessAgentId: HarnessAgentIdSchema,
@@ -47,7 +44,7 @@ export class ExecutableNotFound extends Schema.TaggedErrorClass<ExecutableNotFou
   }
 }
 
-export class AgentOpenError extends Schema.TaggedErrorClass<AgentOpenError>()("AgentOpenError", {
+export class AgentOpenError extends Schema.TaggedError<AgentOpenError>()("AgentOpenError", {
   harnessAgentId: HarnessAgentIdSchema,
   cause: Schema.Defect(),
 }) {
@@ -62,7 +59,7 @@ export class AgentOpenError extends Schema.TaggedErrorClass<AgentOpenError>()("A
  * `SessionNotFound` — metadata missing from storage — and the two used to
  * share a tag, forcing structural sniffing at the RPC error mapping.
  */
-export class HarnessSessionNotFound extends Schema.TaggedErrorClass<HarnessSessionNotFound>()(
+export class HarnessSessionNotFound extends Schema.TaggedError<HarnessSessionNotFound>()(
   "HarnessSessionNotFound",
   {
     sessionId: Schema.String,
@@ -73,7 +70,7 @@ export class HarnessSessionNotFound extends Schema.TaggedErrorClass<HarnessSessi
   }
 }
 
-export class SessionNotResumable extends Schema.TaggedErrorClass<SessionNotResumable>()(
+export class SessionNotResumable extends Schema.TaggedError<SessionNotResumable>()(
   "SessionNotResumable",
   {
     sessionId: Schema.String,
@@ -87,7 +84,7 @@ export class SessionNotResumable extends Schema.TaggedErrorClass<SessionNotResum
   }
 }
 
-export class SessionClosed extends Schema.TaggedErrorClass<SessionClosed>()("SessionClosed", {
+export class SessionClosed extends Schema.TaggedError<SessionClosed>()("SessionClosed", {
   sessionId: Schema.String,
 }) {
   override get message() {
@@ -95,7 +92,7 @@ export class SessionClosed extends Schema.TaggedErrorClass<SessionClosed>()("Ses
   }
 }
 
-export class TurnAlreadyRunning extends Schema.TaggedErrorClass<TurnAlreadyRunning>()(
+export class TurnAlreadyRunning extends Schema.TaggedError<TurnAlreadyRunning>()(
   "TurnAlreadyRunning",
   {
     sessionId: Schema.String,
@@ -109,7 +106,7 @@ export class TurnAlreadyRunning extends Schema.TaggedErrorClass<TurnAlreadyRunni
   }
 }
 
-export class AgentRequestUnavailable extends Schema.TaggedErrorClass<AgentRequestUnavailable>()(
+export class AgentRequestUnavailable extends Schema.TaggedError<AgentRequestUnavailable>()(
   "AgentRequestUnavailable",
   {
     sessionId: Schema.String,
@@ -121,7 +118,7 @@ export class AgentRequestUnavailable extends Schema.TaggedErrorClass<AgentReques
   }
 }
 
-export class AgentOperationError extends Schema.TaggedErrorClass<AgentOperationError>()(
+export class AgentOperationError extends Schema.TaggedError<AgentOperationError>()(
   "AgentOperationError",
   {
     sessionId: Schema.String,
@@ -134,7 +131,7 @@ export class AgentOperationError extends Schema.TaggedErrorClass<AgentOperationE
   }
 }
 
-export class CodexTransportError extends Schema.TaggedErrorClass<CodexTransportError>()(
+export class CodexTransportError extends Schema.TaggedError<CodexTransportError>()(
   "CodexTransportError",
   {
     operation: Schema.String,
@@ -146,7 +143,7 @@ export class CodexTransportError extends Schema.TaggedErrorClass<CodexTransportE
   }
 }
 
-export class CodexRpcError extends Schema.TaggedErrorClass<CodexRpcError>()("CodexRpcError", {
+export class CodexRpcError extends Schema.TaggedError<CodexRpcError>()("CodexRpcError", {
   method: Schema.String,
   code: Schema.Number,
   errorMessage: Schema.String,
@@ -157,19 +154,16 @@ export class CodexRpcError extends Schema.TaggedErrorClass<CodexRpcError>()("Cod
   }
 }
 
-export class PiTransportError extends Schema.TaggedErrorClass<PiTransportError>()(
-  "PiTransportError",
-  {
-    operation: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
+export class PiTransportError extends Schema.TaggedError<PiTransportError>()("PiTransportError", {
+  operation: Schema.String,
+  cause: Schema.Defect(),
+}) {
   override get message() {
     return `Pi transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
   }
 }
 
-export class PiRpcError extends Schema.TaggedErrorClass<PiRpcError>()("PiRpcError", {
+export class PiRpcError extends Schema.TaggedError<PiRpcError>()("PiRpcError", {
   command: Schema.String,
   errorMessage: Schema.String,
 }) {
@@ -178,7 +172,7 @@ export class PiRpcError extends Schema.TaggedErrorClass<PiRpcError>()("PiRpcErro
   }
 }
 
-export class AgentProcessExited extends Schema.TaggedErrorClass<AgentProcessExited>()(
+export class AgentProcessExited extends Schema.TaggedError<AgentProcessExited>()(
   "AgentProcessExited",
   {
     harnessAgentId: HarnessAgentIdSchema,
@@ -199,7 +193,7 @@ export class AgentProcessExited extends Schema.TaggedErrorClass<AgentProcessExit
   }
 }
 
-export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolError>()(
+export class AgentProtocolError extends Schema.TaggedError<AgentProtocolError>()(
   "AgentProtocolError",
   {
     harnessAgentId: HarnessAgentIdSchema,
@@ -216,7 +210,7 @@ export class AgentProtocolError extends Schema.TaggedErrorClass<AgentProtocolErr
 // this harness's declared subset — a client bug by definition (the subset is
 // closed and fully known to the client), so it maps to INVALID_ARGUMENT at the
 // RPC boundary rather than being silently ignored or half-applied.
-export class PermissionModeUnsupported extends Schema.TaggedErrorClass<PermissionModeUnsupported>()(
+export class PermissionModeUnsupported extends Schema.TaggedError<PermissionModeUnsupported>()(
   "PermissionModeUnsupported",
   {
     harnessAgentId: HarnessAgentIdSchema,
@@ -228,7 +222,7 @@ export class PermissionModeUnsupported extends Schema.TaggedErrorClass<Permissio
   }
 }
 
-export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityProbeFailed>()(
+export class CapabilityProbeFailed extends Schema.TaggedError<CapabilityProbeFailed>()(
   "CapabilityProbeFailed",
   {
     harnessAgentId: HarnessAgentIdSchema,
@@ -240,7 +234,7 @@ export class CapabilityProbeFailed extends Schema.TaggedErrorClass<CapabilityPro
   }
 }
 
-export class CapabilityUnsupported extends Schema.TaggedErrorClass<CapabilityUnsupported>()(
+export class CapabilityUnsupported extends Schema.TaggedError<CapabilityUnsupported>()(
   "CapabilityUnsupported",
   {
     harnessAgentId: HarnessAgentIdSchema,

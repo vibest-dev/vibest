@@ -1,0 +1,5 @@
+self-hosted-runner:
+  labels:
+    - rn
+    - vibest
+    - ubuntu-24.04

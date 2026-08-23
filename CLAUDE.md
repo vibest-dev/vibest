@@ -18,17 +18,28 @@ skips the upstream tsdown build.
 
 `lint` and `format` are root-only (oxlint/oxfmt) and not turbo tasks. `test` and
 `typecheck` are cached, so re-run with `--force` after changing something
-outside their hash inputs. `pnpm clean` runs `git clean -xdf`.
+outside their hash inputs. `pnpm clean` runs `turbo run clean` then
+`git clean -xdf node_modules dist .turbo` — not a repo-wide `git clean -xdf`.
+Runtime UI checks use `.agents/skills/verify` (launch the vite app plus server,
+then drive the page).
 
 ## Rules
 
 @.agents/rules/architecture.md
 @.agents/rules/stack.md
 @.agents/rules/frontend-state.md
+@.agents/rules/ui-components.md
 @.agents/rules/toolchain.md
 
 `apps/desktop/src` has its own layering contract in `apps/desktop/AGENTS.md` —
 read it before touching that app.
+
+## Pull requests
+
+Use **squash merge** — one commit per PR keeps `main` readable. Don't mix
+merge-commit / rebase merges in the repo. Squash rewrites the branch tip out
+of `main`'s history, so deleting the local feature branch needs `git branch -D`
+— the changes are already on `main`, so it's safe.
 
 ## Going deeper
 
@@ -39,6 +50,6 @@ read it before touching that app.
 - `docs/design/`, `docs/2026-*.md` — designs in flight
 - `docs/wayfinder/session-streaming-refactor/map.md` — streaming decisions that
   are closed for debate
-- `.claude/skills/verify` — build, launch, and drive the app at runtime
-- `.claude/skills/react-doctor` — React health check; CI fails on error-level only
+- `.agents/skills/verify` — build, launch, and drive the app at runtime
+- `.agents/skills/react-doctor` — React health check; CI fails on error-level only
 - `todos/` — numbered security/perf remediation tickets

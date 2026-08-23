@@ -1,11 +1,12 @@
-import path from "node:path";
-
+import { writeFileAtomic } from "@vibest/effect-json-store";
 import { Effect, FileSystem, type PlatformError } from "effect";
 
+import { daemonRecordPath } from "./paths";
+
 /**
- * The discovery record the launcher writes to `$VIBEST_HOME/daemon.pid` — the
- * local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`. It
- * is the single-instance marker: staleness is decided by "is the pid alive",
+ * The discovery record the launcher writes to `$VIBEST_DAEMON_DIR/daemon.pid` —
+ * the local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`.
+ * It is the single-instance marker: staleness is decided by "is the pid alive",
  * never a lock the server holds. The server itself never reads or writes it.
  */
 export type DaemonRecord = {
@@ -19,17 +20,14 @@ export type DaemonRecord = {
   readonly startedAt: number;
 };
 
-/** `$VIBEST_HOME/daemon.pid`. */
-export const recordPath = (home: string): string => path.join(home, "daemon.pid");
-
 /** Read and validate the record, or `undefined` if missing/garbage. */
 export const readRecord = (
-  home: string,
+  daemonDir: string,
 ): Effect.Effect<DaemonRecord | undefined, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs
-      .readFileString(recordPath(home))
+      .readFileString(daemonRecordPath(daemonDir))
       .pipe(Effect.orElseSucceed(() => undefined));
     if (raw === undefined) return undefined;
 
@@ -52,28 +50,23 @@ export const readRecord = (
   });
 
 /**
- * Atomically write the record with `0600` perms (token is a secret): write a
- * sibling temp file, chmod, then rename over the target so a concurrent reader
- * never sees a half-written file.
+ * Atomically write the record with `0600` perms (token is a secret). The
+ * shared writer renames a sibling temp file over the target so a concurrent
+ * reader never sees a half-written file, and removes the temp file when the
+ * write fails or is interrupted.
  */
 export const writeRecord = (
-  home: string,
+  daemonDir: string,
   record: DaemonRecord,
 ): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(home, { recursive: true });
-    const target = recordPath(home);
-    const tmp = `${target}.${process.pid}.tmp`;
-    yield* fs.writeFileString(tmp, JSON.stringify(record), { mode: 0o600 });
-    // `mode` only applies when the write creates the file, so a leftover temp
-    // from a crashed launcher would otherwise keep its old perms.
-    yield* fs.chmod(tmp, 0o600);
-    yield* fs.rename(tmp, target);
-  });
+  FileSystem.FileSystem.use((fs) =>
+    writeFileAtomic(fs, daemonRecordPath(daemonDir), JSON.stringify(record), { mode: 0o600 }),
+  );
 
 /** Remove the record; a missing file is not an error. */
-export const removeRecord = (home: string): Effect.Effect<void, never, FileSystem.FileSystem> =>
-  FileSystem.FileSystem.use((fs) => fs.remove(recordPath(home), { force: true })).pipe(
+export const removeRecord = (
+  daemonDir: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.use((fs) => fs.remove(daemonRecordPath(daemonDir), { force: true })).pipe(
     Effect.ignore,
   );
