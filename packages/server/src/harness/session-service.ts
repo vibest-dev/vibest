@@ -652,36 +652,55 @@ export const makeHarnessAgentSessionService = (deps: {
         const metadata = yield* readAndStampTitleFromFirstPrompt(input.ref, input.parts);
         const messageId = input.messageId ?? (yield* newSessionId);
 
-        // Broadcast the accepted prompt *before* the harness call so it always
+        // Broadcast the received prompt *before* the harness call so it always
         // precedes the turn's own events in seq order. If the harness then
         // rejects the prompt, `session.prompt.rejected` compensates — clients
         // drop the phantom user message and the runtime clears the retained
         // activePrompt.
-        yield* manager.emit(input.ref, {
-          type: "session.prompt.submitted",
-          messageId,
-          parts: input.parts,
-        });
         // A user message is the one thing that justifies starting an agent, so
         // this is where a runtime is acquired if the session has none — after
         // the submitted event, so a failed acquisition is compensated by the
         // same `prompt.rejected` that a harness-side rejection uses.
-        const runtime = yield* manager.ensureRuntime(
-          {
-            sessionId: metadata.harnessSessionId,
-            harnessAgentId: input.ref.harnessAgentId,
-            ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
-          },
-          input.ref,
-        );
-        return yield* runtime.prompt(userInput).pipe(
-          Effect.tapError((promptError) =>
-            manager.emit(input.ref, {
-              type: "session.prompt.rejected",
+        return yield* Effect.uninterruptible(
+          manager
+            .emit(input.ref, {
+              type: "session.prompt.submitted",
               messageId,
-              reason: promptError.message,
-            }),
-          ),
+              parts: input.parts,
+            })
+            .pipe(
+              Effect.andThen(
+                manager.ensureRuntime(
+                  {
+                    sessionId: metadata.harnessSessionId,
+                    harnessAgentId: input.ref.harnessAgentId,
+                    ...(metadata.cwd !== undefined ? { cwd: metadata.cwd } : {}),
+                  },
+                  input.ref,
+                ),
+              ),
+              Effect.flatMap((runtime) => runtime.prompt(userInput)),
+              // Acquisition and prompt rejection are the same visible outcome:
+              // both must compensate the submitted candidate retained above.
+              Effect.tapError((promptError) =>
+                manager.emit(input.ref, {
+                  type: "session.prompt.rejected",
+                  messageId,
+                  reason: promptError.message,
+                }),
+              ),
+              // Once submitted is visible, interruption must not leave the
+              // candidate without a terminal correlation. Runtime prompt
+              // receipts are short-lived; finish this emit before honoring a
+              // disconnected caller's cancellation.
+              Effect.tap((receipt) =>
+                manager.emit(input.ref, {
+                  type: "session.prompt.accepted",
+                  messageId,
+                  turnId: receipt.turnId,
+                }),
+              ),
+            ),
         );
       }).pipe(inSession(input.ref)),
 

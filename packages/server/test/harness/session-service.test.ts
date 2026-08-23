@@ -6,6 +6,7 @@ import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
 import {
   Crypto,
+  Deferred,
   Effect,
   Fiber,
   FileSystem,
@@ -23,7 +24,7 @@ import type {
   HarnessAgentRuntime,
   SessionInfoResult,
 } from "../../src/harness/adapter";
-import { TurnAlreadyRunning } from "../../src/harness/errors";
+import { AgentOpenError, TurnAlreadyRunning } from "../../src/harness/errors";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
 import { makeHarnessAgentSessionManager } from "../../src/harness/session-manager";
 import {
@@ -48,6 +49,8 @@ type Fixture = {
   readonly repo: HarnessAgentSessionRepositoryShape;
   readonly bus: EventBusShape;
   readonly spy: Spy;
+  readonly waitForPromptStart: Effect.Effect<void>;
+  readonly releasePrompt: Effect.Effect<void>;
   /**
    * A second service over the same storage and the same adapter — what a
    * server restart looks like from the session domain: the records survive,
@@ -81,6 +84,10 @@ describe("HarnessAgentSessionService", () => {
       promptFails?: boolean;
       // Optional close hook for exercising lifecycle contention.
       close?: (sessionId: string) => Promise<void>;
+      // Hold runtime.prompt until the test releases its receipt.
+      promptWaits?: boolean;
+      // Runtime reacquisition fails before runtime.prompt is available.
+      resumeFails?: boolean;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
@@ -88,6 +95,8 @@ describe("HarnessAgentSessionService", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const spy: Spy = { open: [], resume: [], close: [] };
+          const promptStarted = yield* Deferred.make<void>();
+          const promptGate = yield* Deferred.make<void>();
           let opened = 0;
           const turnEvents = (sessionId: string) => {
             if (opts.turn === undefined) return Stream.empty;
@@ -123,7 +132,13 @@ describe("HarnessAgentSessionService", () => {
             events: turnEvents(sessionId),
             prompt: opts.promptFails
               ? () => Effect.fail(new TurnAlreadyRunning({ sessionId }))
-              : () => Effect.succeed({ turnId: "turn-1" }),
+              : opts.promptWaits
+                ? () =>
+                    Deferred.succeed(promptStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(promptGate)),
+                      Effect.as({ turnId: "turn-1" }),
+                    )
+                : () => Effect.succeed({ turnId: "turn-1" }),
             setModel: () => Effect.void,
             setReasoningEffort: () => Effect.void,
             setPermissionMode: () => Effect.void,
@@ -167,10 +182,17 @@ describe("HarnessAgentSessionService", () => {
                 ),
               ),
             resume: ({ sessionId, cwd }) =>
-              Effect.sync(() => {
-                spy.resume.push({ sessionId, cwd });
-                return makeSession(sessionId);
-              }),
+              opts.resumeFails
+                ? Effect.fail(
+                    new AgentOpenError({
+                      harnessAgentId: "claude-code",
+                      cause: new Error("resume failed"),
+                    }),
+                  )
+                : Effect.sync(() => {
+                    spy.resume.push({ sessionId, cwd });
+                    return makeSession(sessionId);
+                  }),
             ...(opts.coldHistory !== undefined
               ? { getMessages: () => Effect.succeed(opts.coldHistory ?? []) }
               : {}),
@@ -192,7 +214,15 @@ describe("HarnessAgentSessionService", () => {
                 bus,
                 newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
               });
-              return { service, repo, bus, spy, restart: build };
+              return {
+                service,
+                repo,
+                bus,
+                spy,
+                waitForPromptStart: Deferred.await(promptStarted),
+                releasePrompt: Deferred.succeed(promptGate, undefined).pipe(Effect.asVoid),
+                restart: build,
+              };
             });
           return yield* program(yield* build);
         }),
@@ -646,6 +676,7 @@ describe("HarnessAgentSessionService", () => {
     expect(snapshot.activePrompt).toMatchObject({
       messageId: "client-msg-1",
       parts: [{ type: "text", text: "hello there" }],
+      acceptedTurnId: expect.any(String),
     });
     expect(snapshot.activePrompt?.seq).toBeGreaterThan(0);
   });
@@ -694,6 +725,102 @@ describe("HarnessAgentSessionService", () => {
     // not retain the phantom for mid-turn joiners.
     expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
     expect(result.activePrompt).toBeNull();
+  });
+
+  it("compensates a submitted prompt when runtime acquisition fails", async () => {
+    const result = await run({ turn: "open", resumeFails: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const restarted = yield* fixture.restart;
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* restarted.bus.subscribe({ kind: "session", ref });
+            const rejection = yield* Effect.flip(
+              restarted.service.prompt({
+                ref,
+                parts: [{ type: "text", text: "cannot resume" }],
+                messageId: "resume-failed-msg",
+              }),
+            );
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return {
+              rejection,
+              broadcast: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+              activePrompt: (yield* restarted.service.getSnapshot(ref)).activePrompt,
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.rejection._tag).toBe("AgentOpenError");
+    expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
+    expect(result.activePrompt).toBeNull();
+  });
+
+  it("finishes prompt correlation when the requesting fiber is interrupted", async () => {
+    const result = await run({ turn: "open", promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            const request = yield* Effect.forkChild(
+              fixture.service.prompt({
+                ref,
+                parts: [{ type: "text", text: "survive cancellation" }],
+                messageId: "interrupted-msg",
+              }),
+            );
+            yield* fixture.waitForPromptStart;
+            const interruption = yield* Effect.forkChild(Fiber.interrupt(request));
+            yield* fixture.releasePrompt;
+            yield* Fiber.join(interruption);
+
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted"),
+                ),
+                2,
+              ),
+            );
+            const snapshot = yield* fixture.service.getSnapshot(ref);
+            return {
+              broadcast: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+              pendingPrompts: snapshot.pendingPrompts,
+              activePrompt: snapshot.activePrompt,
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.accepted"]);
+    expect(result.pendingPrompts).toEqual([]);
+    expect(result.activePrompt).toMatchObject({
+      messageId: "interrupted-msg",
+      acceptedTurnId: "turn-1",
+    });
   });
 
   it("mints a messageId when the prompt carries none", async () => {

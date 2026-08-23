@@ -186,6 +186,7 @@ export type SessionStatus = typeof SessionStatusSchema.Type;
 export const SessionScopedEventTypes = [
   "session.message.chunk",
   "session.prompt.submitted",
+  "session.prompt.accepted",
   "session.prompt.rejected",
   "session.turn.started",
   "session.turn.ended",
@@ -211,7 +212,7 @@ export type SessionScopedEventBody =
       readonly turnId: string;
       readonly chunk: UIMessageChunk;
     }
-  // A user prompt was accepted for this session. Published by the session
+  // A user prompt was received for this session. Published by the session
   // service *before* the harness call, so it always precedes the turn's own
   // events in seq order; `messageId` echoes the client-supplied id (or a
   // server-minted one), letting the prompting client dedupe its optimistic
@@ -221,6 +222,14 @@ export type SessionScopedEventBody =
       readonly type: "session.prompt.submitted";
       readonly messageId: string;
       readonly parts: ReadonlyArray<PromptPart>;
+    }
+  // The harness accepted the submitted prompt. This correlation is emitted
+  // after runtime.prompt resolves; it distinguishes a retained prompt that is
+  // still waiting to enter the harness from one already consumed by a turn.
+  | {
+      readonly type: "session.prompt.accepted";
+      readonly messageId: string;
+      readonly turnId: string;
     }
   // Compensates a `session.prompt.submitted` whose harness call was then
   // rejected (turn already running, session closed, harness error): clients
@@ -346,7 +355,7 @@ export type ActiveTurnSnapshot = {
   readonly truncated: boolean;
 };
 
-// The latest accepted prompt, retained like the active turn's buffer:
+// The latest submitted prompt, retained like the active turn's buffer:
 // `session.prompt.submitted` is never re-sent, so a client attaching mid-turn
 // recovers the user message from here. `seq` is the submit event's seq — replay
 // gates on it, so a client that saw the live event never renders it twice.
@@ -354,6 +363,10 @@ export type ActivePromptSnapshot = {
   readonly messageId: string;
   readonly parts: ReadonlyArray<PromptPart>;
   readonly seq: number;
+  // Null between prompt.submitted and the harness receipt; set to the
+  // correlated turn once prompt.accepted applies. The turn id lets reconnect
+  // distinguish "accepted but not started" from "this turn completed".
+  readonly acceptedTurnId: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -477,7 +490,15 @@ export type SessionRuntimeSnapshot = {
   readonly status: SessionStatus;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;
+  // Newest prompt to render for reconnect (an unresolved candidate wins).
   readonly activePrompt: ActivePromptSnapshot | null;
+  // Latest prompt accepted by the harness, exposed independently because a
+  // newer unresolved candidate may temporarily mask it in activePrompt.
+  readonly acceptedPrompt: ActivePromptSnapshot | null;
+  // Every submitted prompt still awaiting its accepted/rejected correlation.
+  // activePrompt carries only the newest one; the full list preserves both the
+  // boundary and every optimistic user message across reconnect.
+  readonly pendingPrompts: ReadonlyArray<ActivePromptSnapshot>;
   // Last session-scoped seq folded into this snapshot; 0 before any event.
   readonly cursor: number;
 };

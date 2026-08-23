@@ -12,9 +12,12 @@ import type { AgentRequest } from "./agent-requests";
 // context does not.
 export type HistoryStatus = "loading" | "settled" | "unavailable";
 
-// Each Chat owns its own store: messages + status + error + pendingRequests.
+// Each Chat owns its own store. Queued messages stay separate from the
+// transcript: settled-history reconciliation may replace `messages`, but it
+// must never erase prompts that have not been submitted to the server yet.
 export type ChatStoreState = {
   messages: UIMessage[];
+  queuedMessages: UIMessage[];
   status: ChatStatus;
   error?: Error;
   pendingRequests: AgentRequest[];
@@ -37,6 +40,7 @@ export class ChatState implements AiChatStateSlice {
   constructor(initialMessages: UIMessage[] = []) {
     this.store = createStore<ChatStoreState>()(() => ({
       messages: initialMessages,
+      queuedMessages: [],
       status: "ready",
       error: undefined,
       pendingRequests: [],
@@ -89,6 +93,10 @@ export class ChatState implements AiChatStateSlice {
     });
   };
   snapshot = <T>(value: T): T => structuredClone(value);
+
+  setQueuedMessages = (queuedMessages: UIMessage[]) => {
+    this.store.setState({ queuedMessages });
+  };
 
   // Pending agent requests (cleared when the turn ends). The server owns this
   // state: a snapshot hydration replaces the list wholesale, live events add

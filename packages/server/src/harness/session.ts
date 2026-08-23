@@ -332,6 +332,7 @@ export const makeHarnessAgentSession = (
               phase: "idle" as const,
               activeTurn: null,
               activePrompt: null,
+              pendingPrompts: [],
               pendingRequests: new Map(),
             }
           : current,
