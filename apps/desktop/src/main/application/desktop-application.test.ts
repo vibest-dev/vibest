@@ -5,6 +5,10 @@ import type { ServerConnection, ServerStatusSnapshot } from "../../shared/deskto
 import type { LocalServer } from "../server/local-server";
 import { makeDesktopApplication } from "./desktop-application";
 
+// Whichever host the suite runs on — asserting a literal would pin these tests
+// to the developer's OS and fail on a different CI runner.
+const anyOs = expect.stringMatching(/^(macos|windows|linux)$/);
+
 function makeHarness(
   connection: Effect.Effect<ServerConnection> = Effect.succeed({
     httpBaseUrl: "http://127.0.0.1:43123",
@@ -48,6 +52,7 @@ describe("DesktopApplication", () => {
     await expect(Effect.runPromise(h.application.bootstrap)).resolves.toEqual({
       status: "ready",
       statusRevision: 0,
+      os: anyOs,
     });
     await expect(Effect.runPromise(h.application.serverConnection)).resolves.toEqual({
       httpBaseUrl: "http://127.0.0.1:43123",
@@ -67,6 +72,7 @@ describe("DesktopApplication", () => {
     await expect(Effect.runPromise(h.application.bootstrap)).resolves.toEqual({
       status: "ready",
       statusRevision: 0,
+      os: anyOs,
     });
   });
 

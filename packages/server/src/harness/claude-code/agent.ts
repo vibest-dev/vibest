@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import type * as sdk from "@anthropic-ai/claude-agent-sdk";
 import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import { Deferred, Effect, Exit, FiberSet, FileSystem, Queue, Ref, Scope, Stream } from "effect";
@@ -13,6 +16,7 @@ import {
 } from "../errors";
 import { drainQueue, streamFromQueueOne } from "../queue-stream";
 import { resolveClaudeExecutable } from "./executable";
+import { parseTranscriptRecords } from "./transcript";
 
 const SESSION_QUEUE_CAPACITY = 1024;
 
@@ -96,6 +100,14 @@ export interface ClaudeCodeAgent {
       sessionId: string,
       options?: { readonly dir?: string },
     ) => Effect.Effect<ClaudeSessionInfo, ClaudeSdkError>;
+    /**
+     * Reads the session's transcript records from the SDK's on-disk history
+     * without touching the live query — the raw material for a history fold.
+     */
+    readonly getSessionMessages: (
+      sessionId: string,
+      options?: { readonly dir?: string },
+    ) => Effect.Effect<sdk.SessionMessage[], ClaudeSdkError>;
     readonly prompt: (input: {
       readonly sessionId: string;
       readonly message: sdk.SDKUserMessage["message"];
@@ -178,10 +190,31 @@ export const makeClaudeCodeAgent = ({
     // `listModels` ask, so an uncached Effect re-walks PATH on every session.
     const claudeExecutable = yield* Effect.cached(
       resolveClaudeExecutable({ env }).pipe(
-        Effect.orDie,
+        Effect.catchTag("ClaudeExecutableNotFound", (cause) =>
+          Effect.die(
+            new Error(
+              "invariant: the claude executable vanished after the availability check gated on it",
+              { cause },
+            ),
+          ),
+        ),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
       ),
     );
+    const sdkStderr = (line: string, annotations: Record<string, unknown>) => {
+      const text = line.trimEnd();
+      return text.length === 0
+        ? Effect.void
+        : Effect.logDebug(text).pipe(
+            Effect.annotateLogs({
+              event: "harness.stderr",
+              harnessAgentId: "claude-code",
+              ...annotations,
+            }),
+          );
+    };
+    const rootEffectContext = yield* Effect.context<never>();
+
     const sessions = yield* Ref.make(new Map<string, SessionState>());
     const resumes = yield* Ref.make(
       new Map<string, Deferred.Deferred<SessionState, ClaudeAgentFailure>>(),
@@ -307,7 +340,9 @@ export const makeClaudeCodeAgent = ({
             // at runtime (setPermissionMode). This only enables the capability;
             // the active mode stays whatever `permissionMode` currently is.
             allowDangerouslySkipPermissions: true,
-            stderr: (error) => console.error(error),
+            stderr: (error) => {
+              runCallback(sdkStderr(error, { harnessSessionId: sessionId }));
+            },
             executable: process.execPath as "node",
             pathToClaudeCodeExecutable: yield* claudeExecutable,
             env: { ...env },
@@ -544,7 +579,11 @@ export const makeClaudeCodeAgent = ({
                   mcpServers: {},
                   strictMcpConfig: true,
                   settingSources: ["user", "project", "local"],
-                  stderr: (error) => console.error(error),
+                  stderr: (error) => {
+                    void Effect.runSyncExitWith(rootEffectContext)(
+                      sdkStderr(error, { probe: "list-models" }),
+                    );
+                  },
                   executable: process.execPath as "node",
                   pathToClaudeCodeExecutable,
                   env: { ...env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
@@ -669,6 +708,64 @@ export const makeClaudeCodeAgent = ({
           Effect.tryPromise<ClaudeSessionInfo, ClaudeSdkError>({
             try: () => getSessionInfo(sessionId, options?.dir ? { dir: options.dir } : undefined),
             catch: (cause) => sdkError("get-session-info", cause),
+          }),
+        // File-order read of the CLI's own transcript, NOT `sdk.getSessionMessages`
+        // — see `parseTranscriptRecords` for why the SDK's branch walk loses
+        // replies. `dir` narrows to the CLI's munged project directory first;
+        // a miss falls back to scanning every project directory (session ids
+        // are uuids, so the file name cannot collide).
+        getSessionMessages: (sessionId, options) =>
+          Effect.gen(function* () {
+            const projectsRoot = path.join(os.homedir(), ".claude", "projects");
+            const fileName = `${sessionId}.jsonl`;
+            // Unreadable candidate = absent candidate: keep scanning; a session
+            // with no transcript on disk yields empty history, not an error.
+            // A miss is the common case — this scans every project directory —
+            // so the read failure is only worth `debug`. It is still worth
+            // *something*: an unreadable-but-present transcript and an absent
+            // one are indistinguishable from the empty history both produce,
+            // and only this line tells them apart.
+            const readCandidate = (candidate: string) =>
+              fileSystem.readFileString(candidate).pipe(
+                Effect.map((content) => parseTranscriptRecords(content, sessionId)),
+                Effect.tapError((cause) =>
+                  Effect.logDebug("transcript candidate unreadable").pipe(
+                    Effect.annotateLogs({
+                      event: "harness.transcript.miss",
+                      harnessAgentId: "claude-code",
+                      harnessSessionId: sessionId,
+                      candidate,
+                      reason: cause.reason._tag,
+                    }),
+                  ),
+                ),
+                Effect.orElseSucceed(() => null),
+              );
+            if (options?.dir !== undefined) {
+              const munged = options.dir.replace(/[^a-zA-Z0-9]/g, "-");
+              const narrowed = yield* readCandidate(path.join(projectsRoot, munged, fileName));
+              if (narrowed !== null) return narrowed;
+            }
+            // No `~/.claude/projects` at all: the CLI has never run here. That
+            // is a legitimate empty history, not a failure — but a history
+            // request for a session that supposedly exists says otherwise.
+            const entries = yield* fileSystem.readDirectory(projectsRoot).pipe(
+              Effect.tapError(() =>
+                Effect.logDebug("no claude-code projects directory to scan").pipe(
+                  Effect.annotateLogs({
+                    event: "harness.transcript.no_root",
+                    harnessAgentId: "claude-code",
+                    projectsRoot,
+                  }),
+                ),
+              ),
+              Effect.orElseSucceed((): string[] => []),
+            );
+            for (const entry of entries) {
+              const records = yield* readCandidate(path.join(projectsRoot, entry, fileName));
+              if (records !== null) return records;
+            }
+            return [];
           }),
         setModel: (sessionId, model) =>
           callQuery(sessionId, "set-model", (sdkQuery) => sdkQuery.setModel(model)),

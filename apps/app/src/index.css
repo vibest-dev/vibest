@@ -65,8 +65,27 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  html,
   body {
+    min-height: 100svh;
+    overscroll-behavior: none;
+  }
+
+  body {
+    height: 100%;
+    overflow: hidden;
     @apply bg-background text-foreground;
+  }
+
+  #root {
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-y: hidden;
+    overscroll-behavior-y: none;
   }
 }
 
@@ -77,4 +96,12 @@
   color: var(--muted-foreground);
   pointer-events: none;
   height: 0;
+}
+
+/* Thin, theme-aware scrollbar for the chat transcript. Applied where the
+   Conversation component is used, via its `scrollClassName` prop, so the
+   visual style lives in the app rather than in @vibest/ui. */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 20%, transparent) transparent;
 }

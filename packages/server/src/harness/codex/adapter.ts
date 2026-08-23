@@ -6,9 +6,8 @@ import { Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import {
-  applyInitialSessionConfig,
   type HarnessAgentAdapter,
-  type HarnessAgentSession,
+  type HarnessAgentRuntime,
   type SessionInfoResult,
   type UserInput,
 } from "../adapter";
@@ -26,6 +25,7 @@ import type { SessionEnvelopeDraft, SessionEvent } from "../events/framework";
 import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { CodexAgent } from "./agent";
+import { turnsToUIMessages } from "./history";
 
 const EVENT_QUEUE_CAPACITY = 1024;
 
@@ -105,10 +105,10 @@ const toModelInfo = (model: Model): ModelInfo => {
   };
 };
 
-const makeSession = (
+const makeRuntime = (
   agent: CodexAgent,
   sessionId: string,
-): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
+): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
@@ -122,8 +122,9 @@ const makeSession = (
     const permissionMode = yield* Ref.make<CodexPermission | undefined>(undefined);
     // Same story for the model: `thread/start` fixes one, but `turn/start`
     // overrides it for that turn and every turn after. Holding it here is what
-    // lets create-time selection work at all — applyInitialSessionConfig calls
-    // setModel before the first prompt, and that first turn carries it.
+    // lets create-time selection work at all — the session seeds a runtime it
+    // has just acquired, so setModel lands before the first prompt and that
+    // first turn carries it.
     const model = yield* Ref.make<string | undefined>(undefined);
     // ReasoningEffort rides `turn/start` the same way. Cleared on setModel: an reasoningEffort
     // picked for one model must not survive onto another — no override means
@@ -195,7 +196,7 @@ const makeSession = (
       ),
     );
 
-    const interrupt: HarnessAgentSession["interrupt"] = Effect.gen(function* () {
+    const interrupt: HarnessAgentRuntime["interrupt"] = Effect.gen(function* () {
       if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
       yield* agent.session
         .interrupt(sessionId)
@@ -318,8 +319,10 @@ const makeSession = (
         supportsSteering: true,
         supportsPermissions: true,
       }),
+      // No `getMessages` here: `thread/read` answers off the shared
+      // app-server, so the read belongs on the adapter (see `HarnessAgentAdapter.getMessages`).
       close,
-    } satisfies HarnessAgentSession;
+    } satisfies HarnessAgentRuntime;
   });
 
 export const makeCodexAdapter = (
@@ -356,8 +359,7 @@ export const makeCodexAdapter = (
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "codex", cause })),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
-      Effect.tap((session) => applyInitialSessionConfig(session, input)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
@@ -366,7 +368,16 @@ export const makeCodexAdapter = (
           ? cause
           : new AgentOpenError({ harnessAgentId: "codex", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
+    ),
+  // Cold history read: `thread/read` returns the stored turns in the same
+  // ThreadItem vocabulary the live transform streams, so the cold fold and the
+  // live track can't drift apart — and it answers off the shared app-server,
+  // so reading a session costs no thread of its own.
+  getMessages: (harnessSessionId) =>
+    agent.session.read({ sessionId: harnessSessionId, includeTurns: true }).pipe(
+      Effect.map((thread) => turnsToUIMessages(thread.turns)),
+      Effect.mapError((cause) => operationError(harnessSessionId, "get-messages", cause)),
     ),
   getSessionInfo: (harnessSessionId) =>
     agent.session.read({ sessionId: harnessSessionId }).pipe(

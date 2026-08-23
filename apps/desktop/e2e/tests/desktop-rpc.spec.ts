@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { type ElectronApplication, _electron as electron, type Page } from "@playwright/test";
 
-import { expect, test } from "./fixtures.js";
+import { expect, stopDaemonFor, test } from "./fixtures.js";
 
 function appPid(electronApp: ElectronApplication): number {
   const pid = electronApp.process().pid;
@@ -206,6 +206,9 @@ test("boots the development HTTP renderer through MessagePort", async ({}, testI
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
+    // This test builds its own $VIBEST_HOME instead of using the fixture, so
+    // it also owns stopping the per-test daemon.
+    await stopDaemonFor(vibestHome);
   }
 });
 
@@ -213,17 +216,25 @@ test("chats through Claude Agent SDK and the fake Claude executable", async ({
   e2ePaths,
   window,
 }) => {
-  // The app lands on /draft, the new-session surface: typing the first
-  // message creates the session and navigates into it.
+  // The app lands on /draft, the new-session surface: picking the seeded
+  // project and typing the first message creates the session and navigates
+  // into it. There is no default project — the composer blocks until one is
+  // chosen.
   await waitForConnectedUi(window);
+
+  await window.getByRole("combobox").filter({ hasText: "Select a project" }).click();
+  await window.getByRole("option", { name: /e2e-workspace/ }).click();
 
   const input = window.locator("[contenteditable='true']");
   await input.fill("Desktop SDK E2E");
   await input.press("Enter");
 
   await expect(window).toHaveURL(/\/session\/[0-9a-f-]+/);
-  await expect(window.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
-  await expect(window.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
+  // Scoped to the transcript: the prompt text also becomes the session's
+  // optimistic title in the sidebar.
+  const transcript = window.getByRole("log");
+  await expect(transcript.getByText("Desktop SDK E2E", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Desktop fake Claude reply", { exact: true })).toBeVisible();
   await expect
     .poll(() =>
       fs.existsSync(e2ePaths.fakeClaudeLog) ? fs.readFileSync(e2ePaths.fakeClaudeLog, "utf8") : "",
@@ -248,13 +259,18 @@ test("reports a server crash and recovers on the pinned connection", async ({
   await expect(window.getByText("Vibest could not start")).toHaveCount(0);
 });
 
-test("disposes the server process during Electron shutdown", async ({ electronApp, window }) => {
+test("leaves the daemon running through Electron shutdown", async ({ electronApp, window }) => {
   await expect(window).toHaveTitle("Vibest");
   const pid = await waitForServer(appPid(electronApp));
 
   await electronApp.close();
 
-  await expect.poll(() => processExists(pid), { timeout: 5_000 }).toBe(false);
+  // The server is the shared vibest daemon the app attached to (or spawned) —
+  // it deliberately outlives Electron so the CLI and the next app launch
+  // converge on the same backend. `vibest daemon stop` is how it ends (the
+  // fixture teardown does the equivalent for the per-test daemon).
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  expect(processExists(pid)).toBe(true);
 });
 
 test("offers Retry after repeated server failures", async ({ electronApp, window }) => {

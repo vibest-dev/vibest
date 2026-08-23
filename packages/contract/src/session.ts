@@ -1,6 +1,7 @@
 import { eventIterator, oc, type } from "@orpc/contract";
 
 import {
+  ArchiveSessionInputSchema,
   CreateSessionInputSchema,
   serverErrors,
   ListSessionsInputSchema,
@@ -11,7 +12,6 @@ import {
   RenameSessionInputSchema,
   ResolveRefInputSchema,
   RespondToAgentRequestInputSchema,
-  ResumeSessionInputSchema,
   type SessionMessages,
   SessionRefSchema,
   type SessionRuntimeSnapshot,
@@ -37,14 +37,17 @@ export const sessionContract = {
   create: base
     .input(toStandardSchema(CreateSessionInputSchema))
     .output(toStandardSchema(SessionRefSchema)),
-  resume: base
-    .input(toStandardSchema(ResumeSessionInputSchema))
-    .output(toStandardSchema(SessionRefSchema)),
+  // Neither "resume" nor "attach": it validates the ref, backfills the
+  // session's cwd, and checks the harness still knows the native session. It
+  // starts nothing and connects nothing — only a prompt starts a runtime, and
+  // only `subscribe` attaches to the event stream.
+  prepare: base.input(toStandardSchema(RefInputSchema)).output(toStandardSchema(SessionRefSchema)),
   close: base.input(toStandardSchema(RefInputSchema)),
 
   // history / index
   list: base.input(toStandardSchema(ListSessionsInputSchema)).output(type<ListSessionsOutput>()),
   rename: base.input(toStandardSchema(RenameSessionInputSchema)),
+  archive: base.input(toStandardSchema(ArchiveSessionInputSchema)),
   delete: base.input(toStandardSchema(RefInputSchema)),
   getMessages: base.input(toStandardSchema(RefInputSchema)).output(type<SessionMessages>()),
   // sessionId (a bookmarked URL) → full SessionRef via server-side reverse lookup.

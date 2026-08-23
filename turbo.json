@@ -1,10 +1,13 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
+  "globalDependencies": ["mise.toml", "mise.lock"],
+  "globalEnv": ["CI"],
   "tasks": {
     "dev": {
       "cache": false,
       "persistent": true,
-      "interruptible": true
+      "interruptible": true,
+      "passThroughEnv": ["*"]
     },
     "preview": {
       "cache": false,

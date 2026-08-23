@@ -1,4 +1,4 @@
-export { createServer } from "./server";
+export { createServer, ServerStartupError } from "./server";
 export type { CreateServerOptions, ManagedServer } from "./server";
 export { listenServer } from "./listen";
 export { formatReadyLine, parseReadyLine, READY_PREFIX } from "./handshake";

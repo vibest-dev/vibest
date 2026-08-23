@@ -1,17 +1,26 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { Context, Effect, Layer, Logger, Scope } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
 import { createServer, type ManagedServer } from "../../src/http/server";
+import type { UIApp } from "../../src/http/ui";
+import type { RpcRuntime } from "../../src/rpc";
+import { structured, type LogRecord } from "../log-record";
+import { discardContext } from "../platform";
 
 const TOKEN = "test-token-0000";
 
 let server: ManagedServer | undefined;
 
-async function start(options: Parameters<typeof createServer>[0]): Promise<string> {
-  server = await createServer(options);
+async function start(options: Parameters<typeof createServer>[0] = {}): Promise<string> {
+  server = await createServer({
+    ...options,
+    effectContext: options.effectContext ?? (await discardContext()),
+  });
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
@@ -139,6 +148,28 @@ describe("createServer WebSocket ticket", () => {
     expect(await connect(base, "")).toBe(401);
   });
 
+  it("runs WebSocket callback logs on the supplied Effect context", async () => {
+    const records: Array<LogRecord> = [];
+    const effectContext = await Effect.runPromise(
+      Layer.build(
+        Logger.layer([
+          Logger.map(structured, (record) => {
+            records.push(record);
+          }),
+        ]),
+      ).pipe(Effect.scoped),
+    );
+    const base = await start({ authToken: TOKEN, effectContext });
+
+    expect(await connect(base, "")).toBe(401);
+    await expect.poll(() => records.length).toBeGreaterThan(0);
+
+    const record = records.find(
+      (candidate) => candidate.annotations.event === "ws.upgrade_rejected",
+    );
+    expect(record?.annotations.reason).toBe("invalid_ticket");
+  });
+
   it("only upgrades the WebSocket RPC path without consuming the ticket", async () => {
     const base = await start({ authToken: TOKEN });
     const ticketResponse = await fetch(`${base}/api/ws-ticket`, {
@@ -169,5 +200,105 @@ describe("createServer WebSocket ticket", () => {
   it("rejects a browser Origin outside the allowlist, even in browser mode", async () => {
     const base = await start({});
     expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
+  });
+
+  it("accepts a proxy-forwarded upgrade whose Host and Origin name an allowed host", async () => {
+    // The tailscale-serve shape: the proxy preserves its public Host, and the
+    // page it served connects back with the matching browser Origin. Allowing
+    // the Host but rejecting the Origin would render the app without a
+    // working WebSocket.
+    const base = await start({ allowedHosts: ["proxy.ts.net"] });
+    expect(
+      await connect(base, "", "/ws/rpc", {
+        headers: { host: "proxy.ts.net" },
+        origin: "https://proxy.ts.net",
+      }),
+    ).toBe(200);
+  });
+
+  it("keeps rejecting unrelated Origins when allowed hosts are configured", async () => {
+    const base = await start({ allowedHosts: ["proxy.ts.net"] });
+    expect(await connect(base, "", "/ws/rpc", { origin: "https://evil.example" })).toBe(403);
+  });
+});
+
+describe("createServer staged startup", () => {
+  const ui: UIApp = Effect.succeed(HttpServerResponse.text("ok"));
+
+  /** Records its disposal so a test can assert it ran, and ran exactly once. */
+  function fakeRuntime(released: string[]): RpcRuntime {
+    return {
+      context: { "effect/context": Context.empty() } as unknown as RpcRuntime["context"],
+      run: () => Promise.reject(new Error("fake runtime cannot run effects")),
+      dispose: async () => {
+        released.push("rpcRuntime");
+      },
+    };
+  }
+
+  it("disposes the RPC runtime exactly once when UI creation fails", async () => {
+    const released: string[] = [];
+    await expect(
+      createServer(
+        {},
+        {
+          createRpcRuntime: async () => fakeRuntime(released),
+          createUI: () => Promise.reject(new Error("ui failed")),
+          createRequestHandler: () => Promise.reject(new Error("unreachable")),
+        },
+      ),
+    ).rejects.toThrow("ui failed");
+    expect(released).toEqual(["rpcRuntime"]);
+  });
+
+  it("closes the request scope and the runtime when the request handler fails", async () => {
+    const released: string[] = [];
+    await expect(
+      createServer(
+        {},
+        {
+          createRpcRuntime: async () => fakeRuntime(released),
+          createUI: async () => ui,
+          createRequestHandler: async (_runtime, _app, requestScope) => {
+            await Effect.runPromise(
+              Scope.addFinalizer(
+                requestScope,
+                Effect.sync(() => released.push("requestScope")),
+              ),
+            );
+            throw new Error("handler failed");
+          },
+        },
+      ),
+    ).rejects.toThrow("handler failed");
+    expect(released).toEqual(["requestScope", "rpcRuntime"]);
+  });
+
+  it("releases the stages in reverse acquisition order, exactly once, on dispose", async () => {
+    const released: string[] = [];
+    const managed = await createServer(
+      {},
+      {
+        createRpcRuntime: async () => fakeRuntime(released),
+        createUI: async () => ui,
+        createRequestHandler: async (_runtime, _app, requestScope) => {
+          await Effect.runPromise(
+            Scope.addFinalizer(
+              requestScope,
+              Effect.sync(() => released.push("requestScope")),
+            ),
+          );
+          return () => {};
+        },
+      },
+    );
+    await new Promise<void>((resolve) => managed.listen(0, "127.0.0.1", resolve));
+    managed.once("close", () => released.push("http"));
+
+    await managed.dispose();
+    await managed.dispose();
+
+    expect(managed.listening).toBe(false);
+    expect(released).toEqual(["http", "requestScope", "rpcRuntime"]);
   });
 });

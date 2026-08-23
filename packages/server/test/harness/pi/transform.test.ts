@@ -21,6 +21,12 @@ const assistant = (over: Record<string, unknown> = {}) => ({
 const update = (assistantMessageEvent: Record<string, unknown>) =>
   e({ type: "message_update", message: assistant(), assistantMessageEvent });
 
+// RPC mode never emits the assistantMessageEvent `start` delta; the
+// per-assistant-message marker on the real wire is `message_start`.
+const assistantStart = () => e({ type: "message_start", message: assistant() });
+const userStart = (text = "hi") =>
+  e({ type: "message_start", message: { role: "user", content: text, timestamp: 0 } });
+
 describe("createPiTransform", () => {
   it("opens the turn once per run, even across retries", () => {
     const t = createPiTransform("s1");
@@ -36,7 +42,7 @@ describe("createPiTransform", () => {
     const t = createPiTransform("s1");
     const run = (event: AgentSessionEvent) => [...t(event)];
     run(e({ type: "agent_start" }));
-    run(update({ type: "start" }));
+    run(assistantStart());
     const chunks = [
       ...t(update({ type: "thinking_start", contentIndex: 0 })),
       ...t(update({ type: "thinking_delta", contentIndex: 0, delta: "hm" })),
@@ -56,16 +62,51 @@ describe("createPiTransform", () => {
     expect(chunks[3]).toMatchObject({ id: "m1.1" });
 
     // The second assistant message reuses contentIndex 0 under a fresh ordinal.
-    run(update({ type: "start" }));
+    run(assistantStart());
     const second = run(update({ type: "text_start", contentIndex: 0 }));
     expect(second[0]).toMatchObject({ id: "m2.0" });
+  });
+
+  it("splits the UIMessage when a steered user message lands mid-run", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    const opened = run(e({ type: "agent_start" }));
+    const firstMessageId = (opened[0] as { messageId: string }).messageId;
+    // The prompting input's echo arrives before any assistant output: no split.
+    expect(run(userStart("original prompt"))).toEqual([]);
+    run(assistantStart());
+    run(update({ type: "text_start", contentIndex: 0 }));
+    run(update({ type: "text_delta", contentIndex: 0, delta: "before" }));
+    run(update({ type: "text_end", contentIndex: 0, content: "before" }));
+
+    // Steer delivery: deferred until the next assistant message opens, so an
+    // interrupt right after delivery leaves no empty trailing message.
+    expect(run(userStart("steer"))).toEqual([]);
+    const split = run(assistantStart());
+    expect(types(split)).toEqual(["finish", "start"]);
+    expect((split[1] as { messageId: string }).messageId).not.toBe(firstMessageId);
+
+    // Blocks of the continuation land under a fresh ordinal, in the new message.
+    const cont = run(update({ type: "text_start", contentIndex: 0 }));
+    expect(cont[0]).toMatchObject({ id: "m2.0" });
+    expect(types(run(e({ type: "agent_settled" })))).toEqual(["finish"]);
+  });
+
+  it("settles cleanly when a steer lands but no assistant message follows", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    run(assistantStart());
+    run(userStart("steer"));
+    // Interrupted before the next LLM call: exactly one terminal finish.
+    expect(types(run(e({ type: "agent_settled" })))).toEqual(["finish"]);
   });
 
   it("recovers whole text when a block ends without streaming deltas", () => {
     const t = createPiTransform("s1");
     const run = (event: AgentSessionEvent) => [...t(event)];
     run(e({ type: "agent_start" }));
-    run(update({ type: "start" }));
+    run(assistantStart());
     run(update({ type: "text_start", contentIndex: 0 }));
     const end = [...t(update({ type: "text_end", contentIndex: 0, content: "whole" }))];
     expect(types(end)).toEqual(["text-delta", "text-end"]);

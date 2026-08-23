@@ -3,7 +3,7 @@ import type * as Cause from "effect/Cause";
 
 import type {
   HarnessAgentAdapter,
-  HarnessAgentSession,
+  HarnessAgentRuntime,
   SessionInfoResult,
   UserInput,
 } from "../adapter";
@@ -38,10 +38,10 @@ const toPromptText = (input: UserInput): string =>
     )
     .join("\n");
 
-const makeSession = (
+const makeRuntime = (
   agent: PiAgent,
   sessionId: string,
-): Effect.Effect<HarnessAgentSession, never, Scope.Scope> =>
+): Effect.Effect<HarnessAgentRuntime, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
     const events = yield* Queue.bounded<SessionEnvelopeDraft, Cause.Done | AgentOperationError>(
@@ -116,7 +116,7 @@ const makeSession = (
       ),
     );
 
-    const interrupt: HarnessAgentSession["interrupt"] = Effect.gen(function* () {
+    const interrupt: HarnessAgentRuntime["interrupt"] = Effect.gen(function* () {
       if (yield* Ref.get(closed)) return yield* new SessionClosed({ sessionId });
       yield* agent.session
         .interrupt(sessionId)
@@ -226,7 +226,7 @@ const makeSession = (
         return entriesToUIMessages(entries, leafId, sessionId);
       }),
       close,
-    } satisfies HarnessAgentSession;
+    } satisfies HarnessAgentRuntime;
   });
 
 export const makePiAdapter = (
@@ -247,7 +247,7 @@ export const makePiAdapter = (
   open: (input) =>
     agent.session.create({ cwd: input.cwd }).pipe(
       Effect.mapError((cause) => new AgentOpenError({ harnessAgentId: "pi", cause })),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
   resume: (input) =>
     agent.session.resume({ sessionId: input.sessionId, cwd: input.cwd }).pipe(
@@ -256,7 +256,7 @@ export const makePiAdapter = (
           ? cause
           : new AgentOpenError({ harnessAgentId: "pi", cause }),
       ),
-      Effect.flatMap(({ sessionId }) => makeSession(agent, sessionId)),
+      Effect.flatMap(({ sessionId }) => makeRuntime(agent, sessionId)),
     ),
   getSessionInfo: () => Effect.succeed<SessionInfoResult>({ _tag: "unsupported" }),
 });

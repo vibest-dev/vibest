@@ -40,6 +40,11 @@ yarn-error.log*
 .DS_Store
 *.pem
 
+# Better Harness durable reports (generated locally)
+.cursor/better-harness/
+.claude/better-harness/
+.codex/better-harness/
+
 # Dev
 .nitro/
 **/.nitro/

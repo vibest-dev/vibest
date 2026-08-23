@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-export class ClaudeSdkError extends Schema.TaggedErrorClass<ClaudeSdkError>()("ClaudeSdkError", {
+export class ClaudeSdkError extends Schema.TaggedError<ClaudeSdkError>()("ClaudeSdkError", {
   operation: Schema.String,
   cause: Schema.Defect(),
 }) {

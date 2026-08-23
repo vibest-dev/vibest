@@ -1,6 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEditorState } from "@tiptap/react";
 import type { ListSessionsOutput, SessionSummary } from "@vibest/contract";
 import {
   HARNESS_AGENT_IDS,
@@ -15,29 +14,44 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
+import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@vibest/ui/components/empty";
+import { FolderPlusIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { HarnessSelect } from "@/components/chat/harness-select";
-import { ChatInput } from "@/components/chat/input/chat-input";
-import { ChatInputProvider } from "@/components/chat/input/chat-input-provider";
-import { createChatBaseExtensions } from "@/components/chat/input/extensions/chat-base-extensions";
-import { createSubmitKeymap } from "@/components/chat/input/extensions/keymaps";
-import { hasChatContent } from "@/components/chat/input/serialize";
-import { useChatInputController } from "@/components/chat/input/use-chat-input-controller";
-import { ModelSelect } from "@/components/chat/model-select";
-import { PermissionModeSelect } from "@/components/chat/permission-mode-select";
 import Loader from "@/components/loader";
-import { ImportProjectDialog } from "@/components/projects/import-project-dialog";
-import { ProjectSelect } from "@/components/projects/project-select";
-import { useChatManager } from "@/core/chat/chat-context";
-import { orderPermissionModes } from "@/core/harness/permission-modes";
+import { HarnessSelect } from "@/features/chat/components/harness-select";
+import { ChatInput } from "@/features/chat/components/input/chat-input";
+import { ChatInputProvider } from "@/features/chat/components/input/chat-input-provider";
+import { createChatBaseExtensions } from "@/features/chat/components/input/extensions/chat-base-extensions";
+import { createSubmitKeymap } from "@/features/chat/components/input/extensions/keymaps";
+import { useChatInputController } from "@/features/chat/components/input/use-chat-input-controller";
+import { useChatInputHasContent } from "@/features/chat/components/input/use-chat-input-has-content";
+import { ModelSelect } from "@/features/chat/components/model-select";
+import { PermissionModeSelect } from "@/features/chat/components/permission-mode-select";
+import { orderPermissionModes } from "@/features/chat/harness/permission-modes";
 import {
   pickDefaultHarnessAgentId,
   resolveModel,
   resolvePermissionMode,
-} from "@/core/harness/session-config";
-import { useHarnessAgent, useHarnessAgents, useHarnessProbe } from "@/core/harness/use-harness";
+} from "@/features/chat/harness/session-config";
+import {
+  useHarnessAgent,
+  useHarnessAgents,
+  useHarnessProbe,
+} from "@/features/chat/harness/use-harness";
+import { useChatManager } from "@/features/chat/runtime/chat-context";
+import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
+import { ProjectSelect } from "@/features/projects/project-select";
+import { useProject, useProjects } from "@/features/projects/use-projects";
 
 // Until the user picks one. Every other config default is declared by the
 // harness itself; which harness to start from is the one thing no harness can
@@ -104,14 +118,10 @@ function DraftRoute() {
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
 
-  const projects = useQuery({
-    ...orpcQueryUtils.project.list.queryOptions(),
-    staleTime: Infinity,
-  });
-
+  const projects = useProjects();
   // Derived, never synced: a projectId the URL still carries but the server no
   // longer knows reads as "nothing selected", not as a stale selection.
-  const selected = projects.data?.find((project) => project.id === search.projectId) ?? null;
+  const selected = useProject(search.projectId) ?? null;
 
   const harnessAgents = useHarnessAgents();
   const harnessAgentId =
@@ -132,7 +142,7 @@ function DraftRoute() {
   const permissionMode = resolvePermissionMode(harnessAgent, search.permission);
 
   // Create the session and start its first turn against the manager's persisted
-  // store, then navigate — the session route re-attaches the same Chat with the
+  // store, then navigate — the session route picks up the same Chat with the
   // turn already streaming.
   const startSession = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
@@ -145,7 +155,7 @@ function DraftRoute() {
         ...(model !== undefined ? { providerId: model.providerId, modelId: model.modelId } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
-      void manager.attach(ref).prompt(text);
+      void manager.chatFor(ref).prompt(text);
       return ref;
     },
     onSuccess: (ref, { text }) => {
@@ -153,13 +163,13 @@ function DraftRoute() {
       // `.key({ input })` — the latter omits `type` and setQueryData would write
       // a phantom entry the sidebar never reads.
       const listKey = orpcQueryUtils.session.list.queryOptions({
-        input: { projectId: ref.projectId },
+        input: { projectId: ref.projectId, archived: false },
       }).queryKey;
 
       // Optimistic title: seed the row with the prompt text so it appears named
       // the instant we navigate. The server owns the durable title — it stamps a
       // whitespace-collapsed, length-clamped version from this same first prompt
-      // and emits `session.updated`, which SessionEventsSync patches over this
+      // and emits `session.updated`, which useSessionListSync patches over this
       // row. So this is the real value, reconciled in place, never a placeholder
       // that flashes "New chat".
       queryClient.setQueryData<ListSessionsOutput>(listKey, (prev) => {
@@ -169,6 +179,7 @@ function DraftRoute() {
           harnessAgentId: ref.harnessAgentId,
           sessionId: ref.sessionId,
           title: text,
+          archived: false,
           // Placeholder ordering key (≈ now); the real createdAt loads on reload.
           createdAt: new Date().toISOString(),
           historyAvailable: true,
@@ -176,7 +187,12 @@ function DraftRoute() {
         return [...(prev ?? []), optimistic];
       });
 
-      navigate({ to: "/session/$sessionId", params: { sessionId: ref.sessionId } });
+      navigate({
+        to: "/session/$sessionId",
+        params: { sessionId: ref.sessionId },
+        // We just created it, so the whole ref is in hand — pass it along.
+        search: { projectId: ref.projectId, harness: ref.harnessAgentId },
+      });
     },
     onError: (error) => {
       toast.error(`Failed to start session: ${error.message}`);
@@ -209,10 +225,7 @@ function DraftRoute() {
     },
   });
 
-  const hasContent = useEditorState({
-    editor: controller?.editor ?? null,
-    selector: ({ editor }) => (editor ? hasChatContent(editor) : false),
-  });
+  const hasContent = useChatInputHasContent(controller);
 
   // Every branch below renders instead of the composer, because a composer that
   // can never submit is worse than saying why. `data === undefined` must be
@@ -239,11 +252,28 @@ function DraftRoute() {
   // rather than showing a composer that can't submit.
   if (projects.data.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
-        <p className="text-muted-foreground text-sm">Import a project to start a session.</p>
-        <Button onClick={() => setImportOpen(true)} size="sm">
-          Import project
-        </Button>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FolderPlusIcon aria-hidden="true" />
+          </EmptyMedia>
+          {/*
+            The nested `h1` is deliberate: `EmptyTitle` is vendored from the coss
+            registry (docs/adr/0001), renders a plain `div`, and takes no `render`
+            prop — so this is the only way to keep both its `data-slot` styling
+            hook and a real page heading. Don't flatten it.
+          */}
+          <EmptyTitle>
+            <h1>Import your first project</h1>
+          </EmptyTitle>
+          <EmptyDescription>
+            Choose a local folder for your coding agent to work in. You can start a chat right after
+            importing.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button onClick={() => setImportOpen(true)}>Import project</Button>
+        </EmptyContent>
         {importOpen && (
           <ImportProjectDialog
             // The first project is the only one there is — land on a composer
@@ -254,32 +284,38 @@ function DraftRoute() {
             }
           />
         )}
-      </div>
+      </Empty>
     );
   }
 
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <div className="flex w-full max-w-2xl flex-col gap-2">
-        <ProjectSelect
-          // Harness config survives a project switch — it says how the session
-          // runs, not what it is about. A pick the new project's catalog doesn't
-          // offer is dropped by the resolvers, not carried into the session.
-          onChange={(next) =>
-            navigate({
-              to: "/draft",
-              search: (prev) => ({ ...prev, projectId: next }),
-              replace: true,
-            })
+      <CardFrame className="w-full max-w-2xl">
+        <CardFrameHeader className="py-2">
+          <ProjectSelect
+            // Harness config survives a project switch — it says how the session
+            // runs, not what it is about. A pick the new project's catalog doesn't
+            // offer is dropped by the resolvers, not carried into the session.
+            onChange={(next) =>
+              navigate({
+                to: "/draft",
+                search: (prev) => ({ ...prev, projectId: next }),
+                replace: true,
+              })
+            }
+            projects={projects.data}
+            value={selected?.id ?? null}
+          />
+        </CardFrameHeader>
+        <Card
+          render={
+            <PromptInput
+              onSubmit={(e) => {
+                e.preventDefault();
+                void controller?.submit();
+              }}
+            />
           }
-          projects={projects.data}
-          value={selected?.id ?? null}
-        />
-        <PromptInput
-          onSubmit={(e) => {
-            e.preventDefault();
-            void controller?.submit();
-          }}
         >
           <ChatInputProvider controller={controller}>
             <ChatInput />
@@ -320,8 +356,8 @@ function DraftRoute() {
               <PromptInputSubmit disabled={!hasContent || !selected || startSession.isPending} />
             </PromptInputToolbar>
           </ChatInputProvider>
-        </PromptInput>
-      </div>
+        </Card>
+      </CardFrame>
     </div>
   );
 }

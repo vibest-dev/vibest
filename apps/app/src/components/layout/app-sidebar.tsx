@@ -1,3 +1,4 @@
+import type { SessionRef } from "@vibest/contract";
 import {
   Sidebar,
   SidebarContent,
@@ -7,23 +8,44 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
 } from "@vibest/ui/components/sidebar";
-import { Blocks, FolderPlus, Search, SquarePen } from "lucide-react";
+import { Blocks, Search, SquarePen } from "lucide-react";
 import { useState } from "react";
 
-import { ImportProjectDialog } from "@/components/projects/import-project-dialog";
-import { ProjectList } from "@/components/projects/project-list";
+import { BrandMark } from "@/components/layout/brand-mark";
+import { ImportProjectDialog } from "@/features/projects/import-project-dialog";
+import { ProjectList } from "@/features/projects/project-list";
+import { usePlatform } from "@/platform-context";
 
-export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
+export function AppSidebar({
+  isSessionActive,
+  onNewChat,
+}: {
+  readonly isSessionActive: (ref: SessionRef) => boolean;
+  readonly onNewChat: () => void;
+}) {
   const [importOpen, setImportOpen] = useState(false);
+  const { os } = usePlatform();
+  const { isMobile, state } = useSidebar();
 
   return (
-    <Sidebar variant="inset" collapsible="offcanvas" className="md:p-1.5">
-      {/* Reserves the traffic-light / pinned-toggle row (see __root.tsx). */}
-      <SidebarHeader className="h-10 [-webkit-app-region:drag]" />
+    <Sidebar
+      variant="inset"
+      // The panel group owns desktop width; mobile remains an overlay sheet.
+      collapsible={isMobile ? "offcanvas" : "none"}
+      className="w-full [&_[data-slot=scroll-area-scrollbar][data-orientation=vertical]]:mx-0"
+    >
+      <SidebarHeader className="h-10 flex-row items-center px-4 [-webkit-app-region:drag]">
+        {os !== "macos" && <BrandMark />}
+        {!isMobile && state === "expanded" && (
+          <SidebarTrigger className="ms-auto -me-2 [-webkit-app-region:no-drag]" />
+        )}
+      </SidebarHeader>
 
       <SidebarContent className="[-webkit-app-region:no-drag]">
-        {/* New chat and Import project are wired; the rest are placeholders. */}
+        {/* New chat is wired; the rest are placeholders. */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -31,12 +53,6 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
                 <SidebarMenuButton onClick={onNewChat}>
                   <SquarePen />
                   <span>New chat</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => setImportOpen(true)}>
-                  <FolderPlus />
-                  <span>Import project</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -55,7 +71,7 @@ export function AppSidebar({ onNewChat }: { onNewChat: () => void }) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <ProjectList />
+        <ProjectList isSessionActive={isSessionActive} onImport={() => setImportOpen(true)} />
       </SidebarContent>
 
       {importOpen && <ImportProjectDialog onClose={() => setImportOpen(false)} />}

@@ -36,8 +36,17 @@ export const makeHarnessList = (registry: HarnessAgentRegistryShape) => ({
         descriptors,
         (descriptor) =>
           Effect.gen(function* () {
-            // `descriptor.id` came from `registry.list`, so the lookup can't miss.
-            const adapter = yield* registry.get(descriptor.id).pipe(Effect.orDie);
+            // `descriptor.id` came from `registry.list`, so the lookup can't
+            // miss — a miss is a registry invariant violation, not a failure.
+            const adapter = yield* registry.get(descriptor.id).pipe(
+              Effect.catchTag("HarnessAgentNotFound", (cause) =>
+                Effect.die(
+                  new Error(`invariant: registry listed '${descriptor.id}' but get missed it`, {
+                    cause,
+                  }),
+                ),
+              ),
+            );
             const availability = yield* adapter.checkAvailability;
             return {
               id: descriptor.id,

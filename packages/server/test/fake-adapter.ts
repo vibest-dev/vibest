@@ -1,7 +1,7 @@
 import type { HarnessAgentId, PermissionMode } from "@vibest/contract";
 import { Effect, Stream } from "effect";
 
-import type { HarnessAgentAdapter, HarnessAgentSession } from "../src/harness";
+import type { HarnessAgentAdapter, HarnessAgentRuntime } from "../src/harness";
 
 /**
  * The one in-memory `HarnessAgentAdapter` fake for RPC-level tests, so an
@@ -34,7 +34,7 @@ export const makeFakeAdapter = (options: {
 export const makeFakeSession = (options: {
   readonly sessionId: string;
   readonly harnessAgentId: HarnessAgentId;
-}): HarnessAgentSession => ({
+}): HarnessAgentRuntime => ({
   sessionId: options.sessionId,
   harnessAgentId: options.harnessAgentId,
   events: Stream.never,

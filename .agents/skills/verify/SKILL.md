@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Build/launch/drive recipe for verifying vibest web changes at runtime (two processes: vite dev + the server)
+description: "Build/launch/drive recipe for verifying vibest web changes at runtime (two processes: vite dev + the server)"
 ---
 
 # Verifying vibest at runtime

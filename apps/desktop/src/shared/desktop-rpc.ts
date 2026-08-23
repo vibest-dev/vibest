@@ -17,9 +17,14 @@ export const ServerConnectionSchema = z.object({
 });
 export type ServerConnection = z.infer<typeof ServerConnectionSchema>;
 
+/** The three desktop targets, normalized off `process.platform`. */
+export const DesktopOsSchema = z.enum(["macos", "windows", "linux"]);
+export type DesktopOs = z.infer<typeof DesktopOsSchema>;
+
 export const DesktopBootstrapSchema = z.object({
   status: ServerStatusSchema,
   statusRevision: z.number().int().nonnegative(),
+  os: DesktopOsSchema,
 });
 export type DesktopBootstrap = z.infer<typeof DesktopBootstrapSchema>;
 

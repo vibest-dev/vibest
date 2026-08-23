@@ -1,23 +1,43 @@
 import { RPCHandler as WsRPCHandler } from "@orpc/server/websocket";
-import type { Effect, Layer } from "effect";
-import { ManagedRuntime } from "effect";
+import { Cause, Context, Effect, Layer, ManagedRuntime } from "effect";
 import type { WebSocket } from "ws";
 
 import type { RpcContext } from "./context";
 import { router } from "./router";
 import { AgentRuntimeLayer } from "./runtime";
 
-// Without this, a procedure that throws becomes a bare 500 with no trace of the
-// cause anywhere — the client sees "Internal Server Error" and the server says
-// nothing at all. Generic in the result so it types against every handler's
-// own client-interceptor signature.
-async function logErrors<T>({ next }: { next: () => Promise<T> }): Promise<T> {
-  try {
-    return await next();
-  } catch (error) {
-    console.error("[rpc]", error);
-    throw error;
-  }
+/**
+ * Wrap every `.effect()` procedure. The oRPC effect bridge applies
+ * `effect/context` before this wrapper, so the wrapper must re-provide the
+ * process context around its own failure tap and span.
+ *
+ * One function here instruments all ~25 procedures at once: no router file
+ * knows about logging, and none can forget to.
+ *
+ * Interrupt-only causes stay silent: oRPC turns declared `ORPCError`s into
+ * successes before this runs, so what reaches the tap is either a genuine
+ * defect or a client that disconnected mid-call. The latter is routine and
+ * must not be reported as a server error.
+ *
+ * The native span names the procedure for any configured tracer. The failure
+ * tap writes the actionable local record, including the procedure and cause.
+ */
+export function makeRpcWrap(effectContext: Context.Context<never> = Context.empty()) {
+  return <A, E>(effect: Effect.Effect<A, E>, options: { readonly path: ReadonlyArray<string> }) => {
+    const procedure = options.path.join(".");
+    return effect.pipe(
+      Effect.tapCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError("rpc procedure failed", cause).pipe(
+              Effect.annotateLogs({ event: "rpc.failed", procedure }),
+            ),
+      ),
+      // Outside the tap so a failure is logged inside the span it failed in.
+      Effect.withSpan(`rpc.${procedure}`),
+      Effect.provide(effectContext),
+    );
+  };
 }
 
 export type RpcRuntime = {
@@ -35,10 +55,20 @@ export type RpcRuntime = {
 /** Everything `AgentRuntimeLayer` provides, as a requirement. */
 type AgentRuntime = Layer.Success<typeof AgentRuntimeLayer>;
 
-export async function createRpcRuntime(): Promise<RpcRuntime> {
-  const runtime = ManagedRuntime.make(AgentRuntimeLayer);
+/** The process context is provided while constructing and running the graph. */
+export async function createRpcRuntime(
+  effectContext: Context.Context<never> = Context.empty(),
+): Promise<RpcRuntime> {
+  // `provideMerge`, not `mergeAll`: the process context carries the
+  // observability loggers, and fibers forked while `AgentRuntimeLayer` is
+  // building must see them. `mergeAll` leaves those forks on Effect's default
+  // logger (OpenCode #34730).
+  const runtime = ManagedRuntime.make(
+    AgentRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(effectContext))),
+  );
   const context: RpcContext = {
     "effect/context": await runtime.runPromise(runtime.contextEffect),
+    "effect/wrap": makeRpcWrap(effectContext),
   };
   let disposing: Promise<void> | undefined;
   return {
@@ -49,7 +79,10 @@ export async function createRpcRuntime(): Promise<RpcRuntime> {
 }
 
 export function createWsRPCHandler(rpcContext: RpcContext) {
-  const wsHandler = new WsRPCHandler<RpcContext>(router, { clientInterceptors: [logErrors] });
+  // Errors are reported by `effect/wrap` on the context, which — unlike a
+  // client interceptor — runs inside Effect and so can tell an interrupted
+  // call from a failed one.
+  const wsHandler = new WsRPCHandler<RpcContext>(router);
 
   return function upgrade(ws: WebSocket) {
     wsHandler.upgrade(ws, {

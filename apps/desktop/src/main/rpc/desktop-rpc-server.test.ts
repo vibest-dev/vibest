@@ -111,6 +111,8 @@ describe("Desktop MessagePort RPC", () => {
       await expect(h.client.bootstrap()).resolves.toEqual({
         status: "ready",
         statusRevision: 0,
+        // Literal would pin this to the developer's OS; see desktop-application.test.ts.
+        os: expect.stringMatching(/^(macos|windows|linux)$/),
       });
       await expect(h.client.server.connection()).resolves.toEqual({
         httpBaseUrl: "http://127.0.0.1:43123",

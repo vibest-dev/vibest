@@ -38,8 +38,13 @@ export const ProjectServiceLayer: Layer.Layer<
     const repo = yield* ProjectRepository;
     const crypto = yield* Crypto.Crypto;
     // A platform RNG that cannot produce a uuid is a defect, not a domain
-    // failure — keep it out of the service's error channel.
-    const newId = crypto.randomUUIDv4.pipe(Effect.orDie);
+    // failure — keep it out of the service's error channel. Tag-specific so a
+    // future recoverable error on this channel stays typed instead of dying.
+    const newId = crypto.randomUUIDv4.pipe(
+      Effect.catchTag("PlatformError", (cause) =>
+        Effect.die(new Error("invariant: platform RNG failed minting a project id", { cause })),
+      ),
+    );
 
     return {
       list: () => repo.list(),
