@@ -4,7 +4,7 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createRouterClient } from "@orpc/server";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { layerPaths } from "../src/config/paths";
@@ -18,13 +18,16 @@ import {
   HarnessProbeLayer,
   makeHarnessAgentRegistry,
 } from "../src/harness";
+import type { HarnessAgentAdapter, HarnessAgentRuntime } from "../src/harness/adapter";
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
+import { SessionClosed } from "../src/harness/errors";
 import * as Observability from "../src/observability";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
 import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../src/pty";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
+import { makeRpcTestHarness } from "./rpc-harness";
 
 const FAKE = `#!/usr/bin/env node
 const readline = require("node:readline");
@@ -262,6 +265,50 @@ describe("session router", () => {
       await client.session.close({ ref });
     } finally {
       await dispose();
+    }
+  });
+
+  // getStatus is total (an untouched session reads idle), and interrupt /
+  // setModel on a closed runtime succeed as no-ops. The remaining
+  // SESSION_NOT_ACTIVE path is a live-instance op whose runtime itself
+  // refuses the call — prompt, after create has already acquired one.
+  it("maps a closed runtime onto SESSION_NOT_ACTIVE", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-ws-"));
+    const closedRuntime = (sessionId: string): HarnessAgentRuntime => ({
+      sessionId,
+      harnessAgentId: "pi",
+      events: Stream.never,
+      prompt: () => Effect.fail(new SessionClosed({ sessionId })),
+      setModel: () => Effect.void,
+      setReasoningEffort: () => Effect.void,
+      setPermissionMode: () => Effect.void,
+      interrupt: Effect.void,
+      respondToAgentRequest: () => Effect.die("requests are not exercised by this test"),
+      getCapabilities: Effect.die("capabilities are not exercised by this test"),
+      close: Effect.void,
+    });
+    const adapter: HarnessAgentAdapter = {
+      id: "pi",
+      descriptor: { id: "pi", name: "pi" },
+      checkAvailability: Effect.succeed({ available: true }),
+      permissionModes: [],
+      open: () => Effect.succeed(closedRuntime("native-closed")),
+      resume: () => Effect.succeed(closedRuntime("native-closed")),
+      getSessionInfo: () => Effect.succeed({ _tag: "unsupported" }),
+    };
+    const harness = await makeRpcTestHarness(home, [adapter]);
+    try {
+      const project = await harness.client.project.create({ path: workspace });
+      const ref = await harness.client.session.create({
+        projectId: project.id,
+        harnessAgentId: "pi",
+      });
+      await expect(
+        harness.client.session.prompt({ ref, parts: [{ type: "text", text: "hi" }] }),
+      ).rejects.toMatchObject({ code: "SESSION_NOT_ACTIVE" });
+    } finally {
+      await harness.dispose();
     }
   });
 

@@ -35,7 +35,14 @@ export type ErrorTranslation<E extends TaggedError> = {
     | ((error: Extract<E, { readonly _tag: K }>) => Effect.Effect<never, unknown>);
 };
 
-/** The failures left after translation: handler outputs plus `"internal"` passthroughs. */
+/**
+ * The failures left after translation: handler outputs plus `"internal"`
+ * passthroughs. The `error: never` parameter is how the conditional
+ * recognises a function vs the `"internal"` literal — parameter types are
+ * contravariant, so every real handler (`(e: SomeTag) => …`) is assignable
+ * to `(error: never) => …` and we can infer its failure `F`. A looser
+ * parameter type would also match `"internal"`.
+ */
 type Translated<E extends TaggedError, H> = {
   readonly [K in keyof H]: H[K] extends (error: never) => Effect.Effect<never, infer F>
     ? F

@@ -12,6 +12,7 @@ import {
   agentAvailabilityTranslation,
   internalWithMessage,
   projectRefTranslation,
+  resumeInternalTranslation,
   sessionRefTranslation,
   translateErrors,
 } from "./error-translation";
@@ -149,10 +150,8 @@ export const sessionRouter = orpc.router({
         ...projectRefTranslation(errors),
         ...sessionRefTranslation(errors),
         ...agentAvailabilityTranslation(errors),
+        ...resumeInternalTranslation(errors),
         CapabilityUnsupported: (e) => Effect.fail(errors.UNSUPPORTED({ message: e.message })),
-        HarnessSessionNotFound: internalWithMessage(errors),
-        SessionNotResumable: internalWithMessage(errors),
-        AgentOpenError: internalWithMessage(errors),
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         AgentOperationError: internalWithMessage(errors),
