@@ -39,8 +39,7 @@ export const fsRouter = orpc.router({
     return yield* translateErrors(fs.readTree(input.cwd), {
       WorkspacePathEscape: (e) =>
         Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
-      WorkspaceNotDirectory: (e) =>
-        Effect.fail(errors.NOT_DIRECTORY({ data: { path: e.path } })),
+      WorkspaceNotDirectory: (e) => Effect.fail(errors.NOT_DIRECTORY({ data: { path: e.path } })),
       WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
     });
   }),

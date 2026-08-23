@@ -107,9 +107,9 @@ export const sessionRouter = orpc.router({
     const projects = yield* ProjectService;
     const sessions = yield* HarnessAgentSessionService;
     return yield* translateErrors(
-      projects.findById(input.projectId).pipe(
-        Effect.andThen(sessions.list(input.projectId, input.archived ?? false)),
-      ),
+      projects
+        .findById(input.projectId)
+        .pipe(Effect.andThen(sessions.list(input.projectId, input.archived ?? false))),
       {
         ...projectRefTranslation(errors),
         StoreReadError: "internal",
