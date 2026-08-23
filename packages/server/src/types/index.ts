@@ -5,13 +5,10 @@
  * (Context.Service + Layer) live in each module; DTOs like these stay plain.
  */
 
-/** Identifies an agent backend adapter. */
-export type HarnessAgentId = "claude-code" | "codex" | "pi";
+export type { HarnessAgentId } from "@vibest/contract";
+export { HARNESS_AGENT_IDS } from "@vibest/contract";
 
-export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = ["claude-code", "codex", "pi"];
-
-export const isHarnessAgentId = (value: string): value is HarnessAgentId =>
-  (HARNESS_AGENT_IDS as ReadonlyArray<string>).includes(value);
+import type { HarnessAgentId } from "@vibest/contract";
 
 /** A project is a workspace path the runtime can open sessions against. */
 export type { Project } from "@vibest/contract";

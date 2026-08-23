@@ -59,7 +59,7 @@ function FilePanelView({ instance }: { instance: FilePanelHandle }) {
     instance.navigation.getSnapshot,
     instance.navigation.getSnapshot,
   );
-  const workspace = useSessionWorkspace();
+  const workspace = useSessionWorkspace(instance.sessionRef.projectId);
   const panel = useContentPanel();
   const cwd = workspace.data?.path;
   const tree = useWorkspaceTree(cwd);
