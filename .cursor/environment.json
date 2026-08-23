@@ -1,0 +1,15 @@
+{
+  "name": "Cursor Auto",
+  "install": "bash -l -c 'pnpm install && pnpm build'",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "bash -l -c 'pnpm dev'",
+      "description": "Vite on 4190 proxying /api and /ws/rpc to the vibest server on 4180"
+    }
+  ],
+  "ports": [
+    { "name": "app", "port": 4190 },
+    { "name": "api", "port": 4180 }
+  ]
+}
