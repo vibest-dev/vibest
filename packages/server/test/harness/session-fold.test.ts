@@ -113,7 +113,7 @@ describe("session prompt projection", () => {
       event(5, { type: "session.prompt.accepted", messageId: "steer-a", turnId: "turn-1" }),
     );
 
-    expect(toSnapshot(ref, state).acceptedPrompts).toEqual([
+    expect(toSnapshot(ref, "stream-1", state).acceptedPrompts).toEqual([
       {
         messageId: "steer-a",
         parts: [{ type: "text", text: "A" }],
@@ -132,7 +132,7 @@ describe("session prompt projection", () => {
       state,
       event(6, { type: "session.turn.ended", turnId: "turn-1", outcome: "completed" }),
     );
-    expect(toSnapshot(ref, state)).toMatchObject({
+    expect(toSnapshot(ref, "stream-1", state)).toMatchObject({
       acceptedPrompt: null,
       acceptedPrompts: [],
     });

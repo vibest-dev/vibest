@@ -339,7 +339,7 @@ describe("Chat hydration", () => {
     releaseHistory();
     await settle();
 
-    expect(chat.store.getState().pendingRequests.map((request) => request.id)).toEqual([
+    expect(chat.store.getState().session.pendingRequests.map((request) => request.id)).toEqual([
       "new-buffered",
     ]);
   });

@@ -1,6 +1,7 @@
 import {
   type PromptPart,
   PromptPartSchema,
+  HarnessAgentIdSchema,
   type SessionRecoverySnapshot,
   type SessionRef,
   type SessionScopedEventBody,
@@ -23,7 +24,7 @@ const RecoveryRecordSchema = Schema.Struct({
   bootId: Schema.String,
   ref: Schema.Struct({
     projectId: Schema.String,
-    harnessAgentId: Schema.Literals(["claude-code", "codex", "pi"]),
+    harnessAgentId: HarnessAgentIdSchema,
     sessionId: Schema.String,
   }),
   prompts: Schema.Array(RecoveryPromptSchema),

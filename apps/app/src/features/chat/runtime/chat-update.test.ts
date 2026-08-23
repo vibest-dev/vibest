@@ -125,7 +125,7 @@ describe("updateChat", () => {
     const state: ChatState = {
       ...createChatState(),
       session: { ...createChatState().session, activeTurnId: "turn-1", status: "streaming" },
-      sync: { ...createChatState().sync, historyLoaded: true },
+      sync: { ...createChatState().sync, historyLoaded: true, streamId: "stream-1", cursor: 0 },
       outgoing: [
         {
           message: userMessage("follow", "afterwards"),
@@ -145,6 +145,7 @@ describe("updateChat", () => {
     const transition = updateChat(state, {
       type: "transportEvent",
       event: {
+        streamId: "stream-1",
         seq: 1,
         ref,
         type: "session.message.chunk",
@@ -168,6 +169,7 @@ describe("updateChat", () => {
     const state: ChatState = {
       ...createChatState(),
       session: { ...createChatState().session, activeTurnId: "turn-2", status: "streaming" },
+      sync: { ...createChatState().sync, streamId: "stream-1", cursor: 0 },
       outgoing: [
         {
           message: userMessage("steer", "now"),
@@ -181,6 +183,7 @@ describe("updateChat", () => {
     const stale = updateChat(state, {
       type: "transportEvent",
       event: {
+        streamId: "stream-1",
         seq: 1,
         ref,
         type: "session.message.chunk",

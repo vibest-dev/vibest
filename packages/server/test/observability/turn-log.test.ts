@@ -31,7 +31,7 @@ layer(Layer.empty)("turn logging", (it) => {
   // the whole block.
   const session = Effect.gen(function* () {
     const bus = Context.get(yield* Layer.build(EventBusLayer), EventBus);
-    return yield* makeHarnessAgentSession(ref, bus);
+    return yield* makeHarnessAgentSession(ref, "stream-1", bus);
   });
 
   it.effect("logs the two bookends and nothing in between", () =>

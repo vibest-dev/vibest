@@ -182,6 +182,7 @@ export const sessionRouter = orpc.router({
         Effect.fail(
           errors.CONFLICT({ message: `a turn is already running in session ${e.sessionId}` }),
         ),
+      RecoveryRequired: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
     });
   }),
   steer: orpc.steer.effect(function* ({ input, errors }) {
@@ -204,7 +205,6 @@ export const sessionRouter = orpc.router({
         SessionClosed: (e) =>
           Effect.fail(errors.SESSION_NOT_ACTIVE({ message: `session ${e.sessionId} is closed` })),
         TurnAlreadyRunning: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
-        RecoveryRequired: (e) => Effect.fail(errors.CONFLICT({ message: e.message })),
         AgentOperationError: (e) => Effect.fail(errors.INTERNAL({ message: e.message })),
       }),
     );
