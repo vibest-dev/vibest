@@ -41,6 +41,16 @@ export const SessionTurnStarted = defineEvent({
   type: "session.turn.started",
   schema: { ...sid, turnId: Schema.String },
 });
+export const SessionTurnRetry = defineEvent({
+  type: "session.turn.retry.started",
+  schema: {
+    ...sid,
+    turnId: Schema.String,
+    attempt: Schema.Number,
+    maxAttempts: Schema.Number,
+    retryAt: Schema.Number,
+  },
+});
 export const SessionTurnEnded = defineEvent({
   type: "session.turn.ended",
   schema: {
@@ -106,6 +116,7 @@ export const ServerDisconnected = defineEvent({ type: "server.disconnected", sch
 
 export const SessionEventDefs = [
   SessionTurnStarted,
+  SessionTurnRetry,
   SessionTurnEnded,
   SessionRequestAsked,
   SessionRequestReplied,

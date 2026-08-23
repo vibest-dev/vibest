@@ -170,17 +170,34 @@ describe("createPiTransform", () => {
     expect(failed[0]).toMatchObject({ type: "tool-output-error", errorText: "nope" });
   });
 
-  it("skips assistant summaries and surfaces run errors", () => {
+  it("suppresses retryable connection errors when the run later succeeds", () => {
     const t = createPiTransform("s1");
     const run = (event: AgentSessionEvent) => [...t(event)];
     run(e({ type: "agent_start" }));
-    expect([...t(e({ type: "message_end", message: assistant() }))]).toEqual([]);
 
-    const failed = assistant({ stopReason: "error", errorMessage: "boom" });
-    const ended = [...t(e({ type: "agent_end", messages: [failed], willRetry: false }))];
-    expect(ended[0]).toMatchObject({ type: "error", errorText: "boom" });
+    for (const errorMessage of [
+      "Connection error.",
+      "OpenAI API error (503): upstream connection refused",
+    ]) {
+      const failed = assistant({ stopReason: "error", errorMessage });
+      expect(run(e({ type: "agent_end", messages: [failed], willRetry: true }))).toEqual([]);
+    }
+
+    expect(run(e({ type: "agent_end", messages: [assistant()], willRetry: false }))).toEqual([]);
+    expect(types(run(e({ type: "agent_settled" })))).toEqual(["finish"]);
+  });
+
+  it("skips assistant summaries and surfaces terminal run errors", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    expect(run(e({ type: "message_end", message: assistant() }))).toEqual([]);
+
+    const failed = assistant({ stopReason: "error", errorMessage: "Connection error." });
+    const ended = run(e({ type: "agent_end", messages: [failed], willRetry: false }));
+    expect(ended[0]).toMatchObject({ type: "error", errorText: "Connection error." });
     // The terminal finish still comes from agent_settled.
-    expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
+    expect(types(run(e({ type: "agent_settled" })))).toEqual(["finish"]);
   });
 
   it("skips compaction and retry lifecycles", () => {

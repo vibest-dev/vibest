@@ -203,13 +203,12 @@ export function createCodexTransform(): (
         break;
 
       case "error":
+        if (notification.params.willRetry) break;
         yield { type: "error", errorText: notification.params.error.message };
-        // A retryable error keeps the turn open; a terminal one ends the message.
-        if (!notification.params.willRetry) yield { type: "finish" };
+        yield { type: "finish" };
         break;
 
-      // Everything else is either a session-layer event (see to-session-event)
-      // or out of scope for the chunk track. The satisfies keeps the skip-list
+      // Everything else is outside the UI chunk track. The satisfies keeps the skip-list
       // explicit: a new notification method fails typecheck until routed or listed.
       default:
         void (notification.method satisfies

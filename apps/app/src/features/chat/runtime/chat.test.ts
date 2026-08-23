@@ -100,6 +100,7 @@ const activeTurn = (init: ActiveTurnInit): NonNullable<SessionRuntimeSnapshot["a
   messageId: null,
   complete: false,
   truncated: false,
+  retry: null,
   ...init,
 });
 
@@ -426,6 +427,95 @@ describe("Chat prompting", () => {
   });
 });
 
+describe("Chat retry state", () => {
+  it("applies retry state to the active turn and clears it when output resumes", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({});
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, {
+      type: "session.turn.retry.started",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAt: 10_000,
+      phase: "running",
+    });
+    expect(chat.store.getState().retry).toEqual({
+      attempt: 1,
+      maxAttempts: 3,
+      retryAt: 10_000,
+    });
+
+    const [start] = textChunks("text-1", "recovered");
+    live(3, { type: "session.message.chunk", turnId: "turn-1", chunk: start! });
+    expect(chat.store.getState().retry).toBeNull();
+
+    live(4, {
+      type: "session.turn.retry.started",
+      attempt: 2,
+      maxAttempts: 3,
+      retryAt: 20_000,
+      phase: "running",
+    });
+    live(5, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "failed",
+      phase: "idle",
+    });
+    expect(chat.store.getState().retry).toBeNull();
+  });
+
+  it("does not let a stale turn end clear the active turn state", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({});
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, { type: "session.turn.started", turnId: "turn-2", phase: "running" });
+    live(3, {
+      type: "session.turn.retry.started",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAt: 10_000,
+      phase: "running",
+    });
+    live(4, { type: "session.request.asked", request: toolRequest, phase: "requires_action" });
+    live(5, {
+      type: "session.turn.ended",
+      turnId: "turn-1",
+      outcome: "completed",
+      phase: "idle",
+    });
+
+    expect(chat.store.getState().status).toBe("streaming");
+    expect(chat.store.getState().retry?.attempt).toBe(1);
+    expect(chat.store.getState().pendingRequests).toEqual([toolRequest]);
+  });
+
+  it("replaces retry state from every authoritative snapshot", async () => {
+    const { chat, attach } = makeChat();
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({
+        turnId: "turn-1",
+        chunks: [],
+        retry: {
+          attempt: 1,
+          maxAttempts: 3,
+          retryAt: 10_000,
+        },
+      }),
+      cursor: 2,
+    });
+    expect(chat.store.getState().retry?.attempt).toBe(1);
+
+    await attach({
+      status: { phase: "running" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [], retry: null }),
+      cursor: 3,
+    });
+    expect(chat.store.getState().retry).toBeNull();
+  });
+});
+
 describe("Chat stream errors", () => {
   it("surfaces the exact live provider error after the turn settles", async () => {
     const { chat, transport, attach, live } = makeChat();
@@ -581,6 +671,7 @@ describe("Chat agent requests", () => {
     const { chat, attach, live } = makeChat();
     await attach({
       status: { phase: "requires_action" },
+      activeTurn: activeTurn({ turnId: "turn-1", chunks: [] }),
       pendingRequests: [toolRequest],
       cursor: 1,
     });

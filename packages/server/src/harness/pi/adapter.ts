@@ -1,4 +1,4 @@
-import { Effect, Queue, Ref, Scope, Stream } from "effect";
+import { Clock, Effect, Queue, Ref, Scope, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 
 import type {
@@ -20,6 +20,8 @@ import { findExecutable } from "../executable";
 import { streamFromQueueOne } from "../queue-stream";
 import type { PiAgent } from "./agent";
 import { entriesToUIMessages } from "./history";
+import type { AgentSessionEvent } from "./protocol";
+import { createPiTransform } from "./transform";
 import type { PiUIMessageChunk } from "./ui-message";
 
 const EVENT_QUEUE_CAPACITY = 1024;
@@ -50,6 +52,9 @@ const makeRuntime = (
     const cursor = yield* Ref.make(0);
     const closed = yield* Ref.make(false);
     const activeTurn = yield* Ref.make<string | undefined>(undefined);
+    // Native Pi events stay ordered until this adapter splits lifecycle events
+    // from UI chunks onto the harness event stream.
+    const transform = createPiTransform(sessionId);
 
     const emit = (body: PiUIMessageChunk | SessionEvent) =>
       Queue.offer(events, { harnessAgentId: "pi", sessionId, body }).pipe(
@@ -68,8 +73,10 @@ const makeRuntime = (
           alreadyClosed
             ? Effect.void
             : Ref.getAndSet(activeTurn, undefined).pipe(
-                Effect.flatMap((turnId) =>
-                  emit({ type: "session.crashed", sessionId, reason: String(cause) }).pipe(
+                Effect.flatMap((turnId) => {
+                  const message = cause instanceof Error ? cause.message : String(cause);
+                  return (turnId ? emit({ type: "error", errorText: message }) : Effect.void).pipe(
+                    Effect.andThen(emit({ type: "session.crashed", sessionId, reason: message })),
                     Effect.andThen(
                       turnId
                         ? emit({
@@ -77,12 +84,12 @@ const makeRuntime = (
                             sessionId,
                             turnId,
                             outcome: "failed",
-                            error: { message: String(cause), category: "unknown" },
+                            error: { message, category: "unknown" },
                           })
                         : Effect.void,
                     ),
-                  ),
-                ),
+                  );
+                }),
                 Effect.catch(() => Effect.void),
                 Effect.andThen(
                   agent.session.abort(sessionId).pipe(Effect.catch(() => Effect.void)),
@@ -159,30 +166,36 @@ const makeRuntime = (
           }
 
           const finished = yield* Ref.make(false);
-          const pump = Stream.runForEach(prompt.output, (chunk) =>
-            emit(chunk).pipe(
-              Effect.andThen(
-                chunk.type === "finish"
-                  ? Ref.set(finished, true).pipe(
-                      Effect.andThen(
-                        emit({
-                          type: "session.turn.ended",
-                          sessionId,
-                          turnId: prompt.turnId,
-                          outcome: "completed",
-                        }).pipe(
-                          Effect.andThen(
-                            Ref.update(activeTurn, (current) =>
-                              current === prompt.turnId ? undefined : current,
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                  : Effect.void,
-              ),
-            ),
-          ).pipe(
+          const publishEvent = (
+            event: AgentSessionEvent,
+          ): Effect.Effect<void, AgentOperationError> =>
+            Effect.gen(function* () {
+              if (event.type === "auto_retry_start") {
+                yield* emit({
+                  type: "session.turn.retry.started",
+                  sessionId,
+                  turnId: prompt.turnId,
+                  attempt: event.attempt,
+                  maxAttempts: event.maxAttempts,
+                  retryAt: (yield* Clock.currentTimeMillis) + event.delayMs,
+                });
+              }
+
+              for (const chunk of transform(event)) yield* emit(chunk);
+              if (event.type !== "agent_settled") return;
+
+              yield* Ref.set(finished, true);
+              yield* emit({
+                type: "session.turn.ended",
+                sessionId,
+                turnId: prompt.turnId,
+                outcome: "completed",
+              });
+              yield* Ref.update(activeTurn, (current) =>
+                current === prompt.turnId ? undefined : current,
+              );
+            });
+          const pump = Stream.runForEach(prompt.events, publishEvent).pipe(
             Effect.flatMap(() => Ref.get(finished)),
             Effect.flatMap((didFinish) =>
               prompt.started && !didFinish

@@ -177,10 +177,11 @@ export function createPiTransform(
 
       case "agent_end": {
         // A model-level failure surfaces as the run's last assistant message
-        // with stopReason "error". willRetry keeps the turn open (the retry
-        // events follow); the terminal finish always comes from agent_settled.
+        // with stopReason "error". Retryable failures stay off Vibest's error
+        // track because Pi is still working toward a terminal result.
+        // The terminal finish always comes from agent_settled.
         const last = event.messages.at(-1) as AssistantMessage | undefined;
-        if (last?.role === "assistant" && last.stopReason === "error") {
+        if (!event.willRetry && last?.role === "assistant" && last.stopReason === "error") {
           yield { type: "error", errorText: last.errorMessage ?? "Pi run failed" };
         }
         break;

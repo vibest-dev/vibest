@@ -13,6 +13,7 @@ import type { ChatStoreState, HistoryStatus } from "@/features/chat/runtime/chat
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";
 import { MessageView } from "./transcript/message-view";
+import { RetryStatus } from "./transcript/retry-status";
 import { TranscriptRenderProvider } from "./transcript/transcript-render-provider";
 
 // What an empty transcript means, in one place: nothing until the settled
@@ -65,6 +66,7 @@ function ChatTranscriptView({
           />
         ))}
         {snapshot.status === "submitted" && <Loader />}
+        {snapshot.retry && <RetryStatus retry={snapshot.retry} />}
         {snapshot.error && <div className="text-destructive text-xs">{snapshot.error.message}</div>}
         {snapshot.pendingRequests.map((request) => (
           <AgentRequestView key={request.id} request={request} onRespond={onRespond} />

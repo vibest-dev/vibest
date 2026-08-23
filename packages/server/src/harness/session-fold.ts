@@ -8,6 +8,7 @@ import type {
   SessionScopedEvent,
   SessionScopedEventBody,
   SessionStatus,
+  TurnRetryState,
 } from "@vibest/contract";
 
 import { isSessionEvent, type SessionEnvelopeBody, type SessionEvent } from "./events/framework";
@@ -64,6 +65,7 @@ type ActiveTurn = {
   readonly bytes: number;
   readonly complete: boolean;
   readonly truncated: boolean;
+  readonly retry: TurnRetryState | null;
 };
 
 type ActivePrompt = {
@@ -104,6 +106,14 @@ export const toWireBody = (
   switch (event.type) {
     case "session.turn.started":
       return { type: "session.turn.started", turnId: event.turnId };
+    case "session.turn.retry.started":
+      if (event.turnId !== activeTurnId) return null;
+      return {
+        type: "session.turn.retry.started",
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        retryAt: event.retryAt,
+      };
     case "session.turn.ended":
       return {
         type: "session.turn.ended",
@@ -198,6 +208,20 @@ export const foldSessionEvent = (
           bytes: 0,
           complete: false,
           truncated: false,
+          retry: null,
+        },
+      };
+    case "session.turn.retry.started":
+      if (!current.activeTurn || current.activeTurn.complete) return base;
+      return {
+        ...base,
+        activeTurn: {
+          ...current.activeTurn,
+          retry: {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            retryAt: event.retryAt,
+          },
         },
       };
     case "session.message.chunk": {
@@ -208,16 +232,20 @@ export const foldSessionEvent = (
       ) {
         return base;
       }
-      return { ...base, activeTurn: appendChunk(current.activeTurn, event) };
+      return {
+        ...base,
+        activeTurn: appendChunk({ ...current.activeTurn, retry: null }, event),
+      };
     }
     case "session.turn.ended":
+      if (!current.activeTurn || current.activeTurn.turnId !== event.turnId) return base;
       // Keep the finished turn's chunks (marked complete) until the next turn
       // starts: a consumer recovering from a mid-turn disconnect replays the
       // tail from the snapshot. Real history reads supersede.
       return {
         ...base,
         phase: "idle",
-        activeTurn: current.activeTurn ? { ...current.activeTurn, complete: true } : null,
+        activeTurn: { ...current.activeTurn, complete: true, retry: null },
       };
     case "session.request.asked": {
       const pendingRequests = new Map(current.pendingRequests).set(event.request.id, event.request);
@@ -260,6 +288,7 @@ export const toSnapshot = (ref: SessionRef, state: SessionState): SessionRuntime
         chunks: [...state.activeTurn.chunks],
         complete: state.activeTurn.complete,
         truncated: state.activeTurn.truncated,
+        retry: state.activeTurn.complete ? null : state.activeTurn.retry,
       }
     : null,
   activePrompt: state.activePrompt,
