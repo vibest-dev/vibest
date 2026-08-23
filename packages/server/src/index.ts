@@ -5,3 +5,4 @@ export * from "./project";
 export * from "./events";
 export * from "./fs";
 export * from "./git";
+export * from "./pty";

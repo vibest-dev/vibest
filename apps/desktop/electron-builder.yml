@@ -17,6 +17,8 @@ files:
   - "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
 asarUnpack:
   - resources/**
+  - "**/*.node"
+  - "**/node-pty/**"
 icon: resources/icon.png
 mac:
   icon: resources/icon.icns

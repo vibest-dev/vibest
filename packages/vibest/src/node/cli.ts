@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
+import path from "node:path";
+
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
-  resolveDaemonDirectory,
   resolveDaemonLocation,
   resolveOrSpawnDaemon,
   statusDaemon,
@@ -20,8 +21,14 @@ import pkg from "../../package.json" with { type: "json" };
  * just `vibest serve` spawned detached — no second bundle, and `execArgv`
  * carries the dev loader (e.g. tsx) so it works from source too.
  */
-function serverArgv(): string[] {
-  return [process.execPath, ...process.execArgv, process.argv[1] ?? "", "serve"];
+function cliEntry(): string {
+  const entry = process.argv[1];
+  if (entry === undefined) throw new Error("vibest CLI entry path is unavailable");
+  return path.resolve(entry);
+}
+
+function serverArgv(entry: string): string[] {
+  return [process.execPath, ...process.execArgv, entry, "serve"];
 }
 
 type DaemonStartInput = {
@@ -41,9 +48,11 @@ const startDaemon = (input: DaemonStartInput) =>
     // resolved here: the daemon's policy is static, and any extra origins are
     // inherited from the ambient VIBEST_CORS_ORIGINS by the spawned daemon.
     const { port } = resolveServeConfig(input);
+    const entry = cliEntry();
     const handle = yield* resolveOrSpawnDaemon({
       ...resolveDaemonLocation(),
-      serverArgv: serverArgv(),
+      serverArgv: serverArgv(entry),
+      launchOwnerPath: entry,
       port,
     });
     console.log(
@@ -61,13 +70,15 @@ const startDaemon = (input: DaemonStartInput) =>
 
 const stopHandler = () =>
   Effect.gen(function* () {
-    const result = yield* stopDaemon(resolveDaemonDirectory());
+    const { daemonDir, legacyDaemonDir } = resolveDaemonLocation();
+    const result = yield* stopDaemon(daemonDir, legacyDaemonDir);
     console.log(result === "stopped" ? "vibest daemon stopped" : "vibest daemon is not running");
   });
 
 const statusHandler = () =>
   Effect.gen(function* () {
-    const status = yield* statusDaemon(resolveDaemonDirectory());
+    const { daemonDir, legacyDaemonDir } = resolveDaemonLocation();
+    const status = yield* statusDaemon(daemonDir, legacyDaemonDir);
     if (!status.running) {
       console.log("vibest daemon is not running");
       return;

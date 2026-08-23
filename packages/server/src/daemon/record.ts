@@ -6,8 +6,8 @@ import { daemonRecordPath } from "./paths";
 /**
  * The discovery record the launcher writes to `$VIBEST_DAEMON_DIR/daemon.pid` —
  * the local mirror of the SSH remote's `ssh-launch/<stateKey>/{pid,port,token}`.
- * It is the single-instance marker: staleness is decided by "is the pid alive",
- * never a lock the server holds. The server itself never reads or writes it.
+ * Reuse requires a live process, a healthy endpoint, and a launch owner path
+ * that still exists. The server itself never reads or writes it.
  */
 export type DaemonRecord = {
   /** The detached server process's pid. */
@@ -18,6 +18,8 @@ export type DaemonRecord = {
   readonly token: string;
   /** Epoch millis the record was written. */
   readonly startedAt: number;
+  /** Absolute path whose continued existence proves the launching installation still exists. */
+  readonly launchOwnerPath?: string;
 };
 
 /** Read and validate the record, or `undefined` if missing/garbage. */
@@ -44,6 +46,9 @@ export const readRecord = (
         address: parsed.address,
         token: parsed.token,
         startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : 0,
+        ...(typeof parsed.launchOwnerPath === "string"
+          ? { launchOwnerPath: parsed.launchOwnerPath }
+          : {}),
       };
     }
     return undefined;

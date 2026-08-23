@@ -79,3 +79,17 @@ export class WorkspaceReadError extends Data.TaggedError("WorkspaceReadError")<{
   readonly path: string;
   readonly cause: unknown;
 }> {}
+
+export class PtyNotFound extends Data.TaggedError("PtyNotFound")<{
+  readonly ptyId: string;
+}> {}
+
+export class PtyLimitReached extends Data.TaggedError("PtyLimitReached")<{
+  readonly projectId: string;
+  readonly limit: number;
+}> {}
+
+export class PtySpawnFailed extends Data.TaggedError("PtySpawnFailed")<{
+  readonly projectId: string;
+  readonly cause: unknown;
+}> {}

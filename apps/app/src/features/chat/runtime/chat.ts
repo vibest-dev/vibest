@@ -93,6 +93,17 @@ export class Chat {
   // internally and still complete, with the retried tail persisted but never
   // streamed — reconcile from history at turn end regardless of outcome.
   readonly #erroredTurnIds = new Set<string>();
+  // Prompts whose RPC has not settled. A call made after the socket drops can
+  // wait inside oRPC's reconnect loop until the restarted server is reachable;
+  // snapshots and settled history received meanwhile may not account for it.
+  readonly #promptsInFlight = new Set<string>();
+  // Invalidates a history read that overlaps a prompt, even when that prompt
+  // settles before the older read returns.
+  #promptRevision = 0;
+  // Latest snapshot phase held back while a prompt is invisible to that
+  // snapshot. Applied when the final successful prompt RPC settles, unless a
+  // newer lifecycle event has already supplied a phase.
+  #deferredSnapshotPhase: SessionPhase | null = null;
   #cursor = 0;
   #historyLoaded = false;
   // Non-null while the history floor is loading: live events queue here so
@@ -211,6 +222,7 @@ export class Chat {
       event.type !== "session.prompt.submitted" &&
       event.type !== "session.prompt.rejected"
     ) {
+      this.#deferredSnapshotPhase = null;
       this.#setStatus(statusFromPhase(event.phase));
     }
   }
@@ -392,7 +404,25 @@ export class Chat {
     if (this.#needsReconcile) void this.#reconcileHistory();
 
     this.#cursor = Math.max(this.#cursor, snapshot.cursor);
-    this.#setStatus(statusFromPhase(snapshot.status.phase));
+    // A prompt still waiting on the wire is invisible to this snapshot. Keep
+    // the sender-local submitted state, but retain the latest phase so a turn
+    // that completed before the unary receipt can converge when the RPC settles.
+    if (this.#promptsInFlight.size === 0) {
+      this.#deferredSnapshotPhase = null;
+      this.#setStatus(statusFromPhase(snapshot.status.phase));
+    } else {
+      const pendingPromptSnapshot = snapshot.activePrompt;
+      // `activePrompt` proves the server accepted our message. For idle, also
+      // require a later completed turn event: prompt.submitted itself keeps the
+      // previous complete turn beside the new prompt until its turn starts.
+      const accountsForPendingPrompt =
+        this.#promptsInFlight.size === 1 &&
+        pendingPromptSnapshot !== null &&
+        this.#promptsInFlight.has(pendingPromptSnapshot.messageId) &&
+        (snapshot.status.phase !== "idle" ||
+          (snapshot.activeTurn?.complete === true && snapshot.cursor > pendingPromptSnapshot.seq));
+      this.#deferredSnapshotPhase = accountsForPendingPrompt ? snapshot.status.phase : null;
+    }
   }
 
   #replayActiveTurn(activeTurn: NonNullable<SessionRuntimeSnapshot["activeTurn"]>): void {
@@ -468,8 +498,15 @@ export class Chat {
   // or streaming chunks must not be clobbered. A skipped reconcile converges
   // on the next reload instead.
   async #reconcileHistory(): Promise<void> {
+    // Settled history cannot contain a prompt that has not reached the server.
+    // Leave #needsReconcile set so a later turn boundary or attach retries it.
+    if (this.#promptsInFlight.size > 0) return;
+    const promptRevision = this.#promptRevision;
     try {
       const history = await this.#transport.getMessages();
+      // The read is stale if a prompt began while it was in flight — including
+      // the case where that prompt settled before this older response arrived.
+      if (promptRevision !== this.#promptRevision || this.#promptsInFlight.size > 0) return;
       // Same read as the floor's, so it answers the same question: a reconcile
       // that lands clears a floor read that failed earlier.
       this.#state.historyStatus = history === null ? "unavailable" : "settled";
@@ -532,6 +569,13 @@ export class Chat {
     if (this.#state.status !== status) this.#state.status = status;
   }
 
+  #resumeAfterPromptSettlement(): void {
+    const phase = this.#deferredSnapshotPhase;
+    this.#deferredSnapshotPhase = null;
+    if (phase !== null) this.#setStatus(statusFromPhase(phase));
+    if (this.#needsReconcile) void this.#reconcileHistory();
+  }
+
   // ---------------------------------------------------------------------
   // Public surface
   // ---------------------------------------------------------------------
@@ -541,6 +585,8 @@ export class Chat {
   prompt = async (text: string): Promise<void> => {
     const messageId = generateId();
     const parts: PromptPart[] = [{ type: "text", text }];
+    this.#promptRevision += 1;
+    this.#promptsInFlight.add(messageId);
     this.#state.error = undefined;
     this.#state.pushMessage(toUserMessage(messageId, parts));
     this.#setStatus("submitted");
@@ -549,8 +595,14 @@ export class Chat {
     } catch (promptError) {
       this.#state.error =
         promptError instanceof Error ? promptError : new Error(String(promptError));
+      this.#deferredSnapshotPhase = null;
       this.#setStatus("error");
       throw promptError;
+    } finally {
+      this.#promptsInFlight.delete(messageId);
+      if (this.#promptsInFlight.size === 0 && this.#state.status !== "error") {
+        this.#resumeAfterPromptSettlement();
+      }
     }
   };
 

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   type DaemonHandle,
   type DaemonPlatform,
@@ -55,6 +57,14 @@ export function makeDaemonServerProcess(
         const handle = yield* resolveOrSpawnDaemon({
           ...resolveDaemonLocation(config.environment),
           serverArgv: [process.execPath, config.entry],
+          // The server bundle, not `process.execPath`: the failure this guards
+          // against is the daemon's lazy imports resolving out of a deleted
+          // installation, and those resolve relative to the entry. Electron's
+          // own binary can outlive that entry (a hoisted or store-linked
+          // electron, ELECTRON_OVERRIDE_DIST_PATH, a packaged shell pointed at
+          // an external entry), which would leave the check green while the
+          // exact breakage it exists for still happens.
+          launchOwnerPath: path.resolve(config.entry),
           // 0 means "no preference" on the first attempt; afterwards the
           // supervisor pins the port it saw, which we pass as preferred.
           port: port === 0 ? undefined : port,

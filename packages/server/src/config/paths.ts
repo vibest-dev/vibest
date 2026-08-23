@@ -71,6 +71,12 @@ export type DaemonLocation = {
   /** `$VIBEST_DAEMON_DIR` — `daemon.pid`, `.lock`, `.stopped`. Lifecycle state
    * only; the daemon's logs live under `$VIBEST_HOME/logs`. */
   readonly daemonDir: string;
+  /**
+   * Pre-nested lifecycle directory. Present only for the default layout so
+   * upgraded launchers can converge with older worktrees that still use
+   * `$VIBEST_HOME/daemon.pid`; explicit daemon-directory overrides stay isolated.
+   */
+  readonly legacyDaemonDir?: string;
 };
 
 /**
@@ -89,7 +95,10 @@ export type DaemonLocation = {
  */
 export function resolveDaemonLocation(env: NodeJS.ProcessEnv = process.env): DaemonLocation {
   const home = resolveVibestHome(env);
-  return { home, daemonDir: explicitPath(env.VIBEST_DAEMON_DIR) ?? path.join(home, "daemon") };
+  const daemonDir = explicitPath(env.VIBEST_DAEMON_DIR);
+  return daemonDir === undefined
+    ? { home, daemonDir: path.join(home, "daemon"), legacyDaemonDir: home }
+    : { home, daemonDir };
 }
 
 /** `resolveDaemonLocation().daemonDir`, for callers that need only the directory. */

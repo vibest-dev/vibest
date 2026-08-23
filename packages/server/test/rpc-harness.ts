@@ -14,6 +14,7 @@ import {
   type HarnessAgentAdapter,
 } from "../src/harness";
 import { ProjectModuleLayer } from "../src/project";
+import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../src/pty";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { NodePlatformLayer } from "./platform";
@@ -51,6 +52,12 @@ export async function makeRpcTestHarness(
   );
   const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
+  const ptyLayer = PtyServiceLayer.pipe(
+    Layer.provide(
+      PtyManagerLayer.pipe(Layer.provide(NodePtySpawnerLayer), Layer.provide(NodePlatformLayer)),
+    ),
+    Layer.provide(projectLayer),
+  );
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       EventBusLayer,
@@ -60,6 +67,7 @@ export async function makeRpcTestHarness(
       listLayer,
       probeLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
+      ptyLayer,
       NodePlatformLayer,
     ),
   );

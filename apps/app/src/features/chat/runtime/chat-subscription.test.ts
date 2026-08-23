@@ -90,6 +90,24 @@ describe("RecoveringSubscription", () => {
     subscription.stop();
   });
 
+  it("keeps retrying repeated attach failures until it is stopped", async () => {
+    let opens = 0;
+    const subscription = new RecoveringSubscription({
+      subscribe: async () => {
+        opens += 1;
+        if (opens < 25) throw new DOMException("socket unavailable", "AbortError");
+        return hangingIterable();
+      },
+      getSnapshot: async () => snapshot,
+      onEvent: () => undefined,
+      retryDelayMs: () => 0,
+    });
+    subscription.start();
+
+    await expect.poll(() => opens).toBe(25);
+    subscription.stop();
+  });
+
   it("stops for good on session_closed and surfaces it exactly once", async () => {
     let opens = 0;
     const events: string[] = [];

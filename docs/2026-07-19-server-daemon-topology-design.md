@@ -103,12 +103,21 @@ The daemon binds `127.0.0.1:<port>` and atomically writes
 `ssh-launch/<stateKey>/{pid,port,token}`:
 
 ```jsonc
-{ "pid": 12345, "address": "http://127.0.0.1:41234", "token": "…", "startedAt": … }
+{
+  "pid": 12345,
+  "address": "http://127.0.0.1:41234",
+  "token": "…",
+  "startedAt": …,
+  "launchOwnerPath": "/absolute/path/to/the/launching/installation"
+}
 ```
 
 Daemon lifecycle files live together under `$VIBEST_DAEMON_DIR`. When the
-variable is absent, the directory defaults to `$VIBEST_HOME/daemon/`. No daemon
-lifecycle files are written directly under `$VIBEST_HOME`.
+variable is absent, the directory defaults to `$VIBEST_HOME/daemon/`. During the
+root-to-nested compatibility window, default-layout launchers also mirror the
+record, lock, and stop tombstone at their former root paths so older worktrees
+converge on the same daemon; logs exist only in the nested directory. Explicit
+`VIBEST_DAEMON_DIR` overrides do not participate in that compatibility path.
 
 The override is primarily a development escape hatch. Pointing multiple daemon
 directories at the same `$VIBEST_HOME` preserves Projects and Sessions, but the
@@ -118,10 +127,12 @@ mutations remain the caller's responsibility.
 It holds a single-instance lock keyed on `$VIBEST_DAEMON_DIR`. Every local
 front-door runs the same `resolveOrSpawnServer()`:
 
-1. Read `daemon.pid` → health-check `address`.
-2. Alive → **attach** (use its `address` + `token`).
-3. Absent/dead → **spawn** `@vibest/server`'s `dist/server.mjs`, wait for ready,
-   attach.
+1. Read current and applicable compatibility `daemon.pid` records.
+2. PID alive + health check passes + `launchOwnerPath` still exists → **attach**
+   (use its `address` + `token`) and reconcile both records.
+3. Absent, dead, unhealthy, or launched from a removed installation → replace it
+   under the launch locks, spawn `@vibest/server`'s `dist/server.mjs`, wait for
+   ready, and attach.
 
 This removes the split-brain (one instance), the layering inversion (server in
 `@vibest/server`), and the `:4000` collision crash (port comes from the file;
@@ -141,8 +152,9 @@ instead of over SSH.
 
 - **Launcher (`resolveOrSpawnDaemon`, shared by CLI + desktop).** Read `daemon.pid`
   → pid alive + health-check → **attach**; else spawn `serve` **detached**, read the
-  port from the handshake line, write `daemon.pid` (pid/addr/token). `daemon.pid`
-  _is_ the single-instance marker (staleness = "is the pid alive"); the server never
+  port from the handshake line, write `daemon.pid` (pid/addr/token/launch owner).
+  `daemon.pid` _is_ the single-instance marker; reuse requires a live PID, a
+  healthy endpoint, and a launch owner path that still exists. The server never
   touches it. Lock, discovery, reuse, and backgrounding all live here — the local
   twin of the SSH launch script. This resolves the earlier "lifetime knob" toward
   _resident_: a short-lived `vibest` command must operate a backend that outlives it.

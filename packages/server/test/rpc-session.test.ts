@@ -21,6 +21,7 @@ import {
 import { makeCodexAdapter, makeCodexAgent } from "../src/harness/codex";
 import * as Observability from "../src/observability";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../src/project";
+import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../src/pty";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { Codex } from "../src/rpc/runtime";
@@ -94,6 +95,12 @@ async function setup() {
     Layer.provide(ProjectRepositoryLayer),
     Layer.provide(pathsLayer),
   );
+  const ptyServiceLayer = PtyServiceLayer.pipe(
+    Layer.provide(
+      PtyManagerLayer.pipe(Layer.provide(NodePtySpawnerLayer), Layer.provide(NodeServices.layer)),
+    ),
+    Layer.provide(projectServiceLayer),
+  );
 
   const appLayer = Layer.mergeAll(
     EventBusLayer,
@@ -103,6 +110,7 @@ async function setup() {
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
+    ptyServiceLayer,
     NodeServices.layer,
     Observability.discard,
   );
