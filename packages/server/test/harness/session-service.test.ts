@@ -876,7 +876,11 @@ describe("HarnessAgentSessionService", () => {
   // A session whose native stream stays open (turn: "open" concats
   // Stream.never) keeps its runtime alive — emit needs one; a drained-out
   // stream drops the runtime and the broadcast is silently skipped.
-  const takePromptSubmitted = (fixture: Fixture, ref: SessionRef, promptInput: object) =>
+  const takePromptSubmitted = (
+    fixture: Fixture,
+    ref: SessionRef,
+    promptInput: { readonly messageId?: string },
+  ) =>
     Effect.scoped(
       Effect.gen(function* () {
         const stream = yield* fixture.bus.subscribe({ kind: "session", ref });

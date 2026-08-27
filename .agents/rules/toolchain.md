@@ -10,11 +10,14 @@
   `packages/vibest` uses `catalog:` — bump both together.
 - **Lint:** `lint:check` runs `--deny-warnings`, so the whole `suspicious`
   category fails CI while only warning locally. oxfmt reorders imports.
-  Generic and Effect [anti-slop](https://github.com/dmmulroy/anti-slop) rules
-  are vendored at `tools/oxlint/anti-slop/` and enabled as errors in
-  `.oxlintrc.json`. Do not disable them to silence a finding; prefer
-  inference, `satisfies`, named contracts, Layer wiring, and a `SAFETY:`
-  comment on a necessary assertion.
+  Generic and Effect [anti-slop](https://github.com/dmmulroy/anti-slop) plugins
+  are vendored at `tools/oxlint/anti-slop/`. Enabled today:
+  `no-object-parameters`, `no-reflect-apply`, `no-reflect-get`,
+  `no-unknown-type-aliases`, `no-widen-then-assert`. The rest stay off until a
+  dedicated pass — they currently fail on existing source, and
+  `no-shape-in-symbol-names` / `no-service-constructor-imports` fight this
+  repo's Effect `XxxShape` and composition-root `make*` conventions. Do not
+  disable an enabled rule to silence a finding; prefer a named owner type.
 - **Commits rewrite files:** pre-commit runs lint-staged (`oxlint --fix` + `oxfmt`)
   over every staged file. No typecheck, no tests. `SKIP_SIMPLE_GIT_HOOKS=1` skips
   it. Hooks only exist after `pnpm install` — `prepare` sets `core.hooksPath`,

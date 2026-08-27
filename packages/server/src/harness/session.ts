@@ -52,11 +52,16 @@ import type { SessionConfig } from "./session-io";
  * acquisition and closed when the runtime is released. */
 export type AcquireRuntime = Effect.Effect<HarnessAgentRuntime, ResumeSessionError, Scope.Scope>;
 
+/** Opaque identity for one runtime holding. Empty so it is only comparable by
+ * reference; a named type rather than `object` so the slot cannot accept an
+ * arbitrary record. */
+type HeldToken = Record<never, never>;
+
 /** The runtime a session currently holds, its scope, and the fiber draining
  * its events. The token is what lets only this holding's own cleanup clear the
  * slot, so a dead runtime's crash handler can never evict its replacement. */
 type Held = {
-  readonly token: object;
+  readonly token: HeldToken;
   readonly runtime: HarnessAgentRuntime;
   readonly scope: Scope.Closeable;
   readonly fiber: Fiber.Fiber<void>;
@@ -317,7 +322,7 @@ export const makeHarnessAgentSession = (
 
     /** Identity-guarded, so a dying runtime disowns itself and only itself —
      * it can never evict the replacement that came after it. */
-    const clearHeld = (token: object): Effect.Effect<Held | undefined> =>
+    const clearHeld = (token: HeldToken): Effect.Effect<Held | undefined> =>
       Ref.modify(lifecycle, (current) =>
         current.held?.token === token
           ? [current.held, { ...current, held: undefined }]
@@ -362,7 +367,7 @@ export const makeHarnessAgentSession = (
         const runtime = outcome.value;
         yield* clearCrash;
 
-        const token = {};
+        const token: HeldToken = {};
         const release = clearHeld(token).pipe(
           Effect.flatMap((owned) => (owned ? dispose(owned) : Effect.void)),
         );
