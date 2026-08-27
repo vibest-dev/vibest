@@ -251,6 +251,9 @@ importers:
       '@changesets/cli':
         specifier: ^2.31.1
         version: 2.31.1(@types/node@24.13.3)
+      '@oxlint/plugins':
+        specifier: 1.78.0
+        version: 1.78.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
@@ -2941,6 +2944,10 @@ packages:
 
   '@oxlint/plugins@1.68.0':
     resolution: {integrity: sha512-titLmukUt/h8ho7Svlf0xSBjoy2ccZKrXjpXpZCj+v6V4CJccC2KyP45BLSCMx8YIpifMyiDyUptM4+5sruKbQ==}
+    engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
+
+  '@oxlint/plugins@1.78.0':
+    resolution: {integrity: sha512-Ypt8KeRYw+4jUtlPirfcHWMrn5ms12VrrFPD+Mds477/7tJxG1Kcz2Yrg2nVcTQEUx/GdlhS+BUg1kmxNm04Ug==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
 
   '@peculiar/asn1-schema@2.8.0':
@@ -10741,6 +10748,8 @@ snapshots:
 
   '@oxlint/plugins@1.68.0':
     optional: true
+
+  '@oxlint/plugins@1.78.0': {}
 
   '@peculiar/asn1-schema@2.8.0':
     dependencies:
