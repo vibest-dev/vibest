@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import type { SessionRecoverySnapshot } from "@vibest/contract";
 import {
   PromptInput,
@@ -132,13 +134,18 @@ function QueuedPromptList({
 }
 
 export function ChatInputComposer({
+  cwd,
   toolbar,
-  branchName,
 }: {
+  /** Session workspace path, from the route. Used to probe the current branch. */
+  cwd: string | undefined;
   toolbar?: ReactNode;
-  /** Current git branch of the session workspace, when the probe landed. */
-  branchName?: string;
 }) {
+  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
+  const branch = useQuery({
+    ...orpcQueryUtils.git.branch.queryOptions({ input: { cwd: cwd ?? "" } }),
+    enabled: cwd !== undefined,
+  });
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
@@ -227,14 +234,14 @@ export function ChatInputComposer({
           </PromptInputToolbar>
         </ChatInputProvider>
       </Card>
-      {branchName ? (
+      {branch.data?.current ? (
         <CardFrameFooter className="py-2">
           <span
             className="text-muted-foreground flex items-center gap-1.5 px-3 text-xs"
             title="Current git branch"
           >
             <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="truncate">{branchName}</span>
+            <span className="truncate">{branch.data.current}</span>
           </span>
         </CardFrameFooter>
       ) : null}

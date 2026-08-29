@@ -1,5 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
 import type { SessionRef } from "@vibest/contract";
 import { cn } from "@vibest/ui/lib/utils";
 
@@ -28,20 +26,13 @@ export function Chat({
    */
   cwd: string | undefined;
 }) {
-  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
-  const branch = useQuery({
-    ...orpcQueryUtils.git.branch.queryOptions({ input: { cwd: cwd ?? "" } }),
-    enabled: cwd !== undefined,
-  });
-  const branchName = branch.data?.current ?? undefined;
-
   return (
     <ChatSessionProvider cwd={cwd} sessionRef={sessionRef}>
       <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
         <ChatTranscript />
         <div className="mx-auto w-full max-w-4xl min-w-80 flex-shrink-0 px-2 pt-2 pb-6">
           <ChatInputComposer
-            branchName={branchName}
+            cwd={cwd}
             toolbar={
               <>
                 {/* Same slot the draft surface puts the harness picker in, so
