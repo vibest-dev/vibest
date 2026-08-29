@@ -1,5 +1,7 @@
 import module from "node:module";
 
+import { noRestrictedDisable } from "./no-restricted-disable.mjs";
+
 const { isBuiltin } = module;
 
 // Enforces the repo convention for Node builtin imports:
@@ -85,5 +87,6 @@ export default {
   meta: { name: "vibest" },
   rules: {
     "node-import-style": nodeImportStyle,
+    "no-restricted-disable": noRestrictedDisable,
   },
 };

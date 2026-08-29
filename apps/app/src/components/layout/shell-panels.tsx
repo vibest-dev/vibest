@@ -1,6 +1,13 @@
 import { useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import {
   Group,
   Panel,
@@ -91,25 +98,25 @@ function useCollapsedBinding(
 ): OnPanelResize {
   const laidOut = useRef(false);
 
-  const sync = (panel: PanelImperativeHandle): void => {
-    if (collapsed === panel.isCollapsed()) return;
-    if (collapsed) {
-      panel.collapse();
-      return;
-    }
-    panel.expand();
-    if (panel.isCollapsed()) panel.resize(expandedSize);
-  };
+  const sync = useCallback(
+    (panel: PanelImperativeHandle): void => {
+      if (collapsed === panel.isCollapsed()) return;
+      if (collapsed) {
+        panel.collapse();
+        return;
+      }
+      panel.expand();
+      if (panel.isCollapsed()) panel.resize(expandedSize);
+    },
+    [collapsed, expandedSize],
+  );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const panel = panelRef.current;
     // The imperative handle is only safe after the panel's first layout.
-    // eslint-disable-next-line react-you-might-not-need-an-effect/no-event-handler
     if (panel === null || !laidOut.current) return;
     sync(panel);
-    // `sync` closes over the current `collapsed` value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed, panelRef]);
+  }, [collapsed, panelRef, sync]);
 
   return (size) => {
     const panel = panelRef.current;

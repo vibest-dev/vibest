@@ -41,7 +41,7 @@ export class ChatInputController {
    *
    * A disposed controller answers `false` rather than throwing: React can hand
    * a `useSyncExternalStore` snapshot the outgoing controller *after* this
-   * effect's cleanup has already run (see `useChatInputHasContent`), and
+   * store's unsubscribe has already run (see `useChatInputHasContent`), and
    * "destroyed editor" is genuinely "nothing to send".
    */
   hasContent(): boolean {
