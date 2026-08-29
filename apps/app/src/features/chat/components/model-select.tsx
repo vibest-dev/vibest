@@ -15,15 +15,20 @@ import {
   useComboboxFilter,
 } from "@vibest/ui/components/combobox";
 import { ChevronsUpDownIcon, SearchIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 
-import {
-  filterModelGroups,
-  findModelOption,
-  modelGroupsFrom,
-  modelOptionsFrom,
-  type ModelOption,
-} from "./model-select.logic";
+interface ModelOption {
+  provider: string;
+  providerLabel: string;
+  modelId: string;
+  label: string;
+}
+
+interface ModelGroup {
+  provider: string;
+  providerLabel: string;
+  items: ModelOption[];
+}
 
 // Presentational model picker: value/onChange driven so it composes both inside
 // a session (ChatModelSelect binds it to ChatSession context) and on the draft
@@ -46,16 +51,51 @@ export function ModelSelect({
   onChange: (providerId: string, modelId: string) => void;
 }) {
   const filter = useComboboxFilter();
-  const [query, setQuery] = useState("");
-  const options = useMemo(() => modelOptionsFrom(providers), [providers]);
-  const groups = useMemo(() => modelGroupsFrom(options), [options]);
-  const visibleGroups = useMemo(
-    () => filterModelGroups(groups, query, filter.contains),
-    [filter, groups, query],
+
+  const options = useMemo<ModelOption[]>(
+    () =>
+      providers.flatMap((provider) =>
+        provider.models.map((model) => ({
+          provider: provider.id,
+          providerLabel: provider.label ?? provider.id,
+          modelId: model.id,
+          label: model.label ?? model.id,
+        })),
+      ),
+    [providers],
   );
+
+  const groups = useMemo<ModelGroup[]>(() => {
+    const byProvider = new Map<string, ModelOption[]>();
+    const labels = new Map<string, string>();
+    for (const option of options) {
+      const groupItems = byProvider.get(option.provider) ?? [];
+      groupItems.push(option);
+      byProvider.set(option.provider, groupItems);
+      labels.set(option.provider, option.providerLabel);
+    }
+    return [...byProvider].map(([provider, items]) => ({
+      items,
+      provider,
+      providerLabel: labels.get(provider) ?? provider,
+    }));
+  }, [options]);
+
   const value = useMemo(
-    () => findModelOption(options, providerId, modelId),
+    () =>
+      options.find((option) => option.provider === providerId && option.modelId === modelId) ??
+      null,
     [options, providerId, modelId],
+  );
+
+  // Search matches the display name, the raw model id, and the provider group.
+  const matchesQuery = useCallback(
+    (option: ModelOption, query: string) =>
+      filter.contains(option.label, query) ||
+      filter.contains(option.modelId, query) ||
+      filter.contains(option.provider, query) ||
+      filter.contains(option.providerLabel, query),
+    [filter],
   );
 
   if (options.length === 0) return null;
@@ -63,19 +103,10 @@ export function ModelSelect({
   return (
     <Combobox
       autoHighlight
-      filter={null}
-      inputValue={query}
-      isItemEqualToValue={(left, right) =>
-        left.providerId === right.providerId && left.modelId === right.modelId
-      }
-      itemToStringLabel={(option) => option.label}
-      items={options}
-      onInputValueChange={setQuery}
-      onOpenChange={(open) => {
-        if (!open) setQuery("");
-      }}
+      filter={matchesQuery}
+      items={groups}
       onValueChange={(option) => {
-        if (option) onChange(option.providerId, option.modelId);
+        if (option) onChange(option.provider, option.modelId);
       }}
       value={value}
     >
@@ -101,28 +132,25 @@ export function ModelSelect({
             startAddon={<SearchIcon />}
           />
         </div>
-        {visibleGroups.length === 0 ? (
-          <ComboboxEmpty className="text-muted-foreground text-center text-sm">
-            No matching models.
-          </ComboboxEmpty>
-        ) : (
-          <div className="min-h-0 flex-1">
-            <ComboboxList>
-              {visibleGroups.map((group) => (
-                <ComboboxGroup items={group.items} key={group.providerId}>
-                  <ComboboxGroupLabel>{group.providerLabel}</ComboboxGroupLabel>
-                  <ComboboxCollection>
-                    {(option: ModelOption) => (
-                      <ComboboxItem key={`${option.providerId}:${option.modelId}`} value={option}>
-                        {option.label}
-                      </ComboboxItem>
-                    )}
-                  </ComboboxCollection>
-                </ComboboxGroup>
-              ))}
-            </ComboboxList>
-          </div>
-        )}
+        <ComboboxEmpty className="text-muted-foreground text-center text-sm">
+          No matching models.
+        </ComboboxEmpty>
+        <div className="min-h-0 flex-1">
+          <ComboboxList>
+            {(group: ModelGroup) => (
+              <ComboboxGroup items={group.items} key={group.provider}>
+                <ComboboxGroupLabel>{group.providerLabel}</ComboboxGroupLabel>
+                <ComboboxCollection>
+                  {(option: ModelOption) => (
+                    <ComboboxItem key={`${option.provider}:${option.modelId}`} value={option}>
+                      {option.label}
+                    </ComboboxItem>
+                  )}
+                </ComboboxCollection>
+              </ComboboxGroup>
+            )}
+          </ComboboxList>
+        </div>
       </ComboboxPopup>
     </Combobox>
   );
