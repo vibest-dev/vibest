@@ -15,10 +15,10 @@ const NO_UNSUBSCRIBE = () => {};
  * editor the controller has already destroyed — and `Editor.destroy()` nulls
  * `extensionManager`, which is the first thing serialization reads.
  *
- * That swap is not exotic: React tears the controller effect down and back up
- * while this component stays mounted (a route match suspending on its loader,
- * StrictMode, `<Activity>`), so `useChatInputController` disposes one editor
- * and builds another between two renders of the same fiber. Reading through
+ * That swap is not exotic: React tears the controller store subscription down
+ * and back up while this component stays mounted (a route match suspending on
+ * its loader, StrictMode, `<Activity>`), so `useChatInputController` disposes
+ * one editor and builds another between two renders of the same fiber. Reading through
  * the controller keeps that impossible — there is no editor reference held
  * across the swap — and it also drops the staleness the cache caused, where
  * the send button reflected the old editor until the new one first changed.

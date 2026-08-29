@@ -12,6 +12,7 @@ import type { HistoryStatus } from "@/features/chat/runtime/chat-state";
 import { useChatSession } from "./chat-session-context";
 import { AgentRequestView } from "./transcript/agent-request";
 import { MessageView } from "./transcript/message-view";
+import { ModelErrorCard } from "./transcript/model-error-card";
 import { TranscriptRenderProvider } from "./transcript/transcript-render-provider";
 
 function EmptyTranscript({ historyStatus }: { historyStatus: HistoryStatus }) {
@@ -55,7 +56,7 @@ export function ChatTranscript() {
             />
           ))}
           {status === "submitted" && <Loader />}
-          {error && <div className="text-destructive text-xs">{error.message}</div>}
+          {error && <ModelErrorCard error={error} />}
           {pendingRequests.map((request) => (
             <AgentRequestView key={request.id} request={request} onRespond={respondToRequest} />
           ))}

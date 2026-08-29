@@ -11,9 +11,10 @@ files are vendored or ported from upstream (`docs/adr/0001`), so a fix there is
 discarded on the next refresh and belongs upstream instead. A host-pushed value
 is a `useSyncExternalStore` source, not an effect — give the feed a
 `getSnapshot` (`ServerStatusFeed` is the shape to copy) rather than mirroring it
-into `useState`. An effect the rules genuinely misread — an editor's lifetime,
-say — gets an `eslint-disable-next-line` on the line the rule anchors to (the
-`setState` call, not always the `useEffect`) plus a sentence saying why.
+into `useState`. `vibest/no-restricted-disable` forbids `eslint-disable` /
+`oxlint-disable` comments on these nine rules and on `react/exhaustive-deps`
+(`react-hooks/exhaustive-deps` too): rewrite the effect or the store instead of
+silencing the diagnostic. A blanket `eslint-disable` is the same violation.
 
 ## Where a file goes
 
