@@ -25,16 +25,18 @@ describe("parseDisableDirective", () => {
       ).rules,
     ).toEqual(["react-you-might-not-need-an-effect/no-event-handler"]);
     expect(isProtectedRule("react-you-might-not-need-an-effect/no-event-handler")).toBe(true);
-    expect(isProtectedRule("react-you-might-not-need-an-effect/no-external-store-subscription")).toBe(
-      true,
-    );
+    expect(
+      isProtectedRule("react-you-might-not-need-an-effect/no-external-store-subscription"),
+    ).toBe(true);
     expect(isProtectedRule("react-hooks/exhaustive-deps")).toBe(true);
     expect(isProtectedRule("react/exhaustive-deps")).toBe(true);
     expect(isProtectedRule("vibest/no-restricted-disable")).toBe(true);
   });
 
   it("keeps only the rule name when a disable lists several", () => {
-    expect(parseDisableDirective("eslint-disable-next-line react/exhaustive-deps, no-console")).toEqual({
+    expect(
+      parseDisableDirective("eslint-disable-next-line react/exhaustive-deps, no-console"),
+    ).toEqual({
       rules: ["react/exhaustive-deps", "no-console"],
     });
   });
