@@ -134,10 +134,13 @@ function QueuedPromptList({
 export function ChatInputComposer({
   toolbar,
   branchName,
+  branchPending,
 }: {
   toolbar?: ReactNode;
   /** Current git branch of the session workspace, when the probe landed. */
   branchName?: string;
+  /** True while the branch probe is in flight — reserve footer height. */
+  branchPending?: boolean;
 }) {
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
@@ -227,17 +230,21 @@ export function ChatInputComposer({
           </PromptInputToolbar>
         </ChatInputProvider>
       </Card>
-      {branchName ? (
-        <CardFrameFooter className="py-2">
-          <span
-            className="text-muted-foreground flex items-center gap-1.5 px-3 text-xs"
-            title="Current git branch"
-          >
-            <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="truncate">{branchName}</span>
-          </span>
-        </CardFrameFooter>
-      ) : null}
+      <CardFrameFooter className="px-3 py-2">
+        <span
+          className="text-muted-foreground flex h-4 min-w-0 items-center gap-1.5 text-xs"
+          title={branchName ? "Current git branch" : undefined}
+        >
+          {branchPending ? (
+            <span aria-hidden="true" className="bg-muted h-2 w-24 animate-pulse rounded-sm" />
+          ) : branchName ? (
+            <>
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{branchName}</span>
+            </>
+          ) : null}
+        </span>
+      </CardFrameFooter>
     </CardFrame>
   );
 }

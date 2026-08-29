@@ -42,6 +42,7 @@ export function Chat({
         <div className="mx-auto w-full max-w-4xl min-w-80 flex-shrink-0 px-2 pt-2 pb-6">
           <ChatInputComposer
             branchName={branchName}
+            branchPending={cwd !== undefined && branch.isPending}
             toolbar={
               <>
                 {/* Same slot the draft surface puts the harness picker in, so
