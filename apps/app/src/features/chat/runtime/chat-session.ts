@@ -1,6 +1,5 @@
 import type {
   ActivePromptSnapshot,
-  SessionMessageChunkEvent,
   SessionRuntimeSnapshot,
   SessionScopedEvent,
 } from "@vibest/contract";
@@ -131,12 +130,17 @@ export function hydrateSnapshot(
     pushUserMessage(state, prompt.messageId, prompt.parts);
   }
 
-  let latestError: SessionMessageChunkEvent | undefined;
+  // Error text and retry status are not part of the settled transcript
+  // floor. Replay them in order so a retry that later emits output (or a
+  // terminal error) wins. Ignore chunks older than a retained prompt: the
+  // runtime can hold a completed old turn beside a newer submitted prompt.
   for (const event of activeTurn?.chunks ?? []) {
-    if (event.seq > state.sync.cursor && event.chunk.type === "error") latestError = event;
-  }
-  if (latestError && (appliedPromptSeq === undefined || latestError.seq > appliedPromptSeq)) {
-    captureChunkError(state, latestError.chunk);
+    if (
+      event.seq > state.sync.cursor &&
+      (appliedPromptSeq === undefined || event.seq > appliedPromptSeq)
+    ) {
+      captureChunkError(state, event.chunk);
+    }
   }
 
   for (const turnId of state.turns.recoverTurnIds.slice()) {
@@ -279,7 +283,11 @@ export function applyEvent(
   switch (event.type) {
     case "session.message.chunk":
       captureChunkError(state, event.chunk);
-      if (!includesValue(state.turns.recoverTurnIds, event.turnId)) {
+      // Retry is UI status, not transcript — keep it out of the message fold.
+      if (
+        event.chunk.type !== "data-retry" &&
+        !includesValue(state.turns.recoverTurnIds, event.turnId)
+      ) {
         if (event.chunk.type === "error") addUnique(state.turns.erroredTurnIds, event.turnId);
         appendFold(state, effects, event.turnId, event.chunk);
       }
@@ -296,6 +304,7 @@ export function applyEvent(
       break;
     case "session.turn.ended": {
       finishFold(state, effects, event.turnId);
+      state.session.retryNotice = undefined;
       state.session.pendingRequests = [];
       if (
         event.outcome !== "completed" ||
@@ -322,6 +331,7 @@ export function applyEvent(
       break;
     case "session.crashed":
       for (const turnId of Object.keys(state.turns.folds)) abandonFold(state, effects, turnId);
+      state.session.retryNotice = undefined;
       state.session.pendingRequests = [];
       break;
   }
@@ -366,6 +376,7 @@ function terminate(
   state.session.pendingRequests = [];
   state.session.historyStatus = "settled";
   state.session.status = "error";
+  state.session.retryNotice = undefined;
   state.session.error = new Error(
     reason === "session_deleted" ? "Session deleted" : "Session closed",
   );

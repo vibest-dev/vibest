@@ -22,10 +22,15 @@ export type PiMetadata = {
   usage?: PiAssistantHistoryMessage["usage"];
 };
 
-// No `data-*` parts (mirrors codex/ui-message.ts) — assistant summaries,
-// compaction, and retry events stay off the chunk track until a data part
-// earns its keep.
-export type PiDataTypes = Record<never, never>;
+// Retry is transient UI status, not transcript. Compaction and assistant
+// summaries stay off the chunk track.
+export type PiDataTypes = {
+  retry: {
+    errorMessage: string;
+    attempt?: number;
+    maxAttempts?: number;
+  };
+};
 
 export type PiUIMessage = UIMessage<PiMetadata, PiDataTypes, PiTools>;
 export type PiUIMessageChunk = InferUIMessageChunk<PiUIMessage>;

@@ -34,6 +34,7 @@ export function ChatTranscript() {
   const messages = useStore(store, (state) => state.session.messages);
   const status = useStore(store, (state) => state.session.status);
   const error = useStore(store, (state) => state.session.error);
+  const retryNotice = useStore(store, (state) => state.session.retryNotice);
   const pendingRequests = useStore(store, (state) => state.session.pendingRequests);
   const historyStatus = useStore(store, (state) => state.session.historyStatus);
   const lastIndex = messages.length - 1;
@@ -55,6 +56,7 @@ export function ChatTranscript() {
             />
           ))}
           {status === "submitted" && <Loader />}
+          {retryNotice && <div className="text-muted-foreground text-xs">{retryNotice}</div>}
           {error && <div className="text-destructive text-xs">{error.message}</div>}
           {pendingRequests.map((request) => (
             <AgentRequestView key={request.id} request={request} onRespond={respondToRequest} />

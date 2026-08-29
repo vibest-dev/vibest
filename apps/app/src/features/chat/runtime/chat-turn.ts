@@ -3,6 +3,7 @@ import type { UIMessage, UIMessageChunk } from "ai";
 
 import type { ChatDraft, ChatEffects } from "./chat-runtime-types";
 import { addUnique, removeValue, type ChatState } from "./chat-state";
+import { retryNoticeFrom } from "./retry-notice";
 import { sanitizeTail } from "./sanitize-tail";
 
 export const hasFolds = (state: ChatState): boolean => Object.keys(state.turns.folds).length > 0;
@@ -69,7 +70,18 @@ export function appendFold(
 }
 
 export function captureChunkError(state: ChatDraft, chunk: UIMessageChunk): void {
-  if (chunk.type === "error") state.session.error = new Error(chunk.errorText);
+  const retryNotice = retryNoticeFrom(chunk);
+  if (retryNotice !== undefined) {
+    state.session.error = undefined;
+    state.session.retryNotice = retryNotice;
+    return;
+  }
+  if (chunk.type === "error") {
+    state.session.retryNotice = undefined;
+    state.session.error = new Error(chunk.errorText);
+    return;
+  }
+  if (state.session.retryNotice !== undefined) state.session.retryNotice = undefined;
 }
 
 export function replayActiveTurn(
@@ -94,6 +106,7 @@ export function replayActiveTurn(
     return;
   }
   for (const chunk of chunks) {
+    if (chunk.type === "data-retry") continue;
     if (chunk.type === "error") addUnique(state.turns.erroredTurnIds, activeTurn.turnId);
     appendFold(state, effects, activeTurn.turnId, chunk);
   }

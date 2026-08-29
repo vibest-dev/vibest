@@ -49,6 +49,7 @@ export type ChatState = {
     historyStatus: HistoryStatus;
     status: ChatStatus;
     error: Error | undefined;
+    retryNotice: string | undefined;
     activeTurnId: string | null;
   };
   outgoing: OutgoingMessage[];
@@ -93,6 +94,7 @@ export function createChatState(): ChatState {
       historyStatus: "loading",
       status: "ready",
       error: undefined,
+      retryNotice: undefined,
       activeTurnId: null,
     },
     outgoing: [],
