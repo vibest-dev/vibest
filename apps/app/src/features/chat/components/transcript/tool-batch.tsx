@@ -5,11 +5,12 @@ import {
   CollapsibleTrigger,
 } from "@vibest/ui/components/collapsible";
 import { cn } from "@vibest/ui/lib/utils";
-import type { ToolUIPart, UIMessage } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { ChevronDownIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { computeBatchTrigger, type BatchTriggerLabel } from "./compute-batch-trigger";
+import { ReasoningPart } from "./reasoning-part";
 import { ToolPart } from "./tool-part";
 import type { BucketKey } from "./tool/bucket";
 import type { IndexedBatchPart } from "./use-tool-batches";
@@ -59,9 +60,7 @@ function buildTriggerPhrase(label: BatchTriggerLabel): string {
 
 // Collapsible accordion for a run of consecutive tool/reasoning parts.
 // shouldShimmer is computed by the parent from `isTrailing && isStreaming` —
-// the batch stays agnostic of either signal alone. Reasoning parts stay in the
-// batch data flow but never render — the trigger shimmer is the only thinking
-// indicator we surface.
+// the batch stays agnostic of either signal alone.
 export function ToolBatch({
   message,
   parts,
@@ -100,10 +99,18 @@ export function ToolBatch({
         )}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-2 pt-2">
-        {parts.map(({ part }) => {
-          if (part.type === "reasoning") return null;
-          const toolPart = part as ToolUIPart;
-          return <ToolPart key={toolPart.toolCallId} message={message} part={toolPart} />;
+        {parts.map(({ part, index }) => {
+          if (part.type === "reasoning") {
+            return (
+              <ReasoningPart
+                key={part.id ?? `reasoning-${index}`}
+                part={part}
+                isMessageStreaming={shouldShimmer}
+              />
+            );
+          }
+          if (!isToolUIPart(part)) return null;
+          return <ToolPart key={part.toolCallId} message={message} part={part} />;
         })}
       </CollapsibleContent>
     </Collapsible>
