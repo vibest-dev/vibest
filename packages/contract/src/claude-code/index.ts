@@ -5,6 +5,5 @@ export * from "./tools";
 export type {
   ClaudeCodeUIMessage,
   ClaudeCodeUIMessageChunk,
-  ClaudeCodeMetadata,
   ClaudeCodeDataTypes,
 } from "./ui-message";
