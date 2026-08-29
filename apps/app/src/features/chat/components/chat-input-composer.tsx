@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import type { SessionRecoverySnapshot } from "@vibest/contract";
 import {
   PromptInput,
@@ -132,16 +134,19 @@ function QueuedPromptList({
 }
 
 export function ChatInputComposer({
+  cwd,
   toolbar,
-  branchName,
-  branchPending,
 }: {
+  /** Session workspace path, from the route. Used to probe the current branch. */
+  cwd: string | undefined;
   toolbar?: ReactNode;
-  /** Current git branch of the session workspace, when the probe landed. */
-  branchName?: string;
-  /** True while the branch probe is in flight — reserve footer height. */
-  branchPending?: boolean;
 }) {
+  const { orpcQueryUtils } = useRouteContext({ from: "__root__" });
+  const branch = useQuery({
+    ...orpcQueryUtils.git.branch.queryOptions({ input: { cwd: cwd ?? "" } }),
+    enabled: cwd !== undefined,
+  });
+  const currentBranch = branch.data?.current;
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
@@ -233,14 +238,14 @@ export function ChatInputComposer({
       <CardFrameFooter className="px-3 py-2">
         <span
           className="text-muted-foreground flex h-4 min-w-0 items-center gap-1.5 text-xs"
-          title={branchName ? "Current git branch" : undefined}
+          title={currentBranch ? "Current git branch" : undefined}
         >
-          {branchPending ? (
+          {branch.isPending ? (
             <span aria-hidden="true" className="bg-muted h-2 w-24 animate-pulse rounded-sm" />
-          ) : branchName ? (
+          ) : currentBranch ? (
             <>
               <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-              <span className="truncate">{branchName}</span>
+              <span className="truncate">{currentBranch}</span>
             </>
           ) : null}
         </span>
