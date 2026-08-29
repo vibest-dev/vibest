@@ -193,16 +193,48 @@ describe("createPiTransform", () => {
     expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
   });
 
-  it("skips compaction and retry lifecycles", () => {
+  it("emits a transient retry chunk when Pi will retry a run error", () => {
+    const t = createPiTransform("s1");
+    const run = (event: AgentSessionEvent) => [...t(event)];
+    run(e({ type: "agent_start" }));
+    const failed = assistant({ stopReason: "error", errorMessage: "Connection error." });
+    expect(run(e({ type: "agent_end", messages: [failed], willRetry: true }))).toEqual([
+      {
+        type: "data-retry",
+        transient: true,
+        data: { errorMessage: "Connection error." },
+      },
+    ]);
+    expect(types(run(e({ type: "agent_settled" })))).toEqual(["finish"]);
+  });
+
+  it("forwards auto-retry attempts as transient retry chunks", () => {
+    const t = createPiTransform("s1");
+    expect([
+      ...t(
+        e({
+          type: "auto_retry_start",
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 10,
+          errorMessage: "overloaded",
+        }),
+      ),
+    ]).toEqual([
+      {
+        type: "data-retry",
+        transient: true,
+        data: { errorMessage: "overloaded", attempt: 1, maxAttempts: 3 },
+      },
+    ]);
+    expect([...t(e({ type: "auto_retry_end", success: true, attempt: 1 }))]).toEqual([]);
+  });
+
+  it("skips compaction and retry-end lifecycles", () => {
     const t = createPiTransform("s1");
     expect([...t(e({ type: "compaction_start", reason: "threshold" }))]).toEqual([]);
     expect([
       ...t(e({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false })),
-    ]).toEqual([]);
-    expect([
-      ...t(
-        e({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "x" }),
-      ),
     ]).toEqual([]);
     expect([...t(e({ type: "auto_retry_end", success: true, attempt: 1 }))]).toEqual([]);
   });

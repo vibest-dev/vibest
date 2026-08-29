@@ -2044,6 +2044,106 @@ describe("Chat stream errors", () => {
     expect(transport.promptCalls.at(-1)?.parts).toEqual([{ type: "text", text: "retry" }]);
   });
 
+  it("shows a retry notice until the same turn resumes output", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({});
+
+    live(1, { type: "session.turn.started", turnId: "turn-1", phase: "running" });
+    live(2, {
+      type: "session.message.chunk",
+      turnId: "turn-1",
+      chunk: {
+        type: "data-retry",
+        transient: true,
+        data: { errorMessage: "Connection error." },
+      },
+    });
+    expect(chat.store.getState().session.retryNotice).toBe(
+      "Couldn't reach the model provider. Retrying…",
+    );
+    expect(chat.store.getState().session.error).toBeUndefined();
+
+    live(3, {
+      type: "session.message.chunk",
+      turnId: "turn-1",
+      chunk: { type: "text-start", id: "retry-text" },
+    });
+    expect(chat.store.getState().session.retryNotice).toBeUndefined();
+  });
+
+  it("replaces a retry notice with a terminal provider error", async () => {
+    const { chat, attach, live } = makeChat();
+    await attach({});
+
+    live(1, {
+      type: "session.message.chunk",
+      turnId: "turn-1",
+      chunk: {
+        type: "data-retry",
+        transient: true,
+        data: { errorMessage: "overloaded", attempt: 1, maxAttempts: 3 },
+      },
+    });
+    expect(chat.store.getState().session.retryNotice).toBe("overloaded. Retrying (1/3)…");
+
+    live(2, {
+      type: "session.message.chunk",
+      turnId: "turn-1",
+      chunk: { type: "error", errorText: "overloaded" },
+    });
+    expect(chat.store.getState().session.retryNotice).toBeUndefined();
+    expect(chat.store.getState().session.error?.message).toBe("overloaded");
+  });
+
+  it("restores a retry notice from a live retained turn", async () => {
+    const { chat, attach } = makeChat();
+    await attach({ cursor: 1 });
+
+    await attach({
+      status: { phase: "running" },
+      recovery: null,
+      activeTurn: activeTurn({
+        turnId: "turn-1",
+        chunks: [
+          chunkEvent(2, "turn-1", {
+            type: "data-retry",
+            transient: true,
+            data: { errorMessage: "Connection error." },
+          }),
+        ],
+      }),
+      cursor: 2,
+    });
+
+    expect(chat.store.getState().session.retryNotice).toBe(
+      "Couldn't reach the model provider. Retrying…",
+    );
+  });
+
+  it("does not restore a retry notice after the retained turn has resumed", async () => {
+    const { chat, attach } = makeChat();
+    await attach({ cursor: 1 });
+
+    await attach({
+      status: { phase: "running" },
+      recovery: null,
+      activeTurn: activeTurn({
+        turnId: "turn-1",
+        chunks: [
+          chunkEvent(2, "turn-1", {
+            type: "data-retry",
+            transient: true,
+            data: { errorMessage: "Connection error." },
+          }),
+          chunkEvent(3, "turn-1", { type: "text-start", id: "retry-text" }),
+        ],
+      }),
+      cursor: 3,
+    });
+
+    expect(chat.store.getState().session.retryNotice).toBeUndefined();
+  });
+
   it("restores an unseen provider error after its retained prompt boundary", async () => {
     const { chat, attach } = makeChat();
     const providerError = "Connection error.";

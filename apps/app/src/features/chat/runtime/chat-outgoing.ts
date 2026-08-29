@@ -30,6 +30,7 @@ export function pushUserMessage(
 ): boolean {
   if (state.session.messages.some((message) => message.id === messageId)) return false;
   state.session.messages.push(toUserMessage(messageId, parts));
+  state.session.retryNotice = undefined;
   state.session.error = undefined;
   return true;
 }
@@ -119,6 +120,7 @@ function maybeDispatchFollowUp(state: ChatDraft, effects: ChatEffects): void {
     state.session.messages.push(next.message);
   }
   state.session.status = "submitted";
+  state.session.retryNotice = undefined;
   state.session.error = undefined;
   addUnique(state.prompt.pendingMessageIds, next.message.id);
   state.prompt.boundaryOpen = false;

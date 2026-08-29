@@ -23,8 +23,9 @@ import type { PiUIMessageChunk } from "./ui-message";
 //   • tool_execution_start/end → tool-input-available + tool-output-available.
 //     The AI-SDK tool chunks are generic, so args/results forward whole; the
 //     PiTools types still discriminate `message.parts` downstream.
-//   • message_end / compaction / auto-retry → skipped; no `data-*` parts on
-//     the chunk track
+//   • message_end / compaction / auto_retry_end → skipped
+//   • willRetry / auto_retry_start → transient `data-retry` (UI status, not
+//     transcript)
 //   • agent_start/agent_settled → `start`/`finish`; a retry re-emits
 //     agent_start, so `start` is guarded to fire once per turn.
 
@@ -191,13 +192,32 @@ export function createPiTransform(
       case "agent_end": {
         // A model-level failure surfaces as the run's last assistant message
         // with stopReason "error". willRetry keeps the turn open (the retry
-        // events follow); the terminal finish always comes from agent_settled.
+        // events follow): emit a transient retry chunk so the UI can show it,
+        // and only a terminal failure becomes an error chunk. The finish
+        // always comes from agent_settled.
         const last = event.messages.at(-1) as AssistantMessage | undefined;
         if (last?.role === "assistant" && last.stopReason === "error") {
-          yield { type: "error", errorText: last.errorMessage ?? "Pi run failed" };
+          const errorMessage = last.errorMessage ?? "Pi run failed";
+          if (event.willRetry) {
+            yield { type: "data-retry", transient: true, data: { errorMessage } };
+          } else {
+            yield { type: "error", errorText: errorMessage };
+          }
         }
         break;
       }
+
+      case "auto_retry_start":
+        yield {
+          type: "data-retry",
+          transient: true,
+          data: {
+            errorMessage: event.errorMessage,
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+          },
+        };
+        break;
 
       case "agent_settled":
         if (turnOpen) {
@@ -224,7 +244,6 @@ export function createPiTransform(
           | "thinking_level_changed"
           | "compaction_start"
           | "compaction_end"
-          | "auto_retry_start"
           | "auto_retry_end");
     }
   };
