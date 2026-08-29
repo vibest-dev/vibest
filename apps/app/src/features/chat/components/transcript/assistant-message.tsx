@@ -1,11 +1,10 @@
 import { Action, Actions } from "@vibest/ui/ai-elements/actions";
 import { Message, MessageContent } from "@vibest/ui/ai-elements/message";
 import { Response } from "@vibest/ui/ai-elements/response";
-import { isReasoningUIPart, isToolUIPart, type UIMessage } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 
-import { ReasoningPart } from "./reasoning-part";
 import { ToolBatch } from "./tool-batch";
 import { ToolPart } from "./tool-part";
 import { useToolBatches } from "./use-tool-batches";
@@ -47,15 +46,6 @@ export function AssistantMessage({
         const { part, index } = item;
         if (isToolUIPart(part)) {
           return <ToolPart key={part.toolCallId} message={message} part={part} />;
-        }
-        if (isReasoningUIPart(part)) {
-          return (
-            <ReasoningPart
-              key={part.id ?? `reasoning-${index}`}
-              part={part}
-              isMessageStreaming={isStreaming}
-            />
-          );
         }
         if (part.type === "text") {
           const canShowActions =
