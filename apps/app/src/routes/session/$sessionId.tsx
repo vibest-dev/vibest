@@ -34,6 +34,17 @@ export const Route = createFileRoute("/session/$sessionId")({
   loaderDeps: ({ search }) => search,
   loader: async ({ context, params, deps }) => {
     const { session } = context.orpcQueryUtils;
+    const prefetchBranch = async (projectId: string) => {
+      const projects = await context.queryClient.ensureQueryData(
+        context.orpcQueryUtils.project.list.queryOptions(),
+      );
+      const cwd = projects.find((project) => project.id === projectId)?.path;
+      if (cwd) {
+        void context.queryClient.prefetchQuery(
+          context.orpcQueryUtils.git.branch.queryOptions({ input: { cwd } }),
+        );
+      }
+    };
 
     // Fast path: the link handed us a whole ref, so prepare can go first. We
     // return what the server answers with, not what the URL claimed.
@@ -43,6 +54,7 @@ export const Route = createFileRoute("/session/$sessionId")({
         harnessAgentId: deps.harness,
         sessionId: params.sessionId,
       };
+      void prefetchBranch(hinted.projectId);
       const prepared = await session.prepare.call({ ref: hinted }).catch((error: unknown) => {
         // A bad hint and a session the harness has forgotten both fall through
         // to the lookup; only this line tells them apart afterwards.
@@ -69,6 +81,7 @@ export const Route = createFileRoute("/session/$sessionId")({
     // native history was cleaned up fails here — surface it instead of leaving
     // a silently dead chat. The page still renders, so keep the console trail
     // for diagnosis after the toast auto-dismisses.
+    void prefetchBranch(ref.projectId);
     await session.prepare.call({ ref }).catch((error: unknown) => {
       console.error("Failed to prepare session", error);
       toast.error(

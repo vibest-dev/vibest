@@ -146,6 +146,7 @@ export function ChatInputComposer({
     ...orpcQueryUtils.git.branch.queryOptions({ input: { cwd: cwd ?? "" } }),
     enabled: cwd !== undefined,
   });
+  const currentBranch = branch.data?.current;
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
@@ -234,17 +235,21 @@ export function ChatInputComposer({
           </PromptInputToolbar>
         </ChatInputProvider>
       </Card>
-      {branch.data?.current ? (
-        <CardFrameFooter className="py-2">
-          <span
-            className="text-muted-foreground flex items-center gap-1.5 px-3 text-xs"
-            title="Current git branch"
-          >
-            <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="truncate">{branch.data.current}</span>
-          </span>
-        </CardFrameFooter>
-      ) : null}
+      <CardFrameFooter className="px-3 py-2">
+        <span
+          className="text-muted-foreground flex h-4 min-w-0 items-center gap-1.5 text-xs"
+          title={currentBranch ? "Current git branch" : undefined}
+        >
+          {branch.isPending ? (
+            <span aria-hidden="true" className="bg-muted h-2 w-24 animate-pulse rounded-sm" />
+          ) : currentBranch ? (
+            <>
+              <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <span className="truncate">{currentBranch}</span>
+            </>
+          ) : null}
+        </span>
+      </CardFrameFooter>
     </CardFrame>
   );
 }
