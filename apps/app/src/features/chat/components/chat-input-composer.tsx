@@ -6,7 +6,8 @@ import {
   PromptInputTools,
 } from "@vibest/ui/ai-elements/prompt-input";
 import { Button } from "@vibest/ui/components/button";
-import { Card, CardFrame, CardFrameHeader } from "@vibest/ui/components/card";
+import { Card, CardFrame, CardFrameFooter, CardFrameHeader } from "@vibest/ui/components/card";
+import { GitBranchIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useStore } from "zustand";
 
@@ -130,7 +131,14 @@ function QueuedPromptList({
   );
 }
 
-export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
+export function ChatInputComposer({
+  toolbar,
+  branchName,
+}: {
+  toolbar?: ReactNode;
+  /** Current git branch of the session workspace, when the probe landed. */
+  branchName?: string;
+}) {
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
@@ -219,6 +227,17 @@ export function ChatInputComposer({ toolbar }: { toolbar?: ReactNode }) {
           </PromptInputToolbar>
         </ChatInputProvider>
       </Card>
+      {branchName ? (
+        <CardFrameFooter className="py-2">
+          <span
+            className="text-muted-foreground flex items-center gap-1.5 px-3 text-xs"
+            title="Current git branch"
+          >
+            <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{branchName}</span>
+          </span>
+        </CardFrameFooter>
+      ) : null}
     </CardFrame>
   );
 }

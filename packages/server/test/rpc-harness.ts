@@ -4,6 +4,7 @@ import { Layer, ManagedRuntime } from "effect";
 import { layerPaths } from "../src/config/paths";
 import { EventBusLayer } from "../src/events";
 import { FileSystemServiceLayer } from "../src/fs";
+import { GitServiceLayer } from "../src/git";
 import {
   HarnessAgentRegistry,
   HarnessAgentSessionManagerLayer,
@@ -74,6 +75,7 @@ export async function makeRpcTestHarness(
       listLayer,
       probeLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
+      GitServiceLayer,
       ptyLayer,
       NodePlatformLayer,
     ),
