@@ -20,6 +20,11 @@ export class GitError extends Data.TaggedError("GitError")<{
   readonly cause: unknown;
 }> {}
 
+/** `cwd` exists but is not a Git work tree. `git.branch` models this as data. */
+export class GitNotRepository extends Data.TaggedError("GitNotRepository")<{
+  readonly cwd: string;
+}> {}
+
 export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{
   readonly projectId: string;
   readonly sessionId: string;

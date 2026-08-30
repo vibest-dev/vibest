@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { makeRpcTestHarness } from "./rpc-harness";
 
 describe("git router", () => {
-  it("returns the current branch for a work tree and null otherwise", async () => {
+  it("models repository availability instead of failing the probe", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-git-"));
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-nogit-"));
@@ -22,8 +22,18 @@ describe("git router", () => {
 
     const harness = await makeRpcTestHarness(home);
     try {
-      await expect(harness.client.git.branch({ cwd: repo })).resolves.toEqual({ current: "main" });
-      await expect(harness.client.git.branch({ cwd: bare })).resolves.toEqual({ current: null });
+      await expect(harness.client.git.branch({ cwd: repo })).resolves.toEqual({
+        kind: "repository",
+        current: "main",
+      });
+      await expect(harness.client.git.branch({ cwd: bare })).resolves.toEqual({
+        kind: "not-repository",
+      });
+      await expect(harness.client.git.branch({ cwd: path.join(bare, "missing") })).resolves.toEqual(
+        {
+          kind: "workspace-unavailable",
+        },
+      );
     } finally {
       await harness.dispose();
     }

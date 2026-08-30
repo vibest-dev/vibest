@@ -38,13 +38,27 @@ layer(NodePlatformLayer)("GitService", (it) => {
     }).pipe(Effect.provide(GitServiceLayer)),
   );
 
-  it.effect("lists branches", () =>
+  it.effect("lists the current branch of a repository", () =>
     Effect.gen(function* () {
       const dir = yield* repo;
       const git = yield* GitService;
       const branch = yield* git.branch(dir);
+      assert.equal(branch.kind, "repository");
+      if (branch.kind !== "repository") return;
       assert.equal(branch.current, "main");
-      assert.ok(branch.all.includes("main"));
+    }).pipe(Effect.provide(GitServiceLayer)),
+  );
+
+  it.effect("models branch availability without turning it into a failure", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "vibest-not-git-" });
+      const git = yield* GitService;
+
+      assert.deepEqual(yield* git.branch(dir), { kind: "not-repository" });
+      assert.deepEqual(yield* git.branch(path.join(dir, "missing")), {
+        kind: "workspace-unavailable",
+      });
     }).pipe(Effect.provide(GitServiceLayer)),
   );
 });
