@@ -1,4 +1,5 @@
 import { SidebarProvider, useSidebar } from "@vibest/ui/components/sidebar";
+import { LazyMotion, domMax } from "motion/react";
 import { createContext, type ReactNode, use, useCallback, useMemo } from "react";
 
 import { useContentPanel, usePanelSnapshot } from "@/components/layout/content-panel/react/hooks";
@@ -84,7 +85,7 @@ export function AppShell({ children }: AppShellProps) {
       className="bg-sidebar h-svh overflow-hidden [-webkit-app-region:drag]"
       defaultOpen={readSidebarCookie()}
     >
-      {children}
+      <LazyMotion features={domMax}>{children}</LazyMotion>
     </SidebarProvider>
   );
 }

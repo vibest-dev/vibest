@@ -1,11 +1,21 @@
 import { useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
 import {
+  animate,
+  useMotionValue,
+  useMotionValueEvent,
+  useReducedMotion,
+  useTransform,
+} from "motion/react";
+import * as m from "motion/react-m";
+import {
   type ReactNode,
   type RefObject,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
 } from "react";
 import {
@@ -23,6 +33,7 @@ import {
 
 const SHELL_LAYOUT_ID = "vibest:shell-layout";
 const SIDEBAR_DEFAULT_SIZE = "16rem";
+const SIDEBAR_MIN_SIZE = "12rem";
 
 const PANEL_IDS = {
   content: "content",
@@ -130,15 +141,128 @@ function useCollapsedBinding(
   };
 }
 
+/** True while the drawer width has not reached the `open` target. */
+function sidebarDrawerInFlight(open: boolean, px: number, expandedPx: number): boolean {
+  return open ? px < expandedPx - 0.5 : px > 0.5;
+}
+
+/**
+ * Toggle springs the column width; the rail's `x` is `width - expanded` so the
+ * contents slide as a drawer instead of squashing. Drag-resize stays a snap.
+ * `minSize` is 0 while the spring is in flight — the panel group otherwise
+ * refuses any `resize()` below 12rem.
+ */
+function useSidebarDrawer(
+  open: boolean,
+  setOpen: (open: boolean) => void,
+  panelRef: RefObject<PanelImperativeHandle | null>,
+) {
+  const reduceMotion = useReducedMotion() === true;
+  const laidOut = useRef(false);
+  const skip = useRef(false);
+  const flying = useRef(false);
+  const expanded = useMotionValue(256);
+  const width = useMotionValue(open ? 256 : 0);
+  const x = useTransform(() => width.get() - expanded.get());
+  const sync = useReducer((n: number) => n + 1, 0)[1];
+  const inFlight = sidebarDrawerInFlight(open, width.get(), expanded.get());
+
+  // Re-render when the spring or jump crosses the settle threshold so `inFlight`
+  // (and therefore `minSize` / fill) can be derived again. The effect that
+  // drives `animate` / `jump` must not `setState`.
+  useMotionValueEvent(width, "change", (value) => {
+    if (sidebarDrawerInFlight(open, value, expanded.get()) !== inFlight) {
+      sync();
+    }
+  });
+
+  const minSize = open && !inFlight ? SIDEBAR_MIN_SIZE : 0;
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (panel === null || !laidOut.current) return;
+
+    if (skip.current) {
+      skip.current = false;
+      width.jump(open ? expanded.get() : 0);
+      flying.current = false;
+      return;
+    }
+
+    if (reduceMotion) {
+      width.jump(open ? expanded.get() : 0);
+      if (open) {
+        panel.expand();
+        panel.resize(expanded.get());
+      } else if (!panel.isCollapsed()) {
+        panel.collapse();
+      }
+      flying.current = false;
+      return;
+    }
+
+    flying.current = true;
+    const controls = animate(width, open ? expanded.get() : 0, {
+      onComplete() {
+        flying.current = false;
+      },
+      onUpdate(value) {
+        if (value <= 0.5) {
+          if (!panel.isCollapsed()) panel.collapse();
+          return;
+        }
+        panel.resize(value);
+      },
+    });
+    return () => {
+      flying.current = false;
+      controls.stop();
+    };
+  }, [expanded, open, panelRef, reduceMotion, width]);
+
+  const onResize: OnPanelResize = (size) => {
+    const panel = panelRef.current;
+    if (!laidOut.current) {
+      laidOut.current = true;
+      if (size.inPixels > 0) {
+        expanded.set(size.inPixels);
+        if (open) width.set(size.inPixels);
+      }
+      if (panel === null) return;
+      if (!open && !panel.isCollapsed()) panel.collapse();
+      if (open && panel.isCollapsed()) {
+        panel.expand();
+        if (panel.isCollapsed()) panel.resize(expanded.get());
+      }
+      return;
+    }
+
+    if (flying.current) return;
+
+    if (size.inPixels > 0) {
+      expanded.set(size.inPixels);
+      width.set(size.inPixels);
+    }
+
+    const collapsed = size.inPixels === 0;
+    if (collapsed === open) {
+      skip.current = true;
+      setOpen(!collapsed);
+    }
+  };
+
+  return {
+    fill: open && !inFlight,
+    minSize,
+    onResize,
+    style: { width: expanded, x },
+  };
+}
+
 export function ShellSidebarPanel({ children }: { children: ReactNode }): ReactNode {
   const { open, setOpen } = useSidebar();
   const panelRef = usePanelRef();
-  const onResize = useCollapsedBinding(
-    panelRef,
-    !open,
-    (collapsed) => setOpen(!collapsed),
-    SIDEBAR_DEFAULT_SIZE,
-  );
+  const drawer = useSidebarDrawer(open, setOpen, panelRef);
 
   return (
     <Panel
@@ -149,11 +273,19 @@ export function ShellSidebarPanel({ children }: { children: ReactNode }): ReactN
       groupResizeBehavior="preserve-pixel-size"
       id={PANEL_IDS.sidebar}
       maxSize="30rem"
-      minSize="12rem"
-      onResize={onResize}
+      minSize={drawer.minSize}
+      onResize={drawer.onResize}
       panelRef={panelRef}
     >
-      {children}
+      <m.div
+        className={cn("flex h-full min-h-0 flex-col", drawer.fill ? "w-full" : "shrink-0")}
+        data-slot="sidebar-drawer"
+        data-state={open ? "open" : "closed"}
+        inert={!open}
+        style={drawer.fill ? undefined : drawer.style}
+      >
+        {children}
+      </m.div>
     </Panel>
   );
 }
