@@ -14,6 +14,7 @@ import { type ReactNode, useState } from "react";
 import { useStore } from "zustand";
 
 import type { OutgoingMessage } from "@/features/chat/runtime/chat-state";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 import { useChatSession } from "./chat-session-context";
 import { ChatInput } from "./input/chat-input";
@@ -146,13 +147,15 @@ export function ChatInputComposer({
     ...orpcQueryUtils.git.branch.queryOptions({ input: { cwd: cwd ?? "" } }),
     enabled: cwd !== undefined,
   });
-  const currentBranch = branch.data?.current;
+  const currentBranch = branch.data?.kind === "repository" ? branch.data.current : undefined;
+  const workspaceUnavailable = branch.data?.kind === "workspace-unavailable";
   const { acknowledgeRecovery, prompt, steer, turnInProgress, store } = useChatSession();
   const status = useStore(store, (state) => state.session.status);
   const activeTurnId = useStore(store, (state) => state.session.activeTurnId);
   const outgoing = useStore(store, (state) => state.outgoing);
   const recovery = useStore(store, (state) => state.recovery.snapshot);
   const [acknowledgementError, setAcknowledgementError] = useState<string | null>(null);
+  const workspaceUnavailableRef = useLatestRef(workspaceUnavailable);
 
   const controller = useChatInputController({
     extensions: (self) => [
@@ -160,7 +163,7 @@ export function ChatInputComposer({
       createSubmitKeymap({ onSubmit: () => void self.submit() }),
     ],
     onSubmit: (text) => {
-      if (recovery !== null) return false;
+      if (recovery !== null || workspaceUnavailableRef.current) return false;
       // The composer clears once the message is accepted into the local queue;
       // the promise may settle later when this item reaches the server.
       void prompt(text).catch(() => undefined);
@@ -227,7 +230,7 @@ export function ChatInputComposer({
           <PromptInputToolbar>
             <PromptInputTools>{toolbar}</PromptInputTools>
             <PromptInputSubmit
-              disabled={!hasContent || recovery !== null}
+              disabled={!hasContent || recovery !== null || workspaceUnavailable}
               // During a turn this button enqueues rather than interrupts, so the
               // send arrow is the truthful affordance instead of the stop square.
               status={turnInProgress ? "ready" : status}
@@ -236,17 +239,21 @@ export function ChatInputComposer({
         </ChatInputProvider>
       </Card>
       <CardFrameFooter className="px-3 py-2">
-        <span
-          className="text-muted-foreground flex h-4 min-w-0 items-center gap-1.5 text-xs"
-          title={currentBranch ? "Current git branch" : undefined}
-        >
+        <span className="flex h-4 min-w-0 items-center text-xs">
           {branch.isPending ? (
             <span aria-hidden="true" className="bg-muted h-2 w-24 animate-pulse rounded-sm" />
           ) : currentBranch ? (
-            <>
+            <span
+              className="text-muted-foreground flex min-w-0 items-center gap-1.5"
+              title="Current git branch"
+            >
               <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
               <span className="truncate">{currentBranch}</span>
-            </>
+            </span>
+          ) : branch.data?.kind === "not-repository" ? (
+            <span className="text-muted-foreground">Not a Git repository</span>
+          ) : workspaceUnavailable ? (
+            <span className="text-destructive">Workspace unavailable</span>
           ) : null}
         </span>
       </CardFrameFooter>
