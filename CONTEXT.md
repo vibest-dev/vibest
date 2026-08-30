@@ -13,7 +13,7 @@ The composite identity `{ projectId, harnessAgentId, sessionId }` that every ses
 _Avoid_: bare sessionId as a wire identity or client-state key
 
 **Harness session id**:
-The agent-native session identity (Claude session UUID, Codex thread ID, Grok ACP session id) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
+The agent-native session identity (Claude session UUID, Codex thread ID, Grok ACP session id, Cursor SDK `agentId`) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
 _Avoid_: native id
 
 **Attach**:

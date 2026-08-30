@@ -70,7 +70,7 @@ app-server generate-ts`) and is in the lint/format ignore lists. Don't hand-edit
   `packages/server/src/daemon/paths.ts` names files inside a directory it is
   handed and deliberately has no default of its own.
 - `HarnessAgentIdSchema` in `packages/contract/src/domain.ts` is the whitelist:
-  `claude-code`, `codex`, `pi`, `grok` and nothing else. A fifth harness needs a literal
+  `claude-code`, `codex`, `pi`, `grok`, `cursor` and nothing else. A new harness needs a literal
   there, a `packages/server/src/harness/<agent>/` transform, and its adapter added
   to the `RegistryLayer` in `packages/server/src/rpc/runtime.ts` — all three, or it
   is unreachable at runtime. `harness/registry.ts` is only the lookup table's

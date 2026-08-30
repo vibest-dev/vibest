@@ -213,6 +213,29 @@ export class GrokRpcError extends Schema.TaggedError<GrokRpcError>()("GrokRpcErr
   }
 }
 
+export class CursorTransportError extends Schema.TaggedError<CursorTransportError>()(
+  "CursorTransportError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Cursor transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
+  }
+}
+
+export class CursorRpcError extends Schema.TaggedError<CursorRpcError>()("CursorRpcError", {
+  method: Schema.String,
+  code: Schema.Number,
+  errorMessage: Schema.String,
+  data: Schema.optionalKey(Schema.Unknown),
+}) {
+  override get message() {
+    return `Cursor RPC '${this.method}' failed (${this.code}): ${this.errorMessage}`;
+  }
+}
+
 export class AgentProcessExited extends Schema.TaggedError<AgentProcessExited>()(
   "AgentProcessExited",
   {
