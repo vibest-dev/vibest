@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import { makeClaudeCodeAdapter, type ClaudeCodeAgent } from "../../src/harness/claude-code";
 import { makeCodexAdapter, type CodexAgent } from "../../src/harness/codex";
+import { makeCursorAdapter, type CursorAgent } from "../../src/harness/cursor";
 import { makeGrokAdapter, type GrokAgent } from "../../src/harness/grok";
 import { makePiAdapter, type PiAgent } from "../../src/harness/pi";
 
@@ -39,10 +40,18 @@ it("grok declares ask/full, defaulting to ask", () => {
   expect(adapter.defaultPermissionMode).toBe("ask");
 });
 
+it("cursor declares plan/ask/full, defaulting to full", () => {
+  const adapter = makeCursorAdapter(stub<CursorAgent>());
+
+  expect(adapter.permissionModes).toEqual(["plan", "ask", "full"]);
+  expect(adapter.defaultPermissionMode).toBe("full");
+});
+
 it("only the harnesses with a model catalogue declare a probe", () => {
   expect(makeClaudeCodeAdapter(stub<ClaudeCodeAgent>()).probeModels).toBeDefined();
   expect(makeCodexAdapter(stub<CodexAgent>()).probeModels).toBeDefined();
   expect(makeGrokAdapter(stub<GrokAgent>()).probeModels).toBeDefined();
+  expect(makeCursorAdapter(stub<CursorAgent>()).probeModels).toBeDefined();
   // Absent, not empty: pi has no model switch, so the client renders no picker.
   expect(makePiAdapter(stub<PiAgent>()).probeModels).toBeUndefined();
 });
@@ -53,4 +62,5 @@ it("declaring an adapter never touches its agent", () => {
   expect(() => makeClaudeCodeAdapter(stub<ClaudeCodeAgent>())).not.toThrow();
   expect(() => makeCodexAdapter(stub<CodexAgent>())).not.toThrow();
   expect(() => makeGrokAdapter(stub<GrokAgent>())).not.toThrow();
+  expect(() => makeCursorAdapter(stub<CursorAgent>())).not.toThrow();
 });

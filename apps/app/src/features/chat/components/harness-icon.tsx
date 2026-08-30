@@ -49,6 +49,19 @@ export function HarnessIcon({
           <path d="M17.5 12H23v11h-5.5V12z" />
         </svg>
       );
+    case "cursor":
+      return (
+        <svg
+          aria-hidden="true"
+          className={className}
+          fill="#000000"
+          focusable="false"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path d="M4 3.2v17.6l6.4-5.1 3.5 8.1 2.7-1.2-3.5-8.1L20 10.8 4 3.2z" />
+        </svg>
+      );
     case "grok":
       // 2025 Grok "G" (Jon Vio / xAI). Path from Lobe Icons' grok.svg, matching
       // the mark on grok.com — not a made-up glyph.

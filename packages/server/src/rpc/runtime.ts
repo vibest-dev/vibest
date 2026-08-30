@@ -23,6 +23,7 @@ import {
   type ClaudeCodeAgent,
 } from "../harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
+import { makeCursorAdapter, makeCursorAgent, type CursorAgent } from "../harness/cursor";
 import { makeGrokAdapter, makeGrokAgent, type GrokAgent } from "../harness/grok";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
 import { SessionRecoveryStoreLayer } from "../harness/session-recovery";
@@ -33,6 +34,7 @@ export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
 export class Pi extends Context.Service<Pi, PiAgent>()("Pi") {}
 export class Grok extends Context.Service<Grok, GrokAgent>()("Grok") {}
+export class Cursor extends Context.Service<Cursor, CursorAgent>()("Cursor") {}
 
 /**
  * The Node platform services. Every effect that touches disk, paths, or random
@@ -61,7 +63,12 @@ export const GrokLayer: Layer.Layer<Grok> = Layer.effect(Grok, makeGrokAgent()).
   Layer.provide(PlatformLayer),
 );
 
-const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer, GrokLayer);
+export const CursorLayer: Layer.Layer<Cursor> = Layer.effect(Cursor, makeCursorAgent()).pipe(
+  Layer.provide(NodeProcessLayer),
+  Layer.provide(PlatformLayer),
+);
+
+const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer, GrokLayer, CursorLayer);
 
 /**
  * Which CLI is installed, and whether it is new enough, is fixed for the life
@@ -98,12 +105,14 @@ const RegistryLayer = Layer.effect(
     const codex = yield* Codex;
     const pi = yield* Pi;
     const grok = yield* Grok;
+    const cursor = yield* Cursor;
     const adapters = yield* Effect.forEach(
       [
         makeClaudeCodeAdapter(claudeCode),
         makeCodexAdapter(codex),
         makePiAdapter(pi),
         makeGrokAdapter(grok),
+        makeCursorAdapter(cursor),
       ],
       cacheAvailability,
     );

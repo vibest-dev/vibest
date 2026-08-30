@@ -14,6 +14,7 @@
     "./session-events": "./src/session-events.ts",
     "./claude-code": "./src/claude-code/index.ts",
     "./grok": "./src/grok/index.ts",
+    "./cursor": "./src/cursor/index.ts",
     "./codex": "./src/codex/index.ts",
     "./codex/protocol": "./src/codex/protocol/index.ts",
     "./codex/protocol/v2": "./src/codex/protocol/v2/index.ts"
