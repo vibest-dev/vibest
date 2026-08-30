@@ -1,6 +1,8 @@
 import { Outlet } from "@tanstack/react-router";
 import { SidebarInset, SidebarTrigger, useSidebar } from "@vibest/ui/components/sidebar";
 import { cn } from "@vibest/ui/lib/utils";
+import { useReducedMotion } from "motion/react";
+import * as m from "motion/react-m";
 
 import { ContentPanelToggle } from "@/components/layout/content-panel/react/toggle";
 
@@ -14,6 +16,8 @@ export function CardPanel({ hasTrafficLights, heading, supportingText }: CardPan
   const { state, isMobile } = useSidebar();
   const collapsedDesktop = !isMobile && state === "collapsed";
   const ownsToggle = isMobile || collapsedDesktop;
+  const reduceMotion = useReducedMotion() === true;
+  const chromeTransition = reduceMotion ? { duration: 0 } : undefined;
 
   return (
     <SidebarInset className="flex min-h-0 flex-col overflow-hidden border [-webkit-app-region:no-drag] md:rounded-xl md:shadow-sm/5">
@@ -23,23 +27,32 @@ export function CardPanel({ hasTrafficLights, heading, supportingText }: CardPan
           collapsedDesktop && hasTrafficLights && "ps-20",
         )}
       >
-        {ownsToggle && (
-          <SidebarTrigger
-            className={cn(isMobile ? "-ms-0.5" : "-ms-2", "[-webkit-app-region:no-drag]")}
-          />
-        )}
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <span className="min-w-0 truncate font-medium" title={heading}>
-            {heading}
-          </span>
-          {supportingText !== undefined && (
-            <span
-              className="text-muted-foreground max-w-[50%] min-w-0 truncate"
-              title={supportingText}
-            >
-              {supportingText}
-            </span>
+        <div className="flex min-w-0 flex-1 items-center">
+          {ownsToggle && (
+            <SidebarTrigger
+              className={cn(
+                isMobile ? "-ms-0.5 me-2" : "-ms-2 me-2",
+                "[-webkit-app-region:no-drag]",
+              )}
+            />
           )}
+          <m.div
+            className="flex min-w-0 items-center gap-2 text-sm"
+            layout={reduceMotion ? false : "position"}
+            transition={chromeTransition}
+          >
+            <span className="min-w-0 truncate font-medium" title={heading}>
+              {heading}
+            </span>
+            {supportingText !== undefined && (
+              <span
+                className="text-muted-foreground max-w-[50%] min-w-0 truncate"
+                title={supportingText}
+              >
+                {supportingText}
+              </span>
+            )}
+          </m.div>
         </div>
         <ContentPanelToggle className="ms-auto [-webkit-app-region:no-drag]" />
       </header>
