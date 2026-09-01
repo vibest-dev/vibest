@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { isSessionScopedEvent, type SessionRef } from "@vibest/contract";
 import type { UIMessage } from "ai";
-import { Crypto, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
+import { Crypto, Deferred, Effect, Fiber, FileSystem, type Scope, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type EventBusShape, makeEventBus } from "../../src/events/event-bus";
@@ -13,9 +13,14 @@ import type {
   HarnessAgentRuntime,
   SessionInfoResult,
 } from "../../src/harness/adapter";
-import { TurnAlreadyRunning } from "../../src/harness/errors";
+import { AgentOpenError, TurnAlreadyRunning } from "../../src/harness/errors";
 import { makeHarnessAgentRegistry } from "../../src/harness/registry";
+import { makeHarnessAgentSession } from "../../src/harness/session";
 import { makeHarnessAgentSessionManager } from "../../src/harness/session-manager";
+import {
+  makeSessionRecoveryStore,
+  type SessionRecoveryStoreShape,
+} from "../../src/harness/session-recovery";
 import {
   type HarnessAgentSessionRepositoryShape,
   makeHarnessAgentSessionRepository,
@@ -30,13 +35,19 @@ type Spy = {
   open: Array<{ cwd: string }>;
   resume: Array<{ sessionId: string; cwd: string | undefined }>;
   close: Array<string>;
+  promptCalls: number;
 };
 
 type Fixture = {
   readonly service: HarnessAgentSessionServiceShape;
   readonly repo: HarnessAgentSessionRepositoryShape;
   readonly bus: EventBusShape;
+  readonly recovery: SessionRecoveryStoreShape;
   readonly spy: Spy;
+  readonly waitForPromptStart: Effect.Effect<void>;
+  readonly releasePrompt: Effect.Effect<void>;
+  readonly waitForCloseStart: Effect.Effect<void>;
+  readonly releaseClose: Effect.Effect<void>;
   /**
    * A second service over the same storage and the same adapter — what a
    * server restart looks like from the session domain: the records survive,
@@ -68,15 +79,24 @@ describe("HarnessAgentSessionService", () => {
       turn?: "open" | "finished";
       // The harness rejects every prompt (a turn is already running).
       promptFails?: boolean;
-      // Optional close hook for exercising lifecycle contention.
-      close?: (sessionId: string) => Promise<void>;
+      // Hold runtime.prompt until the test releases its receipt.
+      promptWaits?: boolean;
+      // Runtime reacquisition fails before runtime.prompt is available.
+      resumeFails?: boolean;
+      steerFails?: boolean;
+      // Hold runtime.close until the test releases it.
+      closeWaits?: boolean;
     },
     program: (fixture: Fixture) => Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem>,
   ) =>
     Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const spy: Spy = { open: [], resume: [], close: [] };
+          const spy: Spy = { open: [], resume: [], close: [], promptCalls: 0 };
+          const promptStarted = yield* Deferred.make<void>();
+          const promptGate = yield* Deferred.make<void>();
+          const closeStarted = yield* Deferred.make<void>();
+          const closeGate = yield* Deferred.make<void>();
           let opened = 0;
           const turnEvents = (sessionId: string) => {
             if (opts.turn === undefined) return Stream.empty;
@@ -110,9 +130,25 @@ describe("HarnessAgentSessionService", () => {
             sessionId,
             harnessAgentId: "claude-code",
             events: turnEvents(sessionId),
-            prompt: opts.promptFails
-              ? () => Effect.fail(new TurnAlreadyRunning({ sessionId }))
-              : () => Effect.succeed({ turnId: "turn-1" }),
+            prompt: () =>
+              Effect.sync(() => {
+                spy.promptCalls += 1;
+              }).pipe(
+                Effect.andThen(
+                  opts.promptFails
+                    ? Effect.fail(new TurnAlreadyRunning({ sessionId }))
+                    : opts.promptWaits
+                      ? Deferred.succeed(promptStarted, undefined).pipe(
+                          Effect.andThen(Deferred.await(promptGate)),
+                          Effect.as({ turnId: "turn-1" }),
+                        )
+                      : Effect.succeed({ turnId: "turn-1" }),
+                ),
+              ),
+            steer: (_expectedTurnId) =>
+              opts.steerFails
+                ? Effect.fail(new TurnAlreadyRunning({ sessionId, turnId: "turn-other" }))
+                : Effect.void,
             setModel: () => Effect.void,
             setReasoningEffort: () => Effect.void,
             setPermissionMode: () => Effect.void,
@@ -120,7 +156,6 @@ describe("HarnessAgentSessionService", () => {
             respondToAgentRequest: () => Effect.void,
             getCapabilities: Effect.succeed({
               supportsResume: true,
-              supportsSteering: false,
               supportsPermissions: false,
             }),
             ...(opts.history !== undefined ? { getMessages: Effect.succeed(opts.history) } : {}),
@@ -128,9 +163,11 @@ describe("HarnessAgentSessionService", () => {
               spy.close.push(sessionId);
             }).pipe(
               Effect.andThen(
-                opts.close === undefined
-                  ? Effect.void
-                  : Effect.promise(() => opts.close?.(sessionId) ?? Promise.resolve()),
+                opts.closeWaits
+                  ? Deferred.succeed(closeStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(closeGate)),
+                    )
+                  : Effect.void,
               ),
             ),
           });
@@ -150,10 +187,17 @@ describe("HarnessAgentSessionService", () => {
                 return makeSession(`native-${opened}`);
               }),
             resume: ({ sessionId, cwd }) =>
-              Effect.sync(() => {
-                spy.resume.push({ sessionId, cwd });
-                return makeSession(sessionId);
-              }),
+              opts.resumeFails
+                ? Effect.fail(
+                    new AgentOpenError({
+                      harnessAgentId: "claude-code",
+                      cause: new Error("resume failed"),
+                    }),
+                  )
+                : Effect.sync(() => {
+                    spy.resume.push({ sessionId, cwd });
+                    return makeSession(sessionId);
+                  }),
             ...(opts.coldHistory !== undefined
               ? { getMessages: () => Effect.succeed(opts.coldHistory ?? []) }
               : {}),
@@ -164,7 +208,19 @@ describe("HarnessAgentSessionService", () => {
           const build: Effect.Effect<Fixture, never, Scope.Scope | FileSystem.FileSystem> =
             Effect.gen(function* () {
               const bus = yield* makeEventBus();
-              const manager = yield* makeHarnessAgentSessionManager(registry, bus);
+              const recovery = yield* makeSessionRecoveryStore(
+                path.join(home, "storage", "session-recovery"),
+                yield* crypto.randomUUIDv4.pipe(Effect.orDie),
+                crypto.randomUUIDv4.pipe(Effect.orDie),
+              );
+              const manager = yield* makeHarnessAgentSessionManager(
+                registry,
+                bus,
+                (ref, streamId, eventBus) =>
+                  makeHarnessAgentSession(ref, streamId, eventBus, (eventRef, body) =>
+                    recovery.beforePublish(eventRef, body).pipe(Effect.orDie),
+                  ),
+              ).pipe(Effect.provideService(Crypto.Crypto, crypto));
               const repo = yield* makeHarnessAgentSessionRepository(
                 path.join(home, "storage", "sessions"),
               );
@@ -173,9 +229,21 @@ describe("HarnessAgentSessionService", () => {
                 registry,
                 repo,
                 bus,
+                recovery,
                 newSessionId: crypto.randomUUIDv4.pipe(Effect.orDie),
               });
-              return { service, repo, bus, spy, restart: build };
+              return {
+                service,
+                repo,
+                bus,
+                recovery,
+                spy,
+                waitForPromptStart: Deferred.await(promptStarted),
+                releasePrompt: Deferred.succeed(promptGate, undefined).pipe(Effect.asVoid),
+                waitForCloseStart: Deferred.await(closeStarted),
+                releaseClose: Deferred.succeed(closeGate, undefined).pipe(Effect.asVoid),
+                restart: build,
+              };
             });
           return yield* program(yield* build);
         }),
@@ -273,6 +341,77 @@ describe("HarnessAgentSessionService", () => {
     expect(closeSpy).toEqual(["native-1"]);
   });
 
+  it("serializes close behind an already-authorized prompt receipt", async () => {
+    const result = await run({ promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-before-close",
+            parts: [{ type: "text", text: "finish authorization first" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const close = yield* Effect.forkChild(fixture.service.close(ref));
+        yield* Effect.yieldNow;
+        const closeBeforeReceipt = close.pollUnsafe();
+        const recoveryBeforeReceipt = yield* fixture.recovery.read(ref);
+
+        yield* fixture.releasePrompt;
+        yield* Fiber.join(prompt);
+        yield* Fiber.join(close);
+        return {
+          closeBeforeReceipt,
+          recoveryBeforeReceipt,
+          metadata: yield* fixture.repo.read(ref.projectId, ref.sessionId),
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.closeBeforeReceipt).toBeUndefined();
+    expect(result.recoveryBeforeReceipt?.prompts[0]?.messageId).toBe("prompt-before-close");
+    expect(result.metadata.sessionId).toBeTruthy();
+    expect(result.recovery).toBeNull();
+    expect(result.promptCalls).toBe(1);
+  });
+
+  it("lets a prompt waiting behind close create a newer recovery record after close clears", async () => {
+    const result = await run({ turn: "open", closeWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const close = yield* Effect.forkChild(fixture.service.close(ref));
+        yield* fixture.waitForCloseStart;
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-after-close",
+            parts: [{ type: "text", text: "newer work" }],
+          }),
+        );
+        yield* Effect.yieldNow;
+        const promptWhileCloseHeld = prompt.pollUnsafe();
+
+        yield* fixture.releaseClose;
+        yield* Fiber.join(close);
+        yield* Fiber.join(prompt);
+        return {
+          promptWhileCloseHeld,
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.promptWhileCloseHeld).toBeUndefined();
+    expect(result.recovery?.prompts).toMatchObject([
+      { messageId: "prompt-after-close", turnId: "turn-1" },
+    ]);
+    expect(result.promptCalls).toBe(1);
+  });
+
   it("delete closes the native session and removes its metadata", async () => {
     const result = await run({}, (fixture) =>
       Effect.gen(function* () {
@@ -284,6 +423,47 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(result.closeSpy).toEqual(["native-1"]);
     expect(result.listed).toHaveLength(0);
+  });
+
+  it("serializes delete behind an already-authorized prompt receipt", async () => {
+    const result = await run({ promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const prompt = yield* Effect.forkChild(
+          fixture.service.prompt({
+            ref,
+            messageId: "prompt-before-delete",
+            parts: [{ type: "text", text: "finish authorization first" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const deletion = yield* Effect.forkChild(fixture.service.delete(ref));
+        yield* Effect.yieldNow;
+        const deleteBeforeReceipt = deletion.pollUnsafe();
+        const metadataBeforeReceipt = yield* fixture.repo.read(ref.projectId, ref.sessionId);
+        const recoveryBeforeReceipt = yield* fixture.recovery.read(ref);
+
+        yield* fixture.releasePrompt;
+        yield* Fiber.join(prompt);
+        yield* Fiber.join(deletion);
+        const metadataError = yield* Effect.flip(fixture.repo.read(ref.projectId, ref.sessionId));
+        return {
+          deleteBeforeReceipt,
+          metadataBeforeReceipt,
+          recoveryBeforeReceipt,
+          metadataError,
+          recovery: yield* fixture.recovery.read(ref),
+          promptCalls: fixture.spy.promptCalls,
+        };
+      }),
+    );
+
+    expect(result.deleteBeforeReceipt).toBeUndefined();
+    expect(result.metadataBeforeReceipt.sessionId).toBeTruthy();
+    expect(result.recoveryBeforeReceipt?.prompts[0]?.messageId).toBe("prompt-before-delete");
+    expect(result.metadataError._tag).toBe("SessionNotFound");
+    expect(result.recovery).toBeNull();
+    expect(result.promptCalls).toBe(1);
   });
 
   it("list returns one summary per session, keyed by server sessionId", async () => {
@@ -374,9 +554,10 @@ describe("HarnessAgentSessionService", () => {
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       while (true) {
-        const turn = yield* fixture.service
-          .getSnapshot(ref)
-          .pipe(Effect.map((snapshot) => snapshot.activeTurn));
+        const turn = yield* fixture.service.getSnapshot(ref).pipe(
+          Effect.orDie,
+          Effect.map((snapshot) => snapshot.activeTurn),
+        );
         if (done(turn)) return;
         yield* Effect.sleep("10 millis");
       }
@@ -387,10 +568,20 @@ describe("HarnessAgentSessionService", () => {
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
         yield* waitForTurn(fixture, ref, (turn) => turn !== null && !turn.complete);
+        yield* fixture.recovery.beforePublish(ref, {
+          type: "session.prompt.submitted",
+          messageId: "active-before-archive",
+          parts: [{ type: "text", text: "active" }],
+        });
         yield* fixture.service.archive(ref, true);
         const active = yield* fixture.service.list("proj-a", false);
         const archived = yield* fixture.service.list("proj-a", true);
-        return { active, archived, closed: fixture.spy.close.slice() };
+        return {
+          active,
+          archived,
+          closed: fixture.spy.close.slice(),
+          recovery: yield* fixture.recovery.read(ref),
+        };
       }),
     );
 
@@ -398,6 +589,7 @@ describe("HarnessAgentSessionService", () => {
     expect(result.archived).toHaveLength(1);
     expect(result.archived[0]?.status).toBeUndefined();
     expect(result.closed).toEqual(["native-1"]);
+    expect(result.recovery).toBeNull();
   });
 
   it("getMessages trims the last user segment while a turn is in flight", async () => {
@@ -487,14 +679,25 @@ describe("HarnessAgentSessionService", () => {
     const result = await run({ coldHistory: history }, (fixture) =>
       Effect.gen(function* () {
         const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const originalSnapshot = yield* fixture.service.getSnapshot(ref);
         const restarted = yield* fixture.restart;
 
         yield* restarted.service.prepare(ref, "/tmp/vibest-app");
         const status = yield* restarted.service.getStatus(ref);
         const snapshot = yield* restarted.service.getSnapshot(ref);
+        const repeatedSnapshot = yield* restarted.service.getSnapshot(ref);
         const listed = yield* restarted.service.list("proj-a", false);
         const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
-        return { ref, status, snapshot, listed, messages, spy: fixture.spy };
+        return {
+          ref,
+          originalSnapshot,
+          status,
+          snapshot,
+          repeatedSnapshot,
+          listed,
+          messages,
+          spy: fixture.spy,
+        };
       }),
     );
 
@@ -502,6 +705,8 @@ describe("HarnessAgentSessionService", () => {
     expect(result.status).toEqual({ phase: "idle" });
     expect(result.snapshot.cursor).toBe(0);
     expect(result.snapshot.activeTurn).toBeNull();
+    expect(result.snapshot.streamId).toBe(result.repeatedSnapshot.streamId);
+    expect(result.snapshot.streamId).not.toBe(result.originalSnapshot.streamId);
     expect(result.messages).toEqual(history);
     // … a session nothing has touched carries no status at all, so the sidebar
     // does not light up every row as active …
@@ -510,6 +715,100 @@ describe("HarnessAgentSessionService", () => {
     // … and none of it started an agent. `open` is the one at create time.
     expect(result.spy.open).toHaveLength(1);
     expect(result.spy.resume).toEqual([]);
+  });
+
+  it("restores an unresolved turn as a fail-closed barrier until explicit acknowledgement", async () => {
+    const history: UIMessage[] = [
+      { id: "committed-user", role: "user", parts: [{ type: "text", text: "before restart" }] },
+    ];
+    const result = await run({ coldHistory: history, promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* Effect.forkScoped(
+          fixture.service.prompt({
+            ref,
+            messageId: "uncertain-message",
+            parts: [{ type: "text", text: "may have caused side effects" }],
+          }),
+        );
+        yield* fixture.waitForPromptStart;
+        const resumesBeforeRestart = fixture.spy.resume.length;
+
+        const restarted = yield* fixture.restart;
+        const status = yield* restarted.service.getStatus(ref);
+        const snapshot = yield* restarted.service.getSnapshot(ref);
+        const messages = yield* restarted.service.getMessages(ref, "/tmp/vibest-app");
+        const blocked = yield* Effect.flip(
+          restarted.service.prompt({
+            ref,
+            messageId: "must-not-run",
+            parts: [{ type: "text", text: "do not replay" }],
+          }),
+        );
+
+        const recoveryId = snapshot.recovery?.recoveryId;
+        if (recoveryId === undefined) return yield* Effect.die("missing recovery barrier");
+        const acknowledged = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* restarted.bus.subscribe({ kind: "session", ref });
+            const eventFiber = yield* Effect.forkChild(
+              Stream.runCollect(
+                Stream.take(
+                  Stream.filter(
+                    stream,
+                    (item) =>
+                      item.type === "event" && item.event.type === "session.recovery.acknowledged",
+                  ),
+                  1,
+                ),
+              ),
+            );
+            yield* restarted.service.acknowledgeRecovery(ref, recoveryId);
+            return Array.from(yield* Fiber.join(eventFiber))[0];
+          }),
+        );
+        const after = yield* restarted.service.getSnapshot(ref);
+        yield* fixture.releasePrompt;
+
+        return {
+          status,
+          snapshot,
+          messages,
+          blocked,
+          acknowledged,
+          after,
+          promptCalls: fixture.spy.promptCalls,
+          resumesBeforeRestart,
+          resumesAfterRecovery: fixture.spy.resume.length,
+        };
+      }),
+    );
+
+    expect(result.status).toEqual({ phase: "recovery_required" });
+    expect(result.snapshot).toMatchObject({
+      status: { phase: "recovery_required" },
+      recovery: {
+        reason: "server_restart",
+        prompts: [
+          {
+            messageId: "uncertain-message",
+            parts: [{ type: "text", text: "may have caused side effects" }],
+          },
+        ],
+      },
+      activeTurn: null,
+      pendingRequests: [],
+    });
+    expect(result.messages).toEqual(history);
+    expect(result.blocked._tag).toBe("RecoveryRequired");
+    expect(result.acknowledged).toMatchObject({
+      type: "event",
+      event: { type: "session.recovery.acknowledged" },
+    });
+    expect(result.after.recovery).toBeNull();
+    expect(result.after.status).toEqual({ phase: "idle" });
+    expect(result.promptCalls).toBe(1);
+    expect(result.resumesAfterRecovery).toBe(result.resumesBeforeRestart);
   });
 
   // `turn: "finished"` keeps the fake's event stream open, which is what a real
@@ -629,8 +928,118 @@ describe("HarnessAgentSessionService", () => {
     expect(snapshot.activePrompt).toMatchObject({
       messageId: "client-msg-1",
       parts: [{ type: "text", text: "hello there" }],
+      acceptedTurnId: expect.any(String),
     });
     expect(snapshot.activePrompt?.seq).toBeGreaterThan(0);
+  });
+
+  it("emits exactly submitted and accepted for an explicit steer", async () => {
+    const events = await run({ turn: "open" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            yield* fixture.service.steer({
+              ref,
+              expectedTurnId: "turn-1",
+              parts: [{ type: "text", text: "change direction" }],
+              messageId: "steer-msg",
+            });
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return Array.from(items).map((item) =>
+              item.type === "event" ? item.event.type : item.type,
+            );
+          }),
+        );
+      }),
+    );
+    expect(events).toEqual(["session.prompt.submitted", "session.prompt.accepted"]);
+  });
+
+  it("retains multiple accepted steers for reconnect in acceptance order", async () => {
+    const snapshot = await run({ turn: "open" }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        yield* fixture.service.steer({
+          ref,
+          expectedTurnId: "turn-1",
+          parts: [{ type: "text", text: "A" }],
+          messageId: "steer-a",
+        });
+        yield* fixture.service.steer({
+          ref,
+          expectedTurnId: "turn-1",
+          parts: [{ type: "text", text: "B" }],
+          messageId: "steer-b",
+        });
+        return yield* fixture.service.getSnapshot(ref);
+      }),
+    );
+
+    expect(snapshot.acceptedPrompt).toMatchObject({
+      messageId: "steer-b",
+      acceptedTurnId: "turn-1",
+    });
+    expect(snapshot.acceptedPrompts).toMatchObject([
+      { messageId: "steer-a", acceptedTurnId: "turn-1" },
+      { messageId: "steer-b", acceptedTurnId: "turn-1" },
+    ]);
+    expect(snapshot.pendingPrompts).toEqual([]);
+  });
+
+  it("emits exactly submitted and rejected when an explicit steer fails", async () => {
+    const result = await run({ turn: "open", steerFails: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            const rejection = yield* fixture.service
+              .steer({
+                ref,
+                expectedTurnId: "turn-1",
+                parts: [{ type: "text", text: "change direction" }],
+                messageId: "steer-msg",
+              })
+              .pipe(Effect.flip);
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return {
+              rejection,
+              events: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+            };
+          }),
+        );
+      }),
+    );
+    expect(result.rejection._tag).toBe("TurnAlreadyRunning");
+    expect(result.events).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
   });
 
   it("compensates a harness-rejected prompt: rejected event follows, no retained phantom", async () => {
@@ -679,6 +1088,106 @@ describe("HarnessAgentSessionService", () => {
     expect(result.activePrompt).toBeNull();
   });
 
+  it("compensates a submitted prompt when runtime acquisition fails", async () => {
+    const result = await run({ turn: "open", resumeFails: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        const restarted = yield* fixture.restart;
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* restarted.bus.subscribe({ kind: "session", ref });
+            const rejection = yield* Effect.flip(
+              restarted.service.prompt({
+                ref,
+                parts: [{ type: "text", text: "cannot resume" }],
+                messageId: "resume-failed-msg",
+              }),
+            );
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.rejected"),
+                ),
+                2,
+              ),
+            );
+            return {
+              rejection,
+              broadcast: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+              activePrompt: (yield* restarted.service.getSnapshot(ref)).activePrompt,
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.rejection._tag).toBe("AgentOpenError");
+    expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.rejected"]);
+    expect(result.activePrompt).toBeNull();
+  });
+
+  it("finishes prompt correlation when the requesting fiber is interrupted", async () => {
+    const result = await run({ turn: "open", promptWaits: true }, (fixture) =>
+      Effect.gen(function* () {
+        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const stream = yield* fixture.bus.subscribe({ kind: "session", ref });
+            const request = yield* Effect.forkChild(
+              fixture.service.prompt({
+                ref,
+                parts: [{ type: "text", text: "survive cancellation" }],
+                messageId: "interrupted-msg",
+              }),
+            );
+            yield* fixture.waitForPromptStart;
+            const interruption = yield* Effect.forkChild(Fiber.interrupt(request));
+            yield* fixture.releasePrompt;
+            yield* Fiber.join(interruption);
+
+            const items = yield* Stream.runCollect(
+              Stream.take(
+                Stream.filter(
+                  stream,
+                  (item) =>
+                    item.type === "event" &&
+                    (item.event.type === "session.prompt.submitted" ||
+                      item.event.type === "session.prompt.accepted"),
+                ),
+                2,
+              ),
+            );
+            const snapshot = yield* fixture.service.getSnapshot(ref);
+            return {
+              broadcast: Array.from(items).map((item) =>
+                item.type === "event" ? item.event.type : item.type,
+              ),
+              pendingPrompts: snapshot.pendingPrompts,
+              activePrompt: snapshot.activePrompt,
+              acceptedPrompts: snapshot.acceptedPrompts,
+            };
+          }),
+        );
+      }),
+    );
+
+    expect(result.broadcast).toEqual(["session.prompt.submitted", "session.prompt.accepted"]);
+    expect(result.pendingPrompts).toEqual([]);
+    expect(result.activePrompt).toMatchObject({
+      messageId: "interrupted-msg",
+      acceptedTurnId: "turn-1",
+    });
+    expect(result.acceptedPrompts).toMatchObject([
+      { messageId: "interrupted-msg", acceptedTurnId: "turn-1" },
+    ]);
+  });
+
   it("mints a messageId when the prompt carries none", async () => {
     const event = await run({ turn: "open" }, (fixture) =>
       Effect.gen(function* () {
@@ -711,126 +1220,5 @@ describe("HarnessAgentSessionService", () => {
     );
     expect(listed).toHaveLength(1);
     expect(listed[0]?.title).toBeUndefined();
-  });
-
-  // The rename used to be broadcast-only, so every client showed the new title
-  // until the next list load read the old one back off disk.
-  it("rename persists the title across a restart", async () => {
-    const result = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* fixture.service.rename(ref, "Login bug");
-        const listed = yield* fixture.service.list("proj-a", false);
-        const restarted = yield* fixture.restart;
-        return { listed, afterRestart: yield* restarted.service.list("proj-a", false) };
-      }),
-    );
-    expect(result.listed[0]?.title).toBe("Login bug");
-    expect(result.afterRestart[0]?.title).toBe("Login bug");
-  });
-
-  it("publishes session.renamed per change, and nothing for a no-op rename", async () => {
-    const result = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        return yield* Effect.scoped(
-          Effect.gen(function* () {
-            const stream = yield* fixture.bus.subscribe({ kind: "global" });
-            yield* fixture.service.rename(ref, "First title");
-            yield* fixture.service.rename(ref, "First title"); // no-op: no event
-            yield* fixture.service.rename(ref, "Second title");
-            const items = yield* Stream.runCollect(Stream.take(stream, 2));
-            return Array.from(items);
-          }),
-        );
-      }),
-    );
-    expect(
-      result.map((item) =>
-        item.type === "event" && item.event.type === "session.renamed"
-          ? item.event.title
-          : item.type,
-      ),
-    ).toEqual(["First title", "Second title"]);
-  });
-
-  // The title is the user's once they have chosen one: the first-prompt stamp
-  // only fills a record that has none.
-  it("keeps a hand-chosen title through the first prompt", async () => {
-    const listed = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* fixture.service.rename(ref, "Login bug");
-        yield* fixture.service.prompt({ ref, parts: [{ type: "text", text: "first" }] });
-        return yield* fixture.service.list("proj-a", false);
-      }),
-    );
-    expect(listed[0]?.title).toBe("Login bug");
-  });
-
-  it("preserves rename and archive changes made concurrently", async () => {
-    const stored = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* Effect.all(
-          [fixture.service.rename(ref, "Login bug"), fixture.service.archive(ref, true)],
-          { concurrency: "unbounded" },
-        );
-        return yield* fixture.repo.read(ref.projectId, ref.sessionId);
-      }),
-    );
-    expect(stored.title).toBe("Login bug");
-    expect(stored.archived).toBe(true);
-  });
-
-  it("keeps the manual title when rename races the first prompt stamp", async () => {
-    const listed = await run({}, (fixture) =>
-      Effect.gen(function* () {
-        const ref = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-        yield* Effect.all(
-          [
-            fixture.service.prompt({ ref, parts: [{ type: "text", text: "automatic title" }] }),
-            fixture.service.rename(ref, "Login bug"),
-          ],
-          { concurrency: "unbounded" },
-        );
-        return yield* fixture.service.list("proj-a", false);
-      }),
-    );
-    expect(listed[0]?.title).toBe("Login bug");
-  });
-
-  it("does not let one slow session close stall another session's rename", async () => {
-    let releaseClose!: () => void;
-    let markCloseStarted!: () => void;
-    const closeStarted = new Promise<void>((resolve) => {
-      markCloseStarted = resolve;
-    });
-    const closeReleased = new Promise<void>((resolve) => {
-      releaseClose = resolve;
-    });
-
-    const stored = await run(
-      {
-        close: async (sessionId) => {
-          if (sessionId !== "native-1") return;
-          markCloseStarted();
-          await closeReleased;
-        },
-      },
-      (fixture) =>
-        Effect.gen(function* () {
-          const slow = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-          const other = yield* fixture.service.create("proj-a", "claude-code", "/tmp/vibest-app");
-          const archiving = yield* Effect.forkChild(fixture.service.archive(slow, true));
-          yield* Effect.promise(() => closeStarted);
-          yield* fixture.service.rename(other, "Still responsive");
-          releaseClose();
-          yield* Fiber.join(archiving);
-          return yield* fixture.repo.read(other.projectId, other.sessionId);
-        }),
-    );
-
-    expect(stored.title).toBe("Still responsive");
   });
 });

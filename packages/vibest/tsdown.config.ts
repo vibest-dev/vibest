@@ -7,6 +7,7 @@ export default defineConfig({
     // The private server/harness/contract packages are compiled into the CLI.
     // Whitelist their bundled runtime dependencies so additions fail closed.
     // `simple-git` (and its tree) is pulled in by GitService on the serve path.
+    // Native addons (node-pty) stay a CLI production dep and are externalized.
     onlyBundle: [
       "effect",
       "@effect/platform-node-shared",

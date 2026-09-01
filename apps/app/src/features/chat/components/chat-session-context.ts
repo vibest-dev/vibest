@@ -8,14 +8,18 @@ import { createContext, useContext } from "react";
 import type { StoreApi } from "zustand/vanilla";
 
 import type { AgentResponse } from "@/features/chat/runtime/agent-requests";
-import type { ChatStoreState } from "@/features/chat/runtime/chat-state";
+import type { ChatState } from "@/features/chat/runtime/chat-state";
 
 export interface ChatSessionValue {
   sessionId: string;
   harnessAgentId: HarnessAgentId;
   /** Per-Chat store. Consumers subscribe narrowly via useStore(store, selector). */
-  store: StoreApi<ChatStoreState>;
-  prompt: (text: string) => void | Promise<void>;
+  store: StoreApi<ChatState>;
+  /** Resolves when the locally queued prompt reaches the server. */
+  prompt: (text: string) => Promise<void>;
+  /** Marks an existing queued follow-up for delivery into the active turn. */
+  steer: (messageId: string) => void;
+  acknowledgeRecovery: (recoveryId: string) => Promise<void>;
   respondToRequest: (requestId: string, response: AgentResponse) => void | Promise<void>;
   /** A turn is producing a reply (submitted / streaming). */
   turnInProgress: boolean;

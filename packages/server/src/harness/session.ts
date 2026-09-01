@@ -23,6 +23,7 @@ import {
   toStatus,
   toWireBody,
 } from "./session-fold";
+import { inSession } from "./session-identity";
 import type { SessionConfig } from "./session-io";
 
 /**
@@ -155,6 +156,7 @@ const pushConfig = (
 
 export type HarnessAgentSessionShape = {
   readonly ref: SessionRef;
+  readonly streamId: string;
   /**
    * What this session is doing, always answerable. A session that has never
    * had a runtime reads as idle at cursor 0 — which is the truth, not a
@@ -204,7 +206,10 @@ export type HarnessAgentSessionShape = {
 
 export const makeHarnessAgentSession = (
   ref: SessionRef,
+  streamId: string,
   bus: EventBusShape,
+  beforePublish: (ref: SessionRef, body: SessionScopedEventBody) => Effect.Effect<void> = () =>
+    Effect.void,
 ): Effect.Effect<HarnessAgentSessionShape, never, Scope.Scope> =>
   Effect.gen(function* () {
     const ownerScope = yield* Scope.Scope;
@@ -221,28 +226,59 @@ export const makeHarnessAgentSession = (
     // the clients' `seq <= cursor` replay guard would drop n forever.
     const applyLock = Semaphore.makeUnsafe(1);
 
+    const identified = inSession(ref);
+
+    const logTurn = (body: SessionScopedEventBody, seq: number): Effect.Effect<void> => {
+      if (body.type === "session.turn.started") {
+        return Effect.logInfo("turn started").pipe(
+          Effect.annotateLogs({ event: body.type, turnId: body.turnId, seq }),
+        );
+      }
+      if (body.type !== "session.turn.ended") return Effect.void;
+      const message = body.outcome === "failed" ? Effect.logWarning : Effect.logInfo;
+      return message("turn ended").pipe(
+        Effect.annotateLogs({
+          event: body.type,
+          turnId: body.turnId,
+          outcome: body.outcome,
+          seq,
+          ...(body.usage ? { usage: body.usage } : {}),
+          ...(body.error ? { errorCategory: body.error.category, error: body.error.message } : {}),
+        }),
+      );
+    };
+
     // The body builder runs under the same permit as the fold+publish so both
     // read one consistent state — deriving the active turn from a read outside
     // the lock would reintroduce exactly the interleaving the lock stops.
     const applyWith = (
       make: (current: SessionState) => SessionScopedEventBody | null,
     ): Effect.Effect<void> =>
-      applyLock.withPermit(
-        Ref.get(state).pipe(
-          Effect.flatMap((current) => {
-            const wireBody = make(current);
-            if (!wireBody) return Effect.void;
-            const event: SessionScopedEvent = { seq: current.seq + 1, ref, ...wireBody };
-            const next = foldSessionEvent(current, event);
-            // Publish with the post-fold phase stamped on: consumers copy the
-            // session's phase off the event instead of re-deriving it from
-            // event types. (The buffered chunk copy inside `next` keeps the
-            // un-stamped draft — snapshot replays read phase from the
-            // snapshot's own status.)
-            return Ref.set(state, next).pipe(
-              Effect.andThen(bus.publish({ ...event, phase: next.phase })),
-            );
-          }),
+      identified(
+        applyLock.withPermit(
+          Ref.get(state).pipe(
+            Effect.flatMap((current) => {
+              const wireBody = make(current);
+              if (!wireBody) return Effect.void;
+              const event: SessionScopedEvent = {
+                streamId,
+                seq: current.seq + 1,
+                ref,
+                ...wireBody,
+              };
+              const next = foldSessionEvent(current, event);
+              // Publish with the post-fold phase stamped on: consumers copy the
+              // session's phase off the event instead of re-deriving it from
+              // event types. (The buffered chunk copy inside `next` keeps the
+              // un-stamped draft — snapshot replays read phase from the
+              // snapshot's own status.)
+              return beforePublish(ref, wireBody).pipe(
+                Effect.andThen(Ref.set(state, next)),
+                Effect.andThen(bus.publish({ ...event, phase: next.phase })),
+                Effect.andThen(logTurn(wireBody, event.seq)),
+              );
+            }),
+          ),
         ),
       );
 
@@ -271,6 +307,8 @@ export const makeHarnessAgentSession = (
               phase: "idle" as const,
               activeTurn: null,
               activePrompt: null,
+              acceptedPrompts: [],
+              pendingPrompts: [],
               pendingRequests: new Map(),
             }
           : current,
@@ -413,7 +451,8 @@ export const makeHarnessAgentSession = (
 
     return {
       ref,
-      snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, current))),
+      streamId,
+      snapshot: Ref.get(state).pipe(Effect.map((current) => toSnapshot(ref, streamId, current))),
       status: Ref.get(state).pipe(Effect.map(toStatus)),
       emit: (body) => applyWith(() => body),
       setConfig,

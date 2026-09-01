@@ -13,7 +13,7 @@ The composite identity `{ projectId, harnessAgentId, sessionId }` that every ses
 _Avoid_: bare sessionId as a wire identity or client-state key
 
 **Harness session id**:
-The agent-native session identity (Claude session UUID, Codex thread ID) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
+The agent-native session identity (Claude session UUID, Codex thread ID, Grok ACP session id) held in the session's metadata. Internal plumbing for resume/history — never exposed as wire identity.
 _Avoid_: native id
 
 **Attach**:
@@ -21,7 +21,19 @@ A client connecting to a session's live event stream — `session.subscribe` plu
 _Avoid_: attach for the cold pre-flight (its former name) or for taking a Chat instance; resume (`session.prepare` starts nothing — only a prompt does)
 
 **Session metadata**:
-The server-owned recovery record for a session: which Project, which harness agent, which harness session id, and whether the session is archived. Distinct from conversation history, which stays in the agent's native storage.
+The server-owned identity record for a session: which Project, which harness agent, which harness session id, and whether the session is archived. Distinct from conversation history and from a Recovery barrier.
+
+**Session stream**:
+One process-local incarnation of a session's observable server state, identified by `streamId`; `seq` and cursor comparisons are meaningful only inside that stream. A server restart or explicit close/reopen creates a new stream.
+_Avoid_: treating a bare numeric cursor as globally comparable
+
+**Recovery barrier**:
+A durable record that an earlier server process may have left a turn unresolved. It records the uncertain prompts, permits history inspection, and blocks all future prompts until the user explicitly acknowledges the unknown outcome. Acknowledgement permits future work; it does not replay, resume, interrupt, roll back, or declare the old turn complete.
+_Avoid_: active-turn resume, automatic retry, recovered turn
+
+**Active-turn continuation**:
+Reattaching to the same still-running native execution without starting a second executor. No current harness adapter provides this guarantee; Recovery barrier behavior is not active-turn continuation.
+_Avoid_: resume (`adapter.resume` restores session context for future work, not an interrupted execution)
 
 **Workspace path**:
 The validated absolute directory handed to a harness agent when opening or resuming a session; always derived from `Project.path`, never accepted directly from session API callers.
@@ -39,11 +51,11 @@ _Avoid_: SessionService (its dissolved predecessor in `session/service.ts`)
 The sole owner of live session state: the table of sessions keyed by ref (each `Live` or `Closing`), and the `acquire` a session runs when it decides it needs a runtime. Sole caller of `adapter.open`/`adapter.resume` — adapters may assume single-flight per session id, which the session's own acquisition ticket guarantees. A ref with nothing live reads as idle at cursor 0 rather than failing, so a client can attach, snapshot and subscribe without starting anything.
 
 **HarnessAgentAdapter / HarnessAgentRuntime** (`harness/adapter.ts`):
-The per-harness door (descriptor, availability, probes, open/resume factory, cold reads) and the live execution resource it produces (prompt/events/config/close) — a pi child, a Claude SDK handle, a Codex thread. The per-agent `XxxAgent` façades under `harness/<agent>/` are private protocol plumbing below the adapter, not shared abstractions.
+The per-harness door (descriptor, availability, probes, open/resume factory, cold reads) and the live execution resource it produces (prompt/events/config/close) — a pi child, a Claude SDK handle, a Codex thread, a Grok ACP child. The per-agent `XxxAgent` façades under `harness/<agent>/` are private protocol plumbing below the adapter, not shared abstractions.
 _Avoid_: HarnessAgentSession for the runtime (it is the in-memory session; see below)
 
 **Private modules** (no Context tags, never wired directly):
-`harness/session.ts` — **HarnessAgentSession**, one session as this server sees it: seq stamping, phase, buffers, pending requests, and the single-flight lifecycle of the runtime it _optionally_ owns. A crash releases the runtime but leaves the session queryable (phase "crashed") until an explicit `close`. `harness/session-fold.ts` — the pure state fold it applies (no Effect, no I/O). `harness/session-repository.ts` — the service's metadata store over `storage/sessions/`.
+`harness/session.ts` — **HarnessAgentSession**, one session as this server sees it: seq stamping, phase, buffers, pending requests, and the single-flight lifecycle of the runtime it _optionally_ owns. A crash releases the runtime but leaves the session queryable (phase "crashed") until an explicit `close`. `harness/session-fold.ts` — the pure state fold it applies (no Effect, no I/O). `harness/session-repository.ts` — the service's identity metadata store over `storage/sessions/`. `harness/session-recovery.ts` — the separate durable Recovery barrier store over `storage/session-recovery/`.
 _Avoid_: projection (the fold's output is the session's state), SessionRuntimeService, SessionManager
 
 ## UI Components

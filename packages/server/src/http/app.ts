@@ -40,6 +40,53 @@ export const makeRequestApp = (
   never,
   HttpServerRequest.HttpServerRequest
 > =>
+  route(options).pipe(
+    /**
+     * Refusals only — no access log. A 2xx here is the UI loading its own
+     * bundle or the supervisor polling health, which says nothing that the RPC
+     * and session lines do not say better. A 4xx is the interesting half: a
+     * rebound Host, a bad token, a call to an endpoint that does not exist.
+     *
+     * One `tap` rather than a line at each `return` above, because the whole
+     * point of that function is that the order of its checks is readable as the
+     * security policy, and eight logging calls interleaved would end that.
+     */
+    Effect.tap((response) =>
+      response.status < 400
+        ? Effect.void
+        : HttpServerRequest.HttpServerRequest.pipe(
+            Effect.flatMap((request) => {
+              const path = new URL(request.url, "http://localhost").pathname;
+              const annotations = {
+                event: "http.refused",
+                status: response.status,
+                method: request.method,
+                path,
+                ...(request.headers.origin !== undefined ? { origin: request.headers.origin } : {}),
+                ...(request.headers.host !== undefined ? { host: request.headers.host } : {}),
+              };
+              // A 404 off the API surface is the browser asking for something
+              // it always asks for — `favicon.ico`, a source map — and warning
+              // about it twice per page load is how a log stops being read.
+              // Under `/api/` the same status means a client called a procedure
+              // that does not exist, which is a real mismatch; and 401/403 are
+              // security answers at any path.
+              const routine = response.status === 404 && !path.startsWith("/api/");
+              return routine
+                ? Effect.logDebug("http request not found").pipe(Effect.annotateLogs(annotations))
+                : Effect.logWarning("http request refused").pipe(Effect.annotateLogs(annotations));
+            }),
+          ),
+    ),
+  );
+
+const route = (
+  options: RequestAppOptions,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  HttpServerRequest.HttpServerRequest
+> =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
 

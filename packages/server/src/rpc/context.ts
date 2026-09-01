@@ -11,6 +11,7 @@ import type {
   HarnessProbeService,
 } from "../harness";
 import type { ProjectService } from "../project";
+import type { PtyService } from "../pty";
 
 /** Services every RPC procedure may `yield*`. */
 export type RpcContext = WithEffectContext<
@@ -21,6 +22,7 @@ export type RpcContext = WithEffectContext<
   | HarnessListService
   | HarnessProbeService
   | ProjectService
+  | PtyService
   | FileSystemService
   | GitService
 >;

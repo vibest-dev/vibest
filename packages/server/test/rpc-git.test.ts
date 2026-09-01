@@ -20,6 +20,22 @@ async function makeRepo(): Promise<string> {
 }
 
 describe("git router", () => {
+  it("returns the current branch for a work tree", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
+    const cwd = await makeRepo();
+    const harness = await makeRpcTestHarness(home);
+    try {
+      await expect(harness.client.git.branch({ cwd })).resolves.toMatchObject({
+        current: "main",
+        defaultBranch: "main",
+        branches: ["main"],
+        remotes: [],
+      });
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it("reviews uncommitted changes and returns a file diff", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-home-"));
     const cwd = await makeRepo();

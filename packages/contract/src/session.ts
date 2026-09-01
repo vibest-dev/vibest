@@ -1,6 +1,7 @@
 import { eventIterator, oc, type } from "@orpc/contract";
 
 import {
+  AcknowledgeRecoveryInputSchema,
   ArchiveSessionInputSchema,
   CreateSessionInputSchema,
   serverErrors,
@@ -19,6 +20,7 @@ import {
   SetSessionReasoningEffortInputSchema,
   SetSessionModelInputSchema,
   SetSessionPermissionModeInputSchema,
+  SteerInputSchema,
   SubscribeInputSchema,
   type SubscribeStreamEvent,
   toStandardSchema,
@@ -59,6 +61,8 @@ export const sessionContract = {
   prompt: base
     .input(toStandardSchema(PromptInputSchema))
     .output(toStandardSchema(PromptOutputSchema)),
+  steer: base.input(toStandardSchema(SteerInputSchema)),
+  acknowledgeRecovery: base.input(toStandardSchema(AcknowledgeRecoveryInputSchema)),
   interrupt: base.input(toStandardSchema(RefInputSchema)),
   // Session-scoped config, changed via dedicated calls — never on a prompt turn.
   setModel: base.input(toStandardSchema(SetSessionModelInputSchema)),

@@ -14,7 +14,9 @@ import {
   makeHarnessAgentRegistry,
   type HarnessAgentAdapter,
 } from "../src/harness";
+import { SessionRecoveryStoreLayer } from "../src/harness/session-recovery";
 import { ProjectModuleLayer } from "../src/project";
+import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../src/pty";
 import type { RpcContext } from "../src/rpc/context";
 import { router } from "../src/rpc/router";
 import { NodePlatformLayer } from "./platform";
@@ -32,17 +34,23 @@ export async function makeRpcTestHarness(
   const paths = Layer.provideMerge(layerPaths(home), NodePlatformLayer);
   const registryLayer = Layer.sync(HarnessAgentRegistry, () => makeHarnessAgentRegistry(adapters));
   // EventBusLayer is one reference so publish (manager/service) and subscribe
-  // (RPC) share the single bus instance; same for registryLayer.
+  // (RPC) share the single bus instance; same for registryLayer and recoveryLayer.
+  const recoveryLayer = SessionRecoveryStoreLayer.pipe(
+    Layer.provide(paths),
+    Layer.provide(NodePlatformLayer),
+  );
   const harnessSessionLayer = HarnessAgentSessionServiceLayer.pipe(
     Layer.provide(
       HarnessAgentSessionManagerLayer.pipe(
         Layer.provide(registryLayer),
         Layer.provide(EventBusLayer),
+        Layer.provide(recoveryLayer),
         Layer.provide(NodePlatformLayer),
       ),
     ),
     Layer.provide(registryLayer),
     Layer.provide(EventBusLayer),
+    Layer.provide(recoveryLayer),
     Layer.provide(paths),
     Layer.provide(NodePlatformLayer),
   );
@@ -52,6 +60,12 @@ export async function makeRpcTestHarness(
   );
   const probeLayer = HarnessProbeLayer.pipe(Layer.provide(registryLayer));
   const projectLayer = ProjectModuleLayer.pipe(Layer.provide(paths));
+  const ptyLayer = PtyServiceLayer.pipe(
+    Layer.provide(
+      PtyManagerLayer.pipe(Layer.provide(NodePtySpawnerLayer), Layer.provide(NodePlatformLayer)),
+    ),
+    Layer.provide(projectLayer),
+  );
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       EventBusLayer,
@@ -62,6 +76,7 @@ export async function makeRpcTestHarness(
       probeLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
       GitServiceLayer.pipe(Layer.provide(FileSystemServiceLayer), Layer.provide(NodePlatformLayer)),
+      ptyLayer,
       NodePlatformLayer,
     ),
   );

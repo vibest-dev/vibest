@@ -39,6 +39,7 @@ describe("applySessionListEvent", () => {
     const queryClient = seed([row()]);
     const event: ServerEvent = {
       ref,
+      streamId: "stream-1",
       seq: 1,
       type: "session.turn.started",
       turnId: "turn-1",
@@ -53,6 +54,7 @@ describe("applySessionListEvent", () => {
     const before = rows(queryClient);
     const event: ServerEvent = {
       ref,
+      streamId: "stream-1",
       seq: 2,
       type: "session.turn.started",
       turnId: "turn-1",
@@ -67,6 +69,7 @@ describe("applySessionListEvent", () => {
     const before = rows(queryClient);
     const event: ServerEvent = {
       ref,
+      streamId: "stream-1",
       seq: 3,
       type: "session.message.chunk",
       turnId: "turn-1",

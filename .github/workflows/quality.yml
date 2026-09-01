@@ -32,11 +32,26 @@ jobs:
         with:
           persist-credentials: false
 
+      # Persistent caches live beside _work so checkout can stay clean without
+      # actions/cache tarballs on every run. See .github/scripts/bootstrap-ci-runner.sh.
+      - name: Prepare persistent CI caches
+        run: |
+          cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
+          mkdir -p "${cache_root}/pnpm-store" "${cache_root}/turbo"
+          {
+            echo "PNPM_STORE_DIR=${cache_root}/pnpm-store"
+            echo "TURBO_CACHE_DIR=${cache_root}/turbo"
+          } >> "$GITHUB_ENV"
+
       - name: Setup project toolchain
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
-        with:
-          version: "2026.8.3"
-          install_args: "--locked"
+        run: |
+          {
+            echo "/usr/local/bin"
+            echo "${HOME}/.local/share/mise/shims"
+          } >> "$GITHUB_PATH"
+          export PATH="/usr/local/bin:${HOME}/.local/share/mise/shims:${PATH}"
+          mise install --locked
+        shell: bash
 
       - name: Verify CI environment
         run: |
@@ -60,25 +75,24 @@ jobs:
             "$VERSION_ID" "$actual_node" "$actual_pnpm" "$(uname -m)"
         shell: bash
 
-      - run: pnpm install --frozen-lockfile
-
-      # Checkout cleans ignored files on every run, so persist Turborepo's
-      # content-addressed cache explicitly. The outer key isolates incompatible
-      # runner/toolchain state; Turborepo still validates every task's inputs.
-      - name: Restore Turborepo cache
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        with:
-          path: .turbo
-          key: >-
-            turbo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'mise.lock', 'pnpm-lock.yaml', 'turbo.json') }}-${{ github.sha }}
-          restore-keys: |
-            turbo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'mise.lock', 'pnpm-lock.yaml', 'turbo.json') }}-
+      - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
 
       # All three declare `dependsOn: ["^build"]`, so Turborepo builds the
       # upstream workspace packages on demand and caches the results.
-      - run: pnpm turbo run build test typecheck
+      # Lint/format only need node_modules and run in parallel with turbo.
+      - name: Run build, test, typecheck, lint, and format
+        run: |
+          set -euo pipefail
 
-      # Oxlint and Oxfmt scan the whole repo from the root, so they are not
-      # Turborepo tasks — no package defines a `lint` script.
-      - run: pnpm run lint:check
-      - run: pnpm run format:check
+          pnpm turbo run build test typecheck &
+          turbo_pid=$!
+
+          pnpm run lint:check &
+          lint_pid=$!
+
+          pnpm run format:check &
+          format_pid=$!
+
+          wait "$turbo_pid"
+          wait "$lint_pid"
+          wait "$format_pid"

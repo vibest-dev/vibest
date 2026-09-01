@@ -69,9 +69,9 @@ describe("useChatInputHasContent", () => {
     controller.dispose();
   });
 
-  // The session-switch window: React tears the controller effect down and back
-  // up while this component stays mounted (a route match suspending on its
-  // loader, StrictMode, <Activity>), so one editor is destroyed and another
+  // The session-switch window: React tears the controller store subscription
+  // down and back up while this component stays mounted (a route match
+  // suspending on its loader, StrictMode, <Activity>), so one editor is destroyed and another
   // built between two renders of the same fiber. Both halves have to hold —
   // rendering the outgoing, already-disposed controller must not throw, and the
   // incoming one must be read immediately rather than waiting for its first

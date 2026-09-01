@@ -13,7 +13,11 @@ import { exponentialBackoffMs } from "@/lib/utils";
 
 import type { AgentResponse } from "./agent-requests";
 import { RecoveringSubscription } from "./chat-subscription";
-import type { ChatSessionTransport, ChatTransportEvent } from "./chat-transport-port";
+import type {
+  ChatSessionTransport,
+  ChatTransportCallOptions,
+  ChatTransportEvent,
+} from "./chat-transport-port";
 
 // Backoff between subscription recoveries: 500ms doubling to a 10s ceiling,
 // reset by every successful attach.
@@ -24,6 +28,7 @@ type VibestSessionClient = VibestClient["session"];
 type SessionClient = Pick<
   VibestSessionClient,
   | "prompt"
+  | "steer"
   | "respondToAgentRequest"
   | "setReasoningEffort"
   | "setModel"
@@ -31,6 +36,7 @@ type SessionClient = Pick<
   | "getSnapshot"
   | "getMessages"
 > & {
+  acknowledgeRecovery?: VibestSessionClient["acknowledgeRecovery"];
   subscribe: (
     ...args: Parameters<VibestSessionClient["subscribe"]>
   ) => Promise<AsyncIterable<SubscribeStreamEvent>>;
@@ -72,20 +78,48 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
     return () => subscription.stop();
   }
 
-  prompt = async (input: {
-    readonly messageId: string;
-    readonly parts: ReadonlyArray<PromptPart>;
-  }): Promise<{ readonly turnId: string }> => {
-    return await this.client.session.prompt({
-      ref: this.#ref,
-      parts: input.parts,
-      messageId: input.messageId,
-    });
+  prompt = async (
+    input: {
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    },
+    options?: ChatTransportCallOptions,
+  ): Promise<{ readonly turnId: string }> => {
+    return await this.client.session.prompt(
+      {
+        ref: this.#ref,
+        parts: input.parts,
+        messageId: input.messageId,
+      },
+      options,
+    );
   };
 
-  getMessages = async (): Promise<readonly UIMessage[] | null> => {
+  steer = async (
+    input: {
+      readonly expectedTurnId: string;
+      readonly messageId: string;
+      readonly parts: ReadonlyArray<PromptPart>;
+    },
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    await this.client.session.steer({ ref: this.#ref, ...input }, options);
+  };
+
+  acknowledgeRecovery = async (
+    recoveryId: string,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    const acknowledge = this.client.session.acknowledgeRecovery;
+    if (!acknowledge) throw new Error("Recovery acknowledgement is unavailable");
+    await acknowledge({ ref: this.#ref, recoveryId }, options);
+  };
+
+  getMessages = async (
+    options?: ChatTransportCallOptions,
+  ): Promise<readonly UIMessage[] | null> => {
     try {
-      const result = await this.client.session.getMessages({ ref: this.#ref });
+      const result = await this.client.session.getMessages({ ref: this.#ref }, options);
       return result.messages;
     } catch (error) {
       // Capability absence is a normal outcome, not a failure.
@@ -98,28 +132,45 @@ export class OrpcChatSessionTransport implements ChatSessionTransport {
   // clients on one session, that usually means another client answered first.
   // The outcome the responder wanted (request resolved) holds either way, so
   // it maps to success; the request.replied event closes the card everywhere.
-  respondToAgentRequest = async (requestId: string, response: AgentResponse): Promise<void> => {
+  respondToAgentRequest = async (
+    requestId: string,
+    response: AgentResponse,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
     try {
-      await this.client.session.respondToAgentRequest({
-        ref: this.#ref,
-        requestId,
-        response,
-      });
+      await this.client.session.respondToAgentRequest(
+        {
+          ref: this.#ref,
+          requestId,
+          response,
+        },
+        options,
+      );
     } catch (error) {
       if (error instanceof ORPCError && error.code === "NOT_FOUND") return;
       throw error;
     }
   };
 
-  setModel = async (providerId: string, modelId: string): Promise<void> => {
-    await this.client.session.setModel({ ref: this.#ref, providerId, modelId });
+  setModel = async (
+    providerId: string,
+    modelId: string,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    await this.client.session.setModel({ ref: this.#ref, providerId, modelId }, options);
   };
 
-  setReasoningEffort = async (reasoningEffort: ReasoningEffort): Promise<void> => {
-    await this.client.session.setReasoningEffort({ ref: this.#ref, reasoningEffort });
+  setReasoningEffort = async (
+    reasoningEffort: ReasoningEffort,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    await this.client.session.setReasoningEffort({ ref: this.#ref, reasoningEffort }, options);
   };
 
-  setPermissionMode = async (permissionMode: PermissionMode): Promise<void> => {
-    await this.client.session.setPermissionMode({ ref: this.#ref, permissionMode });
+  setPermissionMode = async (
+    permissionMode: PermissionMode,
+    options?: ChatTransportCallOptions,
+  ): Promise<void> => {
+    await this.client.session.setPermissionMode({ ref: this.#ref, permissionMode }, options);
   };
 }

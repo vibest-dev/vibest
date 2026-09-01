@@ -25,6 +25,9 @@ const serverTarget = `http://127.0.0.1:${SERVER_PORT}`;
 const RUNNING_IN_AGENT = isRunningFromAgent({ experimentalProcessTree: true });
 
 export default defineConfig({
+  experimental: {
+    bundledDev: true,
+  },
   define: {
     "import.meta.env.VIBEST_RUN_IN_AGENT": JSON.stringify(RUNNING_IN_AGENT),
   },

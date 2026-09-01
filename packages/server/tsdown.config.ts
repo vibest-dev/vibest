@@ -11,8 +11,10 @@ export default defineConfig({
     // Inline everything so the forked artifact needs no node_modules resolution.
     // `vite` is the exception: server.ts imports it lazily only in dev, and the
     // `NODE_ENV=production` define below dead-code-eliminates that branch.
+    // `node-pty` is a native addon (plus spawn-helper); bundling it breaks
+    // the .node load and the helper path lookup.
     alwaysBundle: [/.*/],
-    neverBundle: ["vite"],
+    neverBundle: ["vite", "node-pty"],
     onlyBundle: false,
   },
   dts: false,

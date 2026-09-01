@@ -92,6 +92,24 @@ export class SessionClosed extends Schema.TaggedError<SessionClosed>()("SessionC
   }
 }
 
+export class RecoveryRequired extends Schema.TaggedError<RecoveryRequired>()("RecoveryRequired", {
+  sessionId: Schema.String,
+  recoveryId: Schema.String,
+}) {
+  override get message() {
+    return `Session '${this.sessionId}' requires acknowledgement of recovery '${this.recoveryId}'.`;
+  }
+}
+
+export class StaleRecovery extends Schema.TaggedError<StaleRecovery>()("StaleRecovery", {
+  sessionId: Schema.String,
+  recoveryId: Schema.String,
+}) {
+  override get message() {
+    return `Recovery '${this.recoveryId}' is no longer pending for session '${this.sessionId}'.`;
+  }
+}
+
 export class TurnAlreadyRunning extends Schema.TaggedError<TurnAlreadyRunning>()(
   "TurnAlreadyRunning",
   {
@@ -169,6 +187,29 @@ export class PiRpcError extends Schema.TaggedError<PiRpcError>()("PiRpcError", {
 }) {
   override get message() {
     return `Pi RPC command '${this.command}' failed: ${this.errorMessage}`;
+  }
+}
+
+export class GrokTransportError extends Schema.TaggedError<GrokTransportError>()(
+  "GrokTransportError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message() {
+    return `Grok transport operation '${this.operation}' failed: ${causeSummary(this.cause)}`;
+  }
+}
+
+export class GrokRpcError extends Schema.TaggedError<GrokRpcError>()("GrokRpcError", {
+  method: Schema.String,
+  code: Schema.Number,
+  errorMessage: Schema.String,
+  data: Schema.optionalKey(Schema.Unknown),
+}) {
+  override get message() {
+    return `Grok RPC '${this.method}' failed (${this.code}): ${this.errorMessage}`;
   }
 }
 

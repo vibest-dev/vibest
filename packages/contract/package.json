@@ -9,10 +9,12 @@
     "./fs": "./src/fs.ts",
     "./git": "./src/git.ts",
     "./harness": "./src/harness.ts",
+    "./pty": "./src/pty.ts",
     "./project": "./src/project.ts",
     "./session": "./src/session.ts",
     "./session-events": "./src/session-events.ts",
     "./claude-code": "./src/claude-code/index.ts",
+    "./grok": "./src/grok/index.ts",
     "./codex": "./src/codex/index.ts",
     "./codex/protocol": "./src/codex/protocol/index.ts",
     "./codex/protocol/v2": "./src/codex/protocol/v2/index.ts"

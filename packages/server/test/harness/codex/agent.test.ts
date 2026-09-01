@@ -74,7 +74,12 @@ rl.on("line", (line) => {
     send({ method: "turn/completed", params: { threadId: "th_1", turn: { id: "turn_1", status: "completed" } } });
   }
   if (msg.method === "turn/steer") {
-    process.exit(1);
+    if (msg.params.input[0].text === "steer-after-crash") {
+      process.exit(1);
+      return;
+    }
+    fs.writeFileSync(path.join(cwd, "steered"), JSON.stringify(msg.params));
+    send({ id: msg.id, result: null });
     return;
   }
   if (msg.method === "turn/interrupt") {
@@ -367,18 +372,54 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
     }),
   );
 
-  it.effect("unblocks a waiting prompt when the transport crashes", () =>
+  it.effect("steers only the expected active turn", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
+      const first = yield* agent.session.prompt({ sessionId, text: "hold" });
+
+      yield* agent.session.steer({
+        sessionId,
+        expectedTurnId: first.turnId,
+        text: "change direction",
+      });
+      const params = JSON.parse(fs.readFileSync(path.join(cwd, "steered"), "utf8"));
+      assert.equal(params.expectedTurnId, first.turnId);
+      assert.equal(params.input[0].text, "change direction");
+
+      const stale = yield* agent.session
+        .steer({ sessionId, expectedTurnId: "other-turn", text: "wrong turn" })
+        .pipe(Effect.flip);
+      assert.equal(stale._tag, "TurnAlreadyRunning");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("rejects a generic prompt promptly while a turn is active", () =>
     Effect.gen(function* () {
       const cwd = yield* makeTempDirectory("codex-agent-");
       const agent = yield* makeFakeAgent;
       const { sessionId } = yield* agent.session.create({ cwd });
       yield* agent.session.prompt({ sessionId, text: "hold" });
-      const secondDone = yield* Deferred.make<void>();
-      yield* agent.session.prompt({ sessionId, text: "steer-after-crash" }).pipe(
-        Effect.exit,
-        Effect.flatMap(() => Deferred.succeed(secondDone, undefined)),
-        Effect.forkChild,
-      );
+
+      const second = yield* agent.session
+        .prompt({ sessionId, text: "follow-up" })
+        .pipe(Effect.flip, Effect.timeout("500 millis"));
+      assert.equal(second._tag, "TurnAlreadyRunning");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("evicts the native session when explicit steer crashes the transport", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDirectory("codex-agent-");
+      const agent = yield* makeFakeAgent;
+      const { sessionId } = yield* agent.session.create({ cwd });
+      const first = yield* agent.session.prompt({ sessionId, text: "hold" });
+      yield* agent.session
+        .steer({ sessionId, expectedTurnId: first.turnId, text: "steer-after-crash" })
+        .pipe(Effect.exit);
 
       yield* Effect.eventually(
         agent.session
@@ -393,13 +434,6 @@ layer(NodeServices.layer)("CodexAgent", (it) => {
               () => new Error("transport crash has not evicted the native session"),
             ),
           ),
-      );
-      yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow, { discard: true });
-
-      assert.equal(
-        yield* Deferred.isDone(secondDone),
-        true,
-        "waiting prompt remained blocked on the crashed turn",
       );
     }),
   );

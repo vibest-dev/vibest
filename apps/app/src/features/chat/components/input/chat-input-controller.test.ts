@@ -45,7 +45,7 @@ describe("ChatInputController", () => {
   });
 
   // The state React hands the committed `useSyncExternalStore` snapshot when a
-  // route match suspends: the controller effect's cleanup has already disposed
+  // route match suspends: the controller store's unsubscribe has already disposed
   // this instance, but the last committed render still closes over it. Reading
   // the destroyed editor is what threw `Cannot read properties of null
   // (reading 'extensions')` — `Editor.destroy()` nulls `extensionManager`, and

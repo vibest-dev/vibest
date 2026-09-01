@@ -16,6 +16,7 @@ describe("createAppClients", () => {
 
     expect(clients.orpcClient).toBeDefined();
     expect(clients.orpcClient.session).toBeDefined();
+    expect(clients.orpcClient.pty).toBeDefined();
     expect(clients.orpcQueryUtils).toBeDefined();
     clients.queryClient.clear();
   });

@@ -28,7 +28,7 @@ const SessionServiceLayer = Layer.effect(
   SessionService,
   Effect.gen(function* () {
     const bus = yield* EventBus;
-    return yield* makeHarnessAgentSession(ref, bus);
+    return yield* makeHarnessAgentSession(ref, "stream-1", bus);
   }),
 );
 
@@ -52,6 +52,7 @@ const runtimeFrom = (
     Stream.map((body) => ({ harnessAgentId: "claude-code" as const, sessionId: nativeId, body })),
   ),
   prompt: () => Effect.succeed({ turnId: "turn-1" }),
+  steer: () => Effect.void,
   setModel: (model) =>
     options.models ? Ref.update(options.models, (seen) => [...seen, model]) : Effect.void,
   setReasoningEffort: () => Effect.void,
@@ -60,7 +61,6 @@ const runtimeFrom = (
   respondToAgentRequest: () => Effect.void,
   getCapabilities: Effect.succeed({
     supportsResume: true,
-    supportsSteering: false,
     supportsPermissions: false,
   }),
   close: options.closes ? Ref.update(options.closes, (count) => count + 1) : Effect.void,
@@ -106,6 +106,7 @@ it.effect("a session that never had a runtime reads as idle at cursor 0", () =>
       const session = yield* SessionService;
       assert.equal(yield* session.peekRuntime, undefined);
       const snapshot = yield* session.snapshot;
+      assert.equal(snapshot.streamId, "stream-1");
       assert.equal(snapshot.status.phase, "idle");
       assert.equal(snapshot.cursor, 0);
       assert.equal(snapshot.activeTurn, null);

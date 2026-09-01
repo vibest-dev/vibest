@@ -4,14 +4,19 @@ import { describe, expect, it } from "vitest";
 import { RecoveringSubscription } from "./chat-subscription";
 
 const snapshot: SessionRuntimeSnapshot = {
+  streamId: "stream-1",
   ref: {
     projectId: "project-1",
     harnessAgentId: "claude-code",
     sessionId: "session-1",
   },
   status: { phase: "idle" },
+  recovery: null,
   activeTurn: null,
   activePrompt: null,
+  acceptedPrompt: null,
+  acceptedPrompts: [],
+  pendingPrompts: [],
   pendingRequests: [],
   cursor: 0,
 };
@@ -87,6 +92,24 @@ describe("RecoveringSubscription", () => {
     subscription.start();
     await expect.poll(() => opens).toBeGreaterThanOrEqual(2);
     expect(events).not.toContain("closed");
+    subscription.stop();
+  });
+
+  it("keeps retrying repeated attach failures until it is stopped", async () => {
+    let opens = 0;
+    const subscription = new RecoveringSubscription({
+      subscribe: async () => {
+        opens += 1;
+        if (opens < 25) throw new DOMException("socket unavailable", "AbortError");
+        return hangingIterable();
+      },
+      getSnapshot: async () => snapshot,
+      onEvent: () => undefined,
+      retryDelayMs: () => 0,
+    });
+    subscription.start();
+
+    await expect.poll(() => opens).toBe(25);
     subscription.stop();
   });
 

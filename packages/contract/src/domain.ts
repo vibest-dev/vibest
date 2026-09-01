@@ -4,7 +4,7 @@ import { Schema } from "effect";
 export const toStandardSchema = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) =>
   Schema.toStandardJSONSchemaV1(Schema.toStandardSchemaV1(schema));
 
-export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi"]);
+export const HarnessAgentIdSchema = Schema.Literals(["claude-code", "codex", "pi", "grok"]);
 export type HarnessAgentId = typeof HarnessAgentIdSchema.Type;
 // Derived from the schema rather than written out a second time: clients that
 // need the ids as data (narrowing a URL param, say) would otherwise keep their
@@ -18,8 +18,7 @@ export const HARNESS_AGENT_IDS: ReadonlyArray<HarnessAgentId> = HarnessAgentIdSc
 export const SessionRefSchema = Schema.Struct({
   projectId: Schema.String.check(Schema.isUUID()),
   harnessAgentId: HarnessAgentIdSchema,
-  // Server-generated, opaque to clients, and globally unique for reverse lookup.
-  // Session operations still use the complete ref rather than this field alone.
+  // Server-generated, opaque to clients; unique within a project.
   sessionId: Schema.NonEmptyString,
 });
 export type SessionRef = typeof SessionRefSchema.Type;
@@ -163,6 +162,7 @@ export const SessionPhaseSchema = Schema.Literals([
   "idle",
   "running",
   "requires_action",
+  "recovery_required",
   "crashed",
 ]);
 export type SessionPhase = typeof SessionPhaseSchema.Type;
@@ -186,12 +186,14 @@ export type SessionStatus = typeof SessionStatusSchema.Type;
 export const SessionScopedEventTypes = [
   "session.message.chunk",
   "session.prompt.submitted",
+  "session.prompt.accepted",
   "session.prompt.rejected",
   "session.turn.started",
   "session.turn.ended",
   "session.request.asked",
   "session.request.replied",
   "session.request.rejected",
+  "session.recovery.acknowledged",
   "session.crashed",
 ] as const;
 export type SessionScopedEventType = (typeof SessionScopedEventTypes)[number];
@@ -211,7 +213,7 @@ export type SessionScopedEventBody =
       readonly turnId: string;
       readonly chunk: UIMessageChunk;
     }
-  // A user prompt was accepted for this session. Published by the session
+  // A user prompt was received for this session. Published by the session
   // service *before* the harness call, so it always precedes the turn's own
   // events in seq order; `messageId` echoes the client-supplied id (or a
   // server-minted one), letting the prompting client dedupe its optimistic
@@ -221,6 +223,14 @@ export type SessionScopedEventBody =
       readonly type: "session.prompt.submitted";
       readonly messageId: string;
       readonly parts: ReadonlyArray<PromptPart>;
+    }
+  // The harness accepted the submitted prompt. This correlation is emitted
+  // after runtime.prompt resolves; it distinguishes a retained prompt that is
+  // still waiting to enter the harness from one already consumed by a turn.
+  | {
+      readonly type: "session.prompt.accepted";
+      readonly messageId: string;
+      readonly turnId: string;
     }
   // Compensates a `session.prompt.submitted` whose harness call was then
   // rejected (turn already running, session closed, harness error): clients
@@ -246,12 +256,18 @@ export type SessionScopedEventBody =
       readonly requestId: string;
       readonly reason?: string;
     }
+  | {
+      readonly type: "session.recovery.acknowledged";
+      readonly recoveryId: string;
+    }
   | { readonly type: "session.crashed"; readonly reason: string };
 
-/** A session-scoped event before the server's `HarnessAgentSession` stamps its `seq`. */
+/** A session-scoped event before `HarnessAgentSession` stamps its `streamId` and `seq`. */
 export type SessionScopedEventDraft = { readonly ref: SessionRef } & SessionScopedEventBody;
 
 export type SessionScopedEvent = {
+  /** Process-local incarnation of this ref's server-side session state. */
+  readonly streamId: string;
   readonly seq: number;
   /**
    * The session's phase *after* this event applied, stamped by the server's
@@ -346,7 +362,7 @@ export type ActiveTurnSnapshot = {
   readonly truncated: boolean;
 };
 
-// The latest accepted prompt, retained like the active turn's buffer:
+// The latest submitted prompt, retained like the active turn's buffer:
 // `session.prompt.submitted` is never re-sent, so a client attaching mid-turn
 // recovers the user message from here. `seq` is the submit event's seq — replay
 // gates on it, so a client that saw the live event never renders it twice.
@@ -354,6 +370,10 @@ export type ActivePromptSnapshot = {
   readonly messageId: string;
   readonly parts: ReadonlyArray<PromptPart>;
   readonly seq: number;
+  // Null between prompt.submitted and the harness receipt; set to the
+  // correlated turn once prompt.accepted applies. The turn id lets reconnect
+  // distinguish "accepted but not started" from "this turn completed".
+  readonly acceptedTurnId: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -472,12 +492,37 @@ export const HarnessProbeOutputSchema = Schema.Struct({
 });
 export type HarnessProbeOutput = typeof HarnessProbeOutputSchema.Type;
 
+export type SessionRecoverySnapshot = {
+  readonly recoveryId: string;
+  readonly reason: "server_restart";
+  readonly prompts: ReadonlyArray<{
+    readonly messageId: string;
+    readonly parts: ReadonlyArray<PromptPart>;
+    readonly turnId?: string;
+  }>;
+};
+
 export type SessionRuntimeSnapshot = {
   readonly ref: SessionRef;
+  /** Process-local incarnation whose cursor and retained events this snapshot describes. */
+  readonly streamId: string;
   readonly status: SessionStatus;
+  /** Durable uncertainty from an unresolved turn owned by an earlier server boot. */
+  readonly recovery: SessionRecoverySnapshot | null;
   readonly pendingRequests: ReadonlyArray<AgentRequest>;
   readonly activeTurn: ActiveTurnSnapshot | null;
+  // Newest prompt to render for reconnect (an unresolved candidate wins).
   readonly activePrompt: ActivePromptSnapshot | null;
+  // Latest prompt accepted by the harness, exposed independently because a
+  // newer unresolved candidate may temporarily mask it in activePrompt.
+  readonly acceptedPrompt: ActivePromptSnapshot | null;
+  // Ordered accepted correlations retained through the current authoritative
+  // turn boundary so reconnect can settle every matching local submission.
+  readonly acceptedPrompts: ReadonlyArray<ActivePromptSnapshot>;
+  // Every submitted prompt still awaiting its accepted/rejected correlation.
+  // activePrompt carries only the newest one; the full list preserves both the
+  // boundary and every optimistic user message across reconnect.
+  readonly pendingPrompts: ReadonlyArray<ActivePromptSnapshot>;
   // Last session-scoped seq folded into this snapshot; 0 before any event.
   readonly cursor: number;
 };
@@ -528,8 +573,22 @@ export const PromptInputSchema = Schema.Struct({
 });
 export type PromptInput = typeof PromptInputSchema.Type;
 
+export const SteerInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  expectedTurnId: Schema.NonEmptyString,
+  parts: Schema.Array(PromptPartSchema).check(Schema.isNonEmpty()),
+  messageId: Schema.NonEmptyString,
+});
+export type SteerInput = typeof SteerInputSchema.Type;
+
 export const PromptOutputSchema = Schema.Struct({ turnId: Schema.String });
 export type PromptOutput = typeof PromptOutputSchema.Type;
+
+export const AcknowledgeRecoveryInputSchema = Schema.Struct({
+  ref: SessionRefSchema,
+  recoveryId: Schema.NonEmptyString,
+});
+export type AcknowledgeRecoveryInput = typeof AcknowledgeRecoveryInputSchema.Type;
 
 // ---------------------------------------------------------------------------
 // Session capabilities (unchanged; setModel/config remains out of scope)
@@ -548,7 +607,6 @@ export const SessionCapabilitiesSchema = Schema.Struct({
     Schema.Array(Schema.Struct({ name: Schema.String, status: Schema.String })),
   ),
   supportsResume: Schema.Boolean,
-  supportsSteering: Schema.Boolean,
   supportsPermissions: Schema.Boolean,
 });
 export type SessionCapabilities = typeof SessionCapabilitiesSchema.Type;
@@ -629,11 +687,6 @@ export type SessionSummary = {
 /** `session.list` returns the summaries directly — one shape, no wrapper. */
 export type ListSessionsOutput = ReadonlyArray<SessionSummary>;
 
-/**
- * Longest title a client may give a session. The title is persisted on the
- * session record and broadcast to every client on rename, so it is bounded
- * here rather than left to whatever a caller sends.
- */
 export const MAX_SESSION_TITLE_CHARS = 120;
 
 export const RenameSessionInputSchema = Schema.Struct({

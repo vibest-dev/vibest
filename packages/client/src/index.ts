@@ -43,19 +43,20 @@ export function createWsConnect(options: CreateVibestClientOptions): () => Promi
 
 /**
  * WebSocket client: every call multiplexed over one connection. The link takes
- * a lazy `connect` factory (oRPC 2.0.0-beta.16), so the socket is only opened
+ * a lazy `connect` factory (oRPC 2.0.0-beta.18), so the socket is only opened
  * on first use — and re-opened, with a fresh ticket, on every reconnect.
  */
 export function createVibestClient(options: CreateVibestClientOptions = {}): VibestClient {
   const link = new WebSocketRPCLink({
     connect: createWsConnect(options),
-    // Reconnect is opt-in in oRPC and OFF by default. Without it the link
-    // holds the dead socket after a drop and every later call hangs on a
-    // send into it — one network blip kills the client until a full page
-    // reload. Enabled, the next call after a drop re-invokes `connect` (and
-    // so mints a fresh ticket); in-flight calls still reject on the drop,
-    // which consumers (e.g. the chat transport's retry loop) recover from.
-    reconnect: { enabled: true },
+    // Reconnect is opt-in in oRPC and OFF by default. Without it one network
+    // blip kills the client until a full page reload. Enabled, calls made
+    // against a closed socket wait for `connect` (and a fresh ticket) until
+    // the server returns. Calls already sent still reject when that socket
+    // drops; consumers such as the chat subscription recover those at their
+    // own protocol boundary. Infinite retry is product behavior, so keep it
+    // explicit rather than relying on oRPC's current default.
+    reconnect: { enabled: true, maxAttempt: Infinity },
   });
   return createORPCClient(link);
 }

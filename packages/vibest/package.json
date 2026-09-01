@@ -23,6 +23,7 @@
     "@orpc/server": "catalog:orpc",
     "ai": "catalog:",
     "effect": "catalog:effect",
+    "node-pty": "^1.0.0",
     "uuid": "catalog:",
     "ws": "catalog:",
     "zod": "catalog:"

@@ -1,5 +1,5 @@
 import type { AgentRequest, AgentResponse } from "@vibest/contract";
-import { Deferred, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Queue, Ref, Scope, Semaphore, Stream } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { v7 as uuid } from "uuid";
@@ -67,6 +67,7 @@ type SessionState = {
   readonly requests: Queue.Queue<AgentRequest, Cause.Done>;
   readonly pending: Ref.Ref<ReadonlyMap<string, PendingRequest>>;
   readonly turnState: Ref.Ref<PiTurnState>;
+  readonly turnPermit: Semaphore.Semaphore;
   readonly transform: ReturnType<typeof createPiTransform>;
 };
 
@@ -102,6 +103,11 @@ export interface PiAgent {
       },
       HarnessSessionNotFound | PiTransportFailure | AgentOperationError | TurnAlreadyRunning
     >;
+    readonly steer: (input: {
+      readonly sessionId: string;
+      readonly expectedTurnId: string;
+      readonly text: string;
+    }) => Effect.Effect<void, HarnessSessionNotFound | PiTransportFailure | TurnAlreadyRunning>;
     /**
      * Read the session's whole entry tree off the live child (`get_entries`).
      * No spawn: the caller (the manager, via ensure) guarantees the session is
@@ -344,6 +350,7 @@ export const makePiAgentWithDependencies = <R>(
             requests: yield* Queue.bounded<AgentRequest, Cause.Done>(SESSION_QUEUE_CAPACITY),
             pending: yield* Ref.make<ReadonlyMap<string, PendingRequest>>(new Map()),
             turnState: yield* Ref.make<PiTurnState>({ _tag: "Idle" }),
+            turnPermit: yield* Semaphore.make(1),
             transform: createPiTransform(sessionId),
           };
           yield* Ref.update(sessions, (current) => new Map(current).set(sessionId, session));
@@ -373,6 +380,27 @@ export const makePiAgentWithDependencies = <R>(
               : new PiTransportError({ operation: "open-session", cause: error }),
           ),
           Effect.onError(() => Scope.close(scope, Exit.void)),
+        );
+      });
+
+    const steer = (input: {
+      readonly sessionId: string;
+      readonly expectedTurnId: string;
+      readonly text: string;
+    }): Effect.Effect<void, HarnessSessionNotFound | PiTransportFailure | TurnAlreadyRunning> =>
+      Effect.gen(function* () {
+        const session = yield* getSession(input.sessionId);
+        yield* session.turnPermit.withPermit(
+          Effect.gen(function* () {
+            const current = yield* Ref.get(session.turnState);
+            if (current._tag !== "Active" || current.turnId !== input.expectedTurnId) {
+              return yield* new TurnAlreadyRunning({
+                sessionId: input.sessionId,
+                ...(current._tag === "Active" ? { turnId: current.turnId } : {}),
+              });
+            }
+            yield* session.transport.command({ type: "steer", message: input.text });
+          }),
         );
       });
 
@@ -418,9 +446,8 @@ export const makePiAgentWithDependencies = <R>(
                 Effect.gen(function* () {
                   const turnId = uuid();
                   const ended = yield* Deferred.make<void>();
-                  const decision = yield* Ref.modify<PiTurnState, TurnDecision>(
-                    session.turnState,
-                    (current) => {
+                  const decision = yield* session.turnPermit.withPermit(
+                    Ref.modify<PiTurnState, TurnDecision>(session.turnState, (current) => {
                       switch (current._tag) {
                         case "Idle":
                           return [
@@ -432,7 +459,7 @@ export const makePiAgentWithDependencies = <R>(
                         case "Finishing":
                           return [{ _tag: "Wait", ended: current.ended }, current];
                       }
-                    },
+                    }),
                   );
 
                   if (decision._tag === "Wait") {
@@ -452,33 +479,10 @@ export const makePiAgentWithDependencies = <R>(
                     return yield* Effect.suspend(prepareTurn);
                   }
                   if (decision._tag === "Steer") {
-                    const steered = yield* restore(
-                      session.transport.command({ type: "steer", message: input.text }),
-                    ).pipe(
-                      Effect.as(true),
-                      Effect.catch(() => Effect.succeed(false)),
-                    );
-                    if (steered) {
-                      return {
-                        turnId: decision.turn.turnId,
-                        started: false,
-                        output: Stream.empty,
-                      };
-                    }
-                    yield* restore(Deferred.await(decision.turn.ended)).pipe(
-                      Effect.timeoutOrElse({
-                        duration: "2 seconds",
-                        orElse: () =>
-                          Effect.fail(
-                            new AgentOperationError({
-                              sessionId: input.sessionId,
-                              operation: "wait-for-stale-turn",
-                              cause: new Error("Timed out waiting for the previous Pi turn"),
-                            }),
-                          ),
-                      }),
-                    );
-                    return yield* Effect.suspend(prepareTurn);
+                    return yield* new TurnAlreadyRunning({
+                      sessionId: input.sessionId,
+                      turnId: decision.turn.turnId,
+                    });
                   }
 
                   yield* drainQueue(session.chunks);
@@ -575,6 +579,7 @@ export const makePiAgentWithDependencies = <R>(
             yield* Deferred.succeed(pending.deferred, pending.settle(response));
             return true;
           }),
+        steer,
         interrupt,
         abort,
       },

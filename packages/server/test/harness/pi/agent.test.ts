@@ -25,6 +25,13 @@ const assistant = (over = {}) => ({ role: "assistant", content: [], api: "a", pr
 const upd = (ev) => send({ type: "message_update", message: assistant(), assistantMessageEvent: ev });
 const settle = (last) => { send({ type: "agent_end", messages: [last || assistant()], willRetry: false }); send({ type: "agent_settled" }); };
 let holding = false;
+let heldSteer = null;
+const completeHeldSteer = () => {
+  if (!heldSteer) return;
+  const msg = heldSteer;
+  heldSteer = null;
+  send({ id: msg.id, type: "response", command: "steer", success: true });
+};
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
   if (msg.type === "get_state") { send({ id: msg.id, type: "response", command: "get_state", success: true, data: { sessionId } }); return; }
@@ -37,6 +44,7 @@ rl.on("line", (line) => {
     return;
   }
   if (msg.type === "steer") {
+    if (msg.message === "hold-steer") { heldSteer = msg; return; }
     send({ id: msg.id, type: "response", command: "steer", success: true });
     if (holding) { holding = false; settle(); }
     return;
@@ -44,11 +52,13 @@ rl.on("line", (line) => {
   if (msg.type === "abort") {
     send({ id: msg.id, type: "response", command: "abort", success: true });
     if (holding) { holding = false; settle(assistant({ stopReason: "aborted" })); }
+    completeHeldSteer();
     return;
   }
   if (msg.type !== "prompt") return;
   const text = msg.message;
   if (text === "fail") { send({ id: msg.id, type: "response", command: "prompt", success: false, error: "cannot prompt" }); return; }
+  if (text === "release-steer") completeHeldSteer();
   send({ id: msg.id, type: "response", command: "prompt", success: true });
   send({ type: "agent_start" });
   if (text === "hold") { holding = true; return; }
@@ -188,19 +198,76 @@ layer(NodeServices.layer)("PiAgent", (it) => {
     }),
   );
 
-  it.effect("steers an active turn instead of starting a new one", () =>
+  it.effect("steers only the expected active turn", () =>
     Effect.gen(function* () {
       const agent = yield* makePiAgent({ executablePath: makeFake() });
       const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
       const first = yield* agent.session.prompt({ sessionId, text: "hold" });
       assert.equal(first.started, true);
 
-      const second = yield* agent.session.prompt({ sessionId, text: "also do this" });
-      assert.equal(second.started, false);
-      assert.equal(second.turnId, first.turnId);
+      yield* agent.session.steer({
+        sessionId,
+        expectedTurnId: first.turnId,
+        text: "also do this",
+      });
+      const stale = yield* agent.session
+        .steer({ sessionId, expectedTurnId: "other-turn", text: "wrong turn" })
+        .pipe(Effect.flip);
+      assert.equal(stale._tag, "TurnAlreadyRunning");
 
       const chunks = yield* Stream.runCollect(first.output);
       assert.equal(Array.from(chunks).at(-1)?.type, "finish");
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("keeps the checked turn reserved until the native steer is accepted", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const first = yield* agent.session.prompt({ sessionId, text: "hold" });
+      const steer = yield* agent.session
+        .steer({ sessionId, expectedTurnId: first.turnId, text: "hold-steer" })
+        .pipe(Effect.forkChild);
+
+      yield* Effect.yieldNow;
+      const laterPrompt = yield* agent.session
+        .prompt({ sessionId, text: "hold" })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+
+      const firstOutput = yield* Stream.runCollect(first.output).pipe(Effect.forkChild);
+      yield* agent.session.interrupt(sessionId);
+      yield* Fiber.join(steer);
+      yield* Fiber.join(firstOutput);
+
+      const later = yield* Fiber.join(laterPrompt);
+      assert.notEqual(later.turnId, first.turnId);
+      const stale = yield* agent.session
+        .steer({ sessionId, expectedTurnId: first.turnId, text: "wrong turn" })
+        .pipe(Effect.flip);
+      assert.equal(stale._tag, "TurnAlreadyRunning");
+      assert.equal(stale.turnId, later.turnId);
+
+      yield* agent.session.interrupt(sessionId);
+      yield* Stream.runCollect(later.output);
+      yield* agent.session.abort(sessionId);
+    }),
+  );
+
+  it.effect("rejects a generic prompt while a turn is active", () =>
+    Effect.gen(function* () {
+      const agent = yield* makePiAgent({ executablePath: makeFake() });
+      const { sessionId } = yield* agent.session.create({ cwd: "/tmp" });
+      const first = yield* agent.session.prompt({ sessionId, text: "hold" });
+
+      const second = yield* agent.session
+        .prompt({ sessionId, text: "follow-up" })
+        .pipe(Effect.flip, Effect.timeout("500 millis"));
+      assert.equal(second._tag, "TurnAlreadyRunning");
+
+      yield* agent.session.interrupt(sessionId);
+      yield* Stream.runCollect(first.output);
       yield* agent.session.abort(sessionId);
     }),
   );
@@ -301,7 +368,6 @@ layer(NodeServices.layer)("PiAgent", (it) => {
       const capabilities = yield* session.getCapabilities;
       assert.deepEqual(capabilities, {
         supportsResume: true,
-        supportsSteering: true,
         supportsPermissions: false,
       });
       yield* session.close;

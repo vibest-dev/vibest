@@ -30,8 +30,9 @@ export function Chat({
     <ChatSessionProvider cwd={cwd} sessionRef={sessionRef}>
       <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
         <ChatTranscript />
-        <div className="mx-auto w-full max-w-4xl min-w-80 flex-shrink-0 p-2">
+        <div className="mx-auto w-full max-w-4xl min-w-80 flex-shrink-0 px-2 pt-2 pb-6">
           <ChatInputComposer
+            cwd={cwd}
             toolbar={
               <>
                 {/* Same slot the draft surface puts the harness picker in, so

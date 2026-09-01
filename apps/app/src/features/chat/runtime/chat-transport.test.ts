@@ -13,9 +13,14 @@ const ref = {
 
 const snapshot: SessionRuntimeSnapshot = {
   ref,
+  streamId: "stream-1",
   status: { phase: "idle" },
+  recovery: null,
   activeTurn: null,
   activePrompt: null,
+  acceptedPrompt: null,
+  acceptedPrompts: [],
+  pendingPrompts: [],
   pendingRequests: [],
   cursor: 0,
 };
@@ -76,6 +81,7 @@ const throwingIterable = (): AsyncIterable<SubscribeStreamEvent> => ({
 const baseSession = {
   getSnapshot: async () => snapshot,
   prompt: unexpectedCall,
+  steer: unexpectedCall,
   setModel: unexpectedCall,
   setReasoningEffort: unexpectedCall,
   setPermissionMode: unexpectedCall,
@@ -95,12 +101,22 @@ describe("OrpcChatSessionTransport subscription", () => {
     let subscriptionCalls = 0;
     let snapshotSawSubscription = false;
     const items: SubscribeStreamEvent[] = [
-      { type: "event", event: { seq: 1, ref, type: "session.turn.started", turnId: "turn-1" } },
+      {
+        type: "event",
+        event: {
+          streamId: "stream-1",
+          seq: 1,
+          ref,
+          type: "session.turn.started",
+          turnId: "turn-1",
+        },
+      },
       // Collection events ride the same stream but are not session-scoped.
       { type: "event", event: { ref, type: "session.updated", title: "t" } },
       {
         type: "event",
         event: {
+          streamId: "stream-1",
           seq: 2,
           ref,
           type: "session.turn.ended",
@@ -153,7 +169,13 @@ describe("OrpcChatSessionTransport subscription", () => {
                 [
                   {
                     type: "event",
-                    event: { seq: 5, ref, type: "session.turn.started", turnId: "turn-2" },
+                    event: {
+                      streamId: "stream-1",
+                      seq: 5,
+                      ref,
+                      type: "session.turn.started",
+                      turnId: "turn-2",
+                    },
                   },
                 ],
                 drained,
@@ -255,6 +277,69 @@ describe("OrpcChatSessionTransport subscription", () => {
 });
 
 describe("OrpcChatSessionTransport RPC mapping", () => {
+  it("forwards abort signals as the oRPC call options", async () => {
+    const calls: Array<{ name: string; options: unknown }> = [];
+    const record = (name: string, options: unknown) => calls.push({ name, options });
+    const client = {
+      session: {
+        ...baseSession,
+        prompt: async (_input: unknown, options?: unknown) => {
+          record("prompt", options);
+          return { turnId: "turn-1" };
+        },
+        getMessages: async (_input: unknown, options?: unknown) => {
+          record("getMessages", options);
+          return { messages: [] };
+        },
+        acknowledgeRecovery: async (_input: unknown, options?: unknown) => {
+          record("acknowledgeRecovery", options);
+        },
+        respondToAgentRequest: async (_input: unknown, options?: unknown) => {
+          record("respondToAgentRequest", options);
+        },
+        setModel: async (_input: unknown, options?: unknown) => {
+          record("setModel", options);
+        },
+        setReasoningEffort: async (_input: unknown, options?: unknown) => {
+          record("setReasoningEffort", options);
+        },
+        setPermissionMode: async (_input: unknown, options?: unknown) => {
+          record("setPermissionMode", options);
+        },
+      },
+    } satisfies ChatTransportClient;
+    const transport = new OrpcChatSessionTransport(client, ref);
+    const signal = new AbortController().signal;
+
+    await transport.prompt(
+      { messageId: "message-1", parts: [{ type: "text", text: "hi" }] },
+      { signal },
+    );
+    await transport.getMessages({ signal });
+    await transport.acknowledgeRecovery("recovery-1", { signal });
+    await transport.respondToAgentRequest(
+      "request-1",
+      { type: "tool", behavior: "allow" },
+      { signal },
+    );
+    await transport.setModel("provider", "model", { signal });
+    await transport.setReasoningEffort("high", { signal });
+    await transport.setPermissionMode("ask", { signal });
+
+    expect(calls.map((call) => call.name)).toEqual([
+      "prompt",
+      "getMessages",
+      "acknowledgeRecovery",
+      "respondToAgentRequest",
+      "setModel",
+      "setReasoningEffort",
+      "setPermissionMode",
+    ]);
+    expect(calls.map((call) => call.options)).toEqual(
+      Array.from({ length: 7 }, () => ({ signal })),
+    );
+  });
+
   it("maps UNSUPPORTED history to null (capability absence, not failure)", async () => {
     const client = {
       session: {

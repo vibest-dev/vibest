@@ -9,6 +9,7 @@ import { FileSystem } from "effect/FileSystem";
 
 import { FileSystemService } from "../fs";
 import type { RpcContext } from "./context";
+import { translateErrors } from "./error-translation";
 
 const orpc = implement(fsContract).$context<RpcContext>();
 
@@ -18,38 +19,29 @@ const IGNORED_DIRS = new Set(["node_modules"]);
 export const fsRouter = orpc.router({
   readFileString: orpc.readFileString.effect(function* ({ input, errors }) {
     const fs = yield* FileSystemService;
-    return yield* fs.readFileString(input.cwd, input.path).pipe(
-      Effect.catchTags({
-        WorkspacePathEscape: (error) =>
-          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: error.cwd, path: error.path } })),
-        WorkspaceFileNotFound: (error) =>
-          Effect.fail(errors.NOT_FOUND({ data: { path: error.path } })),
-        WorkspaceNotFile: (error) => Effect.fail(errors.NOT_FILE({ data: { path: error.path } })),
-        WorkspaceFileTooLarge: (error) =>
-          Effect.fail(
-            errors.FILE_TOO_LARGE({
-              data: { path: error.path, size: error.size, limit: error.limit },
-            }),
-          ),
-        WorkspaceBinaryFile: (error) =>
-          Effect.fail(errors.BINARY_FILE({ data: { path: error.path } })),
-        WorkspaceReadError: (error) =>
-          Effect.fail(errors.READ_FAILED({ data: { path: error.path } })),
-      }),
-    );
+    // Map the service's typed effect errors onto the contract's declared errors,
+    // so the client gets a code + data instead of a generic 500.
+    return yield* translateErrors(fs.readFileString(input.cwd, input.path), {
+      WorkspacePathEscape: (e) =>
+        Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+      WorkspaceFileNotFound: (e) => Effect.fail(errors.NOT_FOUND({ data: { path: e.path } })),
+      WorkspaceNotFile: (e) => Effect.fail(errors.NOT_FILE({ data: { path: e.path } })),
+      WorkspaceFileTooLarge: (e) =>
+        Effect.fail(
+          errors.FILE_TOO_LARGE({ data: { path: e.path, size: e.size, limit: e.limit } }),
+        ),
+      WorkspaceBinaryFile: (e) => Effect.fail(errors.BINARY_FILE({ data: { path: e.path } })),
+      WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+    });
   }),
   readTree: orpc.readTree.effect(function* ({ input, errors }) {
     const fs = yield* FileSystemService;
-    return yield* fs.readTree(input.cwd).pipe(
-      Effect.catchTags({
-        WorkspacePathEscape: (error) =>
-          Effect.fail(errors.PATH_ESCAPE({ data: { cwd: error.cwd, path: error.path } })),
-        WorkspaceNotDirectory: (error) =>
-          Effect.fail(errors.NOT_DIRECTORY({ data: { path: error.path } })),
-        WorkspaceReadError: (error) =>
-          Effect.fail(errors.READ_FAILED({ data: { path: error.path } })),
-      }),
-    );
+    return yield* translateErrors(fs.readTree(input.cwd), {
+      WorkspacePathEscape: (e) =>
+        Effect.fail(errors.PATH_ESCAPE({ data: { cwd: e.cwd, path: e.path } })),
+      WorkspaceNotDirectory: (e) => Effect.fail(errors.NOT_DIRECTORY({ data: { path: e.path } })),
+      WorkspaceReadError: (e) => Effect.fail(errors.READ_FAILED({ data: { path: e.path } })),
+    });
   }),
   browse: orpc.browse.effect(function* ({ input, errors }) {
     const fs = yield* FileSystem;

@@ -31,7 +31,10 @@ describe("createPiTransform", () => {
   it("opens the turn once per run, even across retries", () => {
     const t = createPiTransform("s1");
     const first = [...t(e({ type: "agent_start" }))];
-    expect(first[0]).toMatchObject({ type: "start", messageMetadata: { sessionId: "s1" } });
+    expect(first[0]).toMatchObject({
+      type: "start",
+      messageMetadata: { sessionId: "s1", runId: expect.any(String), segment: 0 },
+    });
     expect([...t(e({ type: "agent_start" }))]).toEqual([]);
     expect(types([...t(e({ type: "agent_settled" }))])).toEqual(["finish"]);
     // A settle without an open turn stays silent.
@@ -83,8 +86,15 @@ describe("createPiTransform", () => {
     // interrupt right after delivery leaves no empty trailing message.
     expect(run(userStart("steer"))).toEqual([]);
     const split = run(assistantStart());
-    expect(types(split)).toEqual(["finish", "start"]);
-    expect((split[1] as { messageId: string }).messageId).not.toBe(firstMessageId);
+    expect(types(split)).toEqual(["start"]);
+    expect(split[0]).toMatchObject({
+      messageMetadata: {
+        sessionId: "s1",
+        runId: (opened[0] as { messageMetadata: { runId: string } }).messageMetadata.runId,
+        segment: 1,
+      },
+    });
+    expect((split[0] as { messageId: string }).messageId).not.toBe(firstMessageId);
 
     // Blocks of the continuation land under a fresh ordinal, in the new message.
     const cont = run(update({ type: "text_start", contentIndex: 0 }));

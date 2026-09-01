@@ -24,12 +24,16 @@ import {
   type ClaudeCodeAgent,
 } from "../harness/claude-code";
 import { makeCodexAdapter, makeCodexAgent, type CodexAgent } from "../harness/codex";
+import { makeGrokAdapter, makeGrokAgent, type GrokAgent } from "../harness/grok";
 import { makePiAdapter, makePiAgent, type PiAgent } from "../harness/pi";
+import { SessionRecoveryStoreLayer } from "../harness/session-recovery";
 import { ProjectRepositoryLayer, ProjectServiceLayer } from "../project";
+import { NodePtySpawnerLayer, PtyManagerLayer, PtyServiceLayer } from "../pty";
 
 export class ClaudeCode extends Context.Service<ClaudeCode, ClaudeCodeAgent>()("ClaudeCode") {}
 export class Codex extends Context.Service<Codex, CodexAgent>()("Codex") {}
 export class Pi extends Context.Service<Pi, PiAgent>()("Pi") {}
+export class Grok extends Context.Service<Grok, GrokAgent>()("Grok") {}
 
 /**
  * The Node platform services. Every effect that touches disk, paths, or random
@@ -53,7 +57,12 @@ export const PiLayer: Layer.Layer<Pi> = Layer.effect(Pi, makePiAgent()).pipe(
   Layer.provide(NodeProcessLayer),
 );
 
-const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer);
+export const GrokLayer: Layer.Layer<Grok> = Layer.effect(Grok, makeGrokAgent()).pipe(
+  Layer.provide(NodeProcessLayer),
+  Layer.provide(PlatformLayer),
+);
+
+const ProvidersLayer = Layer.mergeAll(ClaudeCodeLayer, CodexLayer, PiLayer, GrokLayer);
 
 /**
  * Which CLI is installed, and whether it is new enough, is fixed for the life
@@ -89,8 +98,14 @@ const RegistryLayer = Layer.effect(
     const claudeCode = yield* ClaudeCode;
     const codex = yield* Codex;
     const pi = yield* Pi;
+    const grok = yield* Grok;
     const adapters = yield* Effect.forEach(
-      [makeClaudeCodeAdapter(claudeCode), makeCodexAdapter(codex), makePiAdapter(pi)],
+      [
+        makeClaudeCodeAdapter(claudeCode),
+        makeCodexAdapter(codex),
+        makePiAdapter(pi),
+        makeGrokAdapter(grok),
+      ],
       cacheAvailability,
     );
     return makeHarnessAgentRegistry(adapters);
@@ -113,15 +128,21 @@ const HarnessProbeProvided = HarnessProbeLayer.pipe(Layer.provide(RegistryLayer)
 // layers by reference, so publish (manager/service) and subscribe (RPC) share
 // the single bus instance. A second reference (or Layer.fresh) would split the
 // bus and silently drop events.
+const SessionRecoveryProvided = SessionRecoveryStoreLayer.pipe(
+  Layer.provide(PathsLayer),
+  Layer.provide(PlatformLayer),
+);
 const HarnessSessionManagerProvided = HarnessAgentSessionManagerLayer.pipe(
   Layer.provide(RegistryLayer),
   Layer.provide(EventBusLayer),
+  Layer.provide(SessionRecoveryProvided),
   Layer.provide(PlatformLayer),
 );
 const HarnessSessionServiceProvided = HarnessAgentSessionServiceLayer.pipe(
   Layer.provide(HarnessSessionManagerProvided),
   Layer.provide(RegistryLayer),
   Layer.provide(EventBusLayer),
+  Layer.provide(SessionRecoveryProvided),
   Layer.provide(PathsLayer),
   Layer.provide(PlatformLayer),
 );
@@ -130,6 +151,15 @@ const ProjectServiceProvided = ProjectServiceLayer.pipe(
   Layer.provide(ProjectRepositoryLayer),
   Layer.provide(PathsLayer),
   Layer.provide(PlatformLayer),
+);
+
+const PtyManagerProvided = PtyManagerLayer.pipe(
+  Layer.provide(NodePtySpawnerLayer),
+  Layer.provide(PlatformLayer),
+);
+const PtyServiceProvided = PtyServiceLayer.pipe(
+  Layer.provide(PtyManagerProvided),
+  Layer.provide(ProjectServiceProvided),
 );
 
 // RegistryLayer is merged in as well as provided into the session stack;
@@ -144,6 +174,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   HarnessProbeProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
   GitServiceLayer.pipe(Layer.provide(FileSystemServiceLayer), Layer.provide(PlatformLayer)),
+  PtyServiceProvided,
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a
   // response. Sealed by the vendor layer, hence no `Layer.provide` here.

@@ -128,7 +128,12 @@ describe("resolvePermissionMode", () => {
   });
 
   it("resolves to nothing for a harness that declares nothing", () => {
-    const pi: HarnessAgentInfo = { id: "pi", name: "Pi", available: true, permissionModes: [] };
+    const pi: HarnessAgentInfo = {
+      id: "pi",
+      name: "Pi",
+      available: true,
+      permissionModes: [],
+    };
     expect(resolvePermissionMode(pi, "full")).toBeUndefined();
   });
 

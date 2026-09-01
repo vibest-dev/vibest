@@ -12,6 +12,7 @@
   "rules": {
     "unicorn/prefer-node-protocol": "error",
     "vibest/node-import-style": "error",
+    "vibest/no-restricted-disable": "error",
     "react/exhaustive-deps": [
       "error",
       {
