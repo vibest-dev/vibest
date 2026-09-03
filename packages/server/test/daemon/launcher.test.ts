@@ -38,7 +38,8 @@ const resolve = (
 
 // `excludeTestServices` because the launcher polls a real daemon's health on a
 // real clock: under the default TestClock its retry schedule never advances.
-// The timeout covers a spawn + readiness handshake, not a unit assertion.
+// `timeout` here is the hook budget (layer build / daemon teardown). The
+// per-test spawn + readiness budget lives in `vitest.config.ts`.
 layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
   "resolveOrSpawnDaemon",
   (it) => {
@@ -269,7 +270,18 @@ layer(NodeServices.layer, { excludeTestServices: true, timeout: "30 seconds" })(
         );
 
         const stopFiber = yield* Effect.forkScoped(stopDaemon(daemonDir, legacyDaemonDir));
-        yield* Effect.sleep("100 millis");
+        // `stopDaemon` writes tombstones before waiting on the locks this test
+        // holds. Poll instead of a fixed sleep: under load the fiber may not
+        // have run within 100ms.
+        yield* Effect.sleep("10 millis").pipe(
+          Effect.repeat({
+            while: () =>
+              Effect.gen(function* () {
+                return !(yield* hasTombstone(legacyDaemonDir)) || !(yield* hasTombstone(daemonDir));
+              }),
+          }),
+          Effect.timeout("5 seconds"),
+        );
         assert.equal(yield* hasTombstone(legacyDaemonDir), true);
         assert.equal(yield* hasTombstone(daemonDir), true);
         // Simulate a compatible explicit launcher clearing the early stop
