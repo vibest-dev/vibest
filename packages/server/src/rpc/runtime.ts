@@ -173,7 +173,7 @@ export const AgentRuntimeLayer = Layer.mergeAll(
   HarnessListProvided,
   HarnessProbeProvided,
   FileSystemServiceLayer.pipe(Layer.provide(PlatformLayer)),
-  GitServiceLayer,
+  GitServiceLayer.pipe(Layer.provide(FileSystemServiceLayer), Layer.provide(PlatformLayer)),
   PtyServiceProvided,
   PlatformLayer,
   // For the HTTP request app: `HttpStaticServer` needs it to turn a file into a

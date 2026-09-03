@@ -418,7 +418,9 @@ describe("updateChat", () => {
 
     const prompting = createChatState();
     const pending = requested("sending", "in flight");
-    prompting.outgoing = [{ message: pending.message, parts: pending.parts, status: "sending" }];
+    prompting.outgoing = [
+      { message: pending.message, parts: pending.parts, status: "sending", delivery: "follow-up" },
+    ];
     expectIgnored(prompting, {
       type: "outgoingCompleted",
       messageId: "late",

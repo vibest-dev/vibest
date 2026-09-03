@@ -3,13 +3,14 @@
 Mock content, real wiring. These remain to exercise the panel shapes that do not
 yet have real features behind them:
 
-|           | arity                 | `create` | what it demonstrates                                |
-| --------- | --------------------- | -------- | --------------------------------------------------- |
-| `diff`    | singleton             | —        | the thin default handle; opening twice is one panel |
-| `browser` | family (`key: tabId`) | ✓        | an instance with its own store (url, loading)       |
+|           | arity                 | `create` | what it demonstrates                          |
+| --------- | --------------------- | -------- | --------------------------------------------- |
+| `browser` | family (`key: tabId`) | ✓        | an instance with its own store (url, loading) |
 
 The real Files entry panel and path-keyed file viewer live in `features/files/`.
 The real Terminal panel lives in `features/terminal/`.
+The Review panel (workspace diffs vs uncommitted, committed, or another branch)
+lives in `features/review/`.
 
 There is one tab strip and it belongs to the host. A panel that wants "several
 of a thing" — two shells, two files — opens several panels, so the strip stays

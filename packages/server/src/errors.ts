@@ -17,7 +17,18 @@ export class StoreWriteError extends Data.TaggedError("StoreWriteError")<{
 }> {}
 
 export class GitError extends Data.TaggedError("GitError")<{
+  readonly cwd: string;
   readonly cause: unknown;
+}> {}
+
+/** `cwd` is not inside a Git work tree. */
+export class GitNotRepository extends Data.TaggedError("GitNotRepository")<{
+  readonly cwd: string;
+}> {}
+
+/** `other` is not a local head or remote-tracking ref in this repository. */
+export class GitRefNotFound extends Data.TaggedError("GitRefNotFound")<{
+  readonly ref: string;
 }> {}
 
 export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{

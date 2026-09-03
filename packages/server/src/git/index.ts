@@ -1,2 +1,2 @@
-export type { BranchSummary, StatusResult } from "simple-git";
+export { parseNameStatus, parseNulPaths } from "./name-status";
 export { GitService, GitServiceLayer } from "./service";

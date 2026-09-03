@@ -121,7 +121,7 @@ async function setup() {
     HarnessListLayer.pipe(Layer.provide(registryLayer), Layer.provide(NodeServices.layer)),
     HarnessProbeLayer.pipe(Layer.provide(registryLayer)),
     FileSystemServiceLayer.pipe(Layer.provide(NodeServices.layer)),
-    GitServiceLayer,
+    GitServiceLayer.pipe(Layer.provide(FileSystemServiceLayer), Layer.provide(NodeServices.layer)),
     ptyServiceLayer,
     NodeServices.layer,
     Observability.discard,

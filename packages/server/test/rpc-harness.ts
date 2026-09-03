@@ -75,7 +75,7 @@ export async function makeRpcTestHarness(
       listLayer,
       probeLayer,
       FileSystemServiceLayer.pipe(Layer.provide(NodePlatformLayer)),
-      GitServiceLayer,
+      GitServiceLayer.pipe(Layer.provide(FileSystemServiceLayer), Layer.provide(NodePlatformLayer)),
       ptyLayer,
       NodePlatformLayer,
     ),
