@@ -2,7 +2,10 @@
 // (in PreToolUse's shape) and Cursor's preToolUse through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
 // names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
-// may not touch the project directory except a scratchpad (projects/**/scratch). Which vibest commands an agent may run is
+// may not touch the project directory except a scratchpad (projects/**/scratch), and not a project's instructions.md, docs
+// or memory under a scratch segment either: for every harness, so a Pi or Cursor session cannot use scratch/…/docs or
+// scratch/…/memory, which only Claude's --settings denied before (a key can end in scratch, so those names are the
+// project's). Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
@@ -330,6 +333,9 @@ export const coordinator: Rules = (call) =>
 const OFF_LIMITS = "The project directory is off limits to sessions, except your scratchpad."
 /** A project's own entries: never a session's, wherever a `scratch` segment sits around them. */
 const STORE_ENTRIES = new Set(["instructions.md", "docs", "memory"])
+/** How deep below a searched scratch directory a project root is looked for (a key's levels), and how many reads at most. */
+const ROOT_DEPTH = 4
+const ROOT_READS = 256
 
 /** Shell words that may stand for a path: a word, or the value of `--opt=value` / `VAR=value`. */
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
@@ -344,15 +350,33 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   const projects = yield* physical(layout.projects)
   const vibestHome = yield* physical(layout.home)
   const projectsRoot = path.join(vibestHome, "projects")
-  // projects/<key>/scratch and below. The key can contain slashes; another project's scratch is allowed. A `scratch`
-  // segment cannot be told from part of a key (github.com/o/scratch), so a path naming a project's instructions.md,
-  // docs or memory anywhere is never scratch (what Claude's `--settings` denied: a scratchpad's own docs/ or memory/ too).
-  const inScratch = (target: string) => {
-    const rel = path.relative(projectsRoot, target)
-    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false
-    const parts = rel.split(path.sep)
-    return parts.includes("scratch") && !parts.some((p) => STORE_ENTRIES.has(p))
-  }
+  const fs = yield* FileSystem.FileSystem
+  /** A project root: a directory holding scratch/ together with instructions.md, docs or memory (names only). */
+  const projectRoot = (names: ReadonlyArray<string>) =>
+    names.includes("scratch") && names.some((n) => STORE_ENTRIES.has(n))
+  const names = (dir: string) => fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
+  /**
+   * projects/<key>/scratch and below. The key can contain slashes; another project's scratch is allowed. A `scratch`
+   * segment cannot be told from part of a key (github.com/o/scratch) by name, so what follows the first one may not name
+   * instructions.md, docs or memory (as Claude's `--settings` denied: a scratchpad's own docs/ or memory/ too). Before
+   * it, those names are the key's own (github.com/o/docs) unless the directory holding them is a project root on disk
+   * (it holds instructions.md, or scratch/ with docs or memory: github.com/o/repo/docs/scratch/x is that project's docs).
+   */
+  const inScratch = (target: string) =>
+    Effect.gen(function* () {
+      const rel = path.relative(projectsRoot, target)
+      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false
+      const parts = rel.split(path.sep)
+      const at = parts.indexOf("scratch")
+      if (at === -1 || parts.slice(at + 1).some((p) => STORE_ENTRIES.has(p))) return false
+      for (let i = 0; i < at; i++)
+        if (STORE_ENTRIES.has(parts[i]!)) {
+          // An owner or key directory never holds instructions.md, so it alone marks a project root here.
+          const here = yield* names(path.join(projectsRoot, ...parts.slice(0, i)))
+          if (here.includes("instructions.md") || projectRoot(here)) return false
+        }
+      return true
+    })
   const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
   /**
    * Where `raw` leads from the agent's cwd (`~` and file URLs expanded), both as the system follows it (symlinks before a
@@ -364,24 +388,39 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
     })
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
-  const fs = yield* FileSystem.FileSystem
-  /** Whether a project's own entries are anywhere below `dir` (a directory a search would walk). */
-  // ponytail: walks the whole directory on each search call inside a scratch segment; scratchpads are small.
-  const holdsEntries = (dir: string) =>
-    fs.readDirectory(dir, { recursive: true }).pipe(
-      Effect.map((entries) => entries.some((e) => e.split(path.sep).some((p) => STORE_ENTRIES.has(p)))),
-      Effect.orElseSucceed(() => false),
-    )
+  /**
+   * Whether a project root (a directory holding scratch/ together with instructions.md, docs or memory) is `dir` or below
+   * it within the depth of a key, breadth first: a search there reaches another project's entries (a key such as
+   * github.com/o/scratch puts its root under a scratch segment). A cloned repository's docs/ beside no scratch/ is not one.
+   */
+  // ponytail: at most ROOT_DEPTH levels and ROOT_READS directory reads, names only; a bigger tree past that is not searched
+  // further (allowed), so a node_modules cannot time the guard out.
+  const holdsProjectRoot = (dir: string) =>
+    Effect.gen(function* () {
+      let level = [dir]
+      let reads = 0
+      for (let depth = 0; depth <= ROOT_DEPTH && level.length > 0; depth++) {
+        const next: Array<string> = []
+        for (const d of level) {
+          if (reads++ >= ROOT_READS) return false
+          const here = yield* names(d)
+          if (projectRoot(here)) return true
+          for (const n of here) next.push(path.join(d, n))
+        }
+        level = next
+      }
+      return false
+    })
   /**
    * Off limits: inside the project but not in the scratchpad; with search, also a directory above the Project, or one
-   * under a scratch segment that holds a project's entries (a key such as github.com/o/scratch puts them there).
+   * under a scratch segment with a project root below it (a key such as github.com/o/scratch puts one there).
    */
   const blocked = (target: string, search: boolean) =>
     Effect.gen(function* () {
       if (search && inside(projects, target)) return true
       if (!inside(target, projects)) return false
-      if (!inScratch(target)) return true
-      return search && (yield* holdsEntries(target))
+      if (!(yield* inScratch(target))) return true
+      return search && (yield* holdsProjectRoot(target))
     })
   const tool = call.tool.toLowerCase()
 
@@ -403,7 +442,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
       for (const t of targets) if (t === vibestHome || (yield* blocked(t, search))) return OFF_LIMITS
       // Relative to a directory an earlier `cd` moved to, which the hook does not see.
-      if (word.includes(".vibest/projects") && !targets.every(inScratch)) return OFF_LIMITS
+      if (word.includes(".vibest/projects")) for (const t of targets) if (!(yield* inScratch(t))) return OFF_LIMITS
     }
     return undefined
   }
