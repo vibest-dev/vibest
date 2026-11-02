@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": false,
+  "semi": false,
+  "tabWidth": 2,
+  "useTabs": false,
+  "printWidth": 120,
+  "trailingComma": "all",
+  "experimentalSortImports": {},
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "packages/effect-herdr-sdk/src/generated/**"]
+}

@@ -22,3 +22,5 @@ allowBuilds:
   # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/pi only uses for types: their scripts are not needed.
   "@google/genai": false
   protobufjs: false
+  # The root `prepare` script installs the git hook; its postinstall would only repeat that.
+  simple-git-hooks: false

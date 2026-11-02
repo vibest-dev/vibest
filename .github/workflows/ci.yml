@@ -58,6 +58,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
       - run: pnpm run build
       - run: pnpm run typecheck
+      - run: pnpm run format:check
       # Leave room for the other job sharing this host.
       - run: pnpm run test --maxWorkers=2
       # pnpm e2e needs a local herdr and the real CLIs, so it runs locally (pnpm e2e, pnpm verify), not here.
