@@ -154,12 +154,46 @@ export class World {
     return result
   }
 
-  /** `vibest …` from the repository (or `cwd`). */
+  /**
+   * `args` with this world's herdr session for the commands that open panes (`run`, and bare `vibest` starting the main
+   * agent) when they name none: vibest's default is the session `vibest`, the user's own.
+   */
+  withSession(args: ReadonlyArray<string>): ReadonlyArray<string> {
+    if (args.includes("--session")) return args
+    if (args[0] === "run") return ["run", "--session", this.herdrSession, ...args.slice(1)]
+    if (args.length === 0 || (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help"))
+      return ["--session", this.herdrSession, ...args]
+    return args
+  }
+
+  /** `vibest …` from the repository (or `cwd`), in this world's herdr session unless `args` name one. */
   vibest(
     args: ReadonlyArray<string>,
     options: { cwd?: string; env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
   ) {
-    return this.run(options.cwd ?? this.repository, [binary, ...args], options)
+    return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
+  }
+
+  /**
+   * Terminals vibest recorded outside this world's herdr sessions (its own and the ones a check names after it,
+   * `<session>-…`): a check that opened a pane in a session it does not own, the user's included.
+   */
+  foreignTerminals(): ReadonlyArray<string> {
+    const file = path.join(this.vibestHome, "vibest.db")
+    if (!fs.existsSync(file)) return []
+    const db = new Database(file, { readonly: true })
+    try {
+      const rows = db.query("SELECT id, runtime FROM session").all() as Array<{ id: string; runtime: string | null }>
+      return rows.flatMap((r) => {
+        const terminal = (JSON.parse(r.runtime ?? "{}") as { id?: string }).id ?? ""
+        const session = terminal.split("/")[0] ?? ""
+        return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
+          ? []
+          : [`${r.id} at ${terminal}`]
+      })
+    } finally {
+      db.close()
+    }
   }
 
   /**
@@ -171,7 +205,7 @@ export class World {
     answers: string,
     options: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number } = {},
   ) {
-    const pty = ["python3", "-I", path.join(import.meta.dirname, "terminal.py"), binary, ...args]
+    const pty = ["python3", "-I", path.join(import.meta.dirname, "terminal.py"), binary, ...this.withSession(args)]
     return this.run(options.cwd ?? this.repository, pty, { ...options, stdin: answers })
   }
 
