@@ -41,8 +41,10 @@ describe.skipIf(!enabled)("live", () =>
     it.effect("per-pane subscription without pane_id is rejected by herdr", () =>
       Effect.gen(function* () {
         // The types already forbid this; the test pins down that herdr refuses it too (SPEC §6.2).
-        // @ts-expect-error pane.agent_status_changed requires pane_id
-        const e = yield* Effect.flip((yield* Herdr).subscribe([{ type: "pane.agent_status_changed" }]).pipe(Stream.runHead))
+        const e = yield* Effect.flip(
+          // @ts-expect-error pane.agent_status_changed requires pane_id
+          (yield* Herdr).subscribe([{ type: "pane.agent_status_changed" }]).pipe(Stream.runHead),
+        )
         assert.instanceOf(e, HerdrError)
       }))
 
