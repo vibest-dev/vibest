@@ -152,7 +152,7 @@ describe("subscriptions", () => {
       yield* fs.makeDirectory(agent, { recursive: true })
       yield* fs.writeFileString(
         path.join(agent, "auth.json"),
-        JSON.stringify({ "tencent-proxy": { type: "api_key", key: PI_SECRET } }),
+        JSON.stringify({ "example-proxy": { type: "api_key", key: PI_SECRET } }),
       )
       yield* fs.writeFileString(
         path.join(agent, "models.json"),
@@ -163,9 +163,9 @@ describe("subscriptions", () => {
         "claude auth status --json": claudeStatus,
         "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
         "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
-        "pi auth check --provider tencent-proxy --json --no-refresh": JSON.stringify({
+        "pi auth check --provider example-proxy --json --no-refresh": JSON.stringify({
           status: "ready",
-          provider: "tencent-proxy",
+          provider: "example-proxy",
           authType: "api_key",
         }),
         "pi auth check --provider custom-proxy --json --no-refresh": JSON.stringify({
@@ -202,7 +202,7 @@ describe("subscriptions", () => {
           })
           yield* subs.report({
             harness: "pi",
-            provider: "tencent-proxy",
+            provider: "example-proxy",
             limits: [{ window: "monthly", percent: 7, status: "available", resetTime: null }],
           })
           yield* subs.report({ harness: "nope", limits: [] })
@@ -224,7 +224,7 @@ describe("subscriptions", () => {
           ["cursor", "", "subscription", "Ultra", "token unreadable", 2],
           ["pi", "anthropic", "none", undefined, undefined, undefined],
           ["pi", "custom-proxy", "none", undefined, undefined, undefined],
-          ["pi", "tencent-proxy", "api-key", undefined, undefined, 7],
+          ["pi", "example-proxy", "api-key", undefined, undefined, 7],
         ],
       )
       assert.deepStrictEqual(fake.requests, [])
@@ -372,7 +372,7 @@ describe("subscriptions", () => {
         id: "see",
         effect: (ctx) =>
           Effect.gen(function* () {
-            yield* ctx.subscription.report({ harness: "claude", provider: "tencent-proxy", limits })
+            yield* ctx.subscription.report({ harness: "claude", provider: "example-proxy", limits })
             yield* ctx.agent.hook("start.before", (event) =>
               Effect.sync(() => {
                 seen = event.subscriptions
@@ -402,7 +402,7 @@ describe("subscriptions", () => {
       }).pipe(Effect.provide(Subscriptions.layer), Effect.provide(Runtimes.layer), Effect.scoped)
       assert.deepStrictEqual(listed.seen, listed.list)
       assert.deepStrictEqual(listed.list[0]?.limits, limits)
-      assert.strictEqual(listed.list[0]?.provider, "tencent-proxy")
+      assert.strictEqual(listed.list[0]?.provider, "example-proxy")
     }),
   )
 
@@ -414,7 +414,7 @@ describe("subscriptions", () => {
         const repo = yield* makeRepository
         yield* (yield* Subscriptions).report({
           harness: "pi",
-          provider: "tencent-proxy",
+          provider: "example-proxy",
           limits: [{ window: "monthly", percent: 12, status: "available", resetTime: null }],
         })
         const run = yield* runVibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, ["subscriptions"])
@@ -422,7 +422,7 @@ describe("subscriptions", () => {
         assert.deepStrictEqual(JSON.parse(run.stdout), [
           {
             harness: "pi",
-            provider: "tencent-proxy",
+            provider: "example-proxy",
             machine: "local",
             account: { kind: "none" },
             limits: [{ window: "monthly", percent: 12, status: "available", resetTime: null }],
