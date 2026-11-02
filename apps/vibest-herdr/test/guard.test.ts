@@ -227,7 +227,7 @@ layer(Platform.services)("role rules", (it) => {
   )
 
   it.effect(
-    "Session: the rules Claude's --settings denied (Read/Edit of instructions.md, docs/**, memory/** of every project, any herdr) hold for every file tool",
+    "Session: only its own project's scratch (VIBEST_SCRATCH) under projects; its project's instructions.md, docs and memory, another project's scratch, and everything without VIBEST_SCRATCH are refused; no herdr",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -237,136 +237,63 @@ layer(Platform.services)("role rules", (it) => {
         const projects = path.join(vibestHome, "projects")
         const worktree = path.join(vibestHome, "worktrees", "abcd1234")
         yield* fs.makeDirectory(worktree, { recursive: true })
-        const asSession = (tool: string, input: Record<string, unknown>) =>
+        // A key named like the old shapes (a scratch or docs segment) changes nothing: only VIBEST_SCRATCH counts.
+        const project = path.join(projects, "github.com", "o", "docs")
+        const own = path.join(project, "scratch")
+        const other = path.join(projects, "github.com", "o", "scratch", "scratch")
+        for (const dir of [own, other, path.join(project, "docs"), path.join(project, "memory")])
+          yield* fs.makeDirectory(dir, { recursive: true })
+        const asSession = (tool: string, input: Record<string, unknown>, scratch: string | null = own) =>
           session({ tool, input, cwd: worktree }).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
+            Effect.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown(scratch === null ? { HOME: home } : { HOME: home, VIBEST_SCRATCH: scratch }),
+              ),
+            ),
           )
-        // Every key shape: a repository key with slashes, a hash, a nested group, a key with a segment named scratch, and
-        // keys whose repository or owner is named docs or memory.
-        for (const key of [
-          "github.com/owner/repo",
-          "0123456789ab",
-          "gitlab.com/group/sub/repo",
-          "github.com/o/scratch",
-          "github.com/d/docs",
-          "github.com/memory/repo",
-        ]) {
-          const project = path.join(projects, key)
-          // A project a session ran in has its scratch directory.
-          yield* fs.makeDirectory(path.join(project, "scratch"), { recursive: true })
-          for (const entry of [
-            "instructions.md",
-            "docs/a.md",
-            "docs/sub/b.md",
-            "memory/c.md",
-            // A segment named scratch around a project's entries does not make them a scratchpad.
-            "docs/scratch/x.md",
-            "memory/scratch/x.md",
-            "scratch/docs/a.md",
-            "scratch/memory/a.md",
-          ]) {
-            const file = path.join(project, entry)
-            const dir = path.dirname(file)
-            // On disk: a search's reach is read from what is below its directory.
-            yield* fs.makeDirectory(dir, { recursive: true })
-            yield* fs.writeFileString(file, "secret\n")
-            for (const [tool, input] of [
-              ["Read", { file_path: file }],
-              ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
-              ["MultiEdit", { file_path: file, edits: [] }],
-              ["Write", { file_path: file, content: "x" }],
-              ["NotebookRead", { notebook_path: file }],
-              ["NotebookEdit", { notebook_path: file, new_source: "x" }],
-              ["Glob", { pattern: "*.md", path: dir }],
-              ["Glob", { pattern: `${dir}/**/*.md` }],
-              ["Grep", { pattern: "x", path: file }],
-              ["Grep", { pattern: "x", path: dir, glob: "*.md" }],
-              ["Bash", { command: `cat ${file}` }],
-            ] as const)
-              assert.strictEqual(
-                yield* asSession(tool, input),
-                "The project directory is off limits to sessions, except your scratchpad.",
-                `${tool} ${JSON.stringify(input)}`,
-              )
-          }
-          // A directory above the projects, searched, reaches into them.
-          for (const [tool, input] of [
-            ["Grep", { pattern: "x", path: vibestHome }],
-            ["Glob", { pattern: "**/memory/*", path: vibestHome }],
-            ["Glob", { pattern: `${vibestHome}/**/instructions.md` }],
-          ] as const)
-            assert.isString(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
-          // An instructions.md under a scratch segment is the project's (the key may end in scratch), not a scratchpad's.
-          for (const file of ["scratch/instructions.md", "scratch/r1/instructions.md"])
-            assert.strictEqual(
-              yield* asSession("Read", { file_path: path.join(project, file) }),
-              "The project directory is off limits to sessions, except your scratchpad.",
-              `${key} ${file}`,
-            )
-          const scratch = path.join(project, "scratch", "pane:s", "w1:p1", "notes.md")
-          assert.isUndefined(yield* asSession("Read", { file_path: scratch }), key)
-          assert.isUndefined(yield* asSession("Write", { file_path: scratch, content: "x" }), key)
-          assert.isUndefined(yield* asSession("Glob", { pattern: "*.md", path: path.dirname(scratch) }), key)
-        }
+        const offLimits = "The project directory is off limits to sessions, except your scratchpad."
+        const calls = (dir: string, file: string) =>
+          [
+            ["Read", { file_path: file }],
+            ["Write", { file_path: file, content: "x" }],
+            ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+            ["NotebookRead", { notebook_path: file }],
+            ["Glob", { pattern: "**/*.md", path: dir }],
+            ["Glob", { pattern: `${dir}/**/*.md` }],
+            ["Grep", { pattern: "x", path: dir }],
+            ["Bash", { command: `cat ${file}` }],
+            ["Bash", { command: `grep -r x ${dir}` }],
+          ] as const
+        // Its own scratch: read, write, search, with a docs/ or memory/ of its own in it too.
+        for (const dir of [own, path.join(own, "docs"), path.join(own, "pane:s", "w1:p1")])
+          for (const [tool, input] of calls(dir, path.join(dir, "notes.md")))
+            assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
+        // Its own project's entries, another project's scratch, the project root: refused.
+        for (const [dir, file] of [
+          [project, path.join(project, "instructions.md")],
+          [path.join(project, "docs"), path.join(project, "docs", "a.md")],
+          [path.join(project, "memory"), path.join(project, "memory", "a.md")],
+          [other, path.join(other, "a.md")],
+          [path.join(projects, "0123456789ab", "scratch"), path.join(projects, "0123456789ab", "scratch", "a.md")],
+        ] as const)
+          for (const [tool, input] of calls(dir, file))
+            assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
+        // A search over a directory holding the projects directory reaches into it.
+        for (const [tool, input] of [
+          ["Grep", { pattern: "x", path: vibestHome }],
+          ["Glob", { pattern: `${vibestHome}/**/instructions.md` }],
+          ["Bash", { command: `grep -r x ${vibestHome}` }],
+        ] as const)
+          assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
+        // No VIBEST_SCRATCH: nothing under projects, its own scratch included.
+        for (const [tool, input] of calls(own, path.join(own, "notes.md")))
+          assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no VIBEST_SCRATCH: ${tool}`)
+        // Outside projects it is unchanged, and no herdr at all.
+        assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }, null))
+        assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
         for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
           assert.isString(yield* asSession("Bash", { command }), command)
-        assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }))
-        assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
-      }),
-  )
-
-  it.effect(
-    "Session: a search of a scratchpad holding a cloned repository (docs, memory, a big tree) runs; one over another project's root under a scratch segment is refused",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const home = yield* tempDirectory("vibest-guard-")
-        const vibestHome = path.join(home, ".vibest")
-        const projects = path.join(vibestHome, "projects")
-        const worktree = path.join(vibestHome, "worktrees", "abcd1234")
-        yield* fs.makeDirectory(worktree, { recursive: true })
-        const asSession = (tool: string, input: Record<string, unknown>) =>
-          session({ tool, input, cwd: worktree }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
-          )
-        const write = (file: string) =>
-          Effect.gen(function* () {
-            yield* fs.makeDirectory(path.dirname(file), { recursive: true })
-            yield* fs.writeFileString(file, "x\n")
-          })
-        const project = path.join(projects, "github.com", "o", "repo")
-        yield* write(path.join(project, "instructions.md"))
-        const scratch = path.join(project, "scratch")
-        const clone = path.join(scratch, "oss")
-        for (const f of ["docs/guide.md", "memory/m.md", "instructions.md", "src/a.ts"])
-          yield* write(path.join(clone, f))
-        // More directories than the walk reads: it stops, it does not refuse.
-        for (let i = 0; i < 300; i++)
-          yield* fs.makeDirectory(path.join(clone, "node_modules", `p${i}`, "lib"), { recursive: true })
-        const searches = (dir: string) =>
-          [
-            ["Glob", { pattern: "**/*.md", path: dir }],
-            ["Grep", { pattern: "x", path: dir }],
-          ] as const
-        for (const dir of [scratch, clone])
-          for (const [tool, input] of searches(dir)) assert.isUndefined(yield* asSession(tool, input), `${tool} ${dir}`)
-        // A project root under a scratch segment: the key github.com/o/scratch, or the nested gitlab.com/g/scratch/r.
-        const keyed = path.join(projects, "github.com", "o", "scratch")
-        const nested = path.join(projects, "gitlab.com", "g", "scratch")
-        for (const root of [keyed, path.join(nested, "r")]) {
-          yield* write(path.join(root, "instructions.md"))
-          yield* fs.makeDirectory(path.join(root, "scratch"), { recursive: true })
-        }
-        for (const dir of [keyed, nested])
-          for (const [tool, input] of searches(dir))
-            assert.strictEqual(
-              yield* asSession(tool, input),
-              "The project directory is off limits to sessions, except your scratchpad.",
-              `${tool} ${dir}`,
-            )
       }),
   )
 
@@ -406,10 +333,11 @@ layer(Platform.services)("role rules", (it) => {
       const vibestHome = path.join(home, ".vibest")
       const scratch = path.join(vibestHome, "projects", "k", "scratch", "pane:s", "w1:p1")
       yield* fs.makeDirectory(scratch, { recursive: true })
+      const own = path.join(vibestHome, "projects", "k", "scratch")
       const asSession = (tool: string, input: Record<string, unknown>) =>
         session({ tool, input, cwd: home }).pipe(
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: scratch }))),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: own }))),
         )
       const tilde = "~/.vibest/projects/k/scratch/pane:s/w1:p1"
       for (const [tool, input] of [
@@ -452,7 +380,11 @@ layer(Platform.services)("role rules", (it) => {
         const asSession = (tool: string, input: Record<string, unknown>) =>
           session({ tool, input, cwd: home }).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: scratch }))),
+            Effect.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: path.join(project, "scratch") }),
+              ),
+            ),
           )
         for (const [tool, input] of [
           ["Bash", { command: `cat ${scratch}/x/../a.md` }],

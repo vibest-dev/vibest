@@ -454,7 +454,7 @@ describe("pi-vibest", () => {
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234",
         VIBEST_COMMAND: '["vibest"]',
-        VIBEST_SCRATCH: scratch,
+        VIBEST_SCRATCH: `${layout.projects}/k/scratch`,
       })
       yield* s.emit("session_start", {}, { mode: "tui" })
       const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })

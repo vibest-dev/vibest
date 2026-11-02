@@ -173,6 +173,8 @@ describe.concurrent("Sessions", () => {
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
+      // The project's own scratch directory, the one place under projects the session's guard allows.
+      assert.strictEqual(placed.env.VIBEST_SCRATCH, layout.scratch(yield* repositoryKey(repo)))
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       const start = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(start.env.VIBEST_SESSION_ID, id)

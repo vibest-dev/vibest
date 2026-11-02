@@ -77,7 +77,7 @@ export const sessionPlacement = (deps: {
   readonly vibest: ReadonlyArray<string>
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly rulesInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow, scratch: string) => Readonly<Record<string, string>>
   /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
@@ -161,6 +161,8 @@ export const sessionPlacement = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
+      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
+      readonly key: string
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
     },
@@ -171,7 +173,7 @@ export const sessionPlacement = (deps: {
       project: input.project,
       cwd: input.cwd,
       argv: input.argv,
-      env: { ...session.metadata.env, ...deps.vibestEnv(session) },
+      env: { ...session.metadata.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
       label: `${session.id} ${session.name}`.slice(0, 60),
       ...(near !== undefined ? { near } : {}),
       ...(input.split === true ? { split: true } : {}),
@@ -276,6 +278,7 @@ export const sessionPlacement = (deps: {
       openTerminal(h, machine, session, {
         project: root,
         cwd: worktree,
+        key,
         argv,
         ...(near !== undefined ? { near } : {}),
         ...(peer !== undefined ? { split: true } : {}),
@@ -383,7 +386,7 @@ export const sessionPlacement = (deps: {
     const terminal = yield* undoOnFailure(
       deps
         .launchArgv(session, true, key)
-        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, argv }))),
+        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, key, argv }))),
       (terminal) => h.close(terminal).pipe(Effect.ignore),
     )
     yield* show(h, session, terminal, root)

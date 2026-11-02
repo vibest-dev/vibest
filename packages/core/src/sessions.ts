@@ -364,8 +364,10 @@ export class Sessions extends Context.Service<
         })
 
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
-      const vibestEnv = (session: SessionRow) => ({
+      // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
+      const vibestEnv = (session: SessionRow, scratch: string) => ({
         VIBEST_SESSION_ID: session.id,
+        VIBEST_SCRATCH: scratch,
         VIBEST_AGENT: session.agent,
         VIBEST_HOME: layout.home,
         VIBEST_COMMAND: encodeCommand(vibest),
@@ -394,7 +396,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session),
+            env: vibestEnv(session, layout.scratch(key)),
           }),
         ]
       })
