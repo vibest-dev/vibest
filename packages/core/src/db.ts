@@ -481,6 +481,11 @@ const make = Effect.gen(function* () {
   const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
   /** The runtime's last reported status per Agent: live, never stored (schema.md). */
   const statuses = new Map<string, AgentStatus>()
+  /** No entry for `unknown` (what a missing one reads as) or an archived session (never live again): the map does not grow with ended sessions. */
+  const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) => {
+    if (row.status === "unknown" || row.metadata.archived || row.metadata.removed) statuses.delete(row.id)
+    else statuses.set(row.id, row.status)
+  }
 
   /** The project row for `key`, created on first use. The no-op `DO UPDATE` makes RETURNING answer for an existing row too. */
   const projectId = (key: string) =>
@@ -617,7 +622,7 @@ const make = Effect.gen(function* () {
       const current = yield* findSession(id)
       if (current === undefined) return
       const next = { ...current, ...patch }
-      statuses.set(id, next.status)
+      remember(next)
       const [stored] = yield* sql<{ metadata: string }>`SELECT metadata FROM session WHERE id = ${id}`
       let task: number | undefined
       try {
@@ -770,7 +775,7 @@ const make = Effect.gen(function* () {
                 startedAt: row.turnPromptedAt,
                 endedAt: row.turnPromptedAt,
               })}`
-            statuses.set(row.id, row.status)
+            remember(row)
             return true
           }),
         )
@@ -792,6 +797,9 @@ const make = Effect.gen(function* () {
       ),
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
+
+    /** How many sessions have a live status in memory (tests check it shrinks back once sessions end). */
+    liveStatuses: Effect.sync(() => statuses.size),
 
     updateSession: (id: string, patch: SessionPatch) =>
       sql.withTransaction(updateSession(id, patch)).pipe(Effect.orDie),
