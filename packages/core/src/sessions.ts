@@ -20,6 +20,7 @@ import {
   Config,
   Context,
   Crypto,
+  Deferred,
   Duration,
   Effect,
   Exit,
@@ -894,22 +895,24 @@ export class Sessions extends Context.Service<
                   }),
                 )
               })
-        // Take the lock before forking so no check sees the row as an abandoned `starting` one.
-        yield* Effect.uninterruptibleMask((restore) =>
+        // The launch holds the lock before spawn returns, so no check sees the row as an abandoned `starting` one.
+        const held = yield* Deferred.make<void>()
+        yield* Effect.uninterruptible(
           Effect.gen(function* () {
-            const release = yield* locks.take(id, restore)
             const leave = drain.track(`spawn ${id}`)
             yield* Effect.forkIn(
-              launch(rt, machine, row, root, decision.prompt, input.peer).pipe(
-                Effect.ensuring(release),
-                Effect.ensuring(leave),
-                logged(`spawn ${id}`),
-                Effect.provideContext(platform),
-              ),
+              locks
+                .withLock(id)(
+                  Deferred.succeed(held, undefined).pipe(
+                    Effect.andThen(launch(rt, machine, row, root, decision.prompt, input.peer)),
+                  ),
+                )
+                .pipe(Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),
               scope,
             )
           }),
         )
+        yield* Deferred.await(held)
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
 
