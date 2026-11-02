@@ -1,0 +1,40 @@
+{
+  "name": "effect-herdr-sdk",
+  "version": "0.0.1-beta.13",
+  "description": "Effect-native client for the herdr socket API. Types generated from herdr's published JSON Schema; forked from @brooswit/herdr-sdk (MIT).",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/effect-herdr-sdk"
+  },
+  "files": [
+    "src",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./bun": "./src/bun.ts"
+  },
+  "scripts": {
+    "generate": "bun scripts/gen/index.ts",
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json && bun scripts/gen/index.ts --check",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/effect-herdr-sdk"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "peerDependencies": {
+    "@effect/platform-bun": "4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@effect/platform-bun": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:"
+  }
+}

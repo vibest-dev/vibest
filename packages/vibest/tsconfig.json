@@ -1,8 +1,0 @@
-{
-  "extends": "@vibest/typescript/base.json",
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
-    "incremental": true
-  },
-  "include": ["vite.config.ts", "tsdown.config.ts"]
-}

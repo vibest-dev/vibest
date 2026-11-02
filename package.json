@@ -1,54 +1,28 @@
 {
-  "name": "vibest",
+  "name": "vibest-monorepo",
   "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "dev": "turbo run dev",
-    "watch": "turbo watch dev",
+    "e2e": "bun tools/e2e/src/main.ts",
+    "verify": "bun tools/verify/src/verify.ts",
     "build": "turbo run build",
-    "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
-    "lint": "oxlint --fix",
-    "lint:check": "oxlint --deny-warnings",
-    "format": "oxfmt",
-    "format:check": "oxfmt --check",
-    "check": "pnpm run lint:check && pnpm run format:check && pnpm run typecheck",
-    "clean": "turbo run clean && git clean -xdf node_modules dist .turbo",
-    "bump": "pnpm taze",
-    "sherif": "pnpm dlx sherif --fix",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "changeset:publish": "changeset publish",
-    "prepare": "git config core.hooksPath .githooks && simple-git-hooks",
-    "doctor": "turbo run doctor"
+    "lint": "oxlint apps packages tools",
+    "typecheck": "turbo run typecheck && pnpm run check:runtime && pnpm run lint",
+    "test": "bun ./node_modules/vitest/vitest.mjs run",
+    "check:runtime": "! grep -rnE \"@effect/(platform|sql-sqlite)-bun|from \\\"bun:\" packages/schema/src packages/core/src packages/protocol/src packages/server/src packages/client/src packages/integration/claude/src packages/effect-herdr-sdk/src tools/verify/src --exclude-dir=platform --exclude=bun.ts",
+    "publish:beta": "turbo run build && bun tools/publish-beta.ts",
+    "release": "bumpp package.json apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json --commit --tag --push"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1",
-    "@types/node": "catalog:",
-    "agent-cli-detector": "^0.1.6",
-    "eslint-plugin-react-you-might-not-need-an-effect": "^1.0.1",
-    "jsdom": "^26.1.0",
-    "lint-staged": "^17.3.0",
-    "oxfmt": "^0.58.0",
-    "oxlint": "^1.78.0",
-    "publint": "^0.3.23",
-    "simple-git-hooks": "^2.13.1",
-    "taze": "^19.17.2",
-    "tsdown": "catalog:",
-    "tsx": "latest",
-    "turbo": "^2.10.10",
-    "typescript": "catalog:",
-    "unrun": "^0.3.1",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "npx --no-install lint-staged"
-  },
-  "lint-staged": {
-    "*": [
-      "oxlint --fix --no-error-on-unmatched-pattern",
-      "oxfmt --no-error-on-unmatched-pattern"
-    ]
-  },
-  "packageManager": "pnpm@12.0.0-rc.6+sha512.3927fce49c3054b7e5541dc720bce7b4ebab07f4562fa6ffce7b39720a25e6a767d76384984e2265c800799613f7f79c5c422e9f5cedc9b66cfffd08ca3c77a9"
+    "@effect/vitest": "catalog:",
+    "@types/bun": "1.4.2",
+    "@vibest/tsconfig": "workspace:*",
+    "bumpp": "^10.0.3",
+    "oxlint": "1.90.0",
+    "tsrs": "0.20.1-ts7.1.0-beta",
+    "turbo": "^2.11.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
 }

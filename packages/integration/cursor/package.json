@@ -1,0 +1,30 @@
+{
+  "name": "@vibest/cursor",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "description": "vibest's Cursor CLI plugin: a session's turn-end result and the tool guard, loaded with `cursor-agent --plugin-dir`.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/integration/cursor"
+  },
+  "exports": {
+    "./plugin": "./src/plugin.ts"
+  },
+  "files": [
+    "src",
+    ".cursor-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/vibest.sh",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/cursor"
+  }
+}

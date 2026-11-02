@@ -1,0 +1,28 @@
+{
+  "name": "@vibest/cli-darwin-arm64",
+  "version": "0.0.1-beta.13",
+  "description": "The vibest binary for macOS on Apple silicon; installed by @vibest/cli.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/cli-darwin-arm64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/vibest",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64",
+    "prepack": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

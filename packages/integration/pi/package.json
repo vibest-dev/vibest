@@ -1,0 +1,48 @@
+{
+  "name": "@vibest/pi",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "description": "vibest's Pi integration: a session's turn-end report, the coordinator's inbox delivery and TUI, and both agents' guard.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/integration/pi"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/pi"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/client": "workspace:*",
+    "@vibest/core": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "catalog:",
+    "@earendil-works/pi-tui": "1.2.0",
+    "@vibest/cli": "workspace:*",
+    "@vibest/server": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

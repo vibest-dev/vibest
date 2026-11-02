@@ -1,12 +1,1 @@
-{
-  "extends": "@vibest/typescript/base.json",
-  "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2023"],
-    "target": "ES2022",
-    "types": ["node"],
-    "ignoreDeprecations": "5.0"
-  },
-  "include": ["src", "test"]
-}
+{ "extends": "@vibest/tsconfig/base.json", "compilerOptions": { "types": [], "customConditions": [] }, "include": ["src", "../core/types"] }

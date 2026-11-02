@@ -1,0 +1,58 @@
+{
+  "name": "@vibest/cli",
+  "version": "0.0.1-beta.13",
+  "description": "vibest: vibestd daemon and the vibest CLI. A coordinator directing sessions in herdr panes.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "apps/vibest-herdr"
+  },
+  "files": [
+    "bin",
+    "harnesses",
+    "herdr-plugin",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "vibest": "./bin/vibest.cjs"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts && bun scripts/build-harnesses.ts",
+    "build:darwin-arm64": "bun scripts/build.ts ../../packages/cli-darwin-arm64/bin/vibest bun-darwin-arm64",
+    "build:linux-x64": "bun scripts/build.ts ../../packages/cli-linux-x64/bin/vibest bun-linux-x64",
+    "prepack": "bun scripts/build-harnesses.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@vibest/client": "workspace:*",
+    "@vibest/core": "workspace:*",
+    "@vibest/plugin": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "@vibest/server": "workspace:*",
+    "effect": "catalog:",
+    "effect-herdr-sdk": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@vibest/cli-darwin-arm64": "workspace:*",
+    "@vibest/cli-linux-x64": "workspace:*"
+  },
+  "imports": {
+    "#platform": {
+      "bun": "./src/platform/bun.ts"
+    }
+  },
+  "exports": {
+    "./test/*": "./test/*.ts",
+    "./*": "./src/*.ts"
+  }
+}

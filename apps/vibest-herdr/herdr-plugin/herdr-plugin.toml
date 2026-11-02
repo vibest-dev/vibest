@@ -1,0 +1,88 @@
+# Draft vibest plugin for herdr (architecture §11, plan phase 8). Not installed anywhere.
+# Checked against herdr 0.9.5 in an isolated XDG_CONFIG_HOME; see docs/design/herdr-surface.md.
+#
+# Every command goes through bin/vibest.sh, which execs `vibest <args>`. vibest reads
+# HERDR_PLUGIN_CONTEXT_JSON (focused pane, cwd, workspace, tab) itself; the plugin holds no state.
+#
+# herdr manifests cannot declare keybindings. The user binds actions in their own config.toml:
+#   [[keys.command]]
+#   key = "prefix+v"
+#   type = "plugin_action"
+#   command = "vibest.open-main"
+
+id = "vibest"
+name = "vibest"
+version = "0.0.0"
+min_herdr_version = "0.9.5"
+description = "Run, watch, and stop vibest subagents from herdr."
+platforms = ["linux", "macos"]
+
+# herdr does not restore metadata tokens after a server restart; ask vibestd to republish them.
+[[startup]]
+command = ["sh", "bin/vibest.sh", "herdr", "startup"]
+
+[[actions]]
+id = "open-main"
+title = "vibest: open main Agent"
+description = "Open or focus the main Agent of the Project for the focused pane's directory."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "bin/vibest.sh", "herdr", "open-main"]
+
+[[actions]]
+id = "run"
+title = "vibest: run a subagent"
+description = "Read a prompt and start a subagent in the focused pane's Project."
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "bin/vibest.sh", "pane", "run"]
+
+[[actions]]
+id = "stop"
+title = "vibest: stop the focused Agent"
+contexts = ["pane"]
+command = ["sh", "bin/vibest.sh", "herdr", "stop"]
+
+[[actions]]
+id = "runs"
+title = "vibest: Runs"
+contexts = ["global", "workspace"]
+command = ["sh", "bin/vibest.sh", "pane", "runs"]
+
+[[actions]]
+id = "subscriptions"
+title = "vibest: Subscriptions"
+contexts = ["global"]
+command = ["sh", "bin/vibest.sh", "pane", "subscriptions"]
+
+[[actions]]
+id = "palette"
+title = "vibest: commands"
+contexts = ["global", "workspace", "pane"]
+command = ["sh", "bin/vibest.sh", "pane", "palette"]
+
+[[panes]]
+id = "run"
+title = "vibest run"
+placement = "popup"
+width = "70%"
+height = 16
+command = ["sh", "bin/vibest.sh", "herdr", "run"]
+
+[[panes]]
+id = "runs"
+title = "vibest Runs"
+placement = "overlay"
+command = ["sh", "bin/vibest.sh", "herdr", "runs"]
+
+[[panes]]
+id = "subscriptions"
+title = "vibest Subscriptions"
+placement = "overlay"
+command = ["sh", "bin/vibest.sh", "herdr", "subscriptions"]
+
+[[panes]]
+id = "palette"
+title = "vibest commands"
+placement = "popup"
+width = "70%"
+height = "60%"
+command = ["sh", "bin/vibest.sh", "herdr", "palette"]

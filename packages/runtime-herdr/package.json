@@ -1,0 +1,21 @@
+{
+  "name": "@vibest/runtime-herdr",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/core": "workspace:*",
+    "@vibest/plugin": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:",
+    "effect-herdr-sdk": "workspace:*"
+  }
+}

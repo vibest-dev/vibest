@@ -1,0 +1,31 @@
+{
+  "name": "@vibest/cli-linux-x64",
+  "version": "0.0.1-beta.13",
+  "description": "The vibest binary for GNU/Linux x64 (glibc); installed by @vibest/cli.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/cli-linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin/vibest",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "cd ../../apps/vibest-herdr && bun run build:linux-x64",
+    "prepack": "cd ../../apps/vibest-herdr && bun run build:linux-x64"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

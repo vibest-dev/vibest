@@ -1,23 +1,18 @@
 {
   "name": "@vibest/client",
-  "version": "0.0.1",
+  "version": "0.0.1-beta.13",
   "private": true,
-  "description": "WebSocket RPC client for the Vibest server",
   "type": "module",
+  "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "clean": "git clean -xdf node_modules dist .turbo"
+    "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
-    "@orpc/client": "catalog:orpc",
-    "@orpc/contract": "catalog:orpc",
-    "@vibest/contract": "workspace:*"
-  },
-  "devDependencies": {
-    "@vibest/typescript": "workspace:*"
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
   }
 }

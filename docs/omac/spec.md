@@ -1,0 +1,825 @@
+# OMAC Architecture (SPEC)
+
+OMAC = Orchestrate My Agent Crew. Command `omac`, daemon `omacd`, state directory `~/.omac`, environment prefix `OMAC_`, npm packages `@omac/*`, repository `iamdin/orchestrate-my-agent-cli`.
+
+A long-running daemon written in Bun + Effect 4, `omacd`, that lets **any** harness (coding agent CLIs such as Pi / Claude Code / Codex / Cursor) act as a coordinator, dispatching tasks to sessions running inside herdr panes and receiving results back. Session processes, statuses, sessions, and worktrees are entirely managed by herdr — no tmux, no guessing state via screen scraping. Result reporting relies on each harness's turn-end hook.
+
+Only two tradeoff criteria: **Do not redo what herdr already does; do not scrape screens for what hooks already solve**. For everything else where awslabs/cli-agent-orchestrator (CAO) already has an established design, adopt its division of responsibilities, naming, and rules directly without reinventing the wheel; only discard the screen-scraping state inference layer (an artifact of the tmux era). Inherit the verified session rules, Project store, and hook mechanisms from the former pi-coordinator (removed, see `packages/pi-coordinator/PLAN.md` at commit `f5c9b3f`).
+
+Process names: daemon `omacd`, CLI `omac`; home directory fixed at `~/.omac/` (baked into hook and worktree paths, never changed).
+
+---
+
+## 1. Goals and Non-Goals
+
+Goals:
+- Decouple coordinator from harness: any harness uses the `omac` CLI in its own shell to dispatch work, check results, and read/write Project; omacd delivers results into its pane (Pi via an in-process extension).
+- Decouple session from harness: differences between harnesses reduce to a single table of "launch arguments / interrupt key / result fields / hook installation path / startup adaptation".
+- Instant dispatch return, asynchronous result arrival; results queue when coordinator is busy, messages queue when session is busy.
+- Daemon restart loses neither sessions nor messages; automatic reconnection during herdr restarts or live handoffs.
+- Users can switch to any session pane to chat directly at any time.
+
+Non-goals (see Section 16): workflow engine, cron, memory consolidation, approval flows, Web UI, remote sessions, tmux fallback.
+
+## 2. Prerequisites
+
+| Condition | When not met |
+|---|---|
+| herdr ≥ 0.9.0 installed (`herdr` in PATH). Clients inside herdr provide `HERDR_SOCKET_PATH`; clients outside herdr have a named session spawned by omacd (Section 4 "herdr session") | Client reports "cannot reach herdr"; daemon itself does not depend on herdr to start |
+| Coordinator is inside a herdr pane (`HERDR_ENV=1`, `HERDR_PANE_ID`) | Pane-based coordinator cannot register; CLI remains usable (one-shot invocation) |
+| cwd is inside a git repository | Spawn errors |
+| Target harness is in PATH: `pi`, `claude`, `codex`, `cursor-agent` | Disabled per harness with prompt |
+| Target harness integration installed (`omac integration status` is `current`) | Spawn reports `HarnessUnavailable` with hint `omac integration install <harness>`; results only recognize hooks, no screen-scraping fallback |
+| Harness available (can list models: CLI runnable, login valid; successful results cached 5 min), specified model is in its list | Spawn reports `HarnessUnavailable` (reason unavailable / list of available models); `omac doctor` inspects harnesses one by one |
+| Bun ≥ 1.3, Effect 4.0.x | Build time |
+
+## 3. Architecture
+
+### 3.1 Process Topology
+
+```
+ coordinator pane (any harness)                     session pane (any harness)
+ ┌──────────────────────────────────┐              ┌────────────────────────────────┐
+ │ claude / codex / cursor / pi     │              │ claude / codex / cursor / pi   │
+ │  └─ omac in shell (one-shot CLI)  │              │  ├─ omac report in shell (report)│
+ │     inherits HERDR_PANE_ID=owner │              │  └─ turn-end hook → result+notif
+ └───────────────┬──────────────────┘              └──────────────┬─────────────────┘
+                 │ RPC (unix socket)                              │ same socket: ResultReady
+                 ▼                                                ▼
+ ┌──────────────────────────────── omacd (Bun + Effect) ─────────────────────────────────┐
+ │ sessions state machine │ Inbox queue & delivery gate │ Worktree policy │ Adapters     │
+ │ Project store │ sqlite: project, session, inbox         │ disk: results, rules, wt   │
+ └──────────────────────────────────────┬───────────────────────────────────────────────┘
+                                        │ herdr socket (@brooswit/herdr-sdk)
+                                        ▼
+                                  herdr server (holds panes, agent states, sessions, worktrees)
+```
+
+Three types of processes:
+
+- **omacd**: The only stateful process, **one per machine**, one socket. Downward connects to herdr servers corresponding to client-resolved herdr sessions (the current session if in herdr, or named session `omac` if outside; connects multiple if multiple sessions exist); upward provides RPC.
+- **omac**: Command-line interface of the same binary, and the agents' only interface (there is no MCP server); one short connection per command, stateless. `omac daemon` starts omacd; `launch` starts coordinator; `run / send / status / interrupt / archive / ls / models / project` are what the coordinator uses in the shell of its own pane (also for humans, scripts, and e2e); the shell inherits `HERDR_PANE_ID`, so omacd knows which pane to deliver results to; `report` is the session's intermediate report; `integration install` installs hooks for harnesses. The caller's role is declared by environment variables (12.2).
+
+Coordinator is launched via `omac launch <harness>`, executable from any directory in the repository. Coordinator always starts at the root of the main checkout (returns to main checkout even in a linked worktree; errors with `NotInRepository` if not in a git repo), and always runs in the repository's parent workspace — herdr only groups by repository (linked worktrees of the same repo indent under the main checkout's workspace without custom or nested grouping); sessions are all linked worktrees, so coordinator in the parent workspace allows sessions to nest beneath it: when in herdr, first identifies the parent workspace via `worktree.list { cwd: root }`'s `source.source_workspace_id`. If current pane (`pane.get`) is inside it (or the command carries the hidden `--in-parent <root>` naming this repo's main checkout, i.e. typed by `Launch` below into the tab / workspace it opened, already in parent workspace by construction: herdr does not report a just-created workspace as the parent, so asking it again would reopen without end; a flag, unlike an environment variable, applies to that one command and is not inherited by the shell), writes rules file then `execve`s into harness (if in a subdirectory, first sends `cd <root> && omac launch …` to current pane and exits, letting shell cd and re-run) (HarnessAdapter coordinator args: rules + readonly inspect tools, whose shell runs `omac`); current pane becomes coordinator, a pane-based owner. When not in parent workspace (including outside herdr), omacd opens a tab in the parent workspace (or creates a workspace at repo root if no parent workspace exists yet, which becomes the parent workspace) and inputs the same `omac launch` into its shell; in herdr, this tab gains focus; outside herdr, CLI then attaches via `herdr session attach` (matching `cao launch`). Pi has no dedicated frontend: the single Pi package `packages/pi-omac` (10.1, listed in `~/.pi/agent/settings.json`'s `packages`) identifies the agent by environment variables: `OMAC_AGENT=coordinator` is the coordinator, any other agent with `OMAC_SESSION_ID` a session; both run `omac` in bash, and the extension registers no MCP server.
+
+### 3.2 Channels
+
+| Edge | Channel | Content |
+|---|---|---|
+| Client → omacd | Effect RPC over unix socket (`RpcServer.layerProtocolSocketServer` + `BunSocketServer.layer({ path })`, `RpcSerialization.layerNdJsonRpc()`: one line per JSON-RPC 2.0 message) | spawn / send / get / list / interrupt / remove / report / project_* |
+
+Reason for unix socket over WebSocket: all clients are local processes; 0600 socket file permissions provide authentication without tokens and cannot be reached by browsers via `ws://localhost`; no port collision; consistent with herdr's approach. RPC contract (RpcGroup) is transport-agnostic, easily swapped to `layerProtocolWebsocket` (mounted on `BunHttpServer` with token) if Web UI or remote sessions are needed later, without touching business logic. Windows uses named pipes `\\.\pipe\…`, matching herdr SDK.
+| omacd → herdr | Short connection per SDK call; long connection for `events.subscribe` | `worktree.*`, `agent.start/prompt/get/read/send_keys/wait`, `pane.read/send_keys/close`; events `pane.updated`, `pane.closed`, `pane.moved`, `workspace.closed` |
+| Session → omacd | hook overwrites result file, then sends `ResultReady { sessionId }` with header `omac-protocol: 1` to `omac.sock` (matching herdr hook pushing to herdr socket); if omacd is offline, scanned on next startup | Final reply of each turn |
+| Session → omacd | `omac report` in shell (session caller header) → RPC `Report` | Intermediate progress report |
+| omacd → coordinator | Pane-based: delivered according to adapter's `inbox`, `prompt` delivered into TUI via `agent.prompt`, `subscribe` (Pi) received via extension's in-process `Inbox.Subscribe` stream (11.2); `cli` does not deliver, latest retrieved via `omac result` (`Get`) | inbox row |
+| omacd → session | `agent.prompt` (when session is idle) | Tasks, follow-up messages |
+| User → session | Native herdr | Direct chat, bypassing omacd |
+
+## 4. Terminology and Identity
+
+These items are persisted to disk, written to user harness configurations, and included in prompts; changing them would require data migration or hook reinstallation, so they are fixed once upfront. Others (timeouts, polling strategies, CLI args, Effect internal structures) can be modified anytime.
+
+- **Terms** (common nouns, lowercase in prose; identifiers keep their language's conventions): **harness**: the CLI program type a session runs (`claude`, `codex`, `pi`, `cursor`). **agent**: what a session is started from; built in: `coordinator` (launched by `omac launch`, one per repository, directs the other sessions) and `general` (the default, a session started to do work). **Session**: a running instance omac started with a harness and an agent. **runtime**: where sessions live (herdr). The agent of a process is `OMAC_AGENT`, its session `OMAC_SESSION_ID` (Section 14).
+- **Session id**: Random 8-character lowercase hex (`[a-f0-9]{8}`) following CAO, globally unique within an omacd daemon, **never reused**. No per-repo incrementing like `w1` (would collide across multiple coordinators/repos sharing a daemon). herdr agent named `w-<id>`, worktree and result files named directly by id, no repository key in path.
+- **owner**: coordinator identity, opaque string. Pane-based is `pane:<session>/<pane_id>` (session name + `HERDR_PANE_ID`, e.g. `pane:default/w1:p1`, rewritten on `pane.moved`), CLI is constant `cli`. Corresponds to CAO's `caller_id` (terminal started by CAO CLI has empty `caller_id`, results polled).
+  `cli` inbox rows are not delivered and remain `pending` until expired; `omac result` reads the latest by session id.
+  A session's own `omac` sends a session caller header; the server resolves that row and a non-coordinator may only `Report` (Section 7).
+  Pane owners carry session name, avoiding server lookups on delivery; `inbox` table omits session.
+  herdr 0.9.3 verified: `pane_id` (`w1:p1`) and `workspace_id` persist across server restarts, while `terminal_id` changes; hence `pane_id` can be persisted, `terminal_id` cannot.
+- **repository key**: Only used for `projects/<key>/`. Calculated following CAO `resolve_project_id`: `OMAC_PROJECT_ID` override → `git config --get remote.origin.url` normalized (credentials, protocol, `.git` suffix stripped, e.g. `github.com/iamdin/orchestrate-my-agent-cli`) → if no remote, first 12 chars of `sha256(realpath)` on main repo (parent of `git-common-dir`, resolving linked worktrees to main repo). Independent worktrees of the same repo share a Project; two independent clones without origin form two Projects. Remote format is stable across clones, machines, and relocations; CAO's alias table is omitted, path hash serves as fallback.
+- **herdr session**: One socket path per herdr server (default session is `default`, named sessions at `~/.config/herdr/sessions/<name>/herdr.sock`). Only the `session` table stores the herdr session, in `address.session`, as the **session name** rather than socket path; name → path queried and cached via `herdr session list --json`. One daemon serves all herdr sessions on the machine.
+  Why session row must store it: omacd calls herdr even without clients present (status polling, reconciliation, post-coordinator cleanup, recovery on restart), at which point session's server can only be known from the row. Probing `w-<id>` across all sessions works but requires every session to be running, which is undesirable.
+  Session placement priority:
+  1. `--session <name>` → that named session; inside herdr it overrides the ambient session, and `omac launch` in the repository's parent workspace refuses it (this pane's own session is used).
+  2. Client process has `HERDR_SOCKET_PATH` (coordinator runs in herdr) and no `--session` → **reuse current session**, session and coordinator share screen.
+  3. Neither (coordinator in regular terminal or IDE) → named session **`omac`**.
+  Named sessions resolved/spawned by omacd: `herdr session list --json` retrieves `socket_path`; if not running, spawns detached `herdr server --session <name>` (headless, verified working in 0.9.3) outside omacd process group and waits for socket (up to 10s). herdr server does not stop on omacd exit; sessions remain managed by it; users can view sessions via `herdr session attach omac`.
+- **turn**: A round between coordinator sending a message and session returning a final reply. `turn_state=open` indicates round in progress; records outcome when ended (8.1). Direct user chat in pane is not a turn.
+- **inbox row**: A sender → receiver message; `kind` is `result` / `message` / `notice`.
+- **result file**: `~/.omac/results/<id>.json`, overwritten per turn by hook, fixed envelope `{harness, ts, payload}`.
+- **harness**: Coding agent CLI running session or coordinator (pi / claude / codex / cursor; CAO calls this provider). In this spec, CLI is always called harness; "agent" only appears in herdr API names.
+- **HarnessAdapter**: Pure data object capturing differences between harnesses.
+
+## 5. Data and Storage
+
+### 5.1 Directory Layout
+
+```
+~/.omac/
+  omac.db                           sqlite, global singleton
+  omac.sock                         RPC socket (0600), machine-wide singleton
+  omacd.log                         daemon output
+  omacd.pid                         running omacd: { pid, version, socket, startedAt } (14)
+  omac.json                         config (JSONC), currently only plugins (plugins.md §4)
+  plugins/                         plugins, loaded on startup, auto-reloaded on change (plugins.md §4)
+  results/<id>.json                result files (written by integration, read by omacd)
+  rules/<id>.md                    session rules file (written once by omacd, read on harness start)
+  worktrees/<id>/                  legacy session cwd, when the owner row has no allocation record; the leaf is the 8-hex session id
+  worktrees/<repository>/<name>/   new session cwd. `<repository>` is origin's final path segment (trailing slashes removed, then a trailing `.git`); the main checkout directory name is used only when origin is absent. An unusable name is refused, not replaced. `<name>` is 4 lowercase hex stored once. Neither is a branch or the session id
+  coordinator/<key>.md             coordinator rules file (rewritten on every omac launch)
+  projects/<key>/
+    instructions.md  memory/  docs/ Project, readable and writable only by coordinator
+    scratch/                       scratchpad, readable and writable by the coordinator and every session of the project
+```
+
+Hook files do not reside under `~/.omac/`, but are placed in each harness's own directory following herdr's approach (see 10.1).
+Hook recognition rule: `OMAC_AGENT` set to an agent other than `coordinator` with `OMAC_SESSION_ID` non-empty writes `$OMAC_HOME/results/$OMAC_SESSION_ID.json`, otherwise exits silently.
+omacd injects `OMAC_SESSION_ID`, `OMAC_AGENT=general` and `OMAC_HOME` into `env` of `tab.create` when opening session panes (matching herdr's `HERDR_ENV` / `HERDR_PANE_ID` mechanism; `agent.start` itself does not take env, see 8.2);
+cwd is ignored, so sessions running `cd` elsewhere during tasks does not affect detection.
+
+### 5.2 SQLite (`bun:sqlite`, WAL, schema v1)
+
+One schema. An empty file gets it in one transaction (the version pragmas included); a failure rolls back. Anything else is accepted only when `PRAGMA application_id` is `0x6F6D6163`, `user_version` is 1, and the v1 tables and indexes are present, including the unique coordinator index. Otherwise omacd fails with `SchemaMismatch`. An existing file is read on a read-only connection before any writable open, so a refusal does not checkpoint the database or its WAL (`-shm` may change). A wrong `application_id` is reported even when `user_version` is 1.
+
+```sql
+PRAGMA application_id = 0x6F6D6163;
+PRAGMA user_version = 1;
+
+CREATE TABLE project (
+  id             INTEGER PRIMARY KEY,
+  repository_key TEXT NOT NULL UNIQUE
+) STRICT;
+
+CREATE TABLE session (
+  id                 TEXT PRIMARY KEY,  -- 8 hex; herdr name s-<id>, worktree, result files
+  project_id         INTEGER NOT NULL REFERENCES project (id),
+  agent              TEXT NOT NULL,     -- coordinator | general | later a user-defined name
+  harness_id         TEXT NOT NULL,
+  harness_session_id TEXT,
+  runtime            TEXT,              -- herdr; null together with address when a coordinator's pane is gone
+  address            TEXT,              -- runtime JSON
+  name               TEXT,
+  provider           TEXT,
+  model              TEXT,
+  status             TEXT,
+  turn_state         TEXT,
+  turn_prompted_at   INTEGER,
+  turn_prompted_seq  INTEGER,
+  metadata           TEXT,
+  created_at         INTEGER,
+  last_active        INTEGER
+) STRICT;
+-- one coordinator row per project; one coordinator per place
+-- CREATE UNIQUE INDEX session_coordinator ON session (project_id) WHERE agent = 'coordinator';
+-- CREATE UNIQUE INDEX session_address ON session (runtime, address) WHERE agent = 'coordinator';
+
+CREATE TABLE inbox (
+  id         INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES session (id),
+  kind       TEXT NOT NULL,             -- send | report | result | notice
+  message    TEXT NOT NULL,
+  details    TEXT NOT NULL DEFAULT '{}',
+  status     TEXT NOT NULL,             -- pending | sending | delivered | failed | dropped
+  created_at INTEGER NOT NULL
+) STRICT;
+```
+
+Connection executes `PRAGMA foreign_keys = ON` on open (SQLite defaults to off and must be set per connection). Table names are singular.
+There is one schema (`PRAGMA application_id` `0x6F6D6163`, `user_version` 1, v1 tables and indexes). An empty file gets it in one transaction. Any other file that is not already that schema fails at omacd start with `SchemaMismatch`: the database file and its WAL are left unchanged (`-shm` may change or be created). Stop omacd and move `~/.omac/omac.db` away. There is no migration.
+One coordinator session per project, unique index `session_coordinator`.
+Omitted columns and rationale: `herdr_name`; `worktree` is not a column. An owner row with `metadata.worktreeRepository` and `metadata.worktreeName` uses `worktrees/<repository>/<name>`; a row without those fields stays at `worktrees/<id>`. Both are stored once and not recomputed, and an existing path is not migrated. `<name>` is not a truncation of the session id, and `<repository>` is not the repository key. A name that cannot be used (`.`, `..`, empty, a slash, or a legacy 8-hex session id on this filesystem) fails spawn with `AllocationFailed`. omac does not substitute another repository name. `repository_root` not stored (CAO's `working_directory` is merely nullable launch cwd): obtained from the caller's repository header at spawn (cli `omac-repository`, or a coordinator's working-directory header), not stored, then queried via `git -C <that worktree> rev-parse --git-common-dir` when main repo needed, worktree removal means row is already `stopped`; `repository_key` computed on the fly from main repo; `workspace_id` not cached (operated by name); `base_commit` unnecessary (cleanup rule checks only if HEAD is contained in a branch); `copied` unnecessary (only files git already ignores in the worktree are copied; nothing is written to `info/exclude`); results originate only from hooks, no `result_source`; `removed` derived from directory existence; inbox omits `delivered_at` (retention calculated from `created_at`).
+
+Omitted tables and rationale: CAO's `sessions` handled by herdr workspace; `handoff_results` are `result` rows in `inbox` (retained until expiration after delivery, `Get` includes the latest); `session_incarnations` unnecessary (worktree path derived from id, herdr `worktree.list` inspects workspace); `idempotency_keys` omitted. Coordinator is not registered: pane-based inspectable anytime via `agent.get`.
+
+### 5.3 Result Files
+
+```json
+{"harness":"claude","ts":1791562603,"payload":{...harness hook input as-is...}}
+```
+
+Pi writes identical structure, with `payload` as `{"text","error","aborted"}`. Only the most recent turn is retained. Text extraction: Claude / Codex extracts `payload.last_assistant_message`, Cursor / Pi extracts `payload.text`; non-empty `payload.error` indicates failure.
+
+Session final reply convention (embedded in session rules):
+
+```markdown
+status: completed | failed | needs_input
+summary: one-line summary
+
+(body: what was done, files changed, verification steps and output, branch name, push status)
+
+## Remember
+(optional: learnings recommended to persist into Project memory)
+```
+
+`status` / `summary` can appear on any line; missing values recorded as `unknown`.
+
+### 5.4 Project Store
+
+Following former pi-coordinator PLAN §8: three entry types `docs` / `memory` / `scratch`, markdown as authority; `if_version` is first 16 chars of content hash, required on writes and deletes; path validation (relative, no `..`, whitelisted extension), 256 KB per-entry limit, secret scanning before write, temp file + rename.
+`instructions.md` and `memory/` fully injected into session rules, capped at 16,000 characters each. Session tools cannot access `~/.omac/projects/`.
+
+### 5.5 Write Model
+
+**Principles**: Each file has only one writer process; sqlite written only by omacd; cross-sqlite and filesystem operations follow strict order, with startup reconciliation as crash fallback; all files use temp file + `rename`, readers never observe partial content.
+
+| Path | Writer | Reader | Method | Authority |
+|---|---|---|---|---|
+| `omac.db` | omacd (single connection, WAL, `busy_timeout`) | omacd | Transaction | Sole authority for session and message states |
+| `results/<id>.json` | Integration files of each harness (inside session process) | omacd (hook's `ResultReady` notification + startup scan + slow poll) | `tmp + mv`, overwritten per turn | File is authority; deleted by omacd only during cleanup. Integration recognizes a session solely via its `OMAC_AGENT` / `OMAC_SESSION_ID` env vars, no pre-created file required from omacd |
+| `rules/<id>.md` | omacd (written once at spawn) | Harness process at launch | `tmp + rename` | Derivative, recomputed from Project |
+| `worktrees/<id>/` or `worktrees/<repository>/<name>/` | herdr (create), session (code), omacd / herdr (remove) | omacd reads `git` status | git | git is authority, omacd does not cache branch or dirty state, always queries live. New rows store origin's repository name (or the main checkout directory name only if origin is absent) and a 4-hex leaf; rows without them stay flat. The session id stays 8 hex everywhere else. Darwin and Windows treat differently cased bucket names as one reservation; Linux does not. The stored spelling is kept |
+| `projects/<key>/{instructions.md,memory/,docs/}` | omacd (on behalf of coordinator's `Project.Write`), user manual edits | omacd, session injected at launch | `tmp + rename`; `if_version` compares content hash | Markdown is authority, sqlite stores no copies, index scans directory |
+| `projects/<key>/scratch/<owner>/` | Coordinator (via omacd), session direct write | Both | Respective file tools | No single authority, governed by convention that filenames begin with author's id |
+| Harness integration files, user harness configs | `omac integration install` (CLI, local) | Harness | `tmp + rename`; managed file fully overwritten, config only adds/removes omac entries without backup; every write or delete shown as a diff and confirmed with `y` first (10.1) (Cursor's `cli-config.json` for `--allow-report`: confirmed, verified, restored on failure, 10.1) | No install.json: status read from version header in managed file |
+| `omacd.lock` | omacd | Nobody else (no status or cleanup reads it) | An SQLite file held by one open `BEGIN EXCLUSIVE` transaction for omacd's whole life, released last (after the socket is closed and unlinked) | The authority on which omacd may bind `omac.sock`: one per `OMAC_HOME` |
+| `omac.sock` | omacd | Clients | Bound only while holding `omacd.lock`: exits 0 if another omacd answers, refuses if something that does not hold the lock still answers (an omacd from before the lock), otherwise `unlink` and bind | |
+| `omacd.pid` | omacd | `omac status` | `tmp + rename` once the socket is bound; removed at shutdown if it still names this PID | Informational, not a lock: never signalled by omac |
+
+**SQLite usage**: `bun:sqlite` is synchronous API wrapped into `Effect.sync`; all SQL centralized in `Db` service; multi-row mutations executed within single transaction, no interleaved awaits inside transactions.
+
+**Write Ordering and Crash Recovery**:
+
+- **spawn**: Insert the `session` row (`starting`) → `worktree.create` → copy `.worktreeinclude` files → write rules file → `agent.start` → prompt.
+  Failure: Roll back in reverse order (`uninterruptible`). Crash: Startup reconciliation marks `starting` rows as `failed` if `agent.get` reports missing, delivering notice to owner; orphan worktree directories without database rows are logged but **not deleted** (better to leave garbage than destroy uncertain state).
+- **finish**: Read result file → single transaction updating `session.turn_state` (open → completed / failed / lost), `status`, and inserting inbox result row → delivery.
+  Protection against duplicate processing of the same result file relies on `turn_state` transitioning out of `open`. A crash between file read and transaction merely re-processes on restart (at-least-once); duplicate inbox rows cannot occur since row insertion and `turn_state` mutation share one transaction.
+- **deliver**: Inside receiver's lock: query `pending` → set `sending` → `agent.prompt` → mark `delivered` on confirmation, `failed` on error and notify owner (if herdr is unreachable before handoff, untouched, remains `pending`).
+  Duplicate delivery prevention relies on an in-process per-receiver lock rather than database flags: the idle event triggered by sending will re-enter, but waits on the lock, finding no remaining pending rows once acquired. CAO required "mark-before-send" due to cross-thread re-entrancy; single-process Effect requires only one lock.
+  With a session as receiver, a crash between "sent" and "marked" leaves the row at `sending`; the next `check` sets it `failed` and notifies the owner "may have been delivered", no blind re-send (8.4).
+- **remove / cleanup**: Interrupt session → set row to `stopped` (open turn set to `interrupted`) → cleanup worktree → delete the transient result file. The session row and inbox stay; nothing sweeps stopped rows.
+- **Kept**: omac never deletes a session or inbox row. `omac archive` (alias `rm`) deletes only that session's result and rules files, and only when the worktree is gone and its processes are confirmed exited.
+- **Project Writes**: Read current file and calculate hash → compare against `if_version` → `tmp + rename`. If user manually edited the file and hash mismatches, write is rejected, requiring coordinator to re-invoke `Project.Read`. No locks: omacd is the sole programmatic writer, human manual edits retry on race.
+
+**Excluded from SQLite**: Project index (scanned from directory), worktree branches and dirty state (queried from git), herdr panes and states (queried from herdr), coordinator registration (pane-based `agent.get`). Principle: do not duplicate data where another source is already authoritative, avoiding synchronization divergence.
+
+**Excluded mechanisms**: Database backups (single-file WAL, Project is markdown tracked by user git); file locking (single writer); deleting session history (inbox rows are kept).
+
+## 6. omacd Internals
+
+Effect 4 services (`Context.Service`) and Layers:
+
+```
+#platform (runtime implementation: services, sqlite, runMain; see 6.3)
+ ├─ Db            requires SqlClient; migrations; all SQL centralized here
+ ├─ Herdr         HerdrClient pool cached by socket path: call(session, method, params) → Effect<R, HerdrError>;
+ │                events(session) → Stream<PushFrame> (broadcast subscription per session, reconnects on Schedule.exponential(1s, 2) capped at 30s)
+ ├─ Harness       HarnessAdapter table (pure data, Section 10)
+ ├─ Worktree      git (Bun.$ wrapped into Effect) + herdr worktree.*; create, copy untracked files, gitState, cleanup rules
+ ├─ Results       readResult, parseReport (arrival notified by RPC ResultReady, no directory watching)
+ ├─ sessions       state machine; spawn/send/stop/list/get/resultReady; subscribes Herdr.events; writes Db; produces inbox rows
+ ├─ Inbox         enqueue / deliver / ack; delivery gate; reconcile timer
+ ├─ Project       ProjectStore
+ └─ Rpc           RpcGroup handlers → RpcServer.layer → layerProtocolSocketServer → SocketServer (provided by #platform)
+```
+
+Constraints:
+- `src/` depends solely on `effect` abstract services (6.3); runtime implementations provided only at entrypoints.
+- Services other than `Sessions` and `Inbox` never touch SQLite.
+- One `Semaphore(1)` per session: spawn / send / stop / event handling serialize per session; parallel across sessions.
+- All background fibers attach to daemon's Scope; interruption on cancellation guarantees no dangling tasks.
+- Calls to herdr use **agent names exclusively**, without caching pane ids (unaffected when users move panes).
+- Resource creation uses `Effect.acquireRelease`, rolling back in reverse dependency order on failure via `uninterruptible`.
+
+### 6.1 Repository Layout (pnpm Workspaces + Turborepo Monorepo)
+
+```
+packages/
+  effect-herdr-sdk/ effect-herdr-sdk: Effect-native herdr client (6.2)
+  cli/              @omac/cli: omacd + omac CLI
+  cli-darwin-arm64/ @omac/cli-darwin-arm64: the compiled omac binary for macOS Apple silicon
+  cli-linux-x64/    @omac/cli-linux-x64: the compiled omac binary for GNU/Linux x64 (glibc)
+  pi-omac/          @omac/pi: Pi integration
+  plugin/           @omac/plugin: plugin authoring API
+```
+
+npm distribution follows esbuild / OpenCode: `@omac/cli`'s `bin` is `bin/omac.cjs`, a Node launcher that runs `@omac/cli-<platform>-<arch>/bin/omac` (an `optionalDependencies` entry; npm installs only the one matching `os` / `cpu` / `libc`; in a source checkout the workspace links the package for this machine, after `bun run build:darwin-arm64` or `bun run build:linux-x64`). The binary is `bun build --compile` with `NO_AUTOLOAD` (`scripts/build.ts`; the platform package's `prepack` builds it). Linux x64 is target `bun-linux-x64` (glibc). Bun 1.4.3 ships one x64 binary that targets Nehalem (SSE4.2) and selects AVX2/AVX-512 at runtime; `-baseline` is that same binary, not a second package. The launcher passes arguments, stdio and the exit status or signal through, forwards SIGTERM / SIGHUP and ignores SIGINT (the terminal already sends Ctrl-C to the binary); a signal Node ignores (SIGPIPE) becomes exit status 128 + its number. `@omac/cli` still ships `src`, since `@omac/pi` imports it.
+
+Root directory contains `package.json`, `pnpm-workspace.yaml` (workspaces; a `catalog:` and an `effect` override keep one Effect version), `pnpm-lock.yaml`, `turbo.json` (`build`, `typecheck`), `tsconfig.base.json`, `spec.md`. pnpm installs; Bun stays the runtime, builds the binary and runs the tests (`pnpm run test`). Dependencies kept current: Effect 4.0.x, @effect/platform-bun 4.0.x, Bun 1.4, TypeScript 7, herdr 0.9.x.
+
+### 6.2 `effect-herdr-sdk`: Effect-Native herdr Client
+
+Forked from `@brooswit/herdr-sdk` 0.3.0 (MIT, schema targeting herdr 0.9.1 / protocol 22). Total 1600 lines, with handwritten core of ~250 lines (socket connection, line splitting, envelope, errors, subscription iterator), remainder generated from `herdr api schema --json`.
+
+| Original SDK | Treatment |
+|---|---|
+| `schema/`, `scripts/gen/` (schema → TS generator), `src/generated/` | **Retained as-is**; `bun run generate` regenerates on herdr upgrade. NOTICE retained for attribution |
+| `transport/socket-path.ts` (herdr config directory & socket path resolution, Windows named pipe) | Retained as-is (pure function) |
+| `transport/connection.ts`, `client/rpc.ts`, `events/subscription.ts`, `services/*`, `reducers/*` | **Replaced** with Effect implementation below; services facade and reducers omitted |
+
+Public service API:
+
+```ts
+class Herdr extends Context.Service<Herdr, {
+  socketPath: string
+  call:      <M extends Method>(method: M, params: ParamsOf<M>) => Effect<ResultOf<M>, HerdrError | HerdrTransportError>
+  subscribe: (subs: Subscription[]) => Stream<PushFrame, HerdrError | HerdrTransportError>
+}>()("effect-herdr-sdk/Herdr") { static layer(options?: { socketPath?; dev?; sessionName? }): Layer<Herdr, ConfigError, SocketConnector | Path> }
+```
+
+`HerdrError` (server `{error}` with `code`, e.g. `timeout`, `agent_pane_busy`) and `HerdrTransportError` (socket missing, refused, closed without response) are `Schema.TaggedError`. Types `ResultOf` / `ParamsOf` follow original method → result mappings. Runtime Schema validation omitted; type safety guaranteed by protocol pinning:
+
+- **Protocol pinning**: `schema/herdr-version.json` records target herdr version and protocol (currently 0.9.1 / 22); generated `PROTOCOL` constant derives from it. Upgrading herdr = updating schema + pin + regenerating in one commit.
+- **Generator assertion**: `scripts/gen` asserts schema protocol matches pin; `typecheck` runs `gen --check`, failing on divergence.
+- **Handshake**: `Herdr.verifyProtocol` validates server protocol via `ping`, raising `HerdrProtocolMismatch` on divergence. HerdrPool performs handshake upon first seeing a session and upon subscription reconnect; mismatched sessions fail `client` immediately, preventing malformed data upstream.
+- Post-handshake `call` / `subscribe` type assertion is the sole unvalidated boundary (commented in code); no `as` assertions elsewhere.
+
+Implementation notes (verified against herdr 0.9.0, Effect 4.0.2 on 2026-10-10):
+- Transport obtains `Socket.Socket` through SDK's `SocketConnector` service (`(endpoint) => Effect<Socket.Socket>`, modeled after `Socket.WebSocketConstructor`; `effect` lacks local socket abstraction); Bun implementation in `effect-herdr-sdk/bun` (`BunSocket.makeNet`), `@effect/platform-bun` as optional peer dependency. `Herdr.make(socketPath)` yields `Effect<HerdrShape, never, SocketConnector>`, `Herdr.layer` requires `SocketConnector | Path`. Each `call` opens a connection closed at end of `Effect.scoped`. **`socket.reader` must be acquired before `writer` and writes**: connection initializes upon reader acquisition, writer waits on reader's latch; writing first hangs indefinitely.
+- Line stream: `reader.pull` → decode → `Stream.splitLines` → `JSON.parse`. When peer closes, `pull` fails with `SocketError` (reason `SocketCloseError`, code 1000), handled as stream completion rather than error.
+- `call`: Writes `{id, method, params}`, takes first envelope matching `id` (or `id === ""` if server failed to parse request); `{error}` → `HerdrError`.
+- `subscribe`: `Stream.unwrap` wraps scoped effect creating connection and subscription request; stream lifecycle matches connection lifecycle. First envelope matching id is ack (stream fails on error), subsequent lines with `event` and `data` are `PushFrame`.
+- herdr 0.9.0 verified: `[{type: "pane.updated"}]`, `pane.closed`, `workspace.closed`, `pane.moved` accept broadcast subscriptions without `pane_id`; `pane.agent_status_changed` without `pane_id` is rejected (`invalid_request: missing field pane_id`). Hence event stream in Section 9 uses `pane.updated`.
+- Single connection can only `events.subscribe` once (learned from CAO on 0.7.5); each herdr session keeps one subscription connection with fixed subscriptions.
+
+Tradeoffs vs using upstream SDK directly:
+- **Benefits**: Errors channel into Effect's error system (`catchTag("HerdrError")`, retries by `code`, `Schedule` backoffs are composable without try/catch); subscriptions as `Stream` support `merge` with slow poll, `timeout`, reconnect `retry`, with natural backpressure; calls are interruptible, Scope closure terminates sockets without leaks; `Herdr` as `Context.Service` allows mocking entire session state machine via fake Layer in unit tests, the largest practical win; eliminates duplicate socket implementation and third-party runtime dependency.
+- **Costs**: Generator must be rerun and method → result mappings verified on protocol bumps; ~150 lines of handwritten core maintained by us.
+- Non-benefits: Upstream SDK already targets herdr 0.9.1; fork provides no version lead.
+
+### 6.3 Runtime Layering
+
+omacd executes on a single runtime at a time, determined at **module resolution time** rather than runtime detection or build flags:
+
+- `src/` relies solely on `effect` abstract services: `FileSystem`, `Path`, `Crypto`, `ChildProcessSpawner`, `Clock`, `Config`, `SqlClient`, `SocketServer`, and SDK's `SocketConnector`.
+- Runtime implementations reside in `packages/cli/src/platform/<runtime>.ts`, exporting `services` (Layer), `sqlite(filename)` (`SqlClient` with `Db`'s `SQL_NAMES` convention), `runMain`.
+  Entrypoints and tests import `* as Platform from "#platform"`; `package.json` resolves conditionally: `{"#platform": {"bun": "./src/platform/bun.ts"}}`.
+  Bun execution and `bun build --target=bun` use `bun` condition; Node support can be added via `"node": "./src/platform/node.ts"` (`@effect/platform-node`, Node SQLite driver) without altering business logic.
+- Only Bun implemented (the chosen stack in SPEC); Node implementation deferred until required.
+- Leak prevention: `tsconfig.core.json` per package includes core source only, omitting runtime types (Web standards like `TextEncoder` declared in `types/web-globals.d.ts`), failing compilation on `Bun.*` references; root `check:runtime` greps core source against `@effect/platform-bun`, `@effect/sql-sqlite-bun`, `bun:*`. Both enforced in `bun run typecheck`.
+- Non-swappable across Layers: Entrypoint `runMain` (one per runtime); behavioral variations under identical interfaces (SQLite numeric/transaction semantics, detached child process behavior, Windows named pipes) validated by running same test suite per runtime; hook scripts remain outside Effect.
+
+## 7. RPC Contract
+
+There is no handshake and no connection identity. `Hello` and `HelloRequired` are gone. Each request carries its own headers; a later request on the same socket does not inherit them, and middleware does not call `client.annotate`.
+`PROTOCOL` (currently 1, `packages/cli/src/protocol.ts`) is independent of the package version. Header `omac-protocol` is required on every method except `Ping`, checked before the handler runs, whether or not this socket has Pinged. `Ping` returns `{ protocol, version, herdrSessions }`: `protocol` is that number, `version` is the package version and is informational only. A package-version difference does not force a restart. The schema leaves `protocol` optional so a new client can still decode an old Ping.
+Before a mutation, the existing command preflight (one Ping per command, not per message) treats a missing or unequal protocol as `IncompatibleDaemon` and does not fall back to Hello. omac does not stop it: the error gives the user the manual steps (14). An agent does not stop it either. An old client that cannot read `ProtocolRejected` is still refused.
+Scoped methods also require `omac-caller`. `cli` requires `omac-repository` and is rejected if a session id is also present. `session` requires `omac-session-id`; project and agent come from that row, never from a self-declared coordinator. Missing, mixed, or malformed caller context is `InvalidCaller` and never becomes cli. An unknown session id is `NoSuchSession`. `Plugins`, `ResultReady`, and `CoordinatorSessionReady` are caller-less: they require protocol and ignore caller headers, so a hook does not gain cli scope. `herdr` is a payload only on `Spawn`, `Launch`, `Project.CoordinatorSession`, and `Project.RunningCoordinator`. A coordinator may also send `omac-repository` as the working directory for checkout; it is not identity. A non-coordinator session that sends it is rejected.
+Caller rules for every method, none missing, are in the `ACCESS` table in `server.ts`: `Report` is a non-coordinator session only; `Spawn`, `Launch`, `List`, `Get`, `Project.*` are a coordinator or the command line; `Inbox.Subscribe` is a coordinator only; `Send`, `Interrupt`, `Remove` additionally require that the session belongs to this coordinator (or the caller is the command line), otherwise `Forbidden`. Roles are self-declared by same-user processes, not authentication (Section 13): the server uniformly rejects calls made with the wrong role, guarding against misuse, not attackers. Same-user local socket trust is unchanged; there are no new tokens.
+Clients with `HERDR_SOCKET_PATH` report `socketPath`, otherwise `session` (`--session` / default `omac`), resolved by omacd per Section 4 rules; daemon connects and opens event stream on first encounter of a path, reusing it subsequently.
+Protocol version mismatches are rejected immediately.
+
+Wire format uses `RpcSerialization.layerNdJsonRpc()` (built into Effect RPC): one line per JSON-RPC 2.0 object, `method` is Rpc tag, `params` is payload.
+Hooks can emit notifications directly without understanding internal Effect RPC framing. The current line, which the generated hook sends, is `{"jsonrpc":"2.0","id":"<random>","method":"ResultReady","params":{"sessionId":"3f9a1c2e"},"headers":[["omac-protocol","1"]]}`. A copy without that header is `ProtocolRejected`.
+
+| Method | Parameters | Return | Description |
+|---|---|---|---|
+| `Ping` | | `{ protocol?, version, herdrSessions: string[] }` | `protocol` is PROTOCOL when this daemon sends it; absent on a daemon from before this protocol. `version` is the package version and is informational |
+| `Spawn` | `name?, prompt, harness?, provider?, model?, env?, agent?, peer?, archive?, herdr?` | `{ id, harness, provider?, model?, decidedBy, trace }` | **Returns immediately**. Runs the `agent.start.before` hook chain first (plugins.md §5), then validates and inserts; reports `NoHarnessChosen` if harness unset, or `AgentRefused { plugin, reason }` if refused. Spawn runs in background; failures delivered as `notice` to inbox. `name` defaults to first 40 chars of prompt line 1. Session is created in the caller's checkout: the cli repository, or the coordinator's working directory when that key is its own project |
+| `Launch` | `harness, argv, focus, herdr?` | `{ place, attach }` | `omac launch` outside repository parent workspace (inside or outside herdr): if main checkout root has parent workspace (`source.source_workspace_id` from `worktree.list { cwd }`), calls `tab.create { workspace_id, cwd, env: { OMAC_HOME }, focus }`, otherwise `workspace.create { cwd, env: same, focus }` (`--env` in `argv`), waits for non-blank output via `pane.wait_for_output` (shell prompt drawn, up to 10s), then sends `cd <root> && <argv> --in-parent <root>` (POSIX quoted) followed by Enter via `pane.send_text` (`Launch.runAtRoot`). Spawns no agent, creates no worktree, writes no SQLite; failures yield `LaunchFailed` (closes tab/workspace on timeout or send failure) |
+| `Send` | `id, message` | | Only the coordinator that spawned it or the command line can send; other coordinators get `Forbidden`. Returns once written to inbox; delivery happens in omacd's own scope, serialized per session (8.4), unaffected by the sending connection disconnecting; if undeliverable, the session's owner is told via `notice` |
+| `Interrupt` | `id` | `{ message }` | Ownership as `Send`. Interrupts current turn; session (pane, worktree, session) preserved (8.6) |
+| `Remove` | `id`, `keepWorktree?`, `stop?` | Per-layer results (8.6a) | Ownership as `Send`. Records tombstone, records PIDs then closes pane, sets stopped only after signal 0 confirms exit, cleans up worktree (per rules) |
+| `List` | `stopped?` | `SessionInfo[]` | Coordinator: every session of its project. Command line: every session. `stopped` true includes stopped sessions (CLI `--all`). `repositoryRoot` and `git` are queried live from the worktree |
+| `Get` | `id` | `SessionInfo & { result }` | No ownership check: any coordinator or the command line can read any session. Does not wait. `result` is the inbox row of the session's latest result, `null` if none yet; `notice`s about it go only to the owner's inbox; `SessionInfo` includes `routing?` (plugin routing decision and callback execution records) |
+| `Plugins` | | `PluginInfo[]` | **Protocol only, no caller**. Current plugins in omacd (waits on in-flight reload up to 10s): source, revision, load time, status, errors, calls / mutations / failures / timeouts / rejections since startup (`omac plugins`) |
+| `Report` | `message` | | Callable only by a non-coordinator session caller; sender is that session, receiver is its owner; cannot name another session; other connections get `Forbidden` |
+| `Inbox.Subscribe` | | Stream: one batch string | Coordinator-side (Pi extension); requires a coordinator caller. Delivers pending rows first, then new rows; `subscribe`-type harness panes do not use `agent.prompt` (11.2) |
+| `ResultReady` | `sessionId` | | Hook-side; **Protocol only, no caller**. The request also carries header `omac-protocol`. Returns immediately, scheduling session check in background (8.5); unknown ids ignored. Content remains governed by result file |
+| `Project.Info / List / Read / Search / Write / Delete` | Same as PLAN §8.2 | | Unavailable on session connections (`Forbidden`). Operates on the coordinator's project, or the cli repository |
+| `Project.CoordinatorSession` | `harness, fresh, paneId, herdr?` | `{ sessionId, harnessSessionId }` | Before `omac launch` execs at the repo root: upserts this project's coordinator row at `paneId` in the herdr session `herdr` names. `sessionId` is that row's id (`OMAC_SESSION_ID`). `harnessSessionId` is the conversation to reopen, null when `fresh` or the harness changed |
+| `CoordinatorSessionReady` | `sessionId, harness, harnessSessionId` | | Coordinator-side (Pi extension, Claude / Codex Stop hook), sent in background; **Protocol only, no caller**. Updates `harness_session_id` when `sessionId` is the coordinator's and `harness` matches; anything else is ignored. The last report wins. Writes db only, no herdr queries |
+| `Daemon.Stop` | `instance` | `{ instance }` | The command line only (`Forbidden` otherwise), naming this omacd's instance (`WrongInstance`). Stops omacd to be replaced only when OMAC is quiet, else `DaemonBusy` with every blocker (14). Success means accepted, not exited; the client sends it once and watches Ping. While a Stop decides, and for good once it is accepted, Spawn, Launch, Send, Interrupt, Remove, Report, ResultReady, Project.CoordinatorSession, CoordinatorSessionReady, Project.StopCoordinator, Project.Write and Project.Delete are refused with `DaemonStopping` (nothing run, nothing recorded); reads still answer |
+
+All errors are `Schema.TaggedError`: `NoSuchSession`, `SessionBusy` (session undergoing cleanup during Remove, or failed to halt within 10s during Interrupt), `LimitReached`, `HerdrUnreachable`, `HerdrProtocolMismatch`, `HarnessUnavailable`, `NoHarnessChosen`, `AgentRefused`, `ProtocolRejected`, `InvalidCaller`, `Forbidden`, `NotInRepository`, `LaunchFailed`, `ProjectConflict`, `ProjectInvalid`. `IncompatibleDaemon` is client-side (the preflight), not a daemon response.
+
+## 8. Session Lifecycle
+
+### 8.1 State Machine
+
+```
+starting ──startup ok, 1st prompt confirmed──▶ working ◀──prompt──┐
+   │                                              │               │
+   │ startup failed                               │ seq change & idle/done
+   ▼                                              ▼               │
+ failed                                          idle ────────────┘
+                                                  │
+ blocked: herdr reports blocked (anytime, rev)     │ remove / process exit / worktree removed
+ failed : hook reports error, exit during turn; held until next turn, queue delivered as usual meanwhile
+                                                  ▼
+                                               stopped
+```
+
+`status` follows herdr; `turn_state` tracks coordinator's active turn, independently:
+
+```
+none ──prompt──▶ open ──hook delivers result─────────────▶ completed (result to inbox)
+                  │ ──hook error / process exit──────────▶ failed (result to inbox)
+                  │ ──idle & seq changed, no file in 10s─▶ lost (failed result to inbox)
+                  │ ──interrupt / remove─────────────────▶ interrupted (no result, reply is tool return)
+                  │ ──prompt unacknowledged (8.3)──────────▶ not_started (notice)
+                  └──prompt errored midway, session idle and seq unchanged for over 8s──▶ not_started (notice says "did not see it start", then queue is delivered; if it starts later, that turn's result is not accepted)
+Any ended state ──next prompt──▶ open
+```
+
+Results enter inbox only when `open`, and abnormalities evaluated only when `open` (8.5); turns outside `open` (including direct user chat in pane) synchronize `status` without inbox insertion.
+
+### 8.2 Spawn
+
+`omac run --peer <id>` does not allocate a worktree. Before a row is inserted it requires a session in the same project, not archived, in the same herdr session, whose worktree is on disk in this repository; a peer's peer resolves to the worktree owner (`metadata.peer`). The new pane is `pane.split` from the named session's pane, with the same `cwd` and `env` as step 1b. Archiving the borrower never removes that worktree. Archiving the owner keeps the directory while a live borrower (not archived, not `stopped`) still shares it. That check plus the insert, and the owner's last sharing check plus `git worktree remove`, take the owner's session lock; the sharing check is repeated immediately before the remove. A peer session's rules tell it not to move the shared checkout. That is prompt text only: Guard does not refuse those git commands, and this is not a sandbox. `omac spawn` is not a CLI command.
+
+`omac run --archive-on-completion` stores `metadata.archive: true` (no schema change); 8.6b archives the session once a completed result reached the coordinator.
+
+1. Validation: If `OMAC_MAX_SESSIONS` set, non-`stopped` session count + reservations must be < limit (CAO's `CAO_MAX_TERMINALS`: node-wide cap, unlimited by default, evaluated before resource allocation, no active probing); harness available; cwd inside git repo.
+2. Generate 8-hex id (deduped against the `session` table), write the `session` row (`starting`), **return immediately**.
+3. Background execution (under session's Semaphore):
+   1. `worktree.create { cwd: repositoryRoot, path: ~/.omac/worktrees/<repository>/<name>, label, focus: false }` → yields workspace and root pane. `<repository>` is the final segment of `remote.origin.url`: trim, remove trailing slashes, then remove one trailing `.git`, and keep the case (`Repo.git/` is `Repo`). Only when that remote is absent is `<repository>` the main checkout directory's own name (`basename` of `mainCheckout`, not of a nested cwd). It is not the repository key and not `OMAC_PROJECT_ID`. `.`, `..`, an empty name, a name containing `/` or `\`, and a name that is a legacy 8-hex session id are refused with `AllocationFailed` before any directory is created. On Darwin and Windows that 8-hex check uses `toLowerCase`, so `ABCD1234` is reserved too; on Linux only the exact lowercase id is reserved. omac does not pick a different repository name and does not move an existing worktree. Reservation of the 4-hex leaf compares repository and leaf with that same case rule (Darwin and Windows fold with `toLowerCase`; Linux compares the strings as stored) while the row keeps the spelling it was given. That rule follows the host OS, not a probe of the volume: a case-sensitive APFS volume and Git `core.precomposeunicode` were not verified. `<name>` is 4 lowercase hex chosen once, stored on the owner as `metadata.worktreeName` with `metadata.worktreeRepository`, and not derived by truncating the session id. Creating or switching a branch does not rename the directory. A row without those fields stays at `~/.omac/worktrees/<id>`. `repositoryRoot` is main checkout (herdr does not create from linked worktrees); herdr groups it under parent workspace alongside coordinator (12.1). `workspace_id` omitted: herdr accepts either `workspace_id` or `cwd`, not both, and it does not affect grouping. herdr creates branch, immediately followed by `git switch --detach` and branch deletion.
+   1b. `tab.create { workspace_id, cwd: <worktree>, env: { OMAC_SESSION_ID: <id>, OMAC_AGENT: general, OMAC_HOME, OMAC_COMMAND, OMAC_SCRATCH }, focus: false }` → session pane; followed by `pane.close` on root pane.
+       herdr allows `env` only on `tab.create` / `pane.split` / `workspace.create`, not on `worktree.create` or `agent.start`, hence this step. Integration detects session via this env (10.1).
+   2. Copy local files named by the main checkout's `.worktreeinclude` (gitignore syntax; the Claude Code convention): `git ls-files -z --others --ignored --exclude-from=<root>/.worktreeinclude`, then only those `git check-ignore -z --stdin` reports ignored both in the main checkout and, after the skips below, in the new worktree (a rule only the main checkout has, such as an uncommitted or untracked `.gitignore` or a relative `core.excludesFile`, would leave the copy untracked there; one only the worktree has does not select a file). No `.worktreeinclude` copies nothing; tracked and not-ignored untracked files are never copied; matching, negation and recursion are git's. A `dir/` entry (nested repository or worktree) is skipped; a symlink is recreated as the same link, never followed; another non-regular file is skipped; a path that exists in the worktree or lies under a link there is left alone. Copies are ignored in the worktree already, so nothing is written to `info/exclude` (shared by every worktree of the repository). A failed copy (`CopyFailed`: source, destination, errno) fails the launch before `agent.start`.
+   3. Write rules file `rules/<id>.md` (session rules + instructions + memory).
+   4. `agent.start { name, kind, pane_id: <1b pane>, args, timeout_ms: 120000 }`; retries every 500ms on `agent_pane_busy`, up to 40 times.
+   5. **ready**: Polling `agent.get` every 500ms until `interactive_ready`, up to 60s. Each tick invokes HarnessAdapter's optional `startup` (startup adaptation, fresh state per launch). Currently used by Claude only: when bottom 40 screen lines match trust / bypass prompt, checks if cursor (`❯`) points to desired option, sends `enter` and records as answered, otherwise sends `down`; sends single keystroke per tick (matching CAO). Timeout notice prompts user to accept dialog in main checkout once.
+   6. `prompt` (8.3).
+   7. Any failure: captures trailing 30 lines via `agent.read` as `terminal tail`, runs `worktree.remove { force: true }`, deletes result and rules files, marks row `failed`, delivers `notice` to owner.
+
+### 8.3 Prompt and Confirm-After-Send
+
+```
+seq0 = agent.get().state_change_seq; t0 = now; turn_state = open; status = working
+agent.prompt { target: herdrName, text }   (text unchanged: no prefix, footer or speaker label)
+Wait 8s: agent.get().state_change_seq > seq0 or agent_status == working  → Confirmed
+  Otherwise agent.send_keys ['enter'], wait 8s                           → Confirmed
+  Otherwise retry agent.prompt once, wait 8s                             → Confirmed
+  Otherwise: status = failed, turn_state = not_started, notice "task_not_started" + tail 30 lines
+```
+
+Origin: CAO #479/#496/#566, where dropped pastes or swallowed Enters left sessions idle indefinitely with no error. Full re-paste attempted only once to prevent duplicate runs.
+Cursor lacks system prompt parameter; prepends full rules text to first prompt.
+
+### 8.4 Send
+
+- First confirms the session and its worktree still exist (otherwise `NoSuchSession`), writes a `message` into inbox (receiver = session id) and returns; delivery happens in omacd's scope, inside that session's lock, and is not lost if the short-lived CLI connection that sent it disconnects.
+- Session `idle` and `turn_state` not `open`: dispatches `prompt` directly; otherwise stays in inbox, delivered when session becomes idle.
+- Session exited (`agent.get` missing) but worktree intact: reopens workspace via `worktree.open`, creates new pane via `tab.create` with env, closes root pane, starts agent via HarnessAdapter resume args, then prompts.
+  Codex / Cursor exiting without session id cannot be resumed (Cursor has one once it has produced a result: `conversation_id` from the hook input, accepted only if it matches `\w[\w.:-]{0,127}`, so it cannot look like a flag).
+- An accepted message is either delivered or finalized (`failed`) with a `notice` to the session's owner (`A message to <id> was not delivered: <reason>` + original text, details carry `messageIds`), notified only once per message; the owner decides whether to resend. Before delivery the batch is set to `sending`:
+  - herdr rejects, session not ready, prompt not registered: finalize the batch; when herdr rejects, the turn this prompt opened is withdrawn (`not_started`, session back to idle), later messages delivered as usual;
+  - herdr unreachable before handoff (`HerdrTransportError` / `HerdrUnreachable`): stays `pending`, retried on next `check`, messages arriving meanwhile delivered together;
+  - connection drops after handoff, or omacd stops mid-handoff (sees `sending` rows after restart): unknown whether it arrived, finalize noting "may have been delivered", **no blind re-send** (owner is informed). "No re-send" here only means omacd will not deliver the same row again on a later check or after restart; the confirmation inside a single prompt (8.3) presses Enter and re-pastes once when events lag, so the session may still receive it twice; this is not global at-most-once;
+  - Session exited with messages still queued: finalize and advise resending to resume the session; unresumable (Codex / Cursor without session id) also finalized.
+  `Send`'s own delivery failure finalizes only its own row (while still `pending`); messages accepted meanwhile are handled by their own delivery.
+- When resuming a session, rewrite its rules file with today's rules. A Cursor session keeps the rules it started with.
+- Dispatch to `blocked` session: enqueued without delivery (CAO: avoid pasting tasks into selection prompts).
+
+### 8.5 Turn Completion and Results
+
+For each session with `turn_state=open`, evaluated upon herdr event, `ResultReady` notification, or slow-poll tick:
+
+1. Result file `mtime > t0` → read text, execute `finish` (completed; failed if hook reported error).
+2. `agent.get` reports missing → execute `finish('', error='agent exited')` (failed), with bottom 30 lines.
+3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<id> waiting for confirmation, switch to pane to resolve"), without answering automatically.
+4. `agent_status ∈ {idle, done}` and `state_change_seq > seq0` → record `endedAt`;
+   if `now - endedAt > 10s` without result file: execute `finish('', error='the turn ended without a report …')` (lost), with bottom 30 lines (usually harness errors without hooks, e.g. Codex quota / wrong model). No screen scraping for results.
+5. `unknown` does not count as completed.
+
+`finish`: updates `turn_state` to terminal state; parses report; evaluates `gitState` (queries `branch --show-current`, `@{upstream}`, `rev-list --count` directly, ignoring session self-reports);
+writes `inbox` row of kind `result`, with `body`:
+
+```
+<agent-result>
+<agent-id>3f9a1c2e</agent-id>
+<status>completed</status>
+<summary>Agent "..." finished</summary>
+<harness>claude</harness>
+<branch>fix/x</branch>
+<pushed>true</pushed>
+<worktree>...</worktree>
+<result>
+Full text of last reply
+</result>
+</agent-result>
+```
+
+One element per field, as Claude Code's task notifications; `branch` / `pushed` are left out off a branch. `summary` is omac's one-line outcome (`finished`, `failed: {error}`, `reported a failure`, `is waiting for an answer`, `finished without a status line`). `omac report` arrives as `<agent-message>` with `agent-id`, `summary` and the text in `<message>`.
+
+`details` carries structured version plus `summary` / `remember` / `error`. Handed off to Inbox for delivery. For a session started with `--archive-on-completion`, that delivery succeeding is what starts 8.6b.
+
+Both herdr's `done` and `idle` qualify as completion (`done` indicates completed in background before tab viewed).
+
+### 8.6 Interrupt
+
+Corresponds to Claude Code's `TaskStop`: halts current turn while keeping session available. Holds session lock throughout, preventing 8.5 checks from misclassifying interrupted turn as missing hook.
+
+1. Evaluates 8.5 rule 1 first: if result file ready, executes normal `finish`, returning "already completed" without interrupt.
+2. If `agent_status` not `working` / `blocked`: returns "not running", mutates nothing.
+3. `agent.send_keys [interruptKey]`, `agent.wait { until: ['idle','done'], timeout_ms: 10000 }`.
+4. If halted: updates `turn_state` from `open` to `interrupted`; pane, worktree, and session preserved, `pending` inbox rows delivered upon idle. Emits no result; tool return value serves as reply. Status transitions to idle on subsequent check (`pane.updated` or slow poll).
+5. On timeout: mutates nothing, `turn_state` remains `open`, returns `SessionBusy`. If session finishes normally later, result delivers as usual.
+
+An interrupted turn has no result, so a `--archive-on-completion` session is not archived by it (8.6b).
+
+### 8.6a Archive
+
+`omac archive` (alias `rm`; RPC `Remove`) is a soft delete: it stops the session's harness, closes the pane and workspace omac opened for it, removes its worktree only when git would lose nothing (the branch is always kept), and marks the session archived (`metadata.archived`, and `metadata.removed` so older rows and readers still see the tombstone). The row, its inbox and its results are never deleted (§5.5): `omac ls --all` and `omac result <id>` still show them.
+
+The coordinator itself runs `omac archive <id> [--keep-worktree]` (alias `rm`; Issue #27): omacd performs role and ownership checks (session connections get `Forbidden`; a coordinator can only remove its own sessions, the user's command line can remove any; same for Send and Interrupt); herdr is used only to close omac's own runtime, and the filesystem is touched only via git. Inside the session's lock:
+
+1. `working` / `blocked` or turn still `open`: archiving ends it: first send the interrupt key as in 8.6 step 3 and wait up to 10s (done directly inside the session's lock, not via the public Interrupt), then proceed whether or not it halted — closing the pane itself ends it, and herdr may escalate all the way to SIGKILL; `reasons` records whether it was closed after interrupt or after timeout. A turn still `open` is set to `interrupted`; that turn's result is no longer delivered.
+2. Record `archived: true` and `removed: true` (the same tombstone; `removed` kept so older rows and readers still see it) first; queued messages are finalized and notified once as in 8.4: from then on Send, checks, and resume never bring it back. The tombstone and the runtime proof below are separate things: a recorded tombstone does not mean the process has stopped.
+3. Its own pane is recognized only via herdr's agent record named after this session (recognized even when the harness has exited and only the shell remains); panes remembered in omacd's memory do not count, and no other pane is claimed. The pane is closed wherever it is: a pane moved to another workspace (the coordinator's, the main checkout's) gets a new pane id, but the agent name moves with the terminal, so it is still found (user decision 2026-10-19: only this session's own pane, never another session's or the user's). Not judged by name prefix alone. omac never closes a workspace; herdr closes one with its last pane (step 6), and closing the last pane of a main checkout's workspace closes its whole worktree group (herdr 0.9.5 `close_selected_workspace` → `close_workspaces` over `workspace_close_indices`, src/app/actions.rs:666-710, 885-917; with the default `ui.confirm_close = true` it refuses with `confirmation_required` instead, panes.rs:1976-1988, and `pane.close` has no flag to prevent either). So when the pane is the only one (`pane.list { workspace_id }`) of a workspace that `workspace.list` reports neither as a linked worktree's nor without a worktree (a main checkout's, or one it does not list), omac first moves it alone into a new workspace (`pane.move` to `new_workspace`, `focus: false`, label `archiving <id>`). Such a workspace has no worktree, so closing its only pane closes only it (herdr 0.9.5 `workspace_group_close_indices`); the workspace the pane left, now empty, herdr drops without closing anything else (panes.rs `move_pane`), and never asks for `confirm_close`. The move gives the pane a new id; omac then asks for the agent record again and goes on only with that new id, which must be where the agent now is; otherwise the pane is left where the move put it (`pane: kept`, processes `unknown`, nothing recorded). A move herdr refuses (`pane_move_failed`, `pane_not_found`, any error) keeps the pane where it was, with no PID read; `omac archive` again tries again. Like close, `pane.move` takes only a pane id and herdr has no compare-and-move: omac moves the id its agent record named just before, and a pane id herdr gave out never names another pane while that one lives (a moved pane's old id stays its alias, and pane numbers are not reused), so at worst it moves the terminal that was the session's own a moment earlier. The only pane of a linked worktree's workspace, or of one without a worktree, is closed directly: that closes only its workspace. Evidence: the PR 75 Linux run against herdr 0.9.5 with `confirm_close = false` closed the main checkout workspace's last pane and lost two other workspaces with their processes; moving it out first and closing it there closed nothing else. When the pane exists: take `shell_pid` from `pane.process_info` (must be a positive integer: without the shell's PID, any number of foreground process PIDs cannot prove the pane's processes are gone) and the foreground process PIDs, written as one record for this pane into the row's metadata `stop` (one record per pane, no argv or env; on retry of the same pane, merged into its own record the PIDs not yet proven exited, and old PIDs already proven exited are replaced by newly taken ones — a reused old PID would look alive forever; another pane's PIDs are never recorded under it), **written before closing**, so a record remains to check even if the response is lost or omacd restarts; before closing, ask both again (agent record, and the workspace's linkage and pane count); if the pane is no longer its agent or is now the last pane of a workspace that would have to be moved out first, do not close, and restore `stop` exactly to its pre-write content (delete it if absent before), tombstone untouched — another's PIDs are not kept as its evidence. Shell PID unavailable or pane changed owner: not closed (`pane: kept`), processes `unknown`. herdr has no atomic "close after confirming ownership" operation: omac cannot see changes between this re-check and `pane.close`; the re-check only narrows the window, it is not compare-and-close.
+4. `pane.close`. On receipt herdr (0.9.1) sends SIGHUP, SIGTERM, SIGKILL in turn (about 250 ms apart) to processes of the same session in the pane, then responds; processes that escaped this session or forked afterwards are not included, and for remaining processes herdr only logs a warning, no error. omac itself never sends termination signals (except SIGTERM to a coordinator's foreground process group from `Project.StopCoordinator`; omacd is replaced through `Daemon.Stop`, 14) and never calls `server.stop`.
+5. Confirm: per record, signal 0 on the recorded PIDs (records already proven exited are not re-checked: a reused PID would only be seen as alive) (ESRCH = exited, EPERM = alive, other = unclear), every 100 ms, up to 30 times. A reused PID only makes it look alive and retained longer; omac never signals it. `processes`: all exited `exited`, any alive `alive`, unclear `unknown`; no pane and no record (closed manually, removed by older omac) is also `unknown` — not finding the runtime does not mean it is gone, and an empty cwd query in 8.7 is not proof either (it may have changed directory later). Such rows with no identity left to check are an unresolved reconciliation case: re-running `omac archive` cannot prove it, the worktree is kept indefinitely, and `reasons` says the user must handle it; omac provides no bypass. Only `exited` sets `stopped` (and records `exited` in `stop`); on `alive` / `unknown` the row is not set `stopped`, the worktree, result, and rules files all stay, and re-running `omac archive` re-checks from the record. herdr errors (including a lost `pane.close` response): report `HerdrUnreachable`; the tombstone and PID record are already persisted, and a retry continues from the record.
+6. Workspace: herdr (0.9.1 `close_pane`) closes the workspace in the same step when the last pane in it is closed; omac itself never calls `workspace.close`, so panes opened after `pane.list` are not closed along with it. Check once more after closing: if the workspace still exists it is kept (stated in `reasons`), otherwise `closed`.
+7. Worktree (8.7).
+8. Return per-layer results: `{id, processes: exited|alive|unknown, pane: closed|kept|none, workspace, worktree: removed|kept|gone, path, branch, reasons}`; `reasons` explains what was kept and why. Re-running is safe: recorded PIDs are checked again, kept worktrees retried, and for what is already gone only the row and its processes are reconciled.
+
+PID records cover only the shell and foreground processes herdr reports, not the whole process tree: background processes and children that escaped the session are visible only via the 8.7 cwd check, and that only looks at working directories (asked again for up to 10 s while it names a process: a detached helper such as an MCP telemetry watchdog may still be shutting down).
+A row with a tombstone whose processes are not proven exited (`alive` / `unknown`, including reused PIDs and old rows without records) is not `stopped`: it still counts against `OMAC_MAX_SESSIONS`. The row is kept either way. This faithfully reflects "it may still be running"; the quota gets no special handling for it; old rows with no identity to check stay occupied until the user handles them.
+
+### 8.6b `omac run --archive-on-completion`
+
+omacd runs 8.6a itself (no `--keep-worktree`, and never step 1's interrupt) for a session with `metadata.archive`, once per result row: when a `result` row whose `status` is `completed` goes `sending` → `delivered` (11.2: `agent.prompt` returned, or the Pi extension acked it). A row only `pending`, `failed` or `dropped` (a coordinator relaunch drops waiting rows) never triggers it, nor do `failed`, `lost`, `needs_input`, `unknown` and interrupted turns; the flag stays, so a later completed result can. Each delivered row takes its turn under the session's lock, then the `stopping` flag like `omac archive` (a concurrent `omac archive` gets `SessionBusy`, one already running makes this a no-op), cleared before the lock is let go; so a row delivered while another row's archive holds the lock is never dropped. It goes by the session's newest result row: a newer one already `delivered` and `completed` is archived on here (its own turn then finds the session archived), and one not delivered yet gets its own turn once it is. It skips with a notice when: the session has work again (a `send` row still pending, `turn_state` no longer `completed`, a newest result row that is not a delivered `completed` one, or its agent working again by 8.6a step 1's check, which then refuses before the tombstone instead of interrupting); its harness already exited (no proof its processes are gone, and a `send` could resume it); it did not go idle within 10 s (`agent.wait`). Already archived: nothing. The last check, a pending `send`, and the tombstone are one transaction, and Send's own insert is one transaction that refuses an archived session: a message accepted before the decision skips the archive and is delivered; one sent after it is refused (`NoSuchSession`), never accepted and then failed. Otherwise the outcome goes to the coordinator as a `notice` after the result (`details.archive` = the 8.6a return value), naming what was kept and why. A borrower whose owner is already archived adds `run omac archive <owner>` to remove the shared worktree; omac does not do it itself. `omac result <id>` still reads the result row. omacd stopping between the delivery and the archive loses the trigger: the session stays, and `omac archive` cleans it up. No RPC admits this archive, so while it runs it blocks a `Daemon.Stop` itself (14); before its pane closes, the live agent does too.
+
+### 8.7 Worktree Cleanup Rules (PLAN §6.6)
+
+Worktrees deleted only when nothing can be lost, checked in order; if any check fails, retained and written into `reasons`:
+- Directory still exists (otherwise `gone`); no `--keep-worktree`;
+- It is a linked worktree of this repository (listed in the main checkout's `git worktree list`; a path prefix alone does not count);
+- No other pane's cwd is inside it;
+- `processes` confirmed exited (`exited` from 8.6a step 5);
+- No process's working directory is inside it: `lsof +w -a -u <omacd's numeric uid> -d cwd -Fpfn0` (argument array, no shell; `+w` forces warnings on regardless of the distribution build's default; no `-w` / `-t` / `-e`), only this user's processes, metadata read only; from the result only PIDs inside the worktree (real path or original path) are taken, and other processes' records are neither logged nor passed on. Only a complete answer counts: exit code 0, empty stderr (any warning means incomplete), finished within 10s, every record is the expected `p` / `f cwd` + `n` fields (NUL-separated, each group ending with NL), no name is an lsof diagnostic rather than a path, and omacd's own PID and cwd are present (canary: only a sanity check against empty or broken output; it cannot prove the list was not truncated or is complete). Diagnostics: for processes whose cwd cannot be read, lsof appends ` (readlink: …)` (Linux source: `/proc/<pid>/cwd (readlink: Permission denied)`) or ` (stat: …)` after the name, with exit code still 0 and stderr empty; only these two fixed prefixes are recognized, the reason after them is localized and not compared. If any name contains either, the whole query is "unclear" and the worktree is kept — such a process's cwd may be inside the worktree; better to block automatic cleanup on unreadable processes (others' and restricted processes are common on Linux). lsof absent (common on Linux), uid unavailable, timeout, nonzero exit code, warnings, diagnostics, unreadable records or records missing cwd: all kept with the reason stated. No claim that this path is fully supported on Linux. On timeout omac ends only the lsof it started: SIGTERM to lsof's own process group, SIGKILL if still alive after 1s, waits for it to exit before returning; an lsof stuck in uninterruptible kernel I/O cannot be reaped even by SIGKILL, and `omac archive` waits until it returns. lsof escapes unprintable characters (`\t`, `\n`, `^X`, `\xNN`; backslash itself is not escaped, so this is ambiguous): from the first escape on, a name is treated as "could be anything", and counts as occupying if it could fall inside the worktree; a `(deleted)` cwd is compared with the suffix stripped. This is only a snapshot at query time: processes that `cd` in afterwards are not seen, and finding "nobody" does not show the harness has exited (`processes` is proven only by the signal 0 in the previous check). This is for background processes left by the pane; omac sends them no signals. While it names any process it is asked again every 500 ms for up to 10 s (a detached helper such as an MCP server's telemetry watchdog may still be shutting down); the 10 s bound the listings themselves too (lsof can take about a second each when omacd's open-file limit is high), so a listing still running at 10 s is cut off, its lsof ended and reaped as on its own timeout, and the worktree kept with that reason, never read as empty; kept if one is still there; an unclear answer keeps it at once;
+- `git status --porcelain --untracked-files=all` is empty, and HEAD is on some `refs/heads` or `refs/remotes`;
+- Ignored files are not checked: `git worktree remove` without force deletes them, as git does (user decision, 2026-10-23); omac adds no veto of its own;
+- Then `git worktree remove <path>`, **without force**: git applies one more check (it refuses locked ones), and its refusal reason is passed back verbatim.
+herdr's `worktree.remove` is never called; no path uses `force`. Branches are never deleted. Only when the worktree is removed (or already gone) and the processes are confirmed exited are its result and rules files deleted too; otherwise they stay (a possibly still-running process may read or write them). Those files are the only things `omac archive` deletes.
+Rollback on spawn failure is likewise without force: close the just-created workspace, then `git worktree remove`; if git refuses (anything not ignored in it), it is left to `omac archive`. A row whose spawn failed stays `failed`.
+`omac archive` records `archived: true` and `removed: true` in the row's metadata (`removed` so a row archived by an older omac, which only set `removed`, is treated the same, and so older readers still see the tombstone): afterwards `omac send` always gets `NoSuchSession` (`was archived; run a new session`); delivery re-reads this flag inside the session's lock, so a message accepted just before archive will not bring it back either (that message is finalized and notified once by archive), and it is never resumed (even with `--keep-worktree`); a session whose harness merely exited can still be messaged and resumed as usual.
+Merging is left to user or delegated by coordinator to an integration session.
+
+### 8.8 Crashes, Restarts, and Recovery
+
+- **Session process exit**: Handled by 8.5 rule 2.
+- **omacd restart**: Reads non-`stopped` rows from the `session` table; calls `agent.get` for each: live agents continue, missing ones marked `stopped` (except those with `archived` or `removed` recorded: only `omac archive`'s confirmation may set that); result files written during downtime with `mtime > t0` enter inbox normally;
+  `pending` inbox rows delivered as usual, `sending` ones finalized per 8.4. `open` turns not prematurely settled, checked via 8.5: running sessions remain monitored, turns completed without results marked `lost`.
+- **herdr restart / live handoff**: Slow poll continues while event stream disconnected; re-subscribes upon reconnect. Transient call failures simply skipped.
+- **User closes session workspace**: `workspace.closed` / `pane.closed` events treated identically to session process exit.
+
+## 9. State Sources
+
+- **Event stream**: Long-lived connection via `events.subscribe`, subscribing to `pane.updated` (broadcast, no pane_id), `pane.closed`, `pane.moved`, `workspace.closed`.
+  `pane.updated` carries `name` and `agent_status`, matched by `name`; `pane.moved` updates owner.
+  CAO lesson: single connection can only subscribe once (handled by SDK).
+- **Slow poll**: Polls `agent.get` every 5s for sessions with `turn_state=open` or non-`stopped`, covering dropped events or reconnect gaps.
+- **Result files**: Hook sends `ResultReady` to `omac.sock` immediately after writing, triggering processing without waiting for poll; omacd downtime covered by startup scan (8.8) and slow poll. No `fs.watch` on directories.
+- **Inbox reconciliation**: Scans `pending` rows every 10s to attempt delivery (CAO #131: receivers already idle generate no further events).
+
+## 10. HarnessAdapter
+
+| | pi | claude | codex | cursor |
+|---|---|---|---|---|
+| Launch args | `--session-id <uuid> --append-system-prompt <rules.md> [--provider --model]` (integration extension activated by `OMAC_AGENT` / `OMAC_SESSION_ID`, no `-e`) | `--session-id <uuid> --append-system-prompt-file <rules.md> --add-dir <scratch> --settings <deny JSON> [--model]` | `-c projects={"<wt>"={trust_level="trusted"}} -c check_for_update_on_startup=false -c developer_instructions="<rules>" --add-dir <scratch> [-c model_provider=… -m …]` | `--add-dir <scratch> --trust [--model]` |
+| provider / model passing | `--provider <p> --model <m>` (Pi native args) | `--model <m>`; non-empty provider other than anthropic fails spawn with `HarnessUnavailable` (Claude lacks provider arg) | `-c model_provider=<p> -m <m>` (p must match a model_provider in user Codex config) | `--model <m>`; provider handled same as Claude |
+| resume | Same session-id | `--resume <uuid>` | `resume <id reported by herdr>` | `--resume=<id>` (one argument: the value of `--resume [chatId]` is optional, so written separately an id starting with - would be taken as a flag) |
+| Rule injection | File | File | Inline (argv, ≤16000 chars) | Prepended to first prompt |
+| Interrupt key | esc | esc | esc | ctrl+c |
+| Result text | `payload.text` | `payload.last_assistant_message` | `payload.last_assistant_message` | `payload.text` |
+| Integration file | Entry in `packages` of `~/.pi/agent/settings.json` (the `@omac/pi` entry: a local `packages/pi-omac` or `npm:@omac/pi`; Pi package, shared by session & coordinator) | `~/.claude/hooks/omac-hook.sh` | `~/.codex/omac-hook.sh` | `~/.cursor/omac-hook.sh` |
+| Events / config | Extension subscribes to `agent_end` + `agent_settled` + `tool_call` | `Stop` + `StopFailure` (turns ending in API errors, `error` / `error_details`) + `PreToolUse` / `~/.claude/settings.json` | `Stop` + `PreToolUse` / `~/.codex/hooks.json` (install writes trusted hash; errored turns lack hooks) | `afterAgentResponse` + `stop` (non-`completed` status recorded as error) + `preToolUse` (`failClosed`) / `~/.cursor/hooks.json` |
+| Startup adaptation (`startup`) | None | `/trust this folder/i` → select "Yes, I trust this folder"; `/bypass permissions/i` → select "Yes, I accept" | None (trust avoided via inline config, update prompt disabled by `check_for_update_on_startup=false`) | None |
+| Tool Guard (guard.ts) | Extension `tool_call` calls `Guard.coordinator` / `Guard.session` in-process | `PreToolUse` → `omac integration guard`; session settings also deny Project's `Read/Edit(*/instructions.md \| */docs/** \| */memory/**)`, `Bash(herdr:*)`; scratch is not in deny (Claude's deny overrides every allow, so "allow only my own scratchpad" cannot be expressed), left to the hook | `PreToolUse` → `omac integration guard` | `preToolUse` (`failClosed`) → `omac integration guard --harness cursor`: always answers `{"permission":"allow"\|"deny"}` (sessions without `OMAC_AGENT` get allow directly, omac not consulted); allow only means no objection, Cursor still runs its own approval; unreadable input or no answer from omac exits 2 (deny). Tools: `Shell {command, cwd}`, `Read` / `Write` / `Delete` / `List` / `ReadLints {file_path}`, `Grep {pattern, file_path}`; paths resolved as cursor-agent's path-utils `o1` does (`file://` URLs parsed per the URL standard then converted to paths, consistent with node `fileURLToPath`; `~` replaced by HOME; relative paths joined to the base directory); the base is the input's `cwd`, or the sole `workspace_roots` entry when empty, and must be absolute; Shell's own `tool_input.cwd` (base if empty) is likewise resolved then normalized. A Shell call's top-level `cwd` is `tool_input.cwd` (getExtraHookFields), so a relative or file URL Shell cwd actually exits 2 at the base check. Base missing or ambiguous, `cwd` not a string, file URL unreadable: exit 2. Shell whose working directory is itself inside Project (except the scratchpad) is denied, same for all harnesses; file paths are checked under both readings, "system follows symlinks" and "normalize first". Cannot act as coordinator |
+| Session-side `omac report` | Run directly in bash | `--allowedTools 'Bash(omac report:*),Bash(<OMAC_COMMAND> report:*)'` | `-c shell_environment_policy.set.<var>`: only omac's variables given explicitly (no `inherit=all`); the sandbox blocking the unix socket is covered in Section 13 | Run in shell (approval unverified) |
+| Coordinator args (`omac launch`) | `--system-prompt <coordinator.md> --tools +codemode,+grep,+find,+ls,-edit,-write --no-mcp` (when `--tools` has no `mcp__` entry MCP tools are no longer hidden, so explicitly turned off; `+`/`-` entries adjust the default tools (`read,bash,edit,write` or the user's `defaultTools`); `codemode` scripts reach only active tools, nested calls still pass the guard): rules replace Pi's coding-assistant header, Pi still appends AGENTS.md, skills, cwd; extension cleans up prompt sections from earlier extensions during `before_agent_start` | `--append-system-prompt-file <coordinator.md> --strict-mcp-config --tools Bash,Read,Grep,Glob --allowedTools Bash,Read,Grep,Glob` (no `--mcp-config`, no MCP server loaded at all) | Inline rules; `-c mcp_servers={}` overrides entire table (user's MCP servers not loaded); `-c shell_environment_policy.set.<var>` for `omac` in the shell; `--disable` all tool-adding features except shell (apps, browser_use, computer_use, goals, image_generation, multi_agent, plugins, request_permissions_tool, tool_suggest, view_image); `web_search="disabled"`; `-s read-only -a on-request`: sandbox still read-only, `apply_patch` is to be denied by the pre-tool hook; `on-request` lets Codex request to run a command outside the sandbox (rules require requesting one-time approval only for an omac command that cannot reach the socket), approved or denied by the user (or the user's existing Codex policy); no longer the `never` fallback of "never approve writes" (see Section 13) | Currently unsupported as coordinator, `HarnessUnavailable` |
+
+All launch arguments must contain no newlines (rejected by herdr); rules are persisted to file for this reason. Coordinator gets only inspect tools (read file, search, Bash); `omac` runs in Bash, and Tool Guard allows every command except the explicit denials below; guard lives in integration, so `omac launch` reports `HarnessUnavailable` if integration is not current.
+
+**Tool Guard (guard.ts)**: All harnesses use unified rules for pre-tool hooks, one set for the coordinator, one for every other agent; `omac integration guard` picks them from `OMAC_AGENT` itself.
+- Entrypoint: Claude / Codex `PreToolUse` runs managed script `guard`; script passes through when `OMAC_AGENT` is unset, else runs `omac integration guard`, which takes `Guard.coordinator` for `OMAC_AGENT=coordinator` and `Guard.session` for any other agent and reads `{tool_name, tool_input, cwd}` from stdin; denies print `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":...}}`, approvals print nothing. Failures calling omac (missing python3, omacd crash, invalid input) cause script to `exit 2` (deny). Pi extension calls identical function in-process for its agent.
+- Default permit: a call no rule names is allowed, whatever the program, tool or shell syntax. Bash is split best effort into the programs it runs (at unquoted `|`, `&`, `;`, `(`, `)`, newlines; past `VAR=` prefixes and wrappers such as `env`, `nohup`, `timeout`, `xargs`, `sudo`; into `$(…)`, backquotes, `sh -c '…'` and `eval`; redirection targets, comments and here-document bodies left out). Quoted text is one word, never a command, so a task or commit message naming a command is data. Which omac command an agent may run is omac's own check where it runs: `userOnly` in `cli.ts` (daemon, daemon restart, launch, update, integration install / uninstall) and the server's `ACCESS` table and ownership checks.
+- Both roles: deny herdr control (`herdr agent|pane|tab|workspace|worktree|server|session` as a program, by name or path); deny omac (bare, by a path ending in `/omac`, or `OMAC_COMMAND`'s argv) when the command changes or clears `OMAC_SESSION_ID` / `OMAC_AGENT` (`VAR=` prefix or assignment, `env -u` / `-i` / `-`, `unset` / `export`), because omac would then speak to omacd as the user; deny `omac integration stop`, the harness's turn-end hook (its result file and `ResultReady` / `CoordinatorSessionReady` notify carry no proof of origin).
+- `Guard.coordinator`: also denies file modification tools (Write / Edit / MultiEdit / NotebookEdit / apply_patch), harness CLIs (`pi`, `claude`, `codex`, `cursor-agent`: a child would inherit the coordinator's `OMAC_SESSION_ID` and report its session id as the coordinator's), and `gh auth|config|alias|extension|ext`.
+- `Guard.session`: also forbids touching Project directory, except its own scratchpad (`OMAC_SCRATCH`): in Bash commands, every occurrence of the scratchpad path (absolute or `~` form) may only end or descend (`/..`, or other characters following such as another pane's directory, are denied), and if a Project directory still appears after removing these, denied; path tools resolving symlinks into the scratchpad are allowed, into the Project directory denied.
+Rules file `~/.omac/coordinator/<repository key>.md`, rewritten per `omac launch`, contains coordinator rules + Project instructions + memory.
+**One coordinator session per repository per harness**: `omac launch` resumes it by default, preserving chat history across restarts (CAO lacked this layer, requiring manual `--resume-session-id`, Claude only). Session ids are generated by harness and reported post-facto; omacd does not pre-select them (Pi's `--session-id` pointing to non-existent session warns; Codex gets id post-launch). Before exec at repo root, after all launch-rejecting checks pass (coordinator capability, provider, harness in PATH, integration current), CLI invokes `Project.CoordinatorSession` (rejected launches cannot supersede running coordinator launch; exec may still fail) to retrieve `{ sessionId, harnessSessionId }`. `sessionId` is the coordinator row's id and is passed as `OMAC_SESSION_ID` (Codex's shell policy carries it). `harnessSessionId` is the conversation to reopen, null when `fresh` or the harness changed. If saved session exists, resumes: Pi `--session-id <id>`, Codex `resume <id>`, Claude `--resume <id>` if `~/.claude/projects/<cwd non-alphanumeric replaced with ->/<id>.jsonl` exists (treated as absent if missing, e.g. early pre-selected ids never flushed); omitted on no archive or `--new`, letting harness create new session. Reports `CoordinatorSessionReady { sessionId, harness, harnessSessionId }` when the harness conversation is flushed (Codex flushes rollout before Stop hook; Claude transcript guarded by file check above): the Pi extension sends it from the TUI on `session_start` for `new`, `resume`, and `fork`, and on `agent_end` for the first startup id and a report that did not succeed (skips a conversation id it already sent; warns if unanswered within 1s and retries on the next `agent_end`. Unanswered is not unsaved: omacd may still apply it; an empty `/new` is not flushed yet and the next `--session-id` warns and creates that same id), Claude / Codex Stop hook sends via detached subprocess (hook returns immediately, neither waiting for nor launching omacd; sends every turn). omacd applies the report when `sessionId` is the coordinator's and `harness` matches; anything else is ignored. The last report wins, including a report that arrives after `--new`. `--new` or a harness switch clears `harness_session_id` at launch, so exiting before one report leaves that cleared value. There is no `OMAC_LAUNCH_PID`. Installed binaries (native claude binary, codex shell script ending in `exec`, pi `env node` script) exec directly. Claude hook invocation observed as `spawn(command, { shell: true })` in 2.1.296 binary. When Codex archive is missing (rollout deleted), `codex resume <id>` exits with `No saved session found with ID ...` (codex-rs `tui/src/lib.rs`, `thread/read` by id), recovered via `omac launch codex --new`.
+
+The session's tab env carries `OMAC_SESSION_ID`, `OMAC_AGENT=general`, `OMAC_HOME`, `OMAC_COMMAND` (JSON argv the extension and the guard compare against; the coordinator prompt types the bare command `omac`, not this argv), `OMAC_SCRATCH`; the coordinator's env carries `OMAC_AGENT=coordinator`, `OMAC_HOME`, `OMAC_COMMAND` (and the coordinator session id as `OMAC_SESSION_ID`), plus `HERDR_PANE_ID`, `HERDR_SOCKET_PATH` from herdr. Codex's shell filters these variables by default, so each (but the coordinator's `OMAC_SESSION_ID`) is set via `shell_environment_policy.set`.
+
+### 10.1 Integration (Modeled on herdr Integration Design)
+
+herdr relies on hooks installed in each harness to acquire session ids and states (`herdr integration install <target>`); omac's result reporting follows this model, replacing "send `pane.report_agent_session` to herdr socket" with "write result file".
+
+- **One managed file each for Claude / Codex / Cursor in the harness's own directory** (paths in table above), not in `~/.omac/`. Fixed 4-line header:
+  `# installed by omac` / `# managed by omac; reinstalling or updating overwrites this file.` / `# OMAC_INTEGRATION_ID=<harness>` / `# OMAC_INTEGRATION_VERSION=<N>`.
+  Pi has no managed file: install writes one package entry into `packages` of Pi's settings, and status checks that entry (see the Pi extension below).
+- **Version detection**: Each integration in omac has internal version number N. `status` reads header: missing file → `not installed`; version equals N → `current (vN)`; smaller → `outdated (vM)`, prompting reinstall. No separate install record.
+- **install**: Overwrites managed file (`tmp + rename`, 0755); ensures harness config contains matching entries (Claude `Stop` + `StopFailure` + `PreToolUse`, Codex `Stop` + `PreToolUse`, Cursor `afterAgentResponse` + `stop` + `preToolUse`). Config files only add/remove omac entries without backups; everyone else's entries, including those left by earlier products, stay as they are. Codex adds `[hooks.state."<hooks.json path>:<stop|pre_tool_use>:<group>:<entry>"] trusted_hash` in `config.toml`, prompting user trust in Codex if hash calculation fails.
+- **uninstall**: Deletes managed file, removes config entries.
+- **Confirmation** (user decision 2026-10-14: "任何需要写入/修改用户其他文件的地方，都要用户 y 确认，并给出 Diff; ~/.omac 下面的除外"): install and uninstall (from `omac integration`, `omac update` and `omac launch`) first work out every file they would write or delete outside `~/.omac` (managed files, harness configs, Codex `config.toml`, Pi settings, Cursor's rule and its record), print each absolute path with a unified diff (`(new file)` / `(deleted)` marked), and ask `Write this change? [y/N]` like `--allow-report`: only `y` / `yes` on an interactive terminal writes; no terminal, EOF, no answer within 2 minutes or anything else leaves every file byte-identical (`<harness>: nothing written`). Nothing to change asks nothing. Writing is all or nothing (shared with `--allow-report`): each file must still read as it did when shown, otherwise nothing is written; every existing file gets a byte copy `<file>.omac-backup` (created new; an existing copy stops the write); each file is replaced atomically with its mode kept and read back; on any failure every file is put back (new files removed) and read back, and the copies are deleted unless that restore failed. Already-installed harnesses done together (`omac update`, and hidden `integration install all --if-installed`) are planned first and asked once; the disclosure lists every absolute path and diff. All unchanged asks nothing. A no writes none of them (`<harness>: declined; nothing written`). Each harness is still committed alone: a later failure restores that harness only, does not roll back an earlier one, and the rest are `not attempted`. `omac integration install <harness>`, `install all` without the flag, and `omac launch` still ask per harness.
+- **Cursor `--allow-report`** (user decision 2026-10-13): `omac integration install cursor --allow-report` offers one rule in Cursor's global `permissions.allow` so a Cursor session's `omac report` runs without a prompt. File: `<config dir>/cli-config.json`, the config directory resolved as cursor-agent does (`CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`, else `~/.cursor`). Rule: `Shell(<omac> report)`, `<omac>` the installing omac's argv written as the session rules write it; cursor-agent 2026.10.01 matches it when a parsed command is exactly that text or starts with it and a space. Only the compiled omac may be allowed: the rule lets omac run unprompted in whatever directory Cursor works in, and Bun loads that directory's `bunfig.toml` (whose `preload` runs code) and `.env` for `bun <script>` and for an executable compiled without `--no-compile-autoload-bunfig --no-compile-autoload-dotenv`. The production build (`bun run build` → `scripts/build.ts`, arguments in `build-flags.ts`) passes both flags and records them in the binary (`--define OMAC_BUILD_FLAGS`); install refuses, before showing or writing anything, when omac runs as more than one argv entry (source mode) or the running binary does not record both flags. Being compiled is not enough on its own. A command containing a glob, `(`, `)`, `:`, `\` or a control character cannot be written as an exact rule (or shown as written): refused, nothing written. Before asking it prints the absolute path, the rule, a unified diff and the impact (global for every Cursor session of the user; matching commands run without asking and outside Cursor's sandbox; a project `.cursor/cli.json` with permissions replaces the list in that project; a running cursor-agent may save its own copy and drop the rule) and that uninstall removes only this rule. It asks only when both input and output are a terminal: otherwise, EOF, no answer within 2 minutes, or anything but `y` / `yes` writes nothing. It changes nothing when the file is missing (cursor-agent writes it on first start), is a symbolic link or not a regular file, has no `permissions.allow` / `deny` lists, or is not laid out as Cursor writes it (`JSON.stringify(config, null, 2)` + newline; otherwise omac would rewrite more than the rule). Writing: omac records `{file, rule}` in `~/.cursor/omac-report-rule.json`, checks the file is unchanged since it was shown, keeps a byte copy (`cli-config.json.omac-backup`, created new: an existing one, say from an earlier failed restore, stops the write), replaces the file atomically with its mode kept, reads it back, and on any failure restores the original, checks it reads back, and drops the record; the copy is deleted unless that restore failed. A rule omac added for an older omac path is replaced in the same change. A record naming a different config file (the config directory moved) stops it before asking: run `omac integration uninstall cursor` first, so the old rule is not left untracked. A rule the user already had is theirs: nothing asked, nothing recorded. `omac integration uninstall cursor` removes the recorded rule (one occurrence) and the record, the same way, and only from a file named `cli-config.json`; every other rule stays. The rule matches the installing omac; sessions of an omacd started from a different omac path still get the prompt. The rule matters only in Cursor's `allowlist` approval mode (`approvalMode`, Cursor's default): `unrestricted` runs every command without asking anyway, and under `auto-review` a server classifier decides, so whether the rule applies there is unverified (cursor-agent 2026.10.01 source).
+- **Managed script structure follows herdr**: sh wrapper + embedded python3 for JSON handling (matches herdr's claude / codex / cursor scripts; python3 is guaranteed on machines with herdr, adding no dependencies).
+  Only three differences: atomic write of result file before pushing `ResultReady` to `$OMAC_HOME/omac.sock` like herdr; gating variables renamed to `OMAC_*`; captures harness's "last assistant message" field.
+  Script implementation defined by `integration.ts` `managedFile`, structural summary: the `guard` branch execs `omac integration guard` when `OMAC_AGENT` is set (Cursor's version adds `--harness cursor`, answering `{"permission":"allow"}` when it is not, see the Tool Guard row above); in the other branches, stdin read into temp file; on `stop`, sh invokes python (`python3 - <agent> <input file>`, no environment variables of its own) only when `OMAC_AGENT` and `OMAC_SESSION_ID` are set (Cursor: not for `coordinator`, which it cannot be); otherwise exits `0`. Python executes as single program: shared input reading (unreadable/non-JSON treated as empty input `{}`; non-objects or subagents with `agent_id` exit immediately) and `send` helper for RPC, branched by agent (`coordinator` or any other):
+  - Session: Lenient parsing — empty input treated as `{}`, event name can be `hook_event_name`, legacy `hookEventName`, or missing; Codex skips child threads where `CODEX_THREAD_ID` mismatches `session_id`, Cursor skips those where `CURSOR_CONVERSATION_ID` (Cursor injects it only into its shell) mismatches `conversation_id` (a cursor-agent the session started again in its shell); Cursor `stop` recognizes only non-`completed`; atomic write to result file, then `send` `ResultReady` (0.5s best-effort timeout).
+  - Coordinator (Claude v6, Codex v5): Requires readable JSON with `hook_event_name` matching harness turn-end event; extracts `session_id` and sends it unconditionally (omacd matches the coordinator session id and harness; there is no `OMAC_LAUNCH_PID`), then forks: parent returns immediately (sh cleans temp file, unneeded by child), child runs `setsid`, redirects 0/1/2 to `/dev/null`, and `send`s `CoordinatorSessionReady` (2s timeout).
+  Matches herdr rules: all branches `exit 0`, python output redirected to `/dev/null` with `|| true`, failures outside `set -eu` caught by `|| exit 0`; harness observes no errors; execution finishes in milliseconds.
+  Payload preserves hook input as-is (Claude / Codex `last_assistant_message`, Cursor `text`), omacd extracts text per HarnessAdapter table.
+- **Config entries** (written by install; paths single-quoted matching herdr):
+  - Claude `~/.claude/settings.json`: `hooks.Stop[].hooks[] = {"type":"command","command":"bash '<path>' stop","timeout":10}`; `hooks.PreToolUse[].hooks[]` identical shape, command `bash '<path>' guard` (no matcher, guards all tools)
+  - Codex `~/.codex/hooks.json`: Same structure as Claude, writes `[hooks.state."<hooks.json>:stop:0:0"] trusted_hash` in `config.toml`
+  - Cursor `~/.cursor/hooks.json`: `{"version":1,"hooks":{"afterAgentResponse":[{"command":"bash '<path>' stop"}],"stop":[same],"preToolUse":[{"command":"bash '<path>' guard","failClosed":true}]}}`, merged with existing entries
+- **Pi extension is Pi package `packages/pi-omac` (v5)**, written in Effect: `Pi` service wraps ExtensionAPI, handlers registered via `pi.handle` in Effect (Pi awaits results), `Pi.runMain` is sole entrypoint (builds extension Layer in session-scoped Scope, factory returns after registration; `session_shutdown` closes Scope and awaits finalizers; factory rejects on build failure, Pi reports load error); extension emits no logs, handler failures reject promise for Pi to report (session result write failures follow same path); imports omac `client.ts` / `rpc.ts` directly. Install writes an `@omac/pi` entry into `packages` of `~/.pi/agent/settings.json`: by default `npm:@omac/pi@<omac's own version>`, which Pi installs from npm; only when `OMAC_PI_PACKAGE` is set, the absolute path of that local package directory (e.g. a checkout's `packages/pi-omac` after `bun install`). Nothing is looked up beside the CLI. Only `npm:@omac/pi`, `…/node_modules/@omac/pi` and `…/packages/pi-omac` entries are omac's; every other entry stays as it is, and install accepts only a directory whose `package.json` is named `@omac/pi` at one of those two paths. Pi loads the package in place, dependencies provided by `bun install`. Extension is no-op without `OMAC_AGENT` (or, for an agent other than `coordinator`, without `OMAC_SESSION_ID`); the extension registers no MCP server, both run `omac` in bash; the coordinator subscribes with its session id to `Inbox.Subscribe` after TUI `session_start`, delivering each batch via `pi.sendMessage({ customType: "omac", content, display: false }, { triggerTurn: true, deliverAs: "followUp" })` into session (without touching input box); reconnects after 2s on disconnect (`RpcClientError`) or stream completion, other errors terminate subscription with `ctx.ui.notify`; for session only: `ctx.mode !== "tui"` in `session_start` does not qualify as root session (RPC / print modes lack PTY); A path-installed `@omac/pi` (`OMAC_PI_PACKAGE`, or a `packages/pi-omac` / `node_modules/@omac/pi` entry) is not compared to the package version: Pi keeps loading that directory until the user reinstalls or reloads it. An npm pin of another version is outdated. Installed Claude, Codex, and Cursor hooks must be reinstalled to send `omac-protocol`; an old hook's nudge is refused, and the result file is still read on the next check.
+  `agent_end` records last assistant text, `agent_settled` writes result file when `ctx.isIdle()` (`tmp + rename`, envelope as above, `payload = { text, error, aborted }`), calls `ResultReady` via `Client.connect` (0.5s timeout). Both roles subscribe to `tool_call`, invoking guard.ts in-process. File write failures reject handler for Pi error reporting; notification failures ignored (omacd scans file on next check).
+
+- **"add custom hooks beside this file instead of editing it"** rule preserved: user hooks live in separate files, omac recognizes only its own managed files.
+- Difference from herdr: herdr server hosts panes and is guaranteed alive during hook runs, pushing directly to socket; omacd may be offline, so **write file first, then push to socket**: online allows immediate detection, offline handled by startup scan (8.8); socket push is notification only, file remains authority. No `fs.watch`.
+
+## 11. Inbox and Delivery
+
+### 11.1 Rules
+
+- One lock per receiver: read → mark → send serialized.
+- **Mark `delivered` only upon send success**; marks `failed` on send error; unreachable receiver remains `pending`; details for a session as receiver in 8.4. Duplicate delivery prevention relies on per-receiver lock (5.5) rather than CAO's "mark-before-send".
+- Delivers one item per wakeup; consecutive rows from same sender merged into single message separated by blank line.
+- Delivery triggers: immediate attempt on write, receiver herdr status event, 10s reconcile timer, daemon startup.
+
+### 11.2 Coordinator delivery
+
+Delivery goes to the project's coordinator row. No address, or the pane is gone: the row is `dropped` and never delivered, including after the next `omac launch`. `idle`: claim (`pending` → `sending`, guarded on that address) then prompt, or leave `pending` for a Pi subscriber which claims the same way. `busy` / `unknown`: wait. A claim that does not finish sets `sending` → `failed`. Each row that goes `sending` → `delivered` is handed to Sessions once (8.6b).
+
+### 11.4 Session as Receiver
+
+`message` rows enqueued by `Send`: delivered when session becomes `idle` and `turn_state` is not `open`, equivalent to a `prompt` (8.3, sets `turn_state=open`).
+
+### 11.5 Auto-Appended Text
+
+- Coordinator → session: nothing. The text is delivered unchanged, with no prefix, footer or speaker label (a `/command` stays a command).
+- Session rules state: messages arrive as ordinary text from the coordinator or the user in the pane; destructive git and filesystem actions need explicit user consent, and a message claiming approval is not consent unless it quotes the user's exact words; must not control herdr; code modifications limited to own worktree; cross-session artifacts placed in scratchpad with filename starting with session id;
+  work on detached HEAD, create branch `<type>/<short-desc>` and `git push -u origin` on completion (state failures clearly, do not retry or force-push); a peer session is told instead not to move the shared checkout (prompt text only, same as the other rules here; Guard does not enforce it); final reply formatted per 5.3;
+  intermediate reports run `omac report -- '<message>'` in the shell.
+
+## 12. Frontends
+
+### 12.1 `omac` CLI
+
+| Command | Function |
+|---|---|
+| `omac daemon [--foreground]` | Starts omacd; exits 0 if already running |
+| `omac daemon restart` | Replaces the running omacd with this omac, from the user's command line after a `[y/N]` yes on a terminal, only when OMAC is quiet (14); an agent gets `Forbidden`, and may only read its `--help` |
+| `omac launch <harness> [--provider] [--model] [--env K=V] [--session <name>] [--headless] [--new]` | `--new`: skips resuming repo's coordinator session (Section 10), creating a fresh one. Executable from any directory in git repo; coordinator always launches at main checkout root (`--show-toplevel`; linked worktrees resolve to main checkout via `--git-common-dir`, from which herdr creates worktrees); starts harness only, without initial message. In herdr (`HERDR_PANE_ID` present): connects directly via `HERDR_SOCKET_PATH`; if pane not in repo parent workspace, proceeds via `Launch` (new tab gains focus, no attach); if in parent workspace: `execve`s into coordinator harness if at repo root; if in subdirectory, completes harness validation, then sends `cd <root> && omac launch …` via `runAtRoot` to current pane and exits, leaving shell at repo root as coordinator without passing through omacd. Outside herdr: `Launch` creates tab in parent workspace (or creates workspace if absent) and runs `omac launch` inside it, then attaches via `herdr session attach <session>`; `--headless` skips attach. cursor unsupported |
+| `omac run <harness\|auto> [--name] [--provider] [--model] [--env K=V] [--peer <id>] [--archive-on-completion] [--session <name>] -- <prompt\|->` | Starts a session, **immediately** prints `Spawn`'s result (JSON, including `id`); the result arrives as a message in the coordinator's inbox, `cli` retrieves it with `omac result`. `--peer <id>` shares that session's worktree in a pane split from its pane (8.2), instead of a new worktree. `--archive-on-completion` archives it once it reports `completed` and that result reached the coordinator (8.6b); `--archive` is not an option of `run` (renamed before release, no alias): a usage error before omacd, like any unknown flag. `omac archive <id>` is a separate command. `--session` overrides the ambient herdr session, defaults to `omac`; `omac launch` (the main Agent) refuses it inside herdr's parent workspace. `omac spawn` is not a command (removed; not an alias): it is a usage error and does not start omacd |
+| `omac send <id> -- <message\|->` | Queues into the session's inbox and returns immediately `{"id","queued":true}`; omacd delivers when the session is idle, never interrupting a running turn |
+| `omac result <id>` | The session's state and latest result, JSON (`Get`: only `result`, not notices; `null` before the first); does not wait |
+| `omac status` | omac's own status, JSON (like `herdr status`): `client` (`version`, `command`), `daemon` (`status`: `running` / `not running`, with `pid` from omacd.pid, `version` and `socket`), `herdr.sessions` (omacd's connected herdr sessions; `null` when omacd is not running). Probes with `Ping` (1 s); never starts omacd. `daemon.protocol` is the number Ping reported, or null when an old daemon omitted it |
+| `omac interrupt <id>` | Interrupts current turn, preserves session (`Interrupt`) |
+| `omac archive <id> [--keep-worktree]` (alias `rm`) | Soft-deletes a session (releases the pane, workspace, and a clean worktree; keeps the session row, inbox history, and stored results), ending a running or blocked one first (interrupt first for up to 10s, then close pane) (`Remove`, 8.6a): closes its pane in its own linked worktree workspace (herdr may escalate to SIGKILL; the workspace is closed by herdr with its last pane, not by omac) — not closed if not there; after confirming the pane's processes exited, git removes the worktree without force, branch kept; prints per-layer results; when `processes` is not `exited`, run again to re-check |
+| `omac ls [--all\|-a]` | JSON array of this owner's sessions that are not `stopped` (plain CLI: every owner on the machine); `--all` includes stopped ones |
+| `omac report -- <message\|->` | Session only: intermediate report to the coordinator that created it (`Report`), only under its own identity |
+| `omac models [<harness>] [--harness] [--provider]` | Available models reported by each harness (or only the given one); runs locally without daemon |
+| `omac harness list\|ls` / `omac harness models <harness> [--provider]` | `list`: per harness, its binary, whether it is on PATH and its default model (no model lists); `models`: one harness's models, same JSON as `omac models`; runs locally without daemon |
+| `omac project info \| list <kind> \| read <kind> <path> \| search [--kind] -- <query> \| write <kind> <path> --if-version <v\|new> -- <content\|-> \| delete <kind> <path> --if-version <v>` | Project read/write; `read` content is wrapped in data markers |
+| `omac plugins` | Plugins loaded by omacd, with counters |
+| `omac doctor` | One line per harness: `ok (N models; default X)` or first issue encountered (uninstalled / outdated integration / unable to list models); runs locally without daemon |
+| `omac update\|upgrade [--integration]` | User only (`Forbidden` for agents). Reads the `beta` tag of `@omac/cli` from the npm registry (`npm_config_registry`, default registry.npmjs.org). This version the same or newer (semver order, a prerelease before its release): prints `omac is already up to date (vX).` and updates outdated installed integrations in one confirmation (`--integration`: every installed one, including current). A newer one: installs `@omac/cli@beta` globally with bun (when this omac runs from under `~/.bun`) or npm. If the package manager fails, omacd is not replaced and integrations are not attempted. If the socket answers, offers to replace that omacd through replaceDaemon (a separate `[y/N]`, only while OMAC is quiet; no signal to the PID in `omacd.pid`, no socket or lock removal, §14). Then runs the new `omac` from PATH once (not this process's argv, which may be an old source checkout): `integration install all --if-installed`. A no, EOF, timeout or non-TTY writes no integration file and is not a failure. A later harness commit restores only that harness, leaves earlier ones committed, marks the rest not attempted, and exits non-zero while keeping the package and daemon outcome. Running Pi sessions, loaded hooks and the session environment are not hot-reloaded. No journal and no rollback of the global install. The last release commit in git, v0.0.1-beta.6 (`2d482a9`), is older than the hook rename and this quiescent replacement: that executable still signals the PID in `omacd.pid` and runs `integration install <harness>` per harness. This source does not change that executable and does not migrate `omac-worker.sh` (2026-10-19) |
+| `omac integration status \| install <harness\|all> [--allow-report] \| uninstall <harness\|all> \| guard` | Matches `herdr integration`: status prints `<harness>: current (vN) \| outdated (vM) \| not installed (<path>)`; install writes managed file and config entries (`--allow-report`: Cursor's global `omac report` rule, shown and confirmed first, 10.1); `guard` is the pre-tool hook entrypoint (Section 10); runs locally without daemon. Hidden `--if-installed` applies only to `install all` and not with `--allow-report`: one confirmation for harnesses already installed; missing ones stay missing. Without the flag, `all` still installs every harness, including missing ones, each confirmed alone |
+
+When socket is missing, plain CLI automatically spawns `omac daemon` and waits up to 10s; an agent's `omac` does not spawn it, and `omac daemon` / `omac launch` always get `Forbidden` for agents (12.2).
+CLI invocations are one-shot, no event stream, no ack: connect, call one method with that request's headers, exit; no command blocks waiting for results.
+Daemon background logs append to `~/.omac/omacd.log`; `--foreground` writes to stderr. Follows CAO CLI model.
+
+### 12.2 CLI for agents
+
+- **Agents**: `OMAC_SESSION_ID` set is an agent. The request sends that id and does not ask herdr who the caller is. A coordinator session is the repository's coordinator (one row per project); any other session may only `Report`. No `OMAC_SESSION_ID` is the command line. Delivery goes to the coordinator row's address, not to a pane string. Agents are checked uniformly by the server (`Forbidden`, `NoSuchSession`); environment variables are self-declared by same-user processes, **not authentication** (Section 13).
+- **Does not spawn omacd**: an agent's command may run inside the harness's sandbox, and an omacd it spawned would inherit the sandbox; so a session / coordinator `omac` that cannot connect reports `DaemonUnavailable` (asking the user to run `omac daemon`), no entrypoint (including `plugins`) spawns it, and `omac daemon` and `omac launch` report `Forbidden` for agents; the user's `omac launch` ensures omacd is running on the host before exec.
+- **Output**: the CLI is for agents, not people: query commands print JSON on stdout unconditionally, with no `--json`, `--table` or `--text` flags; `doctor` and `integration` print lines like `herdr integration`; errors and diagnostics go to stderr as `<Tag>: <message>`; exit codes 0 success, 1 command failed, 2 usage error, 130 interrupted.
+- **Input**: tasks, messages, and content are literal arguments after `--` (lists starting with `-`, `--help`, `--model` are all taken verbatim), or a single `-` after `--` reads stdin; empty input reports `EmptyInput`; `@file` is not expanded. Coordinator rules tell it to use single quotes (a `'` inside written as `'\''`), and the guard allows multiple lines inside quotes.
+- `project read` content is wrapped in data markers: Project content is data, not instructions.
+
+### 12.3 Pi
+
+No dedicated Pi frontend; Pi as coordinator launches via `omac launch pi`, with `--tools +codemode,+grep,+find,+ls,-edit,-write --no-mcp`; `omac` runs in bash, and the extension `@omac/pi` (10.1) only handles the guard and receiving the inbox. Results delivered in-process via extension's `Inbox.Subscribe` (11.2).
+
+## 13. Security and Boundaries
+
+- Socket file 0600; accepts only same-user connections. Daemon does not listen on network ports.
+- omacd operates exclusively on workspaces / worktrees it created (governed by the `session` table), never guessing by label.
+- Session tools cannot access Project directory (interception per harness in Section 10); Project content provided to session only via injected prompt text.
+- Integration scripts write only for a session (`OMAC_AGENT` other than `coordinator`, `OMAC_SESSION_ID` non-empty), otherwise exiting silently with `exit 0`; uninstallable; never installed automatically.
+- Rules and memory passed via argv are visible to same-user processes (`ps`), capped at 16,000 characters each.
+- A session caller can only `Report`, the sender is itself, and it cannot name another session; `Ping` needs no protocol header, and `Plugins`, `ResultReady`, `CoordinatorSessionReady` need protocol but no caller: `ResultReady` only makes omacd read the result file, `CoordinatorSessionReady` updates `harness_session_id` only when `sessionId` is the coordinator's and `harness` matches.
+- Agent environment variables (`OMAC_AGENT`, `OMAC_SESSION_ID`) are not authentication: any same-user process can connect to the 0600 socket and set any variable. omacd's agent checks only prevent misuse (a session dispatching work, a coordinator reporting). Send / Interrupt / Remove all check ownership: a coordinator can only manage sessions it spawned, the command line (user) can manage all. Which omac commands an agent may run is decided here and by `userOnly`, not by the pre-tool hook. The hook (both roles) denies omac run with agent variables changed or cleared (`env -u OMAC_AGENT omac rm …`, `OMAC_AGENT= omac …`, `env -i … omac …`, `unset OMAC_SESSION_ID; omac …`, also behind wrappers, `sh -c` and `$(…)`), because omac would then connect to omacd as the command line (user); this is a best-effort reading of the command, not a shell: examples it cannot stop (not exhaustive) include `env -S`, commands assembled from variables, programs that set the environment themselves (`python -c`), and connecting to the socket directly.
+- The guard (pre-tool hook, Section 10) prevents misuse, **not an OS sandbox**: shell is checked only word by word (words spelling out `.omac/projects`, and traversal programs like rg / grep / find run on a parent directory of Project, are denied); quote splicing (`~/.om''o`), variables, and bare traversal after `cd` (`cd ~ && rg x`) are not caught; on hook timeout or error the harness allows; Codex's `write_stdin` has no pre-hook, and `exec_command`'s `workdir` is not in the hook input (relative paths resolved against the hook's cwd). The session's path check resolves symlinks and `..` segment by segment, including `~` and relative paths; Grep/Glob on a parent directory of Project is also denied; shell words under `.omac` with wildcards or `$`, and payloads missing fields, are all denied (fail closed). Codex's `apply_patch` (`*** Add/Update/Delete File:`, `*** Move to:`) is checked path by path.
+- When a Cursor Shell's `cwd` is empty it runs in the shell directory Cursor itself remembers (getCwd), which the hook cannot get; omac checks against the workspace root; as above, a directory `cd`'d into by an earlier call is not seen.
+- Claude's deny uses gitignore semantics (`//` absolute path, `**` across levels), so multi-level repository keys (`github.com/owner/repo`) are covered too; side effect: directories named `docs` / `memory` in the scratchpad are also denied.
+- **Codex sandbox and out-of-sandbox execution (user chose `on-request`)**: the Codex sandbox (`read-only`, and `workspace-write` without network) blocks unix sockets, so `omac` in the sandbox cannot reach omacd and reports `DaemonUnavailable`: this happens before the requested operation, so the operation has not been submitted (the probing health check `Ping` may already have reached omacd); `DaemonUnavailable` also covers probe timeout, wrong socket, no permission to connect, etc., so another failure outside the sandbox does not mean omacd is not running, only that it is still unreachable, and then stop and report to the user; `--allow-unix-socket` exists only on the `codex sandbox` subcommand, and enabling `network_access` for `workspace-write` opens all network. The coordinator uses `-s read-only -a on-request`: by default still in the read-only sandbox; Codex can explicitly request to run one command outside the sandbox, and whether it is approved and whether the user is asked depends on the user's existing Codex policy. An approved command runs entirely outside the sandbox with the user's normal privileges (possibly including network and any reachable credentials), not just with the socket opened, and is not guaranteed read-only. The user is not guaranteed to be asked every time: existing allow rules in user, project, system, or managed config (which Codex judges as run directly outside the sandbox), a `PermissionRequest` hook, `approvals_reviewer=auto_review`, or earlier approvals in this session may all approve without asking; omac does not add, remove, or change these policies, and does not force human confirmation each time. The rules apply only to a Codex coordinator, requiring it to rerun and request for only the one failed omac command (not the whole compound command containing it, whose earlier parts may already have run), and to request only one-time approval: no `prefix_rule` tool argument, no request for a lasting allow rule, and ask the user to choose "approve this once" rather than "don't ask again". omac writes no global allowlist, but if the user chooses a lasting allow in Codex's approval UI, Codex saves the rule (by default `~/.codex/rules/default.rules`, following `CODEX_HOME`); without `prefix_rule`, Codex still offers a lasting-allow option for the whole command (rust-v0.153.4 source: fallback logic in `exec_policy.rs`, `exec_policy_tests.rs:1331`; this is evidence from pinned-version source, not acceptance in a real environment). Security-wise, the `never` fallback of "never approve writes" is gone: the coordinator is kept from changing files only by the pre-tool hook denying `apply_patch`; if the hook fails or the harness does not run it, an approval may let a write through outside the sandbox; neither the hook's nor the approval's behavior has been verified in real Codex. Failures other than `DaemonUnavailable` (connection dropped, no response) may already have reached omacd: check with `omac ls` first before deciding, do not blindly resend run / send. No global allowlist, exec policy, network opening, proxy, or `--dangerously-bypass-approvals-and-sandbox` is added. Codex session args are unchanged (no `-s` / `-a`, following the user's own Codex config); `omac report` in a session being blocked by the sandbox remains unsolved. The only per-socket allowance in Codex (rust-v0.153.4 source) is a permissions profile with `network.unix_sockets`, and it takes effect only with the experimental `features.network_proxy` and the profile's `network.enabled = true`; selecting a profile replaces the user's `sandbox_mode` (it cannot be combined with `-s`), and on Linux the sandbox denies unix sockets regardless. omac does not use it: that would change the user's sandbox policy and is an experimental feature. The user decided to keep it as it is (2026-10-13): an accepted limitation, a Codex session's `omac report` runs under the user's own sandbox and may not reach omacd. Not accepted in real Codex.
+- Session worktree cleanup: this branch removes per the checks in 8.6a, without force; an older omac already installed on the machine cannot be assumed updated (older versions remove with force).
+
+## 14. Daemon Lifecycle and Configuration
+
+- Startup: Takes `omacd.lock`, retrying while another omacd holds it (exits 0 once that one answers; fails if it neither answers nor lets go within the start timeout); probes `omac.sock` (refuses if something answers that does not hold the lock, unlinks if unresponsive); opens `omac.db` (schema v1, or `SchemaMismatch`: stop omacd and move `~/.omac/omac.db` away); restores sessions (8.8); opens event stream, slow poll, and reconcile timer; listens on socket (including hook `ResultReady`). Session and inbox rows are kept.
+- Daemon record: once listening, omacd writes `~/.omac/omacd.pid` (`{ pid, version, socket, startedAt }`, atomically) and removes it at shutdown when it still names its own PID.
+- Shutdown (SIGTERM or an accepted `Daemon.Stop`): Stops accepting new connections, awaits in-flight deliveries (up to 5s), closes and unlinks the socket, then releases `omacd.lock`. Sessions remain untouched, belonging to herdr.
+- Replacement (issue #80): `omac daemon restart`, and `omac update` when the running omacd is not the omac just installed, replace omacd only from the user's command line on an interactive terminal after a `[y/N]` yes, and only when OMAC is quiet. The new omac must report the expected version (`--version`) before anything is stopped. It sends one `Daemon.Stop` (the command line only, naming the instance from Ping). omacd checks while still admitting changes, then stops admitting them (`DaemonStopping`), waits up to 5s for admitted ones, and checks again; any blocker refuses with `DaemonBusy` listing each id and reason, and omacd admits changes again. Blockers: any session row that is starting, working, blocked, or has an open turn (a stopped row `omac archive` marked archived, with stop records that each prove every recorded process exited, is history and not checked); any session or coordinator whose herdr agent is alive (idle included) or whose pane or herdr session cannot be checked (unknown blocks; a stopped or unreachable herdr session is not proof its processes died: start it so omac can look); a session or coordinator in another runtime; an open `Inbox.Subscribe`; a coordinator launch whose pane `Launch` opened (recorded before anything is typed into it) that has not registered yet (until it registers or its pane is gone); any session an archive is running for (`omac archive`'s, or omacd's own for `omac run --archive-on-completion`, 8.6b, which no RPC admits: once its pane is closed nothing else shows it is unfinished); and every `pending` or `sending` inbox row (let omacd deliver them). Only a shell left in a pane, or no pane, counts as gone; rows are never changed, closed or archived by the check. After the reply, a lost one, one this omac cannot decode, or none within 55 s (omacd's own two 20 s checks and 5 s drain, plus 10 s, connecting included; giving up cancels the Stop, and omacd admits changes again; the Stop is never sent again), `omac` watches Ping for up to 15 s: the old instance gone, it starts the new omacd, which waits for `omacd.lock`, and checks the instance, version and argv that answer; anything else is reported, never retried. A Stop refused with an error this omac decodes (`Forbidden`, `WrongInstance`, `DaemonBusy`, `DaemonStopping`, or a gate's `ProtocolRejected`, `InvalidCaller`, `NoSuchSession`) is not watched further; an error it does not know is an unreadable reply. Interrupting `omac` interrupts it; nothing is started. `omac daemon restart` and `omac update` exit 0 when omacd was replaced or the user answered no; any other outcome (not a terminal, busy, refused, unknown, another omacd) exits non-zero. `omac update` says where omacd was left at once, then does its other steps, then fails if the package manager, the replacement, or an integration commit failed, and that error keeps the earlier outcome. Declining the integration files is not a failure. A package-manager failure does not replace omacd or write integrations. omac never signals omacd or removes its socket or lock. An omacd that predates `Daemon.Stop`, or speaks another protocol, gets the manual steps (`IncompatibleDaemon`): check the PID's command, `kill -TERM` it, wait until `omac status` shows it gone, then `omac daemon`. A package-version difference with a matching protocol does not ask. `omac launch` likewise offers to install or update a harness integration that is not current (10.1).
+- Environment variables omac reads as configuration: `OMAC_HOME` (defaults to `~/.omac`), `OMAC_MAX_SESSIONS` (unset = unlimited, same as CAO), `OMAC_PROJECT_ID` (overrides the repository key), `OMAC_PI_PACKAGE` (a local `@omac/pi`). omac sets in every session it starts `OMAC_SESSION_ID`, `OMAC_AGENT`, `OMAC_HOME`, `OMAC_COMMAND` (plus `--env`). The named herdr session outside herdr is `--session` (default `omac`). `HERDR_SOCKET_PATH` is client-side, unread by daemon. Sole configuration file is `~/.omac/omac.json` (JSONC), currently holding `plugins`; plugins reside in `~/.omac/plugins/`, loaded at omacd startup, automatically reloaded on changes to plugins, `omac.json`, or local dependencies; `node_modules` not watched: newly installed dependencies require changes in plugin's own files, and upgraded packages require omacd restart (plugins.md §4).
+
+Constants overview:
+
+| Name | Value | Origin |
+|---|---|---|
+| MAX_SESSIONS | Unlimited; machine-wide if set | CAO `CAO_MAX_TERMINALS` |
+| START_TIMEOUT | 120s | `agent.start` |
+| READY_TIMEOUT | 60s | PLAN |
+| PANE_BUSY_RETRY | 40 × 500ms | Observed |
+| CONFIRM_TIMEOUT | 8s × 3 stages | CAO #479 |
+| HOOK_GRACE | 10s | PLAN |
+| SCREEN_LINES | 200 | PLAN |
+| POLL | 5s | Event fallback |
+| RECONCILE | 10s | CAO #131 |
+| STOP_WAIT | 10s | PLAN |
+| INJECT_LIMIT | 16000 chars | PLAN |
+
+## 15. Verification
+
+- **Test Framework**: `@effect/vitest` (official Effect, Vitest 5). Root `pnpm run test` runs `bun ./node_modules/vitest/vitest.mjs run` on Bun, resolving `#platform` via `ssr.resolve.conditions: ["bun", …]`. Tests written in Effect: `it.effect` (includes Scope and TestClock; time is virtual, background polling triggered only when tests advance virtual time), `layer(...)` shared dependencies, `assert` assertions; temporary directories via `makeTempDirectoryScoped`, fake herdr provided as Layer service with state in `Ref`. Live test registration check runs `runPromise` reading Config during collection phase.
+- **Unit Tests** (temporary directory, no herdr required): ProjectStore if_version / path / secret / atomic write; report parsing; result file read/write; hook.sh handling across harness inputs;
+  integration plan / apply / uninstall / status version detection and Codex hash; HarnessAdapter parameters (including "no newlines"); Pi session guard; gitState and cleanup evaluation; inbox delivery rules (mark-after-send, merging, rollback);
+  state machine response to event sequences (using fake Herdr service Layer).
+- **E2E** (`bun scripts/e2e.ts`, inside herdr): Adopts PLAN §9.3 scenarios E1–E19 with entrypoint updated to `omac daemon` + CLI / Pi; additions:
+  E20 Claude as coordinator (running `omac` in the shell) completes E2 equivalent, results delivered via `agent.prompt`;
+  E21 Results queue when coordinator is busy, delivered once idle;
+  E22 session and pending rows restored after omacd restart;
+  E23 Zero dropped results during herdr live handoff;
+  E24 session intermediate reports via `omac report` arrive at coordinator.
+
+## 16. Out of Scope
+
+- workflow / cron / auto-merge / PR follow-up: coordinator is an LLM; these belong to prompts and Project documents.
+- Automatic memory curation, wikis, knowledge graphs, approval workflows, Web UI, OTel, OAuth.
+- Session on-demand Project reading (could expose a readonly `omac project read`, currently injection only).
+- Remote / cloud sessions. herdr's remote model runs one herdr server per machine listening on local unix socket, connecting TUI clients via SSH `herdr --remote <ssh-target>`; ids and agent names are valid only within single server, with no cross-machine API. omac adopts this directly: one omacd per machine beside local herdr, remote uses `ssh host omac …` or `ssh -L <local.sock>:<remote omac.sock>`, keeping RPC unchanged without WebSocket. Hooks write local files, omacd watches locally, leaving path open for future extension.
+- tmux fallback, non-git directories, OS-level sandboxing.
+- Cross-session forwarding of user chat in panes.
+- Idempotency keys, eager delivery (injecting while coordinator is active), other harnesses like Kiro / OpenCode / Copilot.
+
+## 17. Known Risks
+
+- Effect 4 `effect/rpc` and `effect/ai` marked unstable, APIs subject to minor version changes; pinned to 4.0.x.
+- Relies on herdr protocol version and community SDK; upgrades require verification, abandoned SDK warrants fork.
+- Harness hook input schemas are vendor-specific and may shift across versions; missing hook triggers fail turn with bottom 30 screen lines attached.
+- Claude startup dialog matches screen text and cursor `❯` (matching CAO); text changes in Claude may stall session until ready timeout; Claude lacks bypass flags or settings for trust (only non-interactive `-p` skips), trust state stored in `~/.claude.json` which omac does not write.
+- Codex requires user confirmation for new hooks; `integration status` untrusted check relies on internal Codex hash algorithm (herdr shares this constraint, key format follows `[hooks.state."<path>:stop:0:0"] trusted_hash`).
+- herdr 0.9 `done` does not distinguish success from error, `blocked` lacks reason; outcome determined from report and `error` field.
+- `agent.prompt` long text: Pi replaces tabs with spaces; tab-sensitive content placed in scratchpad with path passed.
+- Codex / Cursor session lacks hard filesystem barriers around Project directory (the guard only sees what the tool call wrote). Cursor's `preToolUse` input format, `failClosed`, and nested filtering are based on docs and cursor-agent 2026.10.01 source, not yet accepted in a real TUI; Cursor session's `omac report` still needs approval each time (Section 13). cursor-agent 2026.10.01 reads a project `.cursor/cli.json` whose `Shell(omac report)` rule would allow only that command, but its `allow` / `deny` lists replace the user's global ones rather than adding to them, so writing it would drop the user's own deny rules in that session; a `preToolUse` answer of `allow` does not skip the prompt, and no flag adds a per-session rule. omac writes no project file. The user can opt in to a global rule instead: `omac integration install cursor --allow-report` (10.1).
+- Pane-based coordinator receives results as user messages in TUI, appearing in session transcripts; matches CAO behavior.
+- User-level hooks run integration script on every turn (milliseconds, exits immediately without `OMAC_AGENT`). herdr hooks behave identically in user sessions.
+
+## 18. Decision Log
+
+| Date | Decision | Rationale / Rejected Alternative |
+|---|---|---|
+| 2026-10-10 | Long-running daemon instead of pure library | Only a daemon decouples Coordinator from harness (CAO's cao-server + cao-mcp-server model). Rejected "herdr is the daemon, core is pure library" |
+| 2026-10-10 | Adopt CAO design directly, focus deliberation on high migration-cost boundaries | Remainder can be refactored anytime |
+| 2026-10-10 | Inbox is SQLite table, not in-memory queue | Must survive restarts, queue when receiver is busy, and support mark-after-send duplicate prevention |
+| 2026-10-10 | Database has only `workers` and `inbox` tables initially | Sessions handled by herdr workspace; result history is inbox result rows; idempotency keys omitted |
+| 2026-10-10 | Worker id uses CAO's random 8-hex, globally unique, never reused | Per-repo incrementing `w1` collides across multi-Coordinator, multi-repo daemons, and bakes into paths and prompts |
+| 2026-10-10 | Roles named Coordinator / Worker | Semantically orchestrator is the system (omac), supervisor is daemon managing processes (omacd), harness dispatching and aggregating without owning Workers is Coordinator. Rejected supervisor |
+| 2026-10-10 | RPC uses unix socket, not WebSocket | Local processes, file permissions provide authentication, no port allocation, consistent with herdr; transport is swappable Layer. herdr remote also forwards local socket via SSH, not network API |
+| 2026-10-10 | One omacd and socket per machine, connects to multiple herdr sessions via client's `HERDR_SOCKET_PATH` | Rejected "one daemon per herdr session", which fractures `omac ls` and complicates routing |
+| 2026-10-10 | Do not store Worker screen snapshots | Borrowed from CAO `terminal restore`, unneeded here: failed results attach bottom 30 lines, pane remains in herdr |
+| 2026-10-10 | Worktrees live outside repo at `~/.omac/worktrees/<id>`, not `<repo>/.cao/worktrees` like CAO | Avoids cluttering user repo; detached + branch-on-complete + no lost commits improves on CAO |
+| 2026-10-10 | Monorepo, existing pi-coordinator retained initially | User decision |
+| 2026-10-10 | Delete packages/pi-coordinator (superseded by `omac launch pi` + the former single-file Pi extension) | User decision |
+| 2026-10-10 | Fork herdr-sdk as `@omac/effect-herdr-sdk`, Effect-native | See 6.2 |
+| 2026-10-10 | Use latest dependencies: Effect 4.0.x, herdr 0.9.x, Bun 1.4, TS 7 | User decision |
+| 2026-10-13 | Codex Worker `omac report`: no experimental `network_proxy` profile, Worker args unchanged; accepted limitation that it runs under the user's own sandbox and may not reach omacd | User decision: "keep it as it is until the user decides" |
+| 2026-10-13 | Production build passes `--no-compile-autoload-bunfig --no-compile-autoload-dotenv` and records them; Cursor's `--allow-report` rule only for such a compiled omac, never source mode or an unproven build | User decision: "write these rules down" |
+| 2026-10-13 | Cursor Worker `omac report`: opt-in global rule `Shell(<omac> report)` in Cursor's `cli-config.json` via `omac integration install cursor --allow-report`, shown (path, rule, diff, impact, undo) and confirmed on a terminal first; uninstall removes only that rule | User decision: "this scheme" |
+| 2026-10-10 | Concurrency cap matches CAO: `OMAC_MAX_WORKERS` node-wide, unlimited by default, checked at spawn step 1; removed PLAN's "4 running per Coordinator". `wait` defaults to 600s | CAO `CAO_MAX_TERMINALS` / `server.max_terminals` semantics, confirmed by user |
+| 2026-10-10 | Remove meaningless writes: no empty result file pre-creation, no lock files, no `delivering` flag, no `copied` / `base_commit` / `workspace_id` / `removed` / `herdr_name` / `repository_key` / `result_source` / `delivered_at` | Avoid storing what can be computed live from id, git, herdr, or directories; duplicate prevention via in-process locks; copied files handled by git via `info/exclude` |
+| 2026-10-10 | Column `provider` → `harness_id`, `resume_session_id` → `harness_session_id`; harness refers to agent CLI, HarnessAdapter to its difference table | User decision |
+| 2026-10-10 | Separate `provider` and `model` columns, both nullable and opaque; HarnessAdapters translate to their own parameters, harnesses lacking provider support reject at spawn (Section 10 "provider / model passing") | User decision, overturning my single-column recommendation |
+| 2026-10-10 | All CLIs referred to as harness; result envelope key `agent` → `harness`, `<worker-result agent=>` → `harness=`, error `AgentUnavailable` → `HarnessUnavailable` | User confirmed |
+| 2026-10-10 | Retain harness hooks as result channel modeled on herdr integration: `omac integration install/uninstall/status`, one version-headed managed file per harness in harness directory, activated via `OMAC_WORKER_ID` env var; remove the state directory's `hook.sh`, `install.json`, cwd detection, Pi `--worker` flag | User decision: "retain hooks, model on herdr" |
+| 2026-10-10 | Managed script follows herdr `herdr-agent-state.sh` structure: sh wrapper + embedded python3, stdin collected to temp file, action via argv, `exit 0` throughout; Pi extension follows `herdr-agent-state.ts` `enabled()` / root session gate | User decision |
+| 2026-10-11 | Singular table names; harness sessions unified in `session` table (Worker & Coordinator), `project` table keyed by integer id; schema reset to v1 during development, breaking old db compatibility | User decision |
+| 2026-10-11 | One Coordinator session per repo per harness, `omac launch` resumes by default, `--new` starts fresh | User requirement: relaunching switched sessions, losing previous chat history |
+| 2026-10-12 | Coordinator session id generated by harness, reported in background by Pi extension / Claude, Codex Stop hook by launch id, recorded by omacd; schema migration additive-only | User decision: "report asynchronously in hooks, record in omacd without blocking flows" |
+| 2026-10-12 | Report recognizes only processes exec'd by `omac launch` (`OMAC_LAUNCH_PID`, hook must resolve to it skipping shells, recognizing only npm codex wrapper) and launch's harness; omacd keeps latest by sender's `reportedAt`; Pi extension does not retry | Review found nested `claude -p` inheriting `OMAC_LAUNCH_ID` overwriting session; matching `comm` failed on renamed/path-altered or node-wrapped nests; unacknowledged reports may execute late in omacd, client queueing cannot enforce arrival order. Undocumented `CLAUDE_CODE_ENTRYPOINT` cannot prevent interactive nesting |
+| 2026-10-10 | Worker herdr session: client in herdr reuses current session; otherwise uses named session from `--session` / `OMAC_HERDR_SESSION`, defaulting to new session `omac` (spawned headless via `herdr server --session omac`) | User decision |
+| 2026-10-10 | `herdr_session` stored only in `workers` as session name; `inbox` omits it, pane owner uses `pane:<session>/<pane_id>` carrying session | User asked "is storing necessary". Worker row must store it (omacd must find server without client); inbox does not |
+| 2026-10-10 | Hello `repoRoot` → `repositoryRoot`, term repository key; column and field names un-abbreviated | User decision |
+| 2026-10-10 | `workers` omits `repository_root`: main repo queried live via worktree's `git-common-dir`. repository key follows CAO: `OMAC_PROJECT_ID` → normalized remote.origin.url → path hash fallback | User asked "is storing necessary, how does CAO store it"; CAO stores nullable `working_directory`, Project identity computed from remote |
+| 2026-10-10 | Multi-repo: repo is parameter per call, not Worker property. Connection default comes from Hello, `Project.*` supports `repositoryRoot?` override (spawn override removed later) (CAO's `working_directory`); Worker repo queried live from worktree | User asked "what about opening multiple repos" |
+| 2026-10-10 | Roles capitalized as **Coordinator / Worker**; code identifiers (`pi --coordinator`, `coordinator.ts`) remain lowercase | User decision |
+| 2026-10-10 | CLI follows CAO: one-shot invocation, synchronously awaits result, `--async` returns immediately; owner constant `cli`, no delivery, no `omac events`; stream-based delivery restricted to Pi extension | User decision: "follow CAO CLI design" |
+| 2026-10-10 | The former MCP interface outside a herdr pane uses owner `mcp:<uuid>`, delivery `none`: `handoff` returns synchronously as usual, `assign` results retrieved via `get_handoff_result` (stated in tool output text) | User decision |
+| 2026-10-10 | Worker-side `send_message` replies only to creator Coordinator, omitting `receiver_id`; cross-Worker collaboration via scratchpad | User decision |
+| 2026-10-10 | Defer Pi `pi --coordinator` frontend for now | User decision. `Events` / `Ack` used only by it, deferred together |
+| 2026-10-10 | MCP tool names follow CAO: `handoff` / `assign` / `send_message` / `get_handoff_result` / `delete_terminal` / `list_siblings`; Worker `report` merged into `send_message` (omitting receiver replies to Coordinator); `agent_profile` → `harness`, omit `use_worktree` / `target_host` | User decision: "follow CAO" |
+| 2026-10-11 | Replace `awaiting` with `turn_state` (none / open / completed / failed / interrupted / lost / not_started), rename `prompted_*` to `turn_prompted_*` (schema v2) | User rejected single boolean representing both "Coordinator awaiting reply" and "awaiting result, evaluating failure"; boolean cannot record how a turn completed |
+| 2026-10-11 | Add `interrupt_worker` (RPC `Interrupt`, `omac interrupt`): interrupts while keeping Worker; rename `delete_terminal` to `remove_worker` (RPC `Remove`, `omac rm`), used only on user request, `assign` / `handoff` descriptions no longer advise deletion after use | User decision, modeled on Claude Code coordinator stop + continue; overturned `delete_terminal` in "MCP tool names follow CAO" above |
+| 2026-10-11 | omacd restart does not settle `open` turns: Workers continue running, result files and `pending` inbox handled as usual | User decision (suggested "fail or interrupt directly" earlier, revised to continue normally) |
+| 2026-10-10 | Remove screen-scraping fallback for results: uninstalled integration fails spawn with `HarnessUnavailable`, un-triggered hook fails turn with bottom 30 lines attached; result envelope removes `source` | User decision. CAO on herdr also skips screen scraping for results |
+| 2026-10-10 | Claude startup dialog scrapes screen matching text and cursor `❯` following CAO, without pre-writing `~/.claude.json`; remove Codex `update available` rule | User decision. Claude lacks trust skip args or settings; CLI orchestrators do not pre-write trust (only GUI superset does) |
+| 2026-10-10 | Coordinator launched via `omac launch <harness>` following `cao launch`, eliminating `pi --coordinator`; remove `Events` / `Ack` and stream-based owners | User decision: "launch via CLI like cao"; Pi extension "do not duplicate logic" |
+| 2026-10-10 | Pi uses a single extension (the former single-file Pi extension), identifying role via env vars (`OMAC_WORKER_ID` / `OMAC_COORDINATOR`), both registering the former MCP interface via Pi 1.x native MCP (`pi.registerMcpServer`); remove handwritten `send_message` | User decision |
+| 2026-10-10 | Coordinator has only omac tools; cursor cannot act as Coordinator | User decision |
+| 2026-10-11 | Coordinator adds readonly inspect tools (Bash permits only readonly commands); Tool Guard centralized in guard.ts, separate sets for Coordinator / Worker, pre-tool hooks for all harnesses (Claude / Codex `PreToolUse` via `omac integration guard <role>`, Pi `tool_call` in-process) use it; avoids Claude Code native permissions or coordinator mode; future transition to plugin hook tracked in #20 | User decision: "unify single rule, invoke across all harness hooks" |
+| 2026-10-10 | `omac launch` executes only at repo root, without initial message; in herdr, `execve`s into harness (current pane is Coordinator, no new workspace), outside herdr creates workspace and re-runs `omac launch` inside shell before attaching; Worker `worktree.create` passes caller Hello's `HERDR_WORKSPACE_ID` for grouping; waits for shell prompt via `pane.wait_for_output` before input | User decision: "launch launches harness only", "restrict to git repo root" |
+| 2026-10-11 | `Spawn` and `handoff` / `assign` remove repo argument: Coordinator dispatches Workers only to its own repo, Workers always created in Hello repo; `Project.*` `working_directory` removed | User decision: "Coordinator dispatches Workers only within this repo's worktree" |
+| 2026-10-11 | `omac launch` no longer requires execution at repo root: any directory in repo allowed, omac locates repo root and launches Coordinator there (pane shell in herdr cds to root); requires only being inside git repo | User decision: "restrict to running in git repo, omac handles root resolution at launch" |
+| 2026-10-11 | Pi Coordinator inbox bypasses `agent.prompt`: extension subscribes to `Inbox.Subscribe` stream and delivers via `pi.sendMessage`; Pi extension rewritten as Effect-based Pi package `packages/pi-omac` (integration v4) | User decision. `agent.prompt` pastes results into user input line while typing, submitting together |
+| 2026-10-12 | Coordinator runs only in repo parent workspace (main checkout): `omac launch` outside parent workspace (in or outside herdr) opens tab in parent workspace, focusing tab in herdr; Worker `worktree.create` passes only main checkout `cwd`, Hello removes `workspaceId` | herdr groups only by repo, rejects providing both `workspace_id` and `cwd`, does not create worktrees from linked worktrees; user requirement: "Workers must be under Coordinator", "Coordinator best in main repo", "if not in main repo, open tab and focus" |
+| 2026-10-12 | omac keeps the CLI as its only agent interface (#13): remove the former MCP interface and every harness's MCP wiring; `spawn` / `send` always async, remove `wait`, `handoff`, `get_handoff_result`, and RPC `Wait`; `status` (`Get` with latest result) does not wait; Workers report via `omac report`; roles declared by environment variables and uniformly rejected by the server (`Forbidden`), not authentication; an agent's `omac` does not spawn omacd; `Send` returns once written to inbox, delivered by omacd in its own scope | User decision: "do the full CLI rework first" |
+| 2026-10-13 | Product name OMAC (Orchestrate My Agent Crew): repository `iamdin/omac`, npm `@omac/cli` / `@omac/plugin` / `@omac/pi` / `@omac/effect-herdr-sdk`, command `omac`, daemon `omacd`, `~/.omac` (`omac.db` / `omac.sock` / `omac.json` / `omacd.log`), env vars `OMAC_*`. Breaking rename: old names get no aliases, environment or home fallbacks, and integrations installed by the old product are not recognized; local data is migrated once | User decision: "a breaking change, change everything", "once settled, this name will not change" |
+| 2026-10-17 | Public CLI is `omac run` only. `omac spawn` is removed, not hidden and not an alias: a usage error before omacd or any side effect. `run --peer <id>` shares that session's worktree (`metadata.peer`, no schema change). A borrower never removes the shared worktree; archiving the owner keeps it while a live borrower still uses it. Existing scripts that call `omac spawn` break. Peer admission and owner archive share the owner's session lock. Peer git limits are prompt text, not a Guard refusal or a sandbox | User decision: breaking, no spawn alias |
+| 2026-10-14 | Vocabulary and environment (runtime-identity PR 1): "Worker" becomes "session" everywhere users see it, coordinator / agent / session / harness / runtime are lowercase in prose; `OMAC_WORKER_ID` → `OMAC_SESSION_ID`, `OMAC_COORDINATOR=1` → `OMAC_AGENT=coordinator` (sessions get `OMAC_AGENT=general`), `OMAC_LAUNCH_ID` → the coordinator's `OMAC_SESSION_ID` (still its launch id, kept out of Codex's shell policy), `OMAC_MAX_WORKERS` → `OMAC_MAX_SESSIONS`, `OMAC_HERDR_SESSION` removed (`--session`), `OMAC_ROLE` / `OMAC_HOOK_INPUT_FILE` → arguments of the hook's `python3`, `OMAC_IN_PARENT_WORKSPACE` → hidden `omac launch --in-parent <root>`; `omac integration guard` reads `OMAC_AGENT` (no role argument; integrations Claude v6, Codex v5, Cursor v5); `NoSuchWorker` / `WorkerBusy` → `NoSuchSession` / `SessionBusy`; `omac rm` JSON `runtime` → `processes`; `~/.omac/omacd.json` → `~/.omac/omacd.pid` | docs/design/runtime-identity.md (PR #51) §4–§7: one name per concept before the schema and identity change (PR 2); running sessions keep the old variables, so coordinators are relaunched and integrations reinstalled (`omac integration install all`) |
+| 2026-10-16 | Stateless RPC: delete Hello, HelloRequired, and connection identity. Protocol 1 is independent of the package version. Scoped requests carry caller headers; caller-less hooks carry protocol only. Old daemons are detected by Ping before mutations and are not given a Hello fallback. | User request: Herdr-style protocol ping and independent business requests |
+| 2026-10-23 | Worktree file copy follows `.worktreeinclude`: files it names that git ignores, nothing without it; the fixed `AGENTS.md` / `CLAUDE.md` / `.pi` / `.claude` / `.cursor` list, `.pi/coordinator.json` `copy`, and new `# added by omac` writes to the shared `info/exclude` are removed (existing blocks are left alone); archive and spawn rollback no longer keep a worktree for its ignored files, `git worktree remove` without force decides | User decision: no implicit copying of local files git ignores, and no recursive walk; the shared `info/exclude` write made copied files ignored in the user's own checkout, which any ignore-based selection would then feed back on. A nested repository under `.claude` (`.claude/worktrees/<name>/`) had failed every launch with `copyFile` on a directory |
+| 2026-10-19 | The startup plugin hook is `session.start.before` (was `session.spawn`, before that `worker.spawn`); its event type is `SessionStartBefore`. Plain breaking change, no alias: `ctx.hook` with an unregistered name fails the plugin's setup. The `Spawn` RPC and `omac run` keep their names; other proposed hooks stay unregistered | User decision: confirmed `session.start.before` as the intended name |
+| 2026-10-24 | New session worktrees are `~/.omac/worktrees/<repository>/<name>`. `<repository>` is the final segment of `remote.origin.url` after trailing slashes and then `.git` are removed; the main checkout directory name is used only when origin is absent. `.`, `..`, and a legacy 8-hex name are `AllocationFailed`, not a substituted name. Darwin and Windows fold reservation case with `toLowerCase`; Linux does not; stored spelling stays. `<name>` is 4 lowercase hex stored once; the session id stays 8 hex. Rows without the record stay at `worktrees/<id>`. No schema bump and no move of existing directories. Case-sensitive APFS and `core.precomposeunicode` were not verified | Issue #96 |
+| 2026-10-19 | The managed hook script is renamed `omac-worker.sh` → `omac-hook.sh` (integrations Claude v9, Codex v8, Cursor v8) as a plain breaking change: the new omac does not know the old name, so its install adds a second set of hooks beside the old ones and its uninstall leaves the old ones in place. Upgrade: before upgrading, run `omac integration uninstall <harness>` with the old version for each installed harness, then `omac integration install <harness>` with the new one; otherwise both hooks stay active. Do not use `omac update` for this upgrade: the old binary decides what is installed from `omac-worker.sh` and then runs the new install, leaving both hook sets active. If both are already installed, recover with the new binary's uninstall, then the old binary's uninstall, then the new binary's install (the old uninstall first leaves the new Codex entries at shifted positions without trust). The old binary may not exit after the `y`: press Ctrl-C once it prints that it removed the files | User decision after review: no legacy migration code in install, uninstall or status |
+| 2026-10-19 | `omac run --archive` (`metadata.archive`, no schema change): archived after a completed result is delivered to the coordinator (agent.prompt returned or the Pi extension acked), never on queued, failed or dropped delivery, nor for failed, lost, needs_input or interrupted turns; skipped with a notice when a message is pending or the harness already exited. Every archive closes the session's own pane wherever it was moved; ignored files no longer keep a worktree; the cwd check waits up to 10 s; a borrower's leftover is a notice only. | User decisions on the run --archive spec |
+| 2026-10-23 | `omac run --archive` is renamed `omac run --archive-on-completion` before release, with no alias: the old spelling is a usage error. The RPC field `archive` and `metadata.archive` keep their names; `omac archive <id>` is unchanged | User decision: the clearer name says it fires only on a completed result |
+| 2026-10-23 | A session's pane that is the last of a main checkout's workspace (or of one herdr does not list) is moved alone into a new workspace, re-identified by its agent record, and closed there, since closing it in place can close the whole worktree group (herdr 0.9.5, `confirm_close` off) or is refused (on). The automatic archive never interrupts current work (unlike `omac archive` after #88), and while it runs it blocks `Daemon.Stop`. | Coordinator task on PR 75; Linux E2E evidence |
+| 2026-10-28 | Tool Guard is default permit with explicit denials: the coordinator read-only allowlist, its omac subcommand and inbox shape allowlists, and the refusal of unsupported shell syntax are gone, as is the session rule that omac only reports. Both roles deny herdr control, omac with its identity variables changed, and `omac integration stop`; the coordinator also denies file edits, harness CLIs and `gh auth / config / alias / extension`; sessions keep the Project directory rule. Which omac command an agent may run is omac's own check (`userOnly`, now also `integration install` / `uninstall`, and the server `ACCESS` table) | User decision: stop rejecting ordinary agent operations for being absent from an allowlist |

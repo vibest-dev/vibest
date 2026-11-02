@@ -1,0 +1,7 @@
+{
+  "name": "vibest",
+  "description": "VIBEST for Claude Code: turn-end reports and the tool guard for VIBEST sessions, and the coordinator inbox that delivers VIBEST messages as prompts, with /vibest-reattach",
+  "author": { "name": "iamdin" },
+  "repository": "https://github.com/iamdin/orchestrate-my-agent-cli",
+  "license": "MIT"
+}

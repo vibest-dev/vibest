@@ -1,0 +1,26 @@
+{
+  "name": "@vibest/claude",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "description": "VIBEST for Claude Code: native turn-end reports, the tool guard, and the coordinator inbox.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "directory": "packages/integration/claude"
+  },
+  "files": [
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/register.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
+    "typecheck": "bun scripts/prepare-claude-types.ts && tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.plugin.json",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/claude"
+  }
+}

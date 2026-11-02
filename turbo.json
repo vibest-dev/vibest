@@ -1,38 +1,26 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
-  "globalDependencies": ["mise.toml", "mise.lock"],
-  "globalEnv": ["CI"],
+  "globalDependencies": [
+    "tools/tsconfig/base.json"
+  ],
   "tasks": {
-    "dev": {
-      "cache": false,
-      "persistent": true,
-      "interruptible": true,
-      "passThroughEnv": ["*"]
-    },
-    "preview": {
-      "cache": false,
-      "persistent": true,
-      "dependsOn": ["build"]
-    },
     "build": {
-      "outputs": ["dist/**"],
-      "dependsOn": ["^build"]
-    },
-    "test": {
-      "dependsOn": ["^build"]
-    },
-    "test:watch": {
-      "cache": false,
-      "persistent": true,
-      "dependsOn": ["^build"]
-    },
-    "typecheck": {
-      "dependsOn": ["^build"]
-    },
-    "clean": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        "bin/vibest",
+        "harnesses/**"
+      ],
       "cache": false
     },
-    "doctor": {
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "test": {
       "cache": false
     }
   }

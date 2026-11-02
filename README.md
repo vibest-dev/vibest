@@ -1,9 +1,19 @@
-# Vibe Web
+# vibest
 
-**Supercharge your web development experience and productivity by seamlessly
-providing context to Code Agents directly in your browser.**
+A CLI agent orchestrator: a coordinator directing Pi, Claude Code and Cursor sessions in herdr panes.
 
-A monorepo for building in-browser developer tooling around AI coding agents. It enhances vibe coding and web development by combining a chat interface, DOM inspection, and others so the agent has more accurate context (e.g., file, line, component). No MCP or external context‑bridging tools required.
+## Install
 
-> [!NOTE]
-> This project is in active development. Feedback and pull requests are welcome!
+```sh
+curl -fsSL https://github.com/iamdin/vibest/releases/latest/download/install.sh | sh
+```
+
+This installs into `~/.local/share/vibest` and links `~/.local/bin/vibest`; no Node needed. Or with npm:
+
+```sh
+npm i -g @vibest/cli@beta
+```
+
+`vibest update` updates it the same way it was installed and, after a yes, replaces the running vibestd while your agents keep running (queued messages wait for the new one; `vibest daemon restart` does the same on its own). `vibest`, `vibest status` and `vibest doctor` say once a day when a newer vibest is out (`VIBEST_NO_UPDATE_CHECK=1` turns that off). `vibest doctor` checks each harness.
+
+Developing vibest: see [AGENTS.md](AGENTS.md).

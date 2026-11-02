@@ -1,0 +1,22 @@
+# Implementation plan (architecture draft 9)
+
+The order in which the omac-shaped code becomes the product described in `architecture.md`. Each phase ends with
+`pnpm typecheck && pnpm test` green and the listed checks added; phases that change behavior also end with
+`pnpm verify` green. Nothing is published.
+
+| # | Phase | Done when |
+|---|---|---|
+| 1 | **Runtime port.** A `Runtime` service in `core` (open a place, start an agent, prompt, send keys, status, read output, wait, stop, process info, events, presentation metadata) with vibest's own types (`AgentStatus`, `runtime { kind, address }`). Every herdr call in `core` and `server` moves into `runtime-herdr`; a fake runtime backs unit tests. | No module in `schema`, `core`, `server`, `protocol`, `client` imports herdr (a test checks it); unit tests run without herdr; e2e unchanged |
+| 2 | **Data model.** Tables `project` (id, name, paths per machine, folders), `conversation`, `run`, `agent` (definition, access, machine, runtime, parent), `workspace`, `message`, `subscription`, `machine`; the coordinator special case removed. No migration: nobody uses vibest yet, so the old schema and its code are deleted, the schema version goes to 2, and a version-1 file is refused with `SchemaMismatch` naming the file to delete. | Lifecycle tests for Run, Agent, Message; a version-1 file is refused, never changed |
+| 3 | **One start path.** `vibest [--new] [--harness]` replaces `launch`; the main Agent and subagents start through `agent.start` in vibestd; the CLI only places the main Agent in the current terminal. The `agent.start.before` hook chain with the builtin harness choice; the demo's glm-only plugin becomes the first routing plugin. | Routing trace for the main Agent in `vibest ls`; e2e story "install → `cd shop` → `vibest`" |
+| 4 | **Placement and presenter.** Subagents open beside the main Agent in the Project's group (herdr: tabs in the Project workspace, cwd in a vibest-made git worktree); pane labels, Project tokens, notifications. | e2e: subagent tab in the main Agent's workspace, labelled with definition, harness, Run |
+| 5 | **Daily loop.** User exchanges with a subagent return to the main Agent as a `notice`; `ls` shows task, status, latest result; `access: read` enforced (tool allowlist and guard); only vibest skills reach the main Agent; skills `delegate` and `pipeline`; `check` rule on `agent.idle`. | verify stories with fixed replies: dispatch, result returns, step-in notice, pipeline to a pull request; GLM run of scenario 1 and the pipeline |
+| 6 | **Subscriptions.** Claude, Pi, Cursor adapters report login and usage windows; scheduling reschedules a limited Agent onto another harness in the same Workspace. | A forced limit moves a subagent to another harness and its result still returns |
+| 7 | **Multi-repository Projects.** `vibest project create <dir> --from <repository>…` copies repositories; writing subagents get one worktree per repository. | omac #82 scenarios pass |
+| 8 | **herdr plugin.** Keybindings (open main Agent, run, stop), Run list and Subscriptions overlays, command palette. | Every phase-5 action works from herdr keybindings |
+| 9 | **Runtime plugins.** The `Runtime` API (`runtime-api.ts`) in `@vibest/plugin`; core on its required members with the fallbacks of `runtime-port.md` §3; harness integrations write report files and OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. | No herdr name in core; the contract suite passes on herdr; gates and e2e unchanged |
+| 10 | **Machines.** `vibest machine add/list/check/remove`; remote herdr; Project mirror through the shared git remote; offline handling (`runtime-port.md` §6–7). | A subagent runs on voyracloud and on macbook-pro-m1; its result returns; a disconnect marks it offline, not failed, and its result arrives after reconnect |
+| 11 | **rex and tern** (after phase 10 is proven on herdr; not urgent). `runtime-rex`, `runtime-tern` builtin plugins. | Each passes the contract suite and runs scenario S1 |
+
+Rules for every phase: copy and refactor omac code where it is good (D12); no herdr types outside herdr packages
+(D14); English in code and docs; tests gate on exit status.

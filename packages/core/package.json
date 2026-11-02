@@ -1,0 +1,19 @@
+{
+  "name": "@vibest/core",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "@vibest/plugin": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  // Separate project: the cached declarations' hooks-environment globals conflict with Node/Bun types.
+  // scripts/prepare-claude-types.ts must write .cache/claude-code.d.ts first. A missing file fails this project.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": [] },
+  "include": ["src/plugin.ts", ".cache/claude-code.d.ts"],
+  "exclude": []
+}

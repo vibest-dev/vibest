@@ -1,0 +1,6 @@
+{
+  "description": "VIBEST: turn-end reports and the tool guard for VIBEST sessions; the coordinator inbox module",
+  "modules": [
+    "./register.mjs"
+  ]
+}

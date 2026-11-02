@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Either VIBEST runner (same labels). Linux runs the workspace build, including the darwin-arm64
+    # cross-compile and the linux-x64 glibc package, and the suite. The host binary is an ELF.
+    # This job does not execute the macOS binary or an installed linux package.
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJSON('["iamdin","oxwen11"]'), github.event.pull_request.user.login)
+      )
+    runs-on: [self-hosted, Linux, X64, vibest, rn]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Confirm Linux x86_64
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run typecheck
+      # Leave room for the other job sharing this host.
+      - run: pnpm run test --maxWorkers=2
+      # pnpm e2e needs a local herdr and the real CLIs, so it runs locally (pnpm e2e, pnpm verify), not here.

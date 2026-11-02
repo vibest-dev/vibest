@@ -1,57 +1,16 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# Dependencies
-node_modules
-.pnp
-.pnp.js
-
-# Local env files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Testing
-coverage
-
-# Turbo
-.turbo
-
-# Vercel
-.vercel
-
-# Build Outputs
-.next/
-out/
-build
-dist
-.vscode-test
-.tanstack
-.output
-.nitro
-
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Misc
-.DS_Store
-*.pem
-
-# Better Harness durable reports (generated locally)
-.cursor/better-harness/
-.claude/better-harness/
-.codex/better-harness/
-
-# Dev
-.nitro/
-**/.nitro/
-.claude/settings.local.json
-# Node.js V8 compile cache
-node-compile-cache/
-**/node-compile-cache/
-
-# pi steering-subagent artifacts (created when pi sessions run in this repo)
-.pi-subagents/
+node_modules/
+dist/
+packages/cli/test/.tmp/
+apps/vibest-herdr/test/.tmp/
+packages/cli-darwin-arm64/bin/
+packages/cli-linux-x64/bin/
+.turbo/
+packages/cli/.cache/
+packages/integration/claude/.cache/
+packages/integration/claude/hooks/register.mjs
+packages/integration/claude/.claude-plugin/
+tools/e2e/evidence/
+packages/integration/cursor/.cursor-plugin/
+packages/integration/cursor/hooks/
+apps/vibest-herdr/harnesses/
+packages/integration/pi/dist/

@@ -1,0 +1,98 @@
+name: Release
+
+# One entry point and one version for every package: the workspace members.
+# A v* tag publishes that version under `beta`, and as the latest GitHub Release (install.sh and an archive per platform).
+# Pushes to main (and manual runs) publish one canary version of every package to npm only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # the GitHub Release of a v* tag
+  id-token: write # npm trusted publishing (OIDC)
+
+jobs:
+  publish:
+    runs-on: [self-hosted, Linux, X64, vibest, rn]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+
+      - run: pnpm install --frozen-lockfile
+
+      # Versions are set only in this checkout, never committed.
+      - name: Version
+        id: version
+        run: |
+          version=$(node -p 'require("./apps/vibest-herdr/package.json").version')
+          # The same files as the root `release` script. A package left behind fails the run before anything is published.
+          for f in apps/*/package.json packages/*/package.json tools/verify/package.json; do
+            v=$(node -p "const j = require('./$f'); [j.version, j.version].join(' ')")
+            if [ "$v" != "$version $version" ]; then echo "::error::$f is $v, not $version"; exit 1; fi
+          done
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match @vibest/cli $version"; exit 1
+            fi
+            tag=beta
+          else
+            # g<sha>: a prerelease identifier of only digits may not start with 0.
+            version="${version%%-*}-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short=7 HEAD)"
+            tag=canary
+            # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
+            pnpm -r exec npm pkg set version="$version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm run build
+      - run: pnpm run typecheck
+      - run: pnpm run test --maxWorkers=2
+
+      # OIDC first, then the NPM_TOKEN secret when it exists. The token goes to a private per-run config file
+      # (npm reads NPM_CONFIG_USERCONFIG; pnpm falls back to it for auth), removed on any exit, not the runner's ~/.npmrc.
+      # Workspace packages publish in topological order (dependencies first); versions already on npm are skipped.
+      # The new versions are not installed here. The registry can lag behind a successful publish.
+      # Publishing is not atomic: a failure can leave only some packages released.
+      # Workspace publication skips existing versions.
+      # A rerun neither rolls back a partial release nor repairs its tags; reconcile it deliberately.
+      - name: Publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          umask 077
+          NPM_CONFIG_USERCONFIG=$(mktemp "$RUNNER_TEMP/npmrc.XXXXXX")
+          export NPM_CONFIG_USERCONFIG
+          trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "$NPM_CONFIG_USERCONFIG"
+          fi
+          pnpm -r publish --tag "$DIST_TAG" --access public --no-git-checks
+
+      # What install.sh downloads (releases/latest/download/...): an archive per platform, install.sh itself, and `version`,
+      # which `vibest update` reads. Only for a v* tag; marked latest, so the download URLs move to it.
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          out=$(mktemp -d "$RUNNER_TEMP/release.XXXXXX")
+          for target in darwin-arm64 linux-x64; do
+            (cd apps/vibest-herdr && bun scripts/build-archive.ts "$target" "$out")
+          done
+          cp apps/vibest-herdr/install.sh "$out/install.sh"
+          printf '%s\n' "$VERSION" > "$out/version"
+          gh release create "$GITHUB_REF_NAME" "$out"/* --title "vibest $VERSION" --latest --verify-tag

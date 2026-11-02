@@ -1,0 +1,16 @@
+{
+  "name": "@vibest/schema",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  }
+}
