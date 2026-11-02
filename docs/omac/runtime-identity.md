@@ -245,7 +245,8 @@ only while the runtime sees an agent in that terminal; with none there, an exite
 vibestd enforces one main agent, since every start goes through it: `Project.CoordinatorSession` from another terminal
 while `Project.RunningCoordinator` would answer is refused (`Forbidden`) and changes nothing. The running check and the
 launch, and the stop, hold one in-process lock per project (one vibestd serves every request), so two starts at once
-cannot both pass.
+cannot both pass. It is not a sqlite row: the stop waits on the runtime for up to 10 s, and a row would outlive a crash.
+A project's lock is dropped once nobody holds or waits for it.
 
 Limits: local machine only (a PID names a process on vibestd's machine; a remote machine needs a runtime operation); a
 main agent started by an older vibest has no PID recorded and cannot be moved (exit it there); the check fails open (a

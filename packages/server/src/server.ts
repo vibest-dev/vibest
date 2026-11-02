@@ -352,18 +352,8 @@ export const handlers = VibestRpcs.toLayer(
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
-    /**
-     * One project's main-agent changes at a time (keyed by project key): the running check and the launch
-     * (CoordinatorSession), and the stop (StopCoordinator). One vibestd serves every request, so an in-process lock is
-     * enough.
-     */
-    const projectLocks = new Map<string, Semaphore.Semaphore>()
-    const projectLocked = <A, E, R>(key: string, body: Effect.Effect<A, E, R>) =>
-      Effect.suspend(() => {
-        let lock = projectLocks.get(key)
-        if (lock === undefined) projectLocks.set(key, (lock = Semaphore.makeUnsafe(1)))
-        return lock.withPermit(body)
-      })
+    /** One project's main-agent changes at a time: the running check and the launch (CoordinatorSession), and the stop. */
+    const projectLocked = keyedLock()
 
     /**
      * The project's main agent alive (idle or busy) in a terminal other than `terminal`, or null. Fails open: null when
@@ -836,3 +826,27 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+/**
+ * Runs bodies one at a time per key. One vibestd serves every request, so an in-process lock is enough (not sqlite: a
+ * locked section waits on the runtime for up to 10 s, and a lock row would outlive a crash). A key's entry lives only
+ * while a body holds or waits for it, so the map does not grow with keys; `size` is for tests.
+ */
+export const keyedLock = () => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const run = <A, E, R>(key: string, body: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      let entry = locks.get(key)
+      if (entry === undefined) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
+      const held = entry
+      held.users++
+      return held.lock.withPermit(body).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--held.users === 0) locks.delete(key)
+          }),
+        ),
+      )
+    })
+  return Object.assign(run, { size: () => locks.size })
+}
