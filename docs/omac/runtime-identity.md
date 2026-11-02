@@ -221,33 +221,20 @@ previous one (`dropWaiting`, §Delivery).
 (`soleMainAgent`, `cli.ts`) asks `Project.RunningCoordinator { terminal }`. vibestd answers `{ harness, place, runtime,
 address }` when the project's coordinator row has an address other than the launching terminal and
 `coordinatorIdle(address)` is `idle` or `busy`; otherwise null (no row, no address, the launching terminal itself,
-`gone`, `unknown`). On an answer `vibest` prints to stderr `the main agent (<harness>) is still running in <place>`, and
-when `interactive` (stdin and stdout are terminals) asks `askYesNo("Close it (its terminal closes) and start it here?
-[y/N]: ")` (its default two-minute timeout):
-
-| Answer                                   | Then                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `y`                                      | `Project.StopCoordinator { runtime, address }`: vibestd checks the row is still there, then `stopAgent` closes that terminal and waits until nothing runs in it. `stopped` → start. `running` (the runtime does not see the agent there, so nothing is closed; or not gone within 10 s) or the row moved → fail without starting (no `Project.CoordinatorSession`, no exec) |
-| `N`, empty, EOF, timeout, not a terminal | fail without starting (no `Project.CoordinatorSession`, no exec), naming where it runs and how to stop it                                                                                                                                                                                                                                                                   |
+`gone`, `unknown`). On an answer `vibest` asks nothing: it fails with `not starting: the main agent (<harness>) is still
+running in <place>, and a project has one main agent. Exit it there first, then run vibest again`, and starts nothing
+(no `Project.CoordinatorSession`, no exec). Nothing is closed or stopped from here.
 
 vibestd enforces the same rule, since every start goes through it: `Project.CoordinatorSession` from another terminal
 while `Project.RunningCoordinator` would answer is refused (`Forbidden`) and changes nothing. A main agent that is only
-interrupted still runs idle, so it still blocks a start: only its exit (or its terminal closing) frees the project. Two
-limits: the check fails open (a runtime that cannot be reached or cannot tell counts as not running), and it is not one
-transaction with `coordinatorLaunch`, so two first starts at the same moment can both pass (the later launch's row
-wins).
+interrupted still runs idle, so it still blocks a start: only its exit frees the project.
 
-`stopAgent` ends the main agent by the runtime's own `close` of its terminal, which sees its processes off (herdr's
-`pane.close`), then polls `process` every 500 ms until it reports nothing running there or the terminal not found. Gone
-is the only success. Chosen over typing a harness's quit command (one per harness, and text typed into a harness
-that is blocked on a question may answer it instead) and over signalling its process group (the runtime port does not
-expose one). It closes only a terminal where the runtime's `state` sees the agent itself (idle, working, blocked): when
-it reads absent or unknown (the harness exited and vibestd missed the event, so `coordinatorIdle` reads `busy` from
-whatever program now runs there, say the user's editor or dev server) it returns `running` without closing, and the
-user ends that program or uses another terminal. Limits: the whole terminal goes, with its scrollback and whatever else
-runs in it; a harness that ignores the hangup outlives the close and reads `running`; a runtime without `state` never
-closes. The row is not checked again after the close: the close's own exited event clears it, and the start that
-follows checks for a running main agent anyway.
+Limits: the check fails open (a runtime that cannot be reached or cannot tell counts as not running), and it is not one
+transaction with `coordinatorLaunch`, so two first starts at the same moment can both pass (the later launch's row
+wins). When the harness exited and vibestd missed it, whatever program now runs in that pane reads `busy` and blocks
+the start until it ends. Stopping the running main agent from the new terminal comes later, as a restart in place (the
+harness ends, its terminal and shell stay), which needs a runtime plugin operation; `vibest` does not call
+`Project.StopCoordinator` until then.
 
 `moveCoordinator(runtime, from, to)` (herdr `pane_moved`) keeps the same rule, in one transaction. It returns at once when `from = to` (otherwise the first statement would
 clear its own address and drop its own rows):
@@ -564,7 +551,7 @@ self-declared by same-user processes, not authentication (SPEC §13).
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Project.CoordinatorSession`            | payload `{ harness, fresh, paneId, herdr? }`: `cli.ts launch` passes the pane it execs in (`here.paneId`) and the caller's herdr location. `coordinatorLaunch` updates (or first creates) the row. Returns `{ sessionId, harnessSessionId }`: `OMAC_SESSION_ID` for the env, the conversation to reopen                                                                                                                                                                                                                                                                                            |
 | `Project.RunningCoordinator` (new)      | payload `{ paneId, herdr? }`; coordinator-launch only (`cli.ts launch`, before `Project.CoordinatorSession`). Returns `{ harness, place, address } \| null` (§1.2 "A coordinator still running"): `place` display text, `address` opaque, passed back to stop                                                                                                                                                                                                                                                                                                                                      |
-| `Project.StopCoordinator` (new)         | payload `{ runtime, address }`; returns `{ result: "stopped" \| "running" \| "moved" }`. `moved` when the project's coordinator row is no longer at `address`; `running` without closing when the runtime does not see the agent there; otherwise `stopAgent(address)` closes that terminal. `stopped` only once nothing runs there; `running` if something still does after 10 s                                                                                                                                                                                                                  |
+| `Project.StopCoordinator` (new)         | payload `{ address }`; returns `{ result: "stopped" \| "none" \| "running" \| "moved" }`. `moved` when the project's coordinator row is no longer at `address` at the locked re-read immediately before SIGTERM; otherwise `stopAgent(address)`. `running` if the group is not confirmed gone, including no foreground-process proof or a refused signal (anything but ESRCH). Never closes a pane or workspace                                                                                                                                                                                    |
 | `CoordinatorSessionReady`               | payload `{ sessionId, harness, harnessSessionId }` (`reportedAt` and the launch id go; `sessionId` is now `OMAC_SESSION_ID`; today's `sessionId` field, the harness's id, becomes `harnessSessionId`). Applied as in §1.2 "Coordinator session report flow"                                                                                                                                                                                                                                                                                                                                        |
 | `Spawn`                                 | coordinator: session of agent `general` in its project; refused (`Forbidden`) when the repository header's key is not that project's (a coordinator that `cd`'d into another repository). cli: in `projectId(key of root)`, stored like any other session (omacd runs it: state, inbox, cleanup). `runtime/address` from the `herdr` payload, resolved per request. `peer?` shares that session's worktree. Room for agents: a later `agent?` field (`omac run --agent <name>`), default `general`; `coordinator` rejected (`Forbidden`), `general` allowed (it may be customized, never replaced) |
 | `managed()` (Send / Interrupt / Remove) | cli: any non-coordinator session. coordinator: any non-coordinator session with `project_id = c.projectId`, whoever started it                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -600,7 +587,7 @@ What omac asks of a runtime today, by caller:
 | read                        | `pane.read recent_unwrapped`                                                                                                          | `paneTail`                                                                                      |
 | close with proof            | `pane.list`, `workspace.list`, `pane.process_info`, `pane.close`                                                                      | `Remove.release` pane/workspace steps                                                           |
 | coordinator delivery        | `agent.get(pane)` (idle / gone?), `agent.prompt(pane)`; new: `pane.process_info` when no agent (§1.2)                                 | `Inbox.toPane`                                                                                  |
-| stop a coordinator (new)    | `agent.get` sees the agent, then `pane.close`, then `pane.process_info` until nothing runs there                                      | `Project.StopCoordinator`                                                                       |
+| stop a coordinator (new)    | `pane.process_info` (`foreground_process_group_id`, `shell_pid`), then SIGTERM to that group under the coordinator write transaction  | `Project.StopCoordinator`                                                                       |
 | coordinator launch          | `worktree.list`, `pane.get`, `tab.create`/`workspace.create`, `pane.wait_for_output`, `pane.send_text`, `pane.send_keys`, `tab.close` | `launch.ts`, `cli.ts launch`                                                                    |
 | events                      | `pane.updated`, `pane.closed`, `pane.moved`, `workspace.closed`                                                                       | `Sessions.onEvent`, `Inbox` trigger                                                             |
 
@@ -616,14 +603,25 @@ harness(s)            → Option<{ status, seq, harnessSessionId, ready, place }
 prompt(s, text) · keys(s, keys) · waitIdle(s, timeout) · tail(s, lines)
 release(s, { harnessAtStart })  → { pane, workspace, processes, records } // Remove's runtime half, owns metadata.stop
 coordinatorIdle(addr) → "idle" | "busy" | "gone" | "unknown"  ·  promptCoordinator(addr, text)
-stopAgent(addr)       → "stopped" | "running" | "moved"  // closes the terminal; stopped only once nothing runs there
+stopAgent(addr)       → "stopped" | "none" | "running"   // SIGTERM under the coordinator write transaction; never closes the pane
 launchCoordinator({ root, argv, focus }) → address
 events: Stream<{ _tag: "SessionChanged", sessionId } | { _tag: "CoordinatorIdle", projectId }
               | { _tag: "CoordinatorMoved", from, to } | { _tag: "CoordinatorClosed", address }
               | { _tag: "PlaceClosed", place }>
 ```
 
-`stopAgent`: see **A coordinator still running** (§ above): the runtime closes the terminal, then `process` is polled until nothing runs there.
+`stopAgent` (herdr): `pane.process_info` for the pane, read as in `coordinatorIdle` (§1.2); no
+`foreground_process_group_id`, or one equal to `shell_pid` (the shell is in the foreground, so nothing runs there) →
+`none` (or `moved`, if the row changed during that read). Otherwise the coordinator write transaction — the same
+`sql.withTransaction` as `coordinatorLaunch`, `moveCoordinator`, and `clearCoordinator` — re-reads the row and, if it
+still matches, sends `SIGTERM` to the group (`process.kill(-pgid)`) before the transaction ends. `confirmExit`
+(`remove.ts`, `EXIT_CHECKS` × `EXIT_POLL`, about 3 s) runs only after that release, and only on a non-empty list of
+valid `foreground_processes` pids. Missing, empty, or no valid pid cannot prove exit (`running`, not `stopped`).
+`exited` → `stopped`; `alive` or `unknown` → `running`. ESRCH counts as sent; EPERM or any other signal failure is
+`running`, not `stopped`. No `SIGKILL`, no `pane.close`: the pane keeps its shell. `release` (Remove) is the only
+operation that closes panes or workspaces. The write transaction linearizes the row against the signal. It does not
+re-read the group id: a group that exits and whose id is reused before the signal can still be signalled (the same
+exposure as `Remove`'s pid checks).
 
 The adapter maps events to omac ids (pane → session via its in-memory last-seen pane; pane → project via
 `db.coordinatorAt`), so `sessions.ts` and `inbox.ts` stop parsing panes: `pane_updated` idle → `coordinatorAt` →

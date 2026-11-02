@@ -12,7 +12,7 @@ import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
-import { askYesNo, interactive, Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
@@ -206,30 +206,21 @@ const run = Command.make(
 )
 
 /**
- * One main agent per project: `start` runs only when no other terminal runs the project's main agent, or once the user
- * answered y and that one's terminal was closed with nothing left running in it. A no, no answer within two minutes, EOF
- * or a non-interactive terminal starts nothing (vibestd's `Project.CoordinatorSession` refuses a second one too).
+ * One main agent per project: `start` runs only when no other terminal runs the project's main agent. One running
+ * elsewhere fails the start, naming where, and nothing starts (vibestd's `Project.CoordinatorSession` refuses a second
+ * one too). Stopping it from here waits for a restart in place, which keeps its terminal.
  */
 export const soleMainAgent = <A, E, R>(
-  client: Pick<VibestClient, "Project.RunningCoordinator" | "Project.StopCoordinator">,
+  client: Pick<VibestClient, "Project.RunningCoordinator">,
   terminal: string,
   start: Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const running = yield* client["Project.RunningCoordinator"]({ terminal })
-    if (running) {
-      yield* Console.error(`the main agent (${running.harness}) is still running in ${running.place}`)
-      if (!((yield* interactive) && (yield* askYesNo("Close it (its terminal closes) and start it here? [y/N]: "))))
-        return yield* new LaunchFailed({
-          message:
-            "not starting: a project has one main agent. Exit it there, or run vibest here again on an interactive terminal and answer y to close it",
-        })
-      const stopped = yield* client["Project.StopCoordinator"]({ runtime: running.runtime, address: running.address })
-      if (stopped.result === "running" || stopped.result === "moved")
-        return yield* new LaunchFailed({
-          message: `not starting: ${stopped.result === "moved" ? "the main agent moved" : "the main agent did not exit"}; run vibest again`,
-        })
-    }
+    if (running)
+      return yield* new LaunchFailed({
+        message: `not starting: the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent. Exit it there first, then run vibest again`,
+      })
     return yield* start
   })
 

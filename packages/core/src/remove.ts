@@ -10,7 +10,7 @@ import { Db, type SessionRow } from "./db.ts"
 import { Layout, resolveWorktree } from "./paths.ts"
 import { Processes } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
-import { agentState, alive, type Runtime, type Terminal } from "./runtimes.ts"
+import { alive, type Runtime, type Terminal } from "./runtimes.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
@@ -22,37 +22,38 @@ export const CWD_POLL = Duration.millis(500)
 export const CWD_WAIT = Duration.seconds(10)
 
 /**
- * End the main agent a coordinator's terminal runs (the RPC `Project.StopCoordinator`), so that another terminal can
- * start it: the runtime closes that terminal (its own close sees its processes off, runtime-port.md §3), then until the
- * runtime reports no program running there (`process` not running, or the terminal not found). Gone is the only
- * success: an interrupted harness still runs idle, and a second live main agent must never start. It closes only a
- * terminal where the runtime sees the agent itself (`state` answers): a harness that already exited may have left a
- * program of the user's there, which is not ours to close, so that reads `running`. Limits: the whole terminal goes,
- * with its scrollback and anything else running in it; a harness that outlives its terminal's close (ignores the
- * hangup) reads `running`; a runtime without `state` never closes. `moved`: the row was no longer the one asked about
- * before the close. Not asked again after it: our own close can clear the row (the runtime's exited event), and the
- * start that follows checks for a running main agent anyway.
+ * Stop the agent a coordinator's terminal runs, without closing it (the RPC `Project.StopCoordinator`): the harness's
+ * interrupt key, then until it is no longer working. `moved`: the row was no longer the one asked about. `running`: it
+ * did not settle. The write transaction the old signal needed is gone with the signal: `stillThere` is asked again
+ * after the wait.
  */
 export const stopAgent = (
   h: Runtime,
   terminal: Terminal,
   input: {
+    readonly interruptKey: string
     readonly stillThere: Effect.Effect<boolean>
     readonly wait: Duration.Duration
   },
 ) =>
   Effect.gen(function* () {
-    const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
     if (!(yield* input.stillThere)) return "moved" as const
-    if (seen === "absent" || seen === "unknown") return "running" as const
-    // Already gone counts as closed; any other failure is decided by the check below.
-    yield* h.close(terminal).pipe(Effect.ignore)
-    const gone = yield* alive(h, terminal).pipe(
-      Effect.repeat({ until: (running) => !running, schedule: Schedule.spaced("500 millis") }),
-      Effect.map((running) => !running),
+    yield* h.send(terminal, { keys: [input.interruptKey] }).pipe(Effect.ignore)
+    // No `state` member: the terminal's own program decides (§5's `process` fallback).
+    const settled: Effect.Effect<boolean> =
+      h.state === undefined
+        ? alive(h, terminal).pipe(Effect.map((running) => !running))
+        : h.state(terminal).pipe(
+            Effect.option,
+            Effect.map(Option.map((state) => state !== "working" && state !== "blocked")),
+            Effect.map((idle) => Option.getOrElse(idle, () => false)),
+          )
+    const stopped = yield* settled.pipe(
+      Effect.repeat({ until: (idle) => idle, schedule: Schedule.spaced("500 millis") }),
       Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
     )
-    return gone ? ("stopped" as const) : ("running" as const)
+    if (!(yield* input.stillThere)) return "moved" as const
+    return stopped ? ("stopped" as const) : ("running" as const)
   })
 
 export interface ReleaseInput {

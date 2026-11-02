@@ -550,7 +550,7 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
     }),
   ),
-  /** End the main agent at address (opaque terminal JSON) in `runtime` by closing its terminal; stopped only once nothing runs there. moved when the row is no longer there. */
+  /** Stop the agent at address (opaque terminal JSON) in `runtime`. Never closes the terminal. moved when the row is no longer there. */
   scoped(
     admitted(
       Rpc.make("Project.StopCoordinator", {
