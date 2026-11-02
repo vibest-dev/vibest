@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { SocketConnector } from "@vibest/client/client"
 import * as Platform from "#platform"
 import { AgentRefused, Plugin } from "@vibest/plugin"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, PubSub, Queue, type Scope, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import * as Socket from "effect/socket/Socket"
@@ -579,6 +579,70 @@ describe("vibest.sock", () => {
       yield* Fiber.interrupt(fiber)
       yield* TestClock.withLive(Effect.sleep("50 millis"))
       assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))?.status, "delivered")
+    }),
+    undefined,
+    15_000,
+  )
+
+  test(
+    "a Pi subscription keeps its rows when the runtime reads its terminal as gone; with none they are dropped",
+    Effect.gen(function* () {
+      const inbox = yield* Inbox
+      const db = yield* Db
+      const general = { agent: "general", name: "n", harnessId: "pi" as const, provider: null, model: null, harnessSessionId: null, runtime: "herdr", address: { machine: "local", id: "test/p0" }, status: "idle" as const, startedAt: 1, exitedAt: null, turnState: "none" as const, turnPromptedAt: 0, metadata: {}, createdAt: 1, lastActive: 1 }
+      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
+      // No pane at w1:p5: the runtime reads the main agent there as gone.
+      const coord = yield* db.coordinatorLaunch("r", "pi", false, { runtime: "herdr", address: { machine: "local", id: "w1:p5" } })
+      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const row = (message: string) => ({ sessionId: "aaaaaaaa", kind: "result" as const, message, details: {} })
+      const unsubscribed = yield* db.insertInbox(row("unsubscribed"))
+      yield* inbox.deliver(project)
+      assert.strictEqual((yield* db.inboxRows([unsubscribed.id]))[0]?.status, "dropped")
+
+      yield* db.insertInbox(row("one"))
+      const c = asSession(yield* client, coord.sessionId)
+      const got = yield* Queue.unbounded<string>()
+      yield* c["Inbox.Subscribe"](undefined).pipe(Stream.runForEach((text) => Queue.offer(got, text)), Effect.forkChild)
+      assert.strictEqual(yield* Queue.take(got), "one")
+      // Inserted without the arrival, so the stream does not take it before `deliver` reads the terminal.
+      const two = yield* db.insertInbox(row("two"))
+      yield* inbox.deliver(project)
+      assert.strictEqual((yield* db.inboxRows([two.id]))[0]?.status, "pending")
+      yield* inbox.enqueue(row("three"))
+      assert.strictEqual(yield* Queue.take(got), "two\n\nthree")
+    }),
+    undefined,
+    15_000,
+  )
+
+  test(
+    "an exited event at a subscribed Pi main agent's terminal keeps it the main agent; with no subscription it clears it",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const inbox = yield* Inbox
+      const db = yield* Db
+      const general = { agent: "general", name: "n", harnessId: "pi" as const, provider: null, model: null, harnessSessionId: null, runtime: "herdr", address: { machine: "local", id: "test/p0" }, status: "idle" as const, startedAt: 1, exitedAt: null, turnState: "none" as const, turnPromptedAt: 0, metadata: {}, createdAt: 1, lastActive: 1 }
+      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
+      yield* herdr.addPane("w1:p4", "ws", "/")
+      yield* herdr.seedAgent("w1:p4")
+      const coord = yield* db.coordinatorLaunch("r", "pi", false, { runtime: "herdr", address: { machine: "local", id: "w1:p4" } })
+      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const row = (message: string) => ({ sessionId: "aaaaaaaa", kind: "result" as const, message, details: {} })
+      const exited = PubSub.publish(herdr.events, { type: "exited", terminal: { machine: "local", id: "w1:p4" } })
+      yield* db.insertInbox(row("one"))
+      const c = asSession(yield* client, coord.sessionId)
+      const got = yield* Queue.unbounded<string>()
+      const fiber = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.runForEach((text) => Queue.offer(got, text)), Effect.forkChild)
+      assert.strictEqual(yield* Queue.take(got), "one")
+      yield* exited
+      yield* TestClock.withLive(Effect.sleep("200 millis"))
+      assert.strictEqual((yield* db.coordinatorOf(project))?.runtime, "herdr")
+      yield* inbox.enqueue(row("two"))
+      assert.strictEqual(yield* Queue.take(got), "two")
+
+      // vibestd sees the closed subscription a moment later; an exit after that clears the main agent.
+      yield* Fiber.interrupt(fiber)
+      yield* until(exited.pipe(Effect.andThen(db.coordinatorOf(project))), (main) => main?.runtime === null)
     }),
     undefined,
     15_000,
