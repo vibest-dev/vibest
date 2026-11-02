@@ -1280,17 +1280,16 @@ export class Sessions extends Context.Service<
                 if (session.metadata.archived || session.metadata.removed) return
                 const skip = (why: string) =>
                   notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
-                // It has work again (a message was sent to it or it started a new turn): its next completed result archives it. Nothing
-                // for the coordinator to do, so no notice (each notice is a coordinator turn).
-                const sentAnother = () => Effect.void
                 // The newest result decides: a newer completed one already delivered archives it now; one not delivered yet takes its own turn once it is.
                 const latest = yield* db.latestInbox(id, "result")
+                // It has work again (a message was sent to it or it started a new turn): its next completed result archives it.
+                // Nothing for the coordinator to do, so no notice (each notice is a coordinator turn).
                 if (
                   session.turnState !== "completed" ||
                   latest?.status !== "delivered" ||
                   latest.details.status !== "completed"
                 )
-                  return yield* sentAnother()
+                  return
                 const h = yield* live(session)
                 const terminal = session.address
                 const seen = yield* agentState(h, terminal)
@@ -1305,7 +1304,8 @@ export class Sessions extends Context.Service<
                     `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
                   )
                 const out = yield* removeLocked(id, { unlessPending: true })
-                if (!out) return yield* sentAnother()
+                // It has work again (removeLocked refused): no notice, as above.
+                if (!out) return
                 const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
                 const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
                 // The owner was archived while this session shared its worktree: nobody else removes it now.

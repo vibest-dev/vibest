@@ -468,7 +468,7 @@ For each session with `turn_state=open`, evaluated upon herdr event, `ResultRead
 
 1. Result file `mtime > t0` → read text, execute `finish` (completed; failed if hook reported error).
 2. `agent.get` reports missing → execute `finish('', error='agent exited')` (failed), with bottom 30 lines.
-3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<id> waiting for confirmation, switch to pane to resolve"), without answering automatically.
+3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<id> (<harness>) has been waiting for a permission decision since <HH:MM>. Run vibest peek <id> to see the request."), without answering automatically.
 4. `agent_status ∈ {idle, done}` and `state_change_seq > seq0` → record `endedAt`;
    if `now - endedAt > 10s` without result file: execute `finish('', error='the turn ended without a report …')` (lost), naming `vibest peek <id>`, never the screen (usually harness errors without hooks, e.g. Codex quota / wrong model). No screen scraping for results.
 5. `unknown` does not count as completed.

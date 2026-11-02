@@ -1,6 +1,6 @@
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessOptions, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
@@ -353,7 +353,11 @@ export const handlers = VibestRpcs.toLayer(
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
-    /** The project's main agent alive in a terminal other than `terminal`, or null (also when that cannot be checked). */
+    /**
+     * The project's main agent alive (idle or busy) in a terminal other than `terminal`, or null. Fails open: null when
+     * the runtime cannot be reached or cannot tell. Not one transaction with `db.coordinatorLaunch`: two first starts at
+     * the same moment can both pass it, and the later launch's row wins.
+     */
     const runningCoordinator = (key: Parameters<Db["Service"]["projectId"]>[0], terminal: string) =>
       Effect.gen(function* () {
         const coord = yield* db.coordinatorOf(yield* db.projectId(key))
@@ -699,7 +703,7 @@ export const handlers = VibestRpcs.toLayer(
           if (running)
             return yield* new Forbidden({
               method: "Project.CoordinatorSession",
-              message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there, or run vibest here again and answer y to stop it`,
+              message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there, or run vibest here again on an interactive terminal and answer y to close it`,
             })
           const saved = yield* db.coordinatorLaunch(
             key,
@@ -732,7 +736,6 @@ export const handlers = VibestRpcs.toLayer(
             .route(runtime)
             .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })))
           const result = yield* stopAgent(h, place, {
-            interruptKey: (yield* Harnesses).get(coord.harnessId).interruptKey,
             stillThere: db
               .coordinatorOf(projectId)
               .pipe(Effect.map((current) => sameCoordinator(current, runtime, address))),
