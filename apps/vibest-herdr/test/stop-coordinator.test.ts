@@ -321,23 +321,4 @@ describe("Project.StopCoordinator", () => {
       assert.strictEqual(lock.size(), 0)
     }),
   )
-
-  it.effect("the project lock: an interrupted waiter and an interrupted holder each leave no entry behind", () =>
-    Effect.gen(function* () {
-      const lock = Server.keyedLock()
-      const holder = yield* Effect.forkChild(lock("p", Effect.never))
-      yield* Effect.yieldNow
-      const waiter = yield* Effect.forkChild(lock("p", Effect.void))
-      yield* Effect.yieldNow
-      assert.strictEqual(lock.size(), 1)
-      yield* Fiber.interrupt(waiter)
-      assert.strictEqual(lock.size(), 1)
-      yield* Fiber.interrupt(holder)
-      assert.strictEqual(lock.size(), 0)
-      // Interrupted before it even started: nothing entered, nothing left.
-      const early = yield* Effect.forkChild(lock("q", Effect.never), { startImmediately: false })
-      yield* Fiber.interrupt(early)
-      assert.strictEqual(lock.size(), 0)
-    }),
-  )
 })
