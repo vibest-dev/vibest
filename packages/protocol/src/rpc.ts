@@ -535,7 +535,10 @@ export class VibestRpcs extends RpcGroup.make(
       ]),
     }),
   ),
-  /** A coordinator still running in another pane: display text and the opaque address to pass to StopCoordinator. */
+  /**
+   * A coordinator still running in another pane: display text and its opaque address. StopCoordinator, which takes that
+   * address, has no caller now; it is kept for the planned restart in place.
+   */
   scoped(
     Rpc.make("Project.RunningCoordinator", {
       payload: { terminal: Schema.String, machine: Schema.optional(RuntimeMachine) },

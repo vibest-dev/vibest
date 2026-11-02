@@ -208,7 +208,7 @@ const run = Command.make(
 /**
  * One main agent per project: `start` runs only when no other terminal runs the project's main agent. One running
  * elsewhere fails the start, naming where, and nothing starts (vibestd's `Project.CoordinatorSession` refuses a second
- * one too). Stopping it from here waits for a restart in place, which keeps its terminal.
+ * one too). Stopping it from here is not supported yet (planned: a restart in place that keeps its terminal).
  */
 export const soleMainAgent = <A, E, R>(
   client: Pick<VibestClient, "Project.RunningCoordinator">,
