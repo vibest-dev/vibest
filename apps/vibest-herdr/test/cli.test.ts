@@ -169,7 +169,18 @@ describe.concurrent("vibest CLI", () => {
       const { id } = decodeJson((yield* vibest(repo, cli, ["run", "pi", "do it"])).stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
-        vibest(repo, { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: sessionId }, args)
+        Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
+          vibest(
+            repo,
+            {
+              ...cli,
+              VIBEST_AGENT: "general",
+              VIBEST_SESSION_ID: sessionId,
+              VIBEST_PROJECT_ID: String(row?.projectId ?? ""),
+            },
+            args,
+          ),
+        )
 
       // After --, text that looks like options is the message.
       for (const message of ["- fix the bug\n- then test", "--help", "--model x"])
@@ -211,7 +222,16 @@ describe.concurrent("vibest CLI", () => {
         address: { machine: "local", id: "w1:p1" },
       })
       const asCoord = (args: ReadonlyArray<string>) =>
-        vibest(repo, { ...cli, VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: coord.sessionId }, args)
+        vibest(
+          repo,
+          {
+            ...cli,
+            VIBEST_AGENT: "coordinator",
+            VIBEST_SESSION_ID: coord.sessionId,
+            VIBEST_PROJECT_ID: String(coord.projectId),
+          },
+          args,
+        )
       const otherRepo = yield* makeRepository
       const other = yield* db.coordinatorLaunch(yield* repositoryKey(otherRepo), "pi", false, {
         runtime: "herdr",
@@ -229,11 +249,21 @@ describe.concurrent("vibest CLI", () => {
         if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
 
         for (const r of [
-          yield* vibest(repo, { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id }, [command, id]),
-          yield* vibest(otherRepo, { ...cli, VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: other.sessionId }, [
-            command,
-            id,
-          ]),
+          yield* vibest(
+            repo,
+            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(coord.projectId) },
+            [command, id],
+          ),
+          yield* vibest(
+            otherRepo,
+            {
+              ...cli,
+              VIBEST_AGENT: "coordinator",
+              VIBEST_SESSION_ID: other.sessionId,
+              VIBEST_PROJECT_ID: String(other.projectId),
+            },
+            [command, id],
+          ),
         ]) {
           assert.strictEqual(r.code, 1, command)
           assert.match(r.stderr, /^Forbidden: /, command)
@@ -296,11 +326,16 @@ describe.concurrent("vibest CLI", () => {
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
       const { id } = decodeJson((yield* run(["run", "pi", "do it"])).stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
-      const reported = yield* vibest(repo, { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id }, [
-        "report",
-        "--",
-        "prior note",
-      ])
+      const reported = yield* vibest(
+        repo,
+        {
+          ...cli,
+          VIBEST_AGENT: "general",
+          VIBEST_SESSION_ID: id,
+          VIBEST_PROJECT_ID: String((yield* db.sessionIdentity(id))!.projectId),
+        },
+        ["report", "--", "prior note"],
+      )
       assert.strictEqual(reported.code, 0, reported.stderr)
 
       const finding = "status: completed\nsummary: kept finding"

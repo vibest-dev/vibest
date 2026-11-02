@@ -26,6 +26,7 @@ import {
   HARNESS_SESSION_HEADER,
   PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
+  MISSING_PROJECT_ID,
   mismatchText,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -40,12 +41,6 @@ import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-
-/**
- * A request without `vibest-project-id`: refused (403) until the owner decides otherwise. Unconfirmed default, kept in
- * this one place so it can flip to "allow".
- */
-export const MISSING_PROJECT_ID: "refuse" | "allow" = "refuse"
 
 export type Request = {
   readonly path: string

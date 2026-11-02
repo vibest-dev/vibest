@@ -63,8 +63,12 @@ const test = <E>(
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string) => authed(raw, cliHeaders(repositoryRoot))
+/** A session as its environment names it: with its project id (VIBEST_PROJECT_ID), which vibestd requires. */
 const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
-  authed(raw, sessionHeaders(sessionId, repositoryRoot))
+  Effect.gen(function* () {
+    const row = yield* (yield* Db).sessionIdentity(sessionId)
+    return authed(raw, sessionHeaders(sessionId, repositoryRoot, { projectId: row && String(row.projectId) }))
+  })
 
 const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit)
@@ -227,8 +231,13 @@ describe("vibest.sock", () => {
         failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders("nope") }))),
         "NoSuchSession",
       )
+      // A known session without its project id is refused, as over HTTP (MISSING_PROJECT_ID).
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders(id) }))),
+        "InvalidCaller",
+      )
 
-      const w = asSession(yield* client, id)
+      const w = yield* asSession(yield* client, id)
       yield* w.Report({ message: "half way" })
       const reported = yield* db.latestInbox(id, "report")
       assert.match(
@@ -267,7 +276,7 @@ describe("vibest.sock", () => {
       )
 
       assert.strictEqual(failureTag(yield* Effect.exit(c.Report({ message: "x" }))), "Forbidden")
-      const coord = asSession(raw, launch.sessionId, repo)
+      const coord = yield* asSession(raw, launch.sessionId, repo)
       assert.strictEqual(failureTag(yield* Effect.exit(coord.Report({ message: "x" }))), "Forbidden")
     }),
   )
@@ -285,7 +294,7 @@ describe("vibest.sock", () => {
             fresh: false,
             terminal: `test/${paneId}`,
           })
-          return asSession(raw, launched.sessionId, root)
+          return yield* asSession(raw, launched.sessionId, root)
         })
       const a = yield* asCoordinator(repo, "p1")
       const b = yield* asCoordinator(yield* makeRepository, "p2")
@@ -330,7 +339,7 @@ describe("vibest.sock", () => {
             fresh: false,
             terminal: `test/${paneId}`,
           })
-          return asSession(raw, launched.sessionId, root)
+          return yield* asSession(raw, launched.sessionId, root)
         })
       const a = yield* asCoordinator(repo, "p1")
       const { id } = yield* a.Spawn({ harness: "pi", prompt: "do it" })
@@ -368,7 +377,7 @@ describe("vibest.sock", () => {
       const bare = yield* client
       for (const [method, call] of protectedCalls(bare))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
-      const w = asSession(yield* client, id)
+      const w = yield* asSession(yield* client, id)
       for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
@@ -798,7 +807,7 @@ describe("vibest.sock", () => {
       )
       assert.lengthOf(yield* db.coordinatorPending(project), 3)
 
-      const c = asSession(yield* client, coord.sessionId)
+      const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
       yield* until(db.coordinatorPending(project), (rows) => rows.length === 0)
       yield* inbox.enqueue(row("cccccccc", "four"))
@@ -866,6 +875,7 @@ describe("vibest.sock", () => {
           ["vibest-protocol", String(PROTOCOL)],
           ["vibest-caller", "session"],
           ["vibest-session-id", coord.sessionId],
+          ["vibest-project-id", String(coord.projectId)],
         ]),
       )
       const claimed = yield* until(db.latestInbox("aaaaaaaa", "result"), (row) => row?.status !== "pending")
@@ -915,7 +925,7 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "w1:p6" },
       })
       yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "one", details: {} })
-      const c = asSession(yield* client, coord.sessionId)
+      const c = yield* asSession(yield* client, coord.sessionId)
       const got = yield* Deferred.make<string>()
       const fiber = yield* c["Inbox.Subscribe"](undefined).pipe(
         Stream.runForEach((text) => Deferred.succeed(got, text).pipe(Effect.asVoid)),
@@ -992,7 +1002,7 @@ describe("vibest.sock", () => {
       const cli = asCli(raw, repo)
       const { id } = yield* cli.Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
-      const session = asSession(raw, id)
+      const session = yield* asSession(raw, id)
       yield* session.Report({ message: "first" })
       assert.match((yield* db.latestInbox(id, "report"))!.message, /first/)
       const listed = yield* cli.List({})
@@ -1004,7 +1014,7 @@ describe("vibest.sock", () => {
         [
           session.Report({ message: "second" }),
           cli.Get({ id }),
-          Effect.exit(asSession(raw, "nope").Report({ message: "x" })),
+          Effect.exit(Effect.flatMap(asSession(raw, "nope"), (s) => s.Report({ message: "x" }))),
         ],
         { concurrency: "unbounded" },
       )
@@ -1173,7 +1183,7 @@ describe("vibest.sock", () => {
         model: "m",
         routing,
       })
-      const main = asSession(raw, launched.sessionId, repo)
+      const main = yield* asSession(raw, launched.sessionId, repo)
       const { id } = yield* main.Spawn({ harness: "pi", prompt: "do it" })
       const { id: fromUser } = yield* cli.Spawn({ harness: "pi", prompt: "from the user" })
       const sql = yield* SqlClient.SqlClient

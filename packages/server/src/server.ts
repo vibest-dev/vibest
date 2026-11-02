@@ -24,6 +24,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
 import {
   CALLER_HEADER,
+  MISSING_PROJECT_ID,
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -244,7 +245,10 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
       const row = yield* db.sessionIdentity(sessionId.value)
       if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
       // A session's environment names its project (VIBEST_PROJECT_ID); one that names another is not this session.
+      // One that names none is refused as over HTTP (MISSING_PROJECT_ID).
       const project = header(headers, PROJECT_HEADER)
+      if (project._tag === "None" && MISSING_PROJECT_ID === "refuse")
+        return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
       if (project._tag === "Some" && project.value !== String(row.projectId))
         return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
       if (row.agent === "coordinator") {

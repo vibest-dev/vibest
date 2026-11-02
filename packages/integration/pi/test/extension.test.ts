@@ -160,6 +160,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
+          VIBEST_PROJECT_ID: String(coord.projectId),
           VIBEST_COMMAND: '["/nonexistent-vibest-fixture"]',
         })
         yield* s.emit(
@@ -230,6 +231,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
+          VIBEST_PROJECT_ID: String(coord.projectId),
           VIBEST_COMMAND: '["vibest"]',
         })
         yield* s.emit(
@@ -382,6 +384,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
+        VIBEST_PROJECT_ID: String(coord.projectId),
         VIBEST_COMMAND: '["/usr/bin/bun","/src/main.ts"]',
       })
       assert.deepStrictEqual(
@@ -535,6 +538,7 @@ describe("pi-vibest", () => {
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
+        VIBEST_PROJECT_ID: String(coord.projectId),
         VIBEST_COMMAND: '["vibest"]',
       })
       assert.isFalse(coordinator.handlers.has("input"))
