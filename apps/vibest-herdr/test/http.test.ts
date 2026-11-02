@@ -6,7 +6,8 @@ import { AWAY, Inbox, LEASE, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
-import { PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
+import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
+import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
@@ -106,17 +107,32 @@ describe("vibestd's HTTP API", () => {
       const { call, main, worker } = yield* project
       const handle = yield* Http.make
       const raw = (headers: Record<string, string>) =>
-        handle({ path: "/v1/inbox/poll", headers: Headers.fromInput(headers), body: "{}" })
+        handle({ path: "/inbox/poll", headers: Headers.fromInput(headers), body: "{}" })
       const own = sessionHeaders({ sessionId: main })
-      assert.strictEqual((yield* raw({ ...own, "vibest-protocol": String(PROTOCOL - 1) })).status, 409)
-      assert.strictEqual((yield* call("/v1/inbox/poll", { sessionId: "nosuch00" })).status, 404)
+      // An older caller is told to restart itself; a newer one, that vibestd is old. Both with the command to run.
+      const older = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL - 1) })
+      assert.strictEqual(older.status, 409)
+      assert.deepInclude(older.body, {
+        protocol: PROTOCOL,
+        version: VERSION,
+        message: `vibest was updated to ${VERSION}; restart this agent to continue`,
+        action: MISMATCH_ACTION.restartAgent,
+      })
+      const newer = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL + 1) })
+      assert.deepInclude(newer.body, {
+        message: `vibestd is older (${VERSION}); upgrade it`,
+        action: MISMATCH_ACTION.upgradeDaemon,
+      })
+      assert.include((newer.body as { error: string }).error, `Run: ${MISMATCH_ACTION.upgradeDaemon}`)
+      assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
       // Missing project id: refused while Http.MISSING_PROJECT_ID says so.
       assert.strictEqual(Http.MISSING_PROJECT_ID, "refuse")
       assert.strictEqual((yield* raw(own)).status, 403)
-      assert.strictEqual((yield* call("/v1/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
-      assert.strictEqual((yield* call("/v1/inbox/poll", { sessionId: worker })).status, 403)
-      assert.strictEqual((yield* call("/v1/inbox/poll", { sessionId: main })).status, 200)
-      assert.strictEqual((yield* call("/v1/nope", { sessionId: main })).status, 404)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
+      assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
     }),
   )
 
@@ -129,14 +145,14 @@ describe("vibestd's HTTP API", () => {
           ? Effect.map(db.coordinatorOf(projectId), (m) => m?.harnessSessionId)
           : Effect.map(db.getSession(id), (s) => s?.harnessSessionId)
       for (const id of [main, worker]) {
-        yield* call("/v1/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
+        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
         assert.strictEqual(yield* conversation(id), "c1")
         // Written by someone else meanwhile: an unchanged header does not write again.
         yield* db.noteHarnessSession(id, "other")
-        yield* call("/v1/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
+        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
         assert.strictEqual(yield* conversation(id), "other")
         // After /clear the plugin sends the new id: the latest wins.
-        yield* call("/v1/inbox/ack", { sessionId: id, harnessSessionId: "c2" }, JSON.stringify({ ids: [] }))
+        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c2" }, JSON.stringify({ ids: [] }))
         assert.strictEqual(yield* conversation(id), "c2")
       }
     }),
@@ -147,7 +163,7 @@ describe("vibestd's HTTP API", () => {
     Effect.gen(function* () {
       const { call, db, inbox, main, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
-      const first = (yield* call("/v1/inbox/poll", { sessionId: main })).body as Http.Reply["body"] & {
+      const first = (yield* call("/inbox/poll", { sessionId: main })).body as Http.Reply["body"] & {
         ids: Array<number>
         line: string
         text: string
@@ -159,12 +175,12 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
-      const acked = yield* call("/v1/inbox/ack", { sessionId: main }, JSON.stringify({ ids: first.ids }))
+      const acked = yield* call("/inbox/ack", { sessionId: main }, JSON.stringify({ ids: first.ids }))
       assert.deepStrictEqual(acked, { status: 200, body: { acked: first.ids } })
       assert.strictEqual(yield* statusOf(db, worker), "delivered")
       // Again: harmless, nothing changes.
       assert.deepStrictEqual(yield* inbox.ack(projectId, first.ids), [])
-      assert.strictEqual((yield* call("/v1/inbox/ack", { sessionId: main }, "{}")).status, 400)
+      assert.strictEqual((yield* call("/inbox/ack", { sessionId: main }, "{}")).status, 400)
     }),
   )
 
@@ -195,14 +211,14 @@ describe("vibestd's HTTP API", () => {
       const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const prompt = yield* call(
-        "/v1/hooks/claude/prompt",
+        "/hooks/claude/prompt",
         { sessionId: worker },
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
       assert.include(yield* fs.readFileString(layout.reportFile(worker)), '"prompt":"next step"')
       const end = yield* call(
-        "/v1/hooks/claude/turn-end",
+        "/hooks/claude/turn-end",
         { sessionId: worker },
         JSON.stringify({
           hook_event_name: "TurnComplete",
@@ -214,7 +230,7 @@ describe("vibestd's HTTP API", () => {
       assert.include(yield* fs.readFileString(layout.resultFile(worker)), "status: completed")
       // The main agent's turn end is no result.
       yield* call(
-        "/v1/hooks/claude/turn-end",
+        "/hooks/claude/turn-end",
         { sessionId: main },
         JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
       )
@@ -223,15 +239,15 @@ describe("vibestd's HTTP API", () => {
       const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
-      const other = yield* call("/v1/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
+      const other = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
       // ...but its own scratch is its to use, as VIBEST_SCRATCH in its terminal says.
-      const own = yield* call("/v1/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
+      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
       // The main agent edits nothing.
-      const coordinator = yield* call("/v1/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))
+      const coordinator = yield* call("/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))
       assert.isString((coordinator.body as { deny?: string }).deny)
-      const bad = yield* call("/v1/hooks/claude/guard", { sessionId: worker }, "not json")
+      const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
     }),
   )
@@ -247,7 +263,7 @@ describe("vibestd's HTTP API", () => {
         Effect.promise(async () => {
           for (let i = 0; i < 100; i++) {
             try {
-              return await fetch("http://vibestd/v1/inbox/poll", {
+              return await fetch("http://vibestd/inbox/poll", {
                 method: "POST",
                 unix: layout.httpSocket,
                 headers: sessionHeaders({ sessionId: main, projectId: String(projectId) }),

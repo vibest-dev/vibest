@@ -27,6 +27,7 @@ import {
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
+  protocolMismatch,
   REPOSITORY_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
@@ -189,6 +190,9 @@ type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyo
 /** Default session name: the prompt's first line, shortened. */
 const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
+/** Ping's `capabilities`: the additive features this vibestd has (rpc.ts PingResult). */
+export const CAPABILITIES = { http: true } as const
+
 /** This vibestd's identity for Ping, set by Daemon.run; empty on a server a test runs without one. */
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
@@ -262,8 +266,13 @@ export const ProtocolGateLive = Layer.succeed(
   ProtocolGate.of((effect, { headers, rpc }) => {
     const protocol = header(headers, PROTOCOL_HEADER)
     if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
+      const sent = protocol._tag === "None" ? null : protocol.value
       return Effect.fail(
-        new ProtocolRejected({ method: rpc._tag, protocol: protocol._tag === "None" ? null : protocol.value }),
+        new ProtocolRejected({
+          method: rpc._tag,
+          protocol: sent,
+          mismatch: protocolMismatch(sent === null ? undefined : Number(sent), PROTOCOL, VERSION),
+        }),
       )
     }
     return effect
@@ -398,7 +407,13 @@ export const handlers = VibestRpcs.toLayer(
               })),
             ),
           ),
-          Effect.map((rows) => ({ protocol: PROTOCOL, version: VERSION, runtimes: rows, ...identity })),
+          Effect.map((rows) => ({
+            protocol: PROTOCOL,
+            version: VERSION,
+            runtimes: rows,
+            ...identity,
+            capabilities: CAPABILITIES,
+          })),
         ),
 
       Spawn: (input) =>

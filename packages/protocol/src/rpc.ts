@@ -40,7 +40,7 @@ import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 
 import pkg from "../package.json" with { type: "json" }
-import { PROTOCOL } from "./protocol.ts"
+import { mismatchText, PROTOCOL } from "./protocol.ts"
 
 /**
  * The vibestd answering on the socket: its PID, a UUID it made at start (another vibestd, even at the same PID, has another),
@@ -85,6 +85,11 @@ export const PingResult = Schema.Struct({
   runtimes: Schema.optional(Schema.Array(RuntimeStatus)),
   /** Who answered; absent on an vibestd from before these fields. */
   ...DaemonIdentity.fields,
+  /**
+   * Additive features this vibestd has, by name (they do not bump PROTOCOL). A client uses one only when its flag is
+   * true; absent means none. `http`: the HTTP API on vibest-http.sock.
+   */
+  capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
 export type Ping = typeof PingResult.Type
 
@@ -93,14 +98,22 @@ export const VERSION = pkg.version
 
 export { PROTOCOL }
 
-/** A non-Ping request omitted the protocol header or sent a different one. Fail closed; no Hello fallback. */
+/**
+ * A non-Ping request omitted the protocol header or sent a different one (`protocol`). Fail closed; no Hello fallback.
+ * `mismatch` is @vibest/protocol `protocolMismatch`: what vibestd speaks, and what the user runs to continue.
+ */
 export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("ProtocolRejected", {
   method: Schema.String,
   protocol: Schema.NullOr(Schema.String),
+  mismatch: Schema.Struct({
+    protocol: Schema.Number,
+    version: Schema.String,
+    message: Schema.String,
+    action: Schema.String,
+  }),
 }) {
   override get message() {
-    const got = this.protocol === null ? "none" : this.protocol
-    return `${this.method} requires vibest protocol ${PROTOCOL}; the request sent ${got}. Restart vibestd with this vibest (\`vibest daemon\`). An old client that cannot read this error is still refused.`
+    return `${this.method} refused: ${mismatchText(this.mismatch)}`
   }
 }
 

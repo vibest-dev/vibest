@@ -3,27 +3,29 @@
 One ordinary Claude Code plugin, one hooks module. Every call to vibest is an HTTP request from `$.http.fetch` to
 vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibest` process.
 
-- `turn.complete` posts each main-loop turn end to `/v1/hooks/claude/turn-end` with its `reason`, the answer and the
+- `turn.complete` posts each main-loop turn end to `/hooks/claude/turn-end` with its `reason`, the answer and the
   current Claude session id. vibest maps the reason: `answer` is the result as it is; `aborted` is an interrupted
   (failed) result when the person pressed Esc, and nothing when `vibest interrupt` (or remove, archive) stopped the
   turn; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
   coordinator vibestd records only the conversation id.
-- `prompt.submit` posts a worker's prompt with its `origin.kind` to `/v1/hooks/claude/prompt`; vibest keeps only what
+- `prompt.submit` posts a worker's prompt with its `origin.kind` to `/hooks/claude/prompt`; vibest keeps only what
   the person submitted (`composer`, or `bridge` for Remote Control).
-- `tool.call` posts each tool call, a subagent's included, to `/v1/hooks/claude/guard` and returns `{ deny }` when vibest
+- `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
-- The **coordinator inbox**: from `session.start`, a coordinator polls `/v1/inbox/poll` every second. A batch comes as
+- The **coordinator inbox**: from `session.start`, a coordinator polls `/inbox/poll` every second. A batch comes as
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
-  hook attaches the full text as context. An accepted submit is acked by row id (`/v1/inbox/ack`) on the next tick; a
+  hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
   `drop` puts the batch back at the front of the queue.
 
 Reports (turn end, prompt) retry in the background after 1, 2, 4, 8, 15 and 30 s while vibestd does not take them.
 
 Every request carries the session headers from `@vibest/protocol` `sessionHeaders`: protocol, `VIBEST_SESSION_ID`,
 `VIBEST_PROJECT_ID`, the current Claude session id, `VIBEST_AGENT`, `VIBEST_HARNESS`, the cwd, `VIBEST_RUNTIME` and the
-plugin version. vibestd refuses a request with an unknown session (404), a missing or wrong project id (403) or another
-protocol (409).
+plugin version. Paths carry no version; the only one is `PROTOCOL` in the `vibest-protocol` header. vibestd refuses a
+request with an unknown session (404), a missing or wrong project id (403) or another protocol (409). A 409 body holds
+vibestd's protocol and version, a message and the command to run (`action`); the plugin puts them on the status line
+until a request goes through again, and the guard still refuses each tool call, giving them as the reason.
 
 It ships inside `@vibest/cli` and is loaded only into the Claude sessions vibest starts (see Use).
 

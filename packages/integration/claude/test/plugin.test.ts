@@ -167,7 +167,7 @@ describe("Claude plugin requests", () => {
     const h = host()
     await h.start()
     const [poll] = h.requests
-    assert.strictEqual(poll!.url, "http://vibestd/v1/inbox/poll")
+    assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
       "vibest-protocol": "3",
@@ -205,7 +205,7 @@ describe("Claude plugin requests", () => {
     await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/v1/hooks/claude/turn-end", "/v1/hooks/claude/prompt"])
+    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/prompt"])
     assert.deepStrictEqual(h.requests[0]!.body, {
       hook_event_name: "TurnComplete",
       session_id: "c1",
@@ -223,7 +223,7 @@ describe("Claude plugin requests", () => {
     await settle()
     down = false
     await h.fire(1000)
-    assert.deepStrictEqual(h.paths(), ["/v1/hooks/claude/turn-end", "/v1/hooks/claude/turn-end"])
+    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/turn-end"])
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
@@ -251,7 +251,7 @@ describe("Claude plugin inbox", () => {
     await h.tick()
     const ack = h.requests.find((r) => r.url.endsWith("/ack"))
     assert.deepStrictEqual(ack?.body, { ids: [1, 2] })
-    assert.isTrue(h.paths().indexOf("/v1/inbox/ack") < h.paths().lastIndexOf("/v1/inbox/poll"), "ack, then poll")
+    assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
   })
 
   it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {
@@ -298,6 +298,36 @@ describe("Claude plugin inbox", () => {
     down = false
     await h.tick()
     assert.deepStrictEqual(h.statuses.at(-1), undefined)
+  })
+})
+
+describe("Claude plugin protocol mismatch", () => {
+  const mismatch = {
+    error: "vibest was updated to 9.9.9; restart this agent to continue. Run: vibest",
+    protocol: 99,
+    version: "9.9.9",
+    message: "vibest was updated to 9.9.9; restart this agent to continue",
+    action: "vibest",
+  }
+
+  it("a 409 puts vibestd's message and action on the status line, polls on quietly, and clears once it goes through", async () => {
+    const h = host()
+    let refused = true
+    h.state.answer = () => (refused ? { status: 409, body: mismatch } : batch([], "", ""))
+    await h.start()
+    for (let i = 0; i < plugin.POLL_FAILURES_SHOWN + 1; i++) await h.tick()
+    assert.isTrue(h.statuses.every((t) => t === `VIBEST: ${mismatch.error}`))
+    refused = false
+    await h.tick()
+    assert.deepStrictEqual(h.statuses.at(-1), undefined)
+  })
+
+  it("the guard still refuses, with the mismatch and the command as its reason", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => ({ status: 409, body: mismatch })
+    const answer = await h.preTool({ tool: "Read" })
+    assert.include(answer.deny, mismatch.error)
+    assert.lengthOf(h.requests, 1)
   })
 })
 

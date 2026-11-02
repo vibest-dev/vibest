@@ -147,6 +147,7 @@ export function register(on: On, _options?: unknown) {
   let polling = false
   let draining = false
   let failures = 0
+  let mismatched = false
   let timer: { cancel: () => void } | undefined
 
   /** The session's identity from its environment, or undefined outside VIBEST. */
@@ -177,7 +178,16 @@ export function register(on: On, _options?: unknown) {
       ms,
       host.after,
     )
-    return { status: r.status, body: parse(r.text) }
+    const reply = { status: r.status, body: parse(r.text) }
+    // Another protocol: vibestd says what to run. Shown until a request goes through again.
+    if (reply.status === 409) {
+      mismatched = true
+      host.status(`VIBEST: ${errorOf(reply.body) ?? "vibest was updated; restart this agent to continue"}`)
+    } else if (mismatched) {
+      mismatched = false
+      host.status(undefined)
+    }
+    return reply
   }
 
   /** Report `body` to `path`; when vibestd does not take it, again after each REPORT_BACKOFF_MS pause. Never throws. */
@@ -201,10 +211,11 @@ export function register(on: On, _options?: unknown) {
     polling = true
     try {
       if (unacked.length > 0) {
-        const r = await post(host, "/v1/inbox/ack", { ids: unacked }, REPORT_TRY_MS)
+        const r = await post(host, "/inbox/ack", { ids: unacked }, REPORT_TRY_MS)
         if (r.status === 200) unacked = []
       }
-      const r = await post(host, "/v1/inbox/poll", {}, REPORT_TRY_MS)
+      const r = await post(host, "/inbox/poll", {}, REPORT_TRY_MS)
+      if (r.status === 409) return
       if (r.status !== 200 || !isBatch(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
       if (failures >= POLL_FAILURES_SHOWN) host.status(undefined)
       failures = 0
@@ -286,7 +297,7 @@ export function register(on: On, _options?: unknown) {
     if (event.agentId === undefined) {
       const host = nativeHost($)
       if (await identity(host).catch(() => undefined))
-        void report(host, "/v1/hooks/claude/turn-end", {
+        void report(host, "/hooks/claude/turn-end", {
           hook_event_name: "TurnComplete",
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
@@ -310,7 +321,7 @@ export function register(on: On, _options?: unknown) {
     }
     const who = await identity(host).catch(() => undefined)
     if (who && who.agent !== "coordinator")
-      await report(host, "/v1/hooks/claude/prompt", {
+      await report(host, "/hooks/claude/prompt", {
         hook_event_name: "PromptSubmit",
         text: event.text,
         origin: event.origin.kind,
@@ -324,7 +335,7 @@ export function register(on: On, _options?: unknown) {
     const body = { tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }
     for (let n = 0; ; n++) {
       try {
-        const r = await post(host, "/v1/hooks/claude/guard", body, GUARD_TRY_MS)
+        const r = await post(host, "/hooks/claude/guard", body, GUARD_TRY_MS)
         if (r.status === 200) {
           const deny = (r.body as { deny?: unknown } | undefined)?.deny
           return typeof deny === "string" ? { deny } : next(event)

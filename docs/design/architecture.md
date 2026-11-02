@@ -700,7 +700,12 @@ Plugins add subcommands through the `command` catalog.
 **Protocol** (omac `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`, copied): effect/rpc over the unix socket,
 one JSON-RPC 2.0 object per line, transport-agnostic so a WebSocket or HTTP transport can be added for another
 host. Every method but `Ping` needs the `vibest-protocol` header; each command Pings once first and stops with
-`IncompatibleDaemon` on a mismatch; the package version is informational. Scoped methods need caller headers
+`IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC
+and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
+Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. A mismatch is
+answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
+`protocolMismatch`, its commands in `MISMATCH_ACTION`): an older caller is told vibest was updated and to restart
+the agent, a newer one that vibestd is older and to upgrade it. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers
 (`user` with a Project directory, or `agent` with `VIBEST_AGENT_ID`); the role comes from the stored row, and
 missing or mixed headers are `InvalidCaller`, never the user. The ACCESS table lists every method, checked at
 compile time: open (integration notifications), subagent (`Report`), main Agent or user (`Run`, `Send`,
