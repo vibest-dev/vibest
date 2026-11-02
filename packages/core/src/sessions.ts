@@ -262,36 +262,45 @@ export class Sessions extends Context.Service<
           }),
         )
       const locks = keyedLock<string>()
-      /**
-       * Drop the flags of a session that has ended: exited with no turn open, archived, or gone. Nobody may hold or wait on its
-       * lock, and nothing may be in flight on them; what they guard starts afresh at the next prompt, as after a restart.
-       */
-      const forget = (id: string) =>
-        SynchronizedRef.updateEffect(tracked, (map) =>
+      /** Set the session's `stopping` flag in the same step as the lookup, so `sweep` cannot drop the flags in between. Whether it was set already. */
+      const stop = (id: string) =>
+        SynchronizedRef.modifyEffect(tracked, (map) =>
           Effect.gen(function* () {
-            const r = Option.getOrUndefined(HashMap.get(map, id))
-            if (!r || locks.busy(id)) return map
-            const idle = !(yield* Ref.get(r.stopping)) && !(yield* Ref.get(r.prompting)) && !(yield* Ref.get(r.pasting))
-            if (!idle || (yield* Ref.get(r.checking)) !== undefined) return map
-            const row = yield* db.getSession(id)
-            const ended =
-              !row ||
-              row.metadata.archived ||
-              row.metadata.removed ||
-              (row.exitedAt !== null && row.turnState !== "open")
-            return ended ? HashMap.remove(map, id) : map
+            const r = Option.getOrUndefined(HashMap.get(map, id)) ?? (yield* newTracked)
+            const already = yield* Ref.getAndSet(r.stopping, true)
+            return [{ r, already }, HashMap.set(map, id, r)] as const
           }),
         )
+      /**
+       * Once per poll (vibestd-state.md 5): drop the flags of every session that is no longer live (exited, archived, gone)
+       * while nobody holds or waits on its lock and nothing is in flight on them. A live row keeps its flags; what they
+       * guard starts afresh at the next prompt, as after a restart. The rows are read under the map's lock: a resume that
+       * clears `exitedAt` after the read holds the session's lock (busy) or waits here in `track`.
+       */
+      const sweep = SynchronizedRef.updateEffect(tracked, (map) =>
+        Effect.gen(function* () {
+          const live = new Set(
+            (yield* db.listSessions())
+              .filter((row) => !row.metadata.archived && !row.metadata.removed)
+              .map((row) => row.id),
+          )
+          let next = map
+          for (const [id, r] of map) {
+            if (live.has(id) || locks.busy(id)) continue
+            const inFlight =
+              (yield* Ref.get(r.stopping)) ||
+              (yield* Ref.get(r.prompting)) ||
+              (yield* Ref.get(r.pasting)) ||
+              (yield* Ref.get(r.checking)) !== undefined
+            if (!inFlight) next = HashMap.remove(next, id)
+          }
+          return next
+        }),
+      )
       const locked =
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          drain.work(
-            `session ${id}`,
-            locks
-              .withLock(id)(effect)
-              .pipe(Effect.ensuring(forget(id))),
-            settlement,
-          )
+          drain.work(`session ${id}`, locks.withLock(id)(effect), settlement)
       const logged =
         (what: string) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -888,7 +897,7 @@ export class Sessions extends Context.Service<
         // Take the lock before forking so no check sees the row as an abandoned `starting` one.
         yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const release = yield* restore(locks.take(id))
+            const release = yield* locks.take(id, restore)
             const leave = drain.track(`spawn ${id}`)
             yield* Effect.forkIn(
               launch(rt, machine, row, root, decision.prompt, input.peer).pipe(
@@ -1234,9 +1243,8 @@ export class Sessions extends Context.Service<
       const remove = (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) =>
         Effect.gen(function* () {
           yield* getRow(id)
-          const r = yield* track(id)
-          if (yield* Ref.getAndSet(r.stopping, true))
-            return yield* new SessionBusy({ id, message: `${id} is already being removed` })
+          const { r, already } = yield* stop(id)
+          if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
           const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(Ref.set(r.stopping, false))))!
           const row = yield* getRow(id)
           if (options.keepWorktree && !row.metadata.keptWorktree)
@@ -1259,8 +1267,8 @@ export class Sessions extends Context.Service<
             ],
           })
           if (out.processes !== "exited") return later(`${id}'s processes are not confirmed gone`)
-          const o = yield* track(owner)
-          if (yield* Ref.getAndSet(o.stopping, true)) return out
+          const { r: o, already: ownerStopping } = yield* stop(owner)
+          if (ownerStopping) return out
           return yield* locked(owner)(removeLocked(owner, {})).pipe(
             Effect.ensuring(Ref.set(o.stopping, false)),
             Effect.map((freed) => {
@@ -1434,13 +1442,12 @@ export class Sessions extends Context.Service<
         scope,
       )
 
-      const checkAll = db
-        .listSessions()
-        .pipe(
-          Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true }),
-          ),
-        )
+      const checkAll = db.listSessions().pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true }),
+        ),
+        Effect.andThen(sweep),
+      )
 
       // Recovery: put the labels back (the runtime does not keep them), then the poll evaluates every row.
       yield* republish()

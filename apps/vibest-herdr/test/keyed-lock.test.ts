@@ -34,7 +34,7 @@ describe("keyedLock", () => {
   it.effect("an interrupted waiter, a failed holder and a take/release pair leave no entry", () =>
     Effect.gen(function* () {
       const locks = keyedLock<string>()
-      const release = yield* locks.take("a")
+      const release = yield* Effect.uninterruptibleMask((restore) => locks.take("a", restore))
       const waiter = yield* Effect.forkChild(locks.withLock("a")(Effect.void))
       yield* Effect.yieldNow
       yield* Fiber.interrupt(waiter)
@@ -42,6 +42,32 @@ describe("keyedLock", () => {
       assert.strictEqual(locks.size(), 0)
       yield* Effect.flip(locks.withLock("a")(Effect.fail("boom")))
       assert.strictEqual(locks.size(), 0)
+    }),
+  )
+
+  it.effect("a holder interrupted after it took the lock releases it", () =>
+    Effect.gen(function* () {
+      const locks = keyedLock<string>()
+      const holding = yield* Deferred.make<void>()
+      const holder = yield* Effect.forkChild(
+        locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Effect.never))),
+      )
+      yield* Deferred.await(holding)
+      yield* Fiber.interrupt(holder)
+      assert.strictEqual(locks.size(), 0)
+      yield* Effect.exit(locks.withLock("a")(Effect.interrupt))
+      assert.strictEqual(locks.size(), 0)
+      // A waiter interrupted around the moment the lock is handed to it: whether it got the permit or not, nothing is lost.
+      for (let i = 0; i < 50; i++) {
+        const release = yield* Effect.uninterruptibleMask((restore) => locks.take("a", restore))
+        const waiter = yield* Effect.forkChild(locks.withLock("a")(Effect.void))
+        yield* Effect.yieldNow
+        yield* release
+        for (let j = 0; j < i % 5; j++) yield* Effect.yieldNow
+        yield* Fiber.interrupt(waiter)
+        assert.strictEqual(locks.size(), 0)
+        yield* locks.withLock("a")(Effect.void)
+      }
     }),
   )
 })
