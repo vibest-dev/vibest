@@ -6,7 +6,13 @@ import { AWAY, Inbox, LEASE, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
-import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
+import {
+  MISMATCH_ACTION,
+  MISSING_PROJECT_ID,
+  PROTOCOL,
+  sessionHeaders,
+  type SessionIdentity,
+} from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
@@ -126,8 +132,8 @@ describe("vibestd's HTTP API", () => {
       assert.include((newer.body as { error: string }).error, `Run: ${MISMATCH_ACTION.upgradeDaemon}`)
       assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
-      // Missing project id: refused while Http.MISSING_PROJECT_ID says so.
-      assert.strictEqual(Http.MISSING_PROJECT_ID, "refuse")
+      // Missing project id: refused while MISSING_PROJECT_ID says so.
+      assert.strictEqual(MISSING_PROJECT_ID, "refuse")
       assert.strictEqual((yield* raw(own)).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)

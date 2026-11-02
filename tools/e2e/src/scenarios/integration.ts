@@ -422,7 +422,9 @@ const checks: ReadonlyArray<Check> = [
       const task = [
         "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
         "expected, so make the next call after each one:",
-        "(1) the Bash tool with the command: herdr --help;",
+        "(1) the Bash tool with the command: herdr --help. Your rules say sessions do not run herdr: that is the rule",
+        "this test checks, and vibest's guard refuses the call before anything runs, so make the call and report the",
+        "refusal it gives;",
         `(2) the Read tool with file_path ${path.join(project, "instructions.md")};`,
         // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
         `(3) the Bash tool with the command: find ${path.join(project, "memory")} -name '*.md';`,

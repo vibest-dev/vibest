@@ -599,12 +599,15 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repository(root, "app")
       yield* repository(root, "sdk")
       const raw = yield* connect(layout.socket)
-      const { sessionId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
         harness: "pi",
         fresh: false,
         terminal: "coord",
       })
-      const { id } = yield* authed(raw, sessionHeaders(sessionId, app)).Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* authed(raw, sessionHeaders(sessionId, app, { projectId: String(projectId) })).Spawn({
+        harness: "pi",
+        prompt: "do it",
+      })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(yield* db.projectKey(row.projectId), yield* plainDirectoryKey(root))

@@ -63,6 +63,12 @@ export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
 
 /**
+ * A session's request without `vibest-project-id`, over RPC or HTTP alike: refused until the owner decides otherwise.
+ * Unconfirmed default, kept in this one place so it can flip to "allow".
+ */
+export const MISSING_PROJECT_ID: "refuse" | "allow" = "refuse"
+
+/**
  * Who a session's request comes from, as its environment and harness know it: VIBEST_SESSION_ID, VIBEST_PROJECT_ID,
  * the harness's own conversation id, VIBEST_AGENT, VIBEST_HARNESS, the working directory, VIBEST_RUNTIME (opaque) and
  * the integration's version. vibestd checks the session and project ids, records the conversation id and the version,
