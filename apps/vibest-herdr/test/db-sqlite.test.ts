@@ -37,10 +37,7 @@ describe("SQLite", () => {
       const openModes = modes(file).pipe(Effect.provide(database(file)))
       assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
       // Looser files left from before, whether or not SQLite kept -wal and -shm. An empty -wal and -shm are valid.
-      yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map(async (path) => {
-        await (await fs.open(path, "a")).close()
-        await fs.chmod(path, 0o644)
-      })))
+      yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.appendFile(path, "").then(() => fs.chmod(path, 0o644)))))
       assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
     }).pipe(Effect.provide(Platform.services)))
 
