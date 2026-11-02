@@ -20,7 +20,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import * as Server from "@vibest/server/server"
-import { Clock, ConfigProvider, Effect, FileSystem, Layer, Path, type Ref, Schema, type Scope } from "effect"
+import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Schema, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -186,6 +186,82 @@ describe("pi-vibest", () => {
         assert.deepStrictEqual(notes, [])
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
     15_000,
+  )
+
+  it.effect(
+    "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive, until the session shuts down",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        const inbox = yield* Inbox
+        const layout = yield* Layout
+        const runtime = yield* FakeRuntime
+        yield* runtime.addPane("w1:p8", "ws", "/")
+        const row = {
+          agent: "general",
+          name: "n",
+          harnessId: "claude" as const,
+          provider: null,
+          model: null,
+          harnessSessionId: null,
+          runtime: "herdr",
+          address: { machine: "local", id: "test/p0" },
+          status: "idle" as const,
+          startedAt: 1,
+          exitedAt: null,
+          turnState: "none" as const,
+          turnPromptedAt: 0,
+          metadata: {},
+          createdAt: 1,
+          lastActive: 1,
+        }
+        yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
+        const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p8" },
+        })
+        const vibestd = Server.layer.pipe(
+          Layer.provide(Platform.daemon.socketServer(layout.socket)),
+          Layer.provide(Project.layer),
+        )
+        const first = yield* Scope.make()
+        yield* Layer.buildWithScope(vibestd, first)
+        const notes: Array<string> = []
+        const s = yield* session({
+          VIBEST_AGENT: "coordinator",
+          VIBEST_SESSION_ID: coord.sessionId,
+          VIBEST_COMMAND: '["vibest"]',
+        })
+        yield* s.emit(
+          "session_start",
+          { reason: "startup" },
+          { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
+        )
+        const report = (message: string) =>
+          inbox.enqueue({ sessionId: "aaaaaaaa", kind: "report", message, details: {} })
+        const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
+        yield* report("first")
+        yield* until(contents, (c) => c.length === 1)
+        // `vibest daemon restart`: this vibestd closes (interrupting the stream it serves), the next one listens.
+        yield* Scope.close(first, Exit.void)
+        yield* Layer.build(vibestd)
+        yield* report("second")
+        yield* until(contents, (c) => c.length === 2)
+        assert.deepStrictEqual(yield* contents, ["first", "second"])
+        assert.deepStrictEqual(notes, [])
+        // The session's own end does stop it: a later row stays pending. (One arriving before vibestd sees the closed
+        // connection is claimed by the closing stream and ends failed; the wait keeps this check off that edge.)
+        yield* s.emit("session_shutdown")
+        yield* TestClock.withLive(Effect.sleep("500 millis"))
+        yield* report("after shutdown")
+        yield* TestClock.withLive(Effect.sleep("3 seconds"))
+        assert.deepStrictEqual(yield* contents, ["first", "second"])
+        assert.deepStrictEqual(
+          (yield* db.coordinatorPending(yield* db.projectId("r"))).map((r) => r.message),
+          ["after shutdown"],
+        )
+      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+    30_000,
   )
 
   test(

@@ -7,6 +7,7 @@ import type { Check } from "./check.ts"
 import daemon from "./scenarios/daemon.ts"
 import guard from "./scenarios/guard.ts"
 import harness from "./scenarios/harness.ts"
+import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
@@ -24,6 +25,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   guard,
   update,
   start,
+  inbox,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")
