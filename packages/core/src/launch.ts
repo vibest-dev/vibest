@@ -1,7 +1,7 @@
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
-import { Config, Crypto, Effect, Option } from "effect"
+import { Config, Effect, Option } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
@@ -22,10 +22,17 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   readonly model: string | null
   /** The runtime's variables `vibest` in the Coordinator's shell needs to find its pane's owner, passed on when set. */
   readonly passEnv: ReadonlyArray<string>
-  /** `Project.CoordinatorSession`: the coordinator's session id, and the conversation to reopen. */
-  readonly session: Effect.Effect<{ readonly sessionId: string; readonly harnessSessionId: string | null }, E, R>
-  /** `CoordinatorSessionReady`: records a conversation id vibest chose up front, before the harness starts. */
-  readonly record: (sessionId: string, harnessSessionId: string) => Effect.Effect<void, E, R>
+  /** `Project.CoordinatorSession`: the coordinator's session id, the conversation to reopen, and where it runs. */
+  readonly session: Effect.Effect<
+    {
+      readonly sessionId: string
+      readonly harnessSessionId: string | null
+      readonly projectId?: number | undefined
+      readonly runtime?: string | undefined
+    },
+    E,
+    R
+  >
 }) {
   const adapter = (yield* Harnesses).get(input.harness)
   const harness = yield* Harness
@@ -45,6 +52,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   yield* writeAtomic(rulesFile, rules).pipe(Effect.orDie)
   const env: Record<string, string> = {
     VIBEST_AGENT: COORDINATOR,
+    VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
   }
@@ -57,13 +65,12 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
-  // The bridge inbox (Claude) attaches by conversation id, so a new one is chosen and recorded now, not after the first turn.
-  let newSessionId: string | undefined
-  if (harnessSessionId === null && adapter.ownSessionId && adapter.inbox === "bridge") {
-    newSessionId = yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.orDie)
-    yield* input.record(saved.sessionId, newSessionId)
+  const commandEnv: Record<string, string> = {
+    ...env,
+    VIBEST_SESSION_ID: saved.sessionId,
+    ...(saved.projectId !== undefined ? { VIBEST_PROJECT_ID: String(saved.projectId) } : {}),
+    ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
-  const commandEnv: Record<string, string> = { ...env, VIBEST_SESSION_ID: saved.sessionId }
   return {
     file: adapter.binary,
     args: adapter.coordinatorArgs({
@@ -73,7 +80,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
       provider: input.provider,
       model: input.model,
       sessionId: harnessSessionId,
-      ...(newSessionId ? { newSessionId } : {}),
       pluginDir,
       env: commandEnv,
     }),

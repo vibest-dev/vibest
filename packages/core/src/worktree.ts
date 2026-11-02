@@ -81,9 +81,9 @@ export const normalizeRemote = (url: string) =>
     .replace(/\.git$/, "")
     .replace(/\/+$/, "")
 
-/** Project identity (SPEC §4): VIBEST_PROJECT_ID → normalized origin → sha256(realpath(main checkout))[:12], so linked worktrees share it. */
+/** Project identity (SPEC §4): VIBEST_PROJECT_KEY → normalized origin → sha256(realpath(main checkout))[:12], so linked worktrees share it. */
 export const repositoryKey = Effect.fn("repositoryKey")(function* (root: string) {
-  const override = yield* Config.option(Config.String("VIBEST_PROJECT_ID")).pipe(
+  const override = yield* Config.option(Config.String("VIBEST_PROJECT_KEY")).pipe(
     Effect.orElseSucceed(() => Option.none()),
   )
   if (Option.isSome(override) && override.value) return override.value

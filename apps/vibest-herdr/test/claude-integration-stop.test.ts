@@ -9,7 +9,7 @@ import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
 
 import * as Platform from "#platform"
 
-import { COORDINATOR_REPORT_TIMEOUT, integrationPrompt, integrationStop, RESULT_READY_TIMEOUT } from "../src/cli.ts"
+import { integrationPrompt, integrationStop, RESULT_READY_TIMEOUT } from "../src/cli.ts"
 import { runVibest, tempDirectory } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
@@ -119,7 +119,7 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("a coordinator reports the harness session and writes no result file", () =>
+  it.effect("a coordinator's turn end writes no result file and sends nothing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -132,10 +132,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         JSON.stringify({ ...event, reason: "aborted" }),
       )
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
-      assert.deepStrictEqual(
-        rpc(lines).map((r) => [r.method, r.params]),
-        [["CoordinatorSessionReady", { sessionId: "L", harness: "claude", harnessSessionId: "c1" }]],
-      )
+      assert.deepStrictEqual(lines, [])
     }),
   )
 
@@ -173,7 +170,6 @@ layer(Platform.services)("claude integration stop", (it) => {
         assert.isFalse(yield* fs.exists(path.join(home, "results")))
         assert.isFalse(yield* fs.exists(path.join(home, "evil.json")))
         assert.strictEqual(Duration.toMillis(RESULT_READY_TIMEOUT), 500)
-        assert.strictEqual(Duration.toMillis(COORDINATOR_REPORT_TIMEOUT), 2_000)
       }),
   )
 

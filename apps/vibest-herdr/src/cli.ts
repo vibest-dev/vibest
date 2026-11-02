@@ -16,7 +16,7 @@ import { askYesNo, interactive, Layout, VibestCommand, writeAtomic } from "@vibe
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { appendReportLine, writeTerminalStatus } from "@vibest/core/results"
+import { promptOf, recordPrompt, recordTurnEnd, writeTerminalStatus } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
 // VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
@@ -159,7 +159,12 @@ const run = Command.make(
       Argument.withDescription("auto: let spawn plugins choose"),
     ),
     prompt: text("prompt"),
-    name: Flag.String("name").pipe(Flag.optional),
+    title: Flag.String("title").pipe(
+      Flag.withDescription(
+        "What the agent does, in a few words (its pane title, and the line its results show); default: the task's start",
+      ),
+      Flag.optional,
+    ),
     provider: Flag.String("provider").pipe(Flag.optional),
     model: Flag.String("model").pipe(
       Flag.withDescription("Leave out for the harness default; see vibest models"),
@@ -188,7 +193,7 @@ const run = Command.make(
         client.Spawn({
           harness: o.harness === "auto" ? undefined : o.harness,
           prompt,
-          name: Option.getOrUndefined(o.name),
+          name: Option.getOrUndefined(o.title),
           provider: Option.getOrUndefined(o.provider),
           model: Option.getOrUndefined(o.model),
           env: Option.getOrUndefined(o.env),
@@ -376,10 +381,6 @@ const startMain =
           model: chosen.model ?? null,
           passEnv: CALLER_ENV,
           session,
-          record: (sessionId, harnessSessionId) =>
-            withVibest(claim, (client) =>
-              client.CoordinatorSessionReady({ sessionId, harness: chosen.harness, harnessSessionId }),
-            ),
         }).pipe(Effect.provide(Harness.layer))
         return yield* Effect.sync(() => exec(main.file, main.args, { ...env, ...main.env }))
       }
@@ -455,8 +456,11 @@ const status = Command.make("status", {}, () =>
   ),
 )
 
+/** A session as the user reads it: its `name` (the wire and database name) is its `title`. */
+const titled = <S extends { readonly name: string }>({ name, ...rest }: S) => ({ title: name, ...rest })
+
 const result = Command.make("result", { id }, (o) =>
-  vibest((client) => client.Get({ id: o.id })).pipe(Effect.flatMap(json)),
+  vibest((client) => client.Get({ id: o.id })).pipe(Effect.map(titled), Effect.flatMap(json)),
 ).pipe(Command.withDescription("A session's latest result (JSON; null before its first)"))
 
 const interrupt = Command.make("interrupt", { id }, (o) =>
@@ -520,6 +524,7 @@ const ls = Command.make(
       const cwd = (yield* Path.Path).resolve(".")
       const located = yield* projectRoot(cwd).pipe(Effect.option)
       yield* vibest((client) => client.List({ stopped: o.all, ...(Option.isNone(located) ? { all: true } : {}) })).pipe(
+        Effect.map((sessions) => sessions.map(titled)),
         Effect.flatMap(json),
       )
     }),
@@ -712,8 +717,6 @@ const subscriptions = Command.make("subscriptions", {}, () =>
 
 /** How long a worker's ResultReady may take to connect and return. The result file is already written. */
 export const RESULT_READY_TIMEOUT = Duration.millis(500)
-/** How long a coordinator's CoordinatorSessionReady may take. No result file, no detached child. */
-export const COORDINATOR_REPORT_TIMEOUT = Duration.seconds(2)
 
 const nonempty = (name: string) =>
   Config.option(Config.String(name)).pipe(
@@ -723,16 +726,6 @@ const nonempty = (name: string) =>
     }),
   )
 
-const jsonObject = (raw: string): Record<string, unknown> | undefined => {
-  try {
-    const value = JSON.parse(raw) as unknown
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
-    return value as Record<string, unknown>
-  } catch {
-    return undefined
-  }
-}
-
 /** Best-effort protocol notify. Does not start vibestd and sends no caller identity. */
 const notify = (timeout: Duration.Duration, send: (client: VibestClient) => Effect.Effect<void, unknown>) =>
   Effect.gen(function* () {
@@ -741,9 +734,9 @@ const notify = (timeout: Duration.Duration, send: (client: VibestClient) => Effe
   }).pipe(Effect.scoped, Effect.timeout(timeout), Effect.ignore)
 
 /**
- * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`): its adapter's `turnEnd` reads the event.
- * Missing identity, a non-object, or an event the adapter ignores writes nothing and sends nothing. Failures exit 0.
- * Writes the turn-end report line and OSC 7501 idle beside the result file (runtime-port.md §5); the ResultReady push
+ * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`, Cursor's): its adapter's `turnEnd` reads
+ * the event. Missing identity, a non-object, or an event the adapter ignores writes nothing and sends nothing. Failures
+ * exit 0. Writes the result file, the turn-end report line and OSC 7501 idle (runtime-port.md §5); the ResultReady push
  * stays the fast path.
  */
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
@@ -751,31 +744,7 @@ export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
     const agent = yield* nonempty("VIBEST_AGENT")
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
-    const event = jsonObject(raw)
-    const outcome = event && adapter.turnEnd?.(event, agent === "coordinator")
-    if (!outcome) return
-    if ("harnessSessionId" in outcome) {
-      const { harnessSessionId } = outcome
-      yield* notify(COORDINATOR_REPORT_TIMEOUT, (client) =>
-        client.CoordinatorSessionReady({ sessionId, harness: adapter.id, harnessSessionId }),
-      )
-      return
-    }
-    const layout = yield* Layout
-    const path = yield* Path.Path
-    const file = layout.resultFile(sessionId)
-    // The session id is an environment value. Keep the file as one name inside the results directory.
-    if (path.basename(file) !== `${sessionId}.json` || path.dirname(file) !== layout.results) return
-    yield* writeAtomic(
-      file,
-      JSON.stringify({ harness: adapter.id, ts: Math.floor(Date.now() / 1000), payload: outcome.result }),
-    )
-    yield* appendReportLine(layout.reportFile(sessionId), {
-      turn: "end",
-      ts: Date.now(),
-      harness: adapter.id,
-      payload: outcome.result,
-    })
+    if (!(yield* recordTurnEnd(adapter, agent, sessionId, raw))) return
     yield* writeTerminalStatus("idle")
     yield* notify(RESULT_READY_TIMEOUT, (client) => client.ResultReady({ sessionId }))
   }).pipe(Effect.ignore)
@@ -790,13 +759,11 @@ export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
     const agent = yield* nonempty("VIBEST_AGENT")
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
-    const event = jsonObject(raw)
-    const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
-    if (!prompt?.text.trim()) return
-    const layout = yield* Layout
+    const text = promptOf(adapter, agent, raw)
+    if (text === undefined) return
     // `Prompt` first: vibestd stamps the round at receipt, and the start line must not be older than that stamp.
-    yield* notify(RESULT_READY_TIMEOUT, (client) => client.Prompt({ sessionId, text: prompt.text }))
-    yield* appendReportLine(layout.reportFile(sessionId), { turn: "start", ts: Date.now(), prompt: prompt.text })
+    yield* notify(RESULT_READY_TIMEOUT, (client) => client.Prompt({ sessionId, text }))
+    yield* recordPrompt(sessionId, text)
     yield* writeTerminalStatus("working")
   }).pipe(Effect.ignore)
 
@@ -833,7 +800,11 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   Effect.gen(function* () {
     const { guardAnswer } = (yield* Harnesses).get(o.harness)
     if (!guardAnswer) return yield* Effect.fail(new Error(`${o.harness} has no pre-tool hook`))
-    const answer = guardAnswer(yield* Guard.hook(yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin))))
+    // No VIBEST_AGENT fails: the hook refuses.
+    const agent = yield* Config.String("VIBEST_AGENT")
+    const answer = guardAnswer(
+      yield* Guard.check(agent, yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin))),
+    )
     if (answer !== undefined) yield* json(answer)
   }),
 ).pipe(
@@ -1191,96 +1162,6 @@ const update = Command.make("update", {}, () =>
   ),
 )
 
-/** Where a claude bridge call comes from: its pane's terminal id and the machine target (the ambient herdr socket). */
-const inboxPlace = Effect.gen(function* () {
-  const terminal = yield* callerTerminal
-  const machine = yield* callerMachine()
-  return terminal === undefined ? undefined : { terminal, machine }
-})
-
-const claudeSession = Argument.String("claudeSessionId").pipe(
-  Argument.withDescription("The Claude transcript id reported for this coordinator"),
-)
-const inboxGeneration = Argument.String("generation").pipe(
-  Argument.withDescription("The generation returned by inbox attach"),
-)
-const inboxToken = Argument.String("token").pipe(Argument.withDescription("The token returned by inbox pull"))
-
-const inbox = Command.make("inbox").pipe(
-  Command.withDescription(
-    "Claude coordinator inbox. Stdout is one JSON object; the claim body is a file, not stdout. Not a user-terminal replace and not detach.",
-  ),
-  Command.withSubcommands([
-    Command.make(
-      "attach",
-      {
-        claudeSessionId: claudeSession,
-        replace: Flag.Boolean("replace").pipe(
-          Flag.withDescription("Mint a new generation and retire only this process's claim"),
-          Flag.withDefault(false),
-        ),
-      },
-      (o) =>
-        Effect.gen(function* () {
-          const place = yield* inboxPlace
-          if (!place) return yield* json({ error: "invalid-caller" })
-          return yield* vibest((client) =>
-            client["Inbox.Attach"]({ claudeSessionId: o.claudeSessionId, replace: o.replace, ...place }),
-          ).pipe(Effect.flatMap(json))
-        }),
-    ),
-    Command.make("pull", { generation: inboxGeneration, claudeSessionId: claudeSession }, (o) =>
-      Effect.gen(function* () {
-        const place = yield* inboxPlace
-        if (!place) return yield* json({ error: "invalid-caller" })
-        return yield* vibest((client) =>
-          client["Inbox.Pull"]({ generation: o.generation, claudeSessionId: o.claudeSessionId, ...place }),
-        ).pipe(Effect.flatMap(json))
-      }),
-    ),
-    Command.make("ack", { generation: inboxGeneration, claudeSessionId: claudeSession, token: inboxToken }, (o) =>
-      Effect.gen(function* () {
-        const place = yield* inboxPlace
-        if (!place) return yield* json({ error: "invalid-caller" })
-        return yield* vibest((client) =>
-          client["Inbox.Ack"]({
-            generation: o.generation,
-            claudeSessionId: o.claudeSessionId,
-            token: o.token,
-            ...place,
-          }),
-        ).pipe(Effect.flatMap(json))
-      }),
-    ),
-    Command.make(
-      "release",
-      {
-        generation: inboxGeneration,
-        claudeSessionId: claudeSession,
-        token: inboxToken,
-        retry: Flag.Boolean("retry").pipe(
-          Flag.withDescription("The prompt was definitely dropped, so the rows may be claimed again"),
-          Flag.withDefault(false),
-        ),
-      },
-      (o) =>
-        Effect.gen(function* () {
-          const place = yield* inboxPlace
-          if (!place) return yield* json({ error: "invalid-caller" })
-          return yield* vibest((client) =>
-            client["Inbox.Release"]({
-              generation: o.generation,
-              claudeSessionId: o.claudeSessionId,
-              token: o.token,
-              retry: o.retry,
-              ...place,
-            }),
-          ).pipe(Effect.flatMap(json))
-        }),
-    ),
-  ]),
-)
-
 export const command = (host: Daemon.Host, exec: Exec) =>
   Command.make("vibest", mainFlags, startMain(exec)).pipe(
     Command.withDescription(
@@ -1305,7 +1186,6 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       integration,
       doctor,
       update,
-      inbox,
       herdrCommands(userOnly),
     ]),
   )

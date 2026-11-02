@@ -132,18 +132,6 @@ describe("Daemon.Stop", () => {
         ),
         "DaemonStopping",
       )
-      const inboxPayload = {
-        claudeSessionId: "s",
-        terminal: "test/p",
-        machine: { id: "local" },
-        generation: "g",
-        token: "t",
-      }
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Inbox.Ack"](inboxPayload))), "DaemonStopping")
-      assert.strictEqual(
-        tagOf(yield* Effect.exit(user["Inbox.Release"]({ ...inboxPayload, retry: false }))),
-        "DaemonStopping",
-      )
       assert.strictEqual(
         tagOf(yield* Effect.exit(raw.ResultReady({ sessionId: "x" }, { headers: protocolHeaders() }))),
         "DaemonStopping",
@@ -334,33 +322,23 @@ describe("Daemon.Stop", () => {
     }),
   )
 
-  for (const op of ["ack", "release"] as const)
-    test(
-      `a Claude ${op} settles a claim already made while the Stop drains`,
-      Effect.gen(function* () {
-        const repo = yield* makeRepository
-        const { db, c, worker, projectId } = yield* receiver(repo, "claude")
-        const inbox = yield* Inbox
-        const call = { projectId, terminal: "wC:p1", claudeSessionId: "claude-session" }
-        const generation = (yield* inbox.attach({ ...call, replace: false })).generation!
-        yield* inbox.enqueue({ sessionId: worker, kind: "report", message: op, details: {} })
-        const token = (yield* until(inbox.pull({ ...call, generation }), (r) => r.token !== undefined)).token!
-        const stopping = yield* Effect.forkScoped(stop(repo))
-        yield* draining
-        const payload = {
-          generation,
-          token,
-          claudeSessionId: "claude-session",
-          terminal: "wC:p1",
-          machine: { id: "local" },
-        }
-        const result =
-          op === "ack" ? yield* c["Inbox.Ack"](payload) : yield* c["Inbox.Release"]({ ...payload, retry: true })
-        assert.isUndefined(result.error)
-        assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, op === "ack" ? "delivered" : "pending")
-        assert.strictEqual(yield* settled(stopping), "accepted")
-      }),
-    )
+  test(
+    "a Claude ack settles a batch already leased while the Stop drains",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { db, worker, projectId } = yield* receiver(repo, "claude")
+      const inbox = yield* Inbox
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "ack", details: {} })
+      const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
+      const stopping = yield* Effect.forkScoped(stop(repo))
+      yield* draining
+      // A poll while draining hands out nothing new.
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
+      assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
+      assert.strictEqual(yield* settled(stopping), "accepted")
+    }),
+  )
 
   test(
     "a client that stops waiting for its Stop cancels it: the drain ends and changes are admitted again, its operation untouched",

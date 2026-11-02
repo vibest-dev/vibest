@@ -1,65 +1,51 @@
 /**
- * The Claude Code hooks module of the VIBEST coordinator inbox, bundled to hooks/register.mjs by scripts/build.ts.
- * It binds the accepted client (inbox-client.ts) and adapters (inbox-adapter.ts) to the native host:
- * `vibest inbox …` through `$.process.run` (bare argv, PATH and inherited environment), the claim body through `$.fs.read`,
- * delivery through `$.prompt.submit`.
+ * The Claude Code hooks module of VIBEST, bundled to hooks/register.mjs by scripts/build.ts. Everything it says to
+ * vibest goes over vibestd's HTTP socket (`$VIBEST_HOME/vibest-http.sock`, packages/server/src/http.ts) with the shared
+ * session headers (@vibest/protocol `sessionHeaders`): no `vibest` process, no files.
  *
- * Turn-end reports, the user prompt, and the tool guard are the native `turn.complete`, `prompt.submit` and `tool.call`
- * listeners, not command hooks or classic events: turn.complete fires for every main-loop turn end (reason answer,
- * aborted, refusal or error; Stop fires for no Esc). They call fixed argv `vibest integration stop --harness claude`,
- * `vibest integration prompt --harness claude` and `vibest integration guard --harness claude`. No shell, no
- * VIBEST_COMMAND. turn.complete carries no API error kind (StopFailure's `rate_limit`, `billing_error`, ...).
+ * - `turn.complete`, `prompt.submit` and `tool.call` for every VIBEST session (VIBEST_AGENT and VIBEST_SESSION_ID set):
+ *   the turn end, the person's prompt and the tool guard. turn.complete fires for every main-loop turn end (reason
+ *   answer, aborted, refusal or error; Stop fires for no Esc) and carries no API error kind.
+ * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
+ *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
+ *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
+ *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll.
  *
- * The inbox listeners (session.start, session.end, command.run) are always registered. Only a coordinator
- * (VIBEST_AGENT=coordinator with an VIBEST_SESSION_ID) activates a receiver; anywhere else the module registers no
- * /vibest-reattach command, starts no timer and never calls `vibest inbox`.
- * Startup attaches without replace, and keeps trying ordinary attach while VIBEST answers not-reported;
- * `/vibest-reattach` is the only replace. No shared store, takeover after reload,
- * detach, lease, or pane-move recovery. No session.start report.
+ * /clear fires session.end with the old conversation and no new session.start; the clock keeps running and
+ * `$.session.id()` answers the new conversation, so nothing stops on session.end and every request sends the current id.
  *
  * Types: `import type` from `claude-code`. The declarations are a local ignored cache, not a vendored file.
  * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts).
- * That file's "Written by Claude Code 2.1.277" header is stale and does not date this pin.
- * Hooks modules are early access and may change without notice. This revision has not been loaded in Claude.
+ * The AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
  */
-import type { EngineInterface, On, ProcessRunResult, Register } from "claude-code"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import type { EngineInterface, On, Register } from "claude-code"
 
-import { adaptAttach, adaptPull, adaptSettle } from "./inbox-adapter.ts"
-import { createClaudeInboxClient, type SubmitReply } from "./inbox-client.ts"
+/** This plugin's version, inlined by scripts/build.ts (Claude Code's `$.plugin` has no version). */
+declare const VIBEST_PLUGIN_VERSION: string
 
-type RunResult = ProcessRunResult
+export const POLL_MS = 1000
+/** Consecutive failed polls before the status line says vibestd is unreachable. */
+export const POLL_FAILURES_SHOWN = 5
+/** One guard try; then the next after these pauses; then the call is refused. */
+export const GUARD_TRY_MS = 2000
+export const GUARD_BACKOFF_MS = [100, 300, 900] as const
+/** A turn end or prompt that did not get through is tried again after these pauses (about a minute in all). */
+export const REPORT_BACKOFF_MS = [1000, 2000, 4000, 8000, 15_000, 30_000] as const
+export const REPORT_TRY_MS = 10_000
+export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
+/** At most this many lines keep their full text waiting for the prompt.submit hook. */
+export const FULL_MAX = 100
 
-export const REATTACH = "vibest-reattach"
-/** Ticks never overlap; each `vibest` call is killed after RUN_TIMEOUT_MS. */
-export const POLL_MS = 2000
-export const RUN_TIMEOUT_MS = 15_000
-/** Bound for `vibest integration stop` and `vibest integration guard`. */
-export const BRIDGE_TIMEOUT_MS = 10_000
-/** The tool.call hook's refusal when vibest cannot answer a guard check. */
-export const GUARD_FAILURE = "vibest integration guard failed; the tool call is refused."
-
-/** The `error` a refusing `vibest inbox attach` printed, for the status line only (the adapter decides the reply). */
-const errorOf = (stdout: string) => {
-  try {
-    const value = JSON.parse(stdout) as { error?: unknown }
-    return typeof value?.error === "string" ? value.error : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const refusal = (why: string) => {
-  if (why === "stale-receiver") return `another receiver holds this coordinator's inbox; run /${REATTACH} to take it`
-  if (why === "not-reported") return `VIBEST has not recorded this Claude session yet; run /${REATTACH} once it has`
-  if (why === "session-mismatch") return `the Claude session changed, so delivery stopped; run /${REATTACH}`
-  if (why.startsWith("exit "))
-    return `vibest inbox attach failed (${why}); check that vibest on PATH has the inbox command`
-  return `vibest inbox attach refused (${why}); run /${REATTACH} after fixing it`
-}
-
-/** A replace whose reply was lost may have committed: this receiver may already be retired. It is never replayed. */
-const unknownReplace = (why: string) =>
-  `vibest inbox attach --replace gave no usable answer (${why}). It may have replaced this receiver anyway, so it is not retried automatically and delivery here may stop. Run /${REATTACH} again.`
+type Reply = { readonly status: number; readonly body: unknown }
+type Env =
+  | "VIBEST_AGENT"
+  | "VIBEST_SESSION_ID"
+  | "VIBEST_PROJECT_ID"
+  | "VIBEST_HARNESS"
+  | "VIBEST_RUNTIME"
+  | "VIBEST_HOME"
+  | "HOME"
 
 /**
  * Every native call this module makes, bound to one hook's `$`. Claude Code statically checks a hooks module: `$` may
@@ -68,37 +54,35 @@ const unknownReplace = (why: string) =>
  */
 function nativeHost($: EngineInterface) {
   return {
-    coordinator: async () =>
-      (await $.env.get("VIBEST_AGENT")) === "coordinator" && ((await $.env.get("VIBEST_SESSION_ID")) ?? "") !== "",
-    agent: () => $.env.get("VIBEST_AGENT"),
-    vibestSession: () => $.env.get("VIBEST_SESSION_ID"),
-    cwd: () => $.session.cwd(),
-    sessionId: () => $.session.id(),
-    run: (argv: ReadonlyArray<string>) => $.process.run(["vibest", "inbox", ...argv], { timeoutMs: RUN_TIMEOUT_MS }),
-    stop: (stdin: string) =>
-      $.process.run(["vibest", "integration", "stop", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
-    prompt: (stdin: string) =>
-      $.process.run(["vibest", "integration", "prompt", "--harness", "claude"], {
-        stdin,
-        timeoutMs: BRIDGE_TIMEOUT_MS,
-      }),
-    guard: (stdin: string) =>
-      $.process.run(["vibest", "integration", "guard", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
-    read: (file: string) => $.fs.read(file),
-    submit: (text: string) => $.prompt.submit({ text }),
-    registerReattach: () =>
-      $.command.register({
-        name: REATTACH,
-        description: "Take this coordinator's VIBEST inbox with a new generation (attach --replace)",
-        immediate: true,
-      }),
-    every: (fn: () => void) => $.clock.every(POLL_MS, fn),
-    status: (text: string) => $.ui.status(`VIBEST inbox: ${text}`),
-    /** Claude Code draws every pinned plugin status as a warning, so a healthy inbox clears its line and says so once. */
-    attached: () => {
-      $.ui.status(undefined)
-      $.ui.toast("VIBEST inbox attached")
+    // The loader wants a literal name at each $.env.get, so the variables a module reads can be listed.
+    env: (name: Env) => {
+      switch (name) {
+        case "VIBEST_AGENT":
+          return $.env.get("VIBEST_AGENT")
+        case "VIBEST_SESSION_ID":
+          return $.env.get("VIBEST_SESSION_ID")
+        case "VIBEST_PROJECT_ID":
+          return $.env.get("VIBEST_PROJECT_ID")
+        case "VIBEST_HARNESS":
+          return $.env.get("VIBEST_HARNESS")
+        case "VIBEST_RUNTIME":
+          return $.env.get("VIBEST_RUNTIME")
+        case "VIBEST_HOME":
+          return $.env.get("VIBEST_HOME")
+        case "HOME":
+          return $.env.get("HOME")
+      }
     },
+    conversation: () => $.session.id(),
+    cwd: () => $.session.cwd(),
+    plugin: () => $.plugin.name,
+    fetch: (socketPath: string, path: string, headers: Record<string, string>, body: string) =>
+      $.http.fetch(`http://vibestd${path}`, { method: "POST", socketPath, headers, body }),
+    submit: (text: string) => $.prompt.submit({ text }),
+    redraw: () => $.ui.invalidate("ui.render"),
+    every: (ms: number, fn: () => void) => $.clock.every(ms, fn),
+    after: (ms: number, fn: () => void) => $.clock.after(ms, fn),
+    status: (text: string | undefined) => $.ui.status(text),
   }
 }
 
@@ -115,268 +99,253 @@ const toolInput = (event: object): Record<string, unknown> => {
   return input
 }
 
-/** A deny reason from guard stdout, only for the object Guard.hook prints. Undefined when the body is not that object. */
-const guardDenyReason = (stdout: string): string | undefined => {
-  let value: unknown
+const timeout = <T>(promise: Promise<T>, ms: number, after: Host["after"]) =>
+  new Promise<T>((resolve, reject) => {
+    const timer = after(ms, () => reject(new Error(`no answer in ${ms} ms`)))
+    promise.then(
+      (value) => {
+        timer.cancel()
+        resolve(value)
+      },
+      (error: unknown) => {
+        timer.cancel()
+        reject(error)
+      },
+    )
+  })
+
+const parse = (text: string): unknown => {
   try {
-    value = JSON.parse(stdout)
+    return JSON.parse(text)
   } catch {
     return undefined
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
-  const keys = Object.keys(value)
-  if (keys.length !== 1 || keys[0] !== "hookSpecificOutput") return undefined
-  const output = (value as { readonly hookSpecificOutput: unknown }).hookSpecificOutput
-  if (typeof output !== "object" || output === null || Array.isArray(output)) return undefined
-  const fields = Object.keys(output)
-  if (
-    fields.length !== 3 ||
-    !fields.includes("hookEventName") ||
-    !fields.includes("permissionDecision") ||
-    !fields.includes("permissionDecisionReason")
-  )
-    return undefined
-  const denial = output as {
-    readonly hookEventName: unknown
-    readonly permissionDecision: unknown
-    readonly permissionDecisionReason: unknown
-  }
-  if (
-    denial.hookEventName !== "PreToolUse" ||
-    denial.permissionDecision !== "deny" ||
-    typeof denial.permissionDecisionReason !== "string"
-  )
-    return undefined
-  return denial.permissionDecisionReason
 }
 
-/** Undefined lets the call through. Any other answer, including a failed bridge, denies. */
-const guardReason = (result: RunResult): string | undefined => {
-  if (result.exitCode === 0 && result.stdout.trim() === "") return undefined
-  if (result.exitCode !== 0) return GUARD_FAILURE
-  return guardDenyReason(result.stdout) ?? GUARD_FAILURE
-}
+const errorOf = (body: unknown) =>
+  typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
+    ? (body as { error: string }).error
+    : undefined
+
+type Batch = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
+const isBatch = (body: unknown): body is Batch =>
+  typeof body === "object" &&
+  body !== null &&
+  Array.isArray((body as Batch).ids) &&
+  typeof (body as Batch).line === "string" &&
+  typeof (body as Batch).text === "string"
 
 // A top-level function declaration: Claude Code's loader accepts `register` in no other shape.
 export function register(on: On, _options?: unknown) {
-  let started = false
-  let client: ReturnType<typeof createClaudeInboxClient> | undefined
-  let lastRefusal = "unparsed"
+  // The main agent's inbox, this module only. `queue`: batches polled, not yet submitted. `seen`: ids taken (queued or
+  // submitted), so a batch handed out again after its lease ran out is not shown twice. `full`: per line, the full
+  // texts waiting for the prompt.submit hook, oldest first. `unacked`: submitted, acked on the next poll.
+  const queue: Array<Batch> = []
+  const seen = new Set<number>()
+  const full = new Map<string, Array<string>>()
+  let unacked: Array<number> = []
+  let polling = false
+  let draining = false
+  let failures = 0
   let timer: { cancel: () => void } | undefined
-  // Session lifetime: session.end bumps `lifetime` and sets `ended`; only a reattach confirmed in the same lifetime clears it.
-  let lifetime = 0
-  let ended = false
-  let current = ""
-  // Host ownership of a step: a reattach bumps `epoch`, so a step left waiting on the old generation neither blocks
-  // the new one nor clears its busy mark. The client fences its own callbacks the same way.
-  let epoch = 0
-  let busy: number | undefined
-  let reattaching = false
 
-  /** The session id, or undefined when a session.end landed while it was read (that read belongs to the old lifetime). */
-  const readSession = async (host: Host) => {
-    const seen = lifetime
-    const id = await host.sessionId()
-    return seen === lifetime ? id : undefined
+  /** The session's identity from its environment, or undefined outside VIBEST. */
+  const identity = async (host: Host) => {
+    const agent = await host.env("VIBEST_AGENT")
+    const sessionId = await host.env("VIBEST_SESSION_ID")
+    if (!agent || !sessionId) return undefined
+    const home = (await host.env("VIBEST_HOME")) || `${(await host.env("HOME")) ?? ""}/.vibest`
+    return { agent, sessionId, socket: `${home}/vibest-http.sock` }
   }
 
-  const attachArgv = (sessionId: string, replace: boolean) =>
-    replace ? ["attach", sessionId, "--replace"] : ["attach", sessionId]
-
-  const makeClient = (host: Host) =>
-    createClaudeInboxClient({
-      sessionId: () => (ended ? "" : current),
-      attach: async (sessionId) => {
-        lastRefusal = "no reply"
-        const r = await host.run(attachArgv(sessionId, false))
-        lastRefusal = r.exitCode !== 0 ? `exit ${r.exitCode}` : (errorOf(r.stdout) ?? "unparsed")
-        return adaptAttach(r.exitCode, r.stdout)
-      },
-      pull: async (generation, sessionId) => {
-        const r = await host.run(["pull", generation, sessionId])
-        return adaptPull(r.exitCode, r.stdout)
-      },
-      readClaim: async (file) => {
-        const body = await host.read(file)
-        if (typeof body !== "string") throw new Error("claim body is not text")
-        return body
-      },
-      submit: async (text): Promise<SubmitReply> => {
-        // Accepted or queued is delivery acceptance, not a finished VIBEST task. A throw is ambiguous (the client says so).
-        const r = await host.submit(text)
-        return r.drop !== undefined ? { kind: "drop" } : { kind: "accepted", text: r.text }
-      },
-      ack: async (generation, sessionId, token) => {
-        const r = await host.run(["ack", generation, sessionId, token])
-        return adaptSettle(r.exitCode, r.stdout, "ack")
-      },
-      release: async (generation, sessionId, token, retry) => {
-        const r = await host.run(["release", generation, sessionId, token, ...(retry ? ["--retry"] : [])])
-        return adaptSettle(r.exitCode, r.stdout, "release")
-      },
+  /** One request to vibestd. Throws when nothing answered (no socket, connection refused, timeout). */
+  const post = async (host: Host, path: string, body: unknown, ms: number): Promise<Reply> => {
+    const who = await identity(host)
+    if (!who) throw new Error("not an VIBEST session")
+    const headers = sessionHeaders({
+      sessionId: who.sessionId,
+      projectId: await host.env("VIBEST_PROJECT_ID"),
+      harnessSessionId: await host.conversation().catch(() => undefined),
+      agent: who.agent,
+      harness: (await host.env("VIBEST_HARNESS")) || "claude",
+      cwd: await host.cwd().catch(() => undefined),
+      runtime: await host.env("VIBEST_RUNTIME"),
+      pluginVersion: VIBEST_PLUGIN_VERSION,
     })
-
-  const halt = () => {
-    timer?.cancel()
-    timer = undefined
+    const r = await timeout(
+      host.fetch(who.socket, path, { ...headers, "content-type": "application/json" }, JSON.stringify(body)),
+      ms,
+      host.after,
+    )
+    return { status: r.status, body: parse(r.text) }
   }
 
-  const step = async (host: Host) => {
-    if (!client || ended || busy === epoch) return
-    const mine = epoch
-    busy = mine
-    try {
-      const id = await readSession(host)
-      if (id === undefined || ended || mine !== epoch) return
-      current = id
-      const before = client.snapshot().phase
-      const snap = before === "new" ? await client.start() : await client.tick()
-      if (mine !== epoch || ended) return
-      if (before === "new" && snap.phase === "idle") host.attached()
-      // not-reported: VIBEST records the session when a turn ends (turn.complete); the next poll attaches again.
-      if (before === "new" && snap.phase === "new")
-        host.status("waiting for VIBEST to record this Claude session (after a turn ends)")
-      if (snap.phase === "stopped") {
-        halt()
-        host.status(refusal(snap.stopReason === "attach-failed" ? lastRefusal : (snap.stopReason ?? "unparsed")))
+  /** Report `body` to `path`; when vibestd does not take it, again after each REPORT_BACKOFF_MS pause. Never throws. */
+  const report = async (host: Host, path: string, body: unknown) => {
+    const attempt = async (n: number): Promise<void> => {
+      let retry = true
+      try {
+        const r = await post(host, path, body, REPORT_TRY_MS)
+        retry = r.status >= 500
+      } catch {
+        // Nothing answered: try again.
       }
+      const pause = REPORT_BACKOFF_MS[n]
+      if (retry && pause !== undefined) host.after(pause, () => void attempt(n + 1))
+    }
+    await attempt(0)
+  }
+
+  const tick = async (host: Host) => {
+    if (polling) return
+    polling = true
+    try {
+      if (unacked.length > 0) {
+        const r = await post(host, "/v1/inbox/ack", { ids: unacked }, REPORT_TRY_MS)
+        if (r.status === 200) unacked = []
+      }
+      const r = await post(host, "/v1/inbox/poll", {}, REPORT_TRY_MS)
+      if (r.status !== 200 || !isBatch(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
+      if (failures >= POLL_FAILURES_SHOWN) host.status(undefined)
+      failures = 0
+      const batch = r.body
+      if (batch.ids.length === 0) return
+      const fresh = batch.ids.filter((id) => !seen.has(id))
+      if (fresh.length === 0) {
+        // Handed out again after its lease ran out: still queued here, or submitted and its ack lost.
+        const queued = queue.some((b) => b.ids.some((id) => batch.ids.includes(id)))
+        if (!queued) unacked.push(...batch.ids.filter((id) => !unacked.includes(id)))
+        return
+      }
+      for (const id of batch.ids) seen.add(id)
+      queue.push(batch)
+      host.redraw()
     } catch {
-      // A failed session read leaves the state as it was; the next tick tries again.
+      failures += 1
+      if (failures === POLL_FAILURES_SHOWN) host.status("VIBEST: vibestd does not answer; still trying")
     } finally {
-      if (busy === mine) busy = undefined
+      polling = false
     }
   }
 
-  const poll = (host: Host) => {
-    timer ??= host.every(() => void step(host))
+  /** Keep `text` for the prompt.submit hook under `line`; the oldest lines go past FULL_MAX. */
+  const keep = (line: string, text: string) => {
+    const list = full.get(line)
+    if (list) list.push(text)
+    else full.set(line, [text])
+    while (full.size > FULL_MAX) full.delete(full.keys().next().value!)
+  }
+  const forget = (line: string, text: string) => {
+    const list = full.get(line)
+    const at = list?.lastIndexOf(text) ?? -1
+    if (list && at >= 0) list.splice(at, 1)
+    if (list?.length === 0) full.delete(line)
   }
 
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
-    if (!started && (await host.coordinator())) {
-      started = true
-      client = makeClient(host)
-      await host.registerReattach()
-      poll(host)
+    if (timer === undefined && (await identity(host))?.agent === "coordinator") {
+      timer = host.every(POLL_MS, () => void tick(host))
+      void tick(host)
     }
     return next(e)
   })
 
-  on("session.end", async ($, e, next) => {
-    lifetime += 1
-    ended = true
-    if (client) {
-      halt()
-      nativeHost($).status(refusal("session-mismatch"))
+  // One batch per draw, submitted from inside this hook so this module's own prompt.submit hook sees it. Draws nothing.
+  on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    const batch = queue[0]
+    if (batch !== undefined && !draining) {
+      const host = nativeHost($)
+      draining = true
+      queue.shift()
+      keep(batch.line, batch.text)
+      // Started here, inside the hook; its answer is handled when it comes, without holding the draw.
+      host.submit(batch.line).then(
+        (r) => {
+          draining = false
+          if (r.drop !== undefined) {
+            forget(batch.line, batch.text)
+            queue.unshift(batch)
+          } else unacked.push(...batch.ids)
+          if (queue.length > 0) host.redraw()
+        },
+        () => {
+          draining = false
+          forget(batch.line, batch.text)
+          queue.unshift(batch)
+          host.redraw()
+        },
+      )
     }
     return next(e)
   })
 
-  on("command.run", { command: REATTACH }, async ($) => {
-    if (!client) return { text: "Not an VIBEST coordinator session: nothing to reattach." }
-    if (reattaching) return { text: `A /${REATTACH} is already running; wait for its answer.` }
-    reattaching = true
-    const host = nativeHost($)
-    try {
-      const seen = lifetime
-      const sessionId = await readSession(host).catch(() => undefined)
-      if (sessionId === undefined)
-        return { text: `Could not read this Claude session; nothing was sent. Run /${REATTACH} again.` }
-      let r: RunResult
-      try {
-        r = await host.run(attachArgv(sessionId, true))
-      } catch {
-        return { text: unknownReplace("no reply") }
-      }
-      const reply = adaptAttach(r.exitCode, r.stdout)
-      if (reply.kind !== "attached") {
-        // Only a refusal the server printed is known not to have replaced anything.
-        const refused = r.exitCode === 0 ? errorOf(r.stdout) : undefined
-        if (refused !== undefined) return { text: `VIBEST inbox not reattached (${refused}); the inbox is unchanged.` }
-        return { text: unknownReplace(r.exitCode !== 0 ? `exit ${r.exitCode}` : "unparsed reply") }
-      }
-      if (seen !== lifetime)
-        return {
-          text: `The Claude session changed while reattaching; generation not used here. Run /${REATTACH} again.`,
-        }
-      current = sessionId
-      ended = false
-      epoch += 1
-      busy = undefined
-      client.reattach(reply.generation)
-      host.attached()
-      poll(host)
-      return { text: "VIBEST inbox reattached with a new generation." }
-    } finally {
-      reattaching = false
-    }
-  })
-
-  // Side effect only. A bridge failure still returns next(e): never block or continue a stopped turn. A subagent's turn
-  // (agentId set) is not the session's. Every main-loop turn end is reported with its reason; vibestd tells the
-  // person's Esc (`aborted` while vibest's round is open) from `vibest interrupt`'s own (its round already closed).
+  // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
+  // (agentId set) is not the session's.
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
-      try {
-        const host = nativeHost($)
-        const agent = await host.agent()
-        const session = await host.vibestSession()
-        if (agent && session)
-          await host.stop(
-            JSON.stringify({
-              hook_event_name: "TurnComplete",
-              session_id: await host.sessionId(),
-              reason: event.reason,
-              last_assistant_message: event.answer,
-              ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
-            }),
-          )
-      } catch {
-        // A missed report is not a blocked turn. vibestd scans a result file the bridge already wrote.
-      }
+      const host = nativeHost($)
+      if (await identity(host).catch(() => undefined))
+        void report(host, "/v1/hooks/claude/turn-end", {
+          hook_event_name: "TurnComplete",
+          session_id: await host.conversation().catch(() => ""),
+          reason: event.reason,
+          last_assistant_message: event.answer,
+          ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
+        })
     }
     return next(event)
   })
 
-  // Side effect only. A bridge failure still returns next(e): never block the user's prompt. The coordinator's pane is the
-  // normal conversation; the adapter keeps only what the person submitted (origin composer or bridge).
+  // This module's own submit (a polled batch's line): its full text goes with it as context. Anything else is reported;
+  // vibestd keeps only what the person submitted (origin composer or bridge), and never the main agent's.
   on("prompt.submit", async ($, event, next) => {
-    try {
-      const host = nativeHost($)
-      const agent = await host.agent()
-      const session = await host.vibestSession()
-      if (agent && session && agent !== "coordinator")
-        await host.prompt(
-          JSON.stringify({ hook_event_name: "PromptSubmit", text: event.text, origin: event.origin.kind }),
-        )
-    } catch {
-      // A missed report is not a blocked prompt. The turn still runs.
+    const host = nativeHost($)
+    if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
+      const list = full.get(event.text)
+      const text = list?.shift()
+      if (list?.length === 0) full.delete(event.text)
+      if (text !== undefined) return next({ ...event, context: [...(event.context ?? []), text] })
+      return next(event)
     }
+    const who = await identity(host).catch(() => undefined)
+    if (who && who.agent !== "coordinator")
+      await report(host, "/v1/hooks/claude/prompt", {
+        hook_event_name: "PromptSubmit",
+        text: event.text,
+        origin: event.origin.kind,
+      })
     return next(event)
   })
 
   on("tool.call", async ($, event, next) => {
     const host = nativeHost($)
-    if (!(await host.agent())) return next(event)
-    try {
-      const reason = guardReason(
-        await host.guard(
-          JSON.stringify({ tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }),
-        ),
-      )
-      return reason === undefined ? next(event) : { deny: reason }
-    } catch {
-      return { deny: GUARD_FAILURE }
+    if (!(await host.env("VIBEST_AGENT"))) return next(event)
+    const body = { tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }
+    for (let n = 0; ; n++) {
+      try {
+        const r = await post(host, "/v1/hooks/claude/guard", body, GUARD_TRY_MS)
+        if (r.status === 200) {
+          const deny = (r.body as { deny?: unknown } | undefined)?.deny
+          return typeof deny === "string" ? { deny } : next(event)
+        }
+        if (r.status < 500) return { deny: `vibest refused the tool call: ${errorOf(r.body) ?? `status ${r.status}`}` }
+      } catch {
+        // Nothing answered in time: try again.
+      }
+      const pause = GUARD_BACKOFF_MS[n]
+      if (pause === undefined) return { deny: UNREACHABLE }
+      await new Promise<void>((resolve) => host.after(pause, resolve))
     }
   }).catch(async ($, event, next) => {
     // A failed hook is skipped unless this handler answers. Outside VIBEST that skip must stay a pass.
     try {
-      if (!(await nativeHost($).agent())) return undefined
+      if (!(await nativeHost($).env("VIBEST_AGENT"))) return undefined
     } catch {
       return undefined
     }
     if (next.called) return next(event)
-    return { deny: GUARD_FAILURE }
+    return { deny: UNREACHABLE }
   })
 }
 

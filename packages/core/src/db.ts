@@ -56,28 +56,12 @@ const Metadata = Schema.Struct({
   /** Archived with `--keep-worktree`: its last borrower's archive leaves the directory alone too. */
   keptWorktree: Schema.optional(Schema.Boolean),
   /**
-   * Claude inbox attachment intent. Not a live generation: this process's registry is authoritative, and a restart
-   * leaves the marker here while pull of the stored generation is stale. Paste stays off while it is set on claude.
-   */
-  /**
    * What `vibest rm` closed (SPEC §8.6a), one record per pane, each written before its close: the pane, the PIDs the runtime
    * reported in it (its shell and foreground processes, never argv or env), and `exited` once signal 0 found every one
    * of them gone.
    */
   stop: Schema.optional(
     Schema.Array(Schema.Struct({ pane: Schema.String, pids: Schema.Array(Schema.Number), exited: Schema.Boolean })),
-  ),
-  /**
-   * Claude inbox attachment intent. Not a live generation: this process's registry is authoritative, and a restart
-   * leaves the marker here while pull of the stored generation is stale. Paste stays off while it is set on claude.
-   */
-  bridge: Schema.optional(
-    Schema.Struct({
-      generation: Schema.String,
-      claudeSessionId: Schema.String,
-      runtime: Schema.String,
-      address: Schema.String,
-    }),
   ),
   /**
    * The check rule, on the open round: how many commands have finished, the stored outcome of the current result
@@ -115,24 +99,6 @@ const Metadata = Schema.Struct({
     ),
   ),
 })
-export type CoordinatorBridge = NonNullable<(typeof Metadata.Type)["bridge"]>
-const BridgeValue = Schema.Struct({
-  generation: Schema.String,
-  claudeSessionId: Schema.String,
-  runtime: Schema.String,
-  address: Schema.String,
-})
-
-/** `set` is true when an attachment is stored, even if it does not decode. Corrupt intent still suppresses paste. */
-const bridgeFrom = (raw: unknown): { readonly set: boolean; readonly bridge: CoordinatorBridge | undefined } => {
-  if (raw === undefined || raw === null) return { set: false, bridge: undefined }
-  try {
-    return { set: true, bridge: Schema.decodeUnknownSync(BridgeValue)(raw) }
-  } catch {
-    return { set: true, bridge: undefined }
-  }
-}
-
 /** A subagent (not a project's main session), in the shape its callers read: columns plus `session.metadata`. */
 export const SessionRow = Schema.Struct({
   id: Schema.String,
@@ -930,10 +896,18 @@ const make = Effect.gen(function* () {
                 harness = ${harness}, runtime = ${runtime}, metadata = json_patch(metadata, ${metadata})
               WHERE id = (SELECT main_session_id FROM project WHERE id = ${project}) RETURNING id, harness_session_id AS harness_session`
             if (!existing?.moving || fresh) yield* dropWaiting(project)
-            return { sessionId: saved!.id, harnessSessionId: saved!.harnessSession }
+            return { sessionId: saved!.id, harnessSessionId: saved!.harnessSession, projectId: project }
           }),
         )
       }).pipe(Effect.orDie),
+
+    /** The conversation an integration reports for session `id` (main agent or not): the latest wins. True when it changed. */
+    noteHarnessSession: (id: string, harnessSessionId: string) =>
+      sql<{ id: string }>`UPDATE session SET harness_session_id = ${harnessSessionId}
+        WHERE id = ${id} AND harness_session_id IS NOT ${harnessSessionId} RETURNING id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
 
     /** The last report wins. Another harness, or an id that is not a main agent, changes nothing. */
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
@@ -1099,18 +1073,6 @@ const make = Effect.gen(function* () {
             RETURNING id`.pipe(Effect.map((rows) => rows.map((r) => r.id)))
       ).pipe(Effect.orDie),
 
-    /** Ids among `ids` that are still `sending` (stored as `delivering`). */
-    sendingAmong: (ids: ReadonlyArray<number>) =>
-      (ids.length === 0
-        ? Effect.succeed([] as ReadonlyArray<number>)
-        : sql<{ id: number }>`SELECT id FROM inbox WHERE ${sql.in("id", ids)} AND delivery_status = 'delivering'`.pipe(
-            Effect.map((rows) => rows.map((r) => r.id)),
-          )
-      ).pipe(Effect.orDie),
-
-    inboxRows: (ids: ReadonlyArray<number>) =>
-      (ids.length === 0 ? Effect.succeed([] as ReadonlyArray<InboxRow>) : inboxIn(ids)).pipe(Effect.orDie),
-
     /** Move rows and return only the ids that were in `from`. A short result means the transition did not happen. */
     transitionInbox: (ids: ReadonlyArray<number>, status: InboxStatus, from: InboxStatus) =>
       Effect.gen(function* () {
@@ -1152,67 +1114,21 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
-
-    /**
-     * Run `body`, commit, then `publish`. `restore` covers only the body, so the body can still be cancelled
-     * and a failed COMMIT does not publish. Commit and `publish` stay outside `restore`, so a pending interrupt
-     * cannot skip the memory update after COMMIT. The write transaction `coordinatorLaunch` and
-     * `clearCoordinator` use holds its connection until `body` finishes. Do not await the runtime here.
-     */
-    withCoordinatorWrite: <A, E, R>(body: Effect.Effect<A, E, R>, publish?: (value: A) => void) =>
-      Effect.uninterruptibleMask((restore) =>
-        sql.withTransaction(restore(body)).pipe(
-          Effect.map((value) => {
-            publish?.(value)
-            return value
-          }),
-          Effect.catchTag("SqlError", (e) => Effect.die(e)),
-        ),
-      ),
-
-    /** The main agent's identity and inbox attachment (`metadata.bridge`). */
-    readCoordinatorFence: (projectId: number) =>
-      sql<{ harnessId: string; harnessSessionId: string | null; runtime: string | null; metadata: string }>`
-        SELECT a.harness AS harness_id, a.harness_session_id, a.runtime, a.metadata
-        FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId}
-      `.pipe(
-        Effect.map((rows) => {
-          const row = rows[0]
-          if (!row) return undefined
-          let bridge: ReturnType<typeof bridgeFrom>
-          try {
-            bridge = bridgeFrom((JSON.parse(row.metadata) as { bridge?: unknown }).bridge)
-          } catch {
-            bridge = { set: true, bridge: undefined }
-          }
-          const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-          return {
-            harnessId: row.harnessId,
-            harnessSessionId: row.harnessSessionId,
-            runtime: located?.kind ?? null,
-            address: located === undefined ? null : encodeAddress({ machine: located.machine, id: located.id }),
-            bridgeSet: bridge.set,
-            bridge: bridge.bridge,
-          }
-        }),
-        Effect.orDie,
-      ),
-
-    /** Sets the main agent's `metadata.bridge` and leaves its other keys. */
-    writeCoordinatorBridge: (projectId: number, bridge: CoordinatorBridge) =>
-      sql`UPDATE session SET metadata = json_set(metadata, '$.bridge', json(${JSON.stringify(bridge)}))
-        WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`.pipe(Effect.as(true), Effect.orDie),
   }
 })
 
 /** Name transforms the SQLite client must be built with: columns are the snake_case of the row fields. */
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
-/** A claimed main-Agent-bound Message whose delivery was cut off: it may or may not have arrived. Subagent-bound `delivering` rows stay for `check`. */
+/**
+ * A claimed main-Agent-bound Message whose delivery was cut off: it may or may not have arrived, so it failed. A Claude
+ * main agent's is back to pending: the plugin acks by row id, a row it already has is acked again, and it skips repeats.
+ * Subagent-bound `delivering` rows stay for `check`.
+ */
 const recoverSending = (sql: SqlClient.SqlClient) =>
-  sql`UPDATE inbox SET delivery_status = 'failed' WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(
-    Effect.asVoid,
-  )
+  sql`UPDATE inbox SET delivery_status = CASE WHEN EXISTS (SELECT 1 FROM session s JOIN project p ON p.main_session_id = s.id
+      WHERE s.id = inbox.recipient_session_id AND s.harness = 'claude') THEN 'pending' ELSE 'failed' END
+    WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(Effect.asVoid)
 
 export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibest/Db") {
   /** Opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`). */

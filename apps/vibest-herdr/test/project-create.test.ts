@@ -570,7 +570,6 @@ describe("multi-repository isolated workspace", () => {
           fresh: false,
           terminal: "home:p1",
         }),
-        record: () => Effect.die("pi gets no conversation id chosen up front"),
       }).pipe(
         Effect.provide(
           Layer.succeed(Harness, {

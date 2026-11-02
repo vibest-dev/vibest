@@ -1,7 +1,8 @@
 // Result files and turn-report lines written by the integrations (SPEC §5.3, runtime-port.md §5), and the session report format.
 import { Effect, FileSystem, Option, Path, Schema } from "effect"
 
-import { Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
+import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
+import { Layout, writeAtomic } from "./paths.ts"
 
 /** `{harness, ts, payload}`; payload is the harness's hook input, verbatim. */
 const Envelope = Schema.fromJsonString(
@@ -56,6 +57,56 @@ export const appendReportLine = (file: string, line: ReportLine) =>
     yield* fs.makeDirectory(path.dirname(file), { recursive: true })
     yield* fs.writeFileString(file, encodeReportLine(line), { flag: "a" })
   })
+
+const jsonObject = (raw: string): Record<string, unknown> | undefined => {
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+    return value as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A harness plugin's turn end, wherever it arrives (`vibest integration stop`, or vibestd's HTTP hook): the adapter's
+ * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
+ */
+export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>
+  Effect.gen(function* () {
+    const event = jsonObject(raw)
+    const outcome = event && adapter.turnEnd?.(event, agent === "coordinator")
+    if (!outcome) return false
+    const layout = yield* Layout
+    const path = yield* Path.Path
+    const file = layout.resultFile(sessionId)
+    // The session id comes from the caller. Keep the file as one name inside the results directory.
+    if (path.basename(file) !== `${sessionId}.json` || path.dirname(file) !== layout.results) return false
+    yield* writeAtomic(
+      file,
+      JSON.stringify({ harness: adapter.id, ts: Math.floor(Date.now() / 1000), payload: outcome.result }),
+    )
+    yield* appendReportLine(layout.reportFile(sessionId), {
+      turn: "end",
+      ts: Date.now(),
+      harness: adapter.id,
+      payload: outcome.result,
+    })
+    return true
+  })
+
+/** A harness plugin's prompt event: the text a round starts with, or undefined (the main agent, a nested agent, not the user). */
+export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) => {
+  const event = jsonObject(raw)
+  const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
+  return prompt?.text.trim() ? prompt.text : undefined
+}
+
+/** The prompt's turn-start report line; written after vibestd stamped the round, so it is not older than that stamp. */
+export const recordPrompt = (sessionId: string, text: string) =>
+  Effect.flatMap(Layout, (layout) =>
+    appendReportLine(layout.reportFile(sessionId), { turn: "start", ts: Date.now(), prompt: text }),
+  )
 
 /** Every report line of a session, oldest first; unreadable lines are skipped, a missing file is empty. */
 export const readReportLines = (file: string) =>

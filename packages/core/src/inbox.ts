@@ -1,21 +1,19 @@
 // Inbox rows and their delivery to a project's coordinator (SPEC §11). Rows live in sqlite. Rows for a session (`send`)
 // are delivered by Sessions; here only coordinator-bound rows (report, result, notice) are pushed. A command-line
 // caller reads a session's latest result with `vibest result`.
-// A coordinator whose harness adapter has `inbox: "subscribe"` (the Pi extension) pulls its rows over vibest.sock; one
-// with `inbox: "bridge"` (the Claude plugin) pulls them while its bridge is attached; every other idle coordinator gets
-// them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
+// A coordinator whose harness adapter has `inbox: "subscribe"` takes its rows itself: the Pi extension over vibest.sock
+// (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle coordinator gets them
+// typed in through the runtime's prompt. Nobody there: the row is `dropped`.
 import {
   Cause,
+  Clock,
   Context,
-  Crypto,
   Duration,
   Effect,
   Exit,
-  FileSystem,
   HashMap,
   Layer,
   Option,
-  Path,
   PubSub,
   Queue,
   Schedule,
@@ -24,30 +22,16 @@ import {
   SynchronizedRef,
 } from "effect"
 
-import {
-  claimedText,
-  CLAUDE_INBOX_MAX_BYTES,
-  createRegistry,
-  isInboxId,
-  utf8Bytes,
-  writeClaimFile,
-  type LiveAttachment,
-  type ReceiptOp,
-} from "./claude-inbox.ts"
-import {
-  Db,
-  encodeAddress,
-  type CoordinatorBridge,
-  type InboxRow,
-  type NewInboxRow,
-  type RuntimeAddress,
-} from "./db.ts"
+import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { Harnesses } from "./harness.ts"
-import { Layout } from "./paths.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export const RECONCILE = Duration.seconds(10)
+/** A batch a poll handed out and nobody acked goes back to pending after this. */
+export const LEASE = Duration.seconds(30)
+/** A coordinator that polled and then stopped for this long is gone: its leased rows go back to pending at once. */
+export const AWAY = Duration.seconds(5)
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
@@ -68,28 +52,52 @@ export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
   return other === -1 ? pending : pending.slice(0, other)
 }
 
-const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
+export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 
-export type InboxReply = {
-  readonly generation?: string
-  readonly token?: string
-  readonly file?: string
-  readonly acked?: boolean
-  readonly released?: boolean
-  readonly already?: boolean
-  readonly empty?: boolean
-  readonly error?: string
-  readonly bytes?: number
+/** A delivery's one-line summary is at most this many code points. */
+export const LINE_MAX = 120
+
+const codePoints = (s: string) => [...s].length
+const clip = (s: string, max: number) => {
+  const cps = [...s]
+  return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
 }
 
-export type InboxCall = {
-  readonly projectId: number
-  /** The coordinator's terminal id, as the caller's runtime knows it (opaque to core). */
-  readonly terminal: string
-  /** The terminal's machine; the local one when the caller does not say. */
-  readonly machine?: string
-  readonly claudeSessionId: string
+/** How a result or report row ended, as its line says it. */
+const statusOf = (row: InboxRow) => {
+  if (row.kind !== "result") return "sent a message"
+  const { error, status } = row.details
+  if (error === "interrupted") return "was interrupted"
+  if (typeof error === "string" && error !== "") return "failed"
+  if (status === "completed") return "completed"
+  if (status === "failed") return "failed"
+  if (status === "needs_input") return "needs input"
+  return "ended without a status"
 }
+
+/**
+ * The one line a delivery shows (the full text goes to the model beside it): `<Type> Agent "<title>" <status> (<id>)`,
+ * or `Notice: <first line>`. The id stays, so the model can read the full result back after /compact dropped it. A
+ * batch of several rows is named by its last, with ` · +N more`. The title (or the notice) is cut to fit LINE_MAX.
+ */
+export const line = (
+  batch: ReadonlyArray<InboxRow>,
+  who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
+) => {
+  const last = batch.at(-1)
+  if (!last) return ""
+  const more = batch.length > 1 ? ` · +${batch.length - 1} more` : ""
+  const fit = (prefix: string, middle: string, suffix: string) =>
+    `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
+  if (last.kind === "notice") return fit("Notice: ", last.message.trim().split("\n")[0] ?? "", more)
+  const session = who(last.sessionId)
+  const agent = session?.agent || "general"
+  const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
+  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${last.sessionId})${more}`)
+}
+
+/** What a poll hands the Claude plugin: the rows to ack, the line to show, the full text for the model. */
+export type Polled = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
 
 export class Inbox extends Context.Service<
   Inbox,
@@ -101,18 +109,15 @@ export class Inbox extends Context.Service<
     readonly deliver: (projectId: number) => Effect.Effect<void>
     /** The coordinator's rows from now on, one string per claimed batch, instead of `agent.prompt`. */
     readonly stream: (projectId: number) => Stream.Stream<string>
-    /** The next coordinator-bound row whose delivery succeeded (`agent.prompt` returned, or the Pi extension acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
+    /** The next coordinator-bound row whose delivery succeeded (`agent.prompt` returned, or the integration acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
     readonly delivered: Effect.Effect<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
-    readonly attach: (input: InboxCall & { readonly replace: boolean }) => Effect.Effect<InboxReply>
-    readonly pull: (input: InboxCall & { readonly generation: string }) => Effect.Effect<InboxReply>
-    readonly ack: (
-      input: InboxCall & { readonly generation: string; readonly token: string },
-    ) => Effect.Effect<InboxReply>
-    readonly release: (
-      input: InboxCall & { readonly generation: string; readonly token: string; readonly retry: boolean },
-    ) => Effect.Effect<InboxReply>
-    /** Retire this process's claim when the coordinator row no longer matches the attachment. Does not clear the marker. */
-    readonly reconcile: (projectId: number) => Effect.Effect<void>
+    /**
+     * The coordinator's next batch, leased for LEASE (answered at once, empty when there is none or vibestd is
+     * stopping). Expired leases of the project go back to pending first.
+     */
+    readonly poll: (projectId: number) => Effect.Effect<Polled>
+    /** The rows the coordinator took: delivered. Leased and pending rows of the project both count; repeating is harmless. */
+    readonly ack: (projectId: number, ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
   }
 >()("vibest/Inbox") {
   static readonly layer = Layer.effect(
@@ -121,18 +126,10 @@ export class Inbox extends Context.Service<
       const db = yield* Db
       const drain = yield* Drain
       const runtimes = yield* Runtimes
-      const layout = yield* Layout
       const harnesses = yield* Harnesses
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const crypto = yield* Crypto.Crypto
       const scope = yield* Effect.scope
-      const mint = crypto.randomUUIDv4.pipe(
-        Effect.map((id) => id.toLowerCase()),
-        Effect.orDie,
-      )
       const pubsub = yield* PubSub.unbounded<InboxRow>()
       // Made before any delivery runs, so none is missed.
       const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
@@ -154,7 +151,6 @@ export class Inbox extends Context.Service<
           ),
           true,
         )
-      const registry = createRegistry()
 
       const locks = yield* SynchronizedRef.make(HashMap.empty<number, Semaphore.Semaphore>())
       const lock = (projectId: number) =>
@@ -165,90 +161,8 @@ export class Inbox extends Context.Service<
           }),
         )
 
-      const withLock = <A, E, R>(projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
-        drain.work(
-          `inbox project ${projectId}`,
-          lock(projectId).pipe(Effect.flatMap((s) => s.withPermit(body))),
-          settlement,
-        )
-
-      const removeClaimFile = (file: string) =>
-        fs.remove(file).pipe(
-          Effect.catchIf(
-            (error) => error.reason._tag === "NotFound",
-            () => Effect.void,
-          ),
-          Effect.tapError((error) => Effect.logWarning(`inbox claim file ${file} was not removed: ${error.message}`)),
-          Effect.ignore,
-        )
-
-      const absent = (error: { readonly reason: { readonly _tag: string; readonly cause?: unknown } }) => {
-        const cause = error.reason.cause
-        const code = typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined
-        return error.reason._tag === "NotFound" || (error.reason._tag === "BadResource" && code === "ENOTDIR")
-      }
-
-      const removeIfPresent = (file: string) => {
-        const remove = fs.remove(file).pipe(
-          Effect.catchIf(absent, () => Effect.void),
-          Effect.tapError((error) => Effect.logWarning(`inbox claim file ${file} was not removed: ${error.message}`)),
-          Effect.orDie,
-        )
-        return fs.exists(file).pipe(
-          Effect.matchEffect({
-            onFailure: (error) => (absent(error) ? Effect.void : remove),
-            onSuccess: (present) => (present ? remove : Effect.void),
-          }),
-        )
-      }
-
-      const writeClaim = (file: string, body: string, suffix: string) => writeClaimFile(fs, path, file, body, suffix)
-
-      /** The caller's place, encoded as the fence stores it. */
-      const placeOf = (call: InboxCall) => encodeAddress({ machine: call.machine ?? "local", id: call.terminal })
-      const refusal = (
-        fence:
-          | {
-              readonly harnessId: string
-              readonly harnessSessionId: string | null
-              readonly runtime: string | null
-              readonly address: string | null
-            }
-          | undefined,
-        call: InboxCall,
-      ): InboxReply | undefined => {
-        if (call.terminal === "" || call.claudeSessionId === "") return { error: "invalid-caller" }
-        if (!fence || inboxOf(fence.harnessId) !== "bridge") return { error: "wrong-harness" }
-        if (fence.harnessSessionId === null) return { error: "not-reported" }
-        if (fence.harnessSessionId !== call.claudeSessionId || fence.address !== placeOf(call))
-          return { error: "stale-receiver" }
-        return undefined
-      }
-
-      const retireClaim = (live: LiveAttachment) =>
-        Effect.gen(function* () {
-          const ids = live.claim?.ids ?? []
-          const file = live.claim?.file
-          if (ids.length > 0) yield* db.setInboxStatus(ids, "failed", "sending")
-          live.claim = undefined
-          if (file !== undefined) yield* removeClaimFile(file)
-        })
-
-      const reconcileLocked = (projectId: number) =>
-        Effect.gen(function* () {
-          const live = registry.get(projectId)
-          if (!live) return
-          const fence = yield* db.readCoordinatorFence(projectId)
-          const same =
-            fence !== undefined &&
-            inboxOf(fence.harnessId) === "bridge" &&
-            fence.harnessSessionId === live.claudeSessionId &&
-            fence.runtime === live.runtime &&
-            fence.address === live.address
-          if (same) return
-          yield* retireClaim(live)
-          registry.delete(projectId)
-        })
+      const withLock = <A, E, R>(label: string, projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
+        drain.work(label, lock(projectId).pipe(Effect.flatMap((s) => s.withPermit(body))), settlement)
 
       const deliver = (projectId: number) =>
         drain.work(
@@ -257,8 +171,6 @@ export class Inbox extends Context.Service<
             Effect.flatMap((s) =>
               s.withPermit(
                 Effect.gen(function* () {
-                  // Before any early return: a busy, missing, or unreachable coordinator still retires a stale claim.
-                  yield* reconcileLocked(projectId)
                   const coord = yield* db.coordinatorOf(projectId)
                   if (!coord?.address || coord.address.id === "" || !coord.runtime)
                     return yield* db.dropWaiting(projectId, "absent")
@@ -269,13 +181,10 @@ export class Inbox extends Context.Service<
                   const presence = yield* coordinatorIdle(h.value, coord.address)
                   if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
                   if (presence !== "idle") return
-                  const fence = yield* db.readCoordinatorFence(projectId)
-                  // Recheck under this lock, after the runtime was awaited, so attach cannot overlap an entered paste.
-                  if (fence && inboxOf(fence.harnessId) === "bridge" && fence.bridgeSet) return
+                  // Its harness takes its rows itself (`stream`, `poll`); they wait until it does.
+                  if (inboxOf(coord.harnessId) === "subscribe") return
                   const batch = nextBatch(yield* db.coordinatorPending(projectId))
                   if (batch.length === 0) return
-                  // Its harness takes its rows itself (`stream`); they wait until it does.
-                  if (inboxOf(coord.harnessId) === "subscribe") return
                   const claimed = yield* db.claim(
                     batch.map((r) => r.id),
                     guard,
@@ -326,8 +235,6 @@ export class Inbox extends Context.Service<
       // Triggers: a coordinator terminal's state changes (or its exit), and the reconcile tick. The registry's merged
       // `events` stream carries every registered runtime's (each registration's share ends when it unloads); a runtime
       // without `events` of its own is the poll's to cover (§5).
-      const changed = () =>
-        Effect.forEach(registry.projects(), (id) => withLock(id, reconcileLocked(id), true), { discard: true })
       yield* Effect.forkIn(
         runtimes.events.pipe(
           Stream.runForEach((event) => {
@@ -339,7 +246,6 @@ export class Inbox extends Context.Service<
                   Effect.flatMap((all) =>
                     Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
                   ),
-                  Effect.andThen(changed),
                   Effect.ignore,
                 ),
               )
@@ -354,15 +260,51 @@ export class Inbox extends Context.Service<
       )
       yield* Effect.forkIn(
         db.pendingProjects.pipe(
-          Effect.flatMap((projects) => {
-            const ids = new Set(projects)
-            for (const id of registry.projects()) ids.add(id)
-            return Effect.forEach([...ids], deliver, { discard: true })
-          }),
+          Effect.flatMap((projects) => Effect.forEach(projects, deliver, { discard: true })),
           Effect.repeat(Schedule.spaced(RECONCILE)),
         ),
         scope,
       )
+
+      /**
+       * Claim the coordinator's next batch, under the project's lock. Only for a coordinator that takes its rows itself,
+       * still where `origin` (when given) read it. `hold` runs in the same uninterruptible region as the claim, so a
+       * cut-off caller cannot lose the ids.
+       */
+      const claimNext = (
+        projectId: number,
+        origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
+        hold: (ids: ReadonlyArray<number>) => void,
+      ) =>
+        withLock(
+          `claim project ${projectId}`,
+          projectId,
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const current = yield* db.coordinatorOf(projectId)
+              if (!current || inboxOf(current.harnessId) !== "subscribe" || !current.address || !current.runtime)
+                return undefined
+              const address = encodeAddress(current.address)
+              if (
+                origin &&
+                (current.harnessId !== origin.harnessId ||
+                  current.runtime !== origin.runtime ||
+                  address !== origin.address)
+              )
+                return undefined
+              const pending = yield* db.coordinatorPending(projectId)
+              if (pending.length === 0) return undefined
+              const batch = nextBatch(pending)
+              const claimed = yield* db.claim(
+                batch.map((r) => r.id),
+                { projectId, runtime: current.runtime, address, harnessId: current.harnessId },
+              )
+              if (claimed.length === 0) return undefined
+              hold(claimed)
+              return batch.filter((r) => claimed.includes(r.id))
+            }),
+          ),
+        )
 
       // Guard is the coordinator row as this stream read it. Two subscribers: whichever claims a batch first takes it.
       // shortcut: delivered means the RPC client queued the chunk (next pull starts only after the socket Ack), not that pi.sendMessage succeeded; a dropped Ack can mark failed after the client already has it, upgrade when delivery must mean sendMessage returned
@@ -373,7 +315,6 @@ export class Inbox extends Context.Service<
             const origin =
               subscribed?.address && subscribed.runtime
                 ? {
-                    projectId,
                     runtime: subscribed.runtime,
                     address: encodeAddress(subscribed.address),
                     harnessId: subscribed.harnessId,
@@ -381,43 +322,13 @@ export class Inbox extends Context.Service<
                 : undefined
             const arrivals = yield* PubSub.subscribe(pubsub)
             // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
-            let unconfirmed: Array<number> = []
+            let unconfirmed: ReadonlyArray<number> = []
             const claimOne = () =>
-              drain.work(
-                `Pi claim project ${projectId}`,
-                lock(projectId).pipe(
-                  Effect.flatMap((s) =>
-                    s.withPermit(
-                      Effect.uninterruptible(
-                        Effect.gen(function* () {
-                          if (!origin) return undefined
-                          const current = yield* db.coordinatorOf(projectId)
-                          if (
-                            !current ||
-                            inboxOf(current.harnessId) !== "subscribe" ||
-                            current.harnessId !== origin.harnessId ||
-                            !current.address ||
-                            !current.runtime
-                          )
-                            return undefined
-                          if (current.runtime !== origin.runtime || encodeAddress(current.address) !== origin.address)
-                            return undefined
-                          const pending = yield* db.coordinatorPending(projectId)
-                          if (pending.length === 0) return undefined
-                          const batch = nextBatch(pending)
-                          const claimed = yield* db.claim(
-                            batch.map((r) => r.id),
-                            origin,
-                          )
-                          if (claimed.length === 0) return undefined
-                          unconfirmed = claimed.slice()
-                          return text(batch.filter((r) => claimed.includes(r.id)))
-                        }),
-                      ),
-                    ),
-                  ),
-                ),
-              )
+              origin === undefined
+                ? Effect.succeed(undefined)
+                : claimNext(projectId, origin, (ids) => {
+                    unconfirmed = ids
+                  }).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             // One batch per pull, no buffer: the socket server starts this pull only after the previous chunk's Ack.
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
@@ -449,255 +360,85 @@ export class Inbox extends Context.Service<
           }),
         )
 
-      const mintGeneration = (blocked: ReadonlyArray<string | undefined>) =>
-        Effect.gen(function* () {
-          for (let i = 0; i < 4; i++) {
-            const generation = yield* mint
-            if (!blocked.includes(generation)) return generation
-          }
-          return yield* Effect.die("inbox generation collided")
+      // The Claude plugin's leases, this process only: a restart puts its `sending` rows back to pending (Db.recoverSending).
+      const leases = new Map<number, { readonly projectId: number; readonly until: number }>()
+      const lastPoll = new Map<number, number>()
+      /** Leased rows of `projectId` that `expired` picks go back to pending. Run under the project's lock. */
+      const unlease = (projectId: number, expired: (until: number) => boolean) =>
+        Effect.suspend(() => {
+          const ids: Array<number> = []
+          for (const [id, lease] of leases)
+            if (lease.projectId === projectId && expired(lease.until)) {
+              leases.delete(id)
+              ids.push(id)
+            }
+          return db.transitionInbox(ids, "pending", "sending")
         })
 
-      const attach = (input: InboxCall & { readonly replace: boolean }) =>
-        withLock(
-          input.projectId,
-          Effect.gen(function* () {
-            let ownedFile: string | undefined
-            return yield* Effect.gen(function* () {
-              // Read inside the transaction; the publish callback runs synchronously at commit, with what it saw.
-              let committed: { readonly runtime: string; readonly address: string } | undefined
-              const result = yield* db.withCoordinatorWrite(
-                Effect.gen(function* () {
-                  const fence = yield* db.readCoordinatorFence(input.projectId)
-                  const refused = refusal(fence, input)
-                  if (refused) return { _tag: "reply" as const, reply: refused }
-                  if (fence!.bridgeSet && !input.replace)
-                    return { _tag: "reply" as const, reply: { error: "stale-receiver" } }
-                  const previous = registry.get(input.projectId)
-                  const generation = yield* mintGeneration([fence!.bridge?.generation, previous?.generation])
-                  const bridge: CoordinatorBridge = {
-                    generation,
-                    claudeSessionId: input.claudeSessionId,
-                    runtime: fence!.runtime ?? "",
-                    address: placeOf(input),
-                  }
-                  if (!(yield* db.writeCoordinatorBridge(input.projectId, bridge)))
-                    return { _tag: "reply" as const, reply: { error: "unavailable" } }
-                  if (previous?.claim !== undefined && previous.claim.ids.length > 0) {
-                    const failed = yield* db.transitionInbox(previous.claim.ids, "failed", "sending")
-                    if (failed.length !== previous.claim.ids.length)
-                      return yield* Effect.die("inbox replace did not retire its own claim")
-                  }
-                  committed = { runtime: fence!.runtime ?? "", address: placeOf(input) }
-                  return { _tag: "attached" as const, generation, file: previous?.claim?.file }
-                }),
-                (result) => {
-                  if (result._tag !== "attached" || committed === undefined) return
-                  registry.set(input.projectId, {
-                    generation: result.generation,
-                    claudeSessionId: input.claudeSessionId,
-                    runtime: committed.runtime,
-                    address: committed.address,
-                    claim: undefined,
-                    receipt: undefined,
-                  })
-                  ownedFile = result.file
-                },
-              )
-              if (result._tag === "reply") return result.reply
-              return { generation: result.generation }
-            }).pipe(
-              Effect.ensuring(
-                Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    if (ownedFile !== undefined) yield* removeClaimFile(ownedFile)
-                  }),
-                ),
-              ),
-            )
-          }),
-        )
+      const poll = (projectId: number) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          lastPoll.set(projectId, now)
+          const empty: Polled = { ids: [], line: "", text: "" }
+          // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
+          if ((yield* drain.phase) !== "open") return empty
+          yield* withLock(
+            `unlease project ${projectId}`,
+            projectId,
+            unlease(projectId, (until) => until <= now),
+            true,
+          )
+          const rows = yield* claimNext(projectId, undefined, (ids) => {
+            for (const id of ids) leases.set(id, { projectId, until: now + Duration.toMillis(LEASE) })
+          })
+          if (rows === undefined) return empty
+          const last = rows.at(-1)!
+          const session = last.kind === "notice" ? undefined : yield* db.getSession(last.sessionId)
+          return {
+            ids: rows.map((r) => r.id),
+            line: line(rows, () => session && { agent: session.agent, title: session.name }),
+            text: text(rows),
+          }
+        })
 
-      const sameLive = (
-        live: LiveAttachment | undefined,
-        fence: {
-          readonly harnessSessionId: string | null
-          readonly runtime: string | null
-          readonly address: string | null
-          readonly bridge?: { readonly generation: string } | undefined
-        },
-        call: InboxCall & { readonly generation: string },
-      ) =>
-        live !== undefined &&
-        fence.bridge?.generation === live.generation &&
-        live.generation === call.generation &&
-        live.claudeSessionId === fence.harnessSessionId &&
-        live.runtime === fence.runtime &&
-        live.address === fence.address
-
-      const pull = (input: InboxCall & { readonly generation: string }) =>
+      const ack = (projectId: number, ids: ReadonlyArray<number>) =>
         withLock(
-          input.projectId,
-          Effect.gen(function* () {
-            if (!isInboxId(input.generation)) return { error: "stale-receiver" }
-            let publication:
-              | {
-                  readonly ids: ReadonlyArray<number>
-                  readonly file: string
-                  readonly tmp: string
-                  readonly token: string
-                }
-              | undefined
-            let published = false
-            const compensate = Effect.uninterruptible(
-              Effect.gen(function* () {
-                if (published || !publication) return
-                yield* db.transitionInbox(publication.ids, "pending", "sending")
-                const live = registry.get(input.projectId)
-                if (live?.claim?.token === publication.token) live.claim = undefined
-                yield* removeIfPresent(publication.file)
-                yield* removeIfPresent(publication.tmp)
-              }),
-            )
-            return yield* Effect.gen(function* () {
-              const prepared = yield* db.withCoordinatorWrite(
-                Effect.gen(function* () {
-                  const fence = yield* db.readCoordinatorFence(input.projectId)
-                  const refused = refusal(fence, input)
-                  if (refused || !fence)
-                    return { _tag: "reply" as const, reply: refused ?? { error: "stale-receiver" } }
-                  const live = registry.get(input.projectId)
-                  if (!sameLive(live, fence, input))
-                    return { _tag: "reply" as const, reply: { error: "stale-receiver" } }
-                  let dropPrevious = false
-                  if (live!.claim) {
-                    const sending = yield* db.sendingAmong(live!.claim.ids)
-                    if (sending.length === live!.claim.ids.length)
-                      return { _tag: "have" as const, token: live!.claim.token, file: live!.claim.file }
-                    if (sending.length > 0) {
-                      yield* db.transitionInbox(sending, "failed", "sending")
-                      const still = yield* db.sendingAmong(live!.claim.ids)
-                      if (still.length > 0)
-                        return { _tag: "narrow" as const, token: live!.claim.token, file: live!.claim.file, ids: still }
-                    }
-                    dropPrevious = true
-                  }
-                  const stop = <A extends { readonly error?: string; readonly empty?: true; readonly bytes?: number }>(
-                    reply: A,
-                  ) => (dropPrevious ? { _tag: "clear" as const, reply } : { _tag: "reply" as const, reply })
-                  const batch = nextBatch(yield* db.coordinatorPending(input.projectId))
-                  if (batch.length === 0) return stop({ empty: true })
-                  const bytes = utf8Bytes(text(batch))
-                  if (bytes > CLAUDE_INBOX_MAX_BYTES) return stop({ error: "too-large" as const, bytes })
-                  const token = yield* mint
-                  const suffix = yield* mint
-                  if (!isInboxId(token) || !isInboxId(suffix)) return stop({ error: "unavailable" as const })
-                  const claimed = yield* db.claim(
-                    batch.map((row) => row.id),
-                    { projectId: input.projectId, runtime: fence!.runtime ?? "", address: placeOf(input) },
-                  )
-                  if (claimed.length === 0) return stop({ empty: true })
-                  const file = layout.inboxClaim(live!.generation, token)
-                  return {
-                    _tag: "publish" as const,
-                    token,
-                    file,
-                    body: claimedText(batch, claimed),
-                    ids: claimed,
-                    suffix,
-                    dropPrevious,
-                  }
-                }),
-                (result) => {
-                  const live = registry.get(input.projectId)
-                  if (result._tag === "narrow" && live?.claim)
-                    live.claim = { token: live.claim.token, ids: result.ids, file: live.claim.file }
-                  if ((result._tag === "clear" || (result._tag === "publish" && result.dropPrevious)) && live)
-                    live.claim = undefined
-                  if (result._tag === "publish")
-                    publication = {
-                      ids: result.ids,
-                      file: result.file,
-                      tmp: `${result.file}.${result.suffix}.tmp`,
-                      token: result.token,
-                    }
-                },
-              )
-              if (prepared._tag === "have" || prepared._tag === "narrow")
-                return { token: prepared.token, file: prepared.file }
-              if (prepared._tag === "clear" || prepared._tag === "reply") return prepared.reply
-              const exit = yield* Effect.exit(
-                Effect.uninterruptibleMask((restore) =>
-                  restore(writeClaim(prepared.file, prepared.body, prepared.suffix)).pipe(
-                    Effect.flatMap(() =>
-                      Effect.sync(() => {
-                        const live = registry.get(input.projectId)
-                        if (live) live.claim = { token: prepared.token, ids: prepared.ids, file: prepared.file }
-                        published = true
-                      }),
-                    ),
-                  ),
-                ),
-              )
-              if (Exit.isFailure(exit)) return { error: "unavailable" }
-              return { token: prepared.token, file: prepared.file }
-            }).pipe(Effect.ensuring(compensate))
-          }),
-        )
-
-      const settle = (input: InboxCall & { readonly generation: string; readonly token: string }, op: ReceiptOp) =>
-        withLock(
-          input.projectId,
-          Effect.gen(function* () {
-            if (!isInboxId(input.generation) || !isInboxId(input.token)) return { error: "stale-receiver" }
-            let ownedFile: string | undefined
-            return yield* Effect.gen(function* () {
-              const committed = yield* db.withCoordinatorWrite(
-                Effect.gen(function* () {
-                  const fence = yield* db.readCoordinatorFence(input.projectId)
-                  const refused = refusal(fence, input)
-                  if (refused || !fence) return refused ?? { error: "stale-receiver" }
-                  const live = registry.get(input.projectId)
-                  if (!sameLive(live, fence, input)) return { error: "stale-receiver" }
-                  if (live!.receipt?.token === input.token) {
-                    if (live!.receipt.op !== op) return { error: "stale-receiver" }
-                    return op === "ack" ? { acked: true, already: true } : { released: true, already: true }
-                  }
-                  if (live!.claim?.token !== input.token) return { error: "stale-receiver" }
-                  const status = op === "ack" ? "delivered" : op === "release-retry" ? "pending" : "failed"
-                  const changed = yield* db.transitionInbox(live!.claim.ids, status, "sending")
-                  if (changed.length !== live!.claim.ids.length) {
-                    if (changed.length > 0) yield* db.transitionInbox(changed, "sending", status)
-                    return { error: "stale-receiver" }
-                  }
-                  // Read in the transaction and queued on commit, so the completion archive sees every acked row once.
-                  const rows = op === "ack" ? yield* db.inboxRows(changed) : []
-                  return { _tag: "settled" as const, file: live!.claim.file, token: input.token, rows }
-                }),
-                (result) => {
-                  if (!("_tag" in result) || result._tag !== "settled") return
-                  const live = registry.get(input.projectId)
-                  if (!live) return
-                  live.receipt = { token: result.token, op }
-                  live.claim = undefined
-                  ownedFile = result.file
-                  publishDelivered(result.rows)
-                },
-              )
-              if (!("_tag" in committed) || committed._tag !== "settled") return committed
-              return op === "ack" ? { acked: true } : { released: true }
-            }).pipe(
-              Effect.ensuring(
-                Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    if (ownedFile !== undefined) yield* removeClaimFile(ownedFile)
-                  }),
-                ),
-              ),
-            )
-          }),
+          `ack inbox ${ids.join(",")}`,
+          projectId,
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              // Only this project's rows: leased to it, or back to pending after its lease ran out.
+              const pending = new Set((yield* db.coordinatorPending(projectId)).map((r) => r.id))
+              const own = ids.filter((id) => leases.get(id)?.projectId === projectId || pending.has(id))
+              for (const id of own) leases.delete(id)
+              const rows = [
+                ...(yield* db.setInboxStatus(own, "delivered", "sending")),
+                ...(yield* db.setInboxStatus(own, "delivered", "pending")),
+              ]
+              publishDelivered(rows)
+              return rows.map((r) => r.id)
+            }),
+          ),
           true,
         )
+
+      // A plugin that went away sends no poll, so this check runs on its own clock, not in poll or on RECONCILE.
+      yield* Effect.forkIn(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          for (const [projectId, at] of lastPoll) {
+            if (now - at <= Duration.toMillis(AWAY)) continue
+            lastPoll.delete(projectId)
+            yield* withLock(
+              `unlease project ${projectId}`,
+              projectId,
+              unlease(projectId, () => true),
+              true,
+            )
+          }
+        }).pipe(Effect.repeat(Schedule.spaced("1 second"))),
+        scope,
+      )
 
       return Inbox.of({
         enqueue: (row) => db.insertInbox(row).pipe(Effect.tap(announce)),
@@ -705,11 +446,8 @@ export class Inbox extends Context.Service<
         deliver,
         stream,
         delivered: Queue.take(delivered),
-        attach,
-        pull,
-        ack: (input) => settle(input, "ack"),
-        release: (input) => settle(input, input.retry ? "release-retry" : "release-fail"),
-        reconcile: (projectId) => withLock(projectId, reconcileLocked(projectId)),
+        poll,
+        ack,
       })
     }),
   )

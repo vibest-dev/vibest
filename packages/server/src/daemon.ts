@@ -18,9 +18,11 @@ import { VERSION } from "@vibest/protocol/rpc"
 // server) come from the entry through `Host`, so this file stays on effect's abstract services.
 import { Clock, Crypto, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
+import type { HttpServer } from "effect/http/HttpServer"
 import type { SocketServer } from "effect/socket/SocketServer"
 import type { SqlClient } from "effect/sql"
 
+import * as Http from "./http.ts"
 import * as Server from "./server.ts"
 
 /**
@@ -48,6 +50,8 @@ export const readDaemonInfo = (file: string) =>
 export interface Host {
   readonly sqlite: (filename: string) => Layer.Layer<SqlClient.SqlClient, unknown>
   readonly socketServer: (path: string) => Layer.Layer<SocketServer, unknown>
+  /** The HTTP server on a unix socket (vibest-http.sock: the Claude plugin's poll, ack and hooks). */
+  readonly httpServer: (path: string) => Layer.Layer<HttpServer, unknown>
   readonly plugins: PluginLoader["Service"]
   /** Builtin plugins of this app, after the default harness choice: the runtime plugins (runtime-port.md §2). */
   readonly builtinPlugins: ReadonlyArray<Candidate>
@@ -75,8 +79,10 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
 }) {}
 
 const services = (host: Host, layout: Layout["Service"]) =>
-  Server.layer.pipe(
-    Layer.provide(host.socketServer(layout.socket)),
+  Layer.merge(
+    Server.layer.pipe(Layer.provide(host.socketServer(layout.socket))),
+    Http.layer.pipe(Layer.provide(host.httpServer(layout.httpSocket))),
+  ).pipe(
     Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Processes.layer(host.processes)),
     Layer.provideMerge(
@@ -150,6 +156,7 @@ export const run = (host: Host) =>
         message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}`,
       })
     yield* fs.remove(layout.socket, { force: true })
+    yield* fs.remove(layout.httpSocket, { force: true })
     const identity = {
       pid: host.processes.pid,
       instance: yield* Effect.flatMap(Crypto.Crypto, (c) => c.randomUUIDv4).pipe(Effect.orDie),
@@ -162,8 +169,9 @@ export const run = (host: Host) =>
         Layer.provide(Layer.merge(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown))),
       ),
     )
-    // The socket file's permissions are the authentication (SPEC §13).
+    // The socket files' permissions are the authentication (SPEC §13).
     yield* fs.chmod(layout.socket, 0o600)
+    yield* fs.chmod(layout.httpSocket, 0o600)
     const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
     // Into the locked file itself; releasing the lock empties it.
     yield* write!(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)

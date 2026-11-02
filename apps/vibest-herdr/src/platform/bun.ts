@@ -5,7 +5,7 @@ import path from "node:path"
 
 // vibest on Bun: the only file under src/ that names a runtime. Reached through the `#platform` import, which
 // package.json `imports` resolves by condition ("bun" here); another runtime adds a condition and a sibling file.
-import { BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
+import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { inspectSchema, SQL_NAMES } from "@vibest/core/db"
@@ -252,6 +252,7 @@ const builtinPlugins: ReadonlyArray<Candidate> = [
 export const daemon: Omit<Host, "runtime"> = {
   sqlite,
   socketServer: (path) => BunSocketServer.layer({ path }),
+  httpServer: (path) => BunHttpServer.layerServer({ unix: path }),
   plugins,
   builtinPlugins,
   processes,

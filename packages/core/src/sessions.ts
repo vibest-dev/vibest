@@ -97,6 +97,13 @@ import {
   mainCheckout,
   repositoryDirectoryName,
 } from "./worktree.ts"
+/**
+ * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
+ * it. Opaque to agents and integrations: they pass it on, and only the runtime plugin reads it.
+ */
+export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
+  JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
+
 export {
   AllocationFailed,
   LaunchFailed,
@@ -365,10 +372,14 @@ export class Sessions extends Context.Service<
 
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
       // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
+      // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
       const vibestEnv = (session: SessionRow, scratch: string) => ({
         VIBEST_SESSION_ID: session.id,
+        VIBEST_PROJECT_ID: String(session.projectId),
         VIBEST_SCRATCH: scratch,
         VIBEST_AGENT: session.agent,
+        VIBEST_HARNESS: session.harnessId,
+        VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
         VIBEST_HOME: layout.home,
         VIBEST_COMMAND: encodeCommand(vibest),
       })

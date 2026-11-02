@@ -22,5 +22,8 @@
     "prepack": "bun run build",
     "typecheck": "bun scripts/prepare-claude-types.ts && tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.plugin.json",
     "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/claude"
+  },
+  "devDependencies": {
+    "@vibest/protocol": "workspace:*"
   }
 }
