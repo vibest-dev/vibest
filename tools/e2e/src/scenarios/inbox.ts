@@ -7,7 +7,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, Skip, until, type World } from "../world.ts"
+import { agentModel, expect, Skip, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -192,7 +192,8 @@ const checks: ReadonlyArray<Check> = [
       "Claude main agent: a subagent's result arrives over HTTP as one line with its full text as prompt context, after /clear too, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      // The subagent is a Pi on a fake model (cheap, its answers fixed); the main agent is a real Claude, the user's login.
+      // The subagent is a Pi on a fake model (cheap, its answers fixed); the main agent is a real Claude, the user's login,
+      // on the E2E model (agentModel).
       const model = fakeModel("pi")
       const session = `${w.herdrSession}-cmain`
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
@@ -205,7 +206,7 @@ const checks: ReadonlyArray<Check> = [
         await fs.mkdir(zdot, { recursive: true })
         await w.stopDaemon()
         await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
-        await w.ok(["--harness", "claude", "--model", "haiku", "--session", session, "--headless"], {
+        await w.ok(["--harness", "claude", ...agentModel(), "--session", session, "--headless"], {
           cwd: repo,
           timeoutMs: 120_000,
           env: { CLAUDE_CONFIG_DIR: undefined },
@@ -331,7 +332,7 @@ const checks: ReadonlyArray<Check> = [
         expect(pid !== undefined, "no claude process in the main agent's pane")
         process.kill(pid!, "SIGTERM")
         await until("the main agent's Claude exited", async () => (await claude()) === undefined, 30_000)
-        await typeIn("vibest --model haiku")
+        await typeIn(["vibest", ...agentModel()].join(" "))
         await until("Claude again in the main agent's pane", async () => (await claude()) !== undefined, 60_000)
         await round("cmthree")
         expect(conversation() === cleared, `resumed conversation ${conversation()}; before the stop ${cleared}`)

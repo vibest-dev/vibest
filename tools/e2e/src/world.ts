@@ -251,6 +251,17 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
 }
 
 /** Is `bin` on the world's PATH? */
+/**
+ * The model of the agents a real-model check has vibest start, as vibest's own options (`vibest run` and the main
+ * agent's `vibest` take the same `--provider` and `--model`). VIBEST_E2E_PROVIDER and VIBEST_E2E_MODEL choose it;
+ * unset, Claude Haiku as before. The one place to change it. The World's own environment drops every VIBEST_*
+ * variable, so these reach no agent except as these options.
+ */
+export const agentModel = (): ReadonlyArray<string> => {
+  const provider = process.env.VIBEST_E2E_PROVIDER
+  return [...(provider ? ["--provider", provider] : []), "--model", process.env.VIBEST_E2E_MODEL || "haiku"]
+}
+
 export const onPath = (bin: string) => Bun.which(bin) !== null
 
 /**
