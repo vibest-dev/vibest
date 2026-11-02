@@ -353,6 +353,23 @@ export const handlers = VibestRpcs.toLayer(
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
+    /** The project's main agent alive in a terminal other than `terminal`, or null (also when that cannot be checked). */
+    const runningCoordinator = (key: Parameters<Db["Service"]["projectId"]>[0], terminal: string) =>
+      Effect.gen(function* () {
+        const coord = yield* db.coordinatorOf(yield* db.projectId(key))
+        if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
+        if (coord.address.id === terminal) return null
+        const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+        if (Option.isNone(h)) return null
+        const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+        if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        return {
+          harness: coord.harnessId,
+          place: placeOf(coord.runtime, coord.address),
+          runtime: coord.runtime,
+          address: encodeAddress(coord.address),
+        }
+      })
     /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
@@ -677,6 +694,13 @@ export const handlers = VibestRpcs.toLayer(
               method: "Project.CoordinatorSession",
               message: "Project.CoordinatorSession needs the runtime the main agent runs in",
             })
+          // One main agent per project: every start goes through here, so a second one is refused here.
+          const running = yield* runningCoordinator(key, terminal)
+          if (running)
+            return yield* new Forbidden({
+              method: "Project.CoordinatorSession",
+              message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there, or run vibest here again and answer y to stop it`,
+            })
           const saved = yield* db.coordinatorLaunch(
             key,
             harness,
@@ -694,22 +718,7 @@ export const handlers = VibestRpcs.toLayer(
         }),
 
       "Project.RunningCoordinator": ({ terminal }) =>
-        Effect.gen(function* () {
-          const { key } = yield* scope("Project.RunningCoordinator")
-          const coord = yield* db.coordinatorOf(yield* db.projectId(key))
-          if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
-          if (coord.address.id === terminal) return null
-          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-          if (Option.isNone(h)) return null
-          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
-          if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
-          return {
-            harness: coord.harnessId,
-            place: placeOf(coord.runtime, coord.address),
-            runtime: coord.runtime,
-            address: encodeAddress(coord.address),
-          }
-        }),
+        scope("Project.RunningCoordinator").pipe(Effect.flatMap(({ key }) => runningCoordinator(key, terminal))),
 
       "Project.StopCoordinator": ({ runtime, address }) =>
         Effect.gen(function* () {

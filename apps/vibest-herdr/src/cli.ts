@@ -316,18 +316,21 @@ const startMain =
         const session = withVibest(claim, (client) =>
           Effect.gen(function* () {
             const running = yield* client["Project.RunningCoordinator"]({ terminal })
+            // One main agent per project: start here only once the running one stopped (vibestd refuses a second one too).
             if (running) {
               yield* Console.error(`the main agent (${running.harness}) is still running in ${running.place}`)
-              if ((yield* interactive) && (yield* askYesNo("Stop it before starting it here? [y/N]: "))) {
-                const stopped = yield* client["Project.StopCoordinator"]({
-                  runtime: running.runtime,
-                  address: running.address,
+              if (!((yield* interactive) && (yield* askYesNo("Stop it before starting it here? [y/N]: "))))
+                return yield* new LaunchFailed({
+                  message: `not starting: the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent. Exit it there, or run vibest here again on an interactive terminal and answer y to stop it`,
                 })
-                if (stopped.result === "running" || stopped.result === "moved") {
-                  const why = stopped.result === "moved" ? "the main agent moved" : "the main agent did not stop"
-                  yield* Console.error(`not starting: ${why}; run vibest again`)
-                  return yield* new LaunchFailed({ message: why })
-                }
+              const stopped = yield* client["Project.StopCoordinator"]({
+                runtime: running.runtime,
+                address: running.address,
+              })
+              if (stopped.result === "running" || stopped.result === "moved") {
+                const why = stopped.result === "moved" ? "the main agent moved" : "the main agent did not stop"
+                yield* Console.error(`not starting: ${why}; run vibest again`)
+                return yield* new LaunchFailed({ message: why })
               }
             }
             return yield* client["Project.CoordinatorSession"]({
