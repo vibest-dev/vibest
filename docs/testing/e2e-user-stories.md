@@ -133,12 +133,12 @@ Status: now.
 
 _If the daemon or a pane dies, I lose no result and nothing is sent twice._
 
-| Fault                                  | Expect                                                                          |
-| -------------------------------------- | ------------------------------------------------------------------------------- |
-| kill the daemon while two workers work | next `vibest` command restarts it; both results still reach the main Agent once |
-| close a worker's pane mid-turn         | turn ends `lost` within about 10 s; the main Agent is told                      |
-| model that does not exist              | `LaunchFailed` with the pane tail; turn `not_started`                           |
-| `vibest update` while workers are busy | the replacement waits or names its blockers; no running worker is cut off       |
+| Fault                                  | Expect                                                                            |
+| -------------------------------------- | --------------------------------------------------------------------------------- |
+| kill the daemon while two workers work | next `vibest` command restarts it; both results still reach the main Agent once   |
+| close a worker's pane mid-turn         | turn ends `lost` within about 10 s; the main Agent is told                        |
+| model that does not exist              | a failed result with Claude's error, no screen text; `vibest peek` shows the pane |
+| `vibest update` while workers are busy | the replacement waits or names its blockers; no running worker is cut off         |
 
 Status: now.
 

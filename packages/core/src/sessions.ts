@@ -79,6 +79,7 @@ import {
   type Machine,
   machinesListing as machines,
   paneTail,
+  peekHint,
   Runtimes,
   RuntimeError,
   type Runtime,
@@ -218,6 +219,8 @@ export class Sessions extends Context.Service<
       NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
     >
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
+    /** The last `lines` lines on the session's terminal (`vibest peek`), read on demand; never sent to an agent. */
+    readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
     readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
@@ -342,12 +345,18 @@ export class Sessions extends Context.Service<
             Effect.repeat({ until: settled, schedule: TICK }),
             Effect.timeoutOrElse({
               duration: READY_TIMEOUT,
+              // What the terminal showed goes to vibestd.log only; the failure says why, never the screen.
               orElse: () =>
-                Effect.fail(
-                  new NotReady({
-                    id,
-                    message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
-                  }),
+                screen.pipe(
+                  Effect.flatMap((tail) => Effect.logInfo(`not ready ${id}: terminal tail\n${tail.trim()}`)),
+                  Effect.andThen(
+                    Effect.fail(
+                      new NotReady({
+                        id,
+                        message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
+                      }),
+                    ),
+                  ),
                 ),
             }),
             Effect.map((seen) => stateOf(seen) ?? "unknown"),
@@ -464,7 +473,7 @@ export class Sessions extends Context.Service<
         )
 
       /**
-       * Send a turn and confirm it started. Returns why not (with the terminal tail) when the session never picked it up
+       * Send a turn and confirm it started. Returns why not (no screen text: the tail goes to vibestd.log) when the session never picked it up
        * and the integration wrote no result; the caller tells the owner. A result already on disk is delivered instead, and
        * the caller hears nothing. `onHandover` runs once the session is ready, right before the runtime gets the text.
        * Caller holds the session's lock. `keepRound`: a move will try the next harness, so a miss leaves the open round
@@ -536,9 +545,9 @@ export class Sessions extends Context.Service<
         if (yield* confirmed(h, session, terminal)) return undefined
         if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none")
           return undefined
-        const tail = yield* paneTail(h, terminal)
+        yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* missed
-        return `task_not_started: ${session.id} did not start working on the message.\n\nterminal tail:\n${tail}`
+        return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
       })
 
       // ---- turn end (rounds.ts): the round lifecycle on this service's helpers ----
@@ -603,7 +612,6 @@ export class Sessions extends Context.Service<
         launchArgv,
         notice,
         prompt,
-        paneTail,
         limitMove: limit.move,
         afterOpen,
       })
@@ -901,13 +909,7 @@ export class Sessions extends Context.Service<
             // vibestd died mid-spawn (SPEC §5.5 spawn).
             yield* notice(session, `${id} never finished starting (vibestd restarted during spawn).`)
           } else if (open)
-            yield* finish(
-              session,
-              "failed",
-              "",
-              "the session exited (its terminal is gone or its process with it)",
-              yield* paneTail(h, terminal),
-            )
+            yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
           if (session.exitedAt === null) {
             yield* db.updateSession(id, { status: "unknown", exitedAt: yield* Clock.currentTimeMillis })
@@ -956,13 +958,12 @@ export class Sessions extends Context.Service<
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         if (now - endedAt! <= Duration.toMillis(HOOK_GRACE)) return
-        const tail = yield* paneTail(h, terminal)
+        yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
           "lost",
           "",
-          "the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit or a bad model?); see the terminal tail",
-          tail,
+          `the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`,
         )
       })
 
@@ -1119,6 +1120,21 @@ export class Sessions extends Context.Service<
           ),
           Effect.provideContext(platform),
         )
+
+      const peek = (id: string, lines: number) =>
+        Effect.gen(function* () {
+          const session = yield* getRow(id)
+          if (session.exitedAt !== null || session.address.id === "")
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} has no terminal to peek at (it exited or never started)`,
+            })
+          const h = yield* live(session)
+          const text = yield* h
+            .read(session.address, Math.max(1, Math.min(Math.floor(lines), 500)))
+            .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
+          return text.trimEnd()
+        })
 
       /**
        * Remove a session for good (SPEC §8.6a): a working one is interrupted first (bounded by
@@ -1425,6 +1441,7 @@ export class Sessions extends Context.Service<
         spawn,
         send,
         interrupt,
+        peek,
         remove,
         get,
         list,

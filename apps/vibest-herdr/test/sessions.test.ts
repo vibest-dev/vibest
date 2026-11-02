@@ -325,7 +325,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "an ended turn waits for the hook (grace period), then fails with the pane tail",
+    "an ended turn waits for the hook (grace period), then is lost with a reason and the peek command, never the pane tail",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -340,7 +340,10 @@ describe.concurrent("Sessions", () => {
       const row = yield* db.latestInbox(id, "result")
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the turn ended without a report")
-      assert.include(row!.message, "terminal tail:")
+      assert.include(row!.message, `to see its terminal, run: vibest peek ${id}`)
+      // The fake runtime's screen ("pane tail") is never in what an agent gets.
+      assert.notInclude(row!.message, "pane tail")
+      assert.notInclude(row!.message, "terminal tail")
     }),
   )
 
@@ -356,7 +359,7 @@ describe.concurrent("Sessions", () => {
       const [row] = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
-      assert.include(row!.message, "pane tail")
+      assert.notInclude(row!.message, "pane tail")
     }),
   )
 
@@ -2244,6 +2247,8 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(sends[0]!.keys, ["enter"])
       const row = yield* db.latestInbox(id, "notice")
       assert.include(row!.message, "task_not_started")
+      assert.include(row!.message, `to see its terminal, run: vibest peek ${id}`)
+      assert.notInclude(row!.message, "pane tail")
     }),
     { promptsIgnored: true },
   )

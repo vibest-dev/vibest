@@ -94,7 +94,6 @@ export const sessionMove = (deps: {
     end: "failed",
     text: string,
     error: string | undefined,
-    tail?: string,
   ) => Effect.Effect<unknown, unknown, MovePlatform>
   readonly resultFile: (id: string) => string
   readonly rulesFile: (id: string) => string

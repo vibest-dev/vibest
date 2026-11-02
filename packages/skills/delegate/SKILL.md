@@ -40,6 +40,7 @@ An `<agent-result>` is a claim. For a session that changed code, before you repo
 
 - `status: needs_input` → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
 - `status: failed`, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.
+- A result or notice that says the turn ended without a report, was interrupted in its pane, or did not start (`task_not_started`) carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
 
 Then say what changed, the evidence, and the branch. `<id>` is the id the run printed, for either kind of run.
 

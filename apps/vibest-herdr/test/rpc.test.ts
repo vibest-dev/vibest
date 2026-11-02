@@ -163,6 +163,27 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "Peek: the command line and the session's coordinator read its terminal on demand; an unknown or exited session has none",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const c = asCli(raw, repo)
+      const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
+      yield* c.Peek({ id, lines: 5 })
+      assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 5 })
+      yield* c.Peek({ id, lines: 100_000 })
+      assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
+      assert.strictEqual(failureTag(yield* Effect.exit(c.Peek({ id: "nope" }))), "NoSuchSession")
+      yield* db.updateSession(id, { exitedAt: 1 })
+      assert.strictEqual(failureTag(yield* Effect.exit(c.Peek({ id }))), "NoSuchSession")
+    }),
+  )
+
+  test(
     "a session reports only as itself; an unknown session is refused; a coordinator cannot report",
     Effect.gen(function* () {
       const db = yield* Db
@@ -260,6 +281,7 @@ describe("vibest.sock", () => {
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
+        b.Peek({ id }),
         b.Remove({ id }),
       ]
       for (const call of others) {
@@ -354,6 +376,7 @@ describe("vibest.sock", () => {
         ["Project.Delete", c["Project.Delete"]({ kind: "memory", path: "a.md", ifVersion: "new" })],
         ["Send", c.Send({ id, message: "x" })],
         ["Interrupt", c.Interrupt({ id })],
+        ["Peek", c.Peek({ id })],
         ["Remove", c.Remove({ id })],
         ["Report", c.Report({ message: "x" })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],

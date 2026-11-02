@@ -56,7 +56,7 @@ every script check on that install, a skip failing the run (tools/verify/README.
 | 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                                        |
 | 8   | `run --archive-on-completion`                                                     | archived right after the completed result reaches the coordinator                                                         |
 | 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                                           |
-| 10  | Startup failure                                                                   | bad model: `LaunchFailed` with the pane tail; turn `not_started`                                                          |
+| 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane                              |
 | 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                                             |
 | 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, rules file written                                        |
 

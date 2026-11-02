@@ -396,6 +396,17 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),
+  /**
+   * The last `lines` lines (default 30) on the session's terminal, read when asked: screen text is never pushed to an
+   * agent, so a coordinator looks here itself when a result says the turn ended without a report.
+   */
+  scoped(
+    Rpc.make("Peek", {
+      payload: { id: Schema.String, lines: Schema.optional(Schema.Number) },
+      success: Schema.Struct({ text: Schema.String }),
+      error: Schema.Union([Forbidden, NoSuchSession, NoRuntime, RuntimeUnreachable]),
+    }),
+  ),
   /** A non-coordinator session: a message to that session's own coordinator. */
   scoped(
     admitted(
