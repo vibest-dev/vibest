@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
+import { agentModel, binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -89,7 +89,7 @@ const withClaudeSession = async (
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
   let id = ""
   try {
-    const run = await w.ok(["run", "claude", "--model", "haiku", "--session", session, "--", task], {
+    const run = await w.ok(["run", "claude", ...agentModel(), "--session", session, "--", task], {
       timeoutMs: 120_000,
     })
     id = (JSON.parse(run) as { id: string }).id

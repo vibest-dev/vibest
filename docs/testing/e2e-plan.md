@@ -71,6 +71,11 @@ and `integration stop` ends cleanly. Pi only: the coordinator TUI (tool groups, 
 `tools/e2e/evidence/<run>/`: commands, exit codes, `ls --json`, `result`, pane text, and the database. It signals and
 closes only the PIDs and panes it recorded. A skipped harness (no key) is reported as skipped, never as passed.
 
+Real-model checks give the agents they have vibest start a model through vibest's own options (`--provider`,
+`--model`), chosen in one place (`tools/e2e/src/world.ts` `agentModel`): `VIBEST_E2E_PROVIDER` and `VIBEST_E2E_MODEL`
+when set, else Claude Haiku. The checks that start a harness directly (I3–I5) keep their own flags. vibest's Claude
+adapter accepts no provider other than `anthropic`, so a provider for the Claude checks is refused by vibest itself.
+
 ## 4. Cost and time
 
 About 12 short turns per harness on the cheapest model: roughly 50 turns per full run, about 20–30 minutes.
