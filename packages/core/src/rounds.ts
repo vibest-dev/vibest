@@ -446,7 +446,7 @@ export const sessionRounds = (deps: {
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    // A round that is not open was never vibest's to check, and a harness failure (a StopFailure) is the result:
+    // A round that is not open was never vibest's to check, and a harness failure (an error turn end) is the result:
     // neither gets the check command run over it.
     if (session.turnState !== "open" || found.error) {
       yield* finish(session, found.error ? "failed" : "completed", found.text, found.error)

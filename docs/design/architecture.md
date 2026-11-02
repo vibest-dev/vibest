@@ -576,22 +576,27 @@ Each of these adds to what the harness loads; the user's own plugins, extensions
 
 The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config. `preflight` refuses a harness whose plugin directory is missing.
 
-| vibest event                   | Claude Code                 | Cursor                       | Pi                              |
-| ------------------------------ | --------------------------- | ---------------------------- | ------------------------------- |
-| `agent.session`                | `SessionStart`              | to verify                    | `session_start`                 |
-| `agent.prompt`                 | `UserPromptSubmit`          | `beforeSubmitPrompt`         | `agent_start`                   |
-| `agent.tool`                   | `PreToolUse`, `PostToolUse` | `preToolUse`                 | `tool_call`, `tool_execution_*` |
-| `agent.idle` with last answer  | `Stop`                      | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
-| `agent.fail`                   | `StopFailure`               | `stop` not completed         | `agent_end` with error          |
-| `agent.blocked`                | `Notification`              | to verify                    | —                               |
-| `agent.exit`                   | `SessionEnd`                | herdr                        | `session_shutdown`              |
-| native delivery into the agent | plugin hooks module         | none (herdr typing)          | extension                       |
+| vibest event                   | Claude Code              | Cursor                       | Pi                              |
+| ------------------------------ | ------------------------ | ---------------------------- | ------------------------------- |
+| `agent.session`                | `SessionStart`           | to verify                    | `session_start`                 |
+| `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt`         | `agent_start`                   |
+| `agent.tool`                   | `tool.call`              | `preToolUse`                 | `tool_call`, `tool_execution_*` |
+| `agent.idle` with last answer  | `turn.complete` (answer) | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
+| `agent.fail`                   | `turn.complete` (error)  | `stop` not completed         | `agent_end` with error          |
+| `agent.blocked`                | `Notification`           | to verify                    | —                               |
+| `agent.exit`                   | `SessionEnd`             | herdr                        | `session_shutdown`              |
+| native delivery into the agent | plugin hooks module      | none (herdr typing)          | extension                       |
 
 What omac installs and uses today: Claude `Stop`, `StopFailure`, `PreToolUse`;
 Cursor `afterAgentResponse`, `stop` (not `completed` becomes an error), `preToolUse` (`failClosed`); Pi
 `session_start`, `before_agent_start`, `tool_call`, `agent_end`, `agent_settled`. Every other cell is new in
 vibest and is verified before it is relied on (open question 1). Until then the CLI's conversation id is taken
-at `Stop` as omac does (Claude `session_id`, Cursor `conversation_id`) and at Pi `session_start`.
+at the turn end (Claude `session_id`, Cursor `conversation_id`) and at Pi `session_start`.
+
+vibest's Claude plugin uses the hooks module's native `turn.complete`, `prompt.submit` and `tool.call`, not the
+classic `Stop`, `StopFailure`, `UserPromptSubmit` and `PreToolUse`: Claude fires no `Stop` for a turn stopped with Esc,
+and `prompt.submit` names its origin. `turn.complete` carries no API error kind (`StopFailure`'s `rate_limit`, ...),
+so a Claude usage limit is a failed result, not a usage-limit move.
 
 **Claude Code: the plugin only.** vibest writes nothing into `~/.claude/settings.json`. The plugin (omac
 `packages/claude`, copied) is a hooks module (`hooks/hooks.json` → `register.mjs`, no command hooks, no shell) whose native

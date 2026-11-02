@@ -20,7 +20,7 @@ export type TurnResult = {
   readonly error: string | undefined
   /** Cursor's `conversation_id` (in every hook's input), the id `--resume` takes; only a plain id, never one that reads as a flag. */
   readonly conversationId: string | undefined
-  /** A turn stopped in its terminal (Claude's `TurnComplete` with reason `aborted`): a result only for an open round. */
+  /** A turn stopped in its terminal (`aborted: true`, Claude's and Pi's): a result only for an open round. */
   readonly interrupted: boolean
 }
 
@@ -103,7 +103,7 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
     const envelope = yield* decodeEnvelope(yield* fs.readFileString(file))
     const text = envelope.payload[(yield* Harnesses).get(envelope.harness).resultField]
     const error = envelope.payload.error
-    // Claude's StopFailure: `error` is a kind (`rate_limit`, `model_not_found`, ...), `error_details` the text.
+    // `error` names what ended the turn (Claude's `interrupted`, `refusal`, `error`), `error_details` the text.
     const details = envelope.payload.error_details
     const conversation = envelope.payload.conversation_id
     return {
@@ -118,7 +118,7 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
           : undefined,
       conversationId:
         typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
-      interrupted: envelope.payload.hook_event_name === "TurnComplete" && envelope.payload.reason === "aborted",
+      interrupted: envelope.payload.aborted === true,
     } satisfies TurnResult
   }).pipe(Effect.option)
 })

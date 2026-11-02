@@ -15,8 +15,6 @@ export interface LaunchInput {
   /** Cursor takes the rules in its first prompt; Pi and Claude read `rulesFile` (herdr refuses multi-line args). */
   readonly rules: string
   readonly rulesFile: string
-  /** `~/.vibest/projects`, denied to Claude's file tools. */
-  readonly projectsDir: string
   readonly provider: string | null
   readonly model: string | null
   /** Pi / Claude: the uuid vibestd chose. Cursor: the id herdr reported (resume only). */

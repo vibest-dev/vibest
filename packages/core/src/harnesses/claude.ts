@@ -38,40 +38,28 @@ const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
 const vibestReport = (vibest: ReadonlyArray<string>) =>
   [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
 
-const encodeClaudeSettings = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Struct({ permissions: Schema.Struct({ deny: Schema.Array(Schema.String) }) })),
-)
 /**
- * Every project's entries, not the scratchpads below them: Claude's deny wins over every allow, so the session's own
- * scratchpad can only stay reachable if scratch is left out here; the pre-tool hook (Guard.session) refuses the others.
- * Patterns follow gitignore (Claude's documented semantics): `//` anchors at the filesystem root, `**` spans the
- * repository key's levels (`github.com/owner/repo`, a hash, VIBEST_PROJECT_ID). A scratchpad directory named docs or
- * memory is denied too.
+ * The plugin's turn.complete report (`TurnComplete`) as a result: `answer` as it is (its status line is the report);
+ * `aborted` marked so (readResult: a result only while vibest's round is open, so `vibest interrupt`'s own Esc is none);
+ * `refusal` and `error` failed. turn.complete carries no API error kind, so `error` names no cause (no usage-limit move).
  */
-const claudeSettings = (projectsDir: string) =>
-  encodeClaudeSettings({
-    permissions: {
-      deny: [
-        ...["instructions.md", "docs/**", "memory/**"].flatMap((p) => [
-          `Read(/${projectsDir}/**/${p})`,
-          `Edit(/${projectsDir}/**/${p})`,
-        ]),
-        "Bash(herdr:*)",
-      ],
-    },
-  })
-
-/**
- * The turn-end events: Claude fires StopFailure instead of Stop when a turn ends on an API error, and neither when the
- * turn is stopped with Esc; the plugin's turn.complete listener reports that end as `TurnComplete` with its reason.
- */
-const TURN_END = ["Stop", "StopFailure", "TurnComplete"]
-
-/** A `TurnComplete` end as a failed result: `error` names what ended the turn (readResult joins it with the details). */
-const turnComplete = (event: Readonly<Record<string, unknown>>) =>
-  event.reason === "aborted"
-    ? { ...event, error: "interrupted", error_details: "the turn was stopped in its terminal (Esc) before it ended" }
-    : { ...event, error: "error", error_details: "the turn ended on an error" }
+const turnComplete = (event: Readonly<Record<string, unknown>>) => {
+  if (event.reason === "answer") return event
+  if (event.reason === "aborted")
+    return {
+      ...event,
+      aborted: true,
+      error: "interrupted",
+      error_details: "the turn was stopped in its terminal (Esc) before it ended",
+    }
+  if (event.reason === "refusal") {
+    const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
+    const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
+    return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
+  }
+  const answer = typeof event.last_assistant_message === "string" ? event.last_assistant_message.trim() : ""
+  return { ...event, error: "error", error_details: answer || "the turn ended on an API error" }
+}
 
 /** Where Claude keeps the transcript of session `id` started at `root`: every non-alphanumeric of the path becomes `-`. */
 const transcript = Effect.fn("claudeTranscript")(function* (root: string, id: string) {
@@ -153,8 +141,6 @@ export const claude: HarnessAdapter = {
     i.rulesFile,
     "--add-dir",
     i.scratch,
-    "--settings",
-    claudeSettings(i.projectsDir),
     "--allowedTools",
     vibestReport(i.vibest),
     "--plugin-dir",
@@ -205,19 +191,17 @@ export const claude: HarnessAdapter = {
           },
         }
       : undefined,
-  // classic.UserPromptSubmit. `source` is omitted while Claude rolls the field out; anything but `user` is not the person.
+  // The plugin's prompt.submit: only what the person submitted, at the terminal (composer) or through Remote Control
+  // (bridge); a task notification, a scheduled trigger, a peer or a plugin's prompt is not the person.
   userPrompt: (event, coordinator) => {
-    if (coordinator || event.agent_id) return undefined
-    if (event.hook_event_name !== "UserPromptSubmit" || typeof event.prompt !== "string" || event.prompt.trim() === "")
-      return undefined
-    if (typeof event.source === "string" && event.source !== "user") return undefined
-    return { text: event.prompt }
+    if (coordinator || event.hook_event_name !== "PromptSubmit") return undefined
+    if (event.origin !== "composer" && event.origin !== "bridge") return undefined
+    return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  // The @vibest/claude plugin's classic.Stop / classic.StopFailure / turn.complete; a subagent's turn end is not the session's.
+  // The plugin's main-loop turn.complete, whatever its reason.
   turnEnd: (event, coordinator) => {
-    if (event.agent_id || typeof event.hook_event_name !== "string" || !TURN_END.includes(event.hook_event_name))
-      return undefined
-    if (!coordinator) return { result: event.hook_event_name === "TurnComplete" ? turnComplete(event) : event }
+    if (event.hook_event_name !== "TurnComplete") return undefined
+    if (!coordinator) return { result: turnComplete(event) }
     return typeof event.session_id === "string" && event.session_id !== ""
       ? { harnessSessionId: event.session_id }
       : undefined

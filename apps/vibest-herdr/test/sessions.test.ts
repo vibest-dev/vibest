@@ -3,6 +3,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
+import { claude } from "@vibest/core/harnesses/claude"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout, worktreePath } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
@@ -49,6 +50,17 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     repositoryKey(repo),
     (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
   )
+
+/** The result payload `vibest integration stop` writes for the Claude plugin's turn.complete with `reason`. */
+const claudeEnd = (reason: string) =>
+  (
+    claude.turnEnd!(
+      { hook_event_name: "TurnComplete", session_id: "c1", reason, last_assistant_message: "" },
+      false,
+    ) as {
+      readonly result: object
+    }
+  ).result
 
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
@@ -112,6 +124,20 @@ const pick = (w: { readonly status: string; readonly turnState: string } | undef
   status: w?.status,
   turnState: w?.turnState,
 })
+/** A session's rounds (message rows) and the result rows it sent to the inbox. */
+const countRows = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM message WHERE session_id = ${sessionId}`.pipe(
+      Effect.orDie,
+    )
+    const [results] = yield* sql<{
+      n: number
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_id = ${sessionId} AND result_message_id IS NOT NULL`.pipe(
+      Effect.orDie,
+    )
+    return { rounds: rounds!.n, results: results!.n }
+  })
 const sqlNotices = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -2738,46 +2764,70 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a Claude turn stopped with Esc in its pane (TurnComplete aborted): a failed result that says it was interrupted",
+    "a Claude turn the person stopped with Esc in its pane (turn.complete aborted): one failed result that says it was interrupted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
-      yield* writeResult(id, "claude", {
-        hook_event_name: "TurnComplete",
-        reason: "aborted",
-        last_assistant_message: "",
-        error: "interrupted",
-        error_details: "the turn was stopped in its terminal (Esc) before it ended",
-      })
+      yield* writeResult(id, "claude", claudeEnd("aborted"))
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
-      const row = yield* db.latestInbox(id, "result")
-      assert.include(row!.message, "<status>failed</status>")
-      assert.include(row!.message, "error: interrupted: the turn was stopped in its terminal (Esc) before it ended")
-      assert.notInclude(row!.message, "pane tail")
+      const pending = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
+      assert.deepStrictEqual(
+        pending.map((r) => r.kind),
+        ["result"],
+      )
+      assert.include(pending[0]!.message, "<status>failed</status>")
+      assert.include(
+        pending[0]!.message,
+        "error: interrupted: the turn was stopped in its terminal (Esc) before it ended",
+      )
+      // Checked again: the same report is not a second result or a new round.
+      const before = yield* countRows(id)
+      yield* TestClock.adjust("2 minutes")
+      yield* sessions.check(id)
+      assert.deepStrictEqual(yield* countRows(id), before)
+      assert.strictEqual(before.results, 1)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
     }),
   )
 
+  for (const harness of ["claude", "pi"] as const)
+    test(
+      `vibest interrupt (${harness}): the aborted turn end its Esc makes is no result, no inbox row and no new round`,
+      Effect.gen(function* () {
+        const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, harness)
+        assert.include((yield* sessions.interrupt(id)).message, "interrupted")
+        const before = yield* countRows(id)
+        // Written after the round closed (the bridge is slower than the pane's settle), and newer than any round.
+        yield* writeResult(
+          id,
+          harness,
+          harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true },
+          60_000,
+        )
+        yield* TestClock.adjust("2 minutes")
+        yield* sessions.check(id)
+        const row = (yield* db.getSession(id))!
+        assert.strictEqual(row.turnState, "interrupted")
+        assert.isUndefined(yield* db.latestInbox(id, "result"))
+        assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+        assert.deepStrictEqual(yield* countRows(id), before)
+        assert.strictEqual(before.results, 0)
+      }),
+      harness === "pi" ? { hooked: ["pi"] } : undefined,
+    )
+
   test(
-    "vibest interrupt: the TurnComplete aborted report that Esc makes is not a result (no round is open)",
+    "remove of a working Claude session: the aborted turn end its interrupt makes is no result",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
-      assert.include((yield* sessions.interrupt(id)).message, "interrupted")
-      yield* writeResult(
-        id,
-        "claude",
-        {
-          hook_event_name: "TurnComplete",
-          reason: "aborted",
-          error: "interrupted",
-        },
-        60_000,
-      )
+      yield* sessions.remove(id)
+      yield* writeResult(id, "claude", claudeEnd("aborted"), 60_000)
       yield* TestClock.adjust("2 minutes")
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
+      yield* sessions.check(id).pipe(Effect.ignore)
       assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
     }),
   )
 

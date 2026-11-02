@@ -1,6 +1,6 @@
 // The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude PreToolUse
 // (Cursor preToolUse) through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
-// names it. Every agent: no herdr control, no vibest with its identity variables changed, no vibest turn-end bridge. The
+// names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
 // may not touch the project directory except a scratchpad (projects/**/scratch). Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
@@ -23,6 +23,7 @@ const PATH_TOOLS = new Set([
   "edit",
   "multiedit",
   "notebookedit",
+  "notebookread",
   "ls",
   "grep",
   "glob",
@@ -244,6 +245,8 @@ export const shellBlock = (
     const name = base(program)
     if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest)))
       return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
+    // A session runs no herdr at all (once Claude's `Bash(herdr:*)` deny); the coordinator may read herdr's help.
+    if (name === "herdr" && !coordinator) return "Sessions do not run herdr; vibest manages it."
     if (coordinator && HARNESS_CLIS.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
     if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))

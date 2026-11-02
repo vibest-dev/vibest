@@ -4,11 +4,11 @@
  * `vibest inbox …` through `$.process.run` (bare argv, PATH and inherited environment), the claim body through `$.fs.read`,
  * delivery through `$.prompt.submit`.
  *
- * Turn-end reports, the user prompt, and the tool guard are native `classic.Stop`, `classic.StopFailure`,
- * `classic.UserPromptSubmit` and `classic.PreToolUse` listeners, not command hooks; a turn stopped with Esc (or ended on an
- * error StopFailure did not report) is reported from `turn.complete`. They call fixed argv
- * `vibest integration stop --harness claude`, `vibest integration prompt --harness claude` and
- * `vibest integration guard --harness claude`. No shell, no VIBEST_COMMAND.
+ * Turn-end reports, the user prompt, and the tool guard are the native `turn.complete`, `prompt.submit` and `tool.call`
+ * listeners, not command hooks or classic events: turn.complete fires for every main-loop turn end (reason answer,
+ * aborted, refusal or error; Stop fires for no Esc). They call fixed argv `vibest integration stop --harness claude`,
+ * `vibest integration prompt --harness claude` and `vibest integration guard --harness claude`. No shell, no
+ * VIBEST_COMMAND. turn.complete carries no API error kind (StopFailure's `rate_limit`, `billing_error`, ...).
  *
  * The inbox listeners (session.start, session.end, command.run) are always registered. Only a coordinator
  * (VIBEST_AGENT=coordinator with an VIBEST_SESSION_ID) activates a receiver; anywhere else the module registers no
@@ -35,7 +35,7 @@ export const POLL_MS = 2000
 export const RUN_TIMEOUT_MS = 15_000
 /** Bound for `vibest integration stop` and `vibest integration guard`. */
 export const BRIDGE_TIMEOUT_MS = 10_000
-/** The managed hook's refusal when vibest cannot answer a PreToolUse check. */
+/** The tool.call hook's refusal when vibest cannot answer a guard check. */
 export const GUARD_FAILURE = "vibest integration guard failed; the tool call is refused."
 
 /** The `error` a refusing `vibest inbox attach` printed, for the status line only (the adapter decides the reply). */
@@ -104,11 +104,13 @@ function nativeHost($: EngineInterface) {
 
 type Host = ReturnType<typeof nativeHost>
 
-/** Tool arguments on a classic.PreToolUse envelope: every field except the envelope's own `tool` and `tool_use_id`. */
+/** Keys a tool.call input carries beside the tool's own arguments (ToolCallReserved and AgentLoop). */
+const RESERVED = new Set(["tool", "tool_use_id", "consent", "agentId"])
+/** Tool arguments on a tool.call input: every field except the reserved ones. */
 const toolInput = (event: object): Record<string, unknown> => {
   const input: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(event)) {
-    if (key !== "tool" && key !== "tool_use_id") input[key] = value
+    if (!RESERVED.has(key)) input[key] = value
   }
   return input
 }
@@ -231,7 +233,7 @@ export function register(on: On, _options?: unknown) {
       const snap = before === "new" ? await client.start() : await client.tick()
       if (mine !== epoch || ended) return
       if (before === "new" && snap.phase === "idle") host.attached()
-      // not-reported: VIBEST records the session when a turn ends (Stop / StopFailure); the next poll attaches again.
+      // not-reported: VIBEST records the session when a turn ends (turn.complete); the next poll attaches again.
       if (before === "new" && snap.phase === "new")
         host.status("waiting for VIBEST to record this Claude session (after a turn ends)")
       if (snap.phase === "stopped") {
@@ -310,61 +312,50 @@ export function register(on: On, _options?: unknown) {
     }
   })
 
-  // Side effect only. A bridge failure still returns next(e): never block or continue a stopped turn.
-  const reportStop = async (host: Host, report: object) => {
-    try {
-      const agent = await host.agent()
-      const session = await host.vibestSession()
-      if (agent && session) await host.stop(JSON.stringify(report))
-    } catch {
-      // A missed report is not a blocked turn. vibestd scans a result file the bridge already wrote.
-    }
-  }
-
-  // Whether the running main-loop turn already reported its end through Stop or StopFailure: turn.complete then
-  // reports nothing. Cleared when the next main-loop turn starts, whichever of the two end events comes first.
-  let stopReported = false
-  const onStop = async (host: Host, event: { readonly agent_id?: string }) => {
-    if (!event.agent_id) stopReported = true
-    await reportStop(host, event)
-  }
-  // ponytail: turn.start carries no agentId, so a subagent's turn starting between the main loop's StopFailure and its
-  // turn.complete clears it too and that error is reported twice (the second, generic one may follow as a later result).
-  on("turn.start", async (_$, event, next) => {
-    stopReported = false
-    return next(event)
-  })
-  on("classic.Stop", async ($, event, next) => (await onStop(nativeHost($), event), next(event)))
-  on("classic.StopFailure", async ($, event, next) => (await onStop(nativeHost($), event), next(event)))
-  // A main-loop turn stopped with Esc fires neither: its end is reported here, as `TurnComplete` with the reason. An
-  // `error` end Claude also fires StopFailure for (it does, first, for a model that does not exist) is not reported twice.
+  // Side effect only. A bridge failure still returns next(e): never block or continue a stopped turn. A subagent's turn
+  // (agentId set) is not the session's. Every main-loop turn end is reported with its reason; vibestd tells the
+  // person's Esc (`aborted` while vibest's round is open) from `vibest interrupt`'s own (its round already closed).
   on("turn.complete", async ($, event, next) => {
-    if (event.agentId === undefined && !stopReported && (event.reason === "aborted" || event.reason === "error"))
-      await reportStop(nativeHost($), {
-        hook_event_name: "TurnComplete",
-        reason: event.reason,
-        last_assistant_message: event.answer,
-      })
+    if (event.agentId === undefined) {
+      try {
+        const host = nativeHost($)
+        const agent = await host.agent()
+        const session = await host.vibestSession()
+        if (agent && session)
+          await host.stop(
+            JSON.stringify({
+              hook_event_name: "TurnComplete",
+              session_id: await host.sessionId(),
+              reason: event.reason,
+              last_assistant_message: event.answer,
+              ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
+            }),
+          )
+      } catch {
+        // A missed report is not a blocked turn. vibestd scans a result file the bridge already wrote.
+      }
+    }
     return next(event)
   })
 
   // Side effect only. A bridge failure still returns next(e): never block the user's prompt. The coordinator's pane is the
-  // normal conversation; a nested agent and a non-user source are not the person typing.
-  on("classic.UserPromptSubmit", async ($, event, next) => {
+  // normal conversation; the adapter keeps only what the person submitted (origin composer or bridge).
+  on("prompt.submit", async ($, event, next) => {
     try {
-      if (!event.agent_id && (event.source === undefined || event.source === "user")) {
-        const host = nativeHost($)
-        const agent = await host.agent()
-        const session = await host.vibestSession()
-        if (agent && session && agent !== "coordinator") await host.prompt(JSON.stringify(event))
-      }
+      const host = nativeHost($)
+      const agent = await host.agent()
+      const session = await host.vibestSession()
+      if (agent && session && agent !== "coordinator")
+        await host.prompt(
+          JSON.stringify({ hook_event_name: "PromptSubmit", text: event.text, origin: event.origin.kind }),
+        )
     } catch {
       // A missed report is not a blocked prompt. The turn still runs.
     }
     return next(event)
   })
 
-  on("classic.PreToolUse", async ($, event, next) => {
+  on("tool.call", async ($, event, next) => {
     const host = nativeHost($)
     if (!(await host.agent())) return next(event)
     try {

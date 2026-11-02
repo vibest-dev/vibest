@@ -388,7 +388,6 @@ export class Sessions extends Context.Service<
             scratch: layout.scratch(key),
             rules: yield* fs.readFileString(file),
             rulesFile: file,
-            projectsDir: layout.projects,
             provider: session.provider,
             model: session.model,
             sessionId: session.harnessSessionId,

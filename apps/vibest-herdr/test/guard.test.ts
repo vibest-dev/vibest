@@ -99,7 +99,9 @@ describe("Shell denials", () => {
       "cat <<EOF\nx\nEOF\nherdr pane list",
     ])
       for (const reason of both(command)) assert.match(reason ?? "", /^Agents must not control herdr/, command)
-    assert.deepStrictEqual(both("herdr --help"), [undefined, undefined])
+    // A session runs no herdr at all (Claude's old `Bash(herdr:*)`); the coordinator's non-control herdr runs.
+    for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
+      assert.deepStrictEqual(both(command), [undefined, "Sessions do not run herdr; vibest manages it."], command)
   })
 
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
@@ -220,8 +222,67 @@ layer(Platform.services)("role rules", (it) => {
       assert.isString(yield* asSession("read", { path: "~/.vibest/projects" }))
       assert.isUndefined(yield* asSession("Edit", { file_path: "src/a.ts" }))
       assert.isUndefined(yield* asSession("Bash", { command: "git push" }))
-      assert.isUndefined(yield* asSession("bash", { command: "herdr --help" }))
+      assert.isString(yield* asSession("bash", { command: "herdr --help" }))
     }),
+  )
+
+  it.effect(
+    "Session: the rules Claude's --settings denied (Read/Edit of instructions.md, docs/**, memory/** of every project, any herdr) hold for every file tool",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const home = yield* tempDirectory("vibest-guard-")
+        const vibestHome = path.join(home, ".vibest")
+        const projects = path.join(vibestHome, "projects")
+        const worktree = path.join(vibestHome, "worktrees", "abcd1234")
+        yield* fs.makeDirectory(worktree, { recursive: true })
+        const asSession = (tool: string, input: Record<string, unknown>) =>
+          session({ tool, input, cwd: worktree }).pipe(
+            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
+          )
+        // Every key shape: a repository key with slashes, a hash, a nested group.
+        for (const key of ["github.com/owner/repo", "0123456789ab", "gitlab.com/group/sub/repo"]) {
+          const project = path.join(projects, key)
+          for (const entry of ["instructions.md", "docs/a.md", "docs/sub/b.md", "memory/c.md"]) {
+            const file = path.join(project, entry)
+            const dir = path.dirname(file)
+            for (const [tool, input] of [
+              ["Read", { file_path: file }],
+              ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+              ["MultiEdit", { file_path: file, edits: [] }],
+              ["Write", { file_path: file, content: "x" }],
+              ["NotebookRead", { notebook_path: file }],
+              ["NotebookEdit", { notebook_path: file, new_source: "x" }],
+              ["Glob", { pattern: "*.md", path: dir }],
+              ["Glob", { pattern: `${dir}/**/*.md` }],
+              ["Grep", { pattern: "x", path: file }],
+              ["Grep", { pattern: "x", path: dir, glob: "*.md" }],
+              ["Bash", { command: `cat ${file}` }],
+            ] as const)
+              assert.strictEqual(
+                yield* asSession(tool, input),
+                "The project directory is off limits to sessions, except your scratchpad.",
+                `${tool} ${JSON.stringify(input)}`,
+              )
+          }
+          // A directory above the projects, searched, reaches into them.
+          for (const [tool, input] of [
+            ["Grep", { pattern: "x", path: vibestHome }],
+            ["Glob", { pattern: "**/memory/*", path: vibestHome }],
+            ["Glob", { pattern: `${vibestHome}/**/instructions.md` }],
+          ] as const)
+            assert.isString(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
+          const scratch = path.join(project, "scratch", "pane:s", "w1:p1", "notes.md")
+          assert.isUndefined(yield* asSession("Read", { file_path: scratch }), key)
+          assert.isUndefined(yield* asSession("Glob", { pattern: "*.md", path: path.dirname(scratch) }), key)
+        }
+        for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
+          assert.isString(yield* asSession("Bash", { command }), command)
+        assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }))
+        assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
+      }),
   )
 
   it.effect(
