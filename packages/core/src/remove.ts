@@ -59,19 +59,25 @@ export const stopAgent = (
     const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
     if (seen === "absent" || seen === "unknown")
       return unsupported("vibest does not see its harness in that terminal, so its process may be another program now")
-    if ((yield* detached).result === "moved") return { result: "moved" as const }
-    const exited =
-      (yield* processes.terminate(pid)) === "sent" &&
-      (yield* processes
-        .liveness(pid)
-        .pipe(
-          Effect.repeat({ until: (l) => l === "exited", schedule: Schedule.spaced("200 millis") }),
-          Effect.as(true),
-          Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
-        ))
-    if (exited) return { result: "stopped" as const }
-    yield* input.reattach
-    return { result: "running" as const }
+    // From detach to the answer, uninterruptible (at most `wait`): an interrupt in between (the CLI's Ctrl-C ends its
+    // request) would leave the row detached while the harness still runs, and another terminal could start a second one.
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        if ((yield* detached).result === "moved") return { result: "moved" as const }
+        const exited =
+          (yield* processes.terminate(pid)) === "sent" &&
+          (yield* processes
+            .liveness(pid)
+            .pipe(
+              Effect.repeat({ until: (l) => l === "exited", schedule: Schedule.spaced("200 millis") }),
+              Effect.as(true),
+              Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
+            ))
+        if (exited) return { result: "stopped" as const }
+        yield* input.reattach
+        return { result: "running" as const }
+      }),
+    )
   })
 
 export interface ReleaseInput {

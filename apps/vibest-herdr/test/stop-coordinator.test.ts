@@ -221,6 +221,23 @@ describe("Project.StopCoordinator", () => {
   )
 
   test(
+    "the CLI interrupted (Ctrl-C) after the detach: the stop still finishes, the row is back at its terminal, and a start elsewhere is still refused",
+    Effect.gen(function* () {
+      const s = yield* launched
+      yield* s.processes.setSignalIgnored(true)
+      const stopping = yield* Effect.forkChild(s.stop)
+      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.runtime === null)
+      yield* Fiber.interrupt(stopping)
+      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.address?.id === s.paneId)
+      assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
+      const refused = yield* Effect.exit(s.startAt("test/p2"))
+      assert.isTrue(Exit.isFailure(refused))
+      assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
+    }),
+  )
+
+  test(
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded, a remote machine, or no agent seen but a live PID",
     Effect.gen(function* () {
       const s = yield* launched
@@ -301,6 +318,25 @@ describe("Project.StopCoordinator", () => {
       yield* Fiber.join(first)
       yield* Fiber.join(second)
       assert.deepStrictEqual(order, ["first in", "second in"])
+      assert.strictEqual(lock.size(), 0)
+    }),
+  )
+
+  it.effect("the project lock: an interrupted waiter and an interrupted holder each leave no entry behind", () =>
+    Effect.gen(function* () {
+      const lock = Server.keyedLock()
+      const holder = yield* Effect.forkChild(lock("p", Effect.never))
+      yield* Effect.yieldNow
+      const waiter = yield* Effect.forkChild(lock("p", Effect.void))
+      yield* Effect.yieldNow
+      assert.strictEqual(lock.size(), 1)
+      yield* Fiber.interrupt(waiter)
+      assert.strictEqual(lock.size(), 1)
+      yield* Fiber.interrupt(holder)
+      assert.strictEqual(lock.size(), 0)
+      // Interrupted before it even started: nothing entered, nothing left.
+      const early = yield* Effect.forkChild(lock("q", Effect.never), { startImmediately: false })
+      yield* Fiber.interrupt(early)
       assert.strictEqual(lock.size(), 0)
     }),
   )

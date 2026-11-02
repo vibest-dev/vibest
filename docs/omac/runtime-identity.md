@@ -236,7 +236,7 @@ group) and never the terminal, then signal 0 until it exited, at most 10 s. The 
 signal the row leaves its place (`detachCoordinator`: no address, `metadata.moving`), so the harness's exit (the
 runtime's `exited`) clears nothing and drops nothing, and a delivery round in between keeps what waits for it
 (`dropWaiting`'s `absent` guard skips a moving main agent). A harness still there after 10 s, or a refused signal, puts
-the row back (`reattachCoordinator`): `running`, nothing changed. An exited PID needs no signal: the row detaches,
+the row back (`reattachCoordinator`): `running`, nothing changed. From the detach to the answer the stop is uninterruptible (at most 10 s), so a client that goes away (Ctrl-C) cannot leave the row detached while the harness still runs. An exited PID needs no signal: the row detaches,
 `stopped`. Nothing is signalled, and the answer is `unsupported` with a reason the CLI prints ("cannot be moved from
 here: <why>. Exit it there first"), on another machine, with no PID recorded (started by an older vibest), or when the
 runtime sees no agent there while the PID is alive (it may be another program now). The launch that follows keeps the waiting rows

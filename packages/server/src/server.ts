@@ -834,18 +834,18 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
 export const keyedLock = () => {
   const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
   const run = <A, E, R>(key: string, body: Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      let entry = locks.get(key)
-      if (entry === undefined) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
-      const held = entry
-      held.users++
-      return held.lock.withPermit(body).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            if (--held.users === 0) locks.delete(key)
-          }),
-        ),
-      )
-    })
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        let entry = locks.get(key)
+        if (entry === undefined) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
+        entry.users++
+        return entry
+      }),
+      (held) => held.lock.withPermit(body),
+      (held) =>
+        Effect.sync(() => {
+          if (--held.users === 0) locks.delete(key)
+        }),
+    )
   return Object.assign(run, { size: () => locks.size })
 }
