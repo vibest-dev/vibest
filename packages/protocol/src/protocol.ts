@@ -7,15 +7,10 @@
 export const PROTOCOL = 3
 
 /**
- * What the user runs to continue after a protocol mismatch. The one place to swap them: the restart-and-resume command
- * is still being designed, so these are the best commands that exist today.
+ * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents
+ * running on them to one version, restarting the agents. The one place to change it.
  */
-export const MISMATCH_ACTION = {
-  /** The caller is older than vibestd: quit the agent, then reopen the project's main agent with its conversation. */
-  restartAgent: "vibest",
-  /** vibestd is older than the caller: replace it with the vibest on PATH. */
-  upgradeDaemon: "vibest daemon restart",
-} as const
+export const MISMATCH_ACTION = "vibest update"
 
 /** vibestd's answer to a request in another protocol (HTTP 409 body, RPC ProtocolRejected, the CLI's preflight). */
 export type ProtocolMismatch = {
@@ -23,6 +18,7 @@ export type ProtocolMismatch = {
   readonly protocol: number
   /** vibestd's package version. */
   readonly version: string
+  /** For a person; it names the action. */
   readonly message: string
   /** The command to run. */
   readonly action: string
@@ -32,23 +28,18 @@ export type ProtocolMismatch = {
  * The mismatch between a caller speaking `caller` (undefined: it sent none, so it predates the header) and a vibestd
  * speaking `server` at package `version`. A caller below vibestd was left behind by an update; above it, vibestd is old.
  */
-export const protocolMismatch = (caller: number | undefined, server: number, version: string): ProtocolMismatch =>
-  caller !== undefined && caller > server
-    ? {
-        protocol: server,
-        version,
-        message: `vibestd is older (${version}); upgrade it`,
-        action: MISMATCH_ACTION.upgradeDaemon,
-      }
-    : {
-        protocol: server,
-        version,
-        message: `vibest was updated to ${version}; restart this agent to continue`,
-        action: MISMATCH_ACTION.restartAgent,
-      }
+export const protocolMismatch = (caller: number | undefined, server: number, version: string): ProtocolMismatch => ({
+  protocol: server,
+  version,
+  message:
+    caller !== undefined && caller > server
+      ? `vibestd is older (${version}); run ${MISMATCH_ACTION}`
+      : `vibest was updated to ${version}; run ${MISMATCH_ACTION} to restart this agent on it`,
+  action: MISMATCH_ACTION,
+})
 
-/** One line for a person: the message and the command. */
-export const mismatchText = (m: Pick<ProtocolMismatch, "message" | "action">) => `${m.message}. Run: ${m.action}`
+/** One line for a person (the message names the action). */
+export const mismatchText = (m: Pick<ProtocolMismatch, "message">) => m.message
 
 export const PROTOCOL_HEADER = "vibest-protocol"
 export const CALLER_HEADER = "vibest-caller"

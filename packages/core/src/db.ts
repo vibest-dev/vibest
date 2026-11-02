@@ -34,6 +34,10 @@ const runtimeMatching = (type: string, encodedAddress: string) =>
   encodeRuntime(type, JSON.parse(encodedAddress) as RuntimeAddress)
 
 const Metadata = Schema.Struct({
+  /** A main agent's lease clock (Inbox.poll): its `sending` rows go back to pending once this time has passed. */
+  leaseUntil: Schema.optional(Schema.Number),
+  /** The harness integration's version the session's requests last carried (its plugin). */
+  integrationVersion: Schema.optional(Schema.String),
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   routing: Schema.optional(Routing),
   /** `vibest run --peer`: the session whose worktree this one shares. It never removes that worktree. */
@@ -910,6 +914,31 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orDie),
 
     /** The conversation an integration reports for session `id` (main agent or not): the latest wins. True when it changed. */
+    /** Writes the integration version only when it changed; true when it did. */
+    noteIntegrationVersion: (id: string, version: string) =>
+      sql<{ id: string }>`UPDATE session SET metadata = json_set(metadata, '$.integrationVersion', ${version})
+        WHERE id = ${id} AND json_extract(metadata, '$.integrationVersion') IS NOT ${version} RETURNING id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
+    /** The project's main agent lease clock (`metadata.leaseUntil`), or undefined when none is set. */
+    leaseUntil: (projectId: number) =>
+      sql<{ until: number | null }>`SELECT json_extract(s.metadata, '$.leaseUntil') AS until
+        FROM session s JOIN project p ON p.main_session_id = s.id WHERE p.id = ${projectId}`.pipe(
+        Effect.map((rows) => rows[0]?.until ?? undefined),
+        Effect.orDie,
+      ),
+
+    /** Sets (a time) or clears (undefined) the project's main agent lease clock. */
+    setLeaseUntil: (projectId: number, until: number | undefined) =>
+      (until === undefined
+        ? sql`UPDATE session SET metadata = json_remove(metadata, '$.leaseUntil')
+            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`
+        : sql`UPDATE session SET metadata = json_set(metadata, '$.leaseUntil', ${until})
+            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`
+      ).pipe(Effect.asVoid, Effect.orDie),
+
     noteHarnessSession: (id: string, harnessSessionId: string) =>
       sql<{ id: string }>`UPDATE session SET harness_session_id = ${harnessSessionId}
         WHERE id = ${id} AND harness_session_id IS NOT ${harnessSessionId} RETURNING id`.pipe(
@@ -1038,6 +1067,13 @@ const make = Effect.gen(function* () {
     coordinatorPending: (projectId: number) =>
       inbox(
         `m.sender_type != 'user' AND m.delivery_status = 'pending' AND m.recipient_session_id = (SELECT main_session_id FROM project WHERE id = ?)`,
+        [projectId],
+      ).pipe(Effect.orDie),
+
+    /** Rows handed to the project's main agent and not yet settled (`sending`): the Claude plugin's leased rows. */
+    coordinatorLeased: (projectId: number) =>
+      inbox(
+        `m.sender_type != 'user' AND m.delivery_status = 'delivering' AND m.recipient_session_id = (SELECT main_session_id FROM project WHERE id = ?)`,
         [projectId],
       ).pipe(Effect.orDie),
 

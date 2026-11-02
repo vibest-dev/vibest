@@ -303,11 +303,11 @@ describe("Claude plugin inbox", () => {
 
 describe("Claude plugin protocol mismatch", () => {
   const mismatch = {
-    error: "vibest was updated to 9.9.9; restart this agent to continue. Run: vibest",
+    error: "vibest was updated to 9.9.9; run vibest update to restart this agent on it",
     protocol: 99,
     version: "9.9.9",
-    message: "vibest was updated to 9.9.9; restart this agent to continue",
-    action: "vibest",
+    message: "vibest was updated to 9.9.9; run vibest update to restart this agent on it",
+    action: "vibest update",
   }
 
   it("a 409 puts vibestd's message and action on the status line, polls on quietly, and clears once it goes through", async () => {
