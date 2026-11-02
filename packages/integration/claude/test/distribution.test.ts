@@ -5,11 +5,19 @@ import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 
 const pkg = path.join(import.meta.dirname, "..")
 const repo = path.join(pkg, "../../..")
-const FILES = [".claude-plugin/plugin.json", "LICENSE", "README.md", "hooks/hooks.json", "hooks/register.mjs", "package.json"]
+const FILES = [
+  ".claude-plugin/plugin.json",
+  "LICENSE",
+  "README.md",
+  "hooks/hooks.json",
+  "hooks/register.mjs",
+  "package.json",
+]
 // What a versioned copy of the package needs to pack. Not the type cache or generated files.
 const SOURCES = ["package.json", "src", "scripts", "hooks/hooks.json", "README.md", "LICENSE"]
 // Static, dynamic and CommonJS imports, and re-exports. The bundle must need nothing outside itself.
@@ -18,7 +26,15 @@ const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'
 // exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
-const EVENTS = ["classic.PreToolUse", "classic.Stop", "classic.StopFailure", "classic.UserPromptSubmit", "command.run", "session.end", "session.start"]
+const EVENTS = [
+  "classic.PreToolUse",
+  "classic.Stop",
+  "classic.StopFailure",
+  "classic.UserPromptSubmit",
+  "command.run",
+  "session.end",
+  "session.start",
+]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))
 
@@ -104,7 +120,10 @@ describe("claude plugin distribution", () => {
 
   it("the packed package is complete, import-free and stamped with its own version", () => {
     assert.deepStrictEqual(problems(packed), [])
-    assert.strictEqual(readJson(path.join(packed, ".claude-plugin/plugin.json")).version, readJson(path.join(pkg, "package.json")).version)
+    assert.strictEqual(
+      readJson(path.join(packed, ".claude-plugin/plugin.json")).version,
+      readJson(path.join(pkg, "package.json")).version,
+    )
   })
 
   it("each package version packs a plugin.json of that version", () => {
@@ -141,7 +160,10 @@ describe("claude plugin distribution", () => {
   it("the tarball's bundle is the bytes a build gives", () => {
     const built = path.join(tmp, "built")
     build(pkg, built)
-    assert.deepStrictEqual(listFiles(built), FILES.filter((name) => name !== "package.json"))
+    assert.deepStrictEqual(
+      listFiles(built),
+      FILES.filter((name) => name !== "package.json"),
+    )
     for (const name of FILES.filter((name) => name !== "package.json"))
       assert.isTrue(fs.readFileSync(path.join(built, name)).equals(fs.readFileSync(path.join(packed, name))), name)
   })
@@ -171,12 +193,20 @@ describe("claude plugin distribution", () => {
   it("fails on a register that is not a declared, exported function", () => {
     const arrow = fixture("arrow")
     const arrowFile = path.join(arrow, "hooks/register.mjs")
-    fs.writeFileSync(arrowFile, fs.readFileSync(arrowFile, "utf8").replace(/^function register\(on, _options\)/m, "var register = (on, _options) =>"))
+    fs.writeFileSync(
+      arrowFile,
+      fs
+        .readFileSync(arrowFile, "utf8")
+        .replace(/^function register\(on, _options\)/m, "var register = (on, _options) =>"),
+    )
     assert.include(problems(arrow), "register.mjs has no top-level function register")
 
     const unexported = fixture("unexported")
     const unexportedFile = path.join(unexported, "hooks/register.mjs")
-    fs.writeFileSync(unexportedFile, fs.readFileSync(unexportedFile, "utf8").replace(/^(export \{[^}]*)\bregister\b/m, "$1"))
+    fs.writeFileSync(
+      unexportedFile,
+      fs.readFileSync(unexportedFile, "utf8").replace(/^(export \{[^}]*)\bregister\b/m, "$1"),
+    )
     assert.include(problems(unexported), "register.mjs does not export register")
   })
 
@@ -186,7 +216,12 @@ describe("claude plugin distribution", () => {
     build(elsewhere, "relative-out")
     build(os.tmpdir(), path.join(tmp, "from-tmpdir"))
     for (const out of [path.join(elsewhere, "relative-out"), path.join(tmp, "from-tmpdir")])
-      assert.isTrue(fs.readFileSync(path.join(out, "hooks/register.mjs")).equals(fs.readFileSync(path.join(packed, "hooks/register.mjs"))), out)
+      assert.isTrue(
+        fs
+          .readFileSync(path.join(out, "hooks/register.mjs"))
+          .equals(fs.readFileSync(path.join(packed, "hooks/register.mjs"))),
+        out,
+      )
     assert.isFalse(fs.existsSync(path.join(pkg, "relative-out")), "not resolved against the package")
   })
 

@@ -1,10 +1,31 @@
+import { RuntimeUnreachable as HerdrUnreachable, type RuntimeLocation as HerdrLocation } from "@vibest/schema/session"
+import {
+  Context,
+  Duration,
+  Effect,
+  FileSystem,
+  HashMap,
+  Layer,
+  Option,
+  PubSub,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+  SynchronizedRef,
+} from "effect"
 // One vibestd talks to every herdr session on the machine (SPEC §4 herdr session, §6). Rows store the session name;
 // name → socket path comes from `herdr session list --json`. Each session gets one broadcast subscription,
 // reconnected with capped exponential backoff, fanned into one event stream.
-import { Herdr, HerdrProtocolMismatch, type HerdrShape, type PushFrame, SocketConnector, type Subscription } from "effect-herdr-sdk"
-import { Context, Duration, Effect, FileSystem, HashMap, Layer, Option, PubSub, Ref, Schedule, Schema, Stream, SynchronizedRef } from "effect"
+import {
+  Herdr,
+  HerdrProtocolMismatch,
+  type HerdrShape,
+  type PushFrame,
+  SocketConnector,
+  type Subscription,
+} from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RuntimeUnreachable as HerdrUnreachable, type RuntimeLocation as HerdrLocation } from "@vibest/schema/session"
 
 export interface SessionEvent {
   readonly session: string
@@ -32,17 +53,20 @@ const RECONNECT = Schedule.exponential("1 second").pipe(
   Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(30)))),
 )
 
-export class HerdrPool extends Context.Service<HerdrPool, {
-  /** Resolve a caller location to a session name, starting a named session headless when it is not running. */
-  readonly resolve: (location: HerdrLocation) => Effect.Effect<string, HerdrUnreachable | HerdrProtocolMismatch>
-  /** Client for a running session that speaks the SDK's protocol. Never starts a server. */
-  readonly client: (session: string) => Effect.Effect<HerdrShape, HerdrUnreachable | HerdrProtocolMismatch>
-  readonly events: Stream.Stream<SessionEvent>
-  /** A herdr server this vibestd had connected to came back (restart or live handoff). Metadata is gone. */
-  readonly restarts: Stream.Stream<string>
-  /** Sessions this vibestd has connected to. */
-  readonly sessions: Effect.Effect<ReadonlyArray<string>>
-}>()("vibest/runtime-herdr/HerdrPool") {
+export class HerdrPool extends Context.Service<
+  HerdrPool,
+  {
+    /** Resolve a caller location to a session name, starting a named session headless when it is not running. */
+    readonly resolve: (location: HerdrLocation) => Effect.Effect<string, HerdrUnreachable | HerdrProtocolMismatch>
+    /** Client for a running session that speaks the SDK's protocol. Never starts a server. */
+    readonly client: (session: string) => Effect.Effect<HerdrShape, HerdrUnreachable | HerdrProtocolMismatch>
+    readonly events: Stream.Stream<SessionEvent>
+    /** A herdr server this vibestd had connected to came back (restart or live handoff). Metadata is gone. */
+    readonly restarts: Stream.Stream<string>
+    /** Sessions this vibestd has connected to. */
+    readonly sessions: Effect.Effect<ReadonlyArray<string>>
+  }
+>()("vibest/runtime-herdr/HerdrPool") {
   static readonly layer = Layer.effect(
     HerdrPool,
     Effect.gen(function* () {
@@ -59,10 +83,16 @@ export class HerdrPool extends Context.Service<HerdrPool, {
        * since a herdr live handoff can swap the server under a running vibestd.
        */
       const sessions = yield* SynchronizedRef.make(
-        HashMap.empty<string, { readonly socketPath: string; readonly mismatch: Option.Option<HerdrProtocolMismatch> }>(),
+        HashMap.empty<
+          string,
+          { readonly socketPath: string; readonly mismatch: Option.Option<HerdrProtocolMismatch> }
+        >(),
       )
       const setMismatch = (session: string, mismatch: Option.Option<HerdrProtocolMismatch>) =>
-        SynchronizedRef.update(sessions, HashMap.modify(session, (s) => ({ ...s, mismatch })))
+        SynchronizedRef.update(
+          sessions,
+          HashMap.modify(session, (s) => ({ ...s, mismatch })),
+        )
 
       /** Handshake (SPEC §6.2): the SDK's types only hold for the protocol they were generated from. */
       const verified = (session: string, socketPath: string) =>
@@ -94,7 +124,9 @@ export class HerdrPool extends Context.Service<HerdrPool, {
                 Effect.flatMap((was) => (was ? PubSub.publish(restarts, session).pipe(Effect.asVoid) : Effect.void)),
               ),
             ),
-            Effect.tapError((e) => (e._tag === "HerdrProtocolMismatch" ? setMismatch(session, Option.some(e)) : Effect.void)),
+            Effect.tapError((e) =>
+              e._tag === "HerdrProtocolMismatch" ? setMismatch(session, Option.some(e)) : Effect.void,
+            ),
             Effect.tap(() => setMismatch(session, Option.none())),
             Effect.map((h) => h.subscribe(SUBSCRIPTIONS)),
             Stream.unwrap,
@@ -107,7 +139,8 @@ export class HerdrPool extends Context.Service<HerdrPool, {
       const remember = (session: string, socketPath: string) =>
         SynchronizedRef.modifyEffect(sessions, (map) =>
           Option.match(HashMap.get(map, session), {
-            onSome: (known) => Effect.succeed([undefined, HashMap.set(map, session, { ...known, socketPath })] as const),
+            onSome: (known) =>
+              Effect.succeed([undefined, HashMap.set(map, session, { ...known, socketPath })] as const),
             onNone: () =>
               verified(session, socketPath).pipe(
                 Effect.andThen(Effect.forkIn(watch(session, socketPath), scope)),
@@ -120,22 +153,41 @@ export class HerdrPool extends Context.Service<HerdrPool, {
       const start = (session: string) =>
         Effect.gen(function* () {
           const handle = yield* spawner.spawn(
-            ChildProcess.make("herdr", ["server", "--session", session], { detached: true, stdin: "ignore", stdout: "ignore", stderr: "ignore" }),
+            ChildProcess.make("herdr", ["server", "--session", session], {
+              detached: true,
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore",
+            }),
           )
           yield* handle.unref
         }).pipe(
           Effect.scoped,
-          Effect.mapError((e) => new HerdrUnreachable({ session, message: `herdr server --session ${session}: ${e.message}` })),
+          Effect.mapError(
+            (e) => new HerdrUnreachable({ session, message: `herdr server --session ${session}: ${e.message}` }),
+          ),
           Effect.andThen(
             listSessions(session).pipe(
               Effect.map((list) => list.find((s) => s.name === session && s.running)),
-              Effect.flatMap((found) => (found ? fs.exists(found.socket_path).pipe(Effect.map((ok) => (ok ? found.socket_path : undefined))) : Effect.succeed(undefined))),
+              Effect.flatMap((found) =>
+                found
+                  ? fs.exists(found.socket_path).pipe(Effect.map((ok) => (ok ? found.socket_path : undefined)))
+                  : Effect.succeed(undefined),
+              ),
               Effect.orElseSucceed(() => undefined),
-              Effect.repeat({ until: (socketPath) => socketPath !== undefined, schedule: Schedule.spaced("200 millis") }),
+              Effect.repeat({
+                until: (socketPath) => socketPath !== undefined,
+                schedule: Schedule.spaced("200 millis"),
+              }),
               Effect.timeoutOrElse({
                 duration: START_TIMEOUT,
                 orElse: () =>
-                  Effect.fail(new HerdrUnreachable({ session, message: `herdr server --session ${session} did not come up in ${Duration.format(START_TIMEOUT)}` })),
+                  Effect.fail(
+                    new HerdrUnreachable({
+                      session,
+                      message: `herdr server --session ${session} did not come up in ${Duration.format(START_TIMEOUT)}`,
+                    }),
+                  ),
               }),
               Effect.map((socketPath) => socketPath!),
             ),
@@ -146,7 +198,11 @@ export class HerdrPool extends Context.Service<HerdrPool, {
         Effect.gen(function* () {
           if ("socketPath" in location) {
             const found = (yield* listSessions("?")).find((s) => s.socket_path === location.socketPath)
-            if (!found) return yield* new HerdrUnreachable({ session: "?", message: `no herdr session listens on ${location.socketPath}` })
+            if (!found)
+              return yield* new HerdrUnreachable({
+                session: "?",
+                message: `no herdr session listens on ${location.socketPath}`,
+              })
             yield* remember(found.name, found.socket_path)
             return found.name
           }
@@ -164,7 +220,8 @@ export class HerdrPool extends Context.Service<HerdrPool, {
             return yield* herdr(known.value.socketPath)
           }
           const found = (yield* listSessions(session)).find((s) => s.name === session && s.running)
-          if (!found) return yield* new HerdrUnreachable({ session, message: `herdr session ${session} is not running` })
+          if (!found)
+            return yield* new HerdrUnreachable({ session, message: `herdr session ${session} is not running` })
           yield* remember(session, found.socket_path)
           return yield* herdr(found.socket_path)
         })

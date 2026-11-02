@@ -1,24 +1,14 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
-  "globalDependencies": [
-    "tools/tsconfig/base.json"
-  ],
+  "globalDependencies": ["tools/tsconfig/base.json"],
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**",
-        "bin/vibest",
-        "harnesses/**"
-      ],
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "bin/vibest", "harnesses/**"],
       "cache": false
     },
     "typecheck": {
-      "dependsOn": [
-        "^typecheck"
-      ]
+      "dependsOn": ["^typecheck"]
     },
     "test": {
       "cache": false

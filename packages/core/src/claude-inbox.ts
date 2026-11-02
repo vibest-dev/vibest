@@ -20,25 +20,42 @@ export const utf8Bytes = (value: string) => {
 }
 
 /** Messages of rows the claim actually returned, in that order. Rows claim missed are not included. */
-export const claimedText = (rows: ReadonlyArray<{ readonly id: number; readonly message: string }>, ids: ReadonlyArray<number>) => {
+export const claimedText = (
+  rows: ReadonlyArray<{ readonly id: number; readonly message: string }>,
+  ids: ReadonlyArray<number>,
+) => {
   const owned = new Set(ids)
-  return rows.filter((row) => owned.has(row.id)).map((row) => row.message).join("\n\n")
+  return rows
+    .filter((row) => owned.has(row.id))
+    .map((row) => row.message)
+    .join("\n\n")
 }
 
 /** Remove only this publication's temp file. NotFound is success. Any other removal failure is logged and fails. */
 export const removeOwnedTemp = (fs: FileSystem.FileSystem, tmp: string) =>
   fs.remove(tmp).pipe(
-    Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.void),
+    Effect.catchIf(
+      (error) => error.reason._tag === "NotFound",
+      () => Effect.void,
+    ),
     Effect.tapError((error) => Effect.logWarning(`inbox claim temp ${tmp} was not removed: ${error.message}`)),
   )
 
-export const writeClaimFile = (fs: FileSystem.FileSystem, path: Path.Path, file: string, body: string, suffix: string) => {
+export const writeClaimFile = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  file: string,
+  body: string,
+  suffix: string,
+) => {
   const tmp = `${file}.${suffix}.tmp`
   return Effect.gen(function* () {
     yield* fs.makeDirectory(path.dirname(file), { recursive: true })
     yield* fs.writeFileString(tmp, body, { mode: 0o600 })
     yield* fs.rename(tmp, file)
-  }).pipe(Effect.onExit((exit) => (exit._tag === "Success" ? Effect.void : Effect.uninterruptible(removeOwnedTemp(fs, tmp)))))
+  }).pipe(
+    Effect.onExit((exit) => (exit._tag === "Success" ? Effect.void : Effect.uninterruptible(removeOwnedTemp(fs, tmp)))),
+  )
 }
 
 export type ReceiptOp = "ack" | "release-retry" | "release-fail"

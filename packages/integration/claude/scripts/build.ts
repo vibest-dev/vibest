@@ -20,7 +20,8 @@ const write = (name: string, text: string | Buffer) => {
 }
 
 write(".claude-plugin/plugin.json", `${JSON.stringify({ ...readJson("src/manifest.json"), version }, null, 2)}\n`)
-if (outdir !== root) for (const name of ["hooks/hooks.json", "README.md", "LICENSE"]) write(name, fs.readFileSync(path.join(root, name)))
+if (outdir !== root)
+  for (const name of ["hooks/hooks.json", "README.md", "LICENSE"]) write(name, fs.readFileSync(path.join(root, name)))
 // Bun writes each module's path relative to the working directory into the bundle; pin it so the bytes don't vary.
 process.chdir(root)
 const result = await Bun.build({

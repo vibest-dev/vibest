@@ -1,6 +1,7 @@
 // @vibest/plugin: what an vibest plugin is written against. vibestd maps this module (and `effect`) to its own instances when it
 // loads a plugin, so a plugin imports it normally and never bundles either. See architecture.md §8 and §9.
 import { type Effect, Schema, type Scope } from "effect"
+
 import type { RuntimeRegistry } from "./runtime.ts"
 
 export * as Plugin from "./plugin.ts"
@@ -25,7 +26,11 @@ export interface SubscriptionSnapshot {
   readonly harness: string
   readonly provider: string
   readonly machine: "local"
-  readonly account: { readonly kind: "subscription" | "api-key" | "none"; readonly plan?: string | undefined; readonly provider?: string | undefined }
+  readonly account: {
+    readonly kind: "subscription" | "api-key" | "none"
+    readonly plan?: string | undefined
+    readonly provider?: string | undefined
+  }
   readonly limits: ReadonlyArray<SubscriptionLimit>
   readonly updatedAt: number
   readonly error?: string | undefined
@@ -158,7 +163,9 @@ export interface Domain<D extends string> {
   /** Registered until the plugin is unloaded (its scope closes). A name not in `Hooks` fails the plugin's setup. */
   readonly hook: <N extends HookOf<D>>(
     name: N,
-    callback: (event: Hooks[Extract<`${D}.${N}`, keyof Hooks>]["event"]) => Effect.Effect<void, Hooks[Extract<`${D}.${N}`, keyof Hooks>]["error"]>,
+    callback: (
+      event: Hooks[Extract<`${D}.${N}`, keyof Hooks>]["event"],
+    ) => Effect.Effect<void, Hooks[Extract<`${D}.${N}`, keyof Hooks>]["error"]>,
   ) => Effect.Effect<void, never, Scope.Scope>
 }
 

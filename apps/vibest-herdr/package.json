@@ -2,12 +2,14 @@
   "name": "@vibest/cli",
   "version": "0.0.1-beta.13",
   "description": "vibest: vibestd daemon and the vibest CLI. A coordinator directing sessions in herdr panes.",
-  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
     "directory": "apps/vibest-herdr"
+  },
+  "bin": {
+    "vibest": "./bin/vibest.cjs"
   },
   "files": [
     "bin",
@@ -15,11 +17,18 @@
     "herdr-plugin",
     "LICENSE"
   ],
+  "type": "module",
+  "imports": {
+    "#platform": {
+      "bun": "./src/platform/bun.ts"
+    }
+  },
+  "exports": {
+    "./test/*": "./test/*.ts",
+    "./*": "./src/*.ts"
+  },
   "publishConfig": {
     "access": "public"
-  },
-  "bin": {
-    "vibest": "./bin/vibest.cjs"
   },
   "scripts": {
     "build": "bun scripts/build.ts && bun scripts/build-harnesses.ts",
@@ -45,14 +54,5 @@
   "optionalDependencies": {
     "@vibest/cli-darwin-arm64": "workspace:*",
     "@vibest/cli-linux-x64": "workspace:*"
-  },
-  "imports": {
-    "#platform": {
-      "bun": "./src/platform/bun.ts"
-    }
-  },
-  "exports": {
-    "./test/*": "./test/*.ts",
-    "./*": "./src/*.ts"
   }
 }

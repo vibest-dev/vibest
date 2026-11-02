@@ -1,34 +1,45 @@
+import { dlopen, FFIType } from "bun:ffi"
+import fs from "node:fs"
+import fsPromises from "node:fs/promises"
+import path from "node:path"
+
 // vibest on Bun: the only file under src/ that names a runtime. Reached through the `#platform` import, which
 // package.json `imports` resolves by condition ("bun" here); another runtime adds a condition and a sibling file.
 import { BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { SqlClient } from "effect/sql"
-import { dlopen, FFIType } from "bun:ffi"
-import * as HerdrBun from "effect-herdr-sdk/bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
-import * as VibestPlugin from "@vibest/plugin"
-import * as effect from "effect"
-import { Effect, Layer, Stdio, Stream } from "effect"
-import fsPromises from "node:fs/promises"
-import fs from "node:fs"
-import path from "node:path"
-import type { Host } from "@vibest/server/daemon"
 import { inspectSchema, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
-import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
-import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
-import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
+import * as VibestPlugin from "@vibest/plugin"
+import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
+import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
+import type { Host } from "@vibest/server/daemon"
+import * as effect from "effect"
+import { Effect, Layer, Stdio, Stream } from "effect"
+import * as HerdrBun from "effect-herdr-sdk/bun"
+import { SqlClient } from "effect/sql"
+
 import { migrateLegacyTerminalIds } from "../legacy-terminal-ids.ts"
+import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
 /**
  * Bun's Stdio, except a finished read of stdin unrefs it: a TTY stdin that was read stays referenced even after the
  * stream ends or `pause()`, so `vibest` would never exit after a `[y/N]` answer. A later read still works.
  */
-const stdio = Layer.effect(Stdio.Stdio, Effect.map(Stdio.Stdio, (bun) =>
-  Stdio.make({ ...bun, stdin: Stream.ensuring(bun.stdin, Effect.sync(() => process.stdin.unref?.())) }),
-)).pipe(Layer.provide(BunServices.layer))
+const stdio = Layer.effect(
+  Stdio.Stdio,
+  Effect.map(Stdio.Stdio, (bun) =>
+    Stdio.make({
+      ...bun,
+      stdin: Stream.ensuring(
+        bun.stdin,
+        Effect.sync(() => process.stdin.unref?.()),
+      ),
+    }),
+  ),
+).pipe(Layer.provide(BunServices.layer))
 
 /** FileSystem, Path, Crypto, ChildProcessSpawner, Stdio, Terminal, and the socket connectors (vibest's and herdr's). */
 export const services = Layer.mergeAll(
@@ -66,22 +77,24 @@ const privateDatabase = (filename: string) =>
  * file is created mode 0600 and then opened writable. WAL mode stays off until `Db` accepts the file.
  */
 export const sqlite = (filename: string) =>
-  Layer.unwrap(Effect.gen(function* () {
-    if (filename !== ":memory:") {
-      const existed = yield* Effect.promise(() => Bun.file(filename).exists())
-      yield* privateDatabase(filename)
-      if (existed) yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
-      // The herdr product's one-off migration runs on its own short-lived writable connection before core reads the
-      // table (legacy-terminal-ids.ts): any left of the pre-port rows are rewritten before `Db` ever sees them.
-      if (existed)
-        yield* sqliteLayer(filename, false).pipe(
-          Layer.build,
-          Effect.flatMap((context) => migrateLegacyTerminalIds(effect.Context.get(context, SqlClient.SqlClient))),
-          Effect.scoped,
-        )
-    }
-    return sqliteLayer(filename, false)
-  }))
+  Layer.unwrap(
+    Effect.gen(function* () {
+      if (filename !== ":memory:") {
+        const existed = yield* Effect.promise(() => Bun.file(filename).exists())
+        yield* privateDatabase(filename)
+        if (existed) yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
+        // The herdr product's one-off migration runs on its own short-lived writable connection before core reads the
+        // table (legacy-terminal-ids.ts): any left of the pre-port rows are rewritten before `Db` ever sees them.
+        if (existed)
+          yield* sqliteLayer(filename, false).pipe(
+            Layer.build,
+            Effect.flatMap((context) => migrateLegacyTerminalIds(effect.Context.get(context, SqlClient.SqlClient))),
+            Effect.scoped,
+          )
+      }
+      return sqliteLayer(filename, false)
+    }),
+  )
 
 export const runMain = BunRuntime.runMain
 
@@ -99,11 +112,15 @@ export const plugins: PluginLoader["Service"] = {
     Bun.plugin({
       name: "vibest-plugin-runtime",
       setup(build) {
-        const object = (exports: object) => () => ({ exports: exports as Record<string, unknown>, loader: "object" as const })
+        const object = (exports: object) => () => ({
+          exports: exports as Record<string, unknown>,
+          loader: "object" as const,
+        })
         build.module("effect", object(effect))
         build.module("@vibest/plugin", object(VibestPlugin))
         for (const [name, value] of Object.entries(effect)) {
-          if (/^[A-Z]/.test(name) && typeof value === "object" && value !== null) build.module(`effect/${name}`, object(value))
+          if (/^[A-Z]/.test(name) && typeof value === "object" && value !== null)
+            build.module(`effect/${name}`, object(value))
         }
         keyLocalImports(build)
       },
@@ -157,7 +174,9 @@ const keychain: KeychainPlatform = {
 }
 
 /** libc's flock(2): advisory, whole-file, held by the open file description, dropped by the kernel when the process dies. */
-const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } })
+const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+  flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+})
 const LOCK_EX_NB = 2 | 4
 
 /**
@@ -177,15 +196,28 @@ const lock: Host["lock"] = (file) =>
       },
       catch: (e) => e as Error,
     }),
-    (fd) => Effect.sync(() => {
-      if (fd === undefined) return
-      try { fs.ftruncateSync(fd, 0) } finally { fs.closeSync(fd) }
-    }),
+    (fd) =>
+      Effect.sync(() => {
+        if (fd === undefined) return
+        try {
+          fs.ftruncateSync(fd, 0)
+        } finally {
+          fs.closeSync(fd)
+        }
+      }),
   ).pipe(
-    Effect.map((fd) => fd === undefined ? undefined : (text: string) => Effect.try({
-      try: () => { fs.ftruncateSync(fd, 0); fs.writeSync(fd, text, 0) },
-      catch: (e) => e as Error,
-    })),
+    Effect.map((fd) =>
+      fd === undefined
+        ? undefined
+        : (text: string) =>
+            Effect.try({
+              try: () => {
+                fs.ftruncateSync(fd, 0)
+                fs.writeSync(fd, text, 0)
+              },
+              catch: (e) => e as Error,
+            }),
+    ),
   )
 
 /** vibest.json's top-level `runtime` key (runtime-port §4), read again per start so an edit applies to the next one:
@@ -193,9 +225,12 @@ const lock: Host["lock"] = (file) =>
 const configuredRuntime: ConfiguredRuntime = () =>
   Effect.sync(() => {
     try {
-      const home = process.env["VIBEST_HOME"] ?? (process.env["HOME"] ? path.join(process.env["HOME"], ".vibest") : undefined)
+      const home =
+        process.env["VIBEST_HOME"] ?? (process.env["HOME"] ? path.join(process.env["HOME"], ".vibest") : undefined)
       if (home === undefined) return undefined
-      const runtime = (plugins.parseJsonc(fs.readFileSync(path.join(home, "vibest.json"), "utf8")) as { runtime?: unknown }).runtime
+      const runtime = (
+        plugins.parseJsonc(fs.readFileSync(path.join(home, "vibest.json"), "utf8")) as { runtime?: unknown }
+      ).runtime
       return typeof runtime === "string" && runtime !== "" ? runtime : undefined
     } catch {
       return undefined
@@ -205,15 +240,30 @@ const configuredRuntime: ConfiguredRuntime = () =>
 /** The builtin runtime plugins (runtime-port.md §2), first after the default harness choice. */
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
-  { source: "builtin:runtime-choice", revision: "runtime-choice", options: {}, plugin: choicePlugin(configuredRuntime) },
+  {
+    source: "builtin:runtime-choice",
+    revision: "runtime-choice",
+    options: {},
+    plugin: choicePlugin(configuredRuntime),
+  },
 ]
 
 /** What vibestd needs from the runtime beyond `services`; the product adds the terminal runtime (main.ts). */
-export const daemon: Omit<Host, "runtime"> = { sqlite, socketServer: (path) => BunSocketServer.layer({ path }), plugins, builtinPlugins, processes, keychain, lock }
+export const daemon: Omit<Host, "runtime"> = {
+  sqlite,
+  socketServer: (path) => BunSocketServer.layer({ path }),
+  plugins,
+  builtinPlugins,
+  processes,
+  keychain,
+  lock,
+}
 
 /** argv that runs this vibest again: the binary itself when compiled (`bun build --compile`), else `bun <script>`. */
 export const selfCommand: ReadonlyArray<string> =
-  process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/") ? [process.execPath] : [process.execPath, process.argv[1]]
+  process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")
+    ? [process.execPath]
+    : [process.execPath, process.argv[1]]
 
 /** Replace this process with `file` (looked up on PATH like a shell does), adding `env` to the current environment. */
 export const exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => {

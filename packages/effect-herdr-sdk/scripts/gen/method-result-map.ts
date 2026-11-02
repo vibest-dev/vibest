@@ -7,7 +7,7 @@
  * loose `ResponseResult` union: a typing gap, never a runtime bug.
  */
 export const METHOD_RESULT: Readonly<Record<string, string>> = {
-  "ping": "pong",
+  ping: "pong",
   "session.snapshot": "session_snapshot",
   "workspace.create": "workspace_created",
   "workspace.list": "workspace_list",
@@ -33,4 +33,4 @@ export const METHOD_RESULT: Readonly<Record<string, string>> = {
   "pane.read": "pane_read",
   "pane.split": "pane_info",
   "events.subscribe": "subscription_started",
-};
+}

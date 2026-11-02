@@ -19,7 +19,10 @@ import { Context, Effect, Exit, FiberSet, Layer, Scope } from "effect"
 /** The events vibest handles: what Pi passes, and what the handler may return to it. */
 interface Events {
   readonly session_start: { readonly event: SessionStartEvent; readonly result: void }
-  readonly resources_discover: { readonly event: ResourcesDiscoverEvent; readonly result: ResourcesDiscoverResult | void }
+  readonly resources_discover: {
+    readonly event: ResourcesDiscoverEvent
+    readonly result: ResourcesDiscoverResult | void
+  }
   readonly before_agent_start: { readonly event: BeforeAgentStartEvent; readonly result: void }
   readonly input: { readonly event: InputEvent; readonly result: InputEventResult | void }
   readonly tool_call: { readonly event: ToolCallEvent; readonly result: ToolCallEventResult | undefined }
@@ -27,26 +30,38 @@ interface Events {
   readonly agent_settled: { readonly event: AgentSettledEvent; readonly result: void }
 }
 
-export class Pi extends Context.Service<Pi, {
-  /** Handle `event` while the scope is open; Pi awaits the Effect and uses its value, and reports its failure. */
-  readonly handle: <K extends keyof Events, E, R>(
-    event: K,
-    f: (event: Events[K]["event"], ctx: ExtensionContext) => Effect.Effect<Events[K]["result"], E, R>,
-  ) => Effect.Effect<void, never, R | Scope.Scope>
-  readonly sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => Effect.Effect<void>
-  /** Run another extension's factory on this session's `api`, while the extension loads. */
-  readonly load: (factory: (api: ExtensionAPI) => void) => Effect.Effect<void>
-}>()("@vibest/pi/Pi") {
+export class Pi extends Context.Service<
+  Pi,
+  {
+    /** Handle `event` while the scope is open; Pi awaits the Effect and uses its value, and reports its failure. */
+    readonly handle: <K extends keyof Events, E, R>(
+      event: K,
+      f: (event: Events[K]["event"], ctx: ExtensionContext) => Effect.Effect<Events[K]["result"], E, R>,
+    ) => Effect.Effect<void, never, R | Scope.Scope>
+    readonly sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => Effect.Effect<void>
+    /** Run another extension's factory on this session's `api`, while the extension loads. */
+    readonly load: (factory: (api: ExtensionAPI) => void) => Effect.Effect<void>
+  }
+>()("@vibest/pi/Pi") {
   static readonly layer = (api: ExtensionAPI) =>
     Layer.succeed(
       Pi,
       Pi.of({
-        handle: <K extends keyof Events, E, R>(event: K, f: (event: Events[K]["event"], ctx: ExtensionContext) => Effect.Effect<Events[K]["result"], E, R>) =>
+        handle: <K extends keyof Events, E, R>(
+          event: K,
+          f: (event: Events[K]["event"], ctx: ExtensionContext) => Effect.Effect<Events[K]["result"], E, R>,
+        ) =>
           Effect.gen(function* () {
             const run = yield* FiberSet.makeRuntimePromise<R>()
             // `on` is overloaded per event name; `Events` pins each name to its overload's types.
-            const on = api.on as (event: K, handler: (e: Events[K]["event"], ctx: ExtensionContext) => Promise<Events[K]["result"]>) => () => void
-            yield* Effect.acquireRelease(Effect.sync(() => on(event, (e, ctx) => run(f(e, ctx)))), (off) => Effect.sync(off))
+            const on = api.on as (
+              event: K,
+              handler: (e: Events[K]["event"], ctx: ExtensionContext) => Promise<Events[K]["result"]>,
+            ) => () => void
+            yield* Effect.acquireRelease(
+              Effect.sync(() => on(event, (e, ctx) => run(f(e, ctx)))),
+              (off) => Effect.sync(off),
+            )
           }),
         sendMessage: (...args) => Effect.sync(() => api.sendMessage(...args)),
         load: (factory) => Effect.sync(() => factory(api)),

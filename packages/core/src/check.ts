@@ -37,15 +37,21 @@ const pushTail = (state: TailState, chunk: string): TailState => {
 }
 
 const tailText = (state: TailState) => {
-  const lines = state.partial.length > 0
-    ? state.lines.length === TAIL_LINES ? [...state.lines.slice(1), state.partial] : [...state.lines, state.partial]
-    : state.lines
+  const lines =
+    state.partial.length > 0
+      ? state.lines.length === TAIL_LINES
+        ? [...state.lines.slice(1), state.partial]
+        : [...state.lines, state.partial]
+      : state.lines
   return lines.join("\n")
 }
 
 /** Fold the stream. Never `Stream.mkString` the whole output. */
 const readTail = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
-  Stream.decodeText(stream).pipe(Stream.runFold(() => emptyTail, pushTail), Effect.map(tailText))
+  Stream.decodeText(stream).pipe(
+    Stream.runFold(() => emptyTail, pushTail),
+    Effect.map(tailText),
+  )
 
 const attemptsOf = (options: Readonly<Record<string, unknown>>) => {
   const raw = options.attempts
@@ -74,25 +80,32 @@ export const runCheck = (command: string, cwd: string, timeout = CHECK_TIMEOUT) 
     Effect.scoped,
     Effect.timeoutOption(timeout),
     Effect.map((done) => (Option.isSome(done) ? done.value : { ok: false, tail: "check timed out" })),
-    Effect.catch((error) => Effect.succeed({ ok: false, tail: tailOf(error instanceof Error ? error.message : String(error)) || "check failed" })),
+    Effect.catch((error) =>
+      Effect.succeed({
+        ok: false,
+        tail: tailOf(error instanceof Error ? error.message : String(error)) || "check failed",
+      }),
+    ),
   )
 
 export const checkPlugin = Plugin.define({
   id: "check",
-  effect: (context) => Effect.gen(function* () {
-    const command = typeof context.options.command === "string" ? context.options.command.trim() : ""
-    if (command === "") return yield* Effect.die(new Error("check: command is empty"))
-    const limit = attemptsOf(context.options)
-    const onIdle = (event: AgentIdle) => Effect.sync(() => {
-      if (event.agentType === "main" || event.directory === "") return
-      if (event.ran === undefined) {
-        event.command = command
-        return
-      }
-      if (event.ran.ok) return
-      if (event.checkAttempts < limit) event.prompt = event.ran.tail
-      else event.output = event.ran.tail
-    })
-    yield* context.agent.hook("idle", onIdle)
-  }),
+  effect: (context) =>
+    Effect.gen(function* () {
+      const command = typeof context.options.command === "string" ? context.options.command.trim() : ""
+      if (command === "") return yield* Effect.die(new Error("check: command is empty"))
+      const limit = attemptsOf(context.options)
+      const onIdle = (event: AgentIdle) =>
+        Effect.sync(() => {
+          if (event.agentType === "main" || event.directory === "") return
+          if (event.ran === undefined) {
+            event.command = command
+            return
+          }
+          if (event.ran.ok) return
+          if (event.checkAttempts < limit) event.prompt = event.ran.tail
+          else event.output = event.ran.tail
+        })
+      yield* context.agent.hook("idle", onIdle)
+    }),
 })

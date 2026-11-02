@@ -2,12 +2,16 @@
 // ships — the required members first, then each optional member present. Framework-free: it fails with
 // `ContractFailure` naming the member and why, so any runner (a test file, a CLI check) can drive it.
 import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
+
 import type * as Runtime from "./runtime.ts"
 
 export { type Runtime } from "./runtime.ts"
 
 /** One contract violation: the member under test and what it did. */
-export class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", { member: Schema.String, message: Schema.String }) {}
+export class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", {
+  member: Schema.String,
+  message: Schema.String,
+}) {}
 
 /** What the contract can fail with: its own violation, or the runtime's error from the call it made. */
 export type ContractError = ContractFailure | Runtime.RuntimeError
@@ -16,7 +20,13 @@ const fail = (member: string, message: string) => new ContractFailure({ member, 
 const that = (member: string, ok: boolean, message: string) => (ok ? Effect.void : Effect.fail(fail(member, message)))
 
 /** Poll `read` until `ready` is true, `what` names the wait in the failure. */
-const until = <A, E, R>(member: string, read: Effect.Effect<A, E, R>, ready: (value: A) => boolean, what: string, timeout: Duration.Duration) =>
+const until = <A, E, R>(
+  member: string,
+  read: Effect.Effect<A, E, R>,
+  ready: (value: A) => boolean,
+  what: string,
+  timeout: Duration.Duration,
+) =>
   Effect.gen(function* () {
     const deadline = Date.now() + Duration.toMillis(timeout)
     for (;;) {
@@ -43,7 +53,10 @@ export interface ContractOptions {
  * the closed terminal by `not_found` once it is gone, and on the ended program by `running: false` (its exit code
  * when the runtime knows one).
  */
-export const runtimeContract = (runtime: Runtime.Runtime, options: ContractOptions): Effect.Effect<void, ContractError, Scope.Scope> =>
+export const runtimeContract = (
+  runtime: Runtime.Runtime,
+  options: ContractOptions,
+): Effect.Effect<void, ContractError, Scope.Scope> =>
   Effect.gen(function* () {
     const timeout = Duration.fromInputUnsafe(options.timeout ?? "15 seconds")
     const local: Runtime.Machine = { id: "local" }
@@ -52,7 +65,11 @@ export const runtimeContract = (runtime: Runtime.Runtime, options: ContractOptio
     const ran = (word: string) => `printf 'vbt-%s-${word}\n' "$VBT_CONTRACT"`
 
     const shown = yield* runtime.status(local)
-    yield* that("status", shown.status === "online" || shown.status === "offline" || shown.status === "blocked", `reported a status that is not one of online, offline, blocked: ${JSON.stringify(shown)}`)
+    yield* that(
+      "status",
+      shown.status === "online" || shown.status === "offline" || shown.status === "blocked",
+      `reported a status that is not one of online, offline, blocked: ${JSON.stringify(shown)}`,
+    )
 
     // The events follower runs from the start: the program that ends on its own must be seen without anyone closing it.
     const seen = yield* Ref.make<ReadonlyArray<Runtime.RuntimeEvent>>([])
@@ -74,16 +91,34 @@ export const runtimeContract = (runtime: Runtime.Runtime, options: ContractOptio
     yield* that("open", typeof terminal.id === "string" && terminal.id !== "", "returned a terminal without an id")
 
     yield* runtime.send(terminal, { text: ran("sent"), keys: ["enter"] })
-    yield* until("send", runtime.read(terminal, 40), (out) => out.includes(`vbt-${marker}-sent`), "did not run the text typed with send", timeout)
+    yield* until(
+      "send",
+      runtime.read(terminal, 40),
+      (out) => out.includes(`vbt-${marker}-sent`),
+      "did not run the text typed with send",
+      timeout,
+    )
 
     // Polled: a runtime may take a moment to see the program the terminal is running.
     yield* runtime.send(terminal, { text: "sleep 60", keys: ["enter"] })
-    yield* until("process", runtime.process(terminal), (state) => state.running, "did not report the program running while it still sleeps", timeout)
+    yield* until(
+      "process",
+      runtime.process(terminal),
+      (state) => state.running,
+      "did not report the program running while it still sleeps",
+      timeout,
+    )
 
     if (runtime.state !== undefined) {
       // `not_found` is a valid answer: the runtime names no agent in a terminal it did not start one in (a plain
       // shell), which core reads as "absent" (§3). Any other answer must be a state of the union.
-      const state = yield* runtime.state(terminal).pipe(Effect.catchTag("RuntimeError", (e) => (e.code === "not_found" ? Effect.succeed("absent" as const) : Effect.fail(e))))
+      const state = yield* runtime
+        .state(terminal)
+        .pipe(
+          Effect.catchTag("RuntimeError", (e) =>
+            e.code === "not_found" ? Effect.succeed("absent" as const) : Effect.fail(e),
+          ),
+        )
       yield* that(
         "state",
         state === "absent" || state === "idle" || state === "working" || state === "blocked" || state === "unknown",
@@ -93,24 +128,42 @@ export const runtimeContract = (runtime: Runtime.Runtime, options: ContractOptio
 
     if (runtime.session !== undefined) {
       const session = yield* runtime.session(terminal)
-      yield* that("session", session === null || typeof session === "string", `returned something other than a conversation id or null: ${JSON.stringify(session)}`)
+      yield* that(
+        "session",
+        session === null || typeof session === "string",
+        `returned something other than a conversation id or null: ${JSON.stringify(session)}`,
+      )
     }
 
     if (runtime.present !== undefined) yield* runtime.present(terminal, { contract: marker })
 
     if (runtime.exec !== undefined) {
       const ran = yield* runtime.exec(local, ["printf", "contract-exec"], options.cwd)
-      yield* that("exec", ran.code === 0 && ran.output.includes("contract-exec"), `printf contract-exec gave code ${ran.code} and ${JSON.stringify(ran.output)}`)
+      yield* that(
+        "exec",
+        ran.code === 0 && ran.output.includes("contract-exec"),
+        `printf contract-exec gave code ${ran.code} and ${JSON.stringify(ran.output)}`,
+      )
     }
 
     if (runtime.attach !== undefined) {
       const argv = runtime.attach(local)
-      yield* that("attach", argv.every((part) => typeof part === "string" && part !== ""), "returned something other than a non-empty argv")
+      yield* that(
+        "attach",
+        argv.every((part) => typeof part === "string" && part !== ""),
+        "returned something other than a non-empty argv",
+      )
     }
 
     // A program that exits on its own: `process` stops reporting it running (its exit code when the runtime knows
     // one; `not_found` once the terminal went with it), and the runtime pushes an `exited` event — no `close` ran.
-    const ended = yield* runtime.open(local, { project: options.cwd, cwd: options.cwd, argv: ["/bin/sh", "-c", "exit 3"], env: {}, label: `vibest contract ${marker} exit` })
+    const ended = yield* runtime.open(local, {
+      project: options.cwd,
+      cwd: options.cwd,
+      argv: ["/bin/sh", "-c", "exit 3"],
+      env: {},
+      label: `vibest contract ${marker} exit`,
+    })
     const gone = yield* until(
       "process",
       runtime.process(ended).pipe(Effect.exit),
@@ -125,7 +178,11 @@ export const runtimeContract = (runtime: Runtime.Runtime, options: ContractOptio
       timeout,
     )
     if (Exit.isSuccess(gone) && gone.value.exitCode !== undefined)
-      yield* that("process", gone.value.exitCode === 3, `reported exit code ${gone.value.exitCode} for a program that ran exit 3`)
+      yield* that(
+        "process",
+        gone.value.exitCode === 3,
+        `reported exit code ${gone.value.exitCode} for a program that ran exit 3`,
+      )
     if (runtime.events !== undefined)
       yield* until(
         "events",

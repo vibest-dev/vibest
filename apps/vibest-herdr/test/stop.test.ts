@@ -1,20 +1,33 @@
+import net from "node:net"
+
 // Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "#platform"
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
-import net from "node:net"
 import { cliHeaders, connect, protocolHeaders, sessionHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
-import { TIMING } from "../src/replace.ts"
-import * as Server from "@vibest/server/server"
 import { Sessions } from "@vibest/core/sessions"
-import { authed, FakeRuntime, FakeProcesses, makeRepository, testLayer, type TestServices, until, untilVirtual, writeResult } from "./fakes.ts"
+import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
+import * as Server from "@vibest/server/server"
+import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+
+import * as Platform from "#platform"
+
+import { TIMING } from "../src/replace.ts"
+import {
+  authed,
+  FakeRuntime,
+  FakeProcesses,
+  makeRepository,
+  testLayer,
+  type TestServices,
+  until,
+  untilVirtual,
+  writeResult,
+} from "./fakes.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 
@@ -23,7 +36,12 @@ const served = Layer.unwrap(
     const shutdown = yield* Deferred.make<void>()
     return Server.layer.pipe(
       Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
-      Layer.provideMerge(Layer.mergeAll(Layer.succeed(Server.Identity, { instance: INSTANCE }), Layer.succeed(Server.Shutdown, shutdown))),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.succeed(Server.Identity, { instance: INSTANCE }),
+          Layer.succeed(Server.Shutdown, shutdown),
+        ),
+      ),
       Layer.provideMerge(Project.layer),
       Layer.provideMerge(testLayer()),
     )
@@ -36,8 +54,10 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const cli = (repo: string) => Effect.map(client, (c) => authed(c, cliHeaders(repo)))
 
-const errorOf = <A, E>(exit: Exit.Exit<A, E>) => (Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined)
-const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) => errorOf(exit)?._tag ?? (Exit.isSuccess(exit) ? "success" : "defect")
+const errorOf = <A, E>(exit: Exit.Exit<A, E>) =>
+  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
+  errorOf(exit)?._tag ?? (Exit.isSuccess(exit) ? "success" : "defect")
 
 /** One Stop from the command line: "accepted", or what blocks it, or the refusal's tag. */
 const stop = (repo: string) =>
@@ -45,7 +65,7 @@ const stop = (repo: string) =>
     const exit = yield* Effect.exit((yield* cli(repo))["Daemon.Stop"]({ instance: INSTANCE }))
     if (Exit.isSuccess(exit)) return "accepted" as const
     const e = errorOf(exit)
-    return e?._tag === "DaemonBusy" ? e.blockers : e?._tag ?? "defect"
+    return e?._tag === "DaemonBusy" ? e.blockers : (e?._tag ?? "defect")
   })
 
 const shutdownDone = Effect.flatMap(Server.Shutdown, Deferred.isDone)
@@ -58,7 +78,10 @@ const stopOnceIdle = (repo: string) =>
   })
 /** A forked Stop's answer, moving virtual time (its drain polls and times out on the clock) until it has one. */
 const settled = <A, E>(stopping: Fiber.Fiber<A, E>) =>
-  untilVirtual(Effect.sync(() => stopping.pollUnsafe()), (exit) => exit !== undefined).pipe(Effect.andThen(Fiber.join(stopping)))
+  untilVirtual(
+    Effect.sync(() => stopping.pollUnsafe()),
+    (exit) => exit !== undefined,
+  ).pipe(Effect.andThen(Fiber.join(stopping)))
 
 /** A main agent of `harness` registered at terminal wC:p1 (idle), its session client, and a working worker in its project. */
 const receiver = (repo: string, harness: "pi" | "claude") =>
@@ -67,7 +90,11 @@ const receiver = (repo: string, harness: "pi" | "claude") =>
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
-    const { sessionId } = yield* authed(raw, cliHeaders(repo))["Project.CoordinatorSession"]({ harness, fresh: true, terminal: "wC:p1" })
+    const { sessionId } = yield* authed(raw, cliHeaders(repo))["Project.CoordinatorSession"]({
+      harness,
+      fresh: true,
+      terminal: "wC:p1",
+    })
     if (harness === "claude") yield* db.reportCoordinatorSession(sessionId, "claude", "claude-session")
     const c = authed(raw, sessionHeaders(sessionId, repo))
     const { id: worker } = yield* c.Spawn({ harness: "pi", prompt: "work" })
@@ -86,7 +113,10 @@ describe("Daemon.Stop", () => {
       const repo = yield* makeRepository
       const { c } = yield* receiver(repo, "claude")
       const raw = yield* client
-      assert.strictEqual(tagOf(yield* Effect.exit(authed(raw, cliHeaders(repo))["Daemon.Stop"]({ instance: "another" }))), "WrongInstance")
+      assert.strictEqual(
+        tagOf(yield* Effect.exit(authed(raw, cliHeaders(repo))["Daemon.Stop"]({ instance: "another" }))),
+        "WrongInstance",
+      )
       assert.strictEqual(tagOf(yield* Effect.exit(c["Daemon.Stop"]({ instance: INSTANCE }))), "Forbidden")
       assert.isFalse(yield* shutdownDone)
 
@@ -94,11 +124,30 @@ describe("Daemon.Stop", () => {
       assert.isTrue(yield* shutdownDone)
       const user = yield* cli(repo)
       assert.strictEqual(tagOf(yield* Effect.exit(user.Spawn({ harness: "pi", prompt: "x" }))), "DaemonStopping")
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/late" }))), "DaemonStopping")
-      const inboxPayload = { claudeSessionId: "s", terminal: "test/p", machine: { id: "local" }, generation: "g", token: "t" }
+      assert.strictEqual(
+        tagOf(
+          yield* Effect.exit(
+            user["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/late" }),
+          ),
+        ),
+        "DaemonStopping",
+      )
+      const inboxPayload = {
+        claudeSessionId: "s",
+        terminal: "test/p",
+        machine: { id: "local" },
+        generation: "g",
+        token: "t",
+      }
       assert.strictEqual(tagOf(yield* Effect.exit(user["Inbox.Ack"](inboxPayload))), "DaemonStopping")
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Inbox.Release"]({ ...inboxPayload, retry: false }))), "DaemonStopping")
-      assert.strictEqual(tagOf(yield* Effect.exit(raw.ResultReady({ sessionId: "x" }, { headers: protocolHeaders() }))), "DaemonStopping")
+      assert.strictEqual(
+        tagOf(yield* Effect.exit(user["Inbox.Release"]({ ...inboxPayload, retry: false }))),
+        "DaemonStopping",
+      )
+      assert.strictEqual(
+        tagOf(yield* Effect.exit(raw.ResultReady({ sessionId: "x" }, { headers: protocolHeaders() }))),
+        "DaemonStopping",
+      )
       assert.strictEqual(yield* stop(repo), "DaemonStopping")
       // Reads still answer.
       assert.isAbove((yield* user.List({})).length, 0)
@@ -139,7 +188,12 @@ describe("Daemon.Stop", () => {
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "a.md", content: "x", ifVersion: "new" }))), "DaemonStopping")
+      assert.strictEqual(
+        tagOf(
+          yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "a.md", content: "x", ifVersion: "new" })),
+        ),
+        "DaemonStopping",
+      )
       const refused = yield* settled(stopping)
       assert.include(JSON.stringify(refused), `spawn ${id}`)
       assert.strictEqual(yield* (yield* Drain).phase, "open")
@@ -161,18 +215,34 @@ describe("Daemon.Stop", () => {
       yield* writeResult(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
       const got: Array<string> = []
-      const subscribed = yield* Effect.forkScoped(c["Inbox.Subscribe"](undefined).pipe(Stream.runForEach((body) => Effect.sync(() => { got.push(body) }))))
+      const subscribed = yield* Effect.forkScoped(
+        c["Inbox.Subscribe"](undefined).pipe(
+          Stream.runForEach((body) =>
+            Effect.sync(() => {
+              got.push(body)
+            }),
+          ),
+        ),
+      )
       yield* until(db.latestInbox(worker, "result"), (r) => r?.status === "delivered")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
       // An already-admitted Send whose fork reaches the session lock after the cut.
       yield* sessions.send(worker, "after reopen")
-      yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "arrival while draining", details: {} })
+      yield* (yield* Inbox).enqueue({
+        sessionId: worker,
+        kind: "report",
+        message: "arrival while draining",
+        details: {},
+      })
       assert.isArray(yield* settled(stopping))
       yield* leave
       yield* until(db.inboxWithStatus(worker, "delivered"), (rows) => rows.some((r) => r.message === "after reopen"))
-      yield* until(Effect.sync(() => got), (bodies) => bodies.some((b) => b.includes("arrival while draining")))
+      yield* until(
+        Effect.sync(() => got),
+        (bodies) => bodies.some((b) => b.includes("arrival while draining")),
+      )
       assert.deepStrictEqual(yield* db.inboxWithStatus(worker, "failed"), [])
       yield* Fiber.interrupt(subscribed)
     }),
@@ -232,14 +302,24 @@ describe("Daemon.Stop", () => {
       const { db, sessionId, worker } = yield* receiver(repo, "pi")
       const layout = yield* Layout
       const socket = yield* Effect.acquireRelease(
-        Effect.promise(() => new Promise<net.Socket>((resolve, reject) => {
-          const s = net.connect(layout.socket)
-          s.on("error", reject)
-          s.once("connect", () => resolve(s))
-        })),
-        (s) => Effect.sync(() => { s.destroy() }),
+        Effect.promise(
+          () =>
+            new Promise<net.Socket>((resolve, reject) => {
+              const s = net.connect(layout.socket)
+              s.on("error", reject)
+              s.once("connect", () => resolve(s))
+            }),
+        ),
+        (s) =>
+          Effect.sync(() => {
+            s.destroy()
+          }),
       )
-      const headers = [[PROTOCOL_HEADER, String(PROTOCOL)], [CALLER_HEADER, "session"], [SESSION_HEADER, sessionId]]
+      const headers = [
+        [PROTOCOL_HEADER, String(PROTOCOL)],
+        [CALLER_HEADER, "session"],
+        [SESSION_HEADER, sessionId],
+      ]
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
       yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "sending")
@@ -267,8 +347,15 @@ describe("Daemon.Stop", () => {
         const token = (yield* until(inbox.pull({ ...call, generation }), (r) => r.token !== undefined)).token!
         const stopping = yield* Effect.forkScoped(stop(repo))
         yield* draining
-        const payload = { generation, token, claudeSessionId: "claude-session", terminal: "wC:p1", machine: { id: "local" } }
-        const result = op === "ack" ? yield* c["Inbox.Ack"](payload) : yield* c["Inbox.Release"]({ ...payload, retry: true })
+        const payload = {
+          generation,
+          token,
+          claudeSessionId: "claude-session",
+          terminal: "wC:p1",
+          machine: { id: "local" },
+        }
+        const result =
+          op === "ack" ? yield* c["Inbox.Ack"](payload) : yield* c["Inbox.Release"]({ ...payload, retry: true })
         assert.isUndefined(result.error)
         assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, op === "ack" ? "delivered" : "pending")
         assert.strictEqual(yield* settled(stopping), "accepted")
@@ -287,7 +374,12 @@ describe("Daemon.Stop", () => {
       yield* until(drain.phase, (phase) => phase === "open")
       assert.include(yield* drain.pending, "still running")
       const user = yield* cli(repo)
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "b.md", content: "x", ifVersion: "new" }))), "success")
+      assert.strictEqual(
+        tagOf(
+          yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "b.md", content: "x", ifVersion: "new" })),
+        ),
+        "success",
+      )
       yield* leave
       assert.isFalse(yield* shutdownDone)
     }),

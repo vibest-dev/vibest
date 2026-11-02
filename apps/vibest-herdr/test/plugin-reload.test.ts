@@ -1,15 +1,17 @@
+import module from "node:module"
+
 // Plugins phase 2 (plugins.md §6 P16–P19): reloading keeps the unchanged prefix, falls back to the last working
 // revision, coalesces bursts of saves, and never makes a spawn wait more than ACTIVATION_WAIT.
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "#platform"
-import { Plugin, type AgentStartBefore } from "@vibest/plugin"
-import module from "node:module"
-import { Context, type Crypto, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schedule, Scope } from "effect"
-import { TestClock } from "effect/testing"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Plugin, type AgentStartBefore } from "@vibest/plugin"
+import { Context, type Crypto, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schedule, Scope } from "effect"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
 
 // ---- activation (virtual time) ----
 
@@ -27,37 +29,75 @@ const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.voi
         yield* setup
       }),
   })
-const candidate = (source: string, revision: string, plugin: Candidate["plugin"], options: Record<string, unknown> = {}): Candidate => ({ source, revision, options, plugin })
+const candidate = (
+  source: string,
+  revision: string,
+  plugin: Candidate["plugin"],
+  options: Record<string, unknown> = {},
+): Candidate => ({ source, revision, options, plugin })
 const a1 = candidate("a", "1", logged("a", "a1"))
 const a2 = candidate("a", "2", logged("a", "a2"))
 const b1 = candidate("b", "1", logged("b", "b1"))
 const b2 = candidate("b", "2", logged("b", "b2"))
 const c1 = candidate("c", "1", logged("c", "c1"))
 
-const event = { project: "/r", agentType: "general", parentSessionId: undefined, prompt: "p", harness: undefined, provider: undefined, model: undefined, machine: { id: "local" }, runtime: undefined, parentRuntime: undefined, machines: [], attempts: [], harnesses: [{ harness: "pi", available: true }, { harness: "claude", available: true }, { harness: "cursor", available: true }] }
-const ids = (host: Effect.Success<ReturnType<typeof makeHost>>) => host.service.list.pipe(Effect.map((l) => l.map((p) => [p.id, p.status, p.revision])))
+const event = {
+  project: "/r",
+  agentType: "general",
+  parentSessionId: undefined,
+  prompt: "p",
+  harness: undefined,
+  provider: undefined,
+  model: undefined,
+  machine: { id: "local" },
+  runtime: undefined,
+  parentRuntime: undefined,
+  machines: [],
+  attempts: [],
+  harnesses: [
+    { harness: "pi", available: true },
+    { harness: "claude", available: true },
+    { harness: "cursor", available: true },
+  ],
+}
+const ids = (host: Effect.Success<ReturnType<typeof makeHost>>) =>
+  host.service.list.pipe(Effect.map((l) => l.map((p) => [p.id, p.status, p.revision])))
 const takeEvents = Effect.sync(() => events.splice(0))
 
 const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>) =>
   makeHost().pipe(Effect.flatMap(f), Effect.scoped, Effect.provide(Subscriptions.layer), Effect.provide(Runtimes.layer))
 
 describe("plugins: activation", () => {
-  it.effect("P16: changing the second of three keeps the first; the rest is torn down last-first and rebuilt in order", () =>
-    host((h) =>
-      Effect.gen(function* () {
-        yield* takeEvents
-        yield* h.activate([a1, b1, c1])
-        assert.deepStrictEqual(yield* takeEvents, ["setup a1", "setup b1", "setup c1"])
-        yield* h.activate([a1, b2, c1])
-        assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "setup b2", "setup c1"])
-        assert.deepStrictEqual(yield* ids(h), [["a", "active", "1"], ["b", "active", "2"], ["c", "active", "1"]])
-        const s = yield* h.service.start(event)
-        assert.deepStrictEqual(s.trace.map((t) => [t.plugin, t.changes.at(-1)?.to]), [["a", "a1"], ["b", "b2"], ["c", "c1"]])
-        // Nothing changed: nothing runs.
-        yield* h.activate([a1, b2, c1])
-        assert.deepStrictEqual(yield* takeEvents, [])
-      }),
-    ))
+  it.effect(
+    "P16: changing the second of three keeps the first; the rest is torn down last-first and rebuilt in order",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          yield* takeEvents
+          yield* h.activate([a1, b1, c1])
+          assert.deepStrictEqual(yield* takeEvents, ["setup a1", "setup b1", "setup c1"])
+          yield* h.activate([a1, b2, c1])
+          assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "setup b2", "setup c1"])
+          assert.deepStrictEqual(yield* ids(h), [
+            ["a", "active", "1"],
+            ["b", "active", "2"],
+            ["c", "active", "1"],
+          ])
+          const s = yield* h.service.start(event)
+          assert.deepStrictEqual(
+            s.trace.map((t) => [t.plugin, t.changes.at(-1)?.to]),
+            [
+              ["a", "a1"],
+              ["b", "b2"],
+              ["c", "c1"],
+            ],
+          )
+          // Nothing changed: nothing runs.
+          yield* h.activate([a1, b2, c1])
+          assert.deepStrictEqual(yield* takeEvents, [])
+        }),
+      ),
+  )
 
   it.effect("removal, reorder and options changes rebuild from the first difference", () =>
     host((h) =>
@@ -74,48 +114,70 @@ describe("plugins: activation", () => {
         assert.deepStrictEqual(yield* takeEvents, ["close a1", "close c1"])
         assert.deepStrictEqual(yield* ids(h), [])
       }),
-    ))
+    ),
+  )
 
   it.effect("a duplicate id fails until the first one goes; then it is set up", () =>
     host((h) =>
       Effect.gen(function* () {
         const other = candidate("other", "1", logged("a", "other"))
         yield* h.activate([a1, other])
-        assert.deepStrictEqual((yield* h.service.list).map((p) => [p.source, p.status, p.error]), [
-          ["a", "active", undefined],
-          ["other", "failed", "Duplicate plugin ID: a"],
-        ])
+        assert.deepStrictEqual(
+          (yield* h.service.list).map((p) => [p.source, p.status, p.error]),
+          [
+            ["a", "active", undefined],
+            ["other", "failed", "Duplicate plugin ID: a"],
+          ],
+        )
         yield* takeEvents
         yield* h.activate([other])
         assert.deepStrictEqual(yield* takeEvents, ["close a1", "setup other"])
         assert.deepStrictEqual(yield* ids(h), [["a", "active", "1"]])
       }),
-    ))
+    ),
+  )
 
-  it.effect("P17: a failing setup keeps the last working revision, is not retried while unchanged, and a fix recovers", () =>
-    host((h) =>
-      Effect.gen(function* () {
-        const broken = candidate("b", "2", logged("b", "b2", Effect.die("setup boom")))
-        yield* h.activate([a1, b1, c1])
-        yield* takeEvents
-        yield* h.activate([a1, broken, c1])
-        assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "setup b2", "close b2", "setup b1", "setup c1"])
-        const [, b] = yield* h.service.list
-        assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
-        assert.include(b!.error, "revision 2 failed, still running 1: setup boom")
-        assert.strictEqual((yield* h.service.start(event)).trace[1]!.changes[0]!.to, "b1")
+  it.effect(
+    "P17: a failing setup keeps the last working revision, is not retried while unchanged, and a fix recovers",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          const broken = candidate("b", "2", logged("b", "b2", Effect.die("setup boom")))
+          yield* h.activate([a1, b1, c1])
+          yield* takeEvents
+          yield* h.activate([a1, broken, c1])
+          assert.deepStrictEqual(yield* takeEvents, [
+            "close c1",
+            "close b1",
+            "setup b2",
+            "close b2",
+            "setup b1",
+            "setup c1",
+          ])
+          const [, b] = yield* h.service.list
+          assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
+          assert.include(b!.error, "revision 2 failed, still running 1: setup boom")
+          assert.strictEqual((yield* h.service.start(event)).trace[1]!.changes[0]!.to, "b1")
 
-        // A change before it rebuilds b: the old revision again, not the failed one.
-        yield* h.activate([a2, broken, c1])
-        assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "close a1", "setup a2", "setup b1", "setup c1"])
+          // A change before it rebuilds b: the old revision again, not the failed one.
+          yield* h.activate([a2, broken, c1])
+          assert.deepStrictEqual(yield* takeEvents, [
+            "close c1",
+            "close b1",
+            "close a1",
+            "setup a2",
+            "setup b1",
+            "setup c1",
+          ])
 
-        yield* h.activate([a2, candidate("b", "3", logged("b", "b3")), c1])
-        assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "setup b3", "setup c1"])
-        const [, fixed] = yield* h.service.list
-        assert.deepInclude(fixed, { status: "active", revision: "3" })
-        assert.isUndefined(fixed!.error)
-      }),
-    ))
+          yield* h.activate([a2, candidate("b", "3", logged("b", "b3")), c1])
+          assert.deepStrictEqual(yield* takeEvents, ["close c1", "close b1", "setup b3", "setup c1"])
+          const [, fixed] = yield* h.service.list
+          assert.deepInclude(fixed, { status: "active", revision: "3" })
+          assert.isUndefined(fixed!.error)
+        }),
+      ),
+  )
 
   it.effect("P17: a revision that fails to import keeps the last working one; with none it is failed", () =>
     host((h) =>
@@ -129,34 +191,41 @@ describe("plugins: activation", () => {
         assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
         assert.include(b!.error, "import failed: SyntaxError")
       }),
-    ))
+    ),
+  )
 
-  it.effect("L5: the last working revision is restored only under the same rules, and why it was not stays visible", () =>
-    host((h) =>
-      Effect.gen(function* () {
-        // b's next revision fails setup while its old id now belongs to another plugin earlier in the order.
-        const renamed = candidate("b", "2", logged("b-next", "b2", Effect.die("setup boom")))
-        const taker = candidate("t", "1", logged("b", "taker"))
-        yield* h.activate([b1])
-        yield* takeEvents
-        yield* h.activate([taker, renamed])
-        assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup taker", "setup b2", "close b2"])
-        const [, b] = yield* h.service.list
-        assert.deepInclude(b, { status: "failed" })
-        assert.include(b!.error, "setup boom")
-        assert.include(b!.error, "revision 1 not restored: Duplicate plugin ID: b")
-        // Rebuilt unchanged after an earlier change: still not retried, still explained.
-        yield* h.activate([{ ...taker, revision: "2" }, renamed])
-        assert.deepStrictEqual(yield* takeEvents, ["close taker", "setup taker"])
-        assert.include((yield* h.service.list)[1]!.error, "not restored: Duplicate plugin ID: b")
-      }),
-    ))
+  it.effect(
+    "L5: the last working revision is restored only under the same rules, and why it was not stays visible",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          // b's next revision fails setup while its old id now belongs to another plugin earlier in the order.
+          const renamed = candidate("b", "2", logged("b-next", "b2", Effect.die("setup boom")))
+          const taker = candidate("t", "1", logged("b", "taker"))
+          yield* h.activate([b1])
+          yield* takeEvents
+          yield* h.activate([taker, renamed])
+          assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup taker", "setup b2", "close b2"])
+          const [, b] = yield* h.service.list
+          assert.deepInclude(b, { status: "failed" })
+          assert.include(b!.error, "setup boom")
+          assert.include(b!.error, "revision 1 not restored: Duplicate plugin ID: b")
+          // Rebuilt unchanged after an earlier change: still not retried, still explained.
+          yield* h.activate([{ ...taker, revision: "2" }, renamed])
+          assert.deepStrictEqual(yield* takeEvents, ["close taker", "setup taker"])
+          assert.include((yield* h.service.list)[1]!.error, "not restored: Duplicate plugin ID: b")
+        }),
+      ),
+  )
 
   it.effect("L5: a restore that fails too keeps both errors", () =>
     host((h) =>
       Effect.gen(function* () {
         let setups = 0
-        const once = Plugin.define({ id: "o", effect: () => (++setups === 1 ? Effect.void : Effect.die("restore boom")) })
+        const once = Plugin.define({
+          id: "o",
+          effect: () => (++setups === 1 ? Effect.void : Effect.die("restore boom")),
+        })
         yield* h.activate([candidate("o", "1", once)])
         yield* h.activate([candidate("o", "2", Plugin.define({ id: "o", effect: () => Effect.die("new boom") }))])
         const [o] = yield* h.service.list
@@ -164,7 +233,8 @@ describe("plugins: activation", () => {
         assert.include(o!.error, "new boom")
         assert.include(o!.error, "revision 1 not restored: restore boom")
       }),
-    ))
+    ),
+  )
 
   it.effect("P19: a spawn waits for a pending activation at most 10s, then goes on with the active plugins", () =>
     host((h) =>
@@ -179,17 +249,24 @@ describe("plugins: activation", () => {
         assert.isUndefined(spawning.pollUnsafe(), "still waiting before 10s")
         yield* TestClock.adjust("1 second")
         const s = yield* Fiber.join(spawning)
-        assert.deepStrictEqual(s.trace.map((t) => [t.plugin, t.outcome, t.error]), [
-          ["vibest", "timeout", "plugins still activating"],
-          ["a", "ok", undefined],
-        ])
+        assert.deepStrictEqual(
+          s.trace.map((t) => [t.plugin, t.outcome, t.error]),
+          [
+            ["vibest", "timeout", "plugins still activating"],
+            ["a", "ok", undefined],
+          ],
+        )
         assert.strictEqual(s.model, "a1")
         yield* TestClock.adjust("1 hour")
         yield* Fiber.join(activating)
         // Settled: no wait and no note.
-        assert.deepStrictEqual((yield* h.service.start(event)).trace.map((t) => t.plugin), ["a"])
+        assert.deepStrictEqual(
+          (yield* h.service.start(event)).trace.map((t) => t.plugin),
+          ["a"],
+        )
       }),
-    ))
+    ),
+  )
 
   it.effect("a teardown that never finishes does not block the reload", () =>
     host((h) =>
@@ -204,7 +281,8 @@ describe("plugins: activation", () => {
         assert.deepStrictEqual(yield* ids(h), [["a", "active", "1"]])
         yield* TestClock.adjust("1 hour")
       }),
-    ))
+    ),
+  )
 
   it.effect("a hook in flight finishes before its plugin is torn down", () =>
     host((h) =>
@@ -217,7 +295,10 @@ describe("plugins: activation", () => {
             Effect.gen(function* () {
               yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close slow")))
               yield* ctx.agent.hook("start.before", (e: AgentStartBefore) =>
-                Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(gate)), Effect.andThen(Effect.sync(() => void (e.model = "slow")))),
+                Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(gate)),
+                  Effect.andThen(Effect.sync(() => void (e.model = "slow"))),
+                ),
               )
             }),
         })
@@ -233,7 +314,8 @@ describe("plugins: activation", () => {
         yield* Fiber.join(reloading)
         assert.deepStrictEqual(yield* takeEvents, ["close slow"])
       }),
-    ))
+    ),
+  )
 })
 
 // ---- the supervisor on a real VIBEST_HOME (live clock, real files and watchers) ----
@@ -312,7 +394,10 @@ const supervise = (dir: string) =>
     Layer.provide(Runtimes.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
-    Effect.map((plugins) => ({ ...plugins, list: plugins.list.pipe(Effect.map((all) => all.filter((p) => p.source !== "builtin:harness-choice"))) })),
+    Effect.map((plugins) => ({
+      ...plugins,
+      list: plugins.list.pipe(Effect.map((all) => all.filter((p) => p.source !== "builtin:harness-choice"))),
+    })),
   )
 
 /** Wait (real time, at most 5s) until `f` satisfies `done`. */
@@ -325,7 +410,8 @@ const eventually = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean,
 const waitLive = (ready: () => boolean, what: string) =>
   Effect.gen(function* () {
     for (let i = 0; i < 250 && !ready(); i++) yield* TestClock.withLive(Effect.sleep("20 millis"))
-    if (!ready()) yield* Effect.die(`gave up waiting for ${what}: ${JSON.stringify(watchGate.pending.map((e) => e.name))}`)
+    if (!ready())
+      yield* Effect.die(`gave up waiting for ${what}: ${JSON.stringify(watchGate.pending.map((e) => e.name))}`)
   })
 /** Past the 100ms debounce, so a burst has already become one reload. */
 const quiet = Effect.sleep("150 millis")
@@ -335,8 +421,10 @@ const pastRescan = Effect.gen(function* () {
   for (let i = 0; i < 75 && reads.count === start; i++) yield* Effect.sleep("20 millis")
 })
 
-const live = <E>(name: string, program: Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Crypto.Crypto | Scope.Scope>) =>
-  it.live(name, () => program.pipe(Effect.scoped, Effect.provide(Platform.services)), { timeout: 20_000 })
+const live = <E>(
+  name: string,
+  program: Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Crypto.Crypto | Scope.Scope>,
+) => it.live(name, () => program.pipe(Effect.scoped, Effect.provide(Platform.services)), { timeout: 20_000 })
 
 /** Run `effect` while moving virtual time in 500ms steps, letting real I/O run in between. */
 const advancing = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -358,7 +446,10 @@ describe("plugins: supervisor", () => {
       const dir = yield* home
       yield* fs.makeDirectory(path.join(dir, "lib"))
       yield* fs.writeFileString(path.join(dir, "lib", "value.ts"), `export const value = "v1"\n`)
-      yield* fs.writeFileString(path.join(dir, "plugins", "dep.ts"), pluginFile("dep", "dep", "value", `import { value } from "../lib/value.ts"`))
+      yield* fs.writeFileString(
+        path.join(dir, "plugins", "dep.ts"),
+        pluginFile("dep", "dep", "value", `import { value } from "../lib/value.ts"`),
+      )
       const plugins = yield* supervise(dir)
       assert.strictEqual((yield* plugins.start(event)).model, "v1")
       const [before] = yield* plugins.list
@@ -411,8 +502,15 @@ describe("plugins: supervisor", () => {
       assert.strictEqual(count("import:p"), brokenImports, "a broken revision is not imported again while unchanged")
 
       yield* fs.writeFileString(file, pluginFile("p", "p", `"fixed"`))
-      const fixed = yield* eventually(plugins.list, (l) => l.some((p) => p.id === "p" && p.error === undefined), "the fix")
-      assert.deepInclude(fixed.find((p) => p.id === "p"), { status: "active" })
+      const fixed = yield* eventually(
+        plugins.list,
+        (l) => l.some((p) => p.id === "p" && p.error === undefined),
+        "the fix",
+      )
+      assert.deepInclude(
+        fixed.find((p) => p.id === "p"),
+        { status: "active" },
+      )
     }),
   )
 
@@ -485,38 +583,52 @@ describe("plugins: supervisor", () => {
       const dir = yield* home
       yield* fs.writeFileString(path.join(dir, "plugins", "early.ts"), pluginFile("early", "early", `"early"`))
       const s = yield* (yield* supervise(dir)).start(event)
-      assert.deepStrictEqual(s.trace.map((t) => [t.plugin, t.outcome]), [["harness-choice", "ok"], ["early", "ok"]])
+      assert.deepStrictEqual(
+        s.trace.map((t) => [t.plugin, t.outcome]),
+        [
+          ["harness-choice", "ok"],
+          ["early", "ok"],
+        ],
+      )
       assert.strictEqual(s.model, "early")
     }),
   )
 
-  it.effect("P19 on vibestd: a stuck first activation blocks neither the layer (vibestd listens) nor a spawn past 10s", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* home
-      yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "stuck-a", `"a"`))
-      // Its setup sits in an uninterruptible region for a (virtual) minute.
-      yield* fs.writeFileString(
-        path.join(dir, "plugins", "b.ts"),
-        `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "b", effect: () => Effect.uninterruptible(Effect.sleep("1 minute")) })\n`,
-      )
-      // Built without moving virtual time: the first activation runs in the background.
-      const plugins = yield* supervise(dir)
-      const s = yield* advancing(plugins.start(event))
-      assert.deepStrictEqual(s.trace.map((t) => [t.plugin, t.outcome, t.error]), [
-        ["vibest", "timeout", "plugins still activating"],
-        ["harness-choice", "ok", undefined],
-        ["a", "ok", undefined],
-      ])
-      assert.strictEqual(s.model, "a")
-      assert.deepStrictEqual((yield* advancing(plugins.list)).map((p) => [p.id, p.status, p.error]), [
-        ["a", "active", undefined],
-        ["b", "failed", "setup timed out"],
-      ])
-      // Past b's uninterruptible minute, so its scope can close at teardown.
-      yield* TestClock.adjust("1 minute")
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  it.effect(
+    "P19 on vibestd: a stuck first activation blocks neither the layer (vibestd listens) nor a spawn past 10s",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* home
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "stuck-a", `"a"`))
+        // Its setup sits in an uninterruptible region for a (virtual) minute.
+        yield* fs.writeFileString(
+          path.join(dir, "plugins", "b.ts"),
+          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "b", effect: () => Effect.uninterruptible(Effect.sleep("1 minute")) })\n`,
+        )
+        // Built without moving virtual time: the first activation runs in the background.
+        const plugins = yield* supervise(dir)
+        const s = yield* advancing(plugins.start(event))
+        assert.deepStrictEqual(
+          s.trace.map((t) => [t.plugin, t.outcome, t.error]),
+          [
+            ["vibest", "timeout", "plugins still activating"],
+            ["harness-choice", "ok", undefined],
+            ["a", "ok", undefined],
+          ],
+        )
+        assert.strictEqual(s.model, "a")
+        assert.deepStrictEqual(
+          (yield* advancing(plugins.list)).map((p) => [p.id, p.status, p.error]),
+          [
+            ["a", "active", undefined],
+            ["b", "failed", "setup timed out"],
+          ],
+        )
+        // Past b's uninterruptible minute, so its scope can close at teardown.
+        yield* TestClock.adjust("1 minute")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   live(
@@ -530,7 +642,10 @@ describe("plugins: supervisor", () => {
       yield* Effect.addFinalizer(() => fs.remove(link).pipe(Effect.ignore))
       yield* fs.writeFileString(path.join(link, "plugins", "a.ts"), pluginFile("a", "h2-a", "e.model"))
       const plugins = yield* supervise(link)
-      assert.deepStrictEqual((yield* plugins.list).map((p) => p.status), ["active"])
+      assert.deepStrictEqual(
+        (yield* plugins.list).map((p) => p.status),
+        ["active"],
+      )
       yield* fs.writeFileString(path.join(link, "plugins", "new.ts"), pluginFile("new", "h2-new", `"n1"`))
       yield* eventually(plugins.start(event), (s) => s.model === "n1", "the plugin added after start")
       yield* fs.writeFileString(path.join(link, "plugins", "new.ts"), pluginFile("new", "h2-new", `"n2"`))
@@ -545,7 +660,10 @@ describe("plugins: supervisor", () => {
       const path = yield* Path.Path
       const dir = yield* home
       const entryFile = (dep: string) => pluginFile("s", "m3", "value", `import { value } from "./${dep}"`)
-      for (const [sub, value] of [["one", "one-1"], ["two", "two-1"]] as const) {
+      for (const [sub, value] of [
+        ["one", "one-1"],
+        ["two", "two-1"],
+      ] as const) {
         yield* fs.makeDirectory(path.join(dir, sub))
         yield* fs.writeFileString(path.join(dir, sub, "dep.ts"), `export const value = ${JSON.stringify(value)}\n`)
         yield* fs.writeFileString(path.join(dir, sub, "entry.ts"), entryFile("dep.ts"))
@@ -612,7 +730,11 @@ describe("plugins: supervisor", () => {
         yield* eventually(service.list, (l) => l.length === 1, "d removed")
         yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a2"`))
         // Under load the watcher reports the save late; wait for it rather than a fixed 100 ms.
-        yield* eventually(Effect.sync(() => faults.dropped), (n) => n > 0, "the save's events were dropped")
+        yield* eventually(
+          Effect.sync(() => faults.dropped),
+          (n) => n > 0,
+          "the save's events were dropped",
+        )
         assert.strictEqual((yield* service.start(event)).model, "a1", "not seen yet")
         yield* eventually(service.start(event), (s) => s.model === "a2", "the rescan to find the save")
       } finally {
@@ -625,47 +747,57 @@ describe("plugins: supervisor", () => {
     }),
   )
 
-  it.effect("P19: a change during a stuck activation keeps readiness closed until that change is active too", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* home
-      const entered = ((globalThis as { __vibestStuck?: { value: boolean } }).__vibestStuck = { value: false })
-      watchGate.hold = true
-      watchGate.pending = []
-      // First in order; its setup holds an uninterruptible region for 6 (virtual) seconds.
-      yield* fs.writeFileString(
-        path.join(dir, "plugins", "a.ts"),
-        `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`,
-      )
-      yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z1"`))
-      const plugins = yield* supervise(dir)
-      while (!entered.value) yield* TestClock.withLive(Effect.sleep("5 millis"))
-      yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z2"`))
-      // The overwrite counts only once the watcher has it. A fixed sleep advances the clock either too soon (spawn runs z1)
-      // or, via advancing(), through the 10s budget while the reload's real import is still running (trace starts with vibest).
-      yield* waitLive(() => watchGate.pending.some((change) => change.name === "z.ts"), "the watcher to observe z.ts")
-      for (const change of watchGate.pending.splice(0)) if (change.name === "z.ts") change.deliver()
-      // hold stays set: a duplicate event during the real import would close readiness, and this frozen clock would not run that debounce.
-      const spawning = yield* Effect.forkChild(plugins.start(event))
-      yield* TestClock.adjust("6 seconds")
-      assert.isUndefined(spawning.pollUnsafe(), "readiness opened on the pre-change activation")
-      yield* TestClock.adjust("200 millis")
-      const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("5 seconds")))
-      assert.strictEqual(s.model, "z2")
-      assert.deepStrictEqual(s.trace.map((t) => t.plugin), ["harness-choice", "z"])
-      assert.deepStrictEqual((yield* plugins.list).map((p) => [p.id, p.status, p.error]), [
-        ["a", "failed", "setup timed out"],
-        ["z", "active", undefined],
-      ])
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => {
-        watchGate.hold = false
+  it.effect(
+    "P19: a change during a stuck activation keeps readiness closed until that change is active too",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* home
+        const entered = ((globalThis as { __vibestStuck?: { value: boolean } }).__vibestStuck = { value: false })
+        watchGate.hold = true
         watchGate.pending = []
-      })),
-      Effect.scoped,
-      Effect.provide(Platform.services),
-    ),
+        // First in order; its setup holds an uninterruptible region for 6 (virtual) seconds.
+        yield* fs.writeFileString(
+          path.join(dir, "plugins", "a.ts"),
+          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`,
+        )
+        yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z1"`))
+        const plugins = yield* supervise(dir)
+        while (!entered.value) yield* TestClock.withLive(Effect.sleep("5 millis"))
+        yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z2"`))
+        // The overwrite counts only once the watcher has it. A fixed sleep advances the clock either too soon (spawn runs z1)
+        // or, via advancing(), through the 10s budget while the reload's real import is still running (trace starts with vibest).
+        yield* waitLive(() => watchGate.pending.some((change) => change.name === "z.ts"), "the watcher to observe z.ts")
+        for (const change of watchGate.pending.splice(0)) if (change.name === "z.ts") change.deliver()
+        // hold stays set: a duplicate event during the real import would close readiness, and this frozen clock would not run that debounce.
+        const spawning = yield* Effect.forkChild(plugins.start(event))
+        yield* TestClock.adjust("6 seconds")
+        assert.isUndefined(spawning.pollUnsafe(), "readiness opened on the pre-change activation")
+        yield* TestClock.adjust("200 millis")
+        const s = yield* TestClock.withLive(Fiber.join(spawning).pipe(Effect.timeout("5 seconds")))
+        assert.strictEqual(s.model, "z2")
+        assert.deepStrictEqual(
+          s.trace.map((t) => t.plugin),
+          ["harness-choice", "z"],
+        )
+        assert.deepStrictEqual(
+          (yield* plugins.list).map((p) => [p.id, p.status, p.error]),
+          [
+            ["a", "failed", "setup timed out"],
+            ["z", "active", undefined],
+          ],
+        )
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            watchGate.hold = false
+            watchGate.pending = []
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(Platform.services),
+      ),
     15_000,
   )
 })

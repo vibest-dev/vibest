@@ -18,15 +18,15 @@ default server, the empty `plugins/config/vibest` directory removed, no plugin c
 
 ## 1. Placement (phase 4)
 
-| Question | Answer | Evidence |
-|---|---|---|
-| Open a subagent as a tab in an existing workspace, cwd in a vibest-made git worktree | Yes: `tab.create { workspace_id, cwd, label, env, focus }` | Verified: tab `w1:t2` in workspace `w1` (cwd = main checkout), cwd = linked worktree, `pwd -P` in the pane is the worktree |
-| Environment for the agent | `env` on `tab.create` reaches the root pane's shell | Verified: `VIBEST_AGENT_ID`, `VIBEST_RUN_ID` echoed in the pane |
-| Environment after a herdr server restart | **Lost.** Restored panes start a new shell without the creation `env` | Verified: `ENV=[]` after stop and start |
-| Pane ids after a server restart | Kept (`w1:p2`, `w1:p4`) | Verified |
-| Start the agent | `agent.start { name, kind, pane_id, args }` into the tab's root pane | Documented (schema); omac already uses it |
-| Worktree grouping | herdr groups worktrees at **workspace** level only: `worktree.create/open` make a new workspace grouped under the source workspace. A tab whose cwd is a worktree is not linked: `worktree list` shows that worktree with no `open_workspace_id` | Verified |
-| What herdr shows for the tab | The tab label (any text, e.g. `reviewer · claude`) in the tab bar and the `tab` token of Agent rows; the Agent row shows the agent name, or `display_agent` when reported | Verified (tab label, pane fields); rendering in a client not observed (headless) |
+| Question                                                                             | Answer                                                                                                                                                                                                                                           | Evidence                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Open a subagent as a tab in an existing workspace, cwd in a vibest-made git worktree | Yes: `tab.create { workspace_id, cwd, label, env, focus }`                                                                                                                                                                                       | Verified: tab `w1:t2` in workspace `w1` (cwd = main checkout), cwd = linked worktree, `pwd -P` in the pane is the worktree |
+| Environment for the agent                                                            | `env` on `tab.create` reaches the root pane's shell                                                                                                                                                                                              | Verified: `VIBEST_AGENT_ID`, `VIBEST_RUN_ID` echoed in the pane                                                            |
+| Environment after a herdr server restart                                             | **Lost.** Restored panes start a new shell without the creation `env`                                                                                                                                                                            | Verified: `ENV=[]` after stop and start                                                                                    |
+| Pane ids after a server restart                                                      | Kept (`w1:p2`, `w1:p4`)                                                                                                                                                                                                                          | Verified                                                                                                                   |
+| Start the agent                                                                      | `agent.start { name, kind, pane_id, args }` into the tab's root pane                                                                                                                                                                             | Documented (schema); omac already uses it                                                                                  |
+| Worktree grouping                                                                    | herdr groups worktrees at **workspace** level only: `worktree.create/open` make a new workspace grouped under the source workspace. A tab whose cwd is a worktree is not linked: `worktree list` shows that worktree with no `open_workspace_id` | Verified                                                                                                                   |
+| What herdr shows for the tab                                                         | The tab label (any text, e.g. `reviewer · claude`) in the tab bar and the `tab` token of Agent rows; the Agent row shows the agent name, or `display_agent` when reported                                                                        | Verified (tab label, pane fields); rendering in a client not observed (headless)                                           |
 
 Pane metadata (`pane.report_metadata`, CLI `herdr pane report-metadata`):
 
@@ -85,9 +85,18 @@ Environment, verified with the fake `vibest`: `HERDR_PLUGIN_ACTION_ID` (actions)
 `HERDR_PLUGIN_CONTEXT_JSON`, e.g.
 
 ```json
-{"workspace_id":"w1","workspace_label":"shop","workspace_cwd":"/…/repo","tab_id":"w1:t1","tab_label":"1",
- "focused_pane_id":"w1:p1","focused_pane_cwd":"/…/repo","focused_pane_status":"unknown",
- "invocation_source":"cli","correlation_id":"cli:plugin"}
+{
+  "workspace_id": "w1",
+  "workspace_label": "shop",
+  "workspace_cwd": "/…/repo",
+  "tab_id": "w1:t1",
+  "tab_label": "1",
+  "focused_pane_id": "w1:p1",
+  "focused_pane_cwd": "/…/repo",
+  "focused_pane_status": "unknown",
+  "invocation_source": "cli",
+  "correlation_id": "cli:plugin"
+}
 ```
 
 Source fields also include `worktree` (repository key, root, checkout path, linked flag), `focused_pane_agent`,

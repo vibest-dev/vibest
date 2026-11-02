@@ -2,6 +2,7 @@
 // `--plugin-dir` into each Claude vibest starts; its startup menus answered in the pane; models from its stream-json
 // control requests.
 import { Config, Effect, FileSystem, Path, Ref, Schema } from "effect"
+
 import { anthropicOnly, type HarnessAdapter, opt, type Startup } from "../harness.ts"
 import { findMessage, jsonLines, type RawModel, withConfigured } from "../models.ts"
 
@@ -19,20 +20,23 @@ export const claudeMenuKey = (screen: string, answered: ReadonlyArray<string>) =
 }
 
 /** One key per tick; a menu counts as answered once Enter went in. */
-const claudeStartup: Startup = Effect.map(Ref.make<ReadonlyArray<string>>([]), (answered) => (pane) =>
-  Effect.gen(function* () {
-    const next = claudeMenuKey(yield* pane.screen, yield* Ref.get(answered))
-    if (!next) return
-    if (next.key === "enter") yield* Ref.update(answered, (a) => [...a, next.menu])
-    yield* pane.sendKeys([next.key])
-  }),
+const claudeStartup: Startup = Effect.map(
+  Ref.make<ReadonlyArray<string>>([]),
+  (answered) => (pane) =>
+    Effect.gen(function* () {
+      const next = claudeMenuKey(yield* pane.screen, yield* Ref.get(answered))
+      if (!next) return
+      if (next.key === "enter") yield* Ref.update(answered, (a) => [...a, next.menu])
+      yield* pane.sendKeys([next.key])
+    }),
 )
 
 /** Claude's built-in tools a Coordinator inspects with; its pre-tool hook (guard.ts) refuses edits and the other calls it names, the rest run. */
 const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
 
 /** Claude's permission rules that let `vibest report` run without asking, however vibest is invoked (`vibest`, `bun …/main.ts`). */
-const vibestReport = (vibest: ReadonlyArray<string>) => [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
+const vibestReport = (vibest: ReadonlyArray<string>) =>
+  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
 
 const encodeClaudeSettings = Schema.encodeSync(
   Schema.fromJsonString(Schema.Struct({ permissions: Schema.Struct({ deny: Schema.Array(Schema.String) }) })),
@@ -48,7 +52,10 @@ const claudeSettings = (projectsDir: string) =>
   encodeClaudeSettings({
     permissions: {
       deny: [
-        ...["instructions.md", "docs/**", "memory/**"].flatMap((p) => [`Read(/${projectsDir}/**/${p})`, `Edit(/${projectsDir}/**/${p})`]),
+        ...["instructions.md", "docs/**", "memory/**"].flatMap((p) => [
+          `Read(/${projectsDir}/**/${p})`,
+          `Edit(/${projectsDir}/**/${p})`,
+        ]),
         "Bash(herdr:*)",
       ],
     },
@@ -74,7 +81,14 @@ const claudeInit = findMessage(
     response: Schema.Struct({
       request_id: Schema.Literal("vibest-models"),
       response: Schema.Struct({
-        models: Schema.Array(Schema.Struct({ value: Schema.String, resolvedModel: Schema.optional(Schema.String), displayName: Schema.String, description: Schema.String })),
+        models: Schema.Array(
+          Schema.Struct({
+            value: Schema.String,
+            resolvedModel: Schema.optional(Schema.String),
+            displayName: Schema.String,
+            description: Schema.String,
+          }),
+        ),
       }),
     }),
   }),
@@ -104,7 +118,12 @@ export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
   return withConfigured(
     models
       .filter((m) => m.value !== "default")
-      .map((m) => ({ model: m.value, name: m.displayName, description: m.description, default: applied !== undefined && (m.resolvedModel ?? m.value) === applied })),
+      .map((m) => ({
+        model: m.value,
+        name: m.displayName,
+        description: m.description,
+        default: applied !== undefined && (m.resolvedModel ?? m.value) === applied,
+      })),
     applied ? { model: applied } : undefined,
   )
 }
@@ -121,28 +140,46 @@ export const claude: HarnessAdapter = {
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
-    "--append-system-prompt-file", i.rulesFile,
-    "--add-dir", i.scratch,
-    "--settings", claudeSettings(i.projectsDir),
-    "--allowedTools", vibestReport(i.vibest),
-    "--plugin-dir", i.pluginDir,
+    "--append-system-prompt-file",
+    i.rulesFile,
+    "--add-dir",
+    i.scratch,
+    "--settings",
+    claudeSettings(i.projectsDir),
+    "--allowedTools",
+    vibestReport(i.vibest),
+    "--plugin-dir",
+    i.pluginDir,
     // `claude --help`: --permission-mode plan is the read-only session mode.
     ...opt("--model", i.model),
   ],
   coordinatorArgs: (i) => [
     ...opt("--resume", i.sessionId),
     ...opt("--session-id", i.newSessionId ?? null),
-    "--append-system-prompt-file", i.rulesFile,
+    "--append-system-prompt-file",
+    i.rulesFile,
     // No MCP servers, only the inspection tools; they run without a permission prompt, the pre-tool hook refuses what it names.
     "--strict-mcp-config",
-    "--tools", CLAUDE_INSPECT_TOOLS.join(","),
-    "--allowedTools", CLAUDE_INSPECT_TOOLS.join(","),
-    "--plugin-dir", i.pluginDir,
+    "--tools",
+    CLAUDE_INSPECT_TOOLS.join(","),
+    "--allowedTools",
+    CLAUDE_INSPECT_TOOLS.join(","),
+    "--plugin-dir",
+    i.pluginDir,
     ...opt("--model", i.model),
   ],
   models: {
     // --safe-mode keeps hooks and plugins from running; --bare would skip OAuth and return a short list.
-    args: () => ["-p", "--safe-mode", "--no-session-persistence", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"],
+    args: () => [
+      "-p",
+      "--safe-mode",
+      "--no-session-persistence",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ],
     request: jsonLines(
       { type: "control_request", request_id: "vibest-models", request: { subtype: "initialize" } },
       { type: "control_request", request_id: "vibest-settings", request: { subtype: "get_settings" } },
@@ -150,21 +187,35 @@ export const claude: HarnessAdapter = {
     answer: claudeModels,
   },
   guardAnswer: (reason) =>
-    reason ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } } : undefined,
+    reason
+      ? {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: reason,
+          },
+        }
+      : undefined,
   // classic.UserPromptSubmit. `source` is omitted while Claude rolls the field out; anything but `user` is not the person.
   userPrompt: (event, coordinator) => {
     if (coordinator || event.agent_id) return undefined
-    if (event.hook_event_name !== "UserPromptSubmit" || typeof event.prompt !== "string" || event.prompt.trim() === "") return undefined
+    if (event.hook_event_name !== "UserPromptSubmit" || typeof event.prompt !== "string" || event.prompt.trim() === "")
+      return undefined
     if (typeof event.source === "string" && event.source !== "user") return undefined
     return { text: event.prompt }
   },
   // The @vibest/claude plugin's classic.Stop / classic.StopFailure; a subagent's turn end is not the session's.
   turnEnd: (event, coordinator) => {
-    if (event.agent_id || typeof event.hook_event_name !== "string" || !TURN_END.includes(event.hook_event_name)) return undefined
+    if (event.agent_id || typeof event.hook_event_name !== "string" || !TURN_END.includes(event.hook_event_name))
+      return undefined
     if (!coordinator) return { result: event }
-    return typeof event.session_id === "string" && event.session_id !== "" ? { harnessSessionId: event.session_id } : undefined
+    return typeof event.session_id === "string" && event.session_id !== ""
+      ? { harnessSessionId: event.session_id }
+      : undefined
   },
   // `--resume` of a session Claude never wrote fails (an id vibest chose up front before it took reported ones).
   canResume: (root, sessionId) =>
-    Effect.flatMap(transcript(root, sessionId), (file) => Effect.flatMap(FileSystem.FileSystem, (fs) => fs.exists(file))).pipe(Effect.orDie),
+    Effect.flatMap(transcript(root, sessionId), (file) =>
+      Effect.flatMap(FileSystem.FileSystem, (fs) => fs.exists(file)),
+    ).pipe(Effect.orDie),
 }

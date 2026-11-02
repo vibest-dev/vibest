@@ -7,5 +7,10 @@ export const NO_AUTOLOAD = ["--no-compile-autoload-bunfig", "--no-compile-autolo
 
 /** `bun build` arguments of the production binary. */
 export const buildArgs = (outfile: string) => [
-  "build", "--compile", "./src/main.ts", "--outfile", outfile, ...NO_AUTOLOAD,
+  "build",
+  "--compile",
+  "./src/main.ts",
+  "--outfile",
+  outfile,
+  ...NO_AUTOLOAD,
 ]

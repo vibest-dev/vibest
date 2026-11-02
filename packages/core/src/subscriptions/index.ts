@@ -15,7 +15,8 @@ export { cursorAccount, cursorUsage } from "./cursor.ts"
 export { piAccount } from "./pi.ts"
 
 /** One login is limited when any of its usage windows is; no rows means unknown, not limited. */
-export const isLimited = (row: { readonly limits: ReadonlyArray<{ readonly status: string }> }) => row.limits.some((l) => l.status === "limited")
+export const isLimited = (row: { readonly limits: ReadonlyArray<{ readonly status: string }> }) =>
+  row.limits.some((l) => l.status === "limited")
 
 /**
  * A remembered limit still rules its login out until that login's own row was refreshed after it and says it is fine
@@ -23,8 +24,16 @@ export const isLimited = (row: { readonly limits: ReadonlyArray<{ readonly statu
  */
 export const stillLimited = (
   attempt: { readonly harness: string; readonly provider: string | undefined; readonly at: number },
-  rows: ReadonlyArray<{ readonly harness: string; readonly provider: string; readonly updatedAt: number; readonly limits: ReadonlyArray<{ readonly status: string }> }>,
+  rows: ReadonlyArray<{
+    readonly harness: string
+    readonly provider: string
+    readonly updatedAt: number
+    readonly limits: ReadonlyArray<{ readonly status: string }>
+  }>,
 ) => {
-  const row = attempt.provider === undefined ? undefined : rows.find((r) => r.harness === attempt.harness && r.provider === attempt.provider)
+  const row =
+    attempt.provider === undefined
+      ? undefined
+      : rows.find((r) => r.harness === attempt.harness && r.provider === attempt.provider)
   return !(row !== undefined && row.updatedAt > attempt.at && !isLimited(row))
 }

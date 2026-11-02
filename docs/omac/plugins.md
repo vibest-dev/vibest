@@ -7,34 +7,34 @@ First use case: A plugin intercepts session spawn to select harness and model ba
 
 ## 0. Decided Choices
 
-| Decision | Content |
-|---|---|
-| API | Follow OpenCode V2 Effect edition: `Plugin.define({ id, effect })`, `ctx.<domain>.hook(...)`; Effect-only, no Promise edition |
-| Package | `@omac/plugin` (repo package `packages/plugin`), mapped at runtime by omacd, normally imported by plugins |
-| Config | Single location: `plugins` field in `~/.omac/omac.json` (JSONC) + directory `~/.omac/plugins/` (`OMAC_HOME` relocates both); format aligned with OpenCode |
-| Project-level plugins | None for now, deferred for future consideration |
-| npm plugins | Aligned with OpenCode: config specifies `pkg@ver` for automatic installation; implemented with omacd acting as bun (`BUN_BE_BUN=1 omac add`), adding no dependencies |
-| Hot reload and activation wait | Required once npm is supported (async installation), aligned with OpenCode's supervisor; spawn activation wait has a cap |
-| Multiple plugins modifying the same value | One event mutated in place by every callback in plugin order (no per-callback copy); later execution overrides; host records source via per-callback diffs |
-| Composition mode | Sequential for every hook; the builtin default harness choice runs first |
-| Rejection | Only `agent.start.before` may refuse (`AgentRefused`): a defect or a timeout there is also a refusal. On `agent.fail` / `agent.idle` a defect or timeout fails that operation |
+| Decision                                  | Content                                                                                                                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API                                       | Follow OpenCode V2 Effect edition: `Plugin.define({ id, effect })`, `ctx.<domain>.hook(...)`; Effect-only, no Promise edition                                                 |
+| Package                                   | `@omac/plugin` (repo package `packages/plugin`), mapped at runtime by omacd, normally imported by plugins                                                                     |
+| Config                                    | Single location: `plugins` field in `~/.omac/omac.json` (JSONC) + directory `~/.omac/plugins/` (`OMAC_HOME` relocates both); format aligned with OpenCode                     |
+| Project-level plugins                     | None for now, deferred for future consideration                                                                                                                               |
+| npm plugins                               | Aligned with OpenCode: config specifies `pkg@ver` for automatic installation; implemented with omacd acting as bun (`BUN_BE_BUN=1 omac add`), adding no dependencies          |
+| Hot reload and activation wait            | Required once npm is supported (async installation), aligned with OpenCode's supervisor; spawn activation wait has a cap                                                      |
+| Multiple plugins modifying the same value | One event mutated in place by every callback in plugin order (no per-callback copy); later execution overrides; host records source via per-callback diffs                    |
+| Composition mode                          | Sequential for every hook; the builtin default harness choice runs first                                                                                                      |
+| Rejection                                 | Only `agent.start.before` may refuse (`AgentRefused`): a defect or a timeout there is also a refusal. On `agent.fail` / `agent.idle` a defect or timeout fails that operation |
 
 ## 1. OpenCode V2 Reference (Source Code Studied)
 
-| Aspect | Approach | Location |
-|---|---|---|
-| Configuration source | 6 tiers low to high: remote wellknown → global directory `~/.config/opencode/` (`opencode.json(c)` + `plugin(s)/`) → `OPENCODE_CONFIG` specified file → upward `opencode.json` from cwd → upward `.opencode/` from cwd → `OPENCODE_CONFIG_CONTENT`; plus managed policy. omac only uses the "global directory" tier | `core/src/config.ts`, `config/discovery.ts` |
-| Plugin entries | `plugins: (string \| { package, options })[]`; `"-x"` denotes removal, supports `*`, `x.*`; `./`, `../`, `file://` resolved relative to config file; local paths in config must be directories (packages), files are warned and skipped | `schema/src/config/plugin.ts`, `config/plugin/source.ts` |
-| Plugin directory | `plugin/`, `plugins/` under config root, sorted by path; `.ts`, `.js`, directory, symlink | `plugin/source-directory.ts` |
-| Order | Directory-discovered first, config `plugins` after ("explicit config applied last to override/remove auto-discovered"); overall sorted by builtin pre → sdk → instance → user → builtin post | `source.ts`, `supervisor.ts` |
-| Entrypoint | Directory / package resolved via `server`, `tui`, `rpc` subpaths, defaulting to `index`; package entrypoint must reside within package directory | `plugin/src/host.ts` |
-| Module validation | `Schema.decodeUnknownEffect` validates `default` as `{id, effect}` or `{id, setup}`; `define` simply returns input as-is | `plugin/module.ts` |
-| npm | `@npmcli/arborist` installs to cache dir; activates with local existing version first, missing ones installed then activated; checks updates every 24h, locks per package | `util/src/npm.ts`, `plugin/update.ts` |
-| Local source & reload | `Bun.Transpiler.scan` scans local dependency graph and watches each; evicts `require.cache` before reload; cached by sha256, unchanged content not re-executed (no retry on failure) | `plugin/src/source.ts`, `source.bun.ts` |
-| effect instance | `Bun.plugin` `build.module` maps `effect`, `effect/*`, `@opencode/plugin` to host instances, foreign copies error; static subpath table generated at compile time | `plugin/src/runtime.ts`, `runtime-modules.ts`, `cli/script/build.ts` |
-| supervisor | config / source files / policy / 24h / update events → capacity-1 sliding queue + 100ms debounce → single consumer serial `activate()`; on trigger `hold()` closes readiness Latch, entrypoint `awaitActivation` | `supervisor.ts`, `plugin/service.ts` |
-| Activation | Serialized via Semaphore; diffs `(id, revision)` prefix: unchanged prefix retained, suffix torn down in reverse order then rebuilt in order; each plugin `Scope.fork(root)`, context retains only Scope + logger, `withSpan("Plugin.load")`; setup failure closes scope, marks failed, rolls back to previous version; same revision failure does not retry; duplicate ids first-come first-served | `core/src/plugin.ts` |
-| Dispatch | Serial in caller's fiber in registration order, callbacks directly mutate same event object; no timeout; failures bubble up (typed error on `tool.execute.before` is rejection); does not track who changed what | `plugin/hooks.ts` |
+| Aspect                | Approach                                                                                                                                                                                                                                                                                                                                                                                           | Location                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Configuration source  | 6 tiers low to high: remote wellknown → global directory `~/.config/opencode/` (`opencode.json(c)` + `plugin(s)/`) → `OPENCODE_CONFIG` specified file → upward `opencode.json` from cwd → upward `.opencode/` from cwd → `OPENCODE_CONFIG_CONTENT`; plus managed policy. omac only uses the "global directory" tier                                                                                | `core/src/config.ts`, `config/discovery.ts`                          |
+| Plugin entries        | `plugins: (string \| { package, options })[]`; `"-x"` denotes removal, supports `*`, `x.*`; `./`, `../`, `file://` resolved relative to config file; local paths in config must be directories (packages), files are warned and skipped                                                                                                                                                            | `schema/src/config/plugin.ts`, `config/plugin/source.ts`             |
+| Plugin directory      | `plugin/`, `plugins/` under config root, sorted by path; `.ts`, `.js`, directory, symlink                                                                                                                                                                                                                                                                                                          | `plugin/source-directory.ts`                                         |
+| Order                 | Directory-discovered first, config `plugins` after ("explicit config applied last to override/remove auto-discovered"); overall sorted by builtin pre → sdk → instance → user → builtin post                                                                                                                                                                                                       | `source.ts`, `supervisor.ts`                                         |
+| Entrypoint            | Directory / package resolved via `server`, `tui`, `rpc` subpaths, defaulting to `index`; package entrypoint must reside within package directory                                                                                                                                                                                                                                                   | `plugin/src/host.ts`                                                 |
+| Module validation     | `Schema.decodeUnknownEffect` validates `default` as `{id, effect}` or `{id, setup}`; `define` simply returns input as-is                                                                                                                                                                                                                                                                           | `plugin/module.ts`                                                   |
+| npm                   | `@npmcli/arborist` installs to cache dir; activates with local existing version first, missing ones installed then activated; checks updates every 24h, locks per package                                                                                                                                                                                                                          | `util/src/npm.ts`, `plugin/update.ts`                                |
+| Local source & reload | `Bun.Transpiler.scan` scans local dependency graph and watches each; evicts `require.cache` before reload; cached by sha256, unchanged content not re-executed (no retry on failure)                                                                                                                                                                                                               | `plugin/src/source.ts`, `source.bun.ts`                              |
+| effect instance       | `Bun.plugin` `build.module` maps `effect`, `effect/*`, `@opencode/plugin` to host instances, foreign copies error; static subpath table generated at compile time                                                                                                                                                                                                                                  | `plugin/src/runtime.ts`, `runtime-modules.ts`, `cli/script/build.ts` |
+| supervisor            | config / source files / policy / 24h / update events → capacity-1 sliding queue + 100ms debounce → single consumer serial `activate()`; on trigger `hold()` closes readiness Latch, entrypoint `awaitActivation`                                                                                                                                                                                   | `supervisor.ts`, `plugin/service.ts`                                 |
+| Activation            | Serialized via Semaphore; diffs `(id, revision)` prefix: unchanged prefix retained, suffix torn down in reverse order then rebuilt in order; each plugin `Scope.fork(root)`, context retains only Scope + logger, `withSpan("Plugin.load")`; setup failure closes scope, marks failed, rolls back to previous version; same revision failure does not retry; duplicate ids first-come first-served | `core/src/plugin.ts`                                                 |
+| Dispatch              | Serial in caller's fiber in registration order, callbacks directly mutate same event object; no timeout; failures bubble up (typed error on `tool.execute.before` is rejection); does not track who changed what                                                                                                                                                                                   | `plugin/hooks.ts`                                                    |
 
 ## 2. Verified (Bun 1.4.2 + effect 4.0.2, Compiled Binary)
 
@@ -126,14 +126,20 @@ import { Effect } from "effect"
 
 export default Plugin.define({
   id: "route",
-  effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => {
-    if (e.model) return                                      // Don't override if already selected by coordinator or earlier plugin (convention)
-    if (/^(research|investigate)\b/i.test(e.prompt)) { e.harness = "claude"; e.model = "claude-haiku-5-5" }
-    else if (/refactor|migrat/i.test(e.prompt)) {
-      e.harness = "claude"; e.model = "claude-opus-5-5"
-      e.prompt += "\n\nRun the full test suite before reporting."
-    }
-  })),
+  effect: (ctx) =>
+    ctx.agent.hook("start.before", (e) =>
+      Effect.sync(() => {
+        if (e.model) return // Don't override if already selected by coordinator or earlier plugin (convention)
+        if (/^(research|investigate)\b/i.test(e.prompt)) {
+          e.harness = "claude"
+          e.model = "claude-haiku-5-5"
+        } else if (/refactor|migrat/i.test(e.prompt)) {
+          e.harness = "claude"
+          e.model = "claude-opus-5-5"
+          e.prompt += "\n\nRun the full test suite before reporting."
+        }
+      }),
+    ),
 })
 ```
 
@@ -142,10 +148,12 @@ export default Plugin.define({
 import { AgentRefused, Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "budget",
-  effect: (ctx) => ctx.agent.hook("start.before", (e) =>
-    e.model?.includes("opus") && e.project.includes("/sandbox/")
-      ? Effect.fail(new AgentRefused({ reason: "opus is not allowed in sandbox repositories" }))
-      : Effect.void),
+  effect: (ctx) =>
+    ctx.agent.hook("start.before", (e) =>
+      e.model?.includes("opus") && e.project.includes("/sandbox/")
+        ? Effect.fail(new AgentRefused({ reason: "opus is not allowed in sandbox repositories" }))
+        : Effect.void,
+    ),
 })
 ```
 
@@ -154,9 +162,12 @@ export default Plugin.define({
 import { Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "cheap-second",
-  effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => {
-    if (e.reason === "limited" && e.move === undefined) e.move = { harness: "cursor" }
-  })),
+  effect: (ctx) =>
+    ctx.agent.hook("fail", (e) =>
+      Effect.sync(() => {
+        if (e.reason === "limited" && e.move === undefined) e.move = { harness: "cursor" }
+      }),
+    ),
 })
 ```
 
@@ -166,11 +177,13 @@ Setup can use `Effect.acquireRelease` for resources (tied to plugin scope, relea
 
 ```jsonc
 // ~/.omac/omac.json (parsed as JSONC, comments and trailing commas allowed, matching OpenCode's opencode.jsonc)
-{ "plugins": [
-  "/Users/me/omac-plugins/route",                             // Local package directory (local paths in config must be directories)
-  { "package": "omac-plugin-budget@1.2.0", "options": { "deny": ["opus"] } },   // npm (Phase 3)
-  "-hello"                                                   // Removal; supports "*", "x.*"
-] }
+{
+  "plugins": [
+    "/Users/me/omac-plugins/route", // Local package directory (local paths in config must be directories)
+    { "package": "omac-plugin-budget@1.2.0", "options": { "deny": ["opus"] } }, // npm (Phase 3)
+    "-hello", // Removal; supports "*", "x.*"
+  ],
+}
 ```
 
 - Directory `~/.omac/plugins/`: `.ts`, `.js`, directories, and symlinks are plugins, sorted by path; skips `node_modules`, dot-prefixed entries, and `*.d.ts`. Directories without entrypoints are skipped with a warning (matching OpenCode `config/plugin/source.ts:154`, with an added log line in omac).
@@ -185,6 +198,7 @@ Setup can use `Effect.acquireRelease` for resources (tied to plugin scope, relea
 - Plugin directory is not exposed to sessions; session rules and tools never touch it. Sessions already share permissions with the user and can edit any file under the user's home directory (shell config, harness settings); the plugin directory introduces no additional attack surface and requires no special guards. In Phase 2, file-change-triggered reloads log an info line specifying which file changed (the 1s reconciliation read below has no trigger file, so it skips this line).
 
 **Hot Reload (Phase 2)**
+
 - Startup: omacd does not block on plugins; initial activation runs in background; spawn and `omac plugins` await it (§5).
 - Watching: `omac.json`, `plugins/`, and each plugin's local dependency graph (files imported via `./`, `../`, absolute paths, or `file://`, recursively; excluding `node_modules`). Creation, deletion, rename, and atomic saves (write tmp file then rename) count as changes. Non-existent paths (uncreated directories in config, unresolved imports) watch nearest existing ancestor directory.
 - Coalescing: Changes enter a capacity-1 sliding queue, quiet for 100ms debounce, then re-read and activated by a single consumer; activations never overlap. If the watched set changes during re-read (watchers opened or closed, including initial startup setup), re-read until stable, followed by a one-time catch-up re-read after 1s; reloads without watched set changes skip catch-up (macOS `fs.watch` in Bun 1.4 occasionally drops events for other directories after closing a watcher). Only this single catch-up is done, no continuous polling; watching does not guarantee zero dropped events.
@@ -218,33 +232,34 @@ No task attributes: model-reported type/complexity is subjective, keywords dupli
 
 Sources are issues from anomalyco/opencode; mostly from V1, while V2 resolved deterministic ordering and interruptibility, timeouts, conflicts, and traceability remain open. "Phase" indicates which PR delivers the clause.
 
-| # | Phase | Clause | Source | Test |
-|---|---|---|---|---|
-| P1 | 1 | Deterministic ordering: `plugins/` path-sorted first, `omac.json` `plugins` after; independent of directory listing order; `-x` removes; `node_modules`, dotfiles, `*.d.ts`, and directories without entrypoints do not count as plugins | #45367 | Two plugins write the same field: swapping config order swaps result; discovery unit test injects shuffled listing, output order unchanged; removed via `-x` does not execute; `node_modules/`, `.x.ts`, `a.d.ts`, empty dir under `plugins/` do not appear in plugin list (empty dir warns) |
-| P2 | 1 | A hook failure is a refusal that names the plugin; nothing is inserted or started | #45367, #39031 | Plugin 1 throws: spawn fails `AgentRefused` with `plugin <id> crashed: …`; later plugins not called; no row in db, no pane in herdr; trace has the crash |
-| P3 | 1 | Hung hook does not hang spawn | #39031 | `Effect.never`, `Effect.promise(() => new Promise(() => {}))`, long `Effect.sleep`, `Effect.uninterruptible(Effect.sleep(...))`: spawn returns within timeout (asserted with TestClock virtual time; `TestClock.adjust` past sleep before test teardown so teardown does not await fiber), trace records `timeout`; after reject or timeout db has no extra row, herdr has no pane |
-| P5 | 1 | Writable field mutations actually take effect | #39674, #31680, #26910 | Plugin mutates harness / provider / model: session row and `ADAPTERS[harness].launchArgs` reflect new values |
-| P6 | 1 | Overrides are traceable | #6261, #12223 | A writes `model=a`, B writes `model=b`: final b; trace is `[{A, from: requested, to: a}, {B, from: a, to: b, overwrote: A}]`; return value and `list_siblings` show decided by B |
-| P7 | 1 | All entrypoints share same path and same rules | #6261 | All entrypoints going through `Spawn` (currently only CLI spawn) produce identical results and trace for identical input |
-| P8 | 1 | Correct hook timing, output re-validated | #19960, #44081 | Event `repository` is already repo root; plugin writes `harness = "vim"` → `HarnessUnavailable` includes plugin id |
-| P9 | 1 | Readonly fields not writable in types; a refused callback stops the chain | Inherent risk of mutable objects | `e.project = ...` fails compilation (`@ts-expect-error`); mutating `prompt` takes effect, session receives new prompt |
-| P10 | 1 | Setup failure or hang isolates to itself | V2 scope-per-plugin | Registers hook then throws: hook not called; other plugins normal; plugin failed with reason; setup is `Effect.never`: omacd listens normally, plugin failed with "setup timed out"; duplicate ids first-come first-served |
-| P11 | 1 | Shared effect instance in compiled binary | §2 | `test/plugin-binary.test.ts`, run binary after `bun run build`: plugin `import { Effect } from "effect"` and `import * as S from "effect/Schema"` work and share host instance; plugin's bundled effect still uses host's; `@omac/plugin` `AgentRefused` matches host `instanceof` |
-| P12 | 1 | Plugin loading and execution visible at a glance, including running version | #39674 | `omac plugins` shows source, revision (content hash / package version), load time, status, errors, plus calls, mutations, failures / timeouts / rejections, and latest error since omacd start; counts increment after spawn; file edits visibly desync with disk (auto-reloads from Phase 2). omacd log has one line per plugin loaded, one line per hook execution (info: plugin, duration, what changed) |
-| P13 | Future | User plugins follow builtin plugins | #12223 | Add when introducing first builtin plugin |
-| P14 | 1 | Separate refusal from crash | V2 `tool.execute.before`, #45367 | Plugin 1 `AgentRefused("budget")`, plugin 2 writes model: plugin 2 not called, no row inserted, no pane started; RPC client receives `AgentRefused { plugin: plugin1, reason }`; a defect or timeout is also a refusal. A plugin that unsets the harness leaves `NoHarnessChosen` |
-| P16 | 2 | Hot reload only rebuilds plugins after the change | V2 prefix diff | Edit 2nd of 3 plugins: 1st does not re-setup (setup count unchanged), 2nd and 3rd rebuild in order, old scope finalizers executed |
-| P17 | 2 | Failed new revision preserves old revision without re-executing | V2 rollback + digest cache | Break plugin: old version remains active, `omac plugins` shows error; unrelated file changes do not re-import broken file (import side-effect count unchanged); recovers when fixed |
-| P18 | 2 | Coalesce rapid changes into single activation | V2 sliding queue + debounce | Save 10 times within 50ms: activates only once |
-| P19 | 2 | Spawn waiting for activation is bounded | V2 `awaitActivation` waits until npm install completes | Spawn waits at most 10s when activation is stuck, proceeds with active plugins, trace records `plugins still activating` |
-| P20 | 3 | npm install does not block local plugins; failures isolated | V2 local first then pending | Local plugins active while `pkg@ver` installs; activates automatically after install; install failure only marks that entry failed; installs even without bun in PATH |
-| P21 | 3 | npm plugins also share effect instance | §2, OpenCode `runtime.ts` | Two use cases: npm plugin dependency tree includes another effect, bare `effect` and mapped subpaths both get host instance; referencing unmapped subpaths (resolving to bundled copy) fails load with path error |
+| #   | Phase  | Clause                                                                                                                                                                                                                                   | Source                                                 | Test                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | 1      | Deterministic ordering: `plugins/` path-sorted first, `omac.json` `plugins` after; independent of directory listing order; `-x` removes; `node_modules`, dotfiles, `*.d.ts`, and directories without entrypoints do not count as plugins | #45367                                                 | Two plugins write the same field: swapping config order swaps result; discovery unit test injects shuffled listing, output order unchanged; removed via `-x` does not execute; `node_modules/`, `.x.ts`, `a.d.ts`, empty dir under `plugins/` do not appear in plugin list (empty dir warns)                                                                                                                |
+| P2  | 1      | A hook failure is a refusal that names the plugin; nothing is inserted or started                                                                                                                                                        | #45367, #39031                                         | Plugin 1 throws: spawn fails `AgentRefused` with `plugin <id> crashed: …`; later plugins not called; no row in db, no pane in herdr; trace has the crash                                                                                                                                                                                                                                                    |
+| P3  | 1      | Hung hook does not hang spawn                                                                                                                                                                                                            | #39031                                                 | `Effect.never`, `Effect.promise(() => new Promise(() => {}))`, long `Effect.sleep`, `Effect.uninterruptible(Effect.sleep(...))`: spawn returns within timeout (asserted with TestClock virtual time; `TestClock.adjust` past sleep before test teardown so teardown does not await fiber), trace records `timeout`; after reject or timeout db has no extra row, herdr has no pane                          |
+| P5  | 1      | Writable field mutations actually take effect                                                                                                                                                                                            | #39674, #31680, #26910                                 | Plugin mutates harness / provider / model: session row and `ADAPTERS[harness].launchArgs` reflect new values                                                                                                                                                                                                                                                                                                |
+| P6  | 1      | Overrides are traceable                                                                                                                                                                                                                  | #6261, #12223                                          | A writes `model=a`, B writes `model=b`: final b; trace is `[{A, from: requested, to: a}, {B, from: a, to: b, overwrote: A}]`; return value and `list_siblings` show decided by B                                                                                                                                                                                                                            |
+| P7  | 1      | All entrypoints share same path and same rules                                                                                                                                                                                           | #6261                                                  | All entrypoints going through `Spawn` (currently only CLI spawn) produce identical results and trace for identical input                                                                                                                                                                                                                                                                                    |
+| P8  | 1      | Correct hook timing, output re-validated                                                                                                                                                                                                 | #19960, #44081                                         | Event `repository` is already repo root; plugin writes `harness = "vim"` → `HarnessUnavailable` includes plugin id                                                                                                                                                                                                                                                                                          |
+| P9  | 1      | Readonly fields not writable in types; a refused callback stops the chain                                                                                                                                                                | Inherent risk of mutable objects                       | `e.project = ...` fails compilation (`@ts-expect-error`); mutating `prompt` takes effect, session receives new prompt                                                                                                                                                                                                                                                                                       |
+| P10 | 1      | Setup failure or hang isolates to itself                                                                                                                                                                                                 | V2 scope-per-plugin                                    | Registers hook then throws: hook not called; other plugins normal; plugin failed with reason; setup is `Effect.never`: omacd listens normally, plugin failed with "setup timed out"; duplicate ids first-come first-served                                                                                                                                                                                  |
+| P11 | 1      | Shared effect instance in compiled binary                                                                                                                                                                                                | §2                                                     | `test/plugin-binary.test.ts`, run binary after `bun run build`: plugin `import { Effect } from "effect"` and `import * as S from "effect/Schema"` work and share host instance; plugin's bundled effect still uses host's; `@omac/plugin` `AgentRefused` matches host `instanceof`                                                                                                                          |
+| P12 | 1      | Plugin loading and execution visible at a glance, including running version                                                                                                                                                              | #39674                                                 | `omac plugins` shows source, revision (content hash / package version), load time, status, errors, plus calls, mutations, failures / timeouts / rejections, and latest error since omacd start; counts increment after spawn; file edits visibly desync with disk (auto-reloads from Phase 2). omacd log has one line per plugin loaded, one line per hook execution (info: plugin, duration, what changed) |
+| P13 | Future | User plugins follow builtin plugins                                                                                                                                                                                                      | #12223                                                 | Add when introducing first builtin plugin                                                                                                                                                                                                                                                                                                                                                                   |
+| P14 | 1      | Separate refusal from crash                                                                                                                                                                                                              | V2 `tool.execute.before`, #45367                       | Plugin 1 `AgentRefused("budget")`, plugin 2 writes model: plugin 2 not called, no row inserted, no pane started; RPC client receives `AgentRefused { plugin: plugin1, reason }`; a defect or timeout is also a refusal. A plugin that unsets the harness leaves `NoHarnessChosen`                                                                                                                           |
+| P16 | 2      | Hot reload only rebuilds plugins after the change                                                                                                                                                                                        | V2 prefix diff                                         | Edit 2nd of 3 plugins: 1st does not re-setup (setup count unchanged), 2nd and 3rd rebuild in order, old scope finalizers executed                                                                                                                                                                                                                                                                           |
+| P17 | 2      | Failed new revision preserves old revision without re-executing                                                                                                                                                                          | V2 rollback + digest cache                             | Break plugin: old version remains active, `omac plugins` shows error; unrelated file changes do not re-import broken file (import side-effect count unchanged); recovers when fixed                                                                                                                                                                                                                         |
+| P18 | 2      | Coalesce rapid changes into single activation                                                                                                                                                                                            | V2 sliding queue + debounce                            | Save 10 times within 50ms: activates only once                                                                                                                                                                                                                                                                                                                                                              |
+| P19 | 2      | Spawn waiting for activation is bounded                                                                                                                                                                                                  | V2 `awaitActivation` waits until npm install completes | Spawn waits at most 10s when activation is stuck, proceeds with active plugins, trace records `plugins still activating`                                                                                                                                                                                                                                                                                    |
+| P20 | 3      | npm install does not block local plugins; failures isolated                                                                                                                                                                              | V2 local first then pending                            | Local plugins active while `pkg@ver` installs; activates automatically after install; install failure only marks that entry failed; installs even without bun in PATH                                                                                                                                                                                                                                       |
+| P21 | 3      | npm plugins also share effect instance                                                                                                                                                                                                   | §2, OpenCode `runtime.ts`                              | Two use cases: npm plugin dependency tree includes another effect, bare `effect` and mapped subpaths both get host instance; referencing unmapped subpaths (resolving to bundled copy) fails load with path error                                                                                                                                                                                           |
 
 ## 7. Phased PRs
 
 Each phase is a standalone PR, usable upon merge; subsequent phases only add to earlier APIs without modifying them.
 
 **Phase 1: Core, usable and observable (local plugins, loaded on startup)**
+
 - `packages/plugin` (`@omac/plugin`): §3 types, `Plugin.define`, `AgentRefused`.
 - Configuration and discovery: `plugins` in `~/.omac/omac.json` (local path entries, removal, wildcards) + `~/.omac/plugins/`; npm entries marked failed initially: "npm plugins are not supported yet".
 - Loading: Entrypoint resolution, Schema validation, `Bun.plugin` mapping (`effect/X` → `effect.X`, generated at runtime).
@@ -265,14 +280,17 @@ Each phase is a standalone PR, usable upon merge; subsequent phases only add to 
 - Definition of done: All acceptance scenarios verified with evidence; P1–P3, P5–P12, P14 each have tests (P3 includes uninterruptible sections, P11 tested on real binary); `bun run typecheck` and all tests pass, missing `kind` in hook definition fails compilation, every hook is `sequential` (formerly P15); PR runs `/thermo-nuclear-code-quality-review` and `/ponytail-review` sequentially, up to 3 rounds each, both converging; SPEC §7 and §14 updated; issue #7 Phase 1 checked off with PR linked.
 
 **Phase 2: Supervisor (hot reload and activation wait)**
+
 - Watch `omac.json`, `~/.omac/plugins/`, and local plugin dependency graph; sliding queue + 100ms debounce + serial activation; prefix diff, rollback to last working version, no retry on same revision, digest cache; readiness Latch, spawn waits up to 10s. Actual behavior and known limits in §4 "Hot Reload".
 - Tests: P16–P19 (`test/plugin-reload.test.ts`; binary reloading in `test/plugin-binary.test.ts`).
 
 **Phase 3: npm Plugins**
+
 - `BUN_BE_BUN` install to `~/.omac/packages/` (with file locking), pending activation, 24h update check, `omac plugins update <pkg>`; publish `@omac/plugin` to npm (the `@omac` org is not registered yet).
 - Tests: P20, P21.
 
 **Future (on demand, separate PRs; exposure order and boundaries in §8)**
+
 - `omac route --prompt ...` dry-run (must reuse same trigger, P7).
 - More hooks (proposed, not registered; `ctx.agent.hook` refuses them today): `session.result`, `session.send`, `coordinator.launch`.
 - `first` / `parallel` composition modes; transform registry (plugins registering harness adapters or custom model catalogs).
@@ -283,25 +301,26 @@ Each phase is a standalone PR, usable upon merge; subsequent phases only add to 
 
 Reference systems provide five primary extension mechanisms (Oct 2026 survey of OpenCode V2 `d21b0790a`, Pi 1.1.0, herdr `75f46fe8`):
 
-| Mechanism | Meaning | OpenCode V2 | Pi | herdr |
-|---|---|---|---|---|
-| ① Intercept | Mutate data or veto in-flight flows | `session.hook("prompt" / "context")`, `tool.hook("execute.before")`, `permission.hook("evaluate")`, `shell.hook("create.before")` | `pi.on("input" / "tool_call" / "before_agent_start" ...)`, returns transform / block / cancel | None |
-| ② Contribute | Add new capabilities into system | `transform` editor adds tool, command, provider, model, agent, skill, MCP, VCS, websearch, worktree policy, auth | `registerTool / Command / Shortcut / Flag / Provider / VirtualModel / McpServer`, various renderers | Manifest `[[actions]]`, `[[panes]]`, `[[link_handlers]]`, `[[startup]]` |
-| ③ Edit State | Mutate existing configs and registries | `ctx.<domain>.transform(editor)`, replayed on `reload` | `setActiveTools`, `setModel`, `setThinkingLevel` | None |
-| ④ Callback System | Plugin invokes system capabilities | Narrowed client subset per domain (`Pick<...Api>`), `generate`, `storage`, `rpc.register` | `sendMessage`, `exec`, `ctx.ui` ..., tiered by Tool / Command context | Entire CLI / socket API serves as plugin SDK |
-| ⑤ Observe | Subscribe to events | `ctx.event.subscribe` → Stream | Notification-only events + `pi.events` bus | `[[events]] on = "pane.*"`, `events.subscribe` |
+| Mechanism         | Meaning                                | OpenCode V2                                                                                                                       | Pi                                                                                                  | herdr                                                                   |
+| ----------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| ① Intercept       | Mutate data or veto in-flight flows    | `session.hook("prompt" / "context")`, `tool.hook("execute.before")`, `permission.hook("evaluate")`, `shell.hook("create.before")` | `pi.on("input" / "tool_call" / "before_agent_start" ...)`, returns transform / block / cancel       | None                                                                    |
+| ② Contribute      | Add new capabilities into system       | `transform` editor adds tool, command, provider, model, agent, skill, MCP, VCS, websearch, worktree policy, auth                  | `registerTool / Command / Shortcut / Flag / Provider / VirtualModel / McpServer`, various renderers | Manifest `[[actions]]`, `[[panes]]`, `[[link_handlers]]`, `[[startup]]` |
+| ③ Edit State      | Mutate existing configs and registries | `ctx.<domain>.transform(editor)`, replayed on `reload`                                                                            | `setActiveTools`, `setModel`, `setThinkingLevel`                                                    | None                                                                    |
+| ④ Callback System | Plugin invokes system capabilities     | Narrowed client subset per domain (`Pick<...Api>`), `generate`, `storage`, `rpc.register`                                         | `sendMessage`, `exec`, `ctx.ui` ..., tiered by Tool / Command context                               | Entire CLI / socket API serves as plugin SDK                            |
+| ⑤ Observe         | Subscribe to events                    | `ctx.event.subscribe` → Stream                                                                                                    | Notification-only events + `pi.events` bus                                                          | `[[events]] on = "pane.*"`, `events.subscribe`                          |
 
 omac's tradeoff: **Expose minimally first** (following herdr's philosophy). Interception opens only critical points, while other needs callback via `omac` CLI; open further points only with concrete demand, each in a separate PR.
 
-| Mechanism | omac Extension Points | Status |
-|---|---|---|
-| ① Intercept | `agent.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `agent.idle` (keep a round working); `session.result` (quality gate: send back for rework, auto-open PR) | `agent.start.before`, `agent.fail`, `agent.idle` implemented; `session.result` proposed, not registered |
-| ② Contribute | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets | Not open for now; first candidate is harness adapter |
-| ③ Edit State | Model catalog / defaults, rule templates | Not open for now |
-| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset | No SDK provided for now, CLI is sufficient |
-| ⑤ Observe | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook | Proposed, not registered; pending demand |
+| Mechanism         | omac Extension Points                                                                                                                                                                                                            | Status                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| ① Intercept       | `agent.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `agent.idle` (keep a round working); `session.result` (quality gate: send back for rework, auto-open PR) | `agent.start.before`, `agent.fail`, `agent.idle` implemented; `session.result` proposed, not registered |
+| ② Contribute      | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets                                                                                                                              | Not open for now; first candidate is harness adapter                                                    |
+| ③ Edit State      | Model catalog / defaults, rule templates                                                                                                                                                                                         | Not open for now                                                                                        |
+| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset                                                                                                                      | No SDK provided for now, CLI is sufficient                                                              |
+| ⑤ Observe         | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook                                                                                                                               | Proposed, not registered; pending demand                                                                |
 
 Constraints:
+
 - Plugins do not access omacd internal services (Db, herdr connections); capabilities are strictly exposed via narrow interfaces on `ctx` or CLI.
 - When contribution capabilities exceed two or three types, unify them into `ctx.<domain>.transform`; do not establish domain structures prematurely.
 - All hooks compose the same way (§5): sequential, one event mutated in place.

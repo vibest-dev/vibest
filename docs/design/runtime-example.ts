@@ -17,11 +17,16 @@ const tern = (machine: Machine, args: ReadonlyArray<string>) =>
     const argv = machine.id === "local" ? ["tern", ...args] : ["tern", "ssh", machine.target!, "tern", ...args]
     return yield* spawner.string(ChildProcess.make(argv[0]!, argv.slice(1)))
   }).pipe(
-    Effect.mapError((cause) =>
-      new Runtime.RuntimeError({ code: /no such block|not found/i.test(String(cause)) ? "not_found" : "failed", message: String(cause) }),
+    Effect.mapError(
+      (cause) =>
+        new Runtime.RuntimeError({
+          code: /no such block|not found/i.test(String(cause)) ? "not_found" : "failed",
+          message: String(cause),
+        }),
     ),
   )
-const json = (machine: Machine, args: ReadonlyArray<string>) => tern(machine, [...args, "--json"]).pipe(Effect.map((out) => JSON.parse(out)))
+const json = (machine: Machine, args: ReadonlyArray<string>) =>
+  tern(machine, [...args, "--json"]).pipe(Effect.map((out) => JSON.parse(out)))
 const on = (terminal: Terminal): Machine => ({ id: terminal.machine })
 
 const runtime: Runtime.Runtime = {
@@ -30,7 +35,12 @@ const runtime: Runtime.Runtime = {
   status: (machine) =>
     tern(machine, ["ls"]).pipe(
       Effect.as({ status: "online" as const }),
-      Effect.catchAll((e) => Effect.succeed({ status: machine.id === "local" ? "blocked" as const : "offline" as const, reason: e.message })),
+      Effect.catchAll((e) =>
+        Effect.succeed({
+          status: machine.id === "local" ? ("blocked" as const) : ("offline" as const),
+          reason: e.message,
+        }),
+      ),
     ),
 
   open: (machine, { project, cwd, argv, env, label, near }) =>
@@ -40,7 +50,16 @@ const runtime: Runtime.Runtime = {
       const where = near ? ["split", near.id, "right"] : ["new", "tab", project]
       // tern has no env flag: env(1) sets it, then runs argv exactly.
       const envArgs = Object.entries(env).map(([key, value]) => `${key}=${value}`)
-      const created = yield* json(machine, [...where, "--cwd", cwd, "--keep-open", "--", "/usr/bin/env", ...envArgs, ...argv])
+      const created = yield* json(machine, [
+        ...where,
+        "--cwd",
+        cwd,
+        "--keep-open",
+        "--",
+        "/usr/bin/env",
+        ...envArgs,
+        ...argv,
+      ])
       yield* tern(machine, ["rename", created.block, label])
       return { machine: machine.id, id: created.block }
     }),
@@ -52,16 +71,21 @@ const runtime: Runtime.Runtime = {
     }),
 
   read: (terminal, lines) =>
-    tern(on(terminal), ["capture", terminal.id, "--scrollback"]).pipe(Effect.map((out) => out.split("\n").slice(-lines).join("\n"))),
+    tern(on(terminal), ["capture", terminal.id, "--scrollback"]).pipe(
+      Effect.map((out) => out.split("\n").slice(-lines).join("\n")),
+    ),
 
   process: (terminal) =>
-    json(on(terminal), ["process", terminal.id]).pipe(Effect.map((p) => ({ running: p.child != null, exitCode: p.exit_code ?? undefined }))),
+    json(on(terminal), ["process", terminal.id]).pipe(
+      Effect.map((p) => ({ running: p.child != null, exitCode: p.exit_code ?? undefined })),
+    ),
 
   close: (terminal) => tern(on(terminal), ["close", terminal.id]).pipe(Effect.asVoid),
 
   // Optional members tern has. No `state`, `events`, `exec`: core falls back (integration reports, polling, a hidden
   // terminal for one-off commands).
-  present: (terminal, info) => tern(on(terminal), ["rename", terminal.id, info.title ?? terminal.id]).pipe(Effect.asVoid),
+  present: (terminal, info) =>
+    tern(on(terminal), ["rename", terminal.id, info.title ?? terminal.id]).pipe(Effect.asVoid),
   prepare: (machine) => tern({ id: "local" }, ["remote", "setup", machine.target!]).pipe(Effect.asVoid),
   attach: () => ["tern"],
 }
@@ -95,8 +119,13 @@ export const sendReviewsToCloud = Plugin.define({
   effect: (context) =>
     context.agent.hook("start.before", (event) =>
       Effect.sync(() => {
-        const cloud = event.machines.find((m) => m.machine === "cloud" && m.runtimes.some((r) => r.kind === "herdr" && r.status === "online"))
-        if (event.agentType === "reviewer" && cloud) { event.machine = "cloud"; event.runtime = "herdr" }
+        const cloud = event.machines.find(
+          (m) => m.machine === "cloud" && m.runtimes.some((r) => r.kind === "herdr" && r.status === "online"),
+        )
+        if (event.agentType === "reviewer" && cloud) {
+          event.machine = "cloud"
+          event.runtime = "herdr"
+        }
       }),
     ),
 })

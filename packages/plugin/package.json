@@ -2,7 +2,6 @@
   "name": "@vibest/plugin",
   "version": "0.0.1-beta.13",
   "description": "Authoring API for vibest plugins. vibestd provides this module (and effect) to plugins at runtime.",
-  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,20 +12,21 @@
     "src",
     "LICENSE"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
+  "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsrs --noEmit --fast"
   },
-  "peerDependencies": {
-    "effect": "^4.0.2"
-  },
   "devDependencies": {
     "effect": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.2"
   }
 }

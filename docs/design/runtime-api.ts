@@ -46,25 +46,33 @@ export interface Runtime {
   readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
 
   /** A terminal running `argv` exactly, kept with the Project's other terminals (the runtime decides how). */
-  readonly open: (machine: Machine, input: {
-    readonly project: string
-    readonly cwd: string
-    readonly argv: ReadonlyArray<string>
-    readonly env: Readonly<Record<string, string>>
-    readonly label: string
-    /** Put it beside this terminal when possible. */
-    readonly near?: Terminal
-    /** As a split beside `near` instead of a tab of its own (`vibest run --peer`), when the runtime can. */
-    readonly split?: boolean
-    /** Focus the terminal when the runtime has such a notion (a terminal the user is waiting to see). */
-    readonly focus?: boolean
-  }) => Effect.Effect<Terminal, RuntimeError>
+  readonly open: (
+    machine: Machine,
+    input: {
+      readonly project: string
+      readonly cwd: string
+      readonly argv: ReadonlyArray<string>
+      readonly env: Readonly<Record<string, string>>
+      readonly label: string
+      /** Put it beside this terminal when possible. */
+      readonly near?: Terminal
+      /** As a split beside `near` instead of a tab of its own (`vibest run --peer`), when the runtime can. */
+      readonly split?: boolean
+      /** Focus the terminal when the runtime has such a notion (a terminal the user is waiting to see). */
+      readonly focus?: boolean
+    },
+  ) => Effect.Effect<Terminal, RuntimeError>
   /** Type text and/or press keys (enter, esc, ctrl+c, …). */
-  readonly send: (terminal: Terminal, input: { readonly text?: string; readonly keys?: ReadonlyArray<string> }) => Effect.Effect<void, RuntimeError>
+  readonly send: (
+    terminal: Terminal,
+    input: { readonly text?: string; readonly keys?: ReadonlyArray<string> },
+  ) => Effect.Effect<void, RuntimeError>
   /** The last `lines` lines of output. */
   readonly read: (terminal: Terminal, lines: number) => Effect.Effect<string, RuntimeError>
   /** Is its program still running; its exit code once it is not. `not_found` once the terminal is gone. */
-  readonly process: (terminal: Terminal) => Effect.Effect<{ readonly running: boolean; readonly exitCode?: number }, RuntimeError>
+  readonly process: (
+    terminal: Terminal,
+  ) => Effect.Effect<{ readonly running: boolean; readonly exitCode?: number }, RuntimeError>
   readonly close: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
 
   // Optional. Missing → core's fallback in brackets.
@@ -75,13 +83,28 @@ export interface Runtime {
   /** Pushed changes, every machine. [poll `process`] */
   readonly events?: Stream.Stream<RuntimeEvent>
   /** One-off command on a machine. [run it in a hidden terminal: `open`, wait for exit, `read`] */
-  readonly exec?: (machine: Machine, argv: ReadonlyArray<string>, cwd: string) => Effect.Effect<{ readonly code: number; readonly output: string }, RuntimeError>
+  readonly exec?: (
+    machine: Machine,
+    argv: ReadonlyArray<string>,
+    cwd: string,
+  ) => Effect.Effect<{ readonly code: number; readonly output: string }, RuntimeError>
   /** Labels and tokens shown on a terminal. [the `label` given to `open`] */
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>
   /** Set a machine up on the runtime's side (`vibest machine add`). [the user does it] */
   readonly prepare?: (machine: Machine) => Effect.Effect<void, RuntimeError>
   /** What `vibest doctor` shows: anything the runtime needs for `harnesses` to work in it, with fixes. [its `status` only] */
-  readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<{ readonly name: string; readonly checks: ReadonlyArray<{ readonly ok: boolean; readonly subject?: string; readonly text: string; readonly fix?: string }> }>
+  readonly doctor?: (
+    machine: Machine,
+    harnesses: ReadonlyArray<string>,
+  ) => Effect.Effect<{
+    readonly name: string
+    readonly checks: ReadonlyArray<{
+      readonly ok: boolean
+      readonly subject?: string
+      readonly text: string
+      readonly fix?: string
+    }>
+  }>
   /** The command that shows this runtime on a machine to the user. [none] */
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
 }

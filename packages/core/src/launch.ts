@@ -2,6 +2,7 @@
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
 import { Config, Crypto, Effect, Option } from "effect"
+
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
 import { Layout, VibestCommand, writeAtomic } from "./paths.ts"
@@ -31,7 +32,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const layout = yield* Layout
   const vibest = yield* VibestCommand
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })
-  if (!adapter.coordinatorArgs) return yield* unavailable(`${input.harness} is not currently supported as the coordinator`)
+  if (!adapter.coordinatorArgs)
+    return yield* unavailable(`${input.harness} is not currently supported as the coordinator`)
   const providerError = adapter.checkProvider(input.provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
@@ -41,7 +43,11 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const rulesFile = layout.coordinatorRules(key)
   const rules = coordinatorRules({ ...(yield* projectText(layout.project(key))) })
   yield* writeAtomic(rulesFile, rules).pipe(Effect.orDie)
-  const env: Record<string, string> = { VIBEST_AGENT: COORDINATOR, VIBEST_HOME: layout.home, VIBEST_COMMAND: encodeCommand(vibest) }
+  const env: Record<string, string> = {
+    VIBEST_AGENT: COORDINATOR,
+    VIBEST_HOME: layout.home,
+    VIBEST_COMMAND: encodeCommand(vibest),
+  }
   // What `vibest` in the Coordinator's shell needs to find its pane's owner; a harness may hand its shell less than it got.
   for (const name of input.passEnv) {
     const value = yield* Config.option(Config.String(name))
@@ -49,7 +55,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
   const saved = yield* input.session
   let harnessSessionId = saved.harnessSessionId
-  if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId))) harnessSessionId = null
+  if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
+    harnessSessionId = null
   // The bridge inbox (Claude) attaches by conversation id, so a new one is chosen and recorded now, not after the first turn.
   let newSessionId: string | undefined
   if (harnessSessionId === null && adapter.ownSessionId && adapter.inbox === "bridge") {
@@ -59,7 +66,17 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const commandEnv: Record<string, string> = { ...env, VIBEST_SESSION_ID: saved.sessionId }
   return {
     file: adapter.binary,
-    args: adapter.coordinatorArgs({ root: input.root, rules, rulesFile, provider: input.provider, model: input.model, sessionId: harnessSessionId, ...(newSessionId ? { newSessionId } : {}), pluginDir, env: commandEnv }),
+    args: adapter.coordinatorArgs({
+      root: input.root,
+      rules,
+      rulesFile,
+      provider: input.provider,
+      model: input.model,
+      sessionId: harnessSessionId,
+      ...(newSessionId ? { newSessionId } : {}),
+      pluginDir,
+      env: commandEnv,
+    }),
     env: commandEnv,
   }
 })
@@ -68,7 +85,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
 export const inParent = (argv: ReadonlyArray<string>, root: string) => [...argv, "--in-parent", root]
 
 /** `argv` to run again at `root` from below it: still marked when this run was, so the runtime is not asked again. */
-export const again = (argv: ReadonlyArray<string>, root: string, marked: boolean) => (marked ? inParent(argv, root) : argv)
+export const again = (argv: ReadonlyArray<string>, root: string, marked: boolean) =>
+  marked ? inParent(argv, root) : argv
 
 /**
  * A terminal at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other
@@ -91,13 +109,15 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
   // knows it is in place without asking the runtime, which does not report a just-made workspace as the parent.
   // The shell stays after the command: a start that fails (or a main agent the user quits) shows its error in the
   // pane and leaves a shell, not a closing terminal — and a pane that stays is one the last-pane guard still covers.
-  const terminal = yield* h.open(machine, {
-    project: input.root,
-    cwd: input.root,
-    argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh", ...inParent(input.argv, input.root)],
-    env: { VIBEST_HOME: input.home },
-    label: input.label,
-    ...(input.focus === true ? { focus: true } : {}),
-  }).pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message, tail: "" })))
+  const terminal = yield* h
+    .open(machine, {
+      project: input.root,
+      cwd: input.root,
+      argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh", ...inParent(input.argv, input.root)],
+      env: { VIBEST_HOME: input.home },
+      label: input.label,
+      ...(input.focus === true ? { focus: true } : {}),
+    })
+    .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message, tail: "" })))
   return terminal
 })

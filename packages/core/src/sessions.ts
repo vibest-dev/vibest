@@ -1,30 +1,112 @@
+import type { AgentRefused } from "@vibest/schema/plugin"
+import {
+  AllocationFailed,
+  LimitReached,
+  NoHarnessChosen,
+  NoRuntime,
+  NoSuchSession,
+  NotReady,
+  RuntimeUnreachable,
+  SessionBusy,
+} from "@vibest/schema/session"
 // Session state machine (SPEC §8, §9). Every operation on one session runs under that session's lock;
 // different sessions proceed in parallel. A session is addressed by its row's terminal — `runtime { kind }` routes the
 // call to the registered Runtime (runtime-port.md §3), `address { machine, id }` names the terminal in it. Core follows
 // each Agent with the runtime's `state` and `events` when they exist, else by polling (§5), and a turn ends when the
 // agent goes idle after working or its process exits; the result is the integration's report (the result file).
-import { Cause, Clock, Config, Context, Crypto, Duration, Effect, Exit, Fiber, FileSystem, HashMap, Layer, Option, Path, PlatformError, Predicate, Ref, Schedule, Semaphore, Stream, SynchronizedRef } from "effect"
-import { Hex } from "effect/encoding"
+import {
+  Cause,
+  Clock,
+  Config,
+  Context,
+  Crypto,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  HashMap,
+  Layer,
+  Option,
+  Path,
+  PlatformError,
+  Predicate,
+  Ref,
+  Schedule,
+  Semaphore,
+  Stream,
+  SynchronizedRef,
+} from "effect"
 import type { Scope } from "effect"
+import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
+
 import { Db, type InboxRow, type SessionRow } from "./db.ts"
-import { encodeCommand, harnessOptions, Harness, Harnesses, HarnessUnavailable, type HarnessId, isHarnessId, preflight, type HarnessAdapter } from "./harness.ts"
-import { Inbox } from "./inbox.ts"
 import { Drain } from "./drain.ts"
-import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, allocationLeafTaken, Layout, VibestCommand, resolveWorktree, safeRepositoryDirectory, worktreePath } from "./paths.ts"
-import { sessionPlacement } from "./placement.ts"
+import {
+  encodeCommand,
+  harnessOptions,
+  Harness,
+  Harnesses,
+  HarnessUnavailable,
+  type HarnessId,
+  isHarnessId,
+  preflight,
+  type HarnessAdapter,
+} from "./harness.ts"
+import { Inbox } from "./inbox.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
-import { sessionRounds } from "./rounds.ts"
-import { Subscriptions } from "./subscriptions/service.ts"
+import {
+  ALLOCATION_LEAF,
+  ALLOCATION_NAME_ATTEMPTS,
+  allocationLeafTaken,
+  Layout,
+  VibestCommand,
+  resolveWorktree,
+  safeRepositoryDirectory,
+  worktreePath,
+} from "./paths.ts"
+import { sessionPlacement } from "./placement.ts"
 import { describeSpawn, errorMessage, Plugins, type Routing } from "./plugins.ts"
-import type { AgentRefused } from "@vibest/schema/plugin"
-import * as Remove from "./remove.ts"
-import { agentState, type AgentState, alive, type Machine, machinesListing as machines, paneTail, Runtimes, RuntimeError, type Runtime, type RuntimeEvent, stateOf, type Terminal, type AgentSeen } from "./runtimes.ts"
-import { readReportLines } from "./results.ts"
 import { listProjectRepositories, projectRoot, workspaceGit } from "./project-create.ts"
-import { allocationParentBlocked, entryTaken, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
-import { AllocationFailed, LimitReached, NoHarnessChosen, NoRuntime, NoSuchSession, NotReady, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
-export { AllocationFailed, LaunchFailed, LimitReached, NoHarnessChosen, NoRuntime, NoSuchSession, NotReady, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
+import * as Remove from "./remove.ts"
+import { readReportLines } from "./results.ts"
+import { sessionRounds } from "./rounds.ts"
+import {
+  agentState,
+  type AgentState,
+  alive,
+  type Machine,
+  machinesListing as machines,
+  paneTail,
+  Runtimes,
+  RuntimeError,
+  type Runtime,
+  type RuntimeEvent,
+  stateOf,
+  type Terminal,
+  type AgentSeen,
+} from "./runtimes.ts"
+import { Subscriptions } from "./subscriptions/service.ts"
+import {
+  allocationParentBlocked,
+  entryTaken,
+  gitState,
+  type GitState,
+  mainCheckout,
+  repositoryDirectoryName,
+} from "./worktree.ts"
+export {
+  AllocationFailed,
+  LaunchFailed,
+  LimitReached,
+  NoHarnessChosen,
+  NoRuntime,
+  NoSuchSession,
+  NotReady,
+  RuntimeUnreachable,
+  SessionBusy,
+} from "@vibest/schema/session"
 
 /** Test barrier after `--peer` validation and before insert, while the owner's session lock is held. Production leaves this void. */
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -53,7 +135,9 @@ interface Tracked {
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
   /** Check command in flight for one result mtime. The attempt count lives on the session row. */
-  readonly checking: Ref.Ref<{ readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined>
+  readonly checking: Ref.Ref<
+    { readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined
+  >
   /** A continuation paste is in flight. Its wait does not hold the session lock, so a second check must not paste too. */
   readonly pasting: Ref.Ref<boolean>
 }
@@ -65,7 +149,9 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
-  checking: Ref.make<{ readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined>(undefined),
+  checking: Ref.make<{ readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined>(
+    undefined,
+  ),
   pasting: Ref.make(false),
 })
 
@@ -107,25 +193,42 @@ export interface SessionView extends SessionRow {
   readonly git: GitState | undefined
 }
 
-export class Sessions extends Context.Service<Sessions, {
-  readonly spawn: (input: SpawnInput) => Effect.Effect<Spawned, AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession, Scope.Scope>
-  /** Queue a message; vibestd delivers it once the session is idle (SPEC §8.4). Returns once the message is stored. */
-  readonly send: (id: string, message: string) => Effect.Effect<void, NoSuchSession>
-  /** Interrupt the running turn and keep the session (terminal, worktree, conversation) for follow-ups (SPEC §8.6). */
-  readonly interrupt: (id: string) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
-  /** Close a session's terminal and remove its worktree when git agrees (SPEC §8.6a). The row stays. */
-  readonly remove: (id: string, options?: { readonly keepWorktree?: boolean | undefined }) => Effect.Effect<Remove.RemoveOutcome | undefined, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError>
-  readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
-  readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
-  /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
-  readonly check: (id: string) => Effect.Effect<void>
-  /** RPC `ResultReady` from a hook: schedule a check and return at once (SPEC §7, §9). */
-  readonly resultReady: (id: string) => Effect.Effect<void>
-  /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
-  readonly userPrompt: (id: string, text: string) => Effect.Effect<void, never, FileSystem.FileSystem>
-  /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
-  readonly republish: Effect.Effect<number>
-}>()("vibest/Sessions") {
+export class Sessions extends Context.Service<
+  Sessions,
+  {
+    readonly spawn: (
+      input: SpawnInput,
+    ) => Effect.Effect<
+      Spawned,
+      AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession,
+      Scope.Scope
+    >
+    /** Queue a message; vibestd delivers it once the session is idle (SPEC §8.4). Returns once the message is stored. */
+    readonly send: (id: string, message: string) => Effect.Effect<void, NoSuchSession>
+    /** Interrupt the running turn and keep the session (terminal, worktree, conversation) for follow-ups (SPEC §8.6). */
+    readonly interrupt: (
+      id: string,
+    ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
+    /** Close a session's terminal and remove its worktree when git agrees (SPEC §8.6a). The row stays. */
+    readonly remove: (
+      id: string,
+      options?: { readonly keepWorktree?: boolean | undefined },
+    ) => Effect.Effect<
+      Remove.RemoveOutcome | undefined,
+      NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
+    >
+    readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
+    readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
+    /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
+    readonly check: (id: string) => Effect.Effect<void>
+    /** RPC `ResultReady` from a hook: schedule a check and return at once (SPEC §7, §9). */
+    readonly resultReady: (id: string) => Effect.Effect<void>
+    /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
+    readonly userPrompt: (id: string, text: string) => Effect.Effect<void, never, FileSystem.FileSystem>
+    /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
+    readonly republish: Effect.Effect<number>
+  }
+>()("vibest/Sessions") {
   /** `maxSessions`: non-stopped sessions on this machine; undefined = no limit. */
   static readonly make = (options: { readonly maxSessions: number | undefined }) =>
     Effect.gen(function* () {
@@ -154,16 +257,25 @@ export class Sessions extends Context.Service<Sessions, {
             onNone: () => newTracked.pipe(Effect.map((r) => [r, HashMap.set(map, id, r)] as const)),
           }),
         )
-      const locked = (id: string, settlement = false) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        drain.work(`session ${id}`, track(id).pipe(Effect.flatMap((r) => r.lock.withPermit(effect))), settlement)
-      const logged = (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        effect.pipe(Effect.catchCause((cause) => Effect.logWarning(`${what}: ${Cause.pretty(cause)}`)))
+      const locked =
+        (id: string, settlement = false) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          drain.work(`session ${id}`, track(id).pipe(Effect.flatMap((r) => r.lock.withPermit(effect))), settlement)
+      const logged =
+        (what: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          effect.pipe(Effect.catchCause((cause) => Effect.logWarning(`${what}: ${Cause.pretty(cause)}`)))
 
       /** Which session a terminal belongs to, from the rows (the terminal is on the row now). */
       const sessionAt = (terminal: Terminal) =>
-        db.listSessions().pipe(
-          Effect.map((rows) => rows.find((row) => row.address.machine === terminal.machine && row.address.id === terminal.id)?.id),
-        )
+        db
+          .listSessions()
+          .pipe(
+            Effect.map(
+              (rows) =>
+                rows.find((row) => row.address.machine === terminal.machine && row.address.id === terminal.id)?.id,
+            ),
+          )
 
       const notice = (session: SessionRow, message: string) =>
         inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
@@ -172,21 +284,37 @@ export class Sessions extends Context.Service<Sessions, {
       const worktreeOf = (session: SessionRow) =>
         resolveWorktree(layout, session, (id) => db.getSession(id)).pipe(
           Effect.flatMap((located) =>
-            located._tag === "Resolved" ? Effect.succeed(located.path) : Effect.fail(new NoSuchSession({ id: session.id, message: located.message })),
+            located._tag === "Resolved"
+              ? Effect.succeed(located.path)
+              : Effect.fail(new NoSuchSession({ id: session.id, message: located.message })),
           ),
         )
 
       /** Fail these queued messages for good and tell the coordinator which ones, with the text so it can send them again. */
-      const undelivered = (session: SessionRow, rows: ReadonlyArray<{ readonly id: number; readonly message: string }>, reason: string) =>
-        db.setInboxStatus(rows.map((r) => r.id), "failed").pipe(
-          Effect.andThen(
-            notice(session, `A message to ${session.id} was not delivered: ${reason}\n\n${rows.map((r) => r.message).join("\n\n")}`),
-          ),
-        )
+      const undelivered = (
+        session: SessionRow,
+        rows: ReadonlyArray<{ readonly id: number; readonly message: string }>,
+        reason: string,
+      ) =>
+        db
+          .setInboxStatus(
+            rows.map((r) => r.id),
+            "failed",
+          )
+          .pipe(
+            Effect.andThen(
+              notice(
+                session,
+                `A message to ${session.id} was not delivered: ${reason}\n\n${rows.map((r) => r.message).join("\n\n")}`,
+              ),
+            ),
+          )
 
       /** The session is gone for now: what is still queued for it fails with `reason` (a later Send resumes it). */
       const dropQueue = (session: SessionRow, reason: string) =>
-        db.pendingInbox(session.id).pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason))))
+        db
+          .pendingInbox(session.id)
+          .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason))))
 
       // ---- runtime helpers (runtime-port.md §3, §5) ----
 
@@ -206,7 +334,10 @@ export class Sessions extends Context.Service<Sessions, {
             Effect.flatMap((seen) => {
               if (settled(seen) || step === undefined) return Effect.succeed(seen)
               // The runtime cannot tell yet (a startup dialog): answer it with the harness's own step.
-              return step({ screen, sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore) }).pipe(Effect.as(seen))
+              return step({
+                screen,
+                sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
+              }).pipe(Effect.as(seen))
             }),
             Effect.repeat({ until: settled, schedule: TICK }),
             Effect.timeoutOrElse({
@@ -232,25 +363,32 @@ export class Sessions extends Context.Service<Sessions, {
       })
 
       /** The argv that starts the session's harness in a terminal (what `open` runs). */
-      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (session: SessionRow, resume: boolean, key: string) {
+      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (
+        session: SessionRow,
+        resume: boolean,
+        key: string,
+      ) {
         const file = layout.rulesFile(session.id)
         const adapter = harnesses.get(session.harnessId)
         const pluginDir = yield* harness.plugin(adapter.id)
         // The binary first: `open` runs argv exactly (runtime-port §3), and a runtime knows the harness by it.
-        return [adapter.binary, ...adapter.launchArgs({
-          worktree: yield* worktreeOf(session),
-          scratch: layout.scratch(key),
-          rules: yield* fs.readFileString(file),
-          rulesFile: file,
-          projectsDir: layout.projects,
-          provider: session.provider,
-          model: session.model,
-          sessionId: session.harnessSessionId,
-          resume,
-          pluginDir,
-          vibest,
-          env: vibestEnv(session),
-        })]
+        return [
+          adapter.binary,
+          ...adapter.launchArgs({
+            worktree: yield* worktreeOf(session),
+            scratch: layout.scratch(key),
+            rules: yield* fs.readFileString(file),
+            rulesFile: file,
+            projectsDir: layout.projects,
+            provider: session.provider,
+            model: session.model,
+            sessionId: session.harnessSessionId,
+            resume,
+            pluginDir,
+            vibest,
+            env: vibestEnv(session),
+          }),
+        ]
       })
 
       /** One look (§5): the runtime reports it working or blocked, or the integration wrote a turn-start report line of this round. */
@@ -281,12 +419,18 @@ export class Sessions extends Context.Service<Sessions, {
 
       /** A state that must not be pasted into (SPEC §8.4). */
       const busy = (state: AgentState) => state === "working" || state === "blocked"
-      const busyOf = (seen: AgentSeen) => { const state = stateOf(seen); return state !== undefined && busy(state) }
+      const busyOf = (seen: AgentSeen) => {
+        const state = stateOf(seen)
+        return state !== undefined && busy(state)
+      }
 
       /** Interrupt key, then wait for the agent to settle (core polls its state; false when it did not within STOP_WAIT). Caller holds the lock. */
       const settleAfterInterrupt = (h: Runtime, terminal: Terminal) =>
         agentState(h, terminal).pipe(
-          Effect.map((seen) => { const state = stateOf(seen); return state !== undefined && state !== "working" && state !== "blocked" }),
+          Effect.map((seen) => {
+            const state = stateOf(seen)
+            return state !== undefined && state !== "working" && state !== "blocked"
+          }),
           Effect.repeat({ until: (idle) => idle, schedule: TICK }),
           Effect.timeoutOrElse({ duration: STOP_WAIT, orElse: () => Effect.succeed(false) }),
         )
@@ -314,7 +458,10 @@ export class Sessions extends Context.Service<Sessions, {
        * in the report file. Every stamp is taken before its round's start line can be written (the hook sends `Prompt`
        * first; a continuation is stamped before its paste). */
       const reportStartedSince = (id: string, at: number) =>
-        readReportLines(layout.reportFile(id)).pipe(Effect.map((lines) => lines.some((line) => line.turn === "start" && line.ts >= at)), Effect.orElseSucceed(() => false))
+        readReportLines(layout.reportFile(id)).pipe(
+          Effect.map((lines) => lines.some((line) => line.turn === "start" && line.ts >= at)),
+          Effect.orElseSucceed(() => false),
+        )
 
       /**
        * Send a turn and confirm it started. Returns why not (with the terminal tail) when the session never picked it up
@@ -323,7 +470,14 @@ export class Sessions extends Context.Service<Sessions, {
        * Caller holds the session's lock. `keepRound`: a move will try the next harness, so a miss leaves the open round
        * working; the default still closes it.
        */
-      const prompt = Effect.fn("Sessions.prompt")(function* (h: Runtime, session: SessionRow, terminal: Terminal, text: string, onHandover: Effect.Effect<void> = Effect.void, options?: { readonly keepRound?: boolean }) {
+      const prompt = Effect.fn("Sessions.prompt")(function* (
+        h: Runtime,
+        session: SessionRow,
+        terminal: Terminal,
+        text: string,
+        onHandover: Effect.Effect<void> = Effect.void,
+        options?: { readonly keepRound?: boolean },
+      ) {
         // Open before ready() so a typed prompt during resume sees the round. Claim stays after ready: a session that
         // never gets ready does not take the rows. The second update binds them onto this round.
         const openedHere = session.turnState !== "open"
@@ -335,7 +489,11 @@ export class Sessions extends Context.Service<Sessions, {
         const state = yield* awaitReady(h, terminal, adapter, session.id).pipe(
           Effect.onExit((exit) =>
             openedHere && !Exit.isSuccess(exit)
-              ? Effect.uninterruptible(Effect.flatMap(Clock.currentTimeMillis, (t) => db.updateSession(session.id, { turnState: "not_started", lastActive: t })))
+              ? Effect.uninterruptible(
+                  Effect.flatMap(Clock.currentTimeMillis, (t) =>
+                    db.updateSession(session.id, { turnState: "not_started", lastActive: t }),
+                  ),
+                )
               : Effect.void,
           ),
         )
@@ -352,13 +510,16 @@ export class Sessions extends Context.Service<Sessions, {
           Effect.ensuring(Ref.set(r.prompting, false)),
         )
         // A miss undoes the round opened above — unless a move will try the next harness on it.
-        const missed = options?.keepRound ? Effect.void : db.updateSession(session.id, { turnState: "not_started", lastActive: yield* Clock.currentTimeMillis })
+        const missed = options?.keepRound
+          ? Effect.void
+          : db.updateSession(session.id, { turnState: "not_started", lastActive: yield* Clock.currentTimeMillis })
         // The runtime refused the text. A result the integration wrote anyway is the turn; otherwise the round opened above is undone.
         const delivered = yield* send.pipe(
           Effect.as(false),
           Effect.catchTag("RuntimeError", (error) =>
             Effect.gen(function* () {
-              if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none") return true
+              if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none")
+                return true
               // The connection breaking is not a refusal (§3): the text may have arrived, so the round stays open.
               if (error.code === "unreachable") return yield* Effect.fail(error)
               yield* missed
@@ -373,7 +534,8 @@ export class Sessions extends Context.Service<Sessions, {
         // Re-paste once only, so a task never runs twice.
         yield* send.pipe(Effect.ignore)
         if (yield* confirmed(h, session, terminal)) return undefined
-        if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none") return undefined
+        if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none")
+          return undefined
         const tail = yield* paneTail(h, terminal)
         yield* missed
         return `task_not_started: ${session.id} did not start working on the message.\n\nterminal tail:\n${tail}`
@@ -383,8 +545,25 @@ export class Sessions extends Context.Service<Sessions, {
       // The usage-limit move is late-wired: rounds and placement ask for it before it exists (it needs `finish`).
       const limit = limitMoveBox()
       const rounds = sessionRounds({
-        db, inbox, layout, harnesses, track, locked, scope, plugins, paneTail, busy, interruptAgent,
-        confirmTimeout: CONFIRM_TIMEOUT, stopWait: STOP_WAIT, worktreeOf, notice, undelivered, logged, prompt, limitMove: limit.move,
+        db,
+        inbox,
+        layout,
+        harnesses,
+        track,
+        locked,
+        scope,
+        plugins,
+        paneTail,
+        busy,
+        interruptAgent,
+        confirmTimeout: CONFIRM_TIMEOUT,
+        stopWait: STOP_WAIT,
+        worktreeOf,
+        notice,
+        undelivered,
+        logged,
+        prompt,
+        limitMove: limit.move,
         pickedUp: pickupNow,
       })
       collectResult = rounds.collectResult
@@ -393,25 +572,58 @@ export class Sessions extends Context.Service<Sessions, {
       // ---- spawn ----
 
       /** The first turn, once the terminal exists: the rules in the prompt where the harness reads them, else the text alone. */
-      const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, rules: string, firstPrompt: string) =>
+      const afterOpen = (
+        h: Runtime,
+        session: SessionRow,
+        terminal: Terminal,
+        root: string,
+        rules: string,
+        firstPrompt: string,
+      ) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
-          const first = harnesses.get(session.harnessId).rulesInPrompt ? `${rules}\n\n# Task\n\n${firstPrompt}` : firstPrompt
+          const first = harnesses.get(session.harnessId).rulesInPrompt
+            ? `${rules}\n\n# Task\n\n${firstPrompt}`
+            : firstPrompt
           const notStarted = yield* prompt(h, session, terminal, first)
           if (notStarted) yield* notice(session, notStarted)
         })
 
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
-        db, runtimes, layout, fs, path, vibest, harnesses, worktreeOf, vibestEnv, launchArgv, notice, prompt, paneTail, limitMove: limit.move, afterOpen,
+        db,
+        runtimes,
+        layout,
+        fs,
+        path,
+        vibest,
+        harnesses,
+        worktreeOf,
+        vibestEnv,
+        launchArgv,
+        notice,
+        prompt,
+        paneTail,
+        limitMove: limit.move,
+        afterOpen,
       })
 
       // ---- the usage-limit move (move.ts): the same session on another harness ----
       const move = sessionMove({
-        db, plugins,
+        db,
+        plugins,
         subscriptions: yield* Subscriptions,
-        harness, harnesses, track, prompt, open: openTerminal, show, locate, finish, launchArgv,
-        resultFile: layout.resultFile, rulesFile: layout.rulesFile,
+        harness,
+        harnesses,
+        track,
+        prompt,
+        open: openTerminal,
+        show,
+        locate,
+        finish,
+        launchArgv,
+        resultFile: layout.resultFile,
+        rulesFile: layout.rulesFile,
         fs: { remove: (p, o) => fs.remove(p, o), readFileString: (p) => fs.readFileString(p) },
         uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
         platform,
@@ -421,15 +633,25 @@ export class Sessions extends Context.Service<Sessions, {
       const newId = crypto.randomBytes(4).pipe(Effect.map(Hex.encode), Effect.orDie)
 
       /** The `machines[]` of `agent.start.before` (§7), via the shared helper. */
-      const machinesListing = machines(runtimes, harnesses.all.map((adapter) => adapter.id))
+      const machinesListing = machines(
+        runtimes,
+        harnesses.all.map((adapter) => adapter.id),
+      )
 
       /** §4's check after the chain: the chosen runtime is loaded and online on the machine, else the start refuses with the reason. */
-      const chosenRuntime = (decision: { readonly machine: { readonly id: string }; readonly runtime: string | undefined }) =>
+      const chosenRuntime = (decision: {
+        readonly machine: { readonly id: string }
+        readonly runtime: string | undefined
+      }) =>
         Effect.gen(function* () {
           if (decision.runtime === undefined) {
             const machines = yield* machinesListing
-            const list = machines[0]!.runtimes.map((runtime) => `${runtime.kind}: ${runtime.status}${runtime.reason ? ` (${runtime.reason})` : ""}`).join("; ")
-            return yield* new NoRuntime({ message: `no terminal runtime was chosen for this start (${list || "none is loaded"})` })
+            const list = machines[0]!.runtimes
+              .map((runtime) => `${runtime.kind}: ${runtime.status}${runtime.reason ? ` (${runtime.reason})` : ""}`)
+              .join("; ")
+            return yield* new NoRuntime({
+              message: `no terminal runtime was chosen for this start (${list || "none is loaded"})`,
+            })
           }
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
@@ -448,11 +670,18 @@ export class Sessions extends Context.Service<Sessions, {
           // Reads only: a check must not insert a project row as a side effect.
           if (p.projectId !== (yield* db.projectByKey(input.key))) return yield* refuse("it belongs to another project")
           if (p.metadata.archived || p.metadata.removed) return yield* refuse("it was archived")
-          if (p.runtime !== runtime || p.address.machine !== machineId) return yield* refuse(`ineligible: it runs in ${p.runtime} on ${p.address.machine}, not ${runtime} on ${machineId}`)
+          if (p.runtime !== runtime || p.address.machine !== machineId)
+            return yield* refuse(
+              `ineligible: it runs in ${p.runtime} on ${p.address.machine}, not ${runtime} on ${machineId}`,
+            )
           const worktree = yield* worktreeOf(p).pipe(Effect.mapError((e) => refuse(e.message)))
-          if (!(yield* fs.exists(worktree).pipe(Effect.orDie))) return yield* refuse(`ineligible: its worktree ${worktree} is gone`)
+          if (!(yield* fs.exists(worktree).pipe(Effect.orDie)))
+            return yield* refuse(`ineligible: its worktree ${worktree} is gone`)
           // A multi-repository workspace is not itself a checkout; the project id above is what it belongs to.
-          if (!(yield* listProjectRepositories(worktree).pipe(Effect.mapError((e) => refuse(e.message)))) && !Option.contains(yield* mainCheckout(worktree).pipe(Effect.option), input.root))
+          if (
+            !(yield* listProjectRepositories(worktree).pipe(Effect.mapError((e) => refuse(e.message)))) &&
+            !Option.contains(yield* mainCheckout(worktree).pipe(Effect.option), input.root)
+          )
             return yield* refuse(`ineligible: its worktree is not in ${input.root}`)
           return p.metadata.peer ?? p.id
         })
@@ -471,7 +700,10 @@ export class Sessions extends Context.Service<Sessions, {
           harness: input.harness,
           provider: input.provider,
           model: input.model,
-          harnesses: yield* harnessOptions.pipe(Effect.provideService(Harness, harness), Effect.provideService(Harnesses, harnesses)),
+          harnesses: yield* harnessOptions.pipe(
+            Effect.provideService(Harness, harness),
+            Effect.provideService(Harnesses, harnesses),
+          ),
           attempts: [],
           machine: { id: input.machine.id },
           runtime: undefined,
@@ -481,14 +713,29 @@ export class Sessions extends Context.Service<Sessions, {
         const { provider, model } = decision
         if (decision.harness === undefined) return yield* new NoHarnessChosen()
         const rt = yield* chosenRuntime(decision)
-        const machine: Machine = { id: decision.machine.id, ...(input.machine.id === decision.machine.id && input.machine.target !== undefined ? { target: input.machine.target } : {}) }
+        const machine: Machine = {
+          id: decision.machine.id,
+          ...(input.machine.id === decision.machine.id && input.machine.target !== undefined
+            ? { target: input.machine.target }
+            : {}),
+        }
         const runtimeKind = rt.kind
         // A plugin's choice that cannot run names the plugin.
         const routed = (e: HarnessUnavailable) =>
-          Object.keys(decision.decidedBy).length === 0 ? e : new HarnessUnavailable({ harness: e.harness, message: `${e.message} (routed: ${describeSpawn({ ...decision, harness: e.harness })})` })
+          Object.keys(decision.decidedBy).length === 0
+            ? e
+            : new HarnessUnavailable({
+                harness: e.harness,
+                message: `${e.message} (routed: ${describeSpawn({ ...decision, harness: e.harness })})`,
+              })
         const harnessId = decision.harness
-        if (!isHarnessId(harnessId)) return yield* routed(new HarnessUnavailable({ harness: harnessId, message: `unknown harness ${harnessId}` }))
-        yield* preflight(harnessId, provider ?? null, model ?? null).pipe(Effect.provideService(Harness, harness), Effect.provideService(Harnesses, harnesses), Effect.mapError(routed))
+        if (!isHarnessId(harnessId))
+          return yield* routed(new HarnessUnavailable({ harness: harnessId, message: `unknown harness ${harnessId}` }))
+        yield* preflight(harnessId, provider ?? null, model ?? null).pipe(
+          Effect.provideService(Harness, harness),
+          Effect.provideService(Harnesses, harnesses),
+          Effect.mapError(routed),
+        )
         const adapter = harnesses.get(harnessId)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
         const id = yield* newId.pipe(
@@ -500,20 +747,37 @@ export class Sessions extends Context.Service<Sessions, {
         const admit = (peer: string | undefined) => {
           const reserve = Effect.gen(function* () {
             const refuse = (message: string) => new AllocationFailed({ message })
-            const folders = yield* listProjectRepositories(root).pipe(Effect.mapError((e) => refuse(`${root}: ${e.message}`)))
+            const folders = yield* listProjectRepositories(root).pipe(
+              Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
+            )
             const key = input.key
-            const base = { ...(input.env ? { env: input.env } : {}), ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}), ...(input.archive ? { archive: true } : {}) }
+            const base = {
+              ...(input.env ? { env: input.env } : {}),
+              ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
+              ...(input.archive ? { archive: true } : {}),
+            }
             let allocation: { readonly worktreeRepository: string; readonly worktreeName: string } | undefined
             if (peer === undefined) {
               // `<worktrees>/<project>/<leaf>/<repository>` for a multi-repository project; otherwise the repository's own name.
-              const repository = folders ? path.basename(root) : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
+              const repository = folders
+                ? path.basename(root)
+                : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
               if (!safeRepositoryDirectory(repository))
-                return yield* refuse(`repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`)
+                return yield* refuse(
+                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
+                )
               const parentPath = path.join(layout.worktrees, repository)
-              if (yield* allocationParentBlocked(parentPath).pipe(Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`))))
-                return yield* refuse(`refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`)
+              if (
+                yield* allocationParentBlocked(parentPath).pipe(
+                  Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)),
+                )
+              )
+                return yield* refuse(
+                  `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
+                )
               const scripted = allocationNameSource.leaves
-              const attempts = scripted === undefined ? ALLOCATION_NAME_ATTEMPTS : Math.min(scripted.length, ALLOCATION_NAME_ATTEMPTS)
+              const attempts =
+                scripted === undefined ? ALLOCATION_NAME_ATTEMPTS : Math.min(scripted.length, ALLOCATION_NAME_ATTEMPTS)
               let leaf: string | undefined
               for (let i = 0; i < attempts; i++) {
                 const candidate = scripted?.[i] ?? Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
@@ -551,44 +815,62 @@ export class Sessions extends Context.Service<Sessions, {
             // A peer works in its owner's directory; Db copies it from the owner row.
             const cwd = worktreePath(layout, draft) ?? ""
 
-            if (!(yield* db.insertSession(draft, key, options.maxSessions, cwd, decision.prompt, input.parentSessionId))) return yield* new LimitReached({ limit: options.maxSessions! })
+            if (
+              !(yield* db.insertSession(draft, key, options.maxSessions, cwd, decision.prompt, input.parentSessionId))
+            )
+              return yield* new LimitReached({ limit: options.maxSessions! })
             return (yield* db.getSession(id))!
           })
           return peer === undefined ? allocating.withPermit(reserve) : reserve
         }
         // Archive of the owner holds this same semaphore across its sharing check and git worktree remove. Lock only that owner: also locking the named peer can cycle with another admission.
-        const row = input.peer === undefined
-          ? yield* admit(undefined)
-          : yield* Effect.gen(function* () {
-              const named = yield* db.getSession(input.peer!)
-              if (!named) {
-                yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
-                return yield* Effect.die("peerOf returned for a missing session")
-              }
-              const ownerId = named.metadata.peer ?? named.id
-              return yield* locked(ownerId)(
-                Effect.gen(function* () {
-                  const peer = yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
-                  if (peer !== ownerId) return yield* new NoSuchSession({ id: input.peer!, message: `--peer ${input.peer}: ineligible: its worktree owner changed` })
-                  yield* peerAdmitPause.wait
-                  return yield* admit(peer)
-                }),
-              )
-            })
+        const row =
+          input.peer === undefined
+            ? yield* admit(undefined)
+            : yield* Effect.gen(function* () {
+                const named = yield* db.getSession(input.peer!)
+                if (!named) {
+                  yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
+                  return yield* Effect.die("peerOf returned for a missing session")
+                }
+                const ownerId = named.metadata.peer ?? named.id
+                return yield* locked(ownerId)(
+                  Effect.gen(function* () {
+                    const peer = yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
+                    if (peer !== ownerId)
+                      return yield* new NoSuchSession({
+                        id: input.peer!,
+                        message: `--peer ${input.peer}: ineligible: its worktree owner changed`,
+                      })
+                    yield* peerAdmitPause.wait
+                    return yield* admit(peer)
+                  }),
+                )
+              })
         // Take the lock before forking so no check sees the row as an abandoned `starting` one.
         const { lock } = yield* track(id)
-        yield* Effect.uninterruptibleMask((restore) => Effect.gen(function* () {
-          yield* restore(Semaphore.take(lock, 1))
-          const leave = drain.track(`spawn ${id}`)
-          yield* Effect.forkIn(
-            launch(rt, machine, row, root, decision.prompt, input.peer).pipe(Effect.ensuring(Semaphore.release(lock, 1)), Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),
-            scope,
-          )
-        }))
+        yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            yield* restore(Semaphore.take(lock, 1))
+            const leave = drain.track(`spawn ${id}`)
+            yield* Effect.forkIn(
+              launch(rt, machine, row, root, decision.prompt, input.peer).pipe(
+                Effect.ensuring(Semaphore.release(lock, 1)),
+                Effect.ensuring(leave),
+                logged(`spawn ${id}`),
+                Effect.provideContext(platform),
+              ),
+              scope,
+            )
+          }),
+        )
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
 
-      const check = Effect.fn("Sessions.check")(function* (id: string, parked: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem> }) {
+      const check = Effect.fn("Sessions.check")(function* (
+        id: string,
+        parked: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem> },
+      ) {
         const session = yield* db.getSession(id)
         if (!session) return
         const open = session.turnState === "open"
@@ -596,7 +878,12 @@ export class Sessions extends Context.Service<Sessions, {
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
         // A delivery cut off by vibestd stopping (no delivery runs while the lock is held): it may or may not have arrived.
         const cutOff = yield* db.inboxWithStatus(id, "sending")
-        if (cutOff.length > 0) yield* undelivered(session, cutOff, "vibestd stopped while handing it to the session; it may or may not have arrived")
+        if (cutOff.length > 0)
+          yield* undelivered(
+            session,
+            cutOff,
+            "vibestd stopped while handing it to the session; it may or may not have arrived",
+          )
         const h = yield* live(session)
         const terminal = session.address
         const r = yield* track(id)
@@ -613,7 +900,14 @@ export class Sessions extends Context.Service<Sessions, {
           if (session.startedAt === null) {
             // vibestd died mid-spawn (SPEC §5.5 spawn).
             yield* notice(session, `${id} never finished starting (vibestd restarted during spawn).`)
-          } else if (open) yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)", yield* paneTail(h, terminal))
+          } else if (open)
+            yield* finish(
+              session,
+              "failed",
+              "",
+              "the session exited (its terminal is gone or its process with it)",
+              yield* paneTail(h, terminal),
+            )
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
           if (session.exitedAt === null) {
             yield* db.updateSession(id, { status: "unknown", exitedAt: yield* Clock.currentTimeMillis })
@@ -625,7 +919,8 @@ export class Sessions extends Context.Service<Sessions, {
         // A harness whose ids the runtime knows by watching it (Cursor): its record replaces a conversation id adopted from a report.
         if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
-          if (sessionId !== null && sessionId !== session.harnessSessionId) yield* db.updateSession(id, { harnessSessionId: sessionId })
+          if (sessionId !== null && sessionId !== session.harnessSessionId)
+            yield* db.updateSession(id, { harnessSessionId: sessionId })
         }
 
         const s = state ?? "unknown"
@@ -635,7 +930,10 @@ export class Sessions extends Context.Service<Sessions, {
         }
         if (s === "blocked") {
           if (!(yield* Ref.getAndSet(r.blockedNotified, true)))
-            yield* notice(session, `${id} is waiting for a confirmation in its terminal. Switch to its terminal to answer.`)
+            yield* notice(
+              session,
+              `${id} is waiting for a confirmation in its terminal. Switch to its terminal to answer.`,
+            )
           return
         }
         yield* Ref.set(r.blockedNotified, false)
@@ -649,29 +947,48 @@ export class Sessions extends Context.Service<Sessions, {
         // never moved. Its messages already failed with their notices; close the turn so the queue moves again.
         if (idle && !ended && now - session.turnPromptedAt > Duration.toMillis(CONFIRM_TIMEOUT)) {
           yield* db.updateSession(id, { turnState: "not_started", lastActive: now })
-          yield* notice(session, `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`)
+          yield* notice(
+            session,
+            `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`,
+          )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
         }
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         if (now - endedAt! <= Duration.toMillis(HOOK_GRACE)) return
         const tail = yield* paneTail(h, terminal)
-        yield* finish(session, "lost", "", "the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit or a bad model?); see the terminal tail", tail)
+        yield* finish(
+          session,
+          "lost",
+          "",
+          "the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit or a bad model?); see the terminal tail",
+          tail,
+        )
       })
 
       const checkLocked = (id: string) => {
         const parked: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem>; leave?: Effect.Effect<void> } = {}
         return Effect.gen(function* () {
           // A paste is counted from inside the lock until it ends, so a planned Stop never cuts it off (it would paste twice).
-          yield* locked(id)(check(id, parked).pipe(Effect.tap(() => Effect.sync(() => { if (parked.paste) parked.leave = drain.track(`paste ${id}`) }))))
+          yield* locked(id)(
+            check(id, parked).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  if (parked.paste) parked.leave = drain.track(`paste ${id}`)
+                }),
+              ),
+            ),
+          )
           // The pickup wait lives in `paste` and must not hold the lock `check` just released.
           if (parked.paste) yield* parked.paste
         }).pipe(
-          Effect.ensuring(Effect.gen(function* () {
-            if (parked.leave) yield* parked.leave
-            if (!parked.paste) return
-            yield* Ref.set((yield* track(id)).pasting, false)
-          })),
+          Effect.ensuring(
+            Effect.gen(function* () {
+              if (parked.leave) yield* parked.leave
+              if (!parked.paste) return
+              yield* Ref.set((yield* track(id)).pasting, false)
+            }),
+          ),
           logged(`check ${id}`),
           Effect.provideContext(platform),
         )
@@ -684,9 +1001,13 @@ export class Sessions extends Context.Service<Sessions, {
         Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
 
       const getRow = (id: string) =>
-        db.getSession(id).pipe(
-          Effect.flatMap((session) => (session ? Effect.succeed(session) : Effect.fail(new NoSuchSession({ id, message: `no session ${id}` })))),
-        )
+        db
+          .getSession(id)
+          .pipe(
+            Effect.flatMap((session) =>
+              session ? Effect.succeed(session) : Effect.fail(new NoSuchSession({ id, message: `no session ${id}` })),
+            ),
+          )
 
       /**
        * Hand an idle session its queued messages, resuming its harness first when the process is gone. Caller holds the
@@ -695,8 +1016,14 @@ export class Sessions extends Context.Service<Sessions, {
       const deliver = Effect.fn("Sessions.deliver")(function* (id: string) {
         const session = yield* getRow(id)
         // Read under the lock: a Send accepted just before `vibest archive` must not bring the archived session back.
-        if (session.metadata.archived || session.metadata.removed) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-        if (session.turnState === "open" || session.status === "blocked" || (session.startedAt === null && session.exitedAt === null)) return
+        if (session.metadata.archived || session.metadata.removed)
+          return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
+        if (
+          session.turnState === "open" ||
+          session.status === "blocked" ||
+          (session.startedAt === null && session.exitedAt === null)
+        )
+          return
         const h = yield* live(session)
         const terminal = session.address
         const seen = yield* agentState(h, terminal)
@@ -704,7 +1031,10 @@ export class Sessions extends Context.Service<Sessions, {
         if (state !== undefined && state !== "unknown" && busy(state)) return
         if (seen === "absent" || (state === "unknown" && !(yield* alive(h, terminal)))) {
           if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
-            return yield* new NoSuchSession({ id, message: `${id} exited before the runtime reported its session id; spawn a new session` })
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} exited before the runtime reported its session id; spawn a new session`,
+            })
           yield* resume(h, session)
         }
         const fresh = (yield* db.getSession(id)) ?? session
@@ -730,13 +1060,28 @@ export class Sessions extends Context.Service<Sessions, {
           const failed = (cause: Cause.Cause<unknown>) =>
             Effect.gen(function* () {
               // Only what a retry can fix keeps the message queued (§3 `RuntimeError` codes); a refused start is final.
-              const transient = Cause.findErrorOption(cause).pipe(Option.exists((e) =>
-                Predicate.isTagged(e, "RuntimeUnreachable") || (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
-              ))
-              if (Cause.hasInterruptsOnly(cause) || transient || !(yield* db.pendingInbox(id)).some((r) => r.id === row.id)) return
+              const transient = Cause.findErrorOption(cause).pipe(
+                Option.exists(
+                  (e) =>
+                    Predicate.isTagged(e, "RuntimeUnreachable") ||
+                    (e instanceof RuntimeError && (e.code === "unreachable" || e.code === "busy")),
+                ),
+              )
+              if (
+                Cause.hasInterruptsOnly(cause) ||
+                transient ||
+                !(yield* db.pendingInbox(id)).some((r) => r.id === row.id)
+              )
+                return
               yield* undelivered(session, [row], errorMessage(cause))
             })
-          yield* Effect.forkIn(locked(id)(deliver(id).pipe(Effect.catchCause(failed))).pipe(logged(`send ${id}`), Effect.provideContext(platform)), scope)
+          yield* Effect.forkIn(
+            locked(id)(deliver(id).pipe(Effect.catchCause(failed))).pipe(
+              logged(`send ${id}`),
+              Effect.provideContext(platform),
+            ),
+            scope,
+          )
         })
 
       const interrupt = (id: string) =>
@@ -750,13 +1095,18 @@ export class Sessions extends Context.Service<Sessions, {
                 // A result that is already in is delivered; a check still running is killed, not waited out. A
                 // failing idle hook is delivered failed by collectResult itself, so no branch is needed for it.
                 const collected = yield* collectResult(h, session, "stop")
-                if (collected === "delivered") return { message: `${id} had already finished its turn; its result is delivered` }
+                if (collected === "delivered")
+                  return { message: `${id} had already finished its turn; its result is delivered` }
                 const seen = yield* agentState(h, terminal)
                 const state = stateOf(seen)
-                if (state === undefined || !busy(state)) return { message: `${id} is not working; nothing to interrupt` }
+                if (state === undefined || !busy(state))
+                  return { message: `${id} is not working; nothing to interrupt` }
                 // Waiting under the lock: no check sees the stopped turn as one whose hook never fired.
                 if (!(yield* interruptAgent(h, session, terminal)))
-                  return yield* new SessionBusy({ id, message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working` })
+                  return yield* new SessionBusy({
+                    id,
+                    message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
+                  })
                 // The next round starts its attempt count at zero, same as `finish`.
                 const { check: _check, ...metadata } = session.metadata
                 yield* db.closeTurn(id, "interrupted", {
@@ -765,9 +1115,7 @@ export class Sessions extends Context.Service<Sessions, {
                 })
                 return { message: `${id} interrupted; its terminal, worktree and session are kept` }
               }),
-            ).pipe(
-              Effect.catchTags({ RuntimeError: unreachable(known), PlatformError: Effect.die }),
-            ),
+            ).pipe(Effect.catchTags({ RuntimeError: unreachable(known), PlatformError: Effect.die })),
           ),
           Effect.provideContext(platform),
         )
@@ -779,7 +1127,10 @@ export class Sessions extends Context.Service<Sessions, {
        * The caller holds the session's lock and its `stopping` flag. `unlessPending` (`vibest run --archive-on-completion`): never interrupt,
        * and tombstone only while it is idle and no Send is pending, else change nothing and return undefined.
        */
-      const removeLocked = (id: string, options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean }) =>
+      const removeLocked = (
+        id: string,
+        options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
+      ) =>
         Effect.gen(function* () {
           let session = yield* getRow(id)
           const h = yield* live(session)
@@ -791,7 +1142,11 @@ export class Sessions extends Context.Service<Sessions, {
             if (options.unlessPending) return undefined
             if (working) {
               const stopped = yield* interruptAgent(h, session, terminal)
-              reasons.push(stopped ? `${id} was working: interrupted, then its terminal closed` : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`)
+              reasons.push(
+                stopped
+                  ? `${id} was working: interrupted, then its terminal closed`
+                  : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
+              )
             }
             if (session.turnState === "open") {
               yield* db.closeTurn(id, "interrupted", { lastActive: yield* Clock.currentTimeMillis })
@@ -804,7 +1159,10 @@ export class Sessions extends Context.Service<Sessions, {
               // One transaction with Send's insert: a message accepted before it wins, one after it is refused.
               if (!(yield* db.archiveIfNoPending(id))) return undefined
             } else {
-              yield* db.updateSession(id, { metadata: { ...session.metadata, archived: true, removed: true }, lastActive: yield* Clock.currentTimeMillis })
+              yield* db.updateSession(id, {
+                metadata: { ...session.metadata, archived: true, removed: true },
+                lastActive: yield* Clock.currentTimeMillis,
+              })
               yield* dropQueue(session, `${id} was archived before it was delivered`)
             }
             session = yield* getRow(id)
@@ -813,7 +1171,13 @@ export class Sessions extends Context.Service<Sessions, {
           const running = yield* Ref.get((yield* track(id)).checking)
           if (running) yield* Fiber.interrupt(running.fiber)
           // A row that already exited named a terminal a previous remove closed: nothing of ours is left to close.
-          const out = yield* removal.release({ h, session, terminal: session.exitedAt === null ? terminal : undefined, keepWorktree: options.keepWorktree, reasons })
+          const out = yield* removal.release({
+            h,
+            session,
+            terminal: session.exitedAt === null ? terminal : undefined,
+            keepWorktree: options.keepWorktree,
+            reasons,
+          })
           // The project workspace's live count no longer includes the archived session.
           yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
           return out
@@ -823,15 +1187,29 @@ export class Sessions extends Context.Service<Sessions, {
         Effect.gen(function* () {
           yield* getRow(id)
           const r = yield* track(id)
-          if (yield* Ref.getAndSet(r.stopping, true)) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
+          if (yield* Ref.getAndSet(r.stopping, true))
+            return yield* new SessionBusy({ id, message: `${id} is already being removed` })
           const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(Ref.set(r.stopping, false))))!
           const row = yield* getRow(id)
-          if (options.keepWorktree && !row.metadata.keptWorktree) yield* db.updateSession(id, { metadata: { ...row.metadata, keptWorktree: true } })
+          if (options.keepWorktree && !row.metadata.keptWorktree)
+            yield* db.updateSession(id, { metadata: { ...row.metadata, keptWorktree: true } })
           // An owner archived first kept the shared worktree for this borrower (vibest run --peer); nobody shares it now.
           const owner = row.metadata.peer
           const ownerRow = owner === undefined ? undefined : yield* db.getSession(owner)
-          if (owner === undefined || options.keepWorktree || !ownerRow?.metadata.archived || ownerRow.metadata.keptWorktree) return out
-          const later = (why: string) => ({ ...out, reasons: [...out.reasons, `${owner}'s shared worktree kept: ${why}; run vibest archive ${owner} to remove it`] })
+          if (
+            owner === undefined ||
+            options.keepWorktree ||
+            !ownerRow?.metadata.archived ||
+            ownerRow.metadata.keptWorktree
+          )
+            return out
+          const later = (why: string) => ({
+            ...out,
+            reasons: [
+              ...out.reasons,
+              `${owner}'s shared worktree kept: ${why}; run vibest archive ${owner} to remove it`,
+            ],
+          })
           if (out.processes !== "exited") return later(`${id}'s processes are not confirmed gone`)
           const o = yield* track(owner)
           if (yield* Ref.getAndSet(o.stopping, true)) return out
@@ -842,7 +1220,9 @@ export class Sessions extends Context.Service<Sessions, {
               const why = freed.reasons.length > 0 ? ` (${freed.reasons.join("; ")})` : ""
               return { ...out, reasons: [...out.reasons, `${owner}'s shared worktree ${freed.worktree}${why}`] }
             }),
-            Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(later(errorMessage(cause))))),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(later(errorMessage(cause))),
+            ),
           )
         }).pipe(
           Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
@@ -861,43 +1241,76 @@ export class Sessions extends Context.Service<Sessions, {
           if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
           // A reply with no status line may be done or may be a question: say why it stays, so it is not left open unseen.
           if (row.details.status === "unknown")
-            return yield* notice(owner, `${id} not archived (vibest run --archive-on-completion): its reply had no status line; vibest archive ${id} once it is done`)
+            return yield* notice(
+              owner,
+              `${id} not archived (vibest run --archive-on-completion): its reply had no status line; vibest archive ${id} once it is done`,
+            )
           if (row.details.status !== "completed") return
           const r = yield* track(id)
           // Each delivered result takes its turn under the lock, so one delivered while another archive holds it still gets its own look.
-          yield* locked(id, true)(
+          yield* locked(
+            id,
+            true,
+          )(
             Effect.gen(function* () {
               // An vibest archive already running does it.
               if (yield* Ref.getAndSet(r.stopping, true)) return
               yield* Effect.gen(function* () {
                 const session = yield* getRow(id)
                 if (session.metadata.archived || session.metadata.removed) return
-                const skip = (why: string) => notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
-                const sentAnother = () => skip("it has work again (a message was sent to it or it started a new turn); its next completed result archives it")
+                const skip = (why: string) =>
+                  notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
+                const sentAnother = () =>
+                  skip(
+                    "it has work again (a message was sent to it or it started a new turn); its next completed result archives it",
+                  )
                 // The newest result decides: a newer completed one already delivered archives it now; one not delivered yet takes its own turn once it is.
                 const latest = yield* db.latestInbox(id, "result")
-                if (session.turnState !== "completed" || latest?.status !== "delivered" || latest.details.status !== "completed") return yield* sentAnother()
+                if (
+                  session.turnState !== "completed" ||
+                  latest?.status !== "delivered" ||
+                  latest.details.status !== "completed"
+                )
+                  return yield* sentAnother()
                 const h = yield* live(session)
                 const terminal = session.address
                 const seen = yield* agentState(h, terminal)
                 if (seen === "absent")
-                  return yield* skip(`its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`)
+                  return yield* skip(
+                    `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
+                  )
                 // The runtime can still read `working` right after the turn-end hook.
                 const settled = yield* settleAfterInterrupt(h, terminal)
-                if (!settled) return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`)
+                if (!settled)
+                  return yield* skip(
+                    `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
+                  )
                 const out = yield* removeLocked(id, { unlessPending: true })
                 if (!out) return yield* sentAnother()
                 const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
                 const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
                 // The owner was archived while this session shared its worktree: nobody else removes it now.
                 const owner = session.metadata.peer
-                const leftover = owner && (yield* db.getSession(owner))?.metadata.archived ? ` ${owner} is archived too: run vibest archive ${owner} to remove the shared worktree.` : ""
-                yield* notice(session, `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}${leftover}`)
+                const leftover =
+                  owner && (yield* db.getSession(owner))?.metadata.archived
+                    ? ` ${owner} is archived too: run vibest archive ${owner} to remove the shared worktree.`
+                    : ""
+                yield* notice(
+                  session,
+                  `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}${leftover}`,
+                )
               }).pipe(
                 Effect.catchCause((cause) =>
                   Cause.hasInterruptsOnly(cause)
                     ? Effect.failCause(cause)
-                    : getRow(id).pipe(Effect.flatMap((session) => notice(session, `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`))),
+                    : getRow(id).pipe(
+                        Effect.flatMap((session) =>
+                          notice(
+                            session,
+                            `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`,
+                          ),
+                        ),
+                      ),
                 ),
                 // Cleared before the lock is let go, so the next result's turn never finds it still set.
                 Effect.ensuring(Ref.set(r.stopping, false)),
@@ -910,34 +1323,48 @@ export class Sessions extends Context.Service<Sessions, {
 
       const view = (session: SessionRow) =>
         session.agent === "main"
-          ? Effect.succeed({ ...session, worktree: "", repositoryRoot: undefined, git: undefined } satisfies SessionView)
+          ? Effect.succeed({
+              ...session,
+              worktree: "",
+              repositoryRoot: undefined,
+              git: undefined,
+            } satisfies SessionView)
           : Effect.gen(function* () {
-          const worktree = yield* worktreeOf(session)
-          const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
-          if (repos) {
-            const unsaved = repos.find((r) => !r.saved)
-            const git: GitState = {
-              branch: repos.map((r) => `${r.name}=${r.branch}`).join("\n"),
-              pushed: repos.every((r) => r.pushed),
-              saved: repos.every((r) => r.saved),
-              why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
-            }
-            const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
-            return { ...session, worktree, repositoryRoot, git } satisfies SessionView
-          }
-          const g = yield* gitState(worktree).pipe(Effect.orDie)
-          const repositoryRoot = g ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined)) : undefined
-          return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
-        })
+              const worktree = yield* worktreeOf(session)
+              const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
+              if (repos) {
+                const unsaved = repos.find((r) => !r.saved)
+                const git: GitState = {
+                  branch: repos.map((r) => `${r.name}=${r.branch}`).join("\n"),
+                  pushed: repos.every((r) => r.pushed),
+                  saved: repos.every((r) => r.saved),
+                  why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
+                }
+                const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
+                return { ...session, worktree, repositoryRoot, git } satisfies SessionView
+              }
+              const g = yield* gitState(worktree).pipe(Effect.orDie)
+              const repositoryRoot = g
+                ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+                : undefined
+              return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
+            })
 
       /** List keeps a row whose directory cannot be named. No path is guessed and git is not asked. */
-      const unlocated = (session: SessionRow): SessionView => ({ ...session, worktree: "", repositoryRoot: undefined, git: undefined })
+      const unlocated = (session: SessionRow): SessionView => ({
+        ...session,
+        worktree: "",
+        repositoryRoot: undefined,
+        git: undefined,
+      })
 
       const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
       const list = (filter: { projectId?: number; stopped?: boolean } = {}) =>
         db.listSessions(filter).pipe(
           Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) => view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row))))),
+            Effect.forEach(rows, (row) =>
+              view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+            ),
           ),
           Effect.provideContext(platform),
         )
@@ -958,11 +1385,18 @@ export class Sessions extends Context.Service<Sessions, {
         })
 
       // The registry merges every registered runtime's events (each share ends with its plugin): one follower here.
-      yield* Effect.forkIn(runtimes.events.pipe(Stream.runForEach((event) => onTerminalEvent(event).pipe(logged(`runtime event`)))), scope)
-
-      const checkAll = db.listSessions().pipe(
-        Effect.flatMap((rows) => Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true })),
+      yield* Effect.forkIn(
+        runtimes.events.pipe(Stream.runForEach((event) => onTerminalEvent(event).pipe(logged(`runtime event`)))),
+        scope,
       )
+
+      const checkAll = db
+        .listSessions()
+        .pipe(
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true }),
+          ),
+        )
 
       // Recovery: put the labels back (the runtime does not keep them), then the poll evaluates every row.
       yield* republish()
@@ -970,7 +1404,16 @@ export class Sessions extends Context.Service<Sessions, {
 
       yield* Effect.forkIn(
         inbox.delivered.pipe(
-          Effect.flatMap(({ row, done }) => Effect.forkIn(archiveDelivered(row).pipe(Effect.ensuring(done), logged(`archive ${row.sessionId}`), Effect.provideContext(platform)), scope)),
+          Effect.flatMap(({ row, done }) =>
+            Effect.forkIn(
+              archiveDelivered(row).pipe(
+                Effect.ensuring(done),
+                logged(`archive ${row.sessionId}`),
+                Effect.provideContext(platform),
+              ),
+              scope,
+            ),
+          ),
           Effect.forever,
         ),
         scope,
@@ -979,7 +1422,15 @@ export class Sessions extends Context.Service<Sessions, {
       const resultReady = (id: string) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid)
 
       return Sessions.of({
-        spawn, send, interrupt, remove, get, list, check: checkLocked, resultReady, userPrompt,
+        spawn,
+        send,
+        interrupt,
+        remove,
+        get,
+        list,
+        check: checkLocked,
+        resultReady,
+        userPrompt,
         republish: republish().pipe(Effect.provideContext(platform)),
       })
     })

@@ -2,8 +2,16 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { CLAUDE_TYPES_PIN, CLAUDE_TYPES_SHA256, CLAUDE_TYPES_URL, prepareClaudeTypes, sha256 } from "../scripts/prepare-claude-types.ts"
+
+import {
+  CLAUDE_TYPES_PIN,
+  CLAUDE_TYPES_SHA256,
+  CLAUDE_TYPES_URL,
+  prepareClaudeTypes,
+  sha256,
+} from "../scripts/prepare-claude-types.ts"
 
 const dirs: string[] = []
 const temp = () => {
@@ -37,7 +45,12 @@ describe("claude types cache", () => {
     fs.writeFileSync(cache, body)
     const expected = sha256(body)
     assert.strictEqual(
-      await prepareClaudeTypes({ cachePath: cache, expectedSha256: expected, url: "https://example.invalid/types", fetch: refused }),
+      await prepareClaudeTypes({
+        cachePath: cache,
+        expectedSha256: expected,
+        url: "https://example.invalid/types",
+        fetch: refused,
+      }),
       "reused",
     )
     assert.deepStrictEqual(fs.readFileSync(cache), Buffer.from(body))
@@ -69,19 +82,26 @@ describe("claude types cache", () => {
     const good = bytes("good")
     fs.writeFileSync(cache, "stale")
     await rejects(
-      () => prepareClaudeTypes({ cachePath: cache, expectedSha256: sha256(good), url: "https://example.invalid/types", fetch: async () => bytes("wrong") }),
+      () =>
+        prepareClaudeTypes({
+          cachePath: cache,
+          expectedSha256: sha256(good),
+          url: "https://example.invalid/types",
+          fetch: async () => bytes("wrong"),
+        }),
       /failed checksum/,
     )
     assert.isFalse(fs.existsSync(cache))
 
     fs.writeFileSync(cache, "stale again")
     await rejects(
-      () => prepareClaudeTypes({
-        cachePath: cache,
-        expectedSha256: sha256(good),
-        url: "https://example.invalid/types",
-        fetch: async () => Promise.reject(new Error("offline")),
-      }),
+      () =>
+        prepareClaudeTypes({
+          cachePath: cache,
+          expectedSha256: sha256(good),
+          url: "https://example.invalid/types",
+          fetch: async () => Promise.reject(new Error("offline")),
+        }),
       /offline/,
     )
     assert.isFalse(fs.existsSync(cache))
@@ -90,14 +110,22 @@ describe("claude types cache", () => {
   it("pins the public declaration and the typecheck runs that check before the plugin project", () => {
     assert.strictEqual(CLAUDE_TYPES_PIN, "2eff7a8d21c80be48904f62ebdea36d945d7b504")
     assert.strictEqual(CLAUDE_TYPES_SHA256, "e51e637fbbebb2a6a49c4bdc3860a251c2ca2295884822dff0f4c3e3ec802163")
-    assert.strictEqual(CLAUDE_TYPES_URL, `https://raw.githubusercontent.com/anthropics/claude-code/${CLAUDE_TYPES_PIN}/mods/types/claude-code.d.ts`)
-    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")) as { scripts: { typecheck: string } }
+    assert.strictEqual(
+      CLAUDE_TYPES_URL,
+      `https://raw.githubusercontent.com/anthropics/claude-code/${CLAUDE_TYPES_PIN}/mods/types/claude-code.d.ts`,
+    )
+    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")) as {
+      scripts: { typecheck: string }
+    }
     assert.match(pkg.scripts.typecheck, /bun scripts\/prepare-claude-types\.ts &&/)
     assert.match(pkg.scripts.typecheck, /&& tsrs --noEmit --fast -p tsconfig\.plugin\.json$/)
     assert.notMatch(pkg.scripts.typecheck, /prepare-claude-types\.ts\s*\|\|/)
     const ignored = fs.readFileSync(path.join(import.meta.dirname, "../../../../.gitignore"), "utf8")
     assert.include(ignored, "packages/integration/claude/.cache/")
     assert.include(ignored, "packages/cli/.cache/", "a cache left by the old CLI typecheck stays ignored")
-    assert.notMatch(fs.readFileSync(path.join(import.meta.dirname, "../scripts/prepare-claude-types.ts"), "utf8"), /VIBEST_CLAUDE_TYPES_SEED|eeb174a4-docs/)
+    assert.notMatch(
+      fs.readFileSync(path.join(import.meta.dirname, "../scripts/prepare-claude-types.ts"), "utf8"),
+      /VIBEST_CLAUDE_TYPES_SEED|eeb174a4-docs/,
+    )
   })
 })

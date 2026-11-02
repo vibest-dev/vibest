@@ -1,24 +1,29 @@
 // `vibest herdr`: the command group the herdr plugin runs. The project directory comes from
 // HERDR_PLUGIN_CONTEXT_JSON (focused pane, else workspace). Never from this process's cwd, which is the plugin directory.
 import readline from "node:readline"
-import { Herdr } from "effect-herdr-sdk"
-import { callerMachine } from "@vibest/runtime-herdr/caller"
-import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
-import { Config, Console, Effect, Option, Schema } from "effect"
-import { Command } from "effect/cli"
+
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
 import { VibestCommand } from "@vibest/core/paths"
 import type { SessionInfo } from "@vibest/protocol/rpc"
+import { callerMachine } from "@vibest/runtime-herdr/caller"
+import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeAddress } from "@vibest/schema/session"
+import { Config, Console, Effect, Option, Schema } from "effect"
+import { Herdr } from "effect-herdr-sdk"
+import { Command } from "effect/cli"
 
 /** HERDR_PLUGIN_CONTEXT_JSON is missing or not the object herdr documents. */
-export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", { message: Schema.String }) {}
+export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
+  message: Schema.String,
+}) {}
 
 /** The popup prompt was empty. Same tag the other commands use for empty text. */
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
 /** The focused pane is not one of this project's live sessions. */
-export class NoFocusedSession extends Schema.TaggedError<NoFocusedSession>()("NoFocusedSession", { message: Schema.String }) {}
+export class NoFocusedSession extends Schema.TaggedError<NoFocusedSession>()("NoFocusedSession", {
+  message: Schema.String,
+}) {}
 
 export interface PluginContext {
   readonly workspaceId: string | undefined
@@ -50,7 +55,9 @@ type Step<A, E, R> = Effect.Effect<A, E, R>
 export interface HerdrDaemon<E = never, R = never> {
   /** Republish pane metadata for live herdr sessions. `directory` is only the caller header, not a filter. */
   readonly republish: (directory: string | undefined) => Step<number, E, R>
-  readonly openMain: (directory: string) => Step<{ readonly action: "focused" | "opened"; readonly place: string }, E, R>
+  readonly openMain: (
+    directory: string,
+  ) => Step<{ readonly action: "focused" | "opened"; readonly place: string }, E, R>
   readonly spawn: (directory: string, prompt: string) => Step<string, E, R>
   readonly interrupt: (id: string) => Step<void, E, R>
   /** Live sessions only: `directory` set, that project's; unset, every project's (`stop` matches a pane). */
@@ -89,14 +96,18 @@ export const projectDirectory = (context: PluginContext) => context.focusedPaneC
 const requireDirectory = (context: PluginContext) => {
   const directory = projectDirectory(context)
   if (directory === undefined) {
-    return Effect.fail(new BadPluginContext({ message: "the herdr context has no focused pane or workspace directory" }))
+    return Effect.fail(
+      new BadPluginContext({ message: "the herdr context has no focused pane or workspace directory" }),
+    )
   }
   return Effect.succeed(directory)
 }
 
 export const formatRuns = (sessions: ReadonlyArray<LiveSession>) => {
   if (sessions.length === 0) return "no live sessions"
-  return sessions.map((session) => [session.id, session.agent, session.harness, session.status, session.paneId ?? "-"].join("  ")).join("\n")
+  return sessions
+    .map((session) => [session.id, session.agent, session.harness, session.status, session.paneId ?? "-"].join("  "))
+    .join("\n")
 }
 
 export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
@@ -107,7 +118,11 @@ export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
 const AGENT_NAME = /^s-([0-9a-f]{8})$/
 
 /** The live subagent in the focused pane, else the session whose herdr agent name is `s-<id>`. The main agent is not one. */
-export const sessionToStop = (sessions: ReadonlyArray<LiveSession>, paneId: string | undefined, agent: string | undefined) => {
+export const sessionToStop = (
+  sessions: ReadonlyArray<LiveSession>,
+  paneId: string | undefined,
+  agent: string | undefined,
+) => {
   const live = sessions.filter((session) => session.agent !== "main")
   const byPane = paneId === undefined ? undefined : live.find((session) => session.paneId === paneId)
   if (byPane) return byPane.id
@@ -165,7 +180,8 @@ export const perform = <E, R>(
         case "stop": {
           const id = sessionToStop(yield* daemon.list(undefined), context.focusedPaneId, context.focusedPaneAgent)
           if (id === undefined) {
-            const where = context.focusedPaneId === undefined ? "no focused pane" : `no session in ${context.focusedPaneId}`
+            const where =
+              context.focusedPaneId === undefined ? "no focused pane" : `no session in ${context.focusedPaneId}`
             return yield* new NoFocusedSession({ message: where })
           }
           // Stop ends the turn; the session, its pane and its worktree stay (archive is `vibest rm`).
@@ -194,13 +210,15 @@ const decodeAddress = Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeAd
 
 const herdrClient = Effect.gen(function* () {
   const socket = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  if (socket === undefined) return yield* new BadPluginContext({ message: "HERDR_SOCKET_PATH is not set; vibest herdr runs inside herdr" })
+  if (socket === undefined)
+    return yield* new BadPluginContext({ message: "HERDR_SOCKET_PATH is not set; vibest herdr runs inside herdr" })
   const client = yield* Herdr.make(socket)
   yield* Herdr.verifyProtocol(client)
   return client
 })
 
-const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) => withVibest(claim(directory), f)
+const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
+  withVibest(claim(directory), f)
 
 const toLive = (session: SessionInfo): LiveSession => ({
   id: session.id,
@@ -212,13 +230,15 @@ const toLive = (session: SessionInfo): LiveSession => ({
 
 /** The live daemon's steps: vibestd for sessions, this herdr for focus and metadata. The error and service unions
  * below are derived from these methods, so a wrong signature here does not compile. */
-const theDaemon = ({
+const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
   openMain: (directory: string) =>
     Effect.gen(function* () {
       const machine = yield* callerMachine()
       // An empty match would hide the main agent when this pane is already it. This id is not a pane.
-      const running = yield* ask(directory, (client) => client["Project.RunningCoordinator"]({ terminal: "vibest-open-main" }))
+      const running = yield* ask(directory, (client) =>
+        client["Project.RunningCoordinator"]({ terminal: "vibest-open-main" }),
+      )
       if (running) {
         const address = yield* decodeAddress(running.address)
         const pane = parseTerminal(address)?.paneId
@@ -229,7 +249,9 @@ const theDaemon = ({
       }
       // The same start path as `vibest`: the main agent's current harness, or what scheduling plugins choose.
       const self = yield* VibestCommand
-      const opened = yield* ask(directory, (client) => client.Launch({ argv: [...self], focus: true, machine, runtime: KIND }))
+      const opened = yield* ask(directory, (client) =>
+        client.Launch({ argv: [...self], focus: true, machine, runtime: KIND }),
+      )
       return { action: "opened" as const, place: opened.place }
     }),
   spawn: (directory: string, prompt: string) =>
@@ -257,7 +279,7 @@ const theDaemon = ({
         ),
       ),
     ),
-})
+}
 
 /** What every live step can fail with, and the services they need: inferred from the methods above. */
 type LiveSteps = ReturnType<(typeof theDaemon)[keyof typeof theDaemon]>
@@ -302,22 +324,31 @@ const DESCRIPTIONS: Record<Verb, string> = {
 /** `refuseAgent` is the CLI's user-only check. An agent's `vibest herdr` would run inside its sandbox. */
 export const herdrCommands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) =>
   Command.make("herdr").pipe(
-    Command.withDescription("Commands the herdr plugin runs. The project directory comes from HERDR_PLUGIN_CONTEXT_JSON, not the working directory."),
-    Command.withSubcommands(VERBS.map((verb) =>
-      Command.make(verb, {}, () =>
-        refuseAgent(`herdr ${verb}`).pipe(Effect.andThen(Effect.gen(function* () {
-          const raw = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PLUGIN_CONTEXT_JSON")))
-          if (raw === undefined) return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not set" })
-          const context = yield* parsePluginContext(raw)
-          const io = stdinLines()
-          yield* Effect.ensuring(
-            Effect.gen(function* () {
-              const result = yield* perform(verb, context, liveDaemon(), io.readLine, Console.log)
-              if (result !== "") yield* Console.log(result)
-            }),
-            Effect.sync(() => io.close()),
-          )
-        }))),
-      ).pipe(Command.withDescription(DESCRIPTIONS[verb])),
-    )),
+    Command.withDescription(
+      "Commands the herdr plugin runs. The project directory comes from HERDR_PLUGIN_CONTEXT_JSON, not the working directory.",
+    ),
+    Command.withSubcommands(
+      VERBS.map((verb) =>
+        Command.make(verb, {}, () =>
+          refuseAgent(`herdr ${verb}`).pipe(
+            Effect.andThen(
+              Effect.gen(function* () {
+                const raw = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PLUGIN_CONTEXT_JSON")))
+                if (raw === undefined)
+                  return yield* new BadPluginContext({ message: "HERDR_PLUGIN_CONTEXT_JSON is not set" })
+                const context = yield* parsePluginContext(raw)
+                const io = stdinLines()
+                yield* Effect.ensuring(
+                  Effect.gen(function* () {
+                    const result = yield* perform(verb, context, liveDaemon(), io.readLine, Console.log)
+                    if (result !== "") yield* Console.log(result)
+                  }),
+                  Effect.sync(() => io.close()),
+                )
+              }),
+            ),
+          ),
+        ).pipe(Command.withDescription(DESCRIPTIONS[verb])),
+      ),
+    ),
   )

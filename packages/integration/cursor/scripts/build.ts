@@ -2,6 +2,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
+
 import { files } from "../src/plugin.ts"
 
 const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))

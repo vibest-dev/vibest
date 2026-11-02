@@ -11,7 +11,8 @@ const hostPlatform = (globalThis as { readonly process?: { readonly platform?: s
 export const caseFoldedWorktrees = hostPlatform === "darwin" || hostPlatform === "win32"
 
 /** Same bucket on this platform. Spelling stored on the row is unchanged. */
-export const sameWorktreeBucket = (a: string, b: string) => (caseFoldedWorktrees ? a.toLowerCase() === b.toLowerCase() : a === b)
+export const sameWorktreeBucket = (a: string, b: string) =>
+  caseFoldedWorktrees ? a.toLowerCase() === b.toLowerCase() : a === b
 
 /** One ordinary directory name. A name that is a legacy session id on this filesystem is not a bucket. */
 export const safeRepositoryDirectory = (name: string) =>
@@ -25,7 +26,14 @@ export const safeRepositoryDirectory = (name: string) =>
   !SESSION_ID.test(caseFoldedWorktrees ? name.toLowerCase() : name)
 
 export const allocationLeafTaken = (
-  rows: ReadonlyArray<{ readonly id: string; readonly metadata: { readonly peer?: string | undefined; readonly worktreeRepository?: string | undefined; readonly worktreeName?: string | undefined } }>,
+  rows: ReadonlyArray<{
+    readonly id: string
+    readonly metadata: {
+      readonly peer?: string | undefined
+      readonly worktreeRepository?: string | undefined
+      readonly worktreeName?: string | undefined
+    }
+  }>,
   repository: string,
   leaf: string,
   selfId?: string,
@@ -46,19 +54,31 @@ export interface WorktreeOwner {
 }
 
 export interface WorktreeSession extends WorktreeOwner {
-  readonly metadata: { readonly peer?: string | undefined; readonly worktreeRepository?: string | undefined; readonly worktreeName?: string | undefined }
+  readonly metadata: {
+    readonly peer?: string | undefined
+    readonly worktreeRepository?: string | undefined
+    readonly worktreeName?: string | undefined
+  }
 }
 
 /** The only directory `owner` may use. Undefined: the recorded names are not safe to join. */
 export const worktreePath = (
-  layout: { readonly legacyWorktree: (id: string) => string; readonly allocationWorktree: (repository: string, name: string) => string },
+  layout: {
+    readonly legacyWorktree: (id: string) => string
+    readonly allocationWorktree: (repository: string, name: string) => string
+  },
   owner: WorktreeOwner,
 ): string | undefined => {
   if (!SESSION_ID.test(owner.id)) return undefined
   const repository = owner.metadata.worktreeRepository
   const name = owner.metadata.worktreeName
   if (repository === undefined && name === undefined) return layout.legacyWorktree(owner.id)
-  if (repository !== undefined && name !== undefined && safeRepositoryDirectory(repository) && ALLOCATION_LEAF.test(name))
+  if (
+    repository !== undefined &&
+    name !== undefined &&
+    safeRepositoryDirectory(repository) &&
+    ALLOCATION_LEAF.test(name)
+  )
     return layout.allocationWorktree(repository, name)
   return undefined
 }
@@ -69,25 +89,34 @@ export type WorktreeLocation =
 
 /** Owner row, then its recorded directory. A peer loads that row; a missing or unsafe one is not a second path. */
 export const resolveWorktree = Effect.fn("resolveWorktree")(function* (
-  layout: { readonly legacyWorktree: (id: string) => string; readonly allocationWorktree: (repository: string, name: string) => string },
+  layout: {
+    readonly legacyWorktree: (id: string) => string
+    readonly allocationWorktree: (repository: string, name: string) => string
+  },
   session: WorktreeSession,
   loadOwner: (id: string) => Effect.Effect<WorktreeOwner | undefined>,
 ) {
   const ownerId = session.metadata.peer ?? session.id
   const owner = ownerId === session.id ? session : yield* loadOwner(ownerId)
-  if (!owner) return { _tag: "Unresolved" as const, message: `owner session ${ownerId} has no row; nothing was deleted` }
+  if (!owner)
+    return { _tag: "Unresolved" as const, message: `owner session ${ownerId} has no row; nothing was deleted` }
   const path = worktreePath(layout, owner)
   if (path !== undefined) return { _tag: "Resolved" as const, path, ownerId: owner.id }
   const repository = owner.metadata.worktreeRepository
   const name = owner.metadata.worktreeName
-  const message = repository === undefined && name === undefined
-    ? `session id ${JSON.stringify(owner.id)} is not 8 lowercase hex; nothing was deleted`
-    : `worktree allocation ${JSON.stringify(repository)}/${JSON.stringify(name)} on session ${owner.id} is not a safe path; nothing was deleted`
+  const message =
+    repository === undefined && name === undefined
+      ? `session id ${JSON.stringify(owner.id)} is not 8 lowercase hex; nothing was deleted`
+      : `worktree allocation ${JSON.stringify(repository)}/${JSON.stringify(name)} on session ${owner.id} is not a safe path; nothing was deleted`
   return { _tag: "Unresolved" as const, message }
 })
 
 /** Readers never see half a file (SPEC §5.5): write a sibling temp file, then rename over the target. */
-export const writeAtomic = Effect.fn("writeAtomic")(function* (file: string, content: string, options?: { readonly mode?: number }) {
+export const writeAtomic = Effect.fn("writeAtomic")(function* (
+  file: string,
+  content: string,
+  options?: { readonly mode?: number },
+) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   yield* fs.makeDirectory(path.dirname(file), { recursive: true })
@@ -107,6 +136,11 @@ export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes"
   Effect.gen(function* () {
     const stdio = yield* Stdio.Stdio
     yield* Stream.run(Stream.make(question), stdio.stdout()).pipe(Effect.ignore)
-    const answer = yield* Stream.decodeText(stdio.stdin).pipe(Stream.splitLines, Stream.runHead, Effect.timeoutOption(timeout), Effect.orElseSucceed(() => Option.none()))
+    const answer = yield* Stream.decodeText(stdio.stdin).pipe(
+      Stream.splitLines,
+      Stream.runHead,
+      Effect.timeoutOption(timeout),
+      Effect.orElseSucceed(() => Option.none()),
+    )
     return /^\s*y(es)?\s*$/i.test(Option.getOrElse(Option.flatten(answer), () => ""))
   })

@@ -31,14 +31,22 @@ export const roundSql = (sql: SqlClient.SqlClient, now: Effect.Effect<number>) =
     Effect.gen(function* () {
       const opener = joinedRound(yield* roundRows(sessionId))
       yield* sql`INSERT INTO message ${sql.insert({
-        sessionId, ...(opener ? { inboxId: opener.inboxId } : {}), input: opener?.input ?? "", status: "working", startedAt,
+        sessionId,
+        ...(opener ? { inboxId: opener.inboxId } : {}),
+        input: opener?.input ?? "",
+        status: "working",
+        startedAt,
       })}`
     })
 
   /** A round opened before its rows were claimed (still ''): bind the joined text and the last row once they are delivering. */
   const bindOpenRound = (sessionId: string) =>
     Effect.gen(function* () {
-      const [working] = yield* sql<{ id: number; inboxId: number | null; input: string }>`SELECT id, inbox_id, input FROM message
+      const [working] = yield* sql<{
+        id: number
+        inboxId: number | null
+        input: string
+      }>`SELECT id, inbox_id, input FROM message
         WHERE session_id = ${sessionId} AND status = 'working' LIMIT 1`
       if (!working || working.inboxId != null || working.input !== "") return
       const opener = joinedRound(yield* roundRows(sessionId))
@@ -51,18 +59,28 @@ export const roundSql = (sql: SqlClient.SqlClient, now: Effect.Effect<number>) =
     Effect.gen(function* () {
       const at = yield* now
       const meta = JSON.stringify(metadata)
-      const updated = yield* sql<{ id: number }>`UPDATE message SET output = ${output}, status = ${status}, metadata = ${meta}, ended_at = ${at}
+      const updated = yield* sql<{
+        id: number
+      }>`UPDATE message SET output = ${output}, status = ${status}, metadata = ${meta}, ended_at = ${at}
         WHERE id = (SELECT max(id) FROM message WHERE session_id = ${sessionId} AND status = 'working') RETURNING id`
       if (updated[0]) return updated[0].id
       const [created] = yield* sql<{ id: number }>`INSERT INTO message ${sql.insert({
-        sessionId, input: "", output, status, metadata: meta, startedAt: at, endedAt: at,
+        sessionId,
+        input: "",
+        output,
+        status,
+        metadata: meta,
+        startedAt: at,
+        endedAt: at,
       })} RETURNING id`
       return created!.id
     })
 
   /** Latest time on any message. Undefined: no round yet. A result file that is not newer was already delivered. */
   const latestRoundAt = (sessionId: string) =>
-    sql<{ at: number | null }>`SELECT max(max(started_at, coalesce(ended_at, 0))) AS at FROM message WHERE session_id = ${sessionId}`.pipe(
+    sql<{
+      at: number | null
+    }>`SELECT max(max(started_at, coalesce(ended_at, 0))) AS at FROM message WHERE session_id = ${sessionId}`.pipe(
       Effect.map((rows) => {
         const at = rows[0]?.at
         return at == null ? undefined : at
@@ -72,7 +90,9 @@ export const roundSql = (sql: SqlClient.SqlClient, now: Effect.Effect<number>) =
   /** The newest message ends no earlier than `at`, so that result file is not newer than the round it closed. */
   const coverRound = (sessionId: string, at: number) =>
     sql`UPDATE message SET ended_at = ${at}
-      WHERE id = (SELECT max(id) FROM message WHERE session_id = ${sessionId}) AND coalesce(ended_at, 0) < ${at}`.pipe(Effect.asVoid)
+      WHERE id = (SELECT max(id) FROM message WHERE session_id = ${sessionId}) AND coalesce(ended_at, 0) < ${at}`.pipe(
+      Effect.asVoid,
+    )
 
   /**
    * What a usage-limit move can resend, and who asked. `working` is the open round's input (empty when that round
@@ -83,7 +103,11 @@ export const roundSql = (sql: SqlClient.SqlClient, now: Effect.Effect<number>) =
    */
   const rescheduleSource = (id: string) =>
     Effect.gen(function* () {
-      const [head] = yield* sql<{ working: string | null; linked: number | null; parentSessionId: string | null }>`SELECT
+      const [head] = yield* sql<{
+        working: string | null
+        linked: number | null
+        parentSessionId: string | null
+      }>`SELECT
         (SELECT m.input FROM message m WHERE m.session_id = s.id AND m.status = 'working' ORDER BY m.id DESC LIMIT 1) AS working,
         (SELECT max(m.inbox_id) FROM message m WHERE m.session_id = s.id) AS linked,
         s.parent_session_id AS parentSessionId
@@ -98,11 +122,15 @@ export const roundSql = (sql: SqlClient.SqlClient, now: Effect.Effect<number>) =
       let from = rows.length
       if (last !== undefined) {
         from = rows.length - 1
-        while (from > 0 && rows[from - 1]!.senderType === last.senderType && rows[from - 1]!.senderId === last.senderId) from--
+        while (from > 0 && rows[from - 1]!.senderType === last.senderType && rows[from - 1]!.senderId === last.senderId)
+          from--
       }
       return {
         working: head.working ?? "",
-        delivered: rows.slice(from).map((row) => row.content).join("\n\n"),
+        delivered: rows
+          .slice(from)
+          .map((row) => row.content)
+          .join("\n\n"),
         parentSessionId: head.parentSessionId ?? undefined,
       }
     })

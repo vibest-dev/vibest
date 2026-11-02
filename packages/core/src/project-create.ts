@@ -3,8 +3,18 @@
 // for a writing subagent's isolated Workspace.
 import { Config, Crypto, Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
+
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
-import { addWorktree, copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName, repositoryKey, type GitState } from "./worktree.ts"
+import {
+  addWorktree,
+  copyIncluded,
+  git,
+  gitState,
+  mainCheckout,
+  repositoryDirectoryName,
+  repositoryKey,
+  type GitState,
+} from "./worktree.ts"
 
 export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
@@ -41,17 +51,23 @@ const inspect = (directory: string, given: string) =>
     const absolute = path.resolve(given)
     const info = yield* fs.stat(absolute).pipe(Effect.mapError(() => refuse("not found")))
     if (info.type !== "Directory") return yield* refuse("not a directory")
-    const top = yield* git(absolute, "rev-parse", "--show-toplevel").pipe(Effect.mapError(() => refuse("not a git repository")))
+    const top = yield* git(absolute, "rev-parse", "--show-toplevel").pipe(
+      Effect.mapError(() => refuse("not a git repository")),
+    )
     const source = yield* fs.realPath(top).pipe(Effect.mapError((e) => refuse(e.message)))
     const inside = path.relative(source, directory)
-    if (!inside.startsWith("..") && !path.isAbsolute(inside)) return yield* refuse(`${directory} would be inside this repository`)
+    if (!inside.startsWith("..") && !path.isAbsolute(inside))
+      return yield* refuse(`${directory} would be inside this repository`)
     const branch = yield* git(source, "branch", "--show-current").pipe(Effect.mapError((e) => refuse(e.message)))
     if (!branch) return yield* refuse("HEAD is detached; switch to a branch first")
     const name = yield* repositoryDirectoryName(source).pipe(Effect.mapError((e) => refuse(e.message)))
-    if (!safeRepositoryDirectory(name)) return yield* refuse(`repository name ${JSON.stringify(name)} cannot be a folder name`)
+    if (!safeRepositoryDirectory(name))
+      return yield* refuse(`repository name ${JSON.stringify(name)} cannot be a folder name`)
     const origin = (yield* optionalGit(source, "config", "--get", "remote.origin.url")) || undefined
     // `--branch` puts a `## …` line first, so git's trimmed output keeps the next line's leading status space.
-    const status = yield* git(source, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(Effect.mapError((e) => refuse(e.message)))
+    const status = yield* git(source, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(
+      Effect.mapError((e) => refuse(e.message)),
+    )
     const uncommitted = status.split("\n").slice(1).filter(Boolean)
     return { name, source, path: path.join(directory, name), branch, origin, uncommitted } satisfies ProjectFolder
   })
@@ -69,15 +85,29 @@ const copy = (folder: ProjectFolder) =>
     yield* git(dest, "remote", "remove", "origin")
     if (origin === undefined) return
     yield* git(dest, "remote", "add", "origin", origin)
-    yield* git(dest, "fetch", "--quiet", "--no-tags", "--", source, "+refs/remotes/origin/*:refs/remotes/origin/*", "^refs/remotes/origin/HEAD")
+    yield* git(
+      dest,
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      "--",
+      source,
+      "+refs/remotes/origin/*:refs/remotes/origin/*",
+      "^refs/remotes/origin/HEAD",
+    )
     const head = yield* optionalGit(source, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    if (head?.startsWith("origin/")) yield* optionalGit(dest, "remote", "set-head", "origin", head.slice("origin/".length))
+    if (head?.startsWith("origin/"))
+      yield* optionalGit(dest, "remote", "set-head", "origin", head.slice("origin/".length))
     if ((yield* optionalGit(source, "config", "--get", `branch.${branch}.remote`)) !== "origin") return
     const merge = yield* optionalGit(source, "config", "--get", `branch.${branch}.merge`)
     if (!merge) return
     yield* git(dest, "config", `branch.${branch}.remote`, "origin")
     yield* git(dest, "config", `branch.${branch}.merge`, merge)
-  }).pipe(Effect.mapError((e) => new ProjectCreateFailed({ message: `copy ${folder.source} -> ${folder.path}: ${e.message}` })))
+  }).pipe(
+    Effect.mapError(
+      (e) => new ProjectCreateFailed({ message: `copy ${folder.source} -> ${folder.path}: ${e.message}` }),
+    ),
+  )
 
 /**
  * Make `directory` (or use it when it is an empty directory) and copy each repository in `sources` into it. Everything
@@ -92,14 +122,23 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
   const target = path.resolve(directory)
   const existing = yield* fs.stat(target).pipe(
     Effect.map((info) => info.type),
-    Effect.catchIf((e) => e.reason._tag === "NotFound", () => Effect.succeed(undefined)),
+    Effect.catchIf(
+      (e) => e.reason._tag === "NotFound",
+      () => Effect.succeed(undefined),
+    ),
     Effect.mapError((e) => refuse(`${target}: ${e.message}`)),
   )
-  if (existing !== undefined && existing !== "Directory") return yield* refuse(`${target} exists and is not a directory`)
-  if (existing === "Directory" && (yield* fs.readDirectory(target).pipe(Effect.mapError((e) => refuse(e.message)))).length > 0)
+  if (existing !== undefined && existing !== "Directory")
+    return yield* refuse(`${target} exists and is not a directory`)
+  if (
+    existing === "Directory" &&
+    (yield* fs.readDirectory(target).pipe(Effect.mapError((e) => refuse(e.message)))).length > 0
+  )
     return yield* refuse(`${target} exists and is not empty`)
   // Compare against the real parent, so a source reached through a link is still seen as containing the directory.
-  const parent = yield* fs.realPath(path.dirname(target)).pipe(Effect.mapError(() => refuse(`${path.dirname(target)} does not exist`)))
+  const parent = yield* fs
+    .realPath(path.dirname(target))
+    .pipe(Effect.mapError(() => refuse(`${path.dirname(target)} does not exist`)))
   const real = path.join(parent, path.basename(target))
 
   const folders: ProjectFolder[] = []
@@ -112,7 +151,9 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
   }
 
   const made: string[] = []
-  const undo = Effect.suspend(() => Effect.forEach(made.toReversed(), (p) => fs.remove(p, { recursive: true }).pipe(Effect.ignore), { discard: true }))
+  const undo = Effect.suspend(() =>
+    Effect.forEach(made.toReversed(), (p) => fs.remove(p, { recursive: true }).pipe(Effect.ignore), { discard: true }),
+  )
   yield* Effect.gen(function* () {
     if (existing === undefined) {
       yield* fs.makeDirectory(real).pipe(Effect.mapError((e) => refuse(`${real}: ${e.message}`)))
@@ -151,15 +192,26 @@ const ownGitCheckout = (dir: string) =>
 export const listProjectRepositories = Effect.fn("listProjectRepositories")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const info = yield* fs.stat(directory).pipe(Effect.catchIf((e) => e.reason._tag === "NotFound", () => Effect.succeed(undefined)))
+  const info = yield* fs.stat(directory).pipe(
+    Effect.catchIf(
+      (e) => e.reason._tag === "NotFound",
+      () => Effect.succeed(undefined),
+    ),
+  )
   if (info === undefined || info.type !== "Directory") return undefined
   // A checkout, or any directory inside one, is a single-repository Project. `vendor/sdk` under a repository stays that repository.
-  if ((yield* git(directory, "rev-parse", "--is-inside-work-tree").pipe(Effect.orElseSucceed(() => ""))) === "true") return undefined
+  if ((yield* git(directory, "rev-parse", "--is-inside-work-tree").pipe(Effect.orElseSucceed(() => ""))) === "true")
+    return undefined
   const found: ProjectRepository[] = []
   for (const name of (yield* fs.readDirectory(directory)).slice().sort()) {
     if (!safeRepositoryDirectory(name)) continue
     const child = path.join(directory, name)
-    const stat = yield* fs.stat(child).pipe(Effect.catchIf((e) => e.reason._tag === "NotFound", () => Effect.succeed(undefined)))
+    const stat = yield* fs.stat(child).pipe(
+      Effect.catchIf(
+        (e) => e.reason._tag === "NotFound",
+        () => Effect.succeed(undefined),
+      ),
+    )
     if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) continue
     const branch = yield* git(child, "branch", "--show-current").pipe(Effect.orElseSucceed(() => ""))
     found.push({ name, path: child, branch })
@@ -169,7 +221,9 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
 
 /** Identity of a directory that is not a git repository: `VIBEST_PROJECT_ID`, else sha256(realpath)[:12], same as `repositoryKey`. */
 export const plainDirectoryKey = Effect.fn("plainDirectoryKey")(function* (directory: string) {
-  const override = yield* Config.option(Config.String("VIBEST_PROJECT_ID")).pipe(Effect.orElseSucceed(() => Option.none()))
+  const override = yield* Config.option(Config.String("VIBEST_PROJECT_ID")).pipe(
+    Effect.orElseSucceed(() => Option.none()),
+  )
   if (Option.isSome(override) && override.value) return override.value
   const fs = yield* FileSystem.FileSystem
   const crypto = yield* Crypto.Crypto
@@ -234,10 +288,14 @@ export const projectKey = Effect.fn("projectKey")(function* (directory: string) 
 })
 
 /** Remove each worktree (from its repository, without force: it refuses on anything not clean), then `workspace` when it is empty. Never deletes a branch. */
-const removeWorktrees = (worktrees: ReadonlyArray<{ readonly repository: string; readonly worktree: string }>, workspace: string) =>
+const removeWorktrees = (
+  worktrees: ReadonlyArray<{ readonly repository: string; readonly worktree: string }>,
+  workspace: string,
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    for (const { repository, worktree } of worktrees.toReversed()) yield* git(repository, "worktree", "remove", worktree).pipe(Effect.ignore)
+    for (const { repository, worktree } of worktrees.toReversed())
+      yield* git(repository, "worktree", "remove", worktree).pipe(Effect.ignore)
     const left = yield* fs.readDirectory(workspace).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
     if (left.length === 0) yield* fs.remove(workspace, { recursive: true }).pipe(Effect.ignore)
   })
@@ -263,7 +321,11 @@ export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(func
       yield* addWorktree(folder.path, worktree)
       yield* copyIncluded(folder.path, worktree)
     }
-  }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : Effect.uninterruptible(removeWorktrees(made, workspace)))))
+  }).pipe(
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit) ? Effect.void : Effect.uninterruptible(removeWorktrees(made, workspace)),
+    ),
+  )
   return made.map((entry) => entry.worktree)
 })
 
@@ -274,7 +336,8 @@ export const discardIsolatedWorktrees = Effect.fn("discardIsolatedWorktrees")(fu
     mainCheckout(folder.path).pipe(
       Effect.option,
       Effect.map((checkout) => ({ repository: Option.getOrElse(checkout, () => folder.path), worktree: folder.path })),
-    ))
+    ),
+  )
   yield* removeWorktrees(entries, workspace)
 })
 
@@ -288,7 +351,12 @@ export const workspaceGit = Effect.fn("workspaceGit")(function* (workspace: stri
   if (!folders) return undefined
   const lines: RepositoryGit[] = []
   for (const folder of folders) {
-    const state = (yield* gitState(folder.path)) ?? { branch: "", pushed: false, saved: false, why: "git cannot read it" }
+    const state = (yield* gitState(folder.path)) ?? {
+      branch: "",
+      pushed: false,
+      saved: false,
+      why: "git cannot read it",
+    }
     lines.push({ name: folder.name, ...state })
   }
   return lines
