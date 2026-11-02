@@ -1,4 +1,4 @@
-# Guard and Memory Rule
+# Guard and Memory
 
 1. Under the projects directory the guard allows only the session's own `VIBEST_SCRATCH`. It does not infer anything from path shapes: project keys contain slashes.
 2. Every new path that opens a terminal passes the session key, so `VIBEST_SCRATCH` is set.

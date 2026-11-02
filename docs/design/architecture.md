@@ -120,7 +120,7 @@ on `schema` and `protocol` only. Plugin types derive from the client API.
 | `plugin-check`       | Builtin rule, off until configured: a writing subagent is done only when a check command passes (§4.3).                                                                                             |
 | `apps/vibest-herdr`  | Composition root of the Herdr TUI product.                                                                                                                                                          |
 
-Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary-rule.md`).
+Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary.md`).
 
 **Current layout (omac copied and split, every omac feature kept).** The plugin packages above are later steps; today
 the code sits in:
@@ -659,7 +659,7 @@ The Herdr TUI product makes vibest usable inside herdr through herdr's own exten
   - `agent.view.set` views: this Run, everything needing the user in this Project;
   - `notification.show` on results, `blocked`, and limits.
 - **Sidebar layout** rows using these tokens are written to the user's herdr `config.toml` only under
-  `.agents/rules/user-file-mutation-safety-rule.md`.
+  `.agents/rules/user-file-mutation-safety.md`.
 - **Machines** map to herdr saved machines; remote Agents appear in the combined agent list.
 - **Limits:** one agent view at a time for the whole server; at most 32 tokens per pane and 80 characters per
   value; no non-terminal UI.

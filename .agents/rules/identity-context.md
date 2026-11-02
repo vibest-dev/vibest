@@ -1,4 +1,4 @@
-# Identity and Context Rule
+# Identity and Context
 
 1. Every harness gets the same identity environment: `VIBEST_SESSION_ID`, `VIBEST_PROJECT_ID` (the numeric project id), `VIBEST_AGENT`, `VIBEST_HARNESS`, `VIBEST_RUNTIME`, `VIBEST_SCRATCH`, `VIBEST_HOME`, `VIBEST_COMMAND`. The repository key override is `VIBEST_PROJECT_KEY`.
 2. Every request carries every identifier it has, built by one `sessionHeaders` in `@vibest/client`: `vibest-protocol`, `vibest-caller`, `vibest-session-id`, `vibest-project-id`, `vibest-harness-session-id`, `vibest-agent`, `vibest-harness`, `vibest-cwd`, `vibest-runtime`, `vibest-plugin-version`, `vibest-repository`.

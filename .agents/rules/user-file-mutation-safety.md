@@ -1,4 +1,4 @@
-# User File Mutation Safety Rule
+# User File Mutation Safety
 
 Any operation, command, or integration that writes to or modifies user files outside `~/.vibest` (or `$VIBEST_HOME`) — for example `~/.pi/agent/settings.json`, `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.cursor/cli-config.json`, or shell configuration files — must:
 

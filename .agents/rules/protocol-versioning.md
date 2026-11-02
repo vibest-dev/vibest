@@ -1,4 +1,4 @@
-# Protocol Versioning Rule
+# Protocol Versioning
 
 1. `PROTOCOL` (`packages/protocol/src/protocol.ts`) is one integer, sent in the `vibest-protocol` header for RPC and HTTP alike. HTTP paths carry no version.
 2. An additive feature is a boolean flag in Ping's capabilities and does not bump `PROTOCOL`.

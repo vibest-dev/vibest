@@ -1,4 +1,4 @@
-# Bun Runtime Boundary Rule
+# Bun Runtime Boundary
 
 The monorepo uses `pnpm` for package management. Bun is used only as:
 
