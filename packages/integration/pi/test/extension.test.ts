@@ -87,7 +87,9 @@ const session = (env: Record<string, string>) =>
     const emit = (event: string, e: unknown = {}, ctx: unknown = {}) =>
       Effect.promise(async () => {
         const results = []
-        for (const h of handlers.get(event) ?? []) results.push(await h(e, ctx))
+        // Pi always hands a session manager; a test's context names only what it is about.
+        const full = { sessionManager: { getSessionId: () => "pi-session" }, ...(ctx as object) }
+        for (const h of handlers.get(event) ?? []) results.push(await h(e, full))
         return results
       })
     const config = ConfigProvider.layer(

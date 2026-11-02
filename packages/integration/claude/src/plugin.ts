@@ -9,7 +9,9 @@
  * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
  *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
  *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
- *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll.
+ *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll. A
+ *   batch that mixes rows already taken with new ones (handed out again after a lease ran out or vibestd restarted):
+ *   the taken ones are acked and the new ones given back, so they come alone and no text is shown twice.
  *
  * /clear fires session.end with the old conversation and no new session.start; the clock keeps running and
  * `$.session.id()` answers the new conversation, so nothing stops on session.end and every request sends the current id.
@@ -18,7 +20,7 @@
  * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts).
  * The AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
  */
-import { sessionHeaders } from "@vibest/protocol/protocol"
+import { ACK_ROUTE, hookRoute, isPolled, POLL_ROUTE, type Polled, sessionHeaders } from "@vibest/protocol/protocol"
 import type { EngineInterface, On, Register } from "claude-code"
 
 /** This plugin's version, inlined by scripts/build.ts (Claude Code's `$.plugin` has no version). */
@@ -127,23 +129,17 @@ const errorOf = (body: unknown) =>
     ? (body as { error: string }).error
     : undefined
 
-type Batch = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
-const isBatch = (body: unknown): body is Batch =>
-  typeof body === "object" &&
-  body !== null &&
-  Array.isArray((body as Batch).ids) &&
-  typeof (body as Batch).line === "string" &&
-  typeof (body as Batch).text === "string"
-
 // A top-level function declaration: Claude Code's loader accepts `register` in no other shape.
 export function register(on: On, _options?: unknown) {
   // The main agent's inbox, this module only. `queue`: batches polled, not yet submitted. `seen`: ids taken (queued or
   // submitted), so a batch handed out again after its lease ran out is not shown twice. `full`: per line, the full
-  // texts waiting for the prompt.submit hook, oldest first. `unacked`: submitted, acked on the next poll.
-  const queue: Array<Batch> = []
+  // texts waiting for the prompt.submit hook, oldest first. `unacked`: submitted, acked on the next poll. `release`: new
+  // rows of a mixed batch, given back on the next ack.
+  const queue: Array<Polled> = []
   const seen = new Set<number>()
   const full = new Map<string, Array<string>>()
   let unacked: Array<number> = []
+  let release: Array<number> = []
   let polling = false
   let draining = false
   let failures = 0
@@ -210,22 +206,27 @@ export function register(on: On, _options?: unknown) {
     if (polling) return
     polling = true
     try {
-      if (unacked.length > 0) {
-        const r = await post(host, "/inbox/ack", { ids: unacked }, REPORT_TRY_MS)
-        if (r.status === 200) unacked = []
+      if (unacked.length > 0 || release.length > 0) {
+        const r = await post(host, ACK_ROUTE, { ids: unacked, release }, REPORT_TRY_MS)
+        if (r.status === 200) {
+          unacked = []
+          release = []
+        }
       }
-      const r = await post(host, "/inbox/poll", {}, REPORT_TRY_MS)
+      const r = await post(host, POLL_ROUTE, {}, REPORT_TRY_MS)
       if (r.status === 409) return
-      if (r.status !== 200 || !isBatch(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
+      if (r.status !== 200 || !isPolled(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
       if (failures >= POLL_FAILURES_SHOWN) host.status(undefined)
       failures = 0
       const batch = r.body
       if (batch.ids.length === 0) return
+      // Taken before (still queued here, or submitted and its ack lost): acked once submitted.
+      const queued = (id: number) => queue.some((b) => b.ids.includes(id))
+      for (const id of batch.ids) if (seen.has(id) && !queued(id) && !unacked.includes(id)) unacked.push(id)
       const fresh = batch.ids.filter((id) => !seen.has(id))
-      if (fresh.length === 0) {
-        // Handed out again after its lease ran out: still queued here, or submitted and its ack lost.
-        const queued = queue.some((b) => b.ids.some((id) => batch.ids.includes(id)))
-        if (!queued) unacked.push(...batch.ids.filter((id) => !unacked.includes(id)))
+      if (fresh.length === 0) return
+      if (fresh.length < batch.ids.length) {
+        release.push(...fresh)
         return
       }
       for (const id of batch.ids) seen.add(id)
@@ -292,12 +293,13 @@ export function register(on: On, _options?: unknown) {
   })
 
   // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
-  // (agentId set) is not the session's.
+  // (agentId set) is not the session's; the main agent's has no result (its conversation id goes with every poll).
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
       const host = nativeHost($)
-      if (await identity(host).catch(() => undefined))
-        void report(host, "/hooks/claude/turn-end", {
+      const who = await identity(host).catch(() => undefined)
+      if (who && who.agent !== "coordinator")
+        void report(host, hookRoute("claude", "turn-end"), {
           hook_event_name: "TurnComplete",
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
@@ -321,7 +323,7 @@ export function register(on: On, _options?: unknown) {
     }
     const who = await identity(host).catch(() => undefined)
     if (who && who.agent !== "coordinator")
-      await report(host, "/hooks/claude/prompt", {
+      await report(host, hookRoute("claude", "prompt"), {
         hook_event_name: "PromptSubmit",
         text: event.text,
         origin: event.origin.kind,
@@ -335,7 +337,7 @@ export function register(on: On, _options?: unknown) {
     const body = { tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }
     for (let n = 0; ; n++) {
       try {
-        const r = await post(host, "/hooks/claude/guard", body, GUARD_TRY_MS)
+        const r = await post(host, hookRoute("claude", "guard"), body, GUARD_TRY_MS)
         if (r.status === 200) {
           const deny = (r.body as { deny?: unknown } | undefined)?.deny
           return typeof deny === "string" ? { deny } : next(event)

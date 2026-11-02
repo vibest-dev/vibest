@@ -1,6 +1,6 @@
 // `vibest project create` and multi-repository worktrees: real git, temporary directories only.
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, sessionHeaders } from "@vibest/client/client"
+import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
@@ -15,6 +15,7 @@ import {
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { git, repositoryKey } from "@vibest/core/worktree"
+import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
@@ -604,7 +605,10 @@ describe("multi-repository isolated workspace", () => {
         fresh: false,
         terminal: "coord",
       })
-      const { id } = yield* authed(raw, sessionHeaders(sessionId, app, { projectId: String(projectId) })).Spawn({
+      const { id } = yield* authed(
+        raw,
+        sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
+      ).Spawn({
         harness: "pi",
         prompt: "do it",
       })

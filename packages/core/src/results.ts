@@ -58,7 +58,7 @@ export const appendReportLine = (file: string, line: ReportLine) =>
     yield* fs.writeFileString(file, encodeReportLine(line), { flag: "a" })
   })
 
-const jsonObject = (raw: string): Record<string, unknown> | undefined => {
+export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {
     const value = JSON.parse(raw) as unknown
     if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined

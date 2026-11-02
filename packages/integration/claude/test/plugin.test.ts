@@ -170,7 +170,7 @@ describe("Claude plugin requests", () => {
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
-      "vibest-protocol": "3",
+      "vibest-protocol": "4",
       "vibest-caller": "session",
       "vibest-session-id": "main0001",
       "vibest-project-id": "7",
@@ -215,6 +215,14 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual(h.requests[1]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
   })
 
+  it("the main agent's turn end is not reported", async () => {
+    const h = host()
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
+    await h.turnComplete({ reason: "answer", answer: "x" })
+    await settle()
+    assert.deepStrictEqual(h.paths(), [])
+  })
+
   it("a report vibestd did not take is tried again later", async () => {
     const h = host(WORKER)
     let down = true
@@ -250,7 +258,7 @@ describe("Claude plugin inbox", () => {
     assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
     await h.tick()
     const ack = h.requests.find((r) => r.url.endsWith("/ack"))
-    assert.deepStrictEqual(ack?.body, { ids: [1, 2] })
+    assert.deepStrictEqual(ack?.body, { ids: [1, 2], release: [] })
     assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
   })
 
@@ -283,7 +291,26 @@ describe("Claude plugin inbox", () => {
     await h.tick()
     await h.tick()
     const acks = h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
-    assert.deepStrictEqual(acks, [{ ids: [5] }, { ids: [5] }])
+    assert.deepStrictEqual(acks, [
+      { ids: [5], release: [] },
+      { ids: [5], release: [] },
+    ])
+  })
+
+  it("a batch mixing a row already shown with a new one: the old one is acked, the new one given back, nothing shown twice", async () => {
+    const h = host()
+    const polls = [batch([5], "L", "T"), batch([5, 6], "M", "T + U"), batch([6], "N", "U")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.draw()
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L"], "the mixed batch is not shown")
+    await h.tick()
+    const ack = h.requests.filter((r) => r.url.endsWith("/ack")).at(-1)
+    assert.deepStrictEqual(ack?.body, { ids: [5], release: [6] })
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L", "N"])
   })
 
   it("says so once vibestd stops answering, and clears it when it answers again", async () => {

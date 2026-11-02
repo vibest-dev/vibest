@@ -4,7 +4,7 @@
  * misunderstood; old versions are not served. An additive feature does not bump it: it gets a flag in Ping's
  * `capabilities`, and a client uses it only when the flag is there.
  */
-export const PROTOCOL = 3
+export const PROTOCOL = 4
 
 /**
  * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents
@@ -38,9 +38,6 @@ export const protocolMismatch = (caller: number | undefined, server: number, ver
   action: MISMATCH_ACTION,
 })
 
-/** One line for a person (the message names the action). */
-export const mismatchText = (m: Pick<ProtocolMismatch, "message">) => m.message
-
 export const PROTOCOL_HEADER = "vibest-protocol"
 export const CALLER_HEADER = "vibest-caller"
 export const SESSION_HEADER = "vibest-session-id"
@@ -54,10 +51,33 @@ export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
 
 /**
- * A session's request without `vibest-project-id`, over RPC or HTTP alike: refused until the owner decides otherwise.
- * Unconfirmed default, kept in this one place so it can flip to "allow".
+ * vibestd's HTTP routes (`vibest-http.sock`, every one `POST` with a JSON body). One definition for vibestd and the
+ * harness integrations that bundle this file.
  */
-export const MISSING_PROJECT_ID: "refuse" | "allow" = "refuse"
+export const POLL_ROUTE = "/inbox/poll"
+export const ACK_ROUTE = "/inbox/ack"
+export type HookKind = "turn-end" | "prompt" | "guard"
+export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
+/** The harness and hook a path names, or undefined. */
+export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
+  const m = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/.exec(path)
+  return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
+}
+
+/** `POLL_ROUTE`'s answer: the main agent's next batch, leased (empty `ids`: none). */
+export type Polled = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
+export const isPolled = (body: unknown): body is Polled =>
+  typeof body === "object" &&
+  body !== null &&
+  Array.isArray((body as Polled).ids) &&
+  typeof (body as Polled).line === "string" &&
+  typeof (body as Polled).text === "string"
+
+/**
+ * `ACK_ROUTE`'s body: `ids` were shown (delivered); `release` were handed out but not shown, so they go back to pending
+ * at once (a batch that mixed a row already shown with a new one).
+ */
+export type AckBody = { readonly ids: ReadonlyArray<number>; readonly release?: ReadonlyArray<number> }
 
 /**
  * Who a session's request comes from, as its environment and harness know it: VIBEST_SESSION_ID, VIBEST_PROJECT_ID,

@@ -23,7 +23,8 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
 import {
   CALLER_HEADER,
-  MISSING_PROJECT_ID,
+  HARNESS_HEADER,
+  HARNESS_SESSION_HEADER,
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -221,6 +222,30 @@ export const AdmissionLive = Layer.effect(
 
 const header = (headers: Headers.Headers, name: string) => Headers.get(headers, name)
 
+/**
+ * The harness's conversation id from a session's request, latest wins (a /clear changes it); only from the session's own
+ * harness, so an old process of another harness under this id changes nothing.
+ */
+const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
+  Effect.gen(function* () {
+    const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
+    if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
+    if (yield* db.noteHarnessSession(row.id, conversation))
+      yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
+  })
+
+/**
+ * An open method's session headers (a hook's ResultReady or Prompt, no caller check): the conversation id is kept when
+ * they name this session and its project.
+ */
+const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
+  Effect.gen(function* () {
+    if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
+    const row = yield* db.sessionIdentity(sessionId)
+    if (row && Option.getOrUndefined(header(headers, PROJECT_HEADER)) === String(row.projectId))
+      yield* noteConversation(db, headers, row)
+  })
+
 /** Missing, mixed, or malformed caller headers. Never becomes cli. */
 const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
@@ -244,12 +269,13 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
       const row = yield* db.sessionIdentity(sessionId.value)
       if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
       // A session's environment names its project (VIBEST_PROJECT_ID); one that names another is not this session.
-      // One that names none is refused as over HTTP (MISSING_PROJECT_ID).
+      // One that names none is refused, as over HTTP.
       const project = header(headers, PROJECT_HEADER)
-      if (project._tag === "None" && MISSING_PROJECT_ID === "refuse")
+      if (project._tag === "None")
         return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
-      if (project._tag === "Some" && project.value !== String(row.projectId))
+      if (project.value !== String(row.projectId))
         return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
+      yield* noteConversation(db, headers, row)
       if (row.agent === "coordinator") {
         return {
           _tag: "Coordinator",
@@ -637,9 +663,11 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      ResultReady: ({ sessionId }) => sessions.resultReady(sessionId),
+      ResultReady: ({ sessionId }, { headers }) =>
+        Effect.andThen(noteOpen(db, headers, sessionId), sessions.resultReady(sessionId)),
 
-      Prompt: ({ sessionId, text }) => sessions.userPrompt(sessionId, text),
+      Prompt: ({ sessionId, text }, { headers }) =>
+        Effect.andThen(noteOpen(db, headers, sessionId), sessions.userPrompt(sessionId, text)),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {

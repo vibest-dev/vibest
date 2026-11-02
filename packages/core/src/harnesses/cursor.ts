@@ -36,6 +36,8 @@ export const cursor: HarnessAdapter = {
   // An explicit answer either way (its hook runs fail-closed); allow only lets the call go on to its usual permission checks.
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
+  // Every hook's input carries it.
+  conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
   // beforeSubmitPrompt (cursor-agent 2026.10.22). The coordinator is not a Cursor session; an empty prompt is not a round.
   userPrompt: (event, coordinator) => {
     if (coordinator || event.hook_event_name !== "beforeSubmitPrompt") return undefined

@@ -34,8 +34,11 @@ const runtimeMatching = (type: string, encodedAddress: string) =>
   encodeRuntime(type, JSON.parse(encodedAddress) as RuntimeAddress)
 
 const Metadata = Schema.Struct({
-  /** A main agent's lease clock (Inbox.poll): its `sending` rows go back to pending once this time has passed. */
-  leaseUntil: Schema.optional(Schema.Number),
+  /**
+   * A main agent's leased inbox rows (Inbox.poll), by row id: when each lease ends. An entry goes when its row is
+   * acked, released, or its lease ended.
+   */
+  leases: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
   /** The harness integration's version the session's requests last carried (its plugin). */
   integrationVersion: Schema.optional(Schema.String),
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -532,6 +535,13 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => (rows as ReadonlyArray<InboxSql>).map(toInbox)),
         Effect.flatMap(decodeInbox),
       )
+  /** Removes these rows' entries from the project's main agent `metadata.leases`. */
+  const forgetLeases = (projectId: number, ids: ReadonlyArray<number>) =>
+    sql`UPDATE session SET metadata = json_patch(metadata, json_object('leases', json(${JSON.stringify(
+      Object.fromEntries(ids.map((id) => [id, null])),
+    )})))
+      WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})
+        AND json_extract(metadata, '$.leases') IS NOT NULL`
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(`m.id IN (${ids.map(() => "?").join(", ")})`, ids)
   const userSend = `m.sender_type = 'user' AND m.id != coalesce(json_extract(s.metadata, '$.task'), -1)`
   const findSend = (sessionId: string, status: InboxStatus) =>
@@ -754,7 +764,7 @@ const make = Effect.gen(function* () {
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
-      sql<{ id: string; projectId: number; agent: string }>`SELECT a.id, a.project_id,
+      sql<{ id: string; projectId: number; agent: string; harness: string }>`SELECT a.id, a.project_id, a.harness,
           CASE WHEN p.main_session_id = a.id THEN 'coordinator' ELSE a.agent_type END AS agent
         FROM session a JOIN project p ON p.id = a.project_id WHERE a.id = ${id}`.pipe(
         Effect.map((rows) => rows[0]),
@@ -906,7 +916,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orDie),
 
     /** The conversation an integration reports for session `id` (main agent or not): the latest wins. True when it changed. */
-    /** Writes the integration version only when it changed; true when it did. */
+    /** The integration version the session's requests carry, written only when it changed; true when it did. */
     noteIntegrationVersion: (id: string, version: string) =>
       sql<{ id: string }>`UPDATE session SET metadata = json_set(metadata, '$.integrationVersion', ${version})
         WHERE id = ${id} AND json_extract(metadata, '$.integrationVersion') IS NOT ${version} RETURNING id`.pipe(
@@ -914,23 +924,7 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** The project's main agent lease clock (`metadata.leaseUntil`), or undefined when none is set. */
-    leaseUntil: (projectId: number) =>
-      sql<{ until: number | null }>`SELECT json_extract(s.metadata, '$.leaseUntil') AS until
-        FROM session s JOIN project p ON p.main_session_id = s.id WHERE p.id = ${projectId}`.pipe(
-        Effect.map((rows) => rows[0]?.until ?? undefined),
-        Effect.orDie,
-      ),
-
-    /** Sets (a time) or clears (undefined) the project's main agent lease clock. */
-    setLeaseUntil: (projectId: number, until: number | undefined) =>
-      (until === undefined
-        ? sql`UPDATE session SET metadata = json_remove(metadata, '$.leaseUntil')
-            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`
-        : sql`UPDATE session SET metadata = json_set(metadata, '$.leaseUntil', ${until})
-            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`
-      ).pipe(Effect.asVoid, Effect.orDie),
-
+    /** The harness's own conversation id (latest wins: a /clear changes it), written only when it changed; true when it did. */
     noteHarnessSession: (id: string, harnessSessionId: string) =>
       sql<{ id: string }>`UPDATE session SET harness_session_id = ${harnessSessionId}
         WHERE id = ${id} AND harness_session_id IS NOT ${harnessSessionId} RETURNING id`.pipe(
@@ -1062,12 +1056,72 @@ const make = Effect.gen(function* () {
         [projectId],
       ).pipe(Effect.orDie),
 
-    /** Rows handed to the project's main agent and not yet settled (`sending`): the Claude plugin's leased rows. */
-    coordinatorLeased: (projectId: number) =>
-      inbox(
-        `m.sender_type != 'user' AND m.delivery_status = 'delivering' AND m.recipient_session_id = (SELECT main_session_id FROM project WHERE id = ?)`,
-        [projectId],
-      ).pipe(Effect.orDie),
+    /** Leases rows handed to the project's main agent until `until` (`metadata.leases`, one entry per row). */
+    leaseRows: (projectId: number, ids: ReadonlyArray<number>, until: number) =>
+      ids.length === 0
+        ? Effect.void
+        : sql`UPDATE session SET metadata = json_patch(metadata, json_object('leases', json(${JSON.stringify(
+            Object.fromEntries(ids.map((id) => [id, until])),
+          )})))
+            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`.pipe(Effect.asVoid, Effect.orDie),
+
+    /**
+     * Ends the leases of the project's main agent that ran out by `now` (every one when `now` is undefined): their rows
+     * still `sending` go back to pending, and their entries go. Returns the rows put back.
+     */
+    endLeases: (projectId: number, now: number | undefined) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const main = sql`(SELECT main_session_id FROM project WHERE id = ${projectId})`
+            const leases = yield* sql<{ id: string; until: number }>`SELECT l.key AS id, l.value AS until
+              FROM session s, json_each(s.metadata, '$.leases') l WHERE s.id = ${main}`
+            const ended = leases.filter((l) => now === undefined || l.until <= now).map((l) => Number(l.id))
+            if (ended.length === 0) return [] as ReadonlyArray<number>
+            yield* forgetLeases(projectId, ended)
+            const back = yield* sql<{ id: number }>`UPDATE inbox SET delivery_status = 'pending'
+              WHERE ${sql.in("id", ended)} AND delivery_status = 'delivering' AND recipient_session_id = ${main}
+              RETURNING id`
+            return back.map((r) => r.id)
+          }),
+        )
+        .pipe(Effect.orDie),
+
+    /**
+     * The main agent took `ids` (delivered) and gave back `release` (pending again): only its own rows, `sending` or
+     * `pending`. Their leases go. Returns the rows now delivered.
+     */
+    settleLeased: (projectId: number, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const main = sql`(SELECT main_session_id FROM project WHERE id = ${projectId})`
+            yield* forgetLeases(projectId, [...ids, ...release])
+            if (release.length > 0)
+              yield* sql`UPDATE inbox SET delivery_status = 'pending'
+                WHERE ${sql.in("id", release)} AND delivery_status = 'delivering' AND recipient_session_id = ${main}`
+            if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
+            const done = yield* sql<{ id: number }>`UPDATE inbox SET delivery_status = 'delivered'
+              WHERE ${sql.in("id", ids)} AND delivery_status IN ('delivering', 'pending') AND sender_type != 'user'
+                AND recipient_session_id = ${main}
+              RETURNING id`
+            return done.length === 0 ? [] : yield* inboxIn(done.map((r) => r.id))
+          }),
+        )
+        .pipe(Effect.orDie),
+
+    /**
+     * After a restart: a claimed main-agent-bound row whose delivery was cut off may or may not have arrived, so it
+     * failed; one bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`) is back to
+     * pending, because that integration acks by row id and skips a row it already showed. Subagent-bound
+     * `delivering` rows stay for `check`. (Their leases went when the database opened: Db.layer.)
+     */
+    recoverSending: (pollHarnesses: ReadonlyArray<string>) =>
+      sql`UPDATE inbox SET delivery_status = CASE WHEN EXISTS (SELECT 1 FROM session s
+          JOIN project p ON p.main_session_id = s.id
+          WHERE s.id = inbox.recipient_session_id AND ${pollHarnesses.length === 0 ? sql`0` : sql.in("s.harness", pollHarnesses)})
+        THEN 'pending' ELSE 'failed' END
+        WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(Effect.asVoid, Effect.orDie),
 
     /** Claimed deliveries must settle before a planned shutdown; pending Messages wait for the next vibestd. */
     sendingInbox: inbox(`m.delivery_status = 'delivering'`).pipe(
@@ -1156,16 +1210,6 @@ const make = Effect.gen(function* () {
 /** Name transforms the SQLite client must be built with: columns are the snake_case of the row fields. */
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
-/**
- * A claimed main-Agent-bound Message whose delivery was cut off: it may or may not have arrived, so it failed. A Claude
- * main agent's is back to pending: the plugin acks by row id, a row it already has is acked again, and it skips repeats.
- * Subagent-bound `delivering` rows stay for `check`.
- */
-const recoverSending = (sql: SqlClient.SqlClient) =>
-  sql`UPDATE inbox SET delivery_status = CASE WHEN EXISTS (SELECT 1 FROM session s JOIN project p ON p.main_session_id = s.id
-      WHERE s.id = inbox.recipient_session_id AND s.harness = 'claude') THEN 'pending' ELSE 'failed' END
-    WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(Effect.asVoid)
-
 export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibest/Db") {
   /** Opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`). */
   static readonly layer = Layer.effect(
@@ -1177,7 +1221,15 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
       // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-      Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap(recoverSending))),
+      // No lease outlives the vibestd that granted it (Inbox.poll).
+      Effect.andThen(
+        SqlClient.SqlClient.pipe(
+          Effect.flatMap(
+            (sql) => sql`UPDATE session SET metadata = json_remove(metadata, '$.leases')
+              WHERE json_extract(metadata, '$.leases') IS NOT NULL`,
+          ),
+        ),
+      ),
       Effect.andThen(make),
     ),
   )

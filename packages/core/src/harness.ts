@@ -68,10 +68,11 @@ export interface HarnessAdapter {
   /** Field of the hook payload holding the last reply. */
   readonly resultField: "text" | "last_assistant_message"
   /**
-   * A Coordinator's inbox rows: typed into its pane (`prompt`), or taken by its integration (`subscribe`: the Pi
-   * extension over vibest.sock, the Claude plugin by polling vibestd's HTTP socket).
+   * A Coordinator's inbox rows: typed into its pane (`prompt`), streamed to its integration over vibest.sock
+   * (`subscribe`: the Pi extension), or polled by its integration over vibestd's HTTP socket (`poll`: the Claude
+   * plugin; rows it took are leased, and a vibestd restart puts them back to pending).
    */
-  readonly inbox: "prompt" | "subscribe"
+  readonly inbox: "prompt" | "subscribe" | "poll"
   /** Error message when this harness cannot use `provider`, else undefined. */
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
@@ -100,6 +101,11 @@ export interface HarnessAdapter {
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
   ) => { readonly text: string } | undefined
+  /**
+   * The harness's own conversation id in an event its plugin hands to vibest, sent as vibest-harness-session-id.
+   * Absent: the events carry none (the plugin sends it another way).
+   */
+  readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
   /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
   readonly canResume?: (
     root: string,

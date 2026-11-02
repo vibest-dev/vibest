@@ -134,7 +134,7 @@ describe("SQLite", () => {
 })
 
 describe("a vibestd restart", () => {
-  it.effect("a Claude main agent's rows cut off in delivery go back to pending; any other main agent's failed", () =>
+  it.effect("rows cut off in delivery to a polling main agent go back to pending; any other main agent's failed", () =>
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
       const ids = yield* Effect.gen(function* () {
@@ -153,6 +153,8 @@ describe("a vibestd restart", () => {
         return ids
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
+        // Inbox.layer runs this at start with the harnesses whose adapter polls.
+        yield* (yield* Db).recoverSending(["claude"])
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; deliveryStatus: string }>`SELECT id, delivery_status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

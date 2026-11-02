@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite"
-// The Pi main agent's inbox (feature-map S12): every result reaches the real Pi TUI coordinator as a turn of its own, the
+// The Claude main agent's inbox over HTTP (feature-map S11, S15) and the Pi main agent's (S12). Pi: every result reaches
+// the real Pi TUI coordinator as a turn of its own, the
 // later ones included. The main agent's model is a fake OpenAI-compatible endpoint served here (models.json in a
 // PI_CODING_AGENT_DIR of this check) that drives it as the delegate skill does: `vibest run`, then `vibest send` on
 // the result. vibestd, herdr, Pi and the subagent's harness are the real ones.
@@ -185,6 +186,171 @@ const transcript = async (w: World, cwd: string) => {
   return entries
 }
 
+/**
+ * A real Claude main agent (the user's login, on the E2E model: agentModel) in a herdr session of its own, for project
+ * `name`, trusted and polling; its subagents are Pis on the fake `model`. `close` drops the session.
+ */
+const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeModel>) => {
+  const session = `${w.herdrSession}-${name}`
+  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  const repo = await project(w, name)
+  const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
+  // Panes get the herdr server's environment, which gets vibestd's: both start here, vibestd without
+  // CLAUDE_CONFIG_DIR (the user's Claude login) and with an empty ZDOTDIR (the pane shell keeps this build first).
+  const zdot = path.join(w.root, `zdotdir-${name}`)
+  await fs.mkdir(zdot, { recursive: true })
+  await w.stopDaemon()
+  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
+  await w.ok(["--harness", "claude", ...agentModel(), "--session", session, "--headless"], {
+    cwd: repo,
+    timeoutMs: 120_000,
+    env: { CLAUDE_CONFIG_DIR: undefined },
+  })
+  let main = ""
+  await until(
+    "the main agent in vibest ls",
+    async () => {
+      main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+      return main !== ""
+    },
+    60_000,
+  )
+  const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main)!.p
+  const conversation = () =>
+    row<{ c: string | null }>(w, "SELECT harness_session_id AS c FROM session WHERE id = ?", main)?.c ?? null
+  const pane = () => {
+    const runtime = row<{ r: string }>(w, "SELECT runtime AS r FROM session WHERE id = ?", main)?.r ?? "{}"
+    const id = (JSON.parse(runtime) as { id?: string }).id ?? ""
+    return id.split("/")[1] ?? ""
+  }
+  const screen = async () => {
+    const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
+    return String((r.read as { text?: string } | undefined)?.text ?? "")
+  }
+  // A new folder: Claude asks whether to trust it (vibest answers that menu for subagents, the person for the main
+  // agent). Hooks modules load only once it is trusted.
+  await until(
+    "Claude's trust question or its input box",
+    async () => /trust this folder|❯\s*$/m.test(await screen()),
+    60_000,
+  )
+  // As the Claude adapter answers it for a subagent: down until Yes is selected, then enter.
+  for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
+    const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
+    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
+    await Bun.sleep(1_000)
+  }
+  // The plugin's first poll names its conversation: it is polling.
+  await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
+    const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
+    const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+    throw new Error(`${e.message}; its screen:\n${peek.stdout}${peek.stderr}\nvibestd.log:\n${log.slice(-3000)}`)
+  })
+  const delivered = (from: string) =>
+    row<{ n: number }>(
+      w,
+      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_id = ? AND delivery_status = 'delivered'",
+      main,
+      from,
+    )?.n ?? 0
+  /** The subagent's line shown as a user entry, and its full text attached as hook context. */
+  const shown = async (line: string, marker: string) => {
+    let entries: Awaited<ReturnType<typeof transcript>> = []
+    await until(
+      `the ${marker} line and its context in the main agent's conversation`,
+      async () => {
+        entries = await transcript(w, repo)
+        return (
+          entries.some((e) => e.type === "user" && e.text.includes(line)) &&
+          // The plugin's own prompt.submit hook attached the full text: Claude keeps it as this attachment.
+          entries.some(
+            (e) =>
+              e.type === "attachment" && e.raw.includes("hook_additional_context") && e.raw.includes(`done-${marker}`),
+          )
+        )
+      },
+      90_000,
+    ).catch((e: Error) => {
+      const tail = entries.slice(-8).map((x) => `${x.type}: ${x.raw.slice(0, 300)}`)
+      throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}`)
+    })
+    return entries
+  }
+  /** A Pi subagent titled `title`, started on task `marker`; its id. */
+  const start = async (title: string, marker: string) =>
+    (
+      JSON.parse(
+        await w.ok(["run", "pi", "--env", env, "--title", title, "--", ask(marker)], { cwd: repo, timeoutMs: 60_000 }),
+      ) as { id: string }
+    ).id
+  /** One result from subagent `sub` reaches the main agent: its line as the prompt, its full text as context. */
+  const result = async (sub: string, title: string, marker: string, before: number) => {
+    await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
+    return shown(`General Agent "${title}" completed (${sub})`, marker)
+  }
+  const typeIn = async (text: string) => {
+    await herdr(socket, "pane.send_text", { pane_id: pane(), text })
+    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+  }
+  /** The main agent's Claude process in its pane. */
+  const claude = async () => {
+    const r = await herdr(socket, "pane.process_info", { pane_id: pane() })
+    const info = (r.process_info ?? {}) as {
+      shell_pid?: number
+      foreground_processes?: Array<{ pid: number; name: string; argv0?: string | null; cmdline?: string | null }>
+    }
+    return (info.foreground_processes ?? []).find(
+      (p) => p.pid !== info.shell_pid && /claude/i.test(`${p.name} ${p.argv0 ?? ""} ${p.cmdline ?? ""}`),
+    )?.pid
+  }
+  return {
+    repo,
+    main,
+    projectId,
+    conversation,
+    delivered,
+    start,
+    result,
+    typeIn,
+    claude,
+    close: () => dropHerdrSession(w, session),
+  }
+}
+
+/** One POST to vibestd's HTTP socket with curl, as the main agent's plugin sends it. */
+const curl = async (
+  w: World,
+  route: string,
+  who: { main: string; projectId: number | string; protocol?: string },
+  body: object = {},
+) => {
+  const headers = {
+    "vibest-protocol": who.protocol ?? "4",
+    "vibest-caller": "session",
+    "vibest-session-id": who.main,
+    "vibest-project-id": String(who.projectId),
+    "vibest-agent": "coordinator",
+    "vibest-harness": "claude",
+    "content-type": "application/json",
+  }
+  const r = await w.run(w.root, [
+    "curl",
+    "-s",
+    "-w",
+    "\n%{http_code}",
+    "--unix-socket",
+    path.join(w.vibestHome, "vibest-http.sock"),
+    "-X",
+    "POST",
+    ...Object.entries(headers).flatMap(([k, v]) => ["-H", `${k}: ${v}`]),
+    "-d",
+    JSON.stringify(body),
+    `http://vibestd${route}`,
+  ])
+  const at = r.stdout.lastIndexOf("\n")
+  return { status: Number(r.stdout.slice(at + 1)), body: JSON.parse(r.stdout.slice(0, at) || "null") as unknown }
+}
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "S11",
@@ -192,153 +358,146 @@ const checks: ReadonlyArray<Check> = [
       "Claude main agent: a subagent's result arrives over HTTP as one line with its full text as prompt context, after /clear too, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      // The subagent is a Pi on a fake model (cheap, its answers fixed); the main agent is a real Claude, the user's login,
-      // on the E2E model (agentModel).
+      // The subagent is a Pi on a fake model (cheap, its answers fixed); the main agent is a real Claude.
       const model = fakeModel("pi")
-      const session = `${w.herdrSession}-cmain`
-      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
       try {
-        const repo = await project(w, "claude-main")
-        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-claude-main", model.url)}`
-        // Panes get the herdr server's environment, which gets vibestd's: both start here, vibestd without
-        // CLAUDE_CONFIG_DIR (the user's Claude login) and with an empty ZDOTDIR (the pane shell keeps this build first).
-        const zdot = path.join(w.root, "zdotdir-cmain")
-        await fs.mkdir(zdot, { recursive: true })
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
-        await w.ok(["--harness", "claude", ...agentModel(), "--session", session, "--headless"], {
-          cwd: repo,
-          timeoutMs: 120_000,
-          env: { CLAUDE_CONFIG_DIR: undefined },
-        })
-        type Entry = { id: string; agent: string }
-        let main = ""
-        await until(
-          "the main agent in vibest ls",
-          async () => {
-            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
-            return main !== ""
-          },
-          60_000,
-        )
-        const conversation = () =>
-          row<{ c: string | null }>(w, "SELECT harness_session_id AS c FROM session WHERE id = ?", main)?.c ?? null
-        const pane = () => {
-          const runtime = row<{ r: string }>(w, "SELECT runtime AS r FROM session WHERE id = ?", main)?.r ?? "{}"
-          const id = (JSON.parse(runtime) as { id?: string }).id ?? ""
-          return id.split("/")[1] ?? ""
-        }
-        const screen = async () => {
-          const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
-          return String((r.read as { text?: string } | undefined)?.text ?? "")
-        }
-        // A new folder: Claude asks whether to trust it (vibest answers that menu for subagents, the person for the main
-        // agent). Hooks modules load only once it is trusted.
-        await until(
-          "Claude's trust question or its input box",
-          async () => /trust this folder|❯\s*$/m.test(await screen()),
-          60_000,
-        )
-        // As the Claude adapter answers it for a subagent: down until Yes is selected, then enter.
-        for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-          const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-          await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-          await Bun.sleep(1_000)
-        }
-        // The plugin's first poll names its conversation: it is polling.
-        await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
-          const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
-          const runtime = row<{ r: string }>(w, "SELECT runtime AS r FROM session WHERE id = ?", main)?.r ?? "{}"
-          const at = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
-          const read = await herdr(socket, "pane.read", { pane_id: at, source: "visible", strip_ansi: true }).catch(
-            (x: Error) => ({ error: x.message }),
-          )
-          const screen = `${runtime}\n${peek.stdout}${peek.stderr}\n${JSON.stringify(read).slice(0, 3000)}`
-          const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
-          throw new Error(`${e.message}; its screen:\n${screen}\nvibestd.log:\n${log.slice(-3000)}`)
-        })
-        const delivered = (from: string) =>
-          row<{ n: number }>(
-            w,
-            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_id = ? AND delivery_status = 'delivered'",
-            main,
-            from,
-          )?.n ?? 0
-
-        let sub = ""
+        c = await claudeMain(w, "cmain", model)
         const title = "Answer the probe"
-        /** One result from the subagent reaches the main agent: its line as the prompt, its full text as context. */
+        const sub = await c.start(title, "cmone")
+        await c.result(sub, title, "cmone", 0)
         const round = async (marker: string) => {
-          const before = sub === "" ? 0 : delivered(sub)
-          if (sub === "") {
-            const run = await w.ok(["run", "pi", "--env", env, "--title", title, "--", ask(marker)], {
-              cwd: repo,
-              timeoutMs: 60_000,
-            })
-            sub = (JSON.parse(run) as { id: string }).id
-          } else await w.ok(["send", sub, "--", ask(marker)], { cwd: repo })
-          await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
-          const line = `General Agent "${title}" completed (${sub})`
-          let entries: Awaited<ReturnType<typeof transcript>> = []
-          await until(
-            `the ${marker} line and its context in the main agent's conversation`,
-            async () => {
-              entries = await transcript(w, repo)
-              return (
-                entries.some((e) => e.type === "user" && e.text.includes(line)) &&
-                // The plugin's own prompt.submit hook attached the full text: Claude keeps it as this attachment.
-                entries.some(
-                  (e) =>
-                    e.type === "attachment" &&
-                    e.raw.includes("hook_additional_context") &&
-                    e.raw.includes(`done-${marker}`),
-                )
-              )
-            },
-            60_000,
-          ).catch((e: Error) => {
-            const tail = entries.slice(-8).map((x) => `${x.type}: ${x.raw.slice(0, 300)}`)
-            throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}`)
-          })
+          const before = c!.delivered(sub)
+          await w.ok(["send", sub, "--", ask(marker)], { cwd: c!.repo })
+          await c!.result(sub, title, marker, before)
         }
-        const typeIn = async (text: string) => {
-          await herdr(socket, "pane.send_text", { pane_id: pane(), text })
-          await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
-        }
-
-        await round("cmone")
 
         // /clear starts a new Claude conversation in the same process; the poll goes on and names the new one.
-        const first = conversation()
+        const first = c.conversation()
         await Bun.sleep(10_000)
-        await typeIn("/clear")
-        await until("the conversation after /clear", () => conversation() !== first, 60_000)
+        await c.typeIn("/clear")
+        await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
         await round("cmtwo")
 
         // The harness stopped from outside, then `vibest` again in its pane: the same conversation, resumed.
-        const cleared = conversation()
-        const claude = async () => {
-          const r = await herdr(socket, "pane.process_info", { pane_id: pane() })
-          const info = (r.process_info ?? {}) as {
-            shell_pid?: number
-            foreground_processes?: Array<{ pid: number; name: string; argv0?: string | null; cmdline?: string | null }>
-          }
-          return (info.foreground_processes ?? []).find(
-            (p) => p.pid !== info.shell_pid && /claude/i.test(`${p.name} ${p.argv0 ?? ""} ${p.cmdline ?? ""}`),
-          )?.pid
-        }
+        const cleared = c.conversation()
         await Bun.sleep(10_000)
-        const pid = await claude()
+        const pid = await c.claude()
         expect(pid !== undefined, "no claude process in the main agent's pane")
         process.kill(pid!, "SIGTERM")
-        await until("the main agent's Claude exited", async () => (await claude()) === undefined, 30_000)
-        await typeIn(["vibest", ...agentModel()].join(" "))
-        await until("Claude again in the main agent's pane", async () => (await claude()) !== undefined, 60_000)
+        await until("the main agent's Claude exited", async () => (await c!.claude()) === undefined, 30_000)
+        await c.typeIn(["vibest", ...agentModel()].join(" "))
+        await until("Claude again in the main agent's pane", async () => (await c!.claude()) !== undefined, 60_000)
         await round("cmthree")
-        expect(conversation() === cleared, `resumed conversation ${conversation()}; before the stop ${cleared}`)
+        expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
       } finally {
         model.stop()
-        await dropHerdrSession(w, session)
+        await c?.close()
+      }
+    },
+  },
+  {
+    id: "S15",
+    title:
+      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = fakeModel("pi")
+      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let stopped: number | undefined
+      try {
+        c = await claudeMain(w, "cmtwo", model)
+        // Two subagents, one after the other: each line goes with its own full text, never the other's.
+        const a = await c.start("Answer probe alpha", "cmalpha")
+        await c.result(a, "Answer probe alpha", "cmalpha", 0)
+        const b = await c.start("Answer probe beta", "cmbeta")
+        const entries = await c.result(b, "Answer probe beta", "cmbeta", 0)
+        const contexts = entries.filter((e) => e.type === "attachment" && e.raw.includes("hook_additional_context"))
+        for (const [own, other] of [
+          ["cmalpha", "cmbeta"],
+          ["cmbeta", "cmalpha"],
+        ])
+          expect(
+            contexts.filter((e) => e.raw.includes(`done-${own}`)).every((e) => !e.raw.includes(`done-${other}`)),
+            `a context with done-${own} also holds done-${other}`,
+          )
+        for (const [sub, title] of [
+          [a, "Answer probe alpha"],
+          [b, "Answer probe beta"],
+        ] as const) {
+          const line = `General Agent "${title}" completed (${sub})`
+          const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
+          expect(n === 1, `the line for ${sub} shows ${n} times`)
+        }
+
+        // Mid-turn: the main agent is busy in a turn of its own when the result comes; it still arrives.
+        await c.typeIn("Run the shell command `sleep 40` with the Bash tool, then reply with one word: slept")
+        await until(
+          "the main agent's own turn running",
+          async () => (await transcript(w, c!.repo)).some((e) => e.type === "assistant" && e.raw.includes("sleep 40")),
+          60_000,
+        )
+        const before = c.delivered(a)
+        await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
+        await c.result(a, "Answer probe alpha", "cmmid", before)
+
+        // curl --unix-socket, as the plugin: with the plugin stopped, a curl poll takes the row and leases it; nobody
+        // acks, the poller is gone, and the row is pending again about 5 s later. A curl ack then delivers it.
+        stopped = await c.claude()
+        expect(stopped !== undefined, "no claude process in the main agent's pane")
+        process.kill(stopped!, "SIGSTOP")
+        await Bun.sleep(3_000)
+        const who = { main: c.main, projectId: c.projectId }
+        const status = (id: number) =>
+          row<{ s: string }>(w, "SELECT delivery_status AS s FROM inbox WHERE id = ?", id)?.s
+        await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
+        let polled: { ids: Array<number>; line: string; text: string } = { ids: [], line: "", text: "" }
+        await until(
+          "a curl poll hands the result out",
+          async () => {
+            const r = await curl(w, "/inbox/poll", who)
+            expect(r.status === 200, `poll answered ${r.status}: ${JSON.stringify(r.body)}`)
+            polled = r.body as typeof polled
+            return polled.ids.length > 0
+          },
+          180_000,
+        )
+        expect(polled.text.includes("done-cmcurl"), `the polled text: ${polled.text}`)
+        const id = polled.ids[0]!
+        expect(status(id) === "delivering", `after the poll the row is ${status(id)}`)
+        await until("the lease back to pending once its poller left", () => status(id) === "pending", 15_000)
+        const again = await curl(w, "/inbox/poll", who)
+        expect(JSON.stringify((again.body as typeof polled).ids) === JSON.stringify(polled.ids), "polled again")
+        const acked = await curl(w, "/inbox/ack", who, { ids: polled.ids })
+        expect(
+          acked.status === 200 && JSON.stringify(acked.body) === JSON.stringify({ acked: polled.ids }),
+          `ack answered ${acked.status}: ${JSON.stringify(acked.body)}`,
+        )
+        expect(status(id) === "delivered", `after the ack the row is ${status(id)}`)
+        const other = await curl(w, "/inbox/poll", { ...who, projectId: 999_999 })
+        expect(other.status === 403, `another project's poll answered ${other.status}`)
+        const old = await curl(w, "/inbox/poll", { ...who, protocol: "3" })
+        expect(
+          old.status === 409 && (old.body as { action?: string }).action === "vibest update",
+          `an older protocol's poll answered ${old.status}: ${JSON.stringify(old.body)}`,
+        )
+        process.kill(stopped!, "SIGCONT")
+        stopped = undefined
+
+        // `vibest daemon restart` midway: the plugin polls the next vibestd, and the next result arrives.
+        const restart = await w.tty(["daemon", "restart"], "y\n", {
+          cwd: c.repo,
+          env: { CLAUDE_CONFIG_DIR: undefined },
+          timeoutMs: 60_000,
+        })
+        expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
+        const after = c.delivered(b)
+        await w.ok(["send", b, "--", ask("cmafter")], { cwd: c.repo })
+        await c.result(b, "Answer probe beta", "cmafter", after)
+      } finally {
+        if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+        model.stop()
+        await c?.close()
       }
     },
   },

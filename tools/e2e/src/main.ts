@@ -13,7 +13,7 @@ import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import start from "./scenarios/start.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, harnesses, Skip, World } from "./world.ts"
+import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
 
 /** The checks by area, in the order they run; an area is selected by its name, a single check by its feature-map ID. */
 const areas: Record<string, ReadonlyArray<Check>> = {
@@ -58,13 +58,13 @@ try {
       await check.run(world)
     } catch (e) {
       outcome = e instanceof Skip ? "skip" : "fail"
-      detail = e instanceof Error ? e.message : String(e)
+      detail = redact(e instanceof Error ? e.message : String(e))
     }
     results.push({ id: check.id, title: check.title, outcome, ...(detail ? { detail } : {}) })
     console.log(
       `${outcome.toUpperCase().padEnd(4)} ${area}: ${check.title}${detail ? `\n     ${detail.split("\n").join("\n     ")}` : ""}`,
     )
-    await fs.writeFile(path.join(evidence, `${check.id}.json`), JSON.stringify(world.log.slice(from), null, 2))
+    await fs.writeFile(path.join(evidence, `${check.id}.json`), redact(JSON.stringify(world.log.slice(from), null, 2)))
   }
 } finally {
   await world.close()
