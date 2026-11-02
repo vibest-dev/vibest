@@ -118,6 +118,6 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
       label: input.label,
       ...(input.focus === true ? { focus: true } : {}),
     })
-    .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message, tail: "" })))
+    .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message })))
   return terminal
 })

@@ -25,7 +25,7 @@ import type { LimitMove } from "./move.ts"
 import { errorMessage, type IdleInput } from "./plugins.ts"
 import { workspaceGit } from "./project-create.ts"
 import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "./results.ts"
-import { type AgentState, type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
+import { type AgentState, peekHint, type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
@@ -110,7 +110,7 @@ export const sessionRounds = (deps: {
     end: Extract<TurnState, "completed" | "failed" | "lost">,
     text: string,
     error: string | undefined,
-    tail = "",
+    checkOutput = "",
   ) {
     const report = parseReport(text)
     const worktree = yield* deps.worktreeOf(session)
@@ -127,7 +127,7 @@ export const sessionRounds = (deps: {
       pushed: repos ? repos.map((r) => `${r.name}=${r.pushed}`).join("\n") : String(g?.pushed ?? false),
       worktree,
     }
-    const body = [text, error ? `error: ${error}` : "", tail ? `terminal tail:\n${tail}` : ""]
+    const body = [text, error ? `error: ${error}` : "", checkOutput ? `check output:\n${checkOutput}` : ""]
       .filter(Boolean)
       .join("\n\n")
     const message = envelope(
@@ -384,10 +384,8 @@ export const sessionRounds = (deps: {
           }),
         )
       }
-      const tail = yield* deps.paneTail(h, terminal)
-      yield* unpasted(
-        `task_not_started: ${session.id} did not start working on the message.\n\nterminal tail:\n${tail}`,
-      )
+      yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* deps.paneTail(h, terminal)}`)
+      yield* unpasted(`task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`)
     }).pipe(Effect.catch((error) => unpasted(errorMessage(Cause.fail(error)))))
   }
 
@@ -433,6 +431,8 @@ export const sessionRounds = (deps: {
     if (session.turnState === "open") {
       if (found.mtimeMs <= session.turnPromptedAt) return "none" as const
     } else {
+      // A turn stopped with no round open is `vibest interrupt`'s own (that turn has no result) or no round of vibest's.
+      if (found.interrupted) return "none" as const
       const last = yield* db.latestRoundAt(session.id)
       if (last !== undefined && found.mtimeMs <= last) return "none" as const
     }
@@ -446,7 +446,7 @@ export const sessionRounds = (deps: {
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    // A round that is not open was never vibest's to check, and a harness failure (a StopFailure) is the result:
+    // A round that is not open was never vibest's to check, and a harness failure (an error turn end) is the result:
     // neither gets the check command run over it.
     if (session.turnState !== "open" || found.error) {
       yield* finish(session, found.error ? "failed" : "completed", found.text, found.error)

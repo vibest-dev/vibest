@@ -35,7 +35,6 @@ const launch = (pluginDir: string): LaunchInput => ({
   scratch: "/scratch",
   rules: "rules",
   rulesFile: "/rules.md",
-  projectsDir: "/projects",
   provider: null,
   model: null,
   sessionId: "uuid",

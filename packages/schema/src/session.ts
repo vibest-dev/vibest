@@ -96,10 +96,9 @@ export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHa
   }
 }
 
-/** A session (or the workspace `vibest` opens) could not be started; `tail` is what its pane showed. */
+/** A session (or the workspace `vibest` opens) could not be started. */
 export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("LaunchFailed", {
   message: Schema.String,
-  tail: Schema.String,
 }) {}
 
 export class NotInRepository extends Schema.TaggedError<NotInRepository>()("NotInRepository", { path: Schema.String }) {

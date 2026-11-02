@@ -431,7 +431,7 @@ Results enter inbox only when `open`, and abnormalities evaluated only when `ope
    4. `agent.start { name, kind, pane_id: <1b pane>, args, timeout_ms: 120000 }`; retries every 500ms on `agent_pane_busy`, up to 40 times.
    5. **ready**: Polling `agent.get` every 500ms until `interactive_ready`, up to 60s. Each tick invokes HarnessAdapter's optional `startup` (startup adaptation, fresh state per launch). Currently used by Claude only: when bottom 40 screen lines match trust / bypass prompt, checks if cursor (`❯`) points to desired option, sends `enter` and records as answered, otherwise sends `down`; sends single keystroke per tick (matching CAO). Timeout notice prompts user to accept dialog in main checkout once.
    6. `prompt` (8.3).
-   7. Any failure: captures trailing 30 lines via `agent.read` as `terminal tail`, runs `worktree.remove { force: true }`, deletes result and rules files, marks row `failed`, delivers `notice` to owner.
+   7. Any failure: logs trailing 30 lines via `agent.read` to the daemon log (never into the notice), runs `worktree.remove { force: true }`, deletes result and rules files, marks row `failed`, delivers `notice` to owner.
 
 ### 8.3 Prompt and Confirm-After-Send
 
@@ -441,7 +441,7 @@ agent.prompt { target: herdrName, text }   (text unchanged: no prefix, footer or
 Wait 8s: agent.get().state_change_seq > seq0 or agent_status == working  → Confirmed
   Otherwise agent.send_keys ['enter'], wait 8s                           → Confirmed
   Otherwise retry agent.prompt once, wait 8s                             → Confirmed
-  Otherwise: status = failed, turn_state = not_started, notice "task_not_started" + tail 30 lines
+  Otherwise: status = failed, turn_state = not_started, notice "task_not_started" naming `vibest peek <id>` (the tail goes to the daemon log)
 ```
 
 Origin: CAO #479/#496/#566, where dropped pastes or swallowed Enters left sessions idle indefinitely with no error. Full re-paste attempted only once to prevent duplicate runs.
@@ -470,7 +470,7 @@ For each session with `turn_state=open`, evaluated upon herdr event, `ResultRead
 2. `agent.get` reports missing → execute `finish('', error='agent exited')` (failed), with bottom 30 lines.
 3. `agent_status == blocked` → update status to blocked, deliver one-time `notice` to owner ("<id> waiting for confirmation, switch to pane to resolve"), without answering automatically.
 4. `agent_status ∈ {idle, done}` and `state_change_seq > seq0` → record `endedAt`;
-   if `now - endedAt > 10s` without result file: execute `finish('', error='the turn ended without a report …')` (lost), with bottom 30 lines (usually harness errors without hooks, e.g. Codex quota / wrong model). No screen scraping for results.
+   if `now - endedAt > 10s` without result file: execute `finish('', error='the turn ended without a report …')` (lost), naming `vibest peek <id>`, never the screen (usually harness errors without hooks, e.g. Codex quota / wrong model). No screen scraping for results.
 5. `unknown` does not count as completed.
 
 `finish`: updates `turn_state` to terminal state; parses report; evaluates `gitState` (queries `branch --show-current`, `@{upstream}`, `rev-list --count` directly, ignoring session self-reports);
@@ -756,7 +756,7 @@ Constants overview:
 
 - Effect 4 `effect/rpc` and `effect/ai` marked unstable, APIs subject to minor version changes; pinned to 4.0.x.
 - Relies on herdr protocol version and community SDK; upgrades require verification, abandoned SDK warrants fork.
-- Harness hook input schemas are vendor-specific and may shift across versions; missing hook triggers fail turn with bottom 30 screen lines attached.
+- Harness hook input schemas are vendor-specific and may shift across versions; missing hook triggers fail turn naming `vibest peek <id>`; no screen text is delivered.
 - Claude startup dialog matches screen text and cursor `❯` (matching CAO); text changes in Claude may stall session until ready timeout; Claude lacks bypass flags or settings for trust (only non-interactive `-p` skips), trust state stored in `~/.claude.json` which omac does not write.
 - Codex requires user confirmation for new hooks; `integration status` untrusted check relies on internal Codex hash algorithm (herdr shares this constraint, key format follows `[hooks.state."<path>:stop:0:0"] trusted_hash`).
 - herdr 0.9 `done` does not distinguish success from error, `blocked` lacks reason; outcome determined from report and `error` field.

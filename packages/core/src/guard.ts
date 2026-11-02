@@ -1,8 +1,9 @@
-// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude PreToolUse
-// (Cursor preToolUse) through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
-// names it. Every agent: no herdr control, no vibest with its identity variables changed, no vibest turn-end bridge. The
+// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude's plugin tool.call
+// (in PreToolUse's shape) and Cursor's preToolUse through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
+// names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
-// may not touch the project directory except a scratchpad (projects/**/scratch). Which vibest commands an agent may run is
+// may not touch the projects directory except its project's scratch directory (VIBEST_SCRATCH): not another project's
+// scratch, and not its own project's instructions.md, docs or memory, for every harness. Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
@@ -23,6 +24,7 @@ const PATH_TOOLS = new Set([
   "edit",
   "multiedit",
   "notebookedit",
+  "notebookread",
   "ls",
   "grep",
   "glob",
@@ -244,6 +246,8 @@ export const shellBlock = (
     const name = base(program)
     if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest)))
       return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
+    // A session runs no herdr at all (once Claude's `Bash(herdr:*)` deny); the coordinator may read herdr's help.
+    if (name === "herdr" && !coordinator) return "Sessions do not run herdr; vibest manages it."
     if (coordinator && HARNESS_CLIS.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
     if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
@@ -331,20 +335,20 @@ const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
 /** Programs that walk a directory tree: given a directory above the project, they reach into it. */
 const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
-/** Every agent but the coordinator: the shared shell denials, and no project directory but a scratchpad (projects slash scratch). */
+/**
+ * Every agent but the coordinator: the shared shell denials, and nothing under the projects directory but the session's own
+ * scratch directory (VIBEST_SCRATCH, which vibestd sets as it opens the session's terminal); without one, nothing there.
+ */
 export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
   const path = yield* Path.Path
   const home = yield* Config.String("HOME")
   const layout = yield* Layout
   const projects = yield* physical(layout.projects)
   const vibestHome = yield* physical(layout.home)
-  const projectsRoot = path.join(vibestHome, "projects")
-  // projects/<key>/scratch and below. The key can contain slashes; another project's scratch is allowed.
-  const inScratch = (target: string) => {
-    const rel = path.relative(projectsRoot, target)
-    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) && rel.split(path.sep).includes("scratch")
-  }
+  const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SCRATCH")))
+  const scratch = own ? yield* physical(own) : undefined
   const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
+  const inScratch = (target: string) => scratch !== undefined && inside(target, scratch)
   /**
    * Where `raw` leads from the agent's cwd (`~` and file URLs expanded), both as the system follows it (symlinks before a
    * later `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse.
@@ -355,9 +359,9 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
     })
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
-  /** Off limits: inside the project but not in the scratchpad; with search, also a directory above the Project. */
+  /** Off limits: inside the projects directory but not the session's scratch; with search, also a directory above it. */
   const blocked = (target: string, search: boolean) =>
-    (inScratch(target) ? false : inside(target, projects)) || (search && inside(projects, target))
+    (search && inside(projects, target)) || (inside(target, projects) && !inScratch(target))
   const tool = call.tool.toLowerCase()
 
   if (SHELL_TOOLS.has(tool)) {
@@ -396,7 +400,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
 })
 
 /**
- * Claude's PreToolUse hook input. Cursor's preToolUse has the same three, but its `cwd` may
+ * The hook input in Claude's PreToolUse shape, which the Claude plugin's tool.call builds. Cursor's preToolUse has the same three, but its `cwd` may
  * be empty or left out (then its one workspace root) and a Shell call carries its own working directory in `tool_input.cwd`.
  */
 const decodePreToolUse = Schema.decodeUnknownEffect(

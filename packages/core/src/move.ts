@@ -70,6 +70,8 @@ export const sessionMove = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
+      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
+      readonly key: string
       readonly near?: Terminal | undefined
     },
   ) => Effect.Effect<Terminal, unknown, MovePlatform>
@@ -94,7 +96,6 @@ export const sessionMove = (deps: {
     end: "failed",
     text: string,
     error: string | undefined,
-    tail?: string,
   ) => Effect.Effect<unknown, unknown, MovePlatform>
   readonly resultFile: (id: string) => string
   readonly rulesFile: (id: string) => string
@@ -292,7 +293,7 @@ export const sessionMove = (deps: {
         harnessSessionId,
       }
       const placed = yield* deps
-        .open(h, machine, nextRow, { project: root, cwd, argv: yield* deps.launchArgv(nextRow, false, key) })
+        .open(h, machine, nextRow, { project: root, cwd, key, argv: yield* deps.launchArgv(nextRow, false, key) })
         .pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         // The one error type has a `code`, and that is all core may decide on: `open`'s `failed` is the start dying

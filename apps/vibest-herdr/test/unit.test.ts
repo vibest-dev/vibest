@@ -44,7 +44,7 @@ import {
 } from "@vibest/core/worktree"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 
@@ -844,16 +844,11 @@ describe("Db", () => {
   )
 })
 
-const decodeClaudeSettings = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.Struct({ permissions: Schema.Struct({ deny: Schema.Array(Schema.String) }) })),
-)
-
 const launchInput: LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234",
   scratch: "/h/.vibest/projects/k/scratch/cli",
   rules: 'line one\nline "two"',
   rulesFile: "/h/.vibest/rules/abcd1234.md",
-  projectsDir: "/h/.vibest/projects",
   provider: null,
   model: null,
   sessionId: "uuid-1",
@@ -923,6 +918,68 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(turnEnd(reply, true))
   })
 
+  it("claude reports every reason of the plugin's TurnComplete: answer as it is, aborted, refusal and error failed", () => {
+    const turnEnd = ADAPTERS.claude.turnEnd!
+    const answer = {
+      hook_event_name: "TurnComplete",
+      session_id: "c1",
+      reason: "answer",
+      last_assistant_message: "done",
+    }
+    assert.deepStrictEqual(turnEnd(answer, false), { result: answer })
+    assert.deepStrictEqual(turnEnd(answer, true), { harnessSessionId: "c1" })
+    const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
+    assert.deepStrictEqual(turnEnd(aborted, false), {
+      result: {
+        ...aborted,
+        aborted: true,
+        error: "interrupted",
+        error_details: "the turn was stopped in its terminal (Esc) before it ended",
+      },
+    })
+    assert.deepStrictEqual(turnEnd(aborted, true), { harnessSessionId: "c1" })
+    const error = { ...answer, reason: "error", last_assistant_message: "" }
+    assert.deepStrictEqual(turnEnd(error, false), {
+      result: { ...error, error: "error", error_details: "the turn ended on an API error" },
+    })
+    assert.deepStrictEqual(turnEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
+      result: {
+        ...error,
+        last_assistant_message: " API Error: 500 ",
+        error: "error",
+        error_details: "the turn ended on an API error",
+      },
+    })
+    const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
+    assert.deepStrictEqual(turnEnd(refusal, false), {
+      result: { ...refusal, error: "refusal", error_details: "cyber: not that" },
+    })
+    assert.deepStrictEqual(turnEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
+      result: {
+        ...refusal,
+        refusal: { category: null, explanation: null },
+        error: "refusal",
+        error_details: "the model refused to answer",
+      },
+    })
+    // Classic events are not reported any more; nor is a coordinator end without its Claude session id.
+    for (const name of ["Stop", "StopFailure", "SubagentStop"])
+      assert.isUndefined(turnEnd({ ...answer, hook_event_name: name }, false), name)
+    assert.isUndefined(turnEnd({ ...answer, session_id: "" }, true))
+  })
+
+  it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
+    const userPrompt = ADAPTERS.claude.userPrompt!
+    const typed = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
+    assert.deepStrictEqual(userPrompt(typed, false), { text: "look here" })
+    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }, false), { text: "look here" })
+    assert.isUndefined(userPrompt(typed, true))
+    assert.isUndefined(userPrompt({ ...typed, text: "  " }, false))
+    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
+      assert.isUndefined(userPrompt({ ...typed, origin }, false), String(origin))
+    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
+  })
+
   it("cursor reads a user prompt from beforeSubmitPrompt", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
@@ -932,18 +989,8 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
   })
 
-  it("claude denies the project's entries (not the scratchpads, which its hook guards) and herdr", () => {
-    const args = ADAPTERS.claude.launchArgs(input)
-    const settings = decodeClaudeSettings(args[args.indexOf("--settings") + 1])
-    assert.deepStrictEqual(settings.permissions.deny, [
-      "Read(//h/.vibest/projects/**/instructions.md)",
-      "Edit(//h/.vibest/projects/**/instructions.md)",
-      "Read(//h/.vibest/projects/**/docs/**)",
-      "Edit(//h/.vibest/projects/**/docs/**)",
-      "Read(//h/.vibest/projects/**/memory/**)",
-      "Edit(//h/.vibest/projects/**/memory/**)",
-      "Bash(herdr:*)",
-    ])
+  it("claude starts with no --settings: its deny rules are the plugin's tool guard (guard.test)", () => {
+    assert.notInclude(ADAPTERS.claude.launchArgs(input), "--settings")
   })
 
   it("Coordinator argv: rules and the inspection tools, no MCP server at all; cursor cannot be one", () => {
@@ -1011,34 +1058,6 @@ describe("HarnessAdapter", () => {
 })
 
 layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) => {
-  it.effect(
-    "claude's deny patterns, matched the way Claude documents (gitignore, here git's own matcher), cover every key shape",
-    () =>
-      Effect.gen(function* () {
-        const root = yield* tempDirectory("vibest-deny-")
-        yield* sh(root, "init", "-q")
-        const projectsDir = `${root}/projects`
-        const args = ADAPTERS.claude.launchArgs({ ...launchInput, projectsDir })
-        const deny = decodeClaudeSettings(args[args.indexOf("--settings") + 1]).permissions.deny
-        // Read(//<root>/projects/...) → /projects/... relative to the repository at <root>.
-        const patterns = deny
-          .filter((d) => d.startsWith("Read("))
-          .map((d) => d.slice("Read(/".length, -1).replace(root, ""))
-        yield* (yield* FileSystem.FileSystem).writeFileString(`${root}/.gitignore`, patterns.join("\n") + "\n")
-        const denied = (p: string) =>
-          git(root, "check-ignore", "-q", "--no-index", p).pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
-          )
-        const key = normalizeRemote("git@github.com:Owner/Repo.git")
-        for (const k of [key, "0123456789ab", "gitlab.com/group/sub/repo"]) {
-          for (const entry of ["instructions.md", "docs/a.md", "docs/sub/b.md", "memory/c.md"])
-            assert.isTrue(yield* denied(`projects/${k}/${entry}`), `${k}/${entry}`)
-          assert.isFalse(yield* denied(`projects/${k}/scratch/pane:s/w1:p1/notes.md`), k)
-        }
-      }),
-  )
-
   it.effect("model listings run in the user's home, not the caller's working directory", () =>
     Effect.gen(function* () {
       const cwds: Array<string | undefined> = []

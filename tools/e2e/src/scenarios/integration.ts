@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, Skip, type World } from "../world.ts"
+import { binary, compiled, expect, harnesses, Skip, until, type World } from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -46,6 +46,68 @@ const result = async (w: World, id: string) =>
     harness: string
     payload: Record<string, unknown>
   }
+
+/** A session as `vibest ls` shows it. */
+const listed = async (w: World, id: string) =>
+  (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"])).find(
+    (e) => e.id === id,
+  )
+const status = async (w: World, id: string) => (await listed(w, id))?.status
+const turnState = async (w: World, id: string) => (await listed(w, id))?.turnState
+
+/** The latest result row `vibest result` shows for a session: its inbox id and message. */
+const latest = async (w: World, id: string) =>
+  (await w.json<{ result?: { id: number; message: string } | null }>(["result", id])).result ?? undefined
+
+/** The turn-end payloads in a session's report lines, oldest first. */
+const ends = async (w: World, id: string) =>
+  (await fs.readFile(path.join(w.vibestHome, "reports", `${id}.jsonl`), "utf8").catch(() => ""))
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as { turn: string; payload?: Record<string, unknown> })
+    .flatMap((l) => (l.turn === "end" && l.payload ? [l.payload] : []))
+
+const STORY = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
+
+/**
+ * One real Claude session (`vibest run claude`) on `task` (a long answer by default), in a herdr session of its own, with
+ * the user's own Claude login: vibestd is started anew without CLAUDE_CONFIG_DIR, as S12 does, and the herdr session gets
+ * its environment. An empty ZDOTDIR keeps a pane's zsh from reading the user's zshrc, which can put the user's own
+ * installed `vibest` ahead of this build on PATH (the plugin's hooks run `vibest` from PATH). Archives the session and
+ * stops that herdr session at the end.
+ */
+const withClaudeSession = async (
+  w: World,
+  body: (s: { id: string; socket: string }) => Promise<void>,
+  task = STORY,
+) => {
+  const session = `${w.herdrSession}-claude`
+  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  const zdot = path.join(w.root, "zdotdir")
+  await fs.mkdir(zdot, { recursive: true })
+  await w.stopDaemon()
+  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
+  let id = ""
+  try {
+    const run = await w.ok(["run", "claude", "--model", "haiku", "--session", session, "--", task], {
+      timeoutMs: 120_000,
+    })
+    id = (JSON.parse(run) as { id: string }).id
+    await body({ id, socket })
+  } finally {
+    if (id) await w.vibest(["archive", id], { timeoutMs: 60_000 })
+    await w.stopDaemon()
+    if (
+      await fs.stat(path.dirname(socket)).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      await w.run(w.root, ["herdr", "session", "stop", session])
+      await w.run(w.root, ["herdr", "session", "delete", session])
+    }
+  }
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -265,6 +327,148 @@ const checks: ReadonlyArray<Check> = [
         JSON.stringify(payload),
       )
       expect(await Bun.file(marker).exists(), "the project's own sessionStart hook did not run")
+    },
+  },
+  {
+    id: "I7",
+    title:
+      "Claude: every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const answer = "Do not use tools. Reply with exactly two lines: `status: completed` and `summary: e2e answer`."
+      await withClaudeSession(
+        w,
+        async ({ id, socket }) => {
+          const settled = (want: string) => async () => (await turnState(w, id)) === want
+          await until("the answer's result", settled("completed"), 120_000)
+          const first = await latest(w, id)
+          expect(
+            /<status>completed<\/status>/.test(first?.message ?? "") &&
+              /summary: e2e answer/.test(first?.message ?? ""),
+            `answer result: ${first?.message.slice(0, 500)}`,
+          )
+          const aborted = async () => (await ends(w, id)).filter((p) => p.reason === "aborted").length
+
+          // The person presses Esc in the pane: one result, failed, that says the turn was interrupted.
+          await w.ok(["send", id, STORY])
+          await until("the story turn", settled("open"), 60_000)
+          await Bun.sleep(10_000)
+          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", `s-${id}`, "esc"], {
+            env: { HERDR_SOCKET_PATH: socket },
+          })
+          expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
+          await until("the interrupted result", settled("failed"), 60_000)
+          const second = await latest(w, id)
+          expect(
+            second !== undefined &&
+              second.id !== first!.id &&
+              second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
+            `Esc result: ${second?.message.slice(0, 500)}`,
+          )
+          expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+
+          // vibest's own interrupt: the same aborted turn.complete reaches vibest, and is no result.
+          await w.ok(["send", id, STORY])
+          await until("the second story turn", settled("open"), 60_000)
+          await Bun.sleep(10_000)
+          await w.ok(["interrupt", id], { timeoutMs: 60_000 })
+          await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
+          await Bun.sleep(5_000)
+          expect((await turnState(w, id)) === "interrupted", `turn state: ${await turnState(w, id)}`)
+          const third = await latest(w, id)
+          expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+        },
+        answer,
+      )
+    },
+  },
+  {
+    id: "I8",
+    title: "`vibest peek <id> [--lines N]` prints the session's terminal on demand; an unknown id is refused",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await withClaudeSession(w, async ({ id }) => {
+        await until("the session working", async () => (await status(w, id)) === "working", 120_000)
+        let screen = ""
+        await until(
+          "Claude's input box on the session's screen",
+          // The story may be in any language and scroll the prompt away; Claude's input box stays at the bottom.
+          async () => /❯/.test((screen = await w.ok(["peek", id]))),
+          60_000,
+        ).catch((e: Error) => {
+          throw new Error(`${e.message}; vibest peek printed:\n${screen}`)
+        })
+        const few = await w.ok(["peek", id, "--lines", "3"])
+        expect(few.trimEnd().split("\n").length <= 3, `--lines 3 printed:\n${few}`)
+        const unknown = await w.vibest(["peek", "nope0000"])
+        expect(unknown.code !== 0 && /NoSuchSession/.test(unknown.stderr), `${unknown.code}: ${unknown.stderr}`)
+      })
+    },
+  },
+  {
+    id: "I9",
+    title:
+      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of a project's instructions.md and memory, and any herdr",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const project = path.join(w.vibestHome, "projects", "e2e-guard")
+      await fs.mkdir(path.join(project, "memory"), { recursive: true })
+      await fs.writeFile(path.join(project, "instructions.md"), "The secret word is lighthouse.\n")
+      await fs.writeFile(path.join(project, "memory", "notes.md"), "The secret word is lighthouse.\n")
+      const task = [
+        "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
+        "expected, so make the next call after each one:",
+        "(1) the Bash tool with the command: herdr --help;",
+        `(2) the Read tool with file_path ${path.join(project, "instructions.md")};`,
+        // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
+        `(3) the Bash tool with the command: find ${path.join(project, "memory")} -name '*.md';`,
+        `(4) the Bash tool with the command: grep -r secret ${project}.`,
+        "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
+      ].join(" ")
+      await withClaudeSession(
+        w,
+        async ({ id }) => {
+          await until(
+            "the session's result",
+            async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
+            180_000,
+          )
+          // What each call returned is in Claude's own transcript (the user's ~/.claude, as CLAUDE_CONFIG_DIR is unset).
+          const worktree = await fs.realpath((await listed(w, id))!.worktree)
+          const dir = path.join(w.home, ".claude", "projects", worktree.replace(/[^a-zA-Z0-9]/g, "-"))
+          // Each tool call Claude made, by name, with what came back for it.
+          const calls = new Map<string, { name: string; input: string; result: string }>()
+          for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
+            for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
+              const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
+              if (!Array.isArray(content)) continue
+              for (const c of content as Array<Record<string, unknown>>) {
+                if (c.type === "tool_use")
+                  calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
+                const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
+                if (call) call.result += JSON.stringify(c.content)
+              }
+            }
+          const offLimits = "The project directory is off limits to sessions, except your scratchpad."
+          const want: ReadonlyArray<readonly [string, string, string]> = [
+            ["Read", "instructions.md", offLimits],
+            ["Bash", "find ", offLimits],
+            ["Bash", "grep ", offLimits],
+            ["Bash", "herdr ", "Sessions do not run herdr; vibest manages it."],
+          ]
+          const made = [...calls.values()]
+          for (const [tool, input, reason] of want)
+            expect(
+              made.some((c) => c.name === tool && c.input.includes(input) && c.result.includes(reason)),
+              `no ${tool} ${input}call refused with "${reason}": ${JSON.stringify(made).slice(0, 1500)}`,
+            )
+          expect(
+            made.every((c) => !c.result.includes("lighthouse")),
+            `a refused file's text reached Claude: ${JSON.stringify(made).slice(0, 1500)}`,
+          )
+        },
+        task,
+      )
     },
   },
   {

@@ -1,4 +1,4 @@
-// `vibest integration stop`: Claude's native Stop / StopFailure bridge. Isolated HOME, fake socket, no live daemon.
+// `vibest integration stop` / `prompt`: the Claude plugin's turn.complete and prompt.submit bridges. Isolated HOME, fake socket, no live daemon.
 import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
@@ -64,8 +64,8 @@ const rpc = (lines: readonly string[]) =>
     return message.method && !message.method.startsWith("@effect/") ? [message] : []
   })
 
-const event = { hook_event_name: "Stop", session_id: "c1", last_assistant_message: "done" }
-const promptEvent = { hook_event_name: "UserPromptSubmit", session_id: "c1", prompt: "look here", source: "user" }
+const event = { hook_event_name: "TurnComplete", session_id: "c1", reason: "answer", last_assistant_message: "done" }
+const promptEvent = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
 
 const promptAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationPrompt(claude, raw).pipe(
@@ -129,7 +129,7 @@ layer(Platform.services)("claude integration stop", (it) => {
       yield* stopAt(
         home,
         { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" },
-        JSON.stringify({ ...event, hook_event_name: "StopFailure" }),
+        JSON.stringify({ ...event, reason: "aborted" }),
       )
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
       assert.deepStrictEqual(
@@ -140,7 +140,7 @@ layer(Platform.services)("claude integration stop", (it) => {
   )
 
   it.effect(
-    "invalid input, a subagent, a foreign event, a missing harness id, and a path-like session id do nothing",
+    "invalid input, a classic event, a foreign event, a missing harness id, and a path-like session id do nothing",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -158,11 +158,12 @@ layer(Platform.services)("claude integration stop", (it) => {
           [worker, "not json"],
           [worker, "[]"],
           [worker, "null"],
-          [worker, JSON.stringify({ ...event, agent_id: "sub" })],
+          [worker, JSON.stringify({ ...event, hook_event_name: "Stop" })],
+          [worker, JSON.stringify({ ...event, hook_event_name: "StopFailure", error: "rate_limit" })],
           [worker, JSON.stringify({ hook_event_name: "PreToolUse", session_id: "c1" })],
           [worker, JSON.stringify({ session_id: "c1" })],
-          [coordinator, JSON.stringify({ hook_event_name: "Stop" })],
-          [coordinator, JSON.stringify({ hook_event_name: "Stop", session_id: "" })],
+          [coordinator, JSON.stringify({ hook_event_name: "TurnComplete" })],
+          [coordinator, JSON.stringify({ hook_event_name: "TurnComplete", session_id: "" })],
           [coordinator, "not json"],
           [{ ...worker, VIBEST_SESSION_ID: "../evil" }, JSON.stringify(event)],
         ] as const) {
@@ -221,7 +222,7 @@ layer(Platform.services)("claude integration stop", (it) => {
       }),
   )
 
-  it.effect("a user prompt notifies Prompt; the coordinator, a nested agent, and a non-user source do not", () =>
+  it.effect("a prompt the person submitted notifies Prompt; the coordinator and any other origin do not", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
       const home = yield* tempDirectory("p-")
@@ -235,9 +236,10 @@ layer(Platform.services)("claude integration stop", (it) => {
       )
       for (const [env, raw] of [
         [{ VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "w1" }, JSON.stringify(promptEvent)],
-        [worker, JSON.stringify({ ...promptEvent, agent_id: "sub" })],
-        [worker, JSON.stringify({ ...promptEvent, source: "system" })],
-        [worker, JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "  " })],
+        [worker, JSON.stringify({ ...promptEvent, origin: "task-notification" })],
+        [worker, JSON.stringify({ ...promptEvent, origin: "plugin" })],
+        [worker, JSON.stringify({ ...promptEvent, text: "  " })],
+        [worker, JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" })],
         [{}, JSON.stringify(promptEvent)],
         [worker, "not json"],
       ] as const) {

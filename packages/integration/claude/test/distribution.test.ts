@@ -26,15 +26,7 @@ const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'
 // exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
-const EVENTS = [
-  "classic.PreToolUse",
-  "classic.Stop",
-  "classic.StopFailure",
-  "classic.UserPromptSubmit",
-  "command.run",
-  "session.end",
-  "session.start",
-]
+const EVENTS = ["command.run", "prompt.submit", "session.end", "session.start", "tool.call", "turn.complete"]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))
 
@@ -236,10 +228,10 @@ describe("claude plugin distribution", () => {
     assert.include(source, "2eff7a8d21c80be48904f62ebdea36d945d7b504")
     const bundle = fs.readFileSync(path.join(packed, "hooks/register.mjs"), "utf8")
     assert.isFalse(IMPORT.test(bundle))
-    assert.match(bundle, /on\("classic\.Stop"/)
-    assert.match(bundle, /on\("classic\.StopFailure"/)
-    assert.match(bundle, /on\("classic\.UserPromptSubmit"/)
-    assert.match(bundle, /on\("classic\.PreToolUse"/)
+    assert.match(bundle, /on\("turn\.complete"/)
+    assert.match(bundle, /on\("prompt\.submit"/)
+    assert.match(bundle, /on\("tool\.call"/)
+    assert.notMatch(bundle, /on\("classic\./)
     assert.notMatch(bundle, /vibest-hook\.sh|VIBEST_COMMAND/)
   })
 })

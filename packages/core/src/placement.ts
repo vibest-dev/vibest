@@ -1,4 +1,4 @@
-import { LaunchFailed, NoSuchSession, NotReady } from "@vibest/schema/session"
+import { NoSuchSession, NotReady } from "@vibest/schema/session"
 // Where a session's terminal goes, and the labels the runtime shows on it. `root` is a project directory, never the
 // project key. Placement is the runtime's (runtime-port.md §3): core asks for a terminal running the harness argv,
 // kept beside the project's other terminals (`near`), and labels it with `present` when the runtime has one.
@@ -77,7 +77,7 @@ export const sessionPlacement = (deps: {
   readonly vibest: ReadonlyArray<string>
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly rulesInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow, scratch: string) => Readonly<Record<string, string>>
   /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
@@ -93,7 +93,6 @@ export const sessionPlacement = (deps: {
     onHandover?: Effect.Effect<void>,
     options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | unknown, FileSystem.FileSystem>
-  readonly paneTail: (h: Runtime, terminal: Terminal | undefined) => Effect.Effect<string>
   /** Sessions' post-open step: the first turn's prompt, once the terminal exists. */
   readonly afterOpen: (
     h: Runtime,
@@ -162,6 +161,8 @@ export const sessionPlacement = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
+      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
+      readonly key: string
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
     },
@@ -172,7 +173,7 @@ export const sessionPlacement = (deps: {
       project: input.project,
       cwd: input.cwd,
       argv: input.argv,
-      env: { ...session.metadata.env, ...deps.vibestEnv(session) },
+      env: { ...session.metadata.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
       label: `${session.id} ${session.name}`.slice(0, 60),
       ...(near !== undefined ? { near } : {}),
       ...(input.split === true ? { split: true } : {}),
@@ -277,6 +278,7 @@ export const sessionPlacement = (deps: {
       openTerminal(h, machine, session, {
         project: root,
         cwd: worktree,
+        key,
         argv,
         ...(near !== undefined ? { near } : {}),
         ...(peer !== undefined ? { split: true } : {}),
@@ -286,7 +288,7 @@ export const sessionPlacement = (deps: {
     return yield* deps.afterOpen(h, session, terminal.value, root, rules, firstPrompt)
     // The undos above (worktree, rules, terminal) run when this scope closes: before `launch`'s catch below turns the failure into a notice.
   }, Effect.scoped)
-  /** A failed launch closes the row's turn and tells the owner, keeping what the terminal showed. */
+  /** A failed launch closes the row's turn and tells the owner why, with no screen text (its terminal is closed by then). */
   const launch = (
     h: Runtime,
     machine: Machine,
@@ -299,12 +301,11 @@ export const sessionPlacement = (deps: {
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const e = Cause.squash(cause)
-          const tail = e instanceof LaunchFailed && e.tail ? `\n\nterminal tail:\n${e.tail}` : ""
           const t = yield* Clock.currentTimeMillis
           yield* db.closeTurn(session.id, "failed", { status: "unknown", exitedAt: t, lastActive: t })
           yield* deps.notice(
             session,
-            `${session.id} failed to start ${session.harnessId}: ${e instanceof Error ? e.message : String(e)}${tail}`,
+            `${session.id} failed to start ${session.harnessId}: ${e instanceof Error ? e.message : String(e)}`,
           )
         }),
       ),
@@ -385,7 +386,7 @@ export const sessionPlacement = (deps: {
     const terminal = yield* undoOnFailure(
       deps
         .launchArgv(session, true, key)
-        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, argv }))),
+        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, key, argv }))),
       (terminal) => h.close(terminal).pipe(Effect.ignore),
     )
     yield* show(h, session, terminal, root)

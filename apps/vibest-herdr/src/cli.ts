@@ -290,13 +290,11 @@ const startMain =
         if (Option.isSome(o.session))
           return yield* new LaunchFailed({
             message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
-            tail: "",
           })
         const terminal = yield* callerTerminal
         if (terminal === undefined)
           return yield* new LaunchFailed({
             message: "this pane's herdr session could not be named; run vibest outside herdr",
-            tail: "",
           })
         // git prints the physical path; compare like with like. Below the root: this pane's shell runs it again from there.
         if ((yield* fs.realPath(cwd)) !== root) {
@@ -304,7 +302,6 @@ const startMain =
           if (live === undefined)
             return yield* new LaunchFailed({
               message: `this pane is marked as the main agent's, but herdr could not be reached to run it at ${root}`,
-              tail: "",
             })
           return yield* runAtRoot(live.h, live.paneId, root, Launch.again(again, root, marked))
         }
@@ -329,7 +326,7 @@ const startMain =
                 if (stopped.result === "running" || stopped.result === "moved") {
                   const why = stopped.result === "moved" ? "the main agent moved" : "the main agent did not stop"
                   yield* Console.error(`not starting: ${why}; run vibest again`)
-                  return yield* new LaunchFailed({ message: why, tail: "" })
+                  return yield* new LaunchFailed({ message: why })
                 }
               }
             }
@@ -440,6 +437,26 @@ const interrupt = Command.make("interrupt", { id }, (o) =>
 ).pipe(
   Command.withDescription(
     "Interrupt a session's running turn; the session stays for follow-ups (no result arrives for that turn)",
+  ),
+)
+
+const peek = Command.make(
+  "peek",
+  {
+    id,
+    lines: Flag.Int("lines").pipe(
+      Flag.withAlias("n"),
+      Flag.withDescription("How many of the last lines to print (at most 500; vibestd's default is 30)"),
+      Flag.optional,
+    ),
+  },
+  (o) =>
+    vibest((client) => client.Peek({ id: o.id, lines: Option.getOrUndefined(o.lines) })).pipe(
+      Effect.flatMap((r) => Console.log(r.text)),
+    ),
+).pipe(
+  Command.withDescription(
+    "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the turn ended without a report or did not start",
   ),
 )
 
@@ -1249,6 +1266,7 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       status,
       result,
       interrupt,
+      peek,
       archive,
       ls,
       report,

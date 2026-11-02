@@ -2,10 +2,25 @@
 
 One ordinary Claude Code plugin with two parts:
 
-- **Native classic listeners** for every VIBEST session, workers and the coordinator: `classic.Stop` and
-  `classic.StopFailure` report the turn end (a worker's result, or the coordinator's Claude session) by running
-  `vibest integration stop --harness claude`, and `classic.PreToolUse` runs `vibest integration guard --harness claude`. These are native event names, not
-  command-hook registrations.
+- **Native listeners** for every VIBEST session, workers and the coordinator, not command hooks or classic events:
+  - `turn.complete` reports every main-loop turn end (a worker's result, or the coordinator's Claude session) as
+    `TurnComplete` with its `reason`, the answer and the Claude session id, by running
+    `vibest integration stop --harness claude`. vibest maps the reason: `answer` is the result as it is; `aborted` is an
+    interrupted (failed) result when the person pressed Esc in the pane, and nothing when `vibest interrupt` (or remove,
+    archive) stopped the turn, because vibest closed that round first; `refusal` and `error` are failed results. A
+    `vibest interrupt` whose Esc does not stop the turn within 10 s fails with SessionBusy and leaves the round open,
+    so the aborted turn.complete that follows (once the turn does stop) is delivered as an interrupted result. A
+    subagent's loop (`agentId` set) reports nothing. Claude fires no `Stop` for a turn stopped with Esc, so `classic.Stop`
+    is not used.
+  - turn.complete carries no API error kind: `StopFailure`'s `rate_limit`, `billing_error`, `model_not_found` and so on
+    are not available, so an `error` result names no cause and a Claude usage limit does not trigger vibest's
+    usage-limit move (`agent.fail`).
+  - `prompt.submit` reports a prompt with its `origin.kind` to `vibest integration prompt --harness claude`; vibest keeps
+    only what the person submitted (`composer`, or `bridge` for Remote Control), not a task notification, a scheduled
+    trigger, a peer or a plugin's prompt.
+  - `tool.call` runs `vibest integration guard --harness claude` for each tool call, a subagent's included, and returns
+    `{ deny }` when vibest refuses it. It holds the deny rules Claude once got from `--settings` (a session's Read, Edit,
+    Glob, Grep, NotebookRead and shell access to the project store, and any herdr command); vibest passes no `--settings`.
 - **The inbox module**, for a Claude **coordinator** only: it delivers VIBEST inbox claims into the coordinator as prompts,
   through the native hooks API.
 
@@ -24,8 +39,8 @@ The plugin directory holds exactly:
 - `.claude-plugin/plugin.json`, generated: `src/manifest.json` with `version` set from this `package.json`.
 - `hooks/hooks.json`: `"modules": ["./register.mjs"]` only. No command-hook map and no shell wrapper.
 - `hooks/register.mjs`, generated: a single ES module with no imports. It bundles `src/plugin.ts` together with the
-  client (`src/inbox-client.ts`) and the adapters (`src/inbox-adapter.ts`) it uses. The native `classic.*` listeners are
-  in that module. Prebuilt JS is a delivery choice; Claude Code can also load TypeScript hooks modules.
+  client (`src/inbox-client.ts`) and the adapters (`src/inbox-adapter.ts`) it uses. The native turn-end, prompt and
+  tool-call listeners are in that module. Prebuilt JS is a delivery choice; Claude Code can also load TypeScript hooks modules.
 - `README.md` and `LICENSE`.
 
 The generated files are ignored by Git. `test/distribution.test.ts` packs this package and checks the extracted files.
@@ -37,19 +52,21 @@ Nothing to install. vibest starts each Claude session (and a Claude coordinator)
 the user installed. vibest writes nothing into `~/.claude`. Plain `claude` sessions never load it.
 
 **The `vibest` it calls is the one on PATH.** The module calls the bare `vibest`: `vibest inbox …` for the inbox, and
-`vibest integration stop --harness claude` / `vibest integration guard --harness claude` for the native listeners. There
+`vibest integration stop|prompt|guard --harness claude` for the native listeners. There
 is no shell and no `VIBEST_COMMAND` override.
 
 **Mods are not sandboxed.** The inbox module is a mod, code that Claude Code runs in its own process with your permissions.
 Its own `$.fs` and `$.process` calls do not go through Claude's tool permission rules or `PreToolUse` hooks, and a
 process it starts runs outside the Bash sandbox. What it intends to do is narrow: run the fixed bare argv `vibest inbox attach|pull|ack|release …`,
-`vibest integration stop --harness claude` and `vibest integration guard --harness claude`, read the claim file `vibest inbox pull` names, and submit that text
-as a prompt. The
-module registers no `tool.call` interception, no `tool.check` approval, and changes no permission or policy setting.
-`classic.PreToolUse` is a native listener in this module. It is not the settings.json command hook.
+`vibest integration stop --harness claude`, `vibest integration prompt --harness claude` and
+`vibest integration guard --harness claude`, read the claim file `vibest inbox pull` names, and submit that text
+as a prompt. Its
+`tool.call` listener only refuses (it never rewrites a call or its result); it registers no `tool.check` approval and
+changes no permission or policy setting. A module that does not load guards nothing: with no `--settings`, the guard
+rules hold only while this module runs (a failed guard bridge refuses the call).
 
 **Where it acts.** The plugin loads only into the Claude sessions vibest starts. The native listeners are always registered there.
-`classic.PreToolUse` calls vibest only when `VIBEST_AGENT` is set; `classic.Stop` and `classic.StopFailure` call vibest only
+`tool.call` calls vibest only when `VIBEST_AGENT` is set; `turn.complete` and `prompt.submit` call vibest only
 when `VIBEST_AGENT` and `VIBEST_SESSION_ID` are both set. Elsewhere they return `next` and do not call vibest. The inbox
 module acts only in a process whose environment marks it as an VIBEST coordinator. That environment is what `vibest`
 sets up:
@@ -58,13 +75,16 @@ sets up:
 - `HERDR_PANE_ID` and `HERDR_SOCKET_PATH`;
 - the reported Claude session that the daemon fences on.
 
-The module always registers `session.start`, `session.end`, `command.run`, and the three `classic.*` listeners. In any other
+The module always registers `session.start`, `session.end`, `command.run`, `turn.complete`, `prompt.submit` and
+`tool.call`. In any other
 process (a worker, or a plain `claude`) they activate no receiver: the module registers no `/vibest-reattach` command,
 starts no timer and never calls `vibest inbox`. Setting the VIBEST
 variables by hand is not a substitute, because it does not create the coordinator's daemon-side identity.
 
 **Loading gate.** Claude Code statically analyzes a hooks module before loading it. Claude Code 2.1.316 loaded this
-revision in `claude -p` (E2E I4): `classic.PreToolUse` refused a herdr call and `classic.Stop` wrote the result. The inbox
+revision in `claude -p` (E2E I4): `tool.call` refused a herdr call and `turn.complete` wrote the result. In a session
+vibest launched (E2E I7, I9) turn.complete fired for an answer, a person's Esc and `vibest interrupt`, and `tool.call`
+refused Read, find, grep and herdr. The inbox
 module has not been exercised in a live coordinator.
 
 - `register` stays a top-level `function` declaration. Each hook passes `$` only to the top-level `nativeHost`.
@@ -82,8 +102,8 @@ module has not been exercised in a live coordinator.
 - **`vibest` on PATH with the `inbox` command.** Calls are the bare argv `vibest inbox attach|pull|ack|release …`, run
   through `$.process.run` with the host's PATH and environment, with no shell. An `vibest` without `inbox` makes attach fail
   with an exit code, and the status line says so.
-- **This Claude session reported to VIBEST.** VIBEST learns the coordinator's Claude session from the `Stop` /
-  `StopFailure` hook when a turn ends; there is no SessionStart report. Until then attach answers `not-reported`, and
+- **This Claude session reported to VIBEST.** VIBEST learns the coordinator's Claude session from `turn.complete`
+  when a turn ends; there is no SessionStart report. Until then attach answers `not-reported`, and
   the module keeps polling with ordinary attach (see Behavior). Before the first turn ends nothing is delivered.
 
 ## Behavior
@@ -149,8 +169,7 @@ The pin is anthropics/claude-code `2eff7a8d21c80be48904f62ebdea36d945d7b504`, `m
 under Anthropic's commercial terms. This repository does not assert permission to redistribute it, and a missing or
 unverified cache fails typecheck instead of skipping the plugin project. The cache was not produced by running Claude or `/plugin-types`.
 
-The listeners are `classic.Stop`, `classic.StopFailure`, `classic.PreToolUse`, `session.start`, `session.end` and
-`command.run`. Native calls stay in `register` or the top-level `nativeHost`: `$.process.run`, `$.session.cwd`,
+The listeners are `turn.complete`, `prompt.submit`, `tool.call`, `session.start`, `session.end` and `command.run`. Native calls stay in `register` or the top-level `nativeHost`: `$.process.run`, `$.session.cwd`,
 `$.session.id`, `$.env.get`, `$.fs.read`, `$.prompt.submit`, `$.command.register`, `$.clock.every`, `$.ui.status`.
 
 Hooks modules are early access and may change between releases. `claude plugin validate` and `claude plugin test` have

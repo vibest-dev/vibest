@@ -173,6 +173,7 @@ const ACCESS = {
   "Project.Delete": "agent",
   Send: "owner",
   Interrupt: "owner",
+  Peek: "owner",
   Remove: "owner",
   "Daemon.Stop": "cli",
 } as const satisfies Record<
@@ -555,6 +556,12 @@ export const handlers = VibestRpcs.toLayer(
           const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
           return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
         }),
+
+      Peek: ({ id, lines }) =>
+        managed("Peek", id).pipe(
+          Effect.andThen(sessions.peek(id, lines ?? 30)),
+          Effect.map((text) => ({ text })),
+        ),
 
       Report: ({ message }) =>
         Effect.gen(function* () {

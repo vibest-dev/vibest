@@ -56,8 +56,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     start?: Function
     end?: Function
     command?: { matcher: { command: string }; hook: Function }
-    stop?: Function
-    stopFailure?: Function
+    turnComplete?: Function
     prompt?: Function
     preTool?: Function
   } = {}
@@ -66,10 +65,9 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     if (event === "session.start") hooks.start = a as Function
     else if (event === "session.end") hooks.end = a as Function
     else if (event === "command.run") hooks.command = { matcher: a as { command: string }, hook: b as Function }
-    else if (event === "classic.Stop") hooks.stop = a as Function
-    else if (event === "classic.StopFailure") hooks.stopFailure = a as Function
-    else if (event === "classic.UserPromptSubmit") hooks.prompt = a as Function
-    else if (event === "classic.PreToolUse") hooks.preTool = a as Function
+    else if (event === "turn.complete") hooks.turnComplete = a as Function
+    else if (event === "prompt.submit") hooks.prompt = a as Function
+    else if (event === "tool.call") hooks.preTool = a as Function
     else throw new Error(`unexpected hook ${event}`)
     return { catch: (handler: Function) => void (catches[event] = handler) }
   }
@@ -186,8 +184,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     /** Starts a command run without awaiting it, for runs held at a native call. */
     begin: (name: string): Promise<CommandRunResult> =>
       hooks.command!.hook($, { command: name, args: "" }, async () => ({})),
-    stop: (event: object, next: Function = async (e: object) => e) => hooks.stop!($, event, next),
-    stopFailure: (event: object, next: Function = async (e: object) => e) => hooks.stopFailure!($, event, next),
+    turnComplete: (event: object, next: Function = async (e: object) => e) => hooks.turnComplete!($, event, next),
     prompt: (event: object, next: Function = async (e: object) => e) => hooks.prompt!($, event, next),
     preTool: (event: object, next: Function = async (e: object) => e) => hooks.preTool!($, event, next),
     /** One period of every live clock.every. */
@@ -309,7 +306,7 @@ describe("Claude plugin delivery", () => {
     ])
     assert.match(h.statuses.at(-1)!, /waiting for VIBEST to record this Claude session/)
     assert.strictEqual(h.live().length, 1, "polling continues")
-    // The first Stop / StopFailure reported this session.
+    // The first turn.complete reported this session.
     reported = true
     await h.tick()
     assert.strictEqual(h.statuses.at(-1), "VIBEST inbox attached")
@@ -674,6 +671,8 @@ describe("Claude plugin native listeners", () => {
   const worker = { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }
   const below = { additionalContext: ["kept"] }
   const bash = { tool: "Bash", tool_use_id: "tu1", command: "ls", timeout: 5, description: "list" }
+  const end = { answer: "done", turnId: "t1", durationMs: 5, isAborted: false }
+  const stdin = (h: ReturnType<typeof host>, i = 0) => JSON.parse((h.inits[i] as { stdin: string }).stdin)
 
   const pass = (): RunResult => ({ exitCode: 0, stdout: "\n", stderr: "" })
   const denyBody = (reason: string) =>
@@ -681,79 +680,88 @@ describe("Claude plugin native listeners", () => {
       hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
     })
 
-  it("Stop and StopFailure call vibest integration stop with the event, then return next unchanged", async () => {
-    const h = host(worker)
-    h.state.replies.stop = async () => pass()
-    for (const [fire, name] of [
-      [h.stop, "Stop"],
-      [h.stopFailure, "StopFailure"],
-    ] as const) {
-      const event = { hook_event_name: name, session_id: "c1", last_assistant_message: "done", extra: true }
+  it("turn.complete reports every main-loop turn end with its reason, the Claude session and the answer, then returns next unchanged", async () => {
+    for (const reason of ["answer", "aborted", "error"] as const) {
+      const h = host(worker)
+      h.state.replies.stop = async () => pass()
+      const event = { ...end, reason, isAborted: reason === "aborted" }
       const before = JSON.stringify(event)
-      const result = await fire(event, async (e: object) => ({ echoed: e }))
+      assert.deepStrictEqual(await h.turnComplete(event, async (e: object) => ({ echoed: e })), { echoed: event })
       assert.strictEqual(JSON.stringify(event), before)
-      assert.deepStrictEqual(result, { echoed: event })
+      assert.deepStrictEqual(h.runs, [["vibest", "integration", "stop", "--harness", "claude"]])
+      assert.deepStrictEqual(stdin(h), {
+        hook_event_name: "TurnComplete",
+        session_id: "s1",
+        reason,
+        last_assistant_message: "done",
+      })
+      assert.deepStrictEqual(h.inits[0], {
+        stdin: (h.inits[0] as { stdin: string }).stdin,
+        timeoutMs: plugin.BRIDGE_TIMEOUT_MS,
+      })
     }
-    assert.deepStrictEqual(h.runs, [
-      ["vibest", "integration", "stop", "--harness", "claude"],
-      ["vibest", "integration", "stop", "--harness", "claude"],
-    ])
-    assert.deepStrictEqual(
-      h.inits.map((init) => JSON.parse((init as { stdin: string }).stdin).hook_event_name),
-      ["Stop", "StopFailure"],
-    )
-    assert.deepStrictEqual(
-      h.inits.map((init) => (init as { timeoutMs: number }).timeoutMs),
-      [plugin.BRIDGE_TIMEOUT_MS, plugin.BRIDGE_TIMEOUT_MS],
-    )
-    assert.isTrue(h.inits.every((init) => !("env" in (init as object)) && !("cwd" in (init as object))))
+    const refused = host(worker)
+    refused.state.replies.stop = async () => pass()
+    const refusal = { category: "cyber", explanation: "not that" }
+    await refused.turnComplete({ ...end, answer: "", reason: "refusal", refusal })
+    assert.deepStrictEqual(stdin(refused), {
+      hook_event_name: "TurnComplete",
+      session_id: "s1",
+      reason: "refusal",
+      last_assistant_message: "",
+      refusal,
+    })
   })
 
-  it("forwards a subagent stop event for the bridge to ignore, and still returns next", async () => {
+  it("turn.complete of a subagent's loop reports nothing; the coordinator's reports its Claude session", async () => {
     const h = host(worker)
     h.state.replies.stop = async () => pass()
-    const event = { hook_event_name: "Stop", agent_id: "sub", session_id: "c1" }
-    const result = await h.stop(event, async () => below)
-    assert.strictEqual(result, below)
-    assert.deepStrictEqual(JSON.parse((h.inits[0] as { stdin: string }).stdin), event)
+    assert.strictEqual(await h.turnComplete({ ...end, reason: "aborted", agentId: "sub" }, async () => below), below)
+    assert.deepStrictEqual(h.runs, [])
+    const coordinator = host()
+    coordinator.state.replies.stop = async () => pass()
+    await coordinator.turnComplete({ ...end, reason: "answer" })
+    assert.strictEqual(stdin(coordinator).session_id, "s1")
   })
 
-  it("UserPromptSubmit reports a user-typed prompt, and skips the coordinator, a nested agent, and a non-user source", async () => {
+  it("prompt.submit reports the prompt with its origin (the adapter keeps the person's), and skips the coordinator and outside VIBEST", async () => {
     const h = host(worker)
     h.state.replies.prompt = async () => pass()
-    const event = { hook_event_name: "UserPromptSubmit", session_id: "c1", prompt: "look here", source: "user" }
+    const event = { text: "look here", wait: false, origin: { kind: "composer" } }
     const before = JSON.stringify(event)
     assert.deepStrictEqual(await h.prompt(event, async (e: object) => ({ echoed: e })), { echoed: event })
     assert.strictEqual(JSON.stringify(event), before)
-    assert.deepStrictEqual(h.runs, [["vibest", "integration", "prompt", "--harness", "claude"]])
-    assert.deepStrictEqual(JSON.parse((h.inits[0] as { stdin: string }).stdin), event)
+    await h.prompt({ ...event, origin: { kind: "task-notification" } })
+    await h.prompt({ ...event, origin: { kind: "plugin", name: "x" } })
+    assert.deepStrictEqual(h.runs, [
+      ["vibest", "integration", "prompt", "--harness", "claude"],
+      ["vibest", "integration", "prompt", "--harness", "claude"],
+      ["vibest", "integration", "prompt", "--harness", "claude"],
+    ])
+    assert.deepStrictEqual(
+      [0, 1, 2].map((i) => stdin(h, i)),
+      [
+        { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" },
+        { hook_event_name: "PromptSubmit", text: "look here", origin: "task-notification" },
+        { hook_event_name: "PromptSubmit", text: "look here", origin: "plugin" },
+      ],
+    )
     assert.strictEqual((h.inits[0] as { timeoutMs: number }).timeoutMs, plugin.BRIDGE_TIMEOUT_MS)
-
-    for (const skipped of [
-      { ...event, source: "system" },
-      { ...event, source: "sdk" },
-      { ...event, agent_id: "sub" },
-    ]) {
-      const quiet = host(worker)
+    for (const env of [COORDINATOR, {}, { VIBEST_AGENT: "session" }]) {
+      const quiet = host(env)
       quiet.state.replies.prompt = async () => pass()
-      assert.deepStrictEqual(await quiet.prompt(skipped, async () => below), below)
+      assert.deepStrictEqual(await quiet.prompt(event, async () => below), below)
       assert.deepStrictEqual(quiet.runs, [])
     }
-    const coordinator = host()
-    coordinator.state.replies.prompt = async () => pass()
-    assert.deepStrictEqual(await coordinator.prompt(event, async () => below), below)
-    assert.deepStrictEqual(coordinator.runs, [])
-    const outside = host({})
-    outside.state.replies.prompt = async () => pass()
-    assert.deepStrictEqual(await outside.prompt(event, async () => below), below)
-    assert.deepStrictEqual(outside.runs, [])
   })
 
   it("a failed prompt bridge still returns next and does not block the prompt", async () => {
     const h = host(worker)
     h.state.replies.prompt = async () => Promise.reject(new Error("timed out"))
-    const event = { hook_event_name: "UserPromptSubmit", prompt: "look here" }
-    assert.strictEqual(await h.prompt(event, async () => below), below)
+    assert.strictEqual(
+      await h.prompt({ text: "look here", wait: false, origin: { kind: "composer" } }, async () => below),
+      below,
+    )
   })
 
   it("does not call the stop bridge outside VIBEST, or without a session id", async () => {
@@ -764,8 +772,7 @@ describe("Claude plugin native listeners", () => {
       { VIBEST_AGENT: "", VIBEST_SESSION_ID: "w1" },
     ]) {
       const h = host(env)
-      const event = { hook_event_name: "Stop", session_id: "c1" }
-      assert.deepStrictEqual(await h.stop(event, async () => below), below)
+      assert.deepStrictEqual(await h.turnComplete({ ...end, reason: "answer" }, async () => below), below)
       assert.deepStrictEqual(h.runs, [])
     }
   })
@@ -773,14 +780,13 @@ describe("Claude plugin native listeners", () => {
   it("a failed stop bridge still returns next and does not block the turn", async () => {
     const h = host(worker)
     h.state.replies.stop = async () => Promise.reject(new Error("timed out"))
-    const event = { hook_event_name: "Stop", session_id: "c1" }
-    assert.strictEqual(await h.stop(event, async () => below), below)
+    assert.strictEqual(await h.turnComplete({ ...end, reason: "answer" }, async () => below), below)
   })
 
-  it("PreToolUse maps the envelope to guard stdin, keeps the event, and returns next on an empty pass", async () => {
+  it("tool.call maps the call to guard stdin (reserved keys left out), keeps the event, and returns next on an empty pass", async () => {
     const h = host(worker)
     h.state.replies.guard = async () => pass()
-    const event = { ...bash }
+    const event = { ...bash, agentId: "sub", consent: "The user pressed 1" }
     const before = JSON.stringify(event)
     let seen: object | undefined
     const result = await h.preTool(event, async (e: object) => {
@@ -852,14 +858,14 @@ describe("Claude plugin native listeners", () => {
     }
   })
 
-  it("outside VIBEST, PreToolUse returns next and does not call vibest", async () => {
+  it("outside VIBEST, tool.call returns next and does not call vibest", async () => {
     const h = host({})
     const result = await h.preTool(bash, async () => below)
     assert.strictEqual(result, below)
     assert.deepStrictEqual(h.runs, [])
   })
 
-  it("once VIBEST is known, a failed PreToolUse registration denies instead of passing", async () => {
+  it("once VIBEST is known, a failed tool.call registration denies instead of passing", async () => {
     const inside = host(worker)
     let called = false
     const fresh = Object.assign(
@@ -869,17 +875,17 @@ describe("Claude plugin native listeners", () => {
       },
       { called: false, error: { kind: "throw" } },
     )
-    assert.deepStrictEqual(await inside.catches["classic.PreToolUse"]!(inside.$, bash, fresh), {
+    assert.deepStrictEqual(await inside.catches["tool.call"]!(inside.$, bash, fresh), {
       deny: plugin.GUARD_FAILURE,
     })
     assert.isFalse(called)
 
     const replayed = Object.assign(async () => below, { called: true, error: { kind: "timeout" } })
-    assert.strictEqual(await inside.catches["classic.PreToolUse"]!(inside.$, bash, replayed), below)
+    assert.strictEqual(await inside.catches["tool.call"]!(inside.$, bash, replayed), below)
 
     const outside = host({})
     assert.strictEqual(
-      await outside.catches["classic.PreToolUse"]!(
+      await outside.catches["tool.call"]!(
         outside.$,
         bash,
         Object.assign(async () => below, { called: false }),
