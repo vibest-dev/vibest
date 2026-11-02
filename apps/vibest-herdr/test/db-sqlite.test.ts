@@ -36,9 +36,14 @@ describe("SQLite", () => {
       // (SQLite's default, as on Linux), or keep them (Apple's system SQLite).
       const openModes = modes(file).pipe(Effect.provide(database(file)))
       assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
-      // Looser files left from before, whether or not SQLite kept -wal and -shm. An empty -wal and -shm are valid.
-      yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.appendFile(path, "").then(() => fs.chmod(path, 0o644)))))
-      assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
+      // A connection held open through the second open: no other connection is the last to close, so SQLite neither
+      // deletes nor recreates -wal and -shm, and only privateDatabase's chmod can bring the looser files back to 0600.
+      yield* Effect.gen(function* () {
+        const holder = Context.get(yield* Layer.build(SqliteClient.layer({ filename: file, ...SQL_NAMES })), SqlClient.SqlClient)
+        yield* holder`SELECT count(*) AS n FROM sqlite_master`
+        yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.chmod(path, 0o644))))
+        assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
+      }).pipe(Effect.scoped)
     }).pipe(Effect.provide(Platform.services)))
 
   it.effect("a writable transaction is BEGIN IMMEDIATE and busy_timeout is 5000", () =>
