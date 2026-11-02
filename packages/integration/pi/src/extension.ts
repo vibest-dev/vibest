@@ -1,3 +1,6 @@
+import path from "node:path"
+import url from "node:url"
+
 // vibest's Pi extension. VIBEST_AGENT=coordinator makes it the coordinator (inbox rows delivered in process instead of typed
 // into the pane), any other agent with VIBEST_SESSION_ID a session (turn-end result file); otherwise it is inert. Either way
 // tool calls go through that agent's rules in vibest's guard.ts, in process. Both run vibest itself as `vibest` commands in Pi's bash tool.
@@ -10,9 +13,21 @@ import { type ClientServices, connect, protocolHeaders, SocketConnector, withVib
 import * as Guard from "@vibest/core/guard"
 import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { appendReportLine, writeTerminalStatus } from "@vibest/core/results"
-import { Cause, Clock, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
-import path from "node:path"
-import url from "node:url"
+import {
+  Cause,
+  Clock,
+  Config,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect"
+
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
 import compactUserMessages from "./tui/user-message-padding.ts"
@@ -27,7 +42,9 @@ const guarded = (rules: Guard.Rules) =>
   Effect.gen(function* () {
     const pi = yield* Pi
     yield* pi.handle("tool_call", (e, ctx) =>
-      rules({ tool: e.toolName, input: e.input, cwd: ctx.cwd }).pipe(Effect.map((reason) => (reason ? { block: true, reason } : undefined))),
+      rules({ tool: e.toolName, input: e.input, cwd: ctx.cwd }).pipe(
+        Effect.map((reason) => (reason ? { block: true, reason } : undefined)),
+      ),
     )
   })
 
@@ -65,7 +82,11 @@ const session = (sessionId: string): Role =>
             Effect.timeout("500 millis"),
             Effect.ignore,
           )
-          yield* appendReportLine(layout.reportFile(sessionId), { turn: "start", ts: yield* Clock.currentTimeMillis, prompt: e.text })
+          yield* appendReportLine(layout.reportFile(sessionId), {
+            turn: "start",
+            ts: yield* Clock.currentTimeMillis,
+            prompt: e.text,
+          })
           yield* writeTerminalStatus("working")
         }),
       )
@@ -78,7 +99,12 @@ const session = (sessionId: string): Role =>
           yield* writeAtomic(layout.resultFile(sessionId), encodeJson({ harness: "pi", ts, payload }))
           // The report line and the state are the durable channel (runtime-port.md §5); vibestd also finds the result file
           // on its next check, and the call only makes that immediate.
-          yield* appendReportLine(layout.reportFile(sessionId), { turn: "end", ts: yield* Clock.currentTimeMillis, harness: "pi", payload })
+          yield* appendReportLine(layout.reportFile(sessionId), {
+            turn: "end",
+            ts: yield* Clock.currentTimeMillis,
+            harness: "pi",
+            payload,
+          })
           yield* writeTerminalStatus("idle")
           yield* connect(layout.socket).pipe(
             Effect.flatMap((client) => client.ResultReady({ sessionId }, { headers: protocolHeaders() })),
@@ -107,13 +133,25 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
       if (ctx.mode !== "tui" || (yield* Ref.get(reported)) === harnessSessionId) return
       // Never starts vibestd: `vibest` already did.
       yield* connect(layout.socket).pipe(
-        Effect.flatMap((client) => client.CoordinatorSessionReady({ sessionId, harness: "pi", harnessSessionId }, { headers: protocolHeaders() })),
+        Effect.flatMap((client) =>
+          client.CoordinatorSessionReady(
+            { sessionId, harness: "pi", harnessSessionId },
+            { headers: protocolHeaders() },
+          ),
+        ),
         Effect.scoped,
         Effect.timeout("1 second"),
         Effect.andThen(Ref.set(reported, harnessSessionId)),
         // Unanswered is not unsaved: vibestd may still apply it (and keeps the newest either way).
         Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.sync(() => ctx.ui.notify(`vibest: the coordinator's conversation may not have been saved: ${Cause.pretty(cause)}`, "warning")),
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.sync(() =>
+                ctx.ui.notify(
+                  `vibest: the coordinator's conversation may not have been saved: ${Cause.pretty(cause)}`,
+                  "warning",
+                ),
+              ),
         ),
         Effect.forkIn(scope),
       )
@@ -134,7 +172,11 @@ const coordinator: Role = Layer.effectDiscard(
     // Clear the prompt sections other extensions add for a coding agent. Pi runs these handlers in extension load order,
     // so only sections added by extensions loaded before pi-vibest are cleared; ones loaded after it keep theirs.
     // Turns started by inbox rows skip this event and get the base prompt, which never has them.
-    yield* pi.handle("before_agent_start", (e) => Effect.sync(() => { e.systemPromptOptions.sections = {} }))
+    yield* pi.handle("before_agent_start", (e) =>
+      Effect.sync(() => {
+        e.systemPromptOptions.sections = {}
+      }),
+    )
     // The coordinator's TUI: grouped tool calls and compact user messages. Other agents and plain Pi keep Pi's own.
     yield* pi.load(toolGroups)
     yield* pi.load(compactUserMessages)
@@ -143,19 +185,31 @@ const coordinator: Role = Layer.effectDiscard(
     yield* reportSession(sessionId.value)
     // Pi children of the coordinator (print / RPC mode) inherit VIBEST_AGENT; only the TUI session takes the rows.
     const started = yield* Deferred.make<ExtensionContext>()
-    yield* pi.handle("session_start", (_e, ctx) => (ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void))
-    const subscribe = withVibest({ _tag: "session", sessionId: sessionId.value }, (client) =>
-      client["Inbox.Subscribe"](undefined).pipe(
-        Stream.runForEach((content) => pi.sendMessage({ customType: "vibest", content, display: false }, { triggerTurn: true, deliverAs: "followUp" })),
-        // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
-        // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
-        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
-      ),
+    yield* pi.handle("session_start", (_e, ctx) =>
+      ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
+    )
+    const subscribe = withVibest(
+      { _tag: "session", sessionId: sessionId.value },
+      (client) =>
+        client["Inbox.Subscribe"](undefined).pipe(
+          Stream.runForEach((content) =>
+            pi.sendMessage(
+              { customType: "vibest", content, display: false },
+              { triggerTurn: true, deliverAs: "followUp" },
+            ),
+          ),
+          // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
+          // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
+          Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
+        ),
       // Never start vibestd from here: during `vibest daemon restart` the replacement may be between sockets.
       { start: false },
     ).pipe(
       // The connection dropped or vibestd closed the stream (vibestd restarted): subscribe again; rows not yet taken stay pending.
-      Effect.retry({ while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable", schedule: Schedule.spaced("2 seconds") }),
+      Effect.retry({
+        while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
+        schedule: Schedule.spaced("2 seconds"),
+      }),
       Effect.repeat(Schedule.spaced("2 seconds")),
     )
     // Anything else ends the subscription; no handler is running, so tell the user.
@@ -163,7 +217,9 @@ const coordinator: Role = Layer.effectDiscard(
       Effect.flatMap((ctx) =>
         subscribe.pipe(
           Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.sync(() => ctx.ui.notify(`vibest: inbox subscription ended: ${Cause.pretty(cause)}`, "error")),
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.sync(() => ctx.ui.notify(`vibest: inbox subscription ended: ${Cause.pretty(cause)}`, "error")),
           ),
         ),
       ),
@@ -189,7 +245,9 @@ export const extension = Layer.unwrap(
 
 const vibestCommand = Layer.effect(
   VibestCommand,
-  Config.schema(Schema.fromJsonString(Schema.Array(Schema.String)), "VIBEST_COMMAND").pipe(Config.withDefault(["vibest"])),
+  Config.schema(Schema.fromJsonString(Schema.Array(Schema.String)), "VIBEST_COMMAND").pipe(
+    Config.withDefault(["vibest"]),
+  ),
 )
 
 export const services = Layer.mergeAll(

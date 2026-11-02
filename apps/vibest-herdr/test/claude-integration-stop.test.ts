@@ -1,12 +1,15 @@
 // `vibest integration stop`: Claude's native Stop / StopFailure bridge. Isolated HOME, fake socket, no live daemon.
 import net from "node:net"
+
 import { assert, layer } from "@effect/vitest"
-import * as Platform from "#platform"
-import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
-import { COORDINATOR_REPORT_TIMEOUT, integrationPrompt, integrationStop, RESULT_READY_TIMEOUT } from "../src/cli.ts"
 import { claude } from "@vibest/core/harnesses/claude"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
+import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
+
+import * as Platform from "#platform"
+
+import { COORDINATOR_REPORT_TIMEOUT, integrationPrompt, integrationStop, RESULT_READY_TIMEOUT } from "../src/cli.ts"
 import { runVibest, tempDirectory } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
@@ -98,7 +101,8 @@ layer(Platform.services)("claude integration stop", (it) => {
         sampled: (request as { sampled?: unknown }).sampled,
       })
       assert.deepStrictEqual(request?.headers, [[PROTOCOL_HEADER, String(PROTOCOL)]])
-    }))
+    }),
+  )
 
   it.effect("keeps the worker file when vibestd is down and does not start a daemon", () =>
     Effect.gen(function* () {
@@ -112,7 +116,8 @@ layer(Platform.services)("claude integration stop", (it) => {
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.log")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.pid")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
-    }))
+    }),
+  )
 
   it.effect("a coordinator reports the harness session and writes no result file", () =>
     Effect.gen(function* () {
@@ -121,75 +126,99 @@ layer(Platform.services)("claude integration stop", (it) => {
       const home = yield* tempDirectory("s-")
       const lines: string[] = []
       yield* listen(path.join(home, "vibest.sock"), lines)
-      yield* stopAt(home, { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" }, JSON.stringify({ ...event, hook_event_name: "StopFailure" }))
+      yield* stopAt(
+        home,
+        { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" },
+        JSON.stringify({ ...event, hook_event_name: "StopFailure" }),
+      )
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
-      assert.deepStrictEqual(rpc(lines).map((r) => [r.method, r.params]), [
-        ["CoordinatorSessionReady", { sessionId: "L", harness: "claude", harnessSessionId: "c1" }],
-      ])
-    }))
-
-  it.effect("invalid input, a subagent, a foreign event, a missing harness id, and a path-like session id do nothing", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("s-")
-      const lines: string[] = []
-      yield* listen(path.join(home, "vibest.sock"), lines)
-      const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-      const coordinator = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" }
-      for (const [env, raw] of [
-        [{}, JSON.stringify(event)],
-        [{ VIBEST_AGENT: "general" }, JSON.stringify(event)],
-        [{ VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)],
-        [worker, ""],
-        [worker, "not json"],
-        [worker, "[]"],
-        [worker, "null"],
-        [worker, JSON.stringify({ ...event, agent_id: "sub" })],
-        [worker, JSON.stringify({ hook_event_name: "PreToolUse", session_id: "c1" })],
-        [worker, JSON.stringify({ session_id: "c1" })],
-        [coordinator, JSON.stringify({ hook_event_name: "Stop" })],
-        [coordinator, JSON.stringify({ hook_event_name: "Stop", session_id: "" })],
-        [coordinator, "not json"],
-        [{ ...worker, VIBEST_SESSION_ID: "../evil" }, JSON.stringify(event)],
-      ] as const) {
-        yield* stopAt(home, env, raw)
-      }
-      assert.deepStrictEqual(lines, [])
-      assert.isFalse(yield* fs.exists(path.join(home, "results")))
-      assert.isFalse(yield* fs.exists(path.join(home, "evil.json")))
-      assert.strictEqual(Duration.toMillis(RESULT_READY_TIMEOUT), 500)
-      assert.strictEqual(Duration.toMillis(COORDINATOR_REPORT_TIMEOUT), 2_000)
-    }))
-
-  it.effect("the CLI entrypoint writes then notifies, and a down daemon still leaves the file without starting vibestd", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("s-")
-      const lines: string[] = []
-      yield* listen(path.join(home, "vibest.sock"), lines)
-      const env = { HOME: home, VIBEST_HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-      const ran = yield* runVibest(home, env, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
-      assert.strictEqual(ran.code, 0, ran.stderr)
-      assert.strictEqual(ran.stdout, "")
-      const envelope = JSON.parse(yield* fs.readFileString(path.join(home, "results", "w1.json"))) as { harness: string; payload: unknown }
-      assert.deepStrictEqual([envelope.harness, envelope.payload], ["claude", event])
-      assert.strictEqual(rpc(lines)[0]?.method, "ResultReady")
-
-      const quiet = yield* tempDirectory("q-")
-      const started = Date.now()
-      const down = yield* runVibest(quiet, { HOME: quiet, VIBEST_HOME: quiet, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
-      assert.isBelow(Date.now() - started, 4_000, down.stderr)
-      assert.strictEqual(down.code, 0, down.stderr)
-      assert.isTrue(yield* fs.exists(path.join(quiet, "results", "w1.json")))
-      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.log")))
-      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.pid")))
-
-      const skipped = yield* runVibest(quiet, { HOME: quiet, VIBEST_HOME: quiet }, ["integration", "stop", "--harness", "claude"], "not json")
-      assert.strictEqual(skipped.code, 0, skipped.stderr)
-      assert.deepStrictEqual(yield* fs.readDirectory(path.join(quiet, "results")), ["w1.json"])
+      assert.deepStrictEqual(
+        rpc(lines).map((r) => [r.method, r.params]),
+        [["CoordinatorSessionReady", { sessionId: "L", harness: "claude", harnessSessionId: "c1" }]],
+      )
     }),
+  )
+
+  it.effect(
+    "invalid input, a subagent, a foreign event, a missing harness id, and a path-like session id do nothing",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const home = yield* tempDirectory("s-")
+        const lines: string[] = []
+        yield* listen(path.join(home, "vibest.sock"), lines)
+        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+        const coordinator = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" }
+        for (const [env, raw] of [
+          [{}, JSON.stringify(event)],
+          [{ VIBEST_AGENT: "general" }, JSON.stringify(event)],
+          [{ VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)],
+          [worker, ""],
+          [worker, "not json"],
+          [worker, "[]"],
+          [worker, "null"],
+          [worker, JSON.stringify({ ...event, agent_id: "sub" })],
+          [worker, JSON.stringify({ hook_event_name: "PreToolUse", session_id: "c1" })],
+          [worker, JSON.stringify({ session_id: "c1" })],
+          [coordinator, JSON.stringify({ hook_event_name: "Stop" })],
+          [coordinator, JSON.stringify({ hook_event_name: "Stop", session_id: "" })],
+          [coordinator, "not json"],
+          [{ ...worker, VIBEST_SESSION_ID: "../evil" }, JSON.stringify(event)],
+        ] as const) {
+          yield* stopAt(home, env, raw)
+        }
+        assert.deepStrictEqual(lines, [])
+        assert.isFalse(yield* fs.exists(path.join(home, "results")))
+        assert.isFalse(yield* fs.exists(path.join(home, "evil.json")))
+        assert.strictEqual(Duration.toMillis(RESULT_READY_TIMEOUT), 500)
+        assert.strictEqual(Duration.toMillis(COORDINATOR_REPORT_TIMEOUT), 2_000)
+      }),
+  )
+
+  it.effect(
+    "the CLI entrypoint writes then notifies, and a down daemon still leaves the file without starting vibestd",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const home = yield* tempDirectory("s-")
+        const lines: string[] = []
+        yield* listen(path.join(home, "vibest.sock"), lines)
+        const env = { HOME: home, VIBEST_HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+        const ran = yield* runVibest(home, env, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
+        assert.strictEqual(ran.code, 0, ran.stderr)
+        assert.strictEqual(ran.stdout, "")
+        const envelope = JSON.parse(yield* fs.readFileString(path.join(home, "results", "w1.json"))) as {
+          harness: string
+          payload: unknown
+        }
+        assert.deepStrictEqual([envelope.harness, envelope.payload], ["claude", event])
+        assert.strictEqual(rpc(lines)[0]?.method, "ResultReady")
+
+        const quiet = yield* tempDirectory("q-")
+        const started = Date.now()
+        const down = yield* runVibest(
+          quiet,
+          { HOME: quiet, VIBEST_HOME: quiet, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" },
+          ["integration", "stop", "--harness", "claude"],
+          JSON.stringify(event),
+        )
+        assert.isBelow(Date.now() - started, 4_000, down.stderr)
+        assert.strictEqual(down.code, 0, down.stderr)
+        assert.isTrue(yield* fs.exists(path.join(quiet, "results", "w1.json")))
+        assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.log")))
+        assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.pid")))
+
+        const skipped = yield* runVibest(
+          quiet,
+          { HOME: quiet, VIBEST_HOME: quiet },
+          ["integration", "stop", "--harness", "claude"],
+          "not json",
+        )
+        assert.strictEqual(skipped.code, 0, skipped.stderr)
+        assert.deepStrictEqual(yield* fs.readDirectory(path.join(quiet, "results")), ["w1.json"])
+      }),
   )
 
   it.effect("a user prompt notifies Prompt; the coordinator, a nested agent, and a non-user source do not", () =>
@@ -200,7 +229,10 @@ layer(Platform.services)("claude integration stop", (it) => {
       yield* listen(path.join(home, "vibest.sock"), lines)
       const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
       yield* promptAt(home, worker, JSON.stringify(promptEvent))
-      assert.deepStrictEqual(rpc(lines).map((r) => [r.method, r.params]), [["Prompt", { sessionId: "w1", text: "look here" }]])
+      assert.deepStrictEqual(
+        rpc(lines).map((r) => [r.method, r.params]),
+        [["Prompt", { sessionId: "w1", text: "look here" }]],
+      )
       for (const [env, raw] of [
         [{ VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "w1" }, JSON.stringify(promptEvent)],
         [worker, JSON.stringify({ ...promptEvent, agent_id: "sub" })],
@@ -212,5 +244,6 @@ layer(Platform.services)("claude integration stop", (it) => {
         yield* promptAt(home, env, raw)
       }
       assert.strictEqual(rpc(lines).length, 1)
-    }))
+    }),
+  )
 })

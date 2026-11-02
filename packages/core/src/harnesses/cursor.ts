@@ -24,15 +24,18 @@ export const cursor: HarnessAdapter = {
   launchArgs: (i) => [
     // One argument: `--resume [chatId]` takes an optional value, so a separate id starting with - would be read as a flag.
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
-    "--add-dir", i.scratch,
+    "--add-dir",
+    i.scratch,
     "--trust",
-    "--plugin-dir", i.pluginDir,
+    "--plugin-dir",
+    i.pluginDir,
     // `cursor-agent --help`: --mode plan is read-only (no edits). The guard is the backstop.
     ...opt("--model", i.model),
   ],
   models: { args: () => ["models"], answer: cursorModels },
   // An explicit answer either way (its hook runs fail-closed); allow only lets the call go on to its usual permission checks.
-  guardAnswer: (reason) => (reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" }),
+  guardAnswer: (reason) =>
+    reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   // beforeSubmitPrompt (cursor-agent 2026.10.22). The coordinator is not a Cursor session; an empty prompt is not a round.
   userPrompt: (event, coordinator) => {
     if (coordinator || event.hook_event_name !== "beforeSubmitPrompt") return undefined
@@ -43,7 +46,8 @@ export const cursor: HarnessAdapter = {
   turnEnd: (event, coordinator) => {
     if (coordinator) return undefined
     if (event.hook_event_name === "afterAgentResponse") return { result: event }
-    if (event.hook_event_name !== "stop" || typeof event.status !== "string" || event.status === "completed") return undefined
+    if (event.hook_event_name !== "stop" || typeof event.status !== "string" || event.status === "completed")
+      return undefined
     return { result: { ...event, error: `the turn ended with status ${event.status}` } }
   },
 }

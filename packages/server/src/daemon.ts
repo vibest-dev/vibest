@@ -1,26 +1,27 @@
+import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
+import { Harness } from "@vibest/core/harness"
+import { Inbox } from "@vibest/core/inbox"
+import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
+import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { type ProcessPlatform, Processes } from "@vibest/core/processes"
+import { Project } from "@vibest/core/project"
+import { Runtimes } from "@vibest/core/runtimes"
+import { Sessions } from "@vibest/core/sessions"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { VERSION } from "@vibest/protocol/rpc"
 // vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
 // database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
 // server) come from the entry through `Host`, so this file stays on effect's abstract services.
 import { Clock, Crypto, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
-import type { SqlClient } from "effect/sql"
 import type { SocketServer } from "effect/socket/SocketServer"
-import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
-import { Drain } from "@vibest/core/drain"
-import { Harness } from "@vibest/core/harness"
-import { Inbox } from "@vibest/core/inbox"
-import { Layout, VibestCommand } from "@vibest/core/paths"
-import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
-import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { type ProcessPlatform, Processes } from "@vibest/core/processes"
-import { Project } from "@vibest/core/project"
-import { Runtimes } from "@vibest/core/runtimes"
-import { VERSION } from "@vibest/protocol/rpc"
+import type { SqlClient } from "effect/sql"
+
 import * as Server from "./server.ts"
-import { Sessions } from "@vibest/core/sessions"
 
 /**
  * vibestd.pid (SPEC §14): written once vibestd serves its socket, removed when it stops. For people to read: nothing signals
@@ -58,19 +59,32 @@ export interface Host {
    * Take the start lock on `file` (vibestd.pid) for the scope: a writer for the file's content once this process holds it,
    * undefined while another process does. Released, the file is left empty. Fails when the file cannot be opened.
    */
-  readonly lock: (file: string) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
+  readonly lock: (
+    file: string,
+  ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
 }
 
-export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", { message: Schema.String }) {}
-export class DaemonNotAnswering extends Schema.TaggedError<DaemonNotAnswering>()("DaemonNotAnswering", { message: Schema.String }) {}
-export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("DaemonSocketInUse", { message: Schema.String }) {}
+export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
+  message: Schema.String,
+}) {}
+export class DaemonNotAnswering extends Schema.TaggedError<DaemonNotAnswering>()("DaemonNotAnswering", {
+  message: Schema.String,
+}) {}
+export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("DaemonSocketInUse", {
+  message: Schema.String,
+}) {}
 
 const services = (host: Host, layout: Layout["Service"]) =>
   Server.layer.pipe(
     Layer.provide(host.socketServer(layout.socket)),
     Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Processes.layer(host.processes)),
-    Layer.provideMerge(Plugins.layer.pipe(Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)), Layer.provide(Layer.succeed(PluginLoader, host.plugins)))),
+    Layer.provideMerge(
+      Plugins.layer.pipe(
+        Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)),
+        Layer.provide(Layer.succeed(PluginLoader, host.plugins)),
+      ),
+    ),
     Layer.provideMerge(Subscriptions.live),
     Layer.provideMerge(Keychain.layer(host.keychain)),
     Layer.provideMerge(FetchHttpClient.layer),
@@ -96,7 +110,12 @@ export const run = (host: Host) =>
     // and removed its path, so a successor's socket is never unlinked by this one.
     let write: ((text: string) => Effect.Effect<void, Error>) | undefined
     const held = yield* host.lock(layout.daemonInfo).pipe(
-      Effect.mapError((e) => new DaemonLockUnavailable({ message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.` })),
+      Effect.mapError(
+        (e) =>
+          new DaemonLockUnavailable({
+            message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
+          }),
+      ),
       Effect.flatMap((writer) => {
         if (writer) {
           write = writer
@@ -104,20 +123,32 @@ export const run = (host: Host) =>
         }
         return probe(layout.socket).pipe(Effect.map((up) => (up ? false : undefined)))
       }),
-      Effect.repeat({ until: (done) => done !== undefined, schedule: Schedule.jittered(Schedule.spaced("100 millis")) }),
+      Effect.repeat({
+        until: (done) => done !== undefined,
+        schedule: Schedule.jittered(Schedule.spaced("100 millis")),
+      }),
       Effect.timeoutOrElse({
         duration: DAEMON_START_TIMEOUT,
         orElse: () =>
-          Effect.fail(new DaemonNotAnswering({
-            message: `another vibestd held ${layout.daemonInfo} for ${Duration.format(DAEMON_START_TIMEOUT)} without answering on ${layout.socket}. Nothing was changed; see vibestd.log and \`vibest status\`.`,
-          })),
+          Effect.fail(
+            new DaemonNotAnswering({
+              message: `another vibestd held ${layout.daemonInfo} for ${Duration.format(DAEMON_START_TIMEOUT)} without answering on ${layout.socket}. Nothing was changed; see vibestd.log and \`vibest status\`.`,
+            }),
+          ),
       }),
     )
     if (!held) return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
     // No other vibestd that takes the lock is starting or serving, so whatever answers took none: an older vibestd, or
     // another program. Its socket stays.
-    const inUse = (yield* probe(layout.socket)) ? "answers Ping (an vibestd that takes no start lock, from an older vibest)" : (yield* accepts(layout.socket)) ? "accepts connections but does not answer Ping" : undefined
-    if (inUse) return yield* new DaemonSocketInUse({ message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}` })
+    const inUse = (yield* probe(layout.socket))
+      ? "answers Ping (an vibestd that takes no start lock, from an older vibest)"
+      : (yield* accepts(layout.socket))
+        ? "accepts connections but does not answer Ping"
+        : undefined
+    if (inUse)
+      return yield* new DaemonSocketInUse({
+        message: `something on ${layout.socket} ${inUse}; it was left running. ${stopByHand(layout.socket, undefined)}`,
+      })
     yield* fs.remove(layout.socket, { force: true })
     const identity = {
       pid: host.processes.pid,
@@ -126,7 +157,11 @@ export const run = (host: Host) =>
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
-    yield* Layer.build(services(host, layout).pipe(Layer.provide(Layer.merge(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown)))))
+    yield* Layer.build(
+      services(host, layout).pipe(
+        Layer.provide(Layer.merge(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown))),
+      ),
+    )
     // The socket file's permissions are the authentication (SPEC §13).
     yield* fs.chmod(layout.socket, 0o600)
     const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }

@@ -2,27 +2,38 @@
   "name": "vibest-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.16.1",
   "scripts": {
     "e2e": "bun tools/e2e/src/main.ts",
     "verify": "bun tools/verify/src/verify.ts",
     "build": "turbo run build",
     "lint": "oxlint apps packages tools",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "typecheck": "turbo run typecheck && pnpm run check:runtime && pnpm run lint",
     "test": "bun ./node_modules/vitest/vitest.mjs run",
     "check:runtime": "! grep -rnE \"@effect/(platform|sql-sqlite)-bun|from \\\"bun:\" packages/schema/src packages/core/src packages/protocol/src packages/server/src packages/client/src packages/integration/claude/src packages/effect-herdr-sdk/src tools/verify/src --exclude-dir=platform --exclude=bun.ts",
     "publish:beta": "turbo run build && bun tools/publish-beta.ts",
-    "release": "bumpp package.json apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json --commit --tag --push"
+    "release": "bumpp package.json apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json --commit --tag --push",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/bun": "1.4.2",
     "@vibest/tsconfig": "workspace:*",
     "bumpp": "^10.0.3",
+    "lint-staged": "17.6.0",
+    "oxfmt": "0.75.0",
     "oxlint": "1.90.0",
     "tsrs": "0.20.1-ts7.1.0-beta",
     "turbo": "^2.11.5",
     "typescript": "7.0.2",
     "vitest": "5.0.3"
-  }
+  },
+  "lint-staged": {
+    "*": [
+      "oxlint --fix --no-error-on-unmatched-pattern",
+      "oxfmt --no-error-on-unmatched-pattern"
+    ]
+  },
+  "packageManager": "pnpm@12.16.1"
 }

@@ -21,6 +21,15 @@ jobs:
     runs-on: [self-hosted, Linux, X64, vibest, rn]
     steps:
       - uses: actions/checkout@v4
+      # Persistent caches beside _work, as in ci.yml.
+      - name: Prepare persistent CI caches
+        run: |
+          cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
+          mkdir -p "${cache_root}/pnpm-store" "${cache_root}/turbo"
+          {
+            echo "PNPM_STORE_DIR=${cache_root}/pnpm-store"
+            echo "TURBO_CACHE_DIR=${cache_root}/turbo"
+          } >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: oven-sh/setup-bun@v2
         with:
@@ -29,7 +38,7 @@ jobs:
         with:
           node-version: 26.13.0
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
 
       # Versions are set only in this checkout, never committed.
       - name: Version

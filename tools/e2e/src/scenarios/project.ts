@@ -6,7 +6,8 @@ const KINDS = ["docs", "memory", "scratch"] as const
 
 const write = (w: World, kind: string, file: string, content: string, ifVersion: string) =>
   w.json<{ version: string }>(["project", "write", kind, file, "--if-version", ifVersion, "--", content])
-const read = (w: World, kind: string, file: string) => w.json<{ content: string; version: string }>(["project", "read", kind, file])
+const read = (w: World, kind: string, file: string) =>
+  w.json<{ content: string; version: string }>(["project", "read", kind, file])
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -26,12 +27,21 @@ const checks: ReadonlyArray<Check> = [
         const file = `e2e/${kind}.md`
         const { version } = await write(w, kind, file, `# ${kind}\nneedle-${kind}\n`, "new")
         const got = await read(w, kind, file)
-        expect(got.version === version && got.content.includes(`needle-${kind}`), `${kind}: read ${JSON.stringify(got)}`)
+        expect(
+          got.version === version && got.content.includes(`needle-${kind}`),
+          `${kind}: read ${JSON.stringify(got)}`,
+        )
         expect(got.content.includes("<project-data"), `${kind}: read is not marked as data`)
         const { entries } = await w.json<{ entries: Array<Entry> }>(["project", "list", kind])
-        expect(entries.some((e) => e.path === file && e.version === version), `${kind}: list ${JSON.stringify(entries)}`)
+        expect(
+          entries.some((e) => e.path === file && e.version === version),
+          `${kind}: list ${JSON.stringify(entries)}`,
+        )
         const { hits } = await w.json<{ hits: Array<string> }>(["project", "search", `needle-${kind}`, "--kind", kind])
-        expect(hits.some((h) => h.startsWith(`${kind}/${file}:2:`)), `${kind}: search ${JSON.stringify(hits)}`)
+        expect(
+          hits.some((h) => h.startsWith(`${kind}/${file}:2:`)),
+          `${kind}: search ${JSON.stringify(hits)}`,
+        )
         await w.ok(["project", "delete", kind, file, "--if-version", version])
         const after = await w.vibest(["project", "read", kind, file])
         expect(after.code !== 0, `${kind}: read after delete exited 0`)
@@ -59,7 +69,16 @@ const checks: ReadonlyArray<Check> = [
     id: "P4",
     title: "a secret-looking value is refused and nothing is written",
     run: async (w) => {
-      const r = await w.vibest(["project", "write", "memory", "secret.md", "--if-version", "new", "--", "API_KEY=Zx9Qv7Lm2Rt8Kp4Wn6Yb3Hc5Jd1Fg0Sa\n"])
+      const r = await w.vibest([
+        "project",
+        "write",
+        "memory",
+        "secret.md",
+        "--if-version",
+        "new",
+        "--",
+        "API_KEY=Zx9Qv7Lm2Rt8Kp4Wn6Yb3Hc5Jd1Fg0Sa\n",
+      ])
       expect(r.code !== 0 && /secret/i.test(r.stderr), `not refused: ${r.code} ${r.stderr}`)
       expect((await w.vibest(["project", "read", "memory", "secret.md"])).code !== 0, "the secret was written")
     },
@@ -79,7 +98,10 @@ const checks: ReadonlyArray<Check> = [
         return pid !== undefined && pid !== before
       })
       const got = await read(w, "memory", "durable.md")
-      expect(got.version === version && got.content.includes("kept across restarts"), `after restart: ${JSON.stringify(got)}`)
+      expect(
+        got.version === version && got.content.includes("kept across restarts"),
+        `after restart: ${JSON.stringify(got)}`,
+      )
     },
   },
   {

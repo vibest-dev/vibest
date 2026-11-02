@@ -1,5 +1,6 @@
 import net from "node:net"
 import path from "node:path"
+
 import type { Check } from "../check.ts"
 import { alive, binary, expect, until, type World } from "../world.ts"
 
@@ -54,7 +55,10 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const before = (await running(w)).pid
       const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
-      expect(r.code === 0 && /already running/.test(r.stdout + r.stderr), `second vibestd: ${r.code} ${r.stdout}${r.stderr}`)
+      expect(
+        r.code === 0 && /already running/.test(r.stdout + r.stderr),
+        `second vibestd: ${r.code} ${r.stdout}${r.stderr}`,
+      )
       expect((await running(w)).pid === before, "the first vibestd changed")
     },
   },
@@ -79,7 +83,13 @@ const checks: ReadonlyArray<Check> = [
     title: "a request without the protocol header, or an old one, is refused",
     run: async (w) => {
       for (const headers of [undefined, [["vibest-protocol", "0"]]]) {
-        const reply = await raw(w, { jsonrpc: "2.0", id: "1", method: "List", params: {}, ...(headers ? { headers } : {}) })
+        const reply = await raw(w, {
+          jsonrpc: "2.0",
+          id: "1",
+          method: "List",
+          params: {},
+          ...(headers ? { headers } : {}),
+        })
         expect(JSON.stringify(reply).includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
       }
       expect((await running(w)).status === "running", "vibestd stopped answering")

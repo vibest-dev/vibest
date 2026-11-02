@@ -2,8 +2,8 @@
   "name": "@vibest/server",
   "version": "0.0.1-beta.13",
   "private": true,
-  "type": "module",
   "license": "MIT",
+  "type": "module",
   "exports": {
     "./*": "./src/*.ts"
   },
@@ -11,9 +11,9 @@
     "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
-    "@vibest/plugin": "workspace:*",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:"

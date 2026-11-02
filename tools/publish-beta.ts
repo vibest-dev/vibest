@@ -18,7 +18,13 @@ const dirs = [
 
 // stderr is shown as it arrives (npm prints its 2FA link there) and kept for the checks below.
 const run = async (cmd: string[], cwd = root, env: Record<string, string> = {}) => {
-  const child = Bun.spawn(cmd, { cwd, env: { ...process.env, ...env }, stdin: "inherit", stdout: "inherit", stderr: "pipe" })
+  const child = Bun.spawn(cmd, {
+    cwd,
+    env: { ...process.env, ...env },
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "pipe",
+  })
   let stderr = ""
   const decoder = new TextDecoder()
   for await (const chunk of child.stderr) {

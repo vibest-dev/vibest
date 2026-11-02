@@ -2,20 +2,31 @@
 // fresh isolated world. Prints one line per check and writes evidence to tools/e2e/evidence/<run>/. Exit 1 on any fail.
 import fs from "node:fs/promises"
 import path from "node:path"
-import { binary, checkout, harnesses, Skip, World } from "./world.ts"
+
 import type { Check } from "./check.ts"
 import daemon from "./scenarios/daemon.ts"
-import project from "./scenarios/project.ts"
-import plugins from "./scenarios/plugins.ts"
-import harness from "./scenarios/harness.ts"
-import integration from "./scenarios/integration.ts"
 import guard from "./scenarios/guard.ts"
-import update from "./scenarios/update.ts"
-import start from "./scenarios/start.ts"
+import harness from "./scenarios/harness.ts"
 import inbox from "./scenarios/inbox.ts"
+import integration from "./scenarios/integration.ts"
+import plugins from "./scenarios/plugins.ts"
+import project from "./scenarios/project.ts"
+import start from "./scenarios/start.ts"
+import update from "./scenarios/update.ts"
+import { binary, checkout, harnesses, Skip, World } from "./world.ts"
 
 /** The checks by area, in the order they run; an area is selected by its name, a single check by its feature-map ID. */
-const areas: Record<string, ReadonlyArray<Check>> = { daemon, project, plugins, harness, integration, guard, update, start, inbox }
+const areas: Record<string, ReadonlyArray<Check>> = {
+  daemon,
+  project,
+  plugins,
+  harness,
+  integration,
+  guard,
+  update,
+  start,
+  inbox,
+}
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")
 const only = process.argv.slice(2).filter((a) => a !== "--strict")
@@ -50,7 +61,9 @@ try {
       detail = e instanceof Error ? e.message : String(e)
     }
     results.push({ id: check.id, title: check.title, outcome, ...(detail ? { detail } : {}) })
-    console.log(`${outcome.toUpperCase().padEnd(4)} ${area}: ${check.title}${detail ? `\n     ${detail.split("\n").join("\n     ")}` : ""}`)
+    console.log(
+      `${outcome.toUpperCase().padEnd(4)} ${area}: ${check.title}${detail ? `\n     ${detail.split("\n").join("\n     ")}` : ""}`,
+    )
     await fs.writeFile(path.join(evidence, `${check.id}.json`), JSON.stringify(world.log.slice(from), null, 2))
   }
 } finally {
@@ -60,6 +73,8 @@ await fs.writeFile(path.join(evidence, "report.json"), JSON.stringify({ root: wo
 const count = (o: string) => results.filter((r) => r.outcome === o).length
 // A failed run keeps its world for inspection; a clean one removes it.
 if (!count("fail")) await fs.rm(world.root, { recursive: true, force: true })
-console.log(`\n${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped; evidence in ${path.relative(checkout, evidence)}`)
+console.log(
+  `\n${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped; evidence in ${path.relative(checkout, evidence)}`,
+)
 // --strict (pnpm verify): a check that could not run proves nothing, so it fails the run.
 process.exit(count("fail") || (strict && count("skip")) ? 1 : 0)

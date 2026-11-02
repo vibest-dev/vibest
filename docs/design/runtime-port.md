@@ -21,11 +21,11 @@ question 3 (§12, §17).
 
 ## 2. Terms
 
-| vibest | herdr | rex | tern |
-|---|---|---|---|
-| runtime on a machine | session (socket) | server (`/api/control`) | session daemon |
-| Project's terminals kept together (the runtime decides how) | workspace | session | session |
-| **Terminal** `{ machine, id }` | pane | block | block |
+| vibest                                                      | herdr            | rex                     | tern           |
+| ----------------------------------------------------------- | ---------------- | ----------------------- | -------------- |
+| runtime on a machine                                        | session (socket) | server (`/api/control`) | session daemon |
+| Project's terminals kept together (the runtime decides how) | workspace        | session                 | session        |
+| **Terminal** `{ machine, id }`                              | pane             | block                   | block          |
 
 An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL).
 
@@ -36,16 +36,16 @@ beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (
 `split` (a split beside `near` instead of a tab of its own, `vibest run --peer`) and `focus` (the user is waiting to
 see it); each is the runtime's to honor as it can.
 
-| Optional | herdr | rex | tern | Core's fallback when absent |
-|---|---|---|---|---|
-| `state(terminal)` | detected | OSC 7501 the program wrote | OSC 7501 (window side) | harness integration only |
-| `session(terminal)` | the agent record's conversation id | — | — | the harness's reports only |
-| `events` (exited, state, reset) | `events.subscribe` | `session.attach_all` | `tern events` | poll `process` |
-| `exec(machine, argv, cwd)` | — | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
-| `present(terminal, info)` | `pane.report_metadata` | block/window labels | `rename` | the `label` given to `open` |
-| `prepare(machine)` | `herdr machine add <target> --remote-session vibest` | `rex hosts add` | `tern remote setup` | the user prepares the machine |
-| `attach(machine)` | `herdr --session vibest` | — (Rex.app) | `tern` | none |
-| `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs | what tern needs | `vibest doctor` shows `status` only |
+| Optional                        | herdr                                                                                                            | rex                            | tern                                     | Core's fallback when absent                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ---------------------------------------------- |
+| `state(terminal)`               | detected                                                                                                         | OSC 7501 the program wrote     | OSC 7501 (window side)                   | harness integration only                       |
+| `session(terminal)`             | the agent record's conversation id                                                                               | —                              | —                                        | the harness's reports only                     |
+| `events` (exited, state, reset) | `events.subscribe`                                                                                               | `session.attach_all`           | `tern events`                            | poll `process`                                 |
+| `exec(machine, argv, cwd)`      | —                                                                                                                | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
+| `present(terminal, info)`       | `pane.report_metadata`                                                                                           | block/window labels            | `rename`                                 | the `label` given to `open`                    |
+| `prepare(machine)`              | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
+| `attach(machine)`               | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
+| `doctor(machine, harnesses)`    | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
 
 How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
 `pane.process_info`, `pane.close`; rex `session.new_split` (`command`, env via `/usr/bin/env K=V`), `block.event`,

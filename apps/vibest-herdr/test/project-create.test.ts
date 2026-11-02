@@ -1,19 +1,27 @@
 // `vibest project create` and multi-repository worktrees: real git, temporary directories only.
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "#platform"
-import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
-import { TestClock } from "effect/testing"
 import { cliHeaders, connect, sessionHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
-import { createIsolatedWorktrees, createProject, listProjectRepositories, plainDirectoryKey, projectRoot } from "@vibest/core/project-create"
 import { Project } from "@vibest/core/project"
+import {
+  createIsolatedWorktrees,
+  createProject,
+  listProjectRepositories,
+  plainDirectoryKey,
+  projectRoot,
+} from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { git, repositoryKey } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
+import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
 import { liveDaemon } from "../src/herdr-plugin.ts"
 import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
 
@@ -27,7 +35,11 @@ const tempDirectory = (prefix: string) =>
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
 
-const test = <E>(name: string, program: Effect.Effect<void, E, Layer.Success<typeof Platform.services> | Scope.Scope>, timeout?: number) => {
+const test = <E>(
+  name: string,
+  program: Effect.Effect<void, E, Layer.Success<typeof Platform.services> | Scope.Scope>,
+  timeout?: number,
+) => {
   const run = () => program.pipe(Effect.provide(Platform.services))
   return timeout === undefined ? it.effect(name, run) : it.effect(name, run, timeout)
 }
@@ -77,10 +89,13 @@ describe("project create", () => {
       const directory = path.join(yield* tempDirectory("vibest-project-"), "combo")
       const project = yield* createProject(directory, [app, path.join(sdk, ".")])
       assert.strictEqual(project.directory, directory)
-      assert.deepStrictEqual(project.folders.map((f) => [f.name, f.source, f.path, f.branch, f.origin]), [
-        ["app", app, path.join(directory, "app"), "feature", "https://example.com/acme/app.git"],
-        ["sdk", sdk, path.join(directory, "sdk"), "main", undefined],
-      ])
+      assert.deepStrictEqual(
+        project.folders.map((f) => [f.name, f.source, f.path, f.branch, f.origin]),
+        [
+          ["app", app, path.join(directory, "app"), "feature", "https://example.com/acme/app.git"],
+          ["sdk", sdk, path.join(directory, "sdk"), "main", undefined],
+        ],
+      )
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md", "?? new.txt"])
       assert.deepStrictEqual(project.folders[1]!.uncommitted, [])
 
@@ -118,7 +133,10 @@ describe("project create", () => {
       const base = yield* tempDirectory("vibest-project-")
       const empty = path.join(base, "empty")
       yield* fs.makeDirectory(empty)
-      assert.deepStrictEqual((yield* createProject(empty, [app])).folders.map((f) => f.name), ["app"])
+      assert.deepStrictEqual(
+        (yield* createProject(empty, [app])).folders.map((f) => f.name),
+        ["app"],
+      )
       assert.match(yield* failure(createProject(empty, [app])), /exists and is not empty/)
       const file = path.join(base, "file")
       yield* fs.writeFileString(file, "x")
@@ -245,7 +263,10 @@ describe("multi-repository project", () => {
       const app = yield* repository(root, "app")
       yield* repository(root, "sdk")
       yield* fs.makeDirectory(path.join(root, "notes"))
-      assert.deepStrictEqual((yield* listProjectRepositories(root))?.map((r) => r.name), ["app", "sdk"])
+      assert.deepStrictEqual(
+        (yield* listProjectRepositories(root))?.map((r) => r.name),
+        ["app", "sdk"],
+      )
       assert.isUndefined(yield* listProjectRepositories(app))
       const nested = yield* repository(app, "nested")
       assert.isUndefined(yield* listProjectRepositories(app))
@@ -358,21 +379,39 @@ describe("multi-repository project", () => {
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))
       assert.match(created.stderr, /M README\.md/)
       assert.notMatch(created.stderr, /sdk/)
-      const project = JSON.parse(created.stdout) as { directory: string; folders: ReadonlyArray<{ name: string; uncommitted: ReadonlyArray<string> }> }
+      const project = JSON.parse(created.stdout) as {
+        directory: string
+        folders: ReadonlyArray<{ name: string; uncommitted: ReadonlyArray<string> }>
+      }
       assert.strictEqual(project.directory, directory)
-      assert.deepStrictEqual(project.folders.map((f) => f.name), ["app", "sdk"])
+      assert.deepStrictEqual(
+        project.folders.map((f) => f.name),
+        ["app", "sdk"],
+      )
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md"])
       assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
-      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234" }, ["project", "create", again, "--from", sdk])
+      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234" }, [
+        "project",
+        "create",
+        again,
+        "--from",
+        sdk,
+      ])
       assert.strictEqual(agent.code, 1)
       assert.match(agent.stderr, /^Forbidden: /)
       assert.isFalse(yield* fs.exists(again))
 
       const usage = yield* runVibest(sources, env, ["project", "create", path.join(directory, "missing")])
       assert.strictEqual(usage.code, 2)
-      const bad = yield* runVibest(sources, env, ["project", "create", path.join(directory, "bad"), "--from", path.join(sources, "nope")])
+      const bad = yield* runVibest(sources, env, [
+        "project",
+        "create",
+        path.join(directory, "bad"),
+        "--from",
+        path.join(sources, "nope"),
+      ])
       assert.strictEqual(bad.code, 1)
       assert.match(bad.stderr, /^ProjectCreateFailed: /)
     }),
@@ -404,9 +443,19 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repository(root, "app")
       const sdk = yield* repository(root, "sdk")
-      yield* db.coordinatorLaunch(yield* plainDirectoryKey(root), "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
+      yield* db.coordinatorLaunch(yield* plainDirectoryKey(root), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
 
-      const { id } = yield* sessions.spawn({ machine: { id: "local" }, root, key: yield* plainDirectoryKey(root), name: "task", prompt: "do it", harness: "pi" })
+      const { id } = yield* sessions.spawn({
+        machine: { id: "local" },
+        root,
+        key: yield* plainDirectoryKey(root),
+        name: "task",
+        prompt: "do it",
+        harness: "pi",
+      })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       const row = (yield* db.getSession(id))!
@@ -419,7 +468,10 @@ describe("multi-repository isolated workspace", () => {
       assert.strictEqual(yield* sh(app, "branch", "--list", "vibest/*"), "")
       assert.strictEqual(yield* sh(sdk, "branch", "--list", "vibest/*"), "")
       // Placed like any session, from the project directory.
-      assert.deepStrictEqual((yield* herdr.callsTo("open")).map((call) => [call.project, call.cwd]), [[root, workspace]])
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => [call.project, call.cwd]),
+        [[root, workspace]],
+      )
 
       const view = yield* sessions.get(id)
       assert.strictEqual(view.git?.branch, "app=\nsdk=")
@@ -427,7 +479,7 @@ describe("multi-repository isolated workspace", () => {
       assert.strictEqual(view.git?.saved, true)
 
       yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn((id))
+      yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const message = (yield* db.latestInbox(id, "result"))!.message
       assert.include(message, "<branch>app=\nsdk=</branch>")
@@ -462,7 +514,12 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       yield* repository(root, "app")
       yield* repository(root, "sdk")
-      const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, ["run", "pi", "--", "do it"])
+      const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, [
+        "run",
+        "pi",
+        "--",
+        "do it",
+      ])
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -492,13 +549,21 @@ describe("multi-repository isolated workspace", () => {
         provider: null,
         model: null,
         passEnv: [],
-        session: authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "home:p1" }),
+        session: authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
+          harness: "pi",
+          fresh: false,
+          terminal: "home:p1",
+        }),
         record: () => Effect.die("pi gets no conversation id chosen up front"),
-      }).pipe(Effect.provide(Layer.succeed(Harness, {
-        available: () => Effect.succeed(true),
-        plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
-        models: () => Effect.succeed([]),
-      })))
+      }).pipe(
+        Effect.provide(
+          Layer.succeed(Harness, {
+            available: () => Effect.succeed(true),
+            plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
+            models: () => Effect.succeed([]),
+          }),
+        ),
+      )
       assert.strictEqual(command.env.VIBEST_AGENT, "coordinator")
       const main = yield* db.coordinatorOf(yield* db.projectId(yield* plainDirectoryKey(root)))
       assert.strictEqual(main?.projectDirectory, root)
@@ -519,7 +584,11 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repository(root, "app")
       yield* repository(root, "sdk")
       const raw = yield* connect(layout.socket)
-      const { sessionId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "coord" })
+      const { sessionId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: "coord",
+      })
       const { id } = yield* authed(raw, sessionHeaders(sessionId, app)).Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
@@ -557,12 +626,15 @@ describe("multi-repository isolated workspace", () => {
 
       const listed = yield* liveDaemon().list(workspace)
       assert.deepStrictEqual(listed.map((session) => session.agent).sort(), ["general", "main"])
-      assert.deepStrictEqual((yield* liveDaemon().list(root)).map((session) => session.id).sort(), listed.map((session) => session.id).sort())
+      assert.deepStrictEqual(
+        (yield* liveDaemon().list(root)).map((session) => session.id).sort(),
+        listed.map((session) => session.id).sort(),
+      )
 
       yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn((id))
+      yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* herdr.updateAgent((id), (agent) => ({ ...agent, alive: false }))
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       const before = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "again")
       const places = yield* until(herdr.callsTo("open"), (calls) => calls.length > before)

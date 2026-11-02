@@ -6,9 +6,9 @@
 // Prebuilt JS is this package's npm delivery choice. Claude Code can also load TypeScript hooks modules directly.
 import fs from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import url from "node:url"
 
-const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
 const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8")) as Record<string, unknown>
 
 const version = readJson("package.json").version
@@ -20,7 +20,8 @@ const write = (name: string, text: string | Buffer) => {
 }
 
 write(".claude-plugin/plugin.json", `${JSON.stringify({ ...readJson("src/manifest.json"), version }, null, 2)}\n`)
-if (outdir !== root) for (const name of ["hooks/hooks.json", "README.md", "LICENSE"]) write(name, fs.readFileSync(path.join(root, name)))
+if (outdir !== root)
+  for (const name of ["hooks/hooks.json", "README.md", "LICENSE"]) write(name, fs.readFileSync(path.join(root, name)))
 // Bun writes each module's path relative to the working directory into the bundle; pin it so the bytes don't vary.
 process.chdir(root)
 const result = await Bun.build({

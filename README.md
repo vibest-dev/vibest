@@ -5,7 +5,7 @@ A CLI agent orchestrator: a coordinator directing Pi, Claude Code and Cursor ses
 ## Install
 
 ```sh
-curl -fsSL https://github.com/iamdin/vibest/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/vibest-dev/vibest/releases/latest/download/install.sh | sh
 ```
 
 This installs into `~/.local/share/vibest` and links `~/.local/bin/vibest`; no Node needed. Or with npm:

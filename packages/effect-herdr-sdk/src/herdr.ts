@@ -4,6 +4,7 @@
 // `subscription_started` and then keeps the connection open, streaming `{event, data}` frames.
 import { Cause, Config, Context, Effect, Layer, Option, type Path, Random, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
+
 import type { PushFrame } from "./generated/events.js"
 import { PROTOCOL } from "./generated/index.js"
 import type { Method, MethodParams, Subscription } from "./generated/params.js"
@@ -11,7 +12,9 @@ import type { METHOD_RESULT, ResponseResult, ResultByTag } from "./generated/res
 import { SocketConnector } from "./socket-connector.js"
 import { defaultSocketPath, socketEndpoint, type SocketPathOptions } from "./socket-path.js"
 
-export type ResultOf<M extends Method> = M extends keyof typeof METHOD_RESULT ? ResultByTag[(typeof METHOD_RESULT)[M]] : ResponseResult
+export type ResultOf<M extends Method> = M extends keyof typeof METHOD_RESULT
+  ? ResultByTag[(typeof METHOD_RESULT)[M]]
+  : ResponseResult
 export type ParamsOf<M extends Method> = MethodParams[M]
 
 /** The server answered `{ error }`. `code` is herdr's machine-readable code (`timeout`, `agent_pane_busy`, …). */
@@ -54,7 +57,14 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
       Effect.flatMap((pong) =>
         pong.protocol === PROTOCOL
           ? Effect.void
-          : Effect.fail(new HerdrProtocolMismatch({ socketPath: herdr.socketPath, expected: PROTOCOL, actual: pong.protocol, serverVersion: pong.version })),
+          : Effect.fail(
+              new HerdrProtocolMismatch({
+                socketPath: herdr.socketPath,
+                expected: PROTOCOL,
+                actual: pong.protocol,
+                serverVersion: pong.version,
+              }),
+            ),
       ),
     )
 
@@ -67,7 +77,9 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
   ): Layer.Layer<Herdr, Config.ConfigError, SocketConnector | Path.Path> =>
     Layer.effect(
       Herdr,
-      (options.socketPath ? Effect.succeed(options.socketPath) : defaultSocketPath(options)).pipe(Effect.flatMap(Herdr.make)),
+      (options.socketPath ? Effect.succeed(options.socketPath) : defaultSocketPath(options)).pipe(
+        Effect.flatMap(Herdr.make),
+      ),
     )
 }
 
@@ -83,11 +95,14 @@ const Request = Schema.Struct({ id: Schema.String, method: Schema.String, params
 const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(Request))
 const isResponse = (m: typeof Response.Type | typeof Push.Type): m is typeof Response.Type => "id" in m
 
-const requestId = (prefix: string) => Random.nextIntBetween(0, 2 ** 31).pipe(Effect.map((n) => `${prefix}-${n.toString(36)}`))
+const requestId = (prefix: string) =>
+  Random.nextIntBetween(0, 2 ** 31).pipe(Effect.map((n) => `${prefix}-${n.toString(36)}`))
 
 function makeClient(socketPath: string, connect: SocketConnector["Service"]): HerdrShape {
-  const transport = (method: string) => (e: { readonly message: string }) => new HerdrTransportError({ method, message: e.message })
-  const serverError = (method: string, error: { code: string; message: string }) => new HerdrError({ method, code: error.code, message: error.message })
+  const transport = (method: string) => (e: { readonly message: string }) =>
+    new HerdrTransportError({ method, message: e.message })
+  const serverError = (method: string, error: { code: string; message: string }) =>
+    new HerdrError({ method, code: error.code, message: error.message })
 
   /** Open a connection, send one request line, and expose the decoded response lines. Scoped: closing the scope closes the socket. */
   const open = (method: string, request: typeof Request.Type) =>
@@ -98,7 +113,12 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeRequest(request).pipe(Effect.orDie)}\n`)
       // Every close surfaces as a SocketError; a clean close is just the end of the stream.
-      const text = pull.pipe(Effect.catchIf((e) => e.reason._tag === "SocketCloseError", () => Cause.done()))
+      const text = pull.pipe(
+        Effect.catchIf(
+          (e) => e.reason._tag === "SocketCloseError",
+          () => Cause.done(),
+        ),
+      )
       return Stream.fromPull(Effect.succeed(text)).pipe(
         Stream.splitLines,
         Stream.filter((l) => l.length > 0),
@@ -116,7 +136,8 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
         Stream.filter((m) => m.id === id || m.id === ""),
         Stream.runHead,
       )
-      if (Option.isNone(found)) return yield* new HerdrTransportError({ method, message: "connection closed before a response" })
+      if (Option.isNone(found))
+        return yield* new HerdrTransportError({ method, message: "connection closed before a response" })
       if (found.value.error) return yield* serverError(method, found.value.error)
       // Not decoded at runtime: the shape is herdr's contract for PROTOCOL, checked once per server by verifyProtocol.
       return found.value.result as ResultOf<M>
@@ -129,10 +150,13 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       const id = yield* requestId("sub")
       const lines = yield* open(method, { id, method, params: { subscriptions } })
       return lines.pipe(
-        Stream.flatMap((m): Stream.Stream<PushFrame, HerdrFailure> =>
-          isResponse(m)
-            ? (m.id === id || m.id === "") && m.error ? Stream.fail(serverError(method, m.error)) : Stream.empty
-            : Stream.make(m as PushFrame), // herdr's contract for PROTOCOL, as in `call`
+        Stream.flatMap(
+          (m): Stream.Stream<PushFrame, HerdrFailure> =>
+            isResponse(m)
+              ? (m.id === id || m.id === "") && m.error
+                ? Stream.fail(serverError(method, m.error))
+                : Stream.empty
+              : Stream.make(m as PushFrame), // herdr's contract for PROTOCOL, as in `call`
         ),
       )
     }).pipe(Stream.unwrap)

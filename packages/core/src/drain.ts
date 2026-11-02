@@ -9,23 +9,31 @@ const make = Effect.gen(function* () {
   const track = (label: string) => {
     const token = {}
     active.set(token, label)
-    return Effect.sync(() => { active.delete(token) })
+    return Effect.sync(() => {
+      active.delete(token)
+    })
   }
-  const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> => Effect.suspend(() =>
-    phase === "open" || (settlement && phase === "draining")
-      ? Effect.succeed(track(label))
-      : Deferred.await(reopened).pipe(Effect.andThen(enter(label, settlement))),
-  )
+  const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>
+    Effect.suspend(() =>
+      phase === "open" || (settlement && phase === "draining")
+        ? Effect.succeed(track(label))
+        : Deferred.await(reopened).pipe(Effect.andThen(enter(label, settlement))),
+    )
   return {
     /** Count already-admitted work handed to a queue or fork, with no gap in the accounting. Returns its release. */
     track,
     /** Run `body` counted; while draining it waits for a reopen, unless it settles work already started (`settlement`). */
     work: <A, E, R>(label: string, body: Effect.Effect<A, E, R>, settlement = false) =>
       Effect.uninterruptibleMask((restore) =>
-        Effect.acquireUseRelease(restore(enter(label, settlement)), () => restore(body), (leave) => leave)),
+        Effect.acquireUseRelease(
+          restore(enter(label, settlement)),
+          () => restore(body),
+          (leave) => leave,
+        ),
+      ),
     /** At the RPC entry: the release when admitted now, else undefined (refused, never waits). */
-    admit: (label: string, settlement = false) => Effect.sync(() =>
-      phase === "open" || (settlement && phase === "draining") ? track(label) : undefined),
+    admit: (label: string, settlement = false) =>
+      Effect.sync(() => (phase === "open" || (settlement && phase === "draining") ? track(label) : undefined)),
     begin: Effect.sync(() => {
       if (phase !== "open") return false
       phase = "draining"

@@ -107,11 +107,11 @@ module has not been exercised in a live coordinator.
 - Reads the claim body with `$.fs.read`, never from stdout, and submits it with `$.prompt.submit`.
 - Then settles the claim:
 
-  | Submit result | Settlement |
-  |---|---|
-  | Accepted or queued | `ack`. This means delivery was accepted, not that an VIBEST task finished. |
-  | Definite `drop` | `release --retry` |
-  | Ambiguous (the submit threw) | `release` |
+  | Submit result                | Settlement                                                                 |
+  | ---------------------------- | -------------------------------------------------------------------------- |
+  | Accepted or queued           | `ack`. This means delivery was accepted, not that an VIBEST task finished. |
+  | Definite `drop`              | `release --retry`                                                          |
+  | Ambiguous (the submit threw) | `release`                                                                  |
 
 - A lost settlement retries the same settlement and never submits again.
 

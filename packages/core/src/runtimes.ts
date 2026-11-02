@@ -1,9 +1,9 @@
+import * as VibestPlugin from "@vibest/plugin"
+import { NoRuntime } from "@vibest/schema/session"
 // The runtime registry (runtime-port.md §1–§4): what runtime plugins register through `context.runtime.register`, and
 // how core routes every call by the runtime kind stored on a row. Core never branches on a runtime's `kind` beyond
 // checking it is loaded and online; which runtime a start uses is the choice plugin's decision (§4).
 import { Cause, Context, Effect, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
-import * as VibestPlugin from "@vibest/plugin"
-import { NoRuntime } from "@vibest/schema/session"
 
 export { NoRuntime }
 
@@ -30,7 +30,9 @@ export interface RuntimesShape {
    * Every runtime's status on `machine`, in registration order: what `agent.start.before` reports as `machines[]`
    * (§7) and what the choice plugin decides on.
    */
-  readonly statuses: (machine: Machine) => Effect.Effect<ReadonlyArray<{ readonly runtime: Runtime; readonly status: MachineStatus }>>
+  readonly statuses: (
+    machine: Machine,
+  ) => Effect.Effect<ReadonlyArray<{ readonly runtime: Runtime; readonly status: MachineStatus }>>
   /** `machine`'s status of `runtime`: online, or the reason it is not (§4's check after the chain). */
   readonly online: (runtime: Runtime, machine: Machine) => Effect.Effect<void, NoRuntime>
 }
@@ -44,7 +46,11 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
     const merge = (runtime: Runtime, scope: Scope.Scope) =>
       runtime.events === undefined
         ? Effect.void
-        : runtime.events.pipe(Stream.runForEach((event) => PubSub.publish(events, event)), Effect.catchCause(() => Effect.void), Effect.forkIn(scope))
+        : runtime.events.pipe(
+            Stream.runForEach((event) => PubSub.publish(events, event)),
+            Effect.catchCause(() => Effect.void),
+            Effect.forkIn(scope),
+          )
     // Runtimes seeded at make (a test's fake, registered up front) merge for the registry's own scope.
     const own = yield* Effect.scope
     for (const runtime of initial) yield* merge(runtime, own)
@@ -52,36 +58,57 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
       register: (runtime) =>
         Effect.gen(function* () {
           yield* Effect.sync(() => {
-            if (registered.some((loaded) => loaded.kind === runtime.kind)) throw new Error(`runtime kind "${runtime.kind}" is already registered`)
+            if (registered.some((loaded) => loaded.kind === runtime.kind))
+              throw new Error(`runtime kind "${runtime.kind}" is already registered`)
             registered = [...registered, runtime]
           })
           // This registration's events end with its scope: the fiber dies when the plugin unloads.
           yield* merge(runtime, yield* Effect.scope)
-          yield* Effect.addFinalizer(() => Effect.sync(() => { registered = registered.filter((loaded) => loaded !== runtime) }))
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              registered = registered.filter((loaded) => loaded !== runtime)
+            }),
+          )
         }),
       all: Effect.sync(() => registered),
       route: (kind) =>
         Effect.suspend(() => {
           const found = registered.find((runtime) => runtime.kind === kind)
           return found === undefined
-            ? Effect.fail(new NoRuntime({ message: `the runtime "${kind}" is not loaded${registered.length === 0 ? "" : `; loaded: ${registered.map((runtime) => runtime.kind).join(", ")}`}` }))
+            ? Effect.fail(
+                new NoRuntime({
+                  message: `the runtime "${kind}" is not loaded${registered.length === 0 ? "" : `; loaded: ${registered.map((runtime) => runtime.kind).join(", ")}`}`,
+                }),
+              )
             : Effect.succeed(found)
         }),
       events: Stream.fromPubSub(events),
       statuses: (machine) =>
-        Effect.forEach(registered, (runtime) => runtime.status(machine).pipe(Effect.map((status) => ({ runtime, status }))), { concurrency: "unbounded" }),
+        Effect.forEach(
+          registered,
+          (runtime) => runtime.status(machine).pipe(Effect.map((status) => ({ runtime, status }))),
+          { concurrency: "unbounded" },
+        ),
       online: (runtime, machine) =>
         runtime.status(machine).pipe(
           Effect.flatMap((status) =>
             status.status === "online"
               ? Effect.void
-              : Effect.fail(new NoRuntime({ message: `the runtime ${runtime.kind} is ${status.status} on ${machine.id}${"reason" in status ? ` (${status.reason})` : ""}` })),
+              : Effect.fail(
+                  new NoRuntime({
+                    message: `the runtime ${runtime.kind} is ${status.status} on ${machine.id}${"reason" in status ? ` (${status.reason})` : ""}`,
+                  }),
+                ),
           ),
           Effect.catchCause((cause) =>
-            Effect.fail(new NoRuntime({ message: `the runtime ${runtime.kind}'s status on ${machine.id} could not be read: ${messageOf(cause)}` })),
+            Effect.fail(
+              new NoRuntime({
+                message: `the runtime ${runtime.kind}'s status on ${machine.id} could not be read: ${messageOf(cause)}`,
+              }),
+            ),
           ),
         ),
-      }
+    }
   })
 
 /** A failure's message, whatever shape it is (plugins.ts `errorMessage` without the import cycle). */
@@ -107,7 +134,8 @@ export const registry = make
  */
 export const readFile = (machine: Machine, file: string): Effect.Effect<string, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    if (machine.id !== "local") return yield* Effect.fail(new Error(`reading ${file} on machine ${machine.id} is not supported yet`))
+    if (machine.id !== "local")
+      return yield* Effect.fail(new Error(`reading ${file} on machine ${machine.id} is not supported yet`))
     const fs = yield* FileSystem.FileSystem
     return yield* fs.readFileString(file)
   }).pipe(Effect.mapError((e) => new Error(`read ${file}: ${e.message}`)))
@@ -125,7 +153,12 @@ export const agentState = (h: Runtime, terminal: Terminal): Effect.Effect<AgentS
     : h.state(terminal).pipe(
         // not_found: no agent there. Unreachable is no answer at all (§3: transient, the caller retries); anything else reads as unknown.
         Effect.catchTag("RuntimeError", (error) =>
-          error.code === "not_found" ? Effect.succeed("absent" as AgentSeen) : error.code === "unreachable" ? Effect.fail(error) : Effect.succeed("unknown" as AgentSeen)),
+          error.code === "not_found"
+            ? Effect.succeed("absent" as AgentSeen)
+            : error.code === "unreachable"
+              ? Effect.fail(error)
+              : Effect.succeed("unknown" as AgentSeen),
+        ),
       )
 
 /** Whether a program still runs in the terminal (§5's fallback when there is no `state`): `not_found` is not running; an error that cannot tell counts as running. */
@@ -145,11 +178,20 @@ export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30)
     : Effect.succeed("")
 
 /** The `machines[]` of `agent.start.before` (§7): one `local` machine with every registered runtime's status and the harnesses vibestd can start there. */
-export const machinesListing = (runtimes: RuntimesShape, harnesses: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
+export const machinesListing = (
+  runtimes: RuntimesShape,
+  harnesses: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
   runtimes.statuses({ id: "local" }).pipe(
-    Effect.map((rows) => [{
-      machine: "local",
-      runtimes: rows.map(({ runtime, status }) => ({ kind: runtime.kind, status: status.status, ...("reason" in status ? { reason: status.reason } : {}) })),
-      harnesses,
-    }]),
+    Effect.map((rows) => [
+      {
+        machine: "local",
+        runtimes: rows.map(({ runtime, status }) => ({
+          kind: runtime.kind,
+          status: status.status,
+          ...("reason" in status ? { reason: status.reason } : {}),
+        })),
+        harnesses,
+      },
+    ]),
   )

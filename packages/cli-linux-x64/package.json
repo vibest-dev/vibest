@@ -5,9 +5,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
     "directory": "packages/cli-linux-x64"
   },
+  "files": [
+    "bin/vibest",
+    "LICENSE"
+  ],
   "os": [
     "linux"
   ],
@@ -17,15 +21,11 @@
   "libc": [
     "glibc"
   ],
-  "files": [
-    "bin/vibest",
-    "LICENSE"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "cd ../../apps/vibest-herdr && bun run build:linux-x64",
     "prepack": "cd ../../apps/vibest-herdr && bun run build:linux-x64"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

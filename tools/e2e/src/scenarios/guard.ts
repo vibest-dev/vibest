@@ -2,6 +2,7 @@
 // agent's environment. Claude's and Cursor's plugins call it only for a vibest agent (I9 runs Cursor's for real); Pi's
 // extension applies the same rules in process (needs Pi running: runtime, not here).
 import path from "node:path"
+
 import type { Check } from "../check.ts"
 import { binary, expect, type World } from "../world.ts"
 
@@ -9,7 +10,14 @@ type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
-const ask = async (w: World, harness: Harness, agent: string | undefined, tool: string, input: Record<string, unknown>, raw?: string): Promise<Answer> => {
+const ask = async (
+  w: World,
+  harness: Harness,
+  agent: string | undefined,
+  tool: string,
+  input: Record<string, unknown>,
+  raw?: string,
+): Promise<Answer> => {
   const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
   const env = agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001" }
   const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", harness], { env, stdin })
@@ -43,7 +51,10 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const file = path.join(w.vibestHome, "projects", "x", "memory", "a.md")
       for (const h of both) {
-        for (const [tool, input] of [[shell(h), { command: `cat ${file}` }], ["Read", { file_path: file }]] as const) {
+        for (const [tool, input] of [
+          [shell(h), { command: `cat ${file}` }],
+          ["Read", { file_path: file }],
+        ] as const) {
           const a = await ask(w, h, "general", tool, input)
           expect(a.decision === "deny", `${h} ${tool}: ${JSON.stringify(a)}`)
         }

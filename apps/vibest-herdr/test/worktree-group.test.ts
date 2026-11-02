@@ -1,16 +1,20 @@
 // New worktrees are worktrees/<repository name>/<4 hex>. Rows without that record stay flat.
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Path, type Scope } from "effect"
 import { Db, type SessionRow } from "@vibest/core/db"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Effect, FileSystem, Path, type Scope } from "effect"
+
 import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
-  Effect.map(repositoryKey(repo), (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const)
+  Effect.map(
+    repositoryKey(repo),
+    (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
+  )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -33,7 +37,8 @@ const legacyRow = (
   startedAt: 1,
   exitedAt: null,
   turnState: "none",
-  turnPromptedAt: 0, metadata,
+  turnPromptedAt: 0,
+  metadata,
   createdAt: 1,
   lastActive: 1,
   ...patch,
@@ -57,7 +62,7 @@ describe("repository-grouped worktrees", () => {
       const sessions = yield* Sessions
       const db = yield* Db
       const repo = yield* makeRepository
-      const { id } = yield* sessions.spawn((yield* spawnInput(repo)))
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       const row = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const repository = row.metadata.worktreeRepository!
       const leaf = row.metadata.worktreeName!
@@ -98,7 +103,7 @@ describe("repository-grouped worktrees", () => {
       const taken = layout.allocationWorktree(repository, "ab01")
       yield* fs.makeDirectory(taken, { recursive: true })
       yield* fs.writeFileString(path.join(taken, "keep"), "keep\n")
-      const { id } = yield* sessions.spawn((yield* spawnInput(repo))).pipe(reset)
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
       const row = (yield* db.getSession(id))!
       const at = layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!)
       assert.strictEqual(at, layout.allocationWorktree(repository, "ab02"))
@@ -122,7 +127,7 @@ describe("repository-grouped worktrees", () => {
       const parent = path.join(layout.worktrees, name)
       yield* fs.makeDirectory(layout.worktrees, { recursive: true })
       yield* sh(repo, "worktree", "add", "-q", "--detach", parent)
-      const failed = yield* Effect.flip(sessions.spawn((yield* spawnInput(repo))))
+      const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)))
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, parent)
       assert.lengthOf(yield* herdr.callsTo("open"), 0)
@@ -148,9 +153,12 @@ describe("repository-grouped worktrees", () => {
       yield* fs.makeDirectory(path.dirname(at), { recursive: true })
       yield* fs.symlink("nowhere", at)
       yield* fs.writeFileString(path.join(path.dirname(at), "keep"), "keep\n")
-      const { id } = yield* sessions.spawn((yield* spawnInput(repo))).pipe(reset)
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
       const row = (yield* db.getSession(id))!
-      assert.strictEqual(layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!), layout.allocationWorktree(repository, "ab02"))
+      assert.strictEqual(
+        layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!),
+        layout.allocationWorktree(repository, "ab02"),
+      )
       yield* until(db.getSession(id), (w) => w?.startedAt !== null)
       assert.strictEqual(yield* fs.readLink(at), "nowhere")
       assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(at), "keep")), "keep\n")
@@ -172,14 +180,14 @@ describe("repository-grouped worktrees", () => {
       // refuses it and the spawn never starts. The file stays beside the real worktree through it all.
       allocationNameSource.leaves = ["ab01", "ab02"]
       const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
-      const { id: live } = yield* sessions.spawn((yield* spawnInput(repo)))
+      const { id: live } = yield* sessions.spawn(yield* spawnInput(repo))
       const liveRow = yield* until(db.getSession(live), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const liveTree = layout.allocationWorktree(liveRow.metadata.worktreeRepository!, liveRow.metadata.worktreeName!)
       const repository = yield* repositoryDirectoryName(repo)
       const file = layout.allocationWorktree(repository, "ab02")
       yield* fs.makeDirectory(path.dirname(file), { recursive: true })
       yield* fs.writeFileString(file, "keep\n")
-      const refused = yield* Effect.flip(sessions.spawn((yield* spawnInput(repo))).pipe(reset))
+      const refused = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)).pipe(reset))
       assert.include(refused.message, "no unused 4-hex worktree name")
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
       const rows = yield* sessions.list()
@@ -202,7 +210,7 @@ describe("repository-grouped worktrees", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
-      const { id } = yield* (yield* Sessions).spawn((yield* spawnInput(repo)))
+      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* held.reached
       const created = (yield* db.getSession(id))!
       const wt = layout.allocationWorktree(created.metadata.worktreeRepository!, created.metadata.worktreeName!)
@@ -242,7 +250,10 @@ describe("repository-grouped worktrees", () => {
           return { flat, decoy }
         })
       const open = yield* link(reported)
-      yield* db.insertSession(legacyRow(reported, {}, { status: "working", startedAt: 1, exitedAt: null, turnState: "open" }), key)
+      yield* db.insertSession(
+        legacyRow(reported, {}, { status: "working", startedAt: 1, exitedAt: null, turnState: "open" }),
+        key,
+      )
       assert.strictEqual((yield* sessions.get(reported)).worktree, open.flat)
       assert.strictEqual((yield* sessions.list()).find((s) => s.id === reported)!.worktree, open.flat)
       yield* sessions.check(reported)
@@ -299,7 +310,14 @@ describe("repository-grouped worktrees", () => {
       yield* fs.writeFileString(flat + "/keep", "flat\n")
       const repository = yield* repositoryDirectoryName(repo)
       const grouped = layout.allocationWorktree(repository, "cd34")
-      yield* db.insertSession(legacyRow(id, { worktreeRepository: repository, worktreeName: "cd34", stop: [{ pane: "p", pids: [1], exited: true }] }), key)
+      yield* db.insertSession(
+        legacyRow(id, {
+          worktreeRepository: repository,
+          worktreeName: "cd34",
+          stop: [{ pane: "p", pids: [1], exited: true }],
+        }),
+        key,
+      )
       const out = (yield* sessions.remove(id))!
       assert.deepInclude(out, { worktree: "gone", path: grouped })
       assert.include(out.reasons.join("\n"), grouped + " was already gone")
@@ -364,7 +382,10 @@ describe("repository-grouped worktrees", () => {
       yield* herdr.seedAgent(owner)
       yield* db.insertSession(legacyRow(id, {}), key)
       const spawned = yield* sessions.spawn({ ...(yield* spawnInput(repo)), peer: id })
-      const peerRow = yield* until(db.getSession(spawned.id), (w): w is NonNullable<typeof w> => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      const peerRow = yield* until(
+        db.getSession(spawned.id),
+        (w): w is NonNullable<typeof w> => !!w && (w.startedAt !== null || w.exitedAt !== null),
+      )
       assert.strictEqual(peerRow.metadata.peer, id)
       assert.isUndefined(peerRow.metadata.worktreeRepository)
       assert.isUndefined(peerRow.metadata.worktreeName)
@@ -372,7 +393,7 @@ describe("repository-grouped worktrees", () => {
       // Only the owner's terminal, placed above: the peer is split from it.
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
       yield* writeResult(spawned.id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn((spawned.id))
+      yield* herdr.endTurn(spawned.id)
       yield* sessions.check(spawned.id)
       const borrower = (yield* sessions.remove(spawned.id))!
       assert.deepInclude(borrower, { worktree: "kept", path: flat })
@@ -449,7 +470,9 @@ describe("repository-grouped worktrees", () => {
       yield* db.insertSession(legacyRow("1111aaaa", { worktreeRepository: "MyRepo", worktreeName: "abcd" }), key)
       assert.isFalse(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
       allocationNameSource.leaves = ["abcd", "abce"]
-      const spawned = yield* sessions.spawn((yield* spawnInput(other))).pipe(Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))))
+      const spawned = yield* sessions
+        .spawn(yield* spawnInput(other))
+        .pipe(Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))))
       const row = yield* until(db.getSession(spawned.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
       assert.strictEqual(row.metadata.worktreeRepository, "myrepo")
@@ -478,7 +501,7 @@ describe("repository-grouped worktrees", () => {
       yield* Effect.gen(function* () {
         allocationNameSource.leaves = ["abcd", "abce"]
         const held = yield* herdr.hold("open")
-        const first = yield* sessions.spawn((yield* spawnInput(repo)))
+        const first = yield* sessions.spawn(yield* spawnInput(repo))
         yield* held.reached
         const owner = (yield* db.getSession(first.id))!
         assert.strictEqual(owner.metadata.worktreeRepository, "MyRepo")
@@ -487,13 +510,19 @@ describe("repository-grouped worktrees", () => {
         // keeps the next draw from aliasing it either way.
         assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
         allocationNameSource.leaves = ["abcd", "abce"]
-        const second = yield* sessions.spawn((yield* spawnInput(other)))
-        const otherRow = yield* until(db.getSession(second.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        const second = yield* sessions.spawn(yield* spawnInput(other))
+        const otherRow = yield* until(
+          db.getSession(second.id),
+          (w): w is NonNullable<typeof w> => w?.turnState === "open",
+        )
         assert.strictEqual(otherRow.metadata.worktreeName, sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd")
         assert.strictEqual((yield* db.getSession(first.id))!.metadata.worktreeName, "abcd")
         assert.notStrictEqual((yield* sessions.get(first.id)).worktree, (yield* sessions.get(second.id)).worktree)
         yield* held.release()
-        const created = yield* until(db.getSession(first.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        const created = yield* until(
+          db.getSession(first.id),
+          (w): w is NonNullable<typeof w> => w?.turnState === "open",
+        )
         assert.strictEqual(created.metadata.worktreeName, "abcd")
         assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
         assert.isUndefined((yield* db.getSession(first.id))!.metadata.peer)
@@ -513,10 +542,15 @@ describe("repository-grouped worktrees", () => {
       yield* db.insertSession(legacyRow("1111aaaa", { worktreeRepository: "MyRepo", worktreeName: "abcd" }), key)
       const before = (yield* db.listSessions({ stopped: true })).map((row) => row.id)
       allocationNameSource.leaves = ["abcd"]
-      const failed = yield* Effect.flip(sessions.spawn((yield* spawnInput(repo)))).pipe(Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))))
+      const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo))).pipe(
+        Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))),
+      )
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, "no unused 4-hex")
-      assert.deepStrictEqual((yield* db.listSessions({ stopped: true })).map((row) => row.id), before)
+      assert.deepStrictEqual(
+        (yield* db.listSessions({ stopped: true })).map((row) => row.id),
+        before,
+      )
     }),
   )
 })

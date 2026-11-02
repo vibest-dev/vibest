@@ -1,5 +1,6 @@
 // Unwired Claude inbox client. Fake IO and controlled promises only: no sleeps, processes, or native APIs.
 import { assert, describe, it } from "@effect/vitest"
+
 import {
   createClaudeInboxClient,
   type AttachReply,
@@ -306,7 +307,10 @@ describe("Claude inbox client prototype", () => {
     const next = await box.client.tick()
     assert.strictEqual(next.phase, "done")
     assert.strictEqual(next.generation, "g1")
-    assert.deepStrictEqual(box.submits.map((item) => item.token), ["t1", "t2"])
+    assert.deepStrictEqual(
+      box.submits.map((item) => item.token),
+      ["t1", "t2"],
+    )
     assert.strictEqual(box.acks.length, 4)
     assert.deepStrictEqual(box.acks[3], { generation: "g1", sessionId: "s1", token: "t2" })
     assert.strictEqual(box.submits.filter((item) => item.token === "t1").length, 1)

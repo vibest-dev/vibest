@@ -1,17 +1,28 @@
-// vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
-// (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
-// handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
-import * as Headers from "effect/http/Headers"
-import { RpcSerialization, RpcServer } from "effect/rpc"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
-import { agentState, type Machine, machinesListing, NoRuntime, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
-import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
-import { describeSpawn, Plugins } from "@vibest/core/plugins"
+import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
-import { HARNESS_IDS, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
+import * as Launch from "@vibest/core/launch"
+import { Layout } from "@vibest/core/paths"
+import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
+import { projectRoot } from "@vibest/core/project-create"
+import { stopAgent } from "@vibest/core/remove"
+import { envelope } from "@vibest/core/results"
+import {
+  agentState,
+  type Machine,
+  machinesListing,
+  NoRuntime,
+  Runtimes,
+  type Runtime,
+  type Terminal,
+} from "@vibest/core/runtimes"
+import { STOP_WAIT } from "@vibest/core/sessions"
+import { NoSuchSession, type SessionView, Sessions } from "@vibest/core/sessions"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { NotInRepository } from "@vibest/core/worktree"
+import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, REPOSITORY_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import {
   Admission,
   Caller,
@@ -29,17 +40,14 @@ import {
   type CallerShape,
   type SessionInfo,
 } from "@vibest/protocol/rpc"
-import { Drain } from "@vibest/core/drain"
-import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, REPOSITORY_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
-import * as Launch from "@vibest/core/launch"
-import { Layout } from "@vibest/core/paths"
-import { stopAgent } from "@vibest/core/remove"
-import { STOP_WAIT } from "@vibest/core/sessions"
-import { envelope } from "@vibest/core/results"
-import { NoSuchSession, type SessionView, Sessions } from "@vibest/core/sessions"
+import { HARNESS_IDS, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { projectRoot } from "@vibest/core/project-create"
-import { NotInRepository } from "@vibest/core/worktree"
+// vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
+// (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
+// handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
+import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
+import * as Headers from "effect/http/Headers"
+import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
 
 const placeOf = (kind: string, address: RuntimeAddress) =>
@@ -52,12 +60,19 @@ const sameCoordinator = (
   address: string,
 ) => {
   const place = current?.address
-  return current?.runtime === runtime && place !== null && place !== undefined && place.id !== "" && encodeAddress(place) === address
+  return (
+    current?.runtime === runtime &&
+    place !== null &&
+    place !== undefined &&
+    place.id !== "" &&
+    encodeAddress(place) === address
+  )
 }
 
 /** `vibest ls` shows at most this many characters of a task; the ellipsis is the last of them. `Get` is uncut. */
 const LS_TASK = 500
-const taskForLs = (task: string | null) => (task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task)
+const taskForLs = (task: string | null) =>
+  task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
 export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo => ({
   id: session.id,
@@ -160,7 +175,10 @@ const ACCESS = {
   Interrupt: "owner",
   Remove: "owner",
   "Daemon.Stop": "cli",
-} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], "open" | "session" | "agent" | "coordinator" | "owner" | "cli">
+} as const satisfies Record<
+  RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
+  "open" | "session" | "agent" | "coordinator" | "owner" | "cli"
+>
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
 
@@ -171,7 +189,9 @@ const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
 /** Completed when a Daemon.Stop is accepted; Daemon.run waits for it, then closes the server, the lock last. */
-export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/DaemonShutdown", { defaultValue: () => Deferred.makeUnsafe<void>() })
+export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/DaemonShutdown", {
+  defaultValue: () => Deferred.makeUnsafe<void>(),
+})
 
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
@@ -200,15 +220,19 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
     const sessionId = header(headers, SESSION_HEADER)
     const repository = header(headers, REPOSITORY_HEADER)
     const bad = (message: string) => new InvalidCaller({ method, message })
-    if (kind._tag === "None") return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
+    if (kind._tag === "None")
+      return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
     if (kind.value === "cli") {
       if (sessionId._tag === "Some") return yield* bad(`${method} claims cli and a session id`)
-      if (repository._tag === "None" || repository.value.trim() === "") return yield* bad(`${method} claims cli without a repository`)
+      if (repository._tag === "None" || repository.value.trim() === "")
+        return yield* bad(`${method} claims cli without a repository`)
       return { _tag: "Cli", repositoryRoot: repository.value } satisfies CallerShape
     }
     if (kind.value === "session") {
-      if (sessionId._tag === "None" || sessionId.value.trim() === "") return yield* bad(`${method} claims session without a session id`)
-      if (repository._tag === "Some" && repository.value.trim() === "") return yield* bad(`${method} has an empty repository`)
+      if (sessionId._tag === "None" || sessionId.value.trim() === "")
+        return yield* bad(`${method} claims session without a session id`)
+      if (repository._tag === "Some" && repository.value.trim() === "")
+        return yield* bad(`${method} has an empty repository`)
       const row = yield* db.sessionIdentity(sessionId.value)
       if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
       if (row.agent === "coordinator") {
@@ -230,7 +254,9 @@ export const ProtocolGateLive = Layer.succeed(
   ProtocolGate.of((effect, { headers, rpc }) => {
     const protocol = header(headers, PROTOCOL_HEADER)
     if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
-      return Effect.fail(new ProtocolRejected({ method: rpc._tag, protocol: protocol._tag === "None" ? null : protocol.value }))
+      return Effect.fail(
+        new ProtocolRejected({ method: rpc._tag, protocol: protocol._tag === "None" ? null : protocol.value }),
+      )
     }
     return effect
   }),
@@ -241,7 +267,9 @@ export const CallerGateLive = Layer.effect(
   Effect.gen(function* () {
     const db = yield* Db
     return CallerGate.of((effect, { headers, rpc }) =>
-      resolveCaller(db, headers, rpc._tag).pipe(Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller))),
+      resolveCaller(db, headers, rpc._tag).pipe(
+        Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
+      ),
     )
   }),
 )
@@ -265,7 +293,10 @@ export const handlers = VibestRpcs.toLayer(
       Effect.gen(function* () {
         const c = yield* Caller
         if (c._tag === "Session")
-          return yield* new Forbidden({ method, message: `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)` })
+          return yield* new Forbidden({
+            method,
+            message: `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)`,
+          })
         return c
       })
 
@@ -276,18 +307,30 @@ export const handlers = VibestRpcs.toLayer(
         const session = yield* db.getSession(id)
         if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
         if (c._tag === "Coordinator" && session.projectId !== c.projectId)
-          return yield* new Forbidden({ method, message: `${id} belongs to another coordinator; only it or the user may manage it` })
+          return yield* new Forbidden({
+            method,
+            message: `${id} belongs to another coordinator; only it or the user may manage it`,
+          })
       })
 
     /** Root and key of a directory. A platform failure is a defect; not being a project is `NotInRepository`. */
     const atProject = (directory: string) =>
-      projectRoot(directory).pipe(Effect.catchIf((error) => error._tag !== "NotInRepository", (error) => Effect.die(error)))
+      projectRoot(directory).pipe(
+        Effect.catchIf(
+          (error) => error._tag !== "NotInRepository",
+          (error) => Effect.die(error),
+        ),
+      )
 
     /** The project directory of the caller's working directory. Coordinator identity does not supply it. */
     const checkout = (c: Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>, method: string) =>
       Effect.gen(function* () {
         const directory = c.repositoryRoot
-        if (directory === undefined) return yield* new InvalidCaller({ method, message: `${method} needs the repository of the working directory` })
+        if (directory === undefined)
+          return yield* new InvalidCaller({
+            method,
+            message: `${method} needs the repository of the working directory`,
+          })
         return (yield* atProject(directory)).root
       })
 
@@ -297,7 +340,8 @@ export const handlers = VibestRpcs.toLayer(
         const c = yield* agent(method)
         if (c._tag === "Coordinator") {
           const key = yield* db.projectKey(c.projectId)
-          if (key === undefined) return yield* new NotInRepository({ path: c.repositoryRoot ?? `project ${c.projectId}` })
+          if (key === undefined)
+            return yield* new NotInRepository({ path: c.repositoryRoot ?? `project ${c.projectId}` })
           return { key }
         }
         return { key: (yield* atProject(c.repositoryRoot)).key }
@@ -305,7 +349,9 @@ export const handlers = VibestRpcs.toLayer(
 
     /** The machine a caller names: `local` unless it says more (`RuntimeMachine`), opaque `target` included. */
     const machineOf = (machine: { readonly id: string; readonly target?: string | undefined } | undefined): Machine =>
-      machine === undefined ? { id: "local" } : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
+      machine === undefined
+        ? { id: "local" }
+        : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
     /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
@@ -327,7 +373,11 @@ export const handlers = VibestRpcs.toLayer(
         machinesListing(runtimes, []).pipe(
           Effect.map((machines) =>
             machines.flatMap((machine) =>
-              machine.runtimes.map((r) => ({ kind: r.kind, status: r.status, ...(r.reason !== undefined ? { reason: r.reason } : {}) })),
+              machine.runtimes.map((r) => ({
+                kind: r.kind,
+                status: r.status,
+                ...(r.reason !== undefined ? { reason: r.reason } : {}),
+              })),
             ),
           ),
           Effect.map((rows) => ({ protocol: PROTOCOL, version: VERSION, runtimes: rows, ...identity })),
@@ -336,15 +386,27 @@ export const handlers = VibestRpcs.toLayer(
       Spawn: (input) =>
         Effect.gen(function* () {
           const c = yield* agent("Spawn")
-          if (input.agent === "coordinator" || input.agent === "main") return yield* new Forbidden({ method: "Spawn", message: `${input.agent} is reserved for the main agent (vibest)` })
+          if (input.agent === "coordinator" || input.agent === "main")
+            return yield* new Forbidden({
+              method: "Spawn",
+              message: `${input.agent} is reserved for the main agent (vibest)`,
+            })
           // The main agent starts sessions in its own project wherever its shell is, e.g. inside one repository of a
           // multi-repository Project. Its working directory only counts for a main agent saved without its project directory.
           const own = c._tag === "Coordinator" ? (yield* db.coordinatorOf(c.projectId))?.projectDirectory : undefined
           const directory = own ?? c.repositoryRoot
-          if (directory === undefined) return yield* new InvalidCaller({ method: "Spawn", message: "vibest run needs a project: run it inside a git repository, or a directory of git repositories" })
+          if (directory === undefined)
+            return yield* new InvalidCaller({
+              method: "Spawn",
+              message: "vibest run needs a project: run it inside a git repository, or a directory of git repositories",
+            })
           const project = yield* atProject(directory)
           if (c._tag === "Coordinator" && (yield* db.projectId(project.key)) !== c.projectId)
-            return yield* new Forbidden({ method: "Spawn", message: "a main agent only starts sessions in its own project: cd into the directory where vibest was started and run it again" })
+            return yield* new Forbidden({
+              method: "Spawn",
+              message:
+                "a main agent only starts sessions in its own project: cd into the directory where vibest was started and run it again",
+            })
           return yield* sessions.spawn({
             machine: machineOf(input.machine),
             root: project.root,
@@ -367,8 +429,17 @@ export const handlers = VibestRpcs.toLayer(
       "Runtimes.Doctor": ({ harnesses }) =>
         Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
           Effect.forEach(rows, ({ runtime, status }) =>
-            (runtime.doctor ? runtime.doctor({ id: "local" }, harnesses) : Effect.succeed({ name: runtime.kind, checks: [] })).pipe(
-              Effect.map((report) => ({ kind: runtime.kind, status: status.status, ...("reason" in status ? { reason: status.reason } : {}), name: report.name, checks: report.checks })),
+            (runtime.doctor
+              ? runtime.doctor({ id: "local" }, harnesses)
+              : Effect.succeed({ name: runtime.kind, checks: [] })
+            ).pipe(
+              Effect.map((report) => ({
+                kind: runtime.kind,
+                status: status.status,
+                ...("reason" in status ? { reason: status.reason } : {}),
+                name: report.name,
+                checks: report.checks,
+              })),
             ),
           ),
         ),
@@ -404,12 +475,25 @@ export const handlers = VibestRpcs.toLayer(
           })
           if (decision.runtime === undefined) {
             const loaded = (yield* runtimes.all).map((h) => h.kind)
-            return yield* new NoRuntime({ message: `no terminal runtime was chosen for the main agent${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}` })
+            return yield* new NoRuntime({
+              message: `no terminal runtime was chosen for the main agent${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
+            })
           }
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
-          const terminal = yield* Launch.openInParentWorkspace(rt, at, { root, argv, label: "vibest", home: layout.home, focus })
-          return { runtime: rt.kind, terminal: terminal.id, place: placeOf(rt.kind, terminal), attach: rt.attach?.(at) ?? null }
+          const terminal = yield* Launch.openInParentWorkspace(rt, at, {
+            root,
+            argv,
+            label: "vibest",
+            home: layout.home,
+            focus,
+          })
+          return {
+            runtime: rt.kind,
+            terminal: terminal.id,
+            place: placeOf(rt.kind, terminal),
+            attach: rt.attach?.(at) ?? null,
+          }
         }),
 
       Send: ({ id, message }) => managed("Send", id).pipe(Effect.andThen(sessions.send(id, message))),
@@ -418,7 +502,11 @@ export const handlers = VibestRpcs.toLayer(
         managed("Remove", id).pipe(
           Effect.andThen(sessions.remove(id, { keepWorktree })),
           // Unreachable is the protocol's own error; any other runtime refusal is a server bug.
-          Effect.catchTag("RuntimeError", (e) => (e.code === "unreachable" ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message })) : Effect.die(e))),
+          Effect.catchTag("RuntimeError", (e) =>
+            e.code === "unreachable"
+              ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+              : Effect.die(e),
+          ),
           Effect.map((out) => out ?? null),
         ),
 
@@ -427,14 +515,15 @@ export const handlers = VibestRpcs.toLayer(
           const c = yield* agent("List")
           // A cli in a project sees that project, including its main agent. `all`: every project (`stop` in none). Not a
           // Project and not `all`: no sessions of this directory to show.
-          const projectId = c._tag === "Coordinator"
-            ? c.projectId
-            : all === true
-              ? undefined
-              : yield* atProject(c.repositoryRoot ?? "").pipe(
-                  Effect.flatMap((located) => db.projectByKey(located.key)),
-                  Effect.catchTag("NotInRepository", () => Effect.succeed(undefined)),
-                )
+          const projectId =
+            c._tag === "Coordinator"
+              ? c.projectId
+              : all === true
+                ? undefined
+                : yield* atProject(c.repositoryRoot ?? "").pipe(
+                    Effect.flatMap((located) => db.projectByKey(located.key)),
+                    Effect.catchTag("NotInRepository", () => Effect.succeed(undefined)),
+                  )
           if (projectId === undefined && all !== true) return []
           const rows = yield* sessions.list({
             ...(projectId === undefined ? {} : { projectId }),
@@ -470,15 +559,23 @@ export const handlers = VibestRpcs.toLayer(
       Report: ({ message }) =>
         Effect.gen(function* () {
           const owner = yield* Caller
-          if (owner._tag !== "Session") return yield* new Forbidden({ method: "Report", message: "only a session reports (vibest report runs with VIBEST_SESSION_ID)" })
+          if (owner._tag !== "Session")
+            return yield* new Forbidden({
+              method: "Report",
+              message: "only a session reports (vibest report runs with VIBEST_SESSION_ID)",
+            })
           const session = yield* db.getSession(owner.sessionId)
-          if (!session) return yield* new NoSuchSession({ id: owner.sessionId, message: `no session ${owner.sessionId}` })
+          if (!session)
+            return yield* new NoSuchSession({ id: owner.sessionId, message: `no session ${owner.sessionId}` })
           yield* inbox.enqueue({
             sessionId: session.id,
             kind: "report",
             message: envelope(
               "agent-message",
-              [["agent-id", session.id], ["summary", `Agent "${session.name}" sent a message before finishing`]],
+              [
+                ["agent-id", session.id],
+                ["summary", `Agent "${session.name}" sent a message before finishing`],
+              ],
               ["message", message],
             ),
             details: {},
@@ -489,7 +586,11 @@ export const handlers = VibestRpcs.toLayer(
         Stream.unwrap(
           Effect.gen(function* () {
             const c = yield* Caller
-            if (c._tag !== "Coordinator") return yield* new Forbidden({ method: "Inbox.Subscribe", message: "Inbox.Subscribe is the coordinator's" })
+            if (c._tag !== "Coordinator")
+              return yield* new Forbidden({
+                method: "Inbox.Subscribe",
+                message: "Inbox.Subscribe is the coordinator's",
+              })
             return inbox.stream(c.projectId)
           }),
         ),
@@ -543,9 +644,13 @@ export const handlers = VibestRpcs.toLayer(
           })
           if (decision.harness === undefined) return yield* new NoHarnessChosen()
           if (!isHarnessId(decision.harness))
-            return yield* new HarnessUnavailable({ harness: decision.harness, message: `unknown harness ${decision.harness} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})` })
+            return yield* new HarnessUnavailable({
+              harness: decision.harness,
+              message: `unknown harness ${decision.harness} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
+            })
           // The runtime choice is checked like the harness's (§4): online on the machine, else the start refuses.
-          if (decision.runtime === undefined) return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
+          if (decision.runtime === undefined)
+            return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
           return { ...decision, harness: decision.harness, runtime: rt.kind }
@@ -554,15 +659,29 @@ export const handlers = VibestRpcs.toLayer(
       "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.CoordinatorSession")
-          const projectDirectory = caller.repositoryRoot === undefined
-            ? undefined
-            : Option.getOrUndefined(yield* atProject(caller.repositoryRoot).pipe(Effect.option))
+          const projectDirectory =
+            caller.repositoryRoot === undefined
+              ? undefined
+              : Option.getOrUndefined(yield* atProject(caller.repositoryRoot).pipe(Effect.option))
           const { key } = yield* scope("Project.CoordinatorSession")
           const kind = runtime ?? (yield* onlyRuntime)?.kind
-          if (kind === undefined) return yield* new InvalidCaller({ method: "Project.CoordinatorSession", message: "Project.CoordinatorSession needs the runtime the main agent runs in" })
-          const saved = yield* db.coordinatorLaunch(key, harness, fresh, { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } }, {
-            provider, model, routing, ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
-          })
+          if (kind === undefined)
+            return yield* new InvalidCaller({
+              method: "Project.CoordinatorSession",
+              message: "Project.CoordinatorSession needs the runtime the main agent runs in",
+            })
+          const saved = yield* db.coordinatorLaunch(
+            key,
+            harness,
+            fresh,
+            { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } },
+            {
+              provider,
+              model,
+              routing,
+              ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
+            },
+          )
           yield* inbox.reconcile(yield* db.projectId(key))
           return saved
         }),
@@ -577,7 +696,12 @@ export const handlers = VibestRpcs.toLayer(
           if (Option.isNone(h)) return null
           const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
           if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
-          return { harness: coord.harnessId, place: placeOf(coord.runtime, coord.address), runtime: coord.runtime, address: encodeAddress(coord.address) }
+          return {
+            harness: coord.harnessId,
+            place: placeOf(coord.runtime, coord.address),
+            runtime: coord.runtime,
+            address: encodeAddress(coord.address),
+          }
         }),
 
       "Project.StopCoordinator": ({ runtime, address }) =>
@@ -586,11 +710,16 @@ export const handlers = VibestRpcs.toLayer(
           const projectId = yield* db.projectId(key)
           const coord = yield* db.coordinatorOf(projectId)
           const place = coord?.address
-          if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address)) return { result: "moved" as const }
-          const h = yield* runtimes.route(runtime).pipe(Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })))
+          if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
+            return { result: "moved" as const }
+          const h = yield* runtimes
+            .route(runtime)
+            .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })))
           const result = yield* stopAgent(h, place, {
             interruptKey: (yield* Harnesses).get(coord.harnessId).interruptKey,
-            stillThere: db.coordinatorOf(projectId).pipe(Effect.map((current) => sameCoordinator(current, runtime, address))),
+            stillThere: db
+              .coordinatorOf(projectId)
+              .pipe(Effect.map((current) => sameCoordinator(current, runtime, address))),
             wait: STOP_WAIT,
           })
           return { result }
@@ -614,15 +743,23 @@ export const handlers = VibestRpcs.toLayer(
       "Daemon.Stop": ({ instance }) =>
         Effect.gen(function* () {
           const c = yield* Caller
-          if (c._tag !== "Cli") return yield* new Forbidden({ method: "Daemon.Stop", message: "only the user stops vibestd (vibest daemon restart); an agent may not" })
-          if (instance !== identity.instance) return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
+          if (c._tag !== "Cli")
+            return yield* new Forbidden({
+              method: "Daemon.Stop",
+              message: "only the user stops vibestd (vibest daemon restart); an agent may not",
+            })
+          if (instance !== identity.instance)
+            return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
           if (!(yield* drain.begin)) return yield* new DaemonStopping({ method: "Daemon.Stop" })
           let last: Array<{ id: string; reason: string }> = []
           const blockers = Effect.gen(function* () {
             last = (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" }))
             if (last.length > 0) return last
             last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-            last = (yield* db.sendingInbox).map((row) => ({ id: `inbox ${row.id}`, reason: `${row.kind} for session ${row.sessionId}: delivery not settled` }))
+            last = (yield* db.sendingInbox).map((row) => ({
+              id: `inbox ${row.id}`,
+              reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
+            }))
             return last
           })
           return yield* Effect.gen(function* () {
@@ -631,10 +768,15 @@ export const handlers = VibestRpcs.toLayer(
               Effect.timeoutOption(DRAIN_TIMEOUT),
             )
             if (Option.isNone(idle)) return yield* new DaemonBusy({ blockers: last })
-            yield* Effect.uninterruptible(Effect.gen(function* () {
-              if (!(yield* drain.accept)) return yield* new DaemonBusy({ blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })) })
-              yield* Deferred.succeed(shutdown, undefined)
-            }))
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                if (!(yield* drain.accept))
+                  return yield* new DaemonBusy({
+                    blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })),
+                  })
+                yield* Deferred.succeed(shutdown, undefined)
+              }),
+            )
             return { instance }
           }).pipe(Effect.ensuring(drain.reopen))
         }),

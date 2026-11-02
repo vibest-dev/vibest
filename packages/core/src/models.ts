@@ -2,6 +2,7 @@
 // one `Model` shape. Each harness is asked through its adapter's listing; nothing here calls a model.
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+
 import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
 
 /**
@@ -40,9 +41,20 @@ export interface ModelLister {
 }
 
 /** The one place harness output becomes `Model`s: the requested provider filled in, other providers' entries dropped (pi lists every provider). */
-export const normalizeModels = (harness: HarnessId, provider: string | null, raw: ReadonlyArray<RawModel>): ReadonlyArray<Model> =>
+export const normalizeModels = (
+  harness: HarnessId,
+  provider: string | null,
+  raw: ReadonlyArray<RawModel>,
+): ReadonlyArray<Model> =>
   raw
-    .map((r) => ({ harness, provider: r.provider ?? provider, model: r.model, name: r.name || r.model, description: r.description ?? "", default: r.default }))
+    .map((r) => ({
+      harness,
+      provider: r.provider ?? provider,
+      model: r.model,
+      name: r.name || r.model,
+      description: r.description ?? "",
+      default: r.default,
+    }))
     .filter((m) => !provider || m.provider === provider)
 
 export const jsonLines = (...messages: ReadonlyArray<unknown>) => messages.map((m) => `${JSON.stringify(m)}\n`).join("")
@@ -60,7 +72,10 @@ export const findMessage = <A>(schema: Schema.Codec<A, unknown>) => {
 }
 
 /** The harness's run-without-model choice is always an entry: when none is marked (configured outside the list), add it. */
-export const withConfigured = (models: ReadonlyArray<RawModel>, configured: Omit<RawModel, "default"> | undefined): ReadonlyArray<RawModel> =>
+export const withConfigured = (
+  models: ReadonlyArray<RawModel>,
+  configured: Omit<RawModel, "default"> | undefined,
+): ReadonlyArray<RawModel> =>
   models.some((m) => m.default) || !configured ? models : [...models, { ...configured, default: true }]
 
 /**
@@ -74,28 +89,41 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cwd = yield* Config.String("HOME").pipe(Effect.orDie)
-  const stdin = lister.request === undefined ? "ignore" : Stream.concat(Stream.make(new TextEncoder().encode(lister.request)), Stream.never)
-  const lines = yield* spawner.streamLines(ChildProcess.make(binary, lister.args(provider), { stdin, cwd }), { includeStderr: true }).pipe(
-    Stream.scan((): ReadonlyArray<string> => [], (seen, line) => [...seen, line]),
-    lister.request === undefined ? (s) => s : Stream.takeUntil((seen) => lister.answer(seen) !== undefined),
-    Stream.runLast,
-    Effect.map(Option.getOrElse((): ReadonlyArray<string> => [])),
-    Effect.timeout("30 seconds"),
-    Effect.mapError((e) => unavailable(`${binary} did not list its models: ${e.message}`)),
-  )
+  const stdin =
+    lister.request === undefined
+      ? "ignore"
+      : Stream.concat(Stream.make(new TextEncoder().encode(lister.request)), Stream.never)
+  const lines = yield* spawner
+    .streamLines(ChildProcess.make(binary, lister.args(provider), { stdin, cwd }), { includeStderr: true })
+    .pipe(
+      Stream.scan(
+        (): ReadonlyArray<string> => [],
+        (seen, line) => [...seen, line],
+      ),
+      lister.request === undefined ? (s) => s : Stream.takeUntil((seen) => lister.answer(seen) !== undefined),
+      Stream.runLast,
+      Effect.map(Option.getOrElse((): ReadonlyArray<string> => [])),
+      Effect.timeout("30 seconds"),
+      Effect.mapError((e) => unavailable(`${binary} did not list its models: ${e.message}`)),
+    )
   const raw = lister.answer(lines)
   if (!raw) {
     const last = lines.findLast((l) => l.trim())?.trim()
     return yield* unavailable(`${binary} gave no model list${last ? `: ${last}` : ""}`)
   }
   const models = normalizeModels(id, provider, raw)
-  if (models.length === 0) return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
+  if (models.length === 0)
+    return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
   return models
 })
 
 /** `list_models`: the given harnesses asked at once; the ones that could not answer go to `errors`. */
 export const listAllModels = (harnesses: ReadonlyArray<HarnessId>, provider: string | null) =>
-  Effect.forEach(harnesses, (h) => Effect.result(Effect.flatMap(Harnesses, (all) => listModels(all.get(h), provider))), { concurrency: "unbounded" }).pipe(
+  Effect.forEach(
+    harnesses,
+    (h) => Effect.result(Effect.flatMap(Harnesses, (all) => listModels(all.get(h), provider))),
+    { concurrency: "unbounded" },
+  ).pipe(
     Effect.map((results) => ({
       models: results.flatMap((r) => (r._tag === "Success" ? r.success : [])),
       errors: results.flatMap((r) => (r._tag === "Failure" ? [`${r.failure.harness}: ${r.failure.message}`] : [])),

@@ -1,3 +1,9 @@
+import type * as VibestPlugin from "@vibest/plugin"
+import { Runtime as RuntimeApi } from "@vibest/plugin"
+import { shellQuote } from "@vibest/schema/layout"
+import type { RuntimeLocation } from "@vibest/schema/session"
+import { Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
+import type { FileSystem } from "effect"
 // The Runtime API (runtime-api.ts) on herdr. Everything herdr-specific lives here and in the plugin: agent.start and
 // interactive_ready, workspace grouping by worktree, pane tokens. A terminal id is `<herdr session>/<pane id>` (pane
 // ids repeat across sessions, and are even reused after a close) plus, for a terminal whose agent `open` started, the
@@ -5,13 +11,8 @@
 // for the earlier terminal's agent; `Machine.target` is the caller's herdr location as JSON (runtime-port.md §2: a herdr
 // session is the runtime on a machine), decoded only by this module.
 import type { HerdrFailure, HerdrShape, PushFrame, results } from "effect-herdr-sdk"
-import { Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import type { FileSystem } from "effect"
-import type * as VibestPlugin from "@vibest/plugin"
-import { Runtime as RuntimeApi } from "@vibest/plugin"
-import { shellQuote } from "@vibest/schema/layout"
-import type { RuntimeLocation } from "@vibest/schema/session"
+
 import type { HerdrPool } from "./pool.ts"
 
 export type AgentState = VibestPlugin.Runtime.AgentState
@@ -25,10 +26,15 @@ export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const KIND = "herdr"
 
 /** Terminal of `paneId` in `session` (machine is `local` in this phase), addressed by its `name` when `open` started an agent in it. */
-export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({ machine: "local", id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}` })
+export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
+  machine: "local",
+  id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
+})
 
 /** The session, pane and agent name a terminal id names (the name only for one whose agent `open` started); undefined when it is not one of ours. */
-export const parseTerminal = (terminal: Terminal): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
+export const parseTerminal = (
+  terminal: Terminal,
+): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
   const at = terminal.id.indexOf("/")
   if (at <= 0 || at === terminal.id.length - 1) return undefined
   const rest = terminal.id.slice(at + 1)
@@ -56,13 +62,25 @@ export const decodeTarget = (target: string | undefined): RuntimeLocation | unde
 }
 
 /** Any way a herdr call can fail, as the one error type of the Runtime API. */
-export const failure = (error: HerdrFailure | { readonly _tag: "HerdrProtocolMismatch"; readonly message: string } | { readonly message: string }): RuntimeError => {
+export const failure = (
+  error:
+    | HerdrFailure
+    | { readonly _tag: "HerdrProtocolMismatch"; readonly message: string }
+    | { readonly message: string },
+): RuntimeError => {
   const tag = (error as { readonly _tag?: string })._tag
-  if (tag === "HerdrTransportError" || tag === "RuntimeUnreachable") return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
-  if (tag === "HerdrProtocolMismatch") return new RuntimeApi.RuntimeError({ code: "incompatible", message: error.message })
+  if (tag === "HerdrTransportError" || tag === "RuntimeUnreachable")
+    return new RuntimeApi.RuntimeError({ code: "unreachable", message: error.message })
+  if (tag === "HerdrProtocolMismatch")
+    return new RuntimeApi.RuntimeError({ code: "incompatible", message: error.message })
   if (tag === "HerdrError") {
     const herdr = error as { readonly code: string; readonly method?: string }
-    const code = herdr.code === "agent_not_found" || herdr.code === "pane_not_found" ? "not_found" : herdr.code === "agent_pane_busy" ? "busy" : "failed"
+    const code =
+      herdr.code === "agent_not_found" || herdr.code === "pane_not_found"
+        ? "not_found"
+        : herdr.code === "agent_pane_busy"
+          ? "busy"
+          : "failed"
     return new RuntimeApi.RuntimeError({ code, message: `${herdr.method ?? "herdr"}: ${error.message}` })
   }
   return new RuntimeApi.RuntimeError({ code: "failed", message: error.message })
@@ -96,7 +114,8 @@ const BUSY_RETRIES = 40
 
 /** herdr drops a token or title longer than this. */
 const TOKEN = 80
-const cut = (value: string | undefined): string | undefined => (value === undefined || value === "" ? undefined : value.slice(0, TOKEN))
+const cut = (value: string | undefined): string | undefined =>
+  value === undefined || value === "" ? undefined : value.slice(0, TOKEN)
 
 export interface PoolDeps {
   readonly pool: HerdrPool["Service"]
@@ -159,12 +178,24 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             // `pane.agent_detected` has no pane filter (a workspace-wide subscription), so this pane's frames are picked below.
             h.subscribe([{ type: "pane.agent_status_changed", pane_id: paneId }, { type: "pane.agent_detected" }]).pipe(
               Stream.runForEach((frame: PushFrame) => {
-                const data = frame.data as { readonly type: string; readonly pane_id?: string; readonly agent_status?: results.AgentStatus | null; readonly agent?: string | null }
+                const data = frame.data as {
+                  readonly type: string
+                  readonly pane_id?: string
+                  readonly agent_status?: results.AgentStatus | null
+                  readonly agent?: string | null
+                }
                 if (data.type === "pane_agent_status_changed" && data.agent_status)
-                  return PubSub.publish(events, { type: "state", terminal: terminalOf(session, paneId, names.get(key)), state: stateOf(data.agent_status) })
+                  return PubSub.publish(events, {
+                    type: "state",
+                    terminal: terminalOf(session, paneId, names.get(key)),
+                    state: stateOf(data.agent_status),
+                  })
                 // An agent that ended while the pane stays at its shell: the program of this terminal is gone.
                 if (data.type === "pane_agent_detected" && data.pane_id === paneId && data.agent === null)
-                  return PubSub.publish(events, { type: "exited", terminal: terminalOf(session, paneId, names.get(key)) })
+                  return PubSub.publish(events, {
+                    type: "exited",
+                    terminal: terminalOf(session, paneId, names.get(key)),
+                  })
                 return Effect.void
               }),
               // A stream that ends (a herdr restart) drops its key, so the next `state` installs a fresh one.
@@ -183,7 +214,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Stream.runForEach(({ session, frame }) => {
         const data = frame.data as { readonly type: string; readonly pane_id?: string }
         return data.pane_id && (data.type === "pane_closed" || data.type === "pane_exited")
-          ? PubSub.publish(events, { type: "exited", terminal: terminalOf(session, data.pane_id, names.get(`${session}/${data.pane_id}`)) })
+          ? PubSub.publish(events, {
+              type: "exited",
+              terminal: terminalOf(session, data.pane_id, names.get(`${session}/${data.pane_id}`)),
+            })
           : Effect.void
       }),
       Effect.catchCause(() => Effect.void),
@@ -206,16 +240,29 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     // herdr knows an agent's state (ready, working, done) from a hook it installs into each harness itself.
     const doctor: NonNullable<Runtime["doctor"]> = (_machine, harnesses) => {
       // ponytail: `deps.spawner` is typed by its tag, so its output type is asserted here.
-      const herdr = (args: ReadonlyArray<string>) => (spawner.string(ChildProcess.make("herdr", [...args])) as Effect.Effect<string, unknown>).pipe(Effect.option)
+      const herdr = (args: ReadonlyArray<string>) =>
+        (spawner.string(ChildProcess.make("herdr", [...args])) as Effect.Effect<string, unknown>).pipe(Effect.option)
       return Effect.all([herdr(["--version"]), herdr(["integration", "status"])]).pipe(
         Effect.map(([version, status]): RuntimeApi.RuntimeReport => {
-          if (Option.isNone(version)) return { name: "herdr", checks: [{ ok: false, text: "herdr is not on PATH", fix: "install herdr: https://herdr.dev" }] }
+          if (Option.isNone(version))
+            return {
+              name: "herdr",
+              checks: [{ ok: false, text: "herdr is not on PATH", fix: "install herdr: https://herdr.dev" }],
+            }
           const lines = Option.getOrElse(status, () => "").split("\n")
           const checks = harnesses.map((h): RuntimeApi.RuntimeCheck => {
-            const hook = (lines.find((l) => l.startsWith(`${h}: `))?.slice(h.length + 2) ?? "not reported").replace(/ \(\/.*$/, "")
+            const hook = (lines.find((l) => l.startsWith(`${h}: `))?.slice(h.length + 2) ?? "not reported").replace(
+              / \(\/.*$/,
+              "",
+            )
             return hook.startsWith("current")
               ? { ok: true, subject: h, text: `herdr can see its state (hook ${hook})` }
-              : { ok: false, subject: h, text: `herdr cannot see its state (hook ${hook}); its agents never become ready`, fix: `herdr integration install ${h}` }
+              : {
+                  ok: false,
+                  subject: h,
+                  text: `herdr cannot see its state (hook ${hook}); its agents never become ready`,
+                  fix: `herdr integration install ${h}`,
+                }
           })
           return { name: `herdr ${version.value.trim().replace(/^herdr /, "")}`, checks }
         }),
@@ -226,7 +273,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     const paneOf = (h: HerdrShape, paneId: string) =>
       h.call("pane.get", { pane_id: paneId }).pipe(
         Effect.map((r) => r.pane),
-        Effect.catchTag("HerdrError", (e) => (e.code === "pane_not_found" ? Effect.succeed(undefined) : Effect.fail(e))),
+        Effect.catchTag("HerdrError", (e) =>
+          e.code === "pane_not_found" ? Effect.succeed(undefined) : Effect.fail(e),
+        ),
         failWith,
       )
 
@@ -234,7 +283,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     const named = (h: HerdrShape, name: string) =>
       h.call("agent.get", { target: name }).pipe(
         Effect.map((r) => r.agent),
-        Effect.catchTag("HerdrError", (e) => (e.code === "agent_not_found" ? Effect.succeed(undefined) : Effect.fail(e))),
+        Effect.catchTag("HerdrError", (e) =>
+          e.code === "agent_not_found" ? Effect.succeed(undefined) : Effect.fail(e),
+        ),
         failWith,
       )
 
@@ -242,7 +293,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     const holder = (h: HerdrShape, paneId: string) =>
       h.call("agent.get", { target: paneId }).pipe(
         Effect.map((r) => r.agent),
-        Effect.catchTag("HerdrError", (e) => (e.code === "agent_not_found" ? Effect.succeed(undefined) : Effect.fail(e))),
+        Effect.catchTag("HerdrError", (e) =>
+          e.code === "agent_not_found" ? Effect.succeed(undefined) : Effect.fail(e),
+        ),
         failWith,
       )
 
@@ -253,10 +306,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         if (name !== undefined) {
           const started = yield* named(h, name)
-          return started !== undefined && started.pane_id === paneId ? { agent: started, target: name, detected: false } : undefined
+          return started !== undefined && started.pane_id === paneId
+            ? { agent: started, target: name, detected: false }
+            : undefined
         }
         const holds = yield* holder(h, paneId)
-        if (holds !== undefined && (holds.name ?? undefined) === undefined) return { agent: holds, target: paneId, detected: true }
+        if (holds !== undefined && (holds.name ?? undefined) === undefined)
+          return { agent: holds, target: paneId, detected: true }
         return undefined
       })
 
@@ -264,30 +320,48 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         // The session: beside `near`, else the caller's location, else the ambient socket, else the default session.
         const near = input.near !== undefined ? parseTerminal(input.near) : undefined
-        const ambient = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie))
-        const location: RuntimeLocation = near !== undefined
-          ? { session: near.session }
-          : decodeTarget(machine.target) ?? (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" })
-        const session = yield* pool.resolve(near !== undefined ? { session: near.session } : location).pipe(Effect.mapError(failure))
+        const ambient = Option.getOrUndefined(
+          yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
+        )
+        const location: RuntimeLocation =
+          near !== undefined
+            ? { session: near.session }
+            : (decodeTarget(machine.target) ??
+              (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
+        const session = yield* pool
+          .resolve(near !== undefined ? { session: near.session } : location)
+          .pipe(Effect.mapError(failure))
         const h = yield* client(session)
         // `near` places the terminal only while that pane still exists: a stale address (the pane closed while
         // vibestd was down, or herdr restarted) must not fail every later start, so it falls back to the group.
         const nearPane = near !== undefined ? yield* paneOf(h, near.paneId) : undefined
-        const workspaceId = nearPane !== undefined
-          ? nearPane.workspace_id
-          : (yield* groupWorkspace(h, input.project))
-            ?? (yield* failWith(h.call("workspace.create", { cwd: input.project, focus: false, label: "project" }))).workspace.workspace_id
+        const workspaceId =
+          nearPane !== undefined
+            ? nearPane.workspace_id
+            : ((yield* groupWorkspace(h, input.project)) ??
+              (yield* failWith(h.call("workspace.create", { cwd: input.project, focus: false, label: "project" })))
+                .workspace.workspace_id)
         // A split beside `near` when asked for one (`vibest run --peer`); otherwise a tab of its own in the workspace.
         const split = input.split === true && nearPane !== undefined
         const paneId = split
-          ? (yield* failWith(h.call("pane.split", { target_pane_id: nearPane!.pane_id, direction: "right", cwd: input.cwd, env: { ...input.env }, focus: input.focus === true }))).pane.pane_id
-          : (yield* failWith(h.call("tab.create", {
-              workspace_id: workspaceId,
-              cwd: input.cwd,
-              env: { ...input.env },
-              focus: input.focus === true,
-              label: input.label,
-            }))).root_pane.pane_id
+          ? (yield* failWith(
+              h.call("pane.split", {
+                target_pane_id: nearPane!.pane_id,
+                direction: "right",
+                cwd: input.cwd,
+                env: { ...input.env },
+                focus: input.focus === true,
+              }),
+            )).pane.pane_id
+          : (yield* failWith(
+              h.call("tab.create", {
+                workspace_id: workspaceId,
+                cwd: input.cwd,
+                env: { ...input.env },
+                focus: input.focus === true,
+                label: input.label,
+              }),
+            )).root_pane.pane_id
         // The name the terminal's agent (if `open` starts one) is addressed by, unique per open.
         const name = agentNameOf(input.env)
         const kind = input.argv.length > 0 ? agentKindOf(input.argv[0]!) : undefined
@@ -297,29 +371,47 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const tabId = split ? undefined : (yield* failWith(h.call("pane.get", { pane_id: paneId }))).pane.tab_id
         // Everything after the terminal exists is undone when it fails: a start that dies inside it (a harness on
         // its own usage limit, a bad flag) must not leave an empty shell behind (core only closes what `open` returned).
-        const undo = () => (tabId !== undefined ? h.call("tab.close", { tab_id: tabId }) : h.call("pane.close", { pane_id: paneId })).pipe(Effect.ignore, Effect.asVoid)
+        const undo = () =>
+          (tabId !== undefined
+            ? h.call("tab.close", { tab_id: tabId })
+            : h.call("pane.close", { pane_id: paneId })
+          ).pipe(Effect.ignore, Effect.asVoid)
         yield* Effect.catch(
           Effect.gen(function* () {
             if (kind !== undefined) {
               // A fresh pane's shell may still be starting.
-              yield* failWith(h.call("agent.start", {
-                name,
-                kind,
-                pane_id: paneId,
-                args: input.argv.slice(1),
-                timeout_ms: Duration.toMillis(Duration.seconds(120)),
-              })).pipe(
+              yield* failWith(
+                h.call("agent.start", {
+                  name,
+                  kind,
+                  pane_id: paneId,
+                  args: input.argv.slice(1),
+                  timeout_ms: Duration.toMillis(Duration.seconds(120)),
+                }),
+              ).pipe(
                 Effect.retry({ while: (error) => error.code === "busy", times: BUSY_RETRIES, schedule: TICK }),
                 // herdr sees an agent through its own integration for that harness; without it a start never settles.
                 Effect.mapError((error) =>
-                  error.code === "failed" ? new RuntimeApi.RuntimeError({ code: error.code, message: `${error.message} (if herdr never saw ${kind} start, check \`herdr integration status\`)` }) : error,
+                  error.code === "failed"
+                    ? new RuntimeApi.RuntimeError({
+                        code: error.code,
+                        message: `${error.message} (if herdr never saw ${kind} start, check \`herdr integration status\`)`,
+                      })
+                    : error,
                 ),
               )
             } else {
-              yield* failWith(h.call("pane.wait_for_output", {
-                pane_id: paneId, source: "visible", match: { type: "regex", value: "\\S" }, timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
-              }))
-              yield* failWith(h.call("pane.send_text", { pane_id: paneId, text: `exec ${input.argv.map(shellQuote).join(" ")}` }))
+              yield* failWith(
+                h.call("pane.wait_for_output", {
+                  pane_id: paneId,
+                  source: "visible",
+                  match: { type: "regex", value: "\\S" },
+                  timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
+                }),
+              )
+              yield* failWith(
+                h.call("pane.send_text", { pane_id: paneId, text: `exec ${input.argv.map(shellQuote).join(" ")}` }),
+              )
               yield* failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))
             }
           }),
@@ -334,7 +426,12 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       const parsed = parseTerminal(terminal)
       return parsed !== undefined
         ? Effect.succeed(parsed)
-        : Effect.fail(new RuntimeApi.RuntimeError({ code: "not_found", message: `terminal ${terminal.id} (${method}) names no herdr session` }))
+        : Effect.fail(
+            new RuntimeApi.RuntimeError({
+              code: "not_found",
+              message: `terminal ${terminal.id} (${method}) names no herdr session`,
+            }),
+          )
     }
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>
@@ -351,15 +448,19 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             yield* h.call("agent.prompt", { target: found.target, text }).pipe(
               Effect.catchTag("HerdrError", (e) =>
                 e.code === "agent_not_ready"
-                  ? h.call("pane.send_text", { pane_id: place.paneId, text }).pipe(Effect.andThen(h.call("pane.send_keys", { pane_id: place.paneId, keys: ["enter"] })))
+                  ? h
+                      .call("pane.send_text", { pane_id: place.paneId, text })
+                      .pipe(Effect.andThen(h.call("pane.send_keys", { pane_id: place.paneId, keys: ["enter"] })))
                   : Effect.fail(e),
               ),
               failWith,
             )
-          if (keys !== undefined && keys.length > 0) yield* failWith(h.call("agent.send_keys", { target: found.target, keys: [...keys] }))
+          if (keys !== undefined && keys.length > 0)
+            yield* failWith(h.call("agent.send_keys", { target: found.target, keys: [...keys] }))
         } else {
           if (text !== undefined) yield* failWith(h.call("pane.send_text", { pane_id: place.paneId, text }))
-          if (keys !== undefined && keys.length > 0) yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
+          if (keys !== undefined && keys.length > 0)
+            yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
         }
       })
 
@@ -367,7 +468,8 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "read")
         const h = yield* client(place.session)
-        return (yield* failWith(h.call("pane.read", { pane_id: place.paneId, source: "recent_unwrapped", lines }))).read.text
+        return (yield* failWith(h.call("pane.read", { pane_id: place.paneId, source: "recent_unwrapped", lines }))).read
+          .text
       })
 
     const process: Runtime["process"] = (terminal) =>
@@ -389,11 +491,17 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const started = name === undefined ? undefined : yield* named(h, name)
         if (started !== undefined && started.pane_id !== paneId)
-          return yield* new RuntimeApi.RuntimeError({ code: "failed", message: `pane ${paneId} kept: its agent moved to pane ${started.pane_id}` })
+          return yield* new RuntimeApi.RuntimeError({
+            code: "failed",
+            message: `pane ${paneId} kept: its agent moved to pane ${started.pane_id}`,
+          })
         if (started === undefined) {
           const holds = yield* holder(h, paneId)
           if (holds !== undefined && (name !== undefined || (holds.name ?? undefined) !== undefined))
-            return yield* new RuntimeApi.RuntimeError({ code: "failed", message: `pane ${paneId} kept: another agent (${holds.name ?? "unnamed"}) holds it` })
+            return yield* new RuntimeApi.RuntimeError({
+              code: "failed",
+              message: `pane ${paneId} kept: another agent (${holds.name ?? "unnamed"}) holds it`,
+            })
         }
       })
 
@@ -419,13 +527,24 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             if (panes.panes.length > 1) return false
             const workspaces = yield* failWith(h.call("workspace.list", {}))
             const workspace = workspaces.workspaces.find((w) => w.workspace_id === workspaceId)
-            return workspace === undefined || (workspace.worktree !== null && workspace.worktree !== undefined && !workspace.worktree.is_linked_worktree)
+            return (
+              workspace === undefined ||
+              (workspace.worktree !== null &&
+                workspace.worktree !== undefined &&
+                !workspace.worktree.is_linked_worktree)
+            )
           })
         // One path: the pane is read again right before the close, so a sibling that closed in the gap cannot turn
         // this close into a group close.
         const current = yield* paneOf(h, paneId)
         if (current !== undefined && (yield* isolate(current.workspace_id))) {
-          const moved = yield* failWith(h.call("pane.move", { pane_id: paneId, destination: { type: "new_workspace", label: "closing" }, focus: false }))
+          const moved = yield* failWith(
+            h.call("pane.move", {
+              pane_id: paneId,
+              destination: { type: "new_workspace", label: "closing" },
+              focus: false,
+            }),
+          )
           if (moved.type === "pane_move") {
             paneId = moved.move_result.pane.pane_id
             yield* stillOurs(h, paneId, place.name)
@@ -445,7 +564,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         if (found !== undefined && place.name !== undefined) names.set(`${place.session}/${place.paneId}`, place.name)
         // No agent of ours in the pane: not_found, so core reads "absent" — a reused pane id is not this terminal.
         if (found === undefined)
-          return yield* new RuntimeApi.RuntimeError({ code: "not_found", message: `pane ${place.paneId} holds no agent of this terminal` })
+          return yield* new RuntimeApi.RuntimeError({
+            code: "not_found",
+            message: `pane ${place.paneId} holds no agent of this terminal`,
+          })
         // A detected agent (the main agent) reports its status as herdr reads it; one `open` started only once ready.
         if (!found.agent.agent) return "unknown"
         return found.detected || found.agent.interactive_ready ? stateOf(found.agent.agent_status) : "unknown"
@@ -456,7 +578,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const place = yield* at(terminal, "session")
         const h = yield* client(place.session)
         const found = yield* ours(h, place.paneId, place.name)
-        return found !== undefined ? found.agent.agent_session?.value ?? null : null
+        return found !== undefined ? (found.agent.agent_session?.value ?? null) : null
       })
 
     const present: Runtime["present"] = (terminal, info) =>
@@ -475,26 +597,30 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           if (value("definition") !== undefined) tokens.definition = value("definition")!
           if (value("session") !== undefined) tokens.session = value("session")!
           const title = value("title")
-          yield* failWith(h.call("pane.report_metadata", {
-            pane_id: place.paneId,
-            source: "vibest",
-            display_agent: cut([agent, harness].filter(Boolean).join(" · "))!,
-            state_labels: { blocked: "waiting for you" },
-            ...(title === undefined ? {} : { title }),
-            tokens,
-            seq,
-          })).pipe(Effect.asVoid)
+          yield* failWith(
+            h.call("pane.report_metadata", {
+              pane_id: place.paneId,
+              source: "vibest",
+              display_agent: cut([agent, harness].filter(Boolean).join(" · "))!,
+              state_labels: { blocked: "waiting for you" },
+              ...(title === undefined ? {} : { title }),
+              tokens,
+              seq,
+            }),
+          ).pipe(Effect.asVoid)
         }
         if (value("project") !== undefined || value("live") !== undefined) {
           const tokens: Record<string, string | null> = {}
           if (value("project") !== undefined) tokens.project = value("project")!
           if (value("live") !== undefined) tokens.agents = value("live")!
-          yield* failWith(h.call("workspace.report_metadata", {
-            workspace_id: pane.pane.workspace_id,
-            source: "vibest",
-            tokens,
-            seq,
-          })).pipe(Effect.asVoid)
+          yield* failWith(
+            h.call("workspace.report_metadata", {
+              workspace_id: pane.pane.workspace_id,
+              source: "vibest",
+              tokens,
+              seq,
+            }),
+          ).pipe(Effect.asVoid)
         }
       })
 

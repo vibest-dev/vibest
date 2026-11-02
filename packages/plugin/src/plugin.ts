@@ -1,4 +1,5 @@
 import type { Effect, Scope } from "effect"
+
 import type { Context } from "./index.ts"
 
 export interface Plugin {

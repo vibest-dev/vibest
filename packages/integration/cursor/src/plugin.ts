@@ -31,15 +31,19 @@ const hook = (action: string) => ({ command: `sh ./hooks/vibest.sh ${action}` })
 /** Every file of the plugin, by its path inside the plugin directory. */
 export const files: Readonly<Record<string, string>> = {
   ".cursor-plugin/plugin.json": `${JSON.stringify({ name: "vibest", version: pkg.version, description: pkg.description }, null, 2)}\n`,
-  "hooks/hooks.json": `${JSON.stringify({
-    version: 1,
-    hooks: {
-      // A crash, timeout or missing answer refuses the call; Cursor otherwise lets it through.
-      preToolUse: [{ ...hook("guard"), failClosed: true }],
-      beforeSubmitPrompt: [hook("prompt")],
-      afterAgentResponse: [hook("stop")],
-      stop: [hook("stop")],
+  "hooks/hooks.json": `${JSON.stringify(
+    {
+      version: 1,
+      hooks: {
+        // A crash, timeout or missing answer refuses the call; Cursor otherwise lets it through.
+        preToolUse: [{ ...hook("guard"), failClosed: true }],
+        beforeSubmitPrompt: [hook("prompt")],
+        afterAgentResponse: [hook("stop")],
+        stop: [hook("stop")],
+      },
     },
-  }, null, 2)}\n`,
+    null,
+    2,
+  )}\n`,
   "hooks/vibest.sh": HOOK,
 }

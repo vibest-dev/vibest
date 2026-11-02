@@ -1,5 +1,6 @@
 // A harness login and its usage windows (architecture D10). In memory on the daemon; not a database row.
 import { Schema } from "effect"
+
 import { HARNESS_IDS } from "./session.ts"
 
 export const SubscriptionAccount = Schema.Struct({

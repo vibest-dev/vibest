@@ -6,5 +6,12 @@ export * as results from "./generated/results.js"
 export * as events from "./generated/events.js"
 export type { Method, MethodParams, Subscription } from "./generated/params.js"
 export type { ResponseResult, ResultByTag, ResultTag } from "./generated/results.js"
-export type { AgentStatus, EventFrame, EventKind, PushFrame, SubscriptionEventFrame, SubscriptionEventKind } from "./generated/events.js"
+export type {
+  AgentStatus,
+  EventFrame,
+  EventKind,
+  PushFrame,
+  SubscriptionEventFrame,
+  SubscriptionEventKind,
+} from "./generated/events.js"
 export { PROTOCOL, SCHEMA_VERSION } from "./generated/index.js"

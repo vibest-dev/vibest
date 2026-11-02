@@ -2,6 +2,7 @@
 // Connect RPCs the CLI's own `/usage` command calls, POST https://api2.cursor.sh/aiserver.v1.DashboardService/
 // {GetCurrentPeriodUsage, GetHardLimit} with body `{}`, JSON in and out.
 import type { SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
+
 import { clampPercent, num, record } from "./index.ts"
 
 /** `status`: `{ isAuthenticated, … }`; `about`: `{ subscriptionTier, … }` (optional, it only adds the plan). */
@@ -28,7 +29,8 @@ export const cursorUsage = (usage: unknown, hardLimit?: unknown): ReadonlyArray<
   const h = record(hardLimit)
   const onDemand = h !== undefined && h.noUsageBasedAllowed !== true && (num(h.hardLimit) ?? 0) > 0
   const included = num(plan.limit) ?? 0
-  const total = num(plan.totalPercentUsed) ?? (included > 0 ? ((num(plan.includedSpend) ?? 0) / included) * 100 : undefined)
+  const total =
+    num(plan.totalPercentUsed) ?? (included > 0 ? ((num(plan.includedSpend) ?? 0) / included) * 100 : undefined)
   const buckets: ReadonlyArray<readonly [string, number | undefined]> = [
     ["monthly", total],
     ["monthly-auto", num(plan.autoPercentUsed)],

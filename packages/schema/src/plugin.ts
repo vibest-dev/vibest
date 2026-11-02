@@ -2,7 +2,10 @@
 import { Schema } from "effect"
 
 /** An `agent.start.before` callback refused the start (or crashed, or timed out: the host says which). */
-export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { plugin: Schema.String, reason: Schema.String }) {
+export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", {
+  plugin: Schema.String,
+  reason: Schema.String,
+}) {
   override get message() {
     return `refused by ${this.plugin}: ${this.reason}`
   }

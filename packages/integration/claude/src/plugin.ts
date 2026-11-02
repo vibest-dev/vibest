@@ -22,6 +22,7 @@
  * Hooks modules are early access and may change without notice. This revision has not been loaded in Claude.
  */
 import type { EngineInterface, On, ProcessRunResult, Register } from "claude-code"
+
 import { adaptAttach, adaptPull, adaptSettle } from "./inbox-adapter.ts"
 import { createClaudeInboxClient, type SubmitReply } from "./inbox-client.ts"
 
@@ -50,7 +51,8 @@ const refusal = (why: string) => {
   if (why === "stale-receiver") return `another receiver holds this coordinator's inbox; run /${REATTACH} to take it`
   if (why === "not-reported") return `VIBEST has not recorded this Claude session yet; run /${REATTACH} once it has`
   if (why === "session-mismatch") return `the Claude session changed, so delivery stopped; run /${REATTACH}`
-  if (why.startsWith("exit ")) return `vibest inbox attach failed (${why}); check that vibest on PATH has the inbox command`
+  if (why.startsWith("exit "))
+    return `vibest inbox attach failed (${why}); check that vibest on PATH has the inbox command`
   return `vibest inbox attach refused (${why}); run /${REATTACH} after fixing it`
 }
 
@@ -72,9 +74,15 @@ function nativeHost($: EngineInterface) {
     cwd: () => $.session.cwd(),
     sessionId: () => $.session.id(),
     run: (argv: ReadonlyArray<string>) => $.process.run(["vibest", "inbox", ...argv], { timeoutMs: RUN_TIMEOUT_MS }),
-    stop: (stdin: string) => $.process.run(["vibest", "integration", "stop", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
-    prompt: (stdin: string) => $.process.run(["vibest", "integration", "prompt", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
-    guard: (stdin: string) => $.process.run(["vibest", "integration", "guard", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
+    stop: (stdin: string) =>
+      $.process.run(["vibest", "integration", "stop", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
+    prompt: (stdin: string) =>
+      $.process.run(["vibest", "integration", "prompt", "--harness", "claude"], {
+        stdin,
+        timeoutMs: BRIDGE_TIMEOUT_MS,
+      }),
+    guard: (stdin: string) =>
+      $.process.run(["vibest", "integration", "guard", "--harness", "claude"], { stdin, timeoutMs: BRIDGE_TIMEOUT_MS }),
     read: (file: string) => $.fs.read(file),
     submit: (text: string) => $.prompt.submit({ text }),
     registerReattach: () =>
@@ -125,8 +133,16 @@ const guardDenyReason = (stdout: string): string | undefined => {
     !fields.includes("permissionDecisionReason")
   )
     return undefined
-  const denial = output as { readonly hookEventName: unknown; readonly permissionDecision: unknown; readonly permissionDecisionReason: unknown }
-  if (denial.hookEventName !== "PreToolUse" || denial.permissionDecision !== "deny" || typeof denial.permissionDecisionReason !== "string")
+  const denial = output as {
+    readonly hookEventName: unknown
+    readonly permissionDecision: unknown
+    readonly permissionDecisionReason: unknown
+  }
+  if (
+    denial.hookEventName !== "PreToolUse" ||
+    denial.permissionDecision !== "deny" ||
+    typeof denial.permissionDecisionReason !== "string"
+  )
     return undefined
   return denial.permissionDecisionReason
 }
@@ -161,7 +177,8 @@ export function register(on: On, _options?: unknown) {
     return seen === lifetime ? id : undefined
   }
 
-  const attachArgv = (sessionId: string, replace: boolean) => (replace ? ["attach", sessionId, "--replace"] : ["attach", sessionId])
+  const attachArgv = (sessionId: string, replace: boolean) =>
+    replace ? ["attach", sessionId, "--replace"] : ["attach", sessionId]
 
   const makeClient = (host: Host) =>
     createClaudeInboxClient({
@@ -169,7 +186,7 @@ export function register(on: On, _options?: unknown) {
       attach: async (sessionId) => {
         lastRefusal = "no reply"
         const r = await host.run(attachArgv(sessionId, false))
-        lastRefusal = r.exitCode !== 0 ? `exit ${r.exitCode}` : errorOf(r.stdout) ?? "unparsed"
+        lastRefusal = r.exitCode !== 0 ? `exit ${r.exitCode}` : (errorOf(r.stdout) ?? "unparsed")
         return adaptAttach(r.exitCode, r.stdout)
       },
       pull: async (generation, sessionId) => {
@@ -214,10 +231,11 @@ export function register(on: On, _options?: unknown) {
       if (mine !== epoch || ended) return
       if (before === "new" && snap.phase === "idle") host.attached()
       // not-reported: VIBEST records the session when a turn ends (Stop / StopFailure); the next poll attaches again.
-      if (before === "new" && snap.phase === "new") host.status("waiting for VIBEST to record this Claude session (after a turn ends)")
+      if (before === "new" && snap.phase === "new")
+        host.status("waiting for VIBEST to record this Claude session (after a turn ends)")
       if (snap.phase === "stopped") {
         halt()
-        host.status(refusal(snap.stopReason === "attach-failed" ? lastRefusal : snap.stopReason ?? "unparsed"))
+        host.status(refusal(snap.stopReason === "attach-failed" ? lastRefusal : (snap.stopReason ?? "unparsed")))
       }
     } catch {
       // A failed session read leaves the state as it was; the next tick tries again.
@@ -259,7 +277,8 @@ export function register(on: On, _options?: unknown) {
     try {
       const seen = lifetime
       const sessionId = await readSession(host).catch(() => undefined)
-      if (sessionId === undefined) return { text: `Could not read this Claude session; nothing was sent. Run /${REATTACH} again.` }
+      if (sessionId === undefined)
+        return { text: `Could not read this Claude session; nothing was sent. Run /${REATTACH} again.` }
       let r: RunResult
       try {
         r = await host.run(attachArgv(sessionId, true))
@@ -274,7 +293,9 @@ export function register(on: On, _options?: unknown) {
         return { text: unknownReplace(r.exitCode !== 0 ? `exit ${r.exitCode}` : "unparsed reply") }
       }
       if (seen !== lifetime)
-        return { text: `The Claude session changed while reattaching; generation not used here. Run /${REATTACH} again.` }
+        return {
+          text: `The Claude session changed while reattaching; generation not used here. Run /${REATTACH} again.`,
+        }
       current = sessionId
       ended = false
       epoch += 1
@@ -323,7 +344,11 @@ export function register(on: On, _options?: unknown) {
     const host = nativeHost($)
     if (!(await host.agent())) return next(event)
     try {
-      const reason = guardReason(await host.guard(JSON.stringify({ tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() })))
+      const reason = guardReason(
+        await host.guard(
+          JSON.stringify({ tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }),
+        ),
+      )
       return reason === undefined ? next(event) : { deny: reason }
     } catch {
       return { deny: GUARD_FAILURE }

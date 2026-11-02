@@ -21,7 +21,7 @@ jobs:
       github.event_name == 'push' ||
       (
         github.event.pull_request.head.repo.full_name == github.repository &&
-        contains(fromJSON('["iamdin","oxwen11"]'), github.event.pull_request.user.login)
+        contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
       )
     runs-on: [self-hosted, Linux, X64, vibest, rn]
     timeout-minutes: 45
@@ -29,6 +29,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # Persistent caches live beside _work, so checkout stays clean without actions/cache tarballs
+      # on every run. The runner user creates them, so they need no setup on the host.
+      - name: Prepare persistent CI caches
+        run: |
+          cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
+          mkdir -p "${cache_root}/pnpm-store" "${cache_root}/turbo"
+          {
+            echo "PNPM_STORE_DIR=${cache_root}/pnpm-store"
+            echo "TURBO_CACHE_DIR=${cache_root}/turbo"
+          } >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:
@@ -44,9 +55,10 @@ jobs:
           test "$(uname -s)" = Linux
           test "$(uname -m)" = x86_64
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
       - run: pnpm run build
       - run: pnpm run typecheck
+      - run: pnpm run format:check
       # Leave room for the other job sharing this host.
       - run: pnpm run test --maxWorkers=2
       # pnpm e2e needs a local herdr and the real CLIs, so it runs locally (pnpm e2e, pnpm verify), not here.

@@ -86,13 +86,13 @@ Another runtime defines its own shape.
 
 ## Message status
 
-| `status` | Meaning |
-|---|---|
-| `working` | the round is in progress |
-| `completed` / `failed` | the session finished and said so in its answer |
-| `interrupted` | `vibest interrupt` stopped it |
-| `lost` | the session went idle without leaving an answer |
-| `not_started` | delivery could not be confirmed |
+| `status`               | Meaning                                         |
+| ---------------------- | ----------------------------------------------- |
+| `working`              | the round is in progress                        |
+| `completed` / `failed` | the session finished and said so in its answer  |
+| `interrupted`          | `vibest interrupt` stopped it                   |
+| `lost`                 | the session went idle without leaving an answer |
+| `not_started`          | delivery could not be confirmed                 |
 
 ## One task, step by step
 
