@@ -168,14 +168,13 @@ export const alive = (h: Runtime, terminal: Terminal): Effect.Effect<boolean> =>
     Effect.catchTag("RuntimeError", (error) => Effect.succeed(error.code !== "not_found")),
   )
 
-/** The last `lines` of a terminal; empty when unknown or unreadable. */
 /**
  * What a notice or result says instead of screen text (none is ever sent to an agent): the command that shows the
  * session's terminal on demand.
  */
 export const peekHint = (id: string) => `to see its terminal, run: vibest peek ${id}`
 
-/** The last lines on screen, trimmed; "" when the runtime cannot read them. For `vibest peek` and vibestd.log only. */
+/** The last lines on screen, trimmed; "" when the runtime cannot read them. For vibestd.log only. */
 export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30) =>
   terminal
     ? h.read(terminal, lines).pipe(

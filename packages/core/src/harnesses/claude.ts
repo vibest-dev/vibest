@@ -57,8 +57,8 @@ const turnComplete = (event: Readonly<Record<string, unknown>>) => {
     const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
     return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
   }
-  const answer = typeof event.last_assistant_message === "string" ? event.last_assistant_message.trim() : ""
-  return { ...event, error: "error", error_details: answer || "the turn ended on an API error" }
+  // The answer stays the result's text; repeating it here would print it twice.
+  return { ...event, error: "error", error_details: "the turn ended on an API error" }
 }
 
 /** Where Claude keeps the transcript of session `id` started at `root`: every non-alphanumeric of the path becomes `-`. */

@@ -8,6 +8,8 @@ One ordinary Claude Code plugin with two parts:
     `vibest integration stop --harness claude`. vibest maps the reason: `answer` is the result as it is; `aborted` is an
     interrupted (failed) result when the person pressed Esc in the pane, and nothing when `vibest interrupt` (or remove,
     archive) stopped the turn, because vibest closed that round first; `refusal` and `error` are failed results. A
+    `vibest interrupt` whose Esc does not stop the turn within 10 s fails with SessionBusy and leaves the round open,
+    so the aborted turn.complete that follows (once the turn does stop) is delivered as an interrupted result. A
     subagent's loop (`agentId` set) reports nothing. Claude fires no `Stop` for a turn stopped with Esc, so `classic.Stop`
     is not used.
   - turn.complete carries no API error kind: `StopFailure`'s `rate_limit`, `billing_error`, `model_not_found` and so on
@@ -56,7 +58,8 @@ is no shell and no `VIBEST_COMMAND` override.
 **Mods are not sandboxed.** The inbox module is a mod, code that Claude Code runs in its own process with your permissions.
 Its own `$.fs` and `$.process` calls do not go through Claude's tool permission rules or `PreToolUse` hooks, and a
 process it starts runs outside the Bash sandbox. What it intends to do is narrow: run the fixed bare argv `vibest inbox attach|pull|ack|release …`,
-`vibest integration stop --harness claude` and `vibest integration guard --harness claude`, read the claim file `vibest inbox pull` names, and submit that text
+`vibest integration stop --harness claude`, `vibest integration prompt --harness claude` and
+`vibest integration guard --harness claude`, read the claim file `vibest inbox pull` names, and submit that text
 as a prompt. Its
 `tool.call` listener only refuses (it never rewrites a call or its result); it registers no `tool.check` approval and
 changes no permission or policy setting. A module that does not load guards nothing: with no `--settings`, the guard

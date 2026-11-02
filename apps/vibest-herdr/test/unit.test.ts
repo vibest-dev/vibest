@@ -943,7 +943,12 @@ describe("HarnessAdapter", () => {
       result: { ...error, error: "error", error_details: "the turn ended on an API error" },
     })
     assert.deepStrictEqual(turnEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
-      result: { ...error, last_assistant_message: " API Error: 500 ", error: "error", error_details: "API Error: 500" },
+      result: {
+        ...error,
+        last_assistant_message: " API Error: 500 ",
+        error: "error",
+        error_details: "the turn ended on an API error",
+      },
     })
     const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
     assert.deepStrictEqual(turnEnd(refusal, false), {

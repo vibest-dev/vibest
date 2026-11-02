@@ -446,11 +446,14 @@ const peek = Command.make(
     id,
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
-      Flag.withDescription("How many of the last lines to print (at most 500)"),
-      Flag.withDefault(30),
+      Flag.withDescription("How many of the last lines to print (at most 500; vibestd's default is 30)"),
+      Flag.optional,
     ),
   },
-  (o) => vibest((client) => client.Peek({ id: o.id, lines: o.lines })).pipe(Effect.flatMap((r) => Console.log(r.text))),
+  (o) =>
+    vibest((client) => client.Peek({ id: o.id, lines: Option.getOrUndefined(o.lines) })).pipe(
+      Effect.flatMap((r) => Console.log(r.text)),
+    ),
 ).pipe(
   Command.withDescription(
     "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the turn ended without a report or did not start",

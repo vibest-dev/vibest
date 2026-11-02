@@ -1601,6 +1601,8 @@ describe.concurrent("Sessions", () => {
       const started = yield* spawnWorking(repo)
       assert.strictEqual((yield* started.db.getSession(started.id))!.harnessId, "pi")
       const { id, sessions, db } = yield* spawnWorking(repo, "claude")
+      // A generic limit payload on a claude row: this tests the harness move. Claude's plugin reports no error kind
+      // (turn.complete has none), so a real Claude limit is a failed result, not this move.
       yield* writeResult(id, "claude", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -1837,6 +1839,8 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      // A generic limit payload on a claude row: this tests the harness move. Claude's plugin reports no error kind
+      // (turn.complete has none), so a real Claude limit is a failed result, not this move.
       yield* writeResult(id, "claude", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* (yield* Sessions).check(id)
@@ -1979,6 +1983,8 @@ describe.concurrent("Sessions", () => {
         provider: "openai",
         limits: [{ window: "5h", percent: 5, status: "available", resetTime: null }],
       })
+      // A generic limit payload on a claude row: this tests the harness move. Claude's plugin reports no error kind
+      // (turn.complete has none), so a real Claude limit is a failed result, not this move.
       yield* writeResult(id, "claude", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -2818,18 +2824,42 @@ describe.concurrent("Sessions", () => {
       harness === "pi" ? { hooked: ["pi"] } : undefined,
     )
 
-  test(
-    "remove of a working Claude session: the aborted turn end its interrupt makes is no result",
-    Effect.gen(function* () {
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
-      yield* sessions.remove(id)
-      yield* writeResult(id, "claude", claudeEnd("aborted"), 60_000)
-      yield* TestClock.adjust("2 minutes")
-      yield* sessions.check(id).pipe(Effect.ignore)
-      assert.isUndefined(yield* db.latestInbox(id, "result"))
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
-    }),
-  )
+  // Remove and archive (`vibest archive` is Remove; --keep-worktree keeps the worktree) close the round and mark the session
+  // archived and exited under its lock: check returns early for it (sessions.ts check), and were it to collect, the
+  // aborted payload with no open round is none (rounds.ts collectResult). Either alone holds; with both gone these fail.
+  // The file may land while the interrupt key is still going in, or after the archive.
+  for (const harness of ["claude", "pi"] as const)
+    for (const keepWorktree of [false, true])
+      test(
+        `${keepWorktree ? "archive --keep-worktree" : "remove"} of a working ${harness} session: the aborted turn end of its interrupt is no result, written during the interrupt or after`,
+        Effect.gen(function* () {
+          const herdr = yield* FakeRuntime
+          const repo = yield* makeRepository
+          const aborted = harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true }
+          // During: the file lands while the interrupt key is held, before the session is marked archived.
+          const during = yield* spawnWorking(repo, harness)
+          const held = yield* herdr.hold("send", during.id)
+          const removing = yield* Effect.forkChild(during.sessions.remove(during.id, { keepWorktree }))
+          yield* held.reached
+          yield* writeResult(during.id, harness, aborted, 60_000)
+          yield* held.release()
+          yield* Fiber.join(removing)
+          // After: the file lands once the session is archived.
+          const after = yield* spawnWorking(repo, harness)
+          yield* after.sessions.remove(after.id, { keepWorktree })
+          yield* writeResult(after.id, harness, aborted, 60_000)
+          yield* TestClock.adjust("2 minutes")
+          for (const { id, sessions, db } of [during, after]) {
+            const row = (yield* db.getSession(id))!
+            assert.isTrue(row.metadata.archived, id)
+            yield* sessions.check(id)
+            assert.deepStrictEqual(yield* countRows(id), { rounds: 1, results: 0 }, id)
+            assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted", id)
+            assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+          }
+        }),
+        harness === "pi" ? { hooked: ["pi"] } : undefined,
+      )
 
   test(
     "interrupt delivers a result that is already in instead of discarding it",
@@ -2873,6 +2903,29 @@ describe.concurrent("Sessions", () => {
       const error = yield* Effect.flip(Fiber.join(interrupting))
       assert.strictEqual(error._tag, "SessionBusy")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+    }),
+    { interruptIgnored: true },
+  )
+
+  test(
+    "interrupt that does not take: the round stays open, so the late aborted turn.complete is delivered as an interrupted result",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
+      for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
+        yield* TestClock.adjust("250 millis")
+        yield* TestClock.withLive(Effect.sleep("2 millis"))
+      }
+      assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
+      yield* writeResult(id, "claude", claudeEnd("aborted"))
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
+      assert.include(
+        (yield* db.latestInbox(id, "result"))!.message,
+        "interrupted: the turn was stopped in its terminal (Esc) before it ended",
+      )
     }),
     { interruptIgnored: true },
   )
