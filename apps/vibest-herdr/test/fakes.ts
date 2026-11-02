@@ -1,7 +1,7 @@
 // Test doubles: an in-memory Runtime, a throwaway git repository, and waiting helpers.
 import * as Platform from "#platform"
 import type * as VibestPlugin from "@vibest/plugin"
-import nodeFs from "node:fs/promises"
+import fs from "node:fs/promises"
 import { Clock, Config, Context, Deferred, type Duration, Effect, FileSystem, HashMap, Layer, Option, Path, type Predicate, Ref, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
@@ -183,7 +183,7 @@ const templateRepository = Effect.promise(() => {
 export const makeRepository = Effect.gen(function* () {
   const source = yield* templateRepository
   const root = yield* tempDirectory("vibest-repo-")
-  yield* Effect.promise(() => nodeFs.cp(source, root, { recursive: true }))
+  yield* Effect.promise(() => fs.cp(source, root, { recursive: true }))
   return root
 }).pipe(Effect.orDie)
 

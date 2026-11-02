@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process"
+import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -351,8 +351,8 @@ describe("herdr plugin package", () => {
       fs.mkdirSync(path.join(stage, "harnesses"))
       copyHerdrPlugin(stage, path.join(import.meta.dirname, "../herdr-plugin"))
       const archive = path.join(stage, "vibest.tar.gz")
-      execFileSync("tar", ["-czf", archive, "-C", stage, ...ARCHIVE_ROOTS])
-      const listed = execFileSync("tar", ["-tzf", archive], { encoding: "utf8" })
+      childProcess.execFileSync("tar", ["-czf", archive, "-C", stage, ...ARCHIVE_ROOTS])
+      const listed = childProcess.execFileSync("tar", ["-tzf", archive], { encoding: "utf8" })
       assert.match(listed, /^herdr-plugin\/herdr-plugin\.toml$/m)
       assert.match(listed, /^herdr-plugin\/bin\/vibest\.sh$/m)
       assert.match(listed, /^herdr-plugin\/README\.md$/m)

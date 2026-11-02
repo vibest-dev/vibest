@@ -3,17 +3,17 @@
 // Upstream LICENSE.md: © Anthropic PBC. All rights reserved. Commercial terms. This script does not assert a right to redistribute those bytes.
 // The file's "Written by Claude Code 2.1.277" header is stale and does not date the pin.
 // A verified cache is reused, including one placed there by hand. Otherwise the pinned URL is fetched. No other lookup.
-import { createHash } from "node:crypto"
+import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import url from "node:url"
 
 export const CLAUDE_TYPES_PIN = "2eff7a8d21c80be48904f62ebdea36d945d7b504"
 export const CLAUDE_TYPES_SHA256 = "e51e637fbbebb2a6a49c4bdc3860a251c2ca2295884822dff0f4c3e3ec802163"
 export const CLAUDE_TYPES_URL = `https://raw.githubusercontent.com/anthropics/claude-code/${CLAUDE_TYPES_PIN}/mods/types/claude-code.d.ts`
 export const CLAUDE_TYPES_CACHE = ".cache/claude-code.d.ts"
 
-export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+export const sha256 = (bytes: Uint8Array) => crypto.createHash("sha256").update(bytes).digest("hex")
 
 export type PrepareClaudeTypes = {
   readonly cachePath: string
@@ -46,9 +46,9 @@ export const prepareClaudeTypes = async (options: PrepareClaudeTypes): Promise<"
   return "acquired"
 }
 
-const invoked = process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+const invoked = process.argv[1] !== undefined && path.resolve(process.argv[1]) === url.fileURLToPath(import.meta.url)
 if (invoked) {
-  const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+  const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
   prepareClaudeTypes({
     cachePath: path.join(root, CLAUDE_TYPES_CACHE),
     expectedSha256: CLAUDE_TYPES_SHA256,

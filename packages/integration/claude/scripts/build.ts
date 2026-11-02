@@ -6,9 +6,9 @@
 // Prebuilt JS is this package's npm delivery choice. Claude Code can also load TypeScript hooks modules directly.
 import fs from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import url from "node:url"
 
-const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
 const readJson = (file: string) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8")) as Record<string, unknown>
 
 const version = readJson("package.json").version

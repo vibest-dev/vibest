@@ -1,8 +1,8 @@
 // One world per run: the user's own HOME (the harnesses' logins live in its keychain), a temp VIBEST_HOME, temp config
 // directories for each harness (Pi, Claude, Cursor read them from env), a scratch repository with a local bare origin, and
 // the vibest under test first on PATH. vibest writes nothing outside the temp root. Every process this run starts is stopped.
-import fsSync from "node:fs"
-import fs from "node:fs/promises"
+import fs from "node:fs"
+import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -27,7 +27,7 @@ const target = () => {
   }
   if (method === "curl") {
     // The link install.sh made, to the version it installed; the binary finds its plugins beside its bin/.
-    const version = path.join(install, "share/versions", fsSync.readFileSync(path.join(install, "share/current"), "utf8").trim())
+    const version = path.join(install, "share/versions", fs.readFileSync(path.join(install, "share/current"), "utf8").trim())
     return { binary: path.join(install, "bin/vibest"), compiled: path.join(version, "bin/vibest"), harnesses: path.join(version, "harnesses") }
   }
   const compiled = path.join(checkout, "apps/vibest-herdr/dist/vibest")
@@ -76,13 +76,13 @@ export class World {
 
   static async create(): Promise<World> {
     // Short: vibest.sock lives in VIBEST_HOME, and a Unix socket path is at most 104 bytes on macOS.
-    const root = await fs.mkdtemp(path.join(process.platform === "darwin" ? "/tmp" : os.tmpdir(), "vbe-"))
-    await fs.chmod(root, 0o700)
+    const root = await fsPromises.mkdtemp(path.join(process.platform === "darwin" ? "/tmp" : os.tmpdir(), "vbe-"))
+    await fsPromises.chmod(root, 0o700)
     const w = new World(root)
-    for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")]) await fs.mkdir(dir, { mode: 0o700 })
+    for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
-    await fs.writeFile(path.join(w.repository, "README.md"), "# shop\n")
+    await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")
     await w.sh(w.repository, ["git", "add", "."])
     await w.sh(w.repository, ["git", "commit", "-q", "-m", "init"])
     await w.sh(w.repository, ["git", "remote", "add", "origin", w.origin])
@@ -166,7 +166,7 @@ export class World {
 
   /** The PID vibestd recorded in this world's VIBEST_HOME, if any. */
   async daemonPid(): Promise<number | undefined> {
-    const text = await fs.readFile(path.join(this.vibestHome, "vibestd.pid"), "utf8").catch(() => "")
+    const text = await fsPromises.readFile(path.join(this.vibestHome, "vibestd.pid"), "utf8").catch(() => "")
     try {
       const pid = (JSON.parse(text) as { pid?: unknown }).pid
       return typeof pid === "number" && pid > 0 ? pid : undefined
@@ -188,7 +188,7 @@ export class World {
   async close() {
     await this.stopDaemon()
     // The herdr server vibest started for this run (detached), if it did; the user's sessions are never touched.
-    if (await fs.stat(path.join(this.home, ".config", "herdr", "sessions", this.herdrSession)).then(() => true, () => false)) {
+    if (await fsPromises.stat(path.join(this.home, ".config", "herdr", "sessions", this.herdrSession)).then(() => true, () => false)) {
       await this.run(this.root, ["herdr", "session", "stop", this.herdrSession])
       await this.run(this.root, ["herdr", "session", "delete", this.herdrSession])
     }

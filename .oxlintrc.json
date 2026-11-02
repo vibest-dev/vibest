@@ -1,9 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["./tools/oxlint/node-import-style.mjs"],
   "categories": {
     "correctness": "error"
   },
   "rules": {
+    "unicorn/prefer-node-protocol": "error",
+    "vibest/node-import-style": "error",
+    "vibest/no-restricted-disable": "error",
     "eslint/no-unused-vars": "error",
     // A ternary is sometimes the effect: delete the variable, or assign it.
     "eslint/no-unused-expressions": ["error", { "allowTernary": true }]

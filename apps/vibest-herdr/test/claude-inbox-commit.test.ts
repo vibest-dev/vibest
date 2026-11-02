@@ -1,4 +1,3 @@
-import nodeFs from "node:fs"
 import { Deferred, Effect, Exit, Fiber, FileSystem, Path } from "effect"
 import { SqlClient } from "effect/sql"
 import { assert, describe, it } from "@effect/vitest"
@@ -231,8 +230,8 @@ describe("Claude inbox commit boundary", () => {
       const fiber = yield* Effect.forkChild(inbox.pull({ ...call, generation }))
       yield* Deferred.await(reached)
       target.rename = real.rename
-      yield* Effect.sync(() => nodeFs.chmodSync(claims, 0o000))
-      yield* Effect.exit(Fiber.interrupt(fiber)).pipe(Effect.ensuring(Effect.sync(() => nodeFs.chmodSync(claims, 0o755))))
+      yield* fs.chmod(claims, 0o000)
+      yield* Effect.exit(Fiber.interrupt(fiber)).pipe(Effect.ensuring(Effect.orDie(fs.chmod(claims, 0o755))))
       yield* Deferred.succeed(release, undefined)
       const left = (yield* fs.readDirectory(claims)).filter((name) => !name.endsWith(".tmp"))
       assert.strictEqual(yield* status("report one"), "pending")

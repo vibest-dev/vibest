@@ -9,9 +9,9 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import * as VibestPlugin from "@vibest/plugin"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
-import fs from "node:fs/promises"
-import nodeFs from "node:fs"
-import nodePath from "node:path"
+import fsPromises from "node:fs/promises"
+import fs from "node:fs"
+import path from "node:path"
 import type { Host } from "@vibest/server/daemon"
 import { inspectSchema, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
@@ -48,11 +48,11 @@ const PRIVATE_FILE = 0o600
 const privateDatabase = (filename: string) =>
   Effect.tryPromise(async () => {
     // Mode "a" creates a missing file and never truncates an existing one; the chmod right after forces the mode either way.
-    await (await fs.open(filename, "a", PRIVATE_FILE)).close()
-    await fs.chmod(filename, PRIVATE_FILE)
+    await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
+    await fsPromises.chmod(filename, PRIVATE_FILE)
     for (const suffix of ["-wal", "-shm"]) {
       try {
-        await fs.chmod(filename + suffix, PRIVATE_FILE)
+        await fsPromises.chmod(filename + suffix, PRIVATE_FILE)
       } catch (error) {
         if ((error as { code?: string }).code !== "ENOENT") throw error
       }
@@ -170,20 +170,20 @@ const lock: Host["lock"] = (file) =>
   Effect.acquireRelease(
     Effect.try({
       try: () => {
-        const fd = nodeFs.openSync(file, nodeFs.constants.O_RDWR | nodeFs.constants.O_CREAT, 0o600)
+        const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
         if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) return fd
-        nodeFs.closeSync(fd)
+        fs.closeSync(fd)
         return undefined
       },
       catch: (e) => e as Error,
     }),
     (fd) => Effect.sync(() => {
       if (fd === undefined) return
-      try { nodeFs.ftruncateSync(fd, 0) } finally { nodeFs.closeSync(fd) }
+      try { fs.ftruncateSync(fd, 0) } finally { fs.closeSync(fd) }
     }),
   ).pipe(
     Effect.map((fd) => fd === undefined ? undefined : (text: string) => Effect.try({
-      try: () => { nodeFs.ftruncateSync(fd, 0); nodeFs.writeSync(fd, text, 0) },
+      try: () => { fs.ftruncateSync(fd, 0); fs.writeSync(fd, text, 0) },
       catch: (e) => e as Error,
     })),
   )
@@ -193,9 +193,9 @@ const lock: Host["lock"] = (file) =>
 const configuredRuntime: ConfiguredRuntime = () =>
   Effect.sync(() => {
     try {
-      const home = process.env["VIBEST_HOME"] ?? (process.env["HOME"] ? nodePath.join(process.env["HOME"], ".vibest") : undefined)
+      const home = process.env["VIBEST_HOME"] ?? (process.env["HOME"] ? path.join(process.env["HOME"], ".vibest") : undefined)
       if (home === undefined) return undefined
-      const runtime = (plugins.parseJsonc(nodeFs.readFileSync(nodePath.join(home, "vibest.json"), "utf8")) as { runtime?: unknown }).runtime
+      const runtime = (plugins.parseJsonc(fs.readFileSync(path.join(home, "vibest.json"), "utf8")) as { runtime?: unknown }).runtime
       return typeof runtime === "string" && runtime !== "" ? runtime : undefined
     } catch {
       return undefined

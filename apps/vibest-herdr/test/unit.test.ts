@@ -3,7 +3,7 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import * as Platform from "#platform"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
-import { fileURLToPath } from "node:url"
+import url from "node:url"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
@@ -601,8 +601,8 @@ describe("Db", () => {
       const dir = yield* tempDirectory("vibest-schema-race-")
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
-      const dbModule = fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
-      const platformModule = fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
+      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
+      const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(script, [
         'import { Effect, Layer } from "effect"',
         `import { Db } from ${JSON.stringify(dbModule)}`,

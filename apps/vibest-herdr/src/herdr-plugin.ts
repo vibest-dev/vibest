@@ -1,6 +1,6 @@
 // `vibest herdr`: the command group the herdr plugin runs. The project directory comes from
 // HERDR_PLUGIN_CONTEXT_JSON (focused pane, else workspace). Never from this process's cwd, which is the plugin directory.
-import * as readline from "node:readline"
+import readline from "node:readline"
 import { Herdr } from "effect-herdr-sdk"
 import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
