@@ -1,16 +1,12 @@
 // Forbids eslint/oxlint disable comments on the import rules this repository treats as
 // non-negotiable (the `node:` prefix and default imports for Node builtins), and blanket
 // disables, which would turn them off too. Fix the import instead of silencing the diagnostic.
+// oxlint accepts a rule name without its plugin prefix or under another plugin's prefix
+// (prefer-node-protocol, node/prefer-node-protocol), so only the last segment is compared.
 
-const DISABLE_DIRECTIVE = /^\s*(?<kind>oxlint|eslint)-disable(?<scope>-next-line|-line)?(?:\s+(?<body>[\s\S]*))?$/u
+const DISABLE_DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?:\s+(?<body>[\s\S]*))?$/u
 
-const PROTECTED_RULES = new Set([
-  "unicorn/prefer-node-protocol",
-  "vibest/node-import-style",
-  "vibest/no-restricted-disable",
-])
-
-const isProtectedRule = (rule) => PROTECTED_RULES.has(rule)
+export const PROTECTED_RULES = new Set(["prefer-node-protocol", "node-import-style", "no-restricted-disable"])
 
 const parseDisableDirective = (commentValue) => {
   const match = DISABLE_DIRECTIVE.exec(commentValue.trim())
@@ -40,7 +36,7 @@ export const noRestrictedDisable = {
             continue
           }
           for (const rule of parsed.rules) {
-            if (!isProtectedRule(rule)) continue
+            if (!PROTECTED_RULES.has(rule.split("/").pop())) continue
             context.report({
               node: comment,
               message: `Do not disable ${rule} with a comment. Fix the import instead of silencing the diagnostic.`,
@@ -52,4 +48,4 @@ export const noRestrictedDisable = {
   },
 }
 
-export { isProtectedRule, parseDisableDirective }
+export { parseDisableDirective }
