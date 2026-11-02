@@ -155,12 +155,6 @@ export class Inbox extends Context.Service<
           true,
         )
       const registry = createRegistry()
-      /**
-       * Open `stream`s per project. A Pi main agent that holds one is there, whatever the runtime reads at its terminal:
-       * while one is open its rows are not dropped as `gone`, and an `exited` event at its terminal does not clear it.
-       */
-      const openStreams = new Map<number, number>()
-      const isSubscribed = (projectId: number) => (openStreams.get(projectId) ?? 0) > 0
 
       const locks = yield* SynchronizedRef.make(HashMap.empty<number, Semaphore.Semaphore>())
       const lock = (projectId: number) =>
@@ -273,8 +267,7 @@ export class Inbox extends Context.Service<
                   const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
                   if (Option.isNone(h)) return
                   const presence = yield* coordinatorIdle(h.value, coord.address)
-                  if (presence === "gone")
-                    return isSubscribed(projectId) ? undefined : yield* db.dropWaiting(projectId, guard)
+                  if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
                   if (presence !== "idle") return
                   const fence = yield* db.readCoordinatorFence(projectId)
                   // Recheck under this lock, after the runtime was awaited, so attach cannot overlap an entered paste.
@@ -342,15 +335,9 @@ export class Inbox extends Context.Service<
               // The merged stream does not say which runtime it came from; each kind's row matches on its own address.
               return drain.work(
                 "main agent exited",
-                at(event.terminal).pipe(
-                  Effect.flatMap((projectId) =>
-                    projectId !== undefined && isSubscribed(projectId)
-                      ? Effect.void
-                      : runtimes.all.pipe(
-                          Effect.flatMap((all) =>
-                            Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
-                          ),
-                        ),
+                runtimes.all.pipe(
+                  Effect.flatMap((all) =>
+                    Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
                   ),
                   Effect.andThen(changed),
                   Effect.ignore,
@@ -393,16 +380,6 @@ export class Inbox extends Context.Service<
                   }
                 : undefined
             const arrivals = yield* PubSub.subscribe(pubsub)
-            // Counted while the stream is open; once the last one closes, `deliver` reads the terminal again.
-            yield* Effect.acquireRelease(
-              Effect.sync(() => void openStreams.set(projectId, (openStreams.get(projectId) ?? 0) + 1)),
-              () =>
-                Effect.sync(() => {
-                  const left = (openStreams.get(projectId) ?? 1) - 1
-                  if (left > 0) openStreams.set(projectId, left)
-                  else openStreams.delete(projectId)
-                }).pipe(Effect.andThen(Effect.forkIn(deliver(projectId), scope)), Effect.asVoid),
-            )
             // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
             let unconfirmed: Array<number> = []
             const claimOne = () =>
