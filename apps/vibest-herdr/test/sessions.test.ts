@@ -396,6 +396,36 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a session's in-memory flags and lock go once it ends; resumed, its next turn ends as any turn does; archived, they go again",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      // Concurrent checks, as the poll and a runtime event run them: none leaves a lock or the flags behind.
+      yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
+      assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
+      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 0, locks: 0 })
+      // Nothing of the dropped flags is missed: the next message resumes it and its turn is collected.
+      yield* sessions.send(id, "next")
+      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { turnState: "open", exitedAt: null })
+      yield* writeResult(id, "pi", { text: "status: completed\nsummary: again" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
+      assert.strictEqual((yield* db.latestInbox(id, "result"))!.details.summary, "again")
+      // A live session between turns keeps its flags; archived, they go with the next check.
+      assert.strictEqual((yield* sessions.inMemory).tracked, 1)
+      yield* sessions.remove(id)
+      yield* sessions.check(id)
+      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 0, locks: 0 })
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "blocked: one notice, no answer on the session's behalf",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

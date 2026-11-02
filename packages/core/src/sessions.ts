@@ -55,6 +55,7 @@ import {
   type HarnessAdapter,
 } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
+import { keyedLock } from "./keyed-lock.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import {
   ALLOCATION_LEAF,
@@ -125,9 +126,8 @@ const TICK = Schedule.spaced("500 millis")
 
 type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
 
-/** In-memory only; rebuilt from sqlite and the runtime after a restart. */
+/** In-memory only; rebuilt from sqlite and the runtime after a restart. Dropped once the session has ended (`forget`). */
 interface Tracked {
-  readonly lock: Semaphore.Semaphore
   /** When the open turn was last seen working: a state, an event, or a turn-start report line (its file is the durable proof). */
   readonly sawWorking: Ref.Ref<boolean>
   readonly endedAt: Ref.Ref<number | undefined>
@@ -144,7 +144,6 @@ interface Tracked {
 }
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
-  lock: Semaphore.make(1),
   sawWorking: Ref.make(false),
   endedAt: Ref.make<number | undefined>(undefined),
   blockedNotified: Ref.make(false),
@@ -230,6 +229,8 @@ export class Sessions extends Context.Service<
     readonly userPrompt: (id: string, text: string) => Effect.Effect<void, never, FileSystem.FileSystem>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
     readonly republish: Effect.Effect<number>
+    /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
+    readonly inMemory: Effect.Effect<{ readonly tracked: number; readonly locks: number }>
   }
 >()("vibest/Sessions") {
   /** `maxSessions`: non-stopped sessions on this machine; undefined = no limit. */
@@ -260,10 +261,37 @@ export class Sessions extends Context.Service<
             onNone: () => newTracked.pipe(Effect.map((r) => [r, HashMap.set(map, id, r)] as const)),
           }),
         )
+      const locks = keyedLock<string>()
+      /**
+       * Drop the flags of a session that has ended: exited with no turn open, archived, or gone. Nobody may hold or wait on its
+       * lock, and nothing may be in flight on them; what they guard starts afresh at the next prompt, as after a restart.
+       */
+      const forget = (id: string) =>
+        SynchronizedRef.updateEffect(tracked, (map) =>
+          Effect.gen(function* () {
+            const r = Option.getOrUndefined(HashMap.get(map, id))
+            if (!r || locks.busy(id)) return map
+            const idle = !(yield* Ref.get(r.stopping)) && !(yield* Ref.get(r.prompting)) && !(yield* Ref.get(r.pasting))
+            if (!idle || (yield* Ref.get(r.checking)) !== undefined) return map
+            const row = yield* db.getSession(id)
+            const ended =
+              !row ||
+              row.metadata.archived ||
+              row.metadata.removed ||
+              (row.exitedAt !== null && row.turnState !== "open")
+            return ended ? HashMap.remove(map, id) : map
+          }),
+        )
       const locked =
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          drain.work(`session ${id}`, track(id).pipe(Effect.flatMap((r) => r.lock.withPermit(effect))), settlement)
+          drain.work(
+            `session ${id}`,
+            locks
+              .withLock(id)(effect)
+              .pipe(Effect.ensuring(forget(id))),
+            settlement,
+          )
       const logged =
         (what: string) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -560,6 +588,7 @@ export class Sessions extends Context.Service<
         layout,
         harnesses,
         track,
+        lock: locks.withLock,
         locked,
         scope,
         plugins,
@@ -857,14 +886,13 @@ export class Sessions extends Context.Service<
                 )
               })
         // Take the lock before forking so no check sees the row as an abandoned `starting` one.
-        const { lock } = yield* track(id)
         yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            yield* restore(Semaphore.take(lock, 1))
+            const release = yield* restore(locks.take(id))
             const leave = drain.track(`spawn ${id}`)
             yield* Effect.forkIn(
               launch(rt, machine, row, root, decision.prompt, input.peer).pipe(
-                Effect.ensuring(Semaphore.release(lock, 1)),
+                Effect.ensuring(release),
                 Effect.ensuring(leave),
                 logged(`spawn ${id}`),
                 Effect.provideContext(platform),
@@ -1260,13 +1288,14 @@ export class Sessions extends Context.Service<
           const owner = yield* db.getSession(id)
           if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
           if (row.details.status !== "completed") return
-          const r = yield* track(id)
           // Each delivered result takes its turn under the lock, so one delivered while another archive holds it still gets its own look.
           yield* locked(
             id,
             true,
           )(
             Effect.gen(function* () {
+              // Looked up under the lock: an ended session's flags may be dropped while nobody holds it.
+              const r = yield* track(id)
               // An vibest archive already running does it.
               if (yield* Ref.getAndSet(r.stopping, true)) return
               yield* Effect.gen(function* () {
@@ -1448,6 +1477,9 @@ export class Sessions extends Context.Service<
         resultReady,
         userPrompt,
         republish: republish().pipe(Effect.provideContext(platform)),
+        inMemory: SynchronizedRef.get(tracked).pipe(
+          Effect.map((map) => ({ tracked: HashMap.size(map), locks: locks.size() })),
+        ),
       })
     })
 

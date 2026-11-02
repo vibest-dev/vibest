@@ -12,16 +12,13 @@ import {
   Effect,
   Exit,
   FileSystem,
-  HashMap,
   Layer,
   Option,
   Path,
   PubSub,
   Queue,
   Schedule,
-  Semaphore,
   Stream,
-  SynchronizedRef,
 } from "effect"
 
 import {
@@ -44,6 +41,7 @@ import {
 } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { Harnesses } from "./harness.ts"
+import { keyedLock } from "./keyed-lock.ts"
 import { Layout } from "./paths.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
@@ -156,14 +154,9 @@ export class Inbox extends Context.Service<
         )
       const registry = createRegistry()
 
-      const locks = yield* SynchronizedRef.make(HashMap.empty<number, Semaphore.Semaphore>())
-      const lock = (projectId: number) =>
-        SynchronizedRef.modifyEffect(locks, (map) =>
-          Option.match(HashMap.get(map, projectId), {
-            onSome: (s) => Effect.succeed([s, map] as const),
-            onNone: () => Semaphore.make(1).pipe(Effect.map((s) => [s, HashMap.set(map, projectId, s)] as const)),
-          }),
-        )
+      // Dropped once released with nobody waiting (vibestd-state.md 3); `lock` keeps the semaphore's shape for its callers.
+      const locks = keyedLock<number>()
+      const lock = (projectId: number) => Effect.succeed({ withPermit: locks.withLock(projectId) })
 
       const withLock = <A, E, R>(projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
         drain.work(

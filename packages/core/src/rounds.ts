@@ -7,7 +7,7 @@ import { NoSuchSession, NotReady, SessionBusy } from "@vibest/schema/session"
 // sessions.ts — except `userPrompt`, which stamps the round at hook receipt and takes the lock only to record it,
 // and the check command fiber and the continuation paste, which run outside it. The terminal the row addresses is
 // what everything here talks to (runtime-port.md §3).
-import { Cause, Clock, Duration, Effect, Exit, Fiber, Option, Ref, Schedule, type Scope, Semaphore } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Fiber, Option, Ref, Schedule, type Scope } from "effect"
 import type { FileSystem } from "effect"
 
 import { runCheck } from "./check.ts"
@@ -53,7 +53,6 @@ export const sessionRounds = (deps: {
   }
   /** The session's in-memory state: its lock, the flag set while vibest itself pastes a prompt, and the check rule's fibers. */
   readonly track: (id: string) => Effect.Effect<{
-    readonly lock: Semaphore.Semaphore
     readonly prompting: Ref.Ref<boolean>
     readonly sawWorking: Ref.Ref<boolean>
     readonly endedAt: Ref.Ref<number | undefined>
@@ -65,6 +64,8 @@ export const sessionRounds = (deps: {
     /** A continuation paste is in flight. Its wait holds no lock, so a second check must not paste too. */
     readonly pasting: Ref.Ref<boolean>
   }>
+  /** The session's lock alone, not counted by Drain (a typed prompt records its round). */
+  readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** Take the session's lock again from code that runs outside it (the check command fiber, a continuation paste). */
   readonly locked: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** Where the check command fiber is forked. */
@@ -550,7 +551,7 @@ export const sessionRounds = (deps: {
         const session = yield* db.getSession(id)
         // getSession never returns the running main agent; an ended main conversation does come back, and is not a round either.
         if (!session || session.agent === "main") return
-        const { lock, prompting } = yield* deps.track(id)
+        const { prompting } = yield* deps.track(id)
         if (yield* Ref.get(prompting)) return
         // Stamped at hook receipt: the lock can be held for seconds (a delivery, an interrupt, a removal), and the
         // typed turn may already be over when it frees. A later stamp would drop that turn's result file.
@@ -564,7 +565,7 @@ export const sessionRounds = (deps: {
           if (!opened)
             yield* Effect.logWarning(`prompt ${id}: a round is already open; the typed text was not recorded`)
         })
-        yield* lock.withPermit(record)
+        yield* deps.lock(id)(record)
       }),
     )
 
