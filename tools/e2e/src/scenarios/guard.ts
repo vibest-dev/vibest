@@ -1,5 +1,5 @@
 // The pre-tool guard as a harness plugin runs it. Cursor's: `vibest integration guard --harness cursor`, the tool call on
-// stdin, the agent's environment. Claude's: `POST /v1/hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
+// stdin, the agent's environment. Claude's: `POST /hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
 // knows. Both plugins ask only for a vibest agent (I4, I9 run them for real); Pi's extension applies the same rules in
 // process (needs Pi running: runtime, not here).
 import path from "node:path"
@@ -31,7 +31,7 @@ const ask = async (
       projects.get(w) ?? knownSessions(w, "e2e/guard", { "e2e-general": "general", "e2e-coordinator": "coordinator" }),
     )
     const projectId = String(await projects.get(w))
-    const r = await fetch("http://vibestd/v1/hooks/claude/guard", {
+    const r = await fetch("http://vibestd/hooks/claude/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
       headers: { ...sessionHeaders({ sessionId, projectId, agent, harness }), "content-type": "application/json" },

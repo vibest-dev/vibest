@@ -1,7 +1,9 @@
 import {
   CALLER_HEADER,
+  mismatchText,
   PROTOCOL,
   PROTOCOL_HEADER,
+  protocolMismatch,
   REPOSITORY_HEADER,
   type SessionIdentity,
   sessionHeaders as identityHeaders,
@@ -55,7 +57,8 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
   override get message() {
     const got = this.daemonProtocol === null ? "no protocol" : `protocol ${this.daemonProtocol}`
     const self = `vibest ${this.client.version} (${this.client.command.map(shellQuote).join(" ")})`
-    return `${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. To replace it: vibest daemon restart (or ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}). A package-version difference alone does not require a restart.`
+    const mismatch = protocolMismatch(PROTOCOL, this.daemonProtocol ?? 0, this.daemonVersion || "unknown")
+    return `${mismatchText(mismatch)}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}. A package-version difference alone does not require a restart.`
   }
 }
 

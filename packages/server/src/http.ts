@@ -1,15 +1,16 @@
 // vibestd's HTTP API (`vibest-http.sock`, beside vibest.sock): what a harness integration that can only make HTTP requests
-// calls (the Claude plugin's `$.http.fetch`). Every route is `POST /v1/…` with a JSON body, answered at once. The caller is
+// calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once. The caller is
 // a session, named by the shared session headers (@vibest/protocol `sessionHeaders`); the transport is not part of it.
+// Paths carry no version: the only one is PROTOCOL in the `vibest-protocol` header, as for RPC.
 //
-//   /v1/inbox/poll                  → { ids, line, text }  the main agent's next batch, leased (Inbox.poll)
-//   /v1/inbox/ack     { ids }       → { acked }            delivered (Inbox.ack); a settlement, so still taken while stopping
-//   /v1/hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line, ResultReady
-//   /v1/hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt)
-//   /v1/hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
+//   /inbox/poll                  → { ids, line, text }  the main agent's next batch, leased (Inbox.poll)
+//   /inbox/ack     { ids }       → { acked }            delivered (Inbox.ack); a settlement, so still taken while stopping
+//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line, ResultReady
+//   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt)
+//   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
 //
-// Errors are `{ error }`: 409 another protocol, 404 no such session or route, 403 another project or not the main agent,
-// 503 vibestd is stopping.
+// Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
+// action), 404 no such session or route, 403 another project or not the main agent, 503 vibestd is stopping.
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import * as Guard from "@vibest/core/guard"
@@ -25,11 +26,14 @@ import {
   HARNESS_SESSION_HEADER,
   PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
+  mismatchText,
   PROTOCOL,
   PROTOCOL_HEADER,
+  protocolMismatch,
   RUNTIME_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
+import { VERSION } from "@vibest/protocol/rpc"
 import { isHarnessId } from "@vibest/schema/session"
 import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
@@ -55,7 +59,7 @@ const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { 
 
 const AckBody = Schema.fromJsonString(Schema.Struct({ ids: Schema.Array(Schema.Number) }))
 
-const HOOK = /^\/v1\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/
+const HOOK = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/
 
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
@@ -76,8 +80,10 @@ export const make = Effect.gen(function* () {
   const identify = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const protocol = header(headers, PROTOCOL_HEADER)
-      if (protocol !== String(PROTOCOL))
-        return failure(409, `vibestd speaks protocol ${PROTOCOL}; the request has ${protocol ?? "none"}`)
+      if (protocol !== String(PROTOCOL)) {
+        const mismatch = protocolMismatch(protocol === undefined ? undefined : Number(protocol), PROTOCOL, VERSION)
+        return { status: 409, body: { error: mismatchText(mismatch), ...mismatch } } satisfies Reply
+      }
       const sessionId = header(headers, SESSION_HEADER)
       const row = sessionId ? yield* db.sessionIdentity(sessionId) : undefined
       if (!row) return failure(404, `no session ${sessionId ?? "(no vibest-session-id)"}`)
@@ -117,9 +123,9 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const who = yield* identify(request.headers)
       if ("status" in who) return who
-      if (request.path === "/v1/inbox/poll" || request.path === "/v1/inbox/ack") {
+      if (request.path === "/inbox/poll" || request.path === "/inbox/ack") {
         if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's main agent`)
-        if (request.path === "/v1/inbox/poll") return ok(yield* inbox.poll(who.projectId))
+        if (request.path === "/inbox/poll") return ok(yield* inbox.poll(who.projectId))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return failure(400, "the body is not { ids: number[] }")
         return yield* admitted(
