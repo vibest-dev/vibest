@@ -93,9 +93,9 @@ describe("cursor", () => {
 
 describe("pi", () => {
   it("reads `pi auth check --json` per provider", () => {
-    assert.deepStrictEqual(piAccount({ status: "ready", provider: "tencent-proxy", authType: "api_key" }), {
+    assert.deepStrictEqual(piAccount({ status: "ready", provider: "example-proxy", authType: "api_key" }), {
       kind: "api-key",
-      provider: "tencent-proxy",
+      provider: "example-proxy",
     })
     assert.deepStrictEqual(
       piAccount({ status: "not_ready", provider: "anthropic", reason: "credentials_not_configured" }),
