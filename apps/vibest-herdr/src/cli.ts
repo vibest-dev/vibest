@@ -669,7 +669,7 @@ export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError"
 export const isSemver = (v: string) => /^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(v)
 
 /** Where install.sh and the release archives are: the latest GitHub release of this repository. */
-const RELEASES = "https://github.com/iamdin/vibest/releases/latest/download"
+const RELEASES = "https://github.com/vibest-dev/vibest/releases/latest/download"
 
 /**
  * How this vibest was installed. npm: its launcher (bin/vibest.cjs) sets VIBEST_HARNESSES. install.sh: the binary runs from
