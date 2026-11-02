@@ -4,7 +4,9 @@ One ordinary Claude Code plugin with two parts:
 
 - **Native classic listeners** for every VIBEST session, workers and the coordinator: `classic.Stop` and
   `classic.StopFailure` report the turn end (a worker's result, or the coordinator's Claude session) by running
-  `vibest integration stop --harness claude`, and `classic.PreToolUse` runs `vibest integration guard --harness claude`. These are native event names, not
+  `vibest integration stop --harness claude`. A worker's turn stopped with Esc fires neither, and one that ends on an error
+  may fire no StopFailure: `turn.complete` (reason `aborted` or `error`, main loop, not already reported by Stop or
+  StopFailure since `turn.start`) reports it the same way as `TurnComplete`, which vibest delivers as a failed result. `classic.PreToolUse` runs `vibest integration guard --harness claude`. These are native event names, not
   command-hook registrations.
 - **The inbox module**, for a Claude **coordinator** only: it delivers VIBEST inbox claims into the coordinator as prompts,
   through the native hooks API.
@@ -149,8 +151,8 @@ The pin is anthropics/claude-code `2eff7a8d21c80be48904f62ebdea36d945d7b504`, `m
 under Anthropic's commercial terms. This repository does not assert permission to redistribute it, and a missing or
 unverified cache fails typecheck instead of skipping the plugin project. The cache was not produced by running Claude or `/plugin-types`.
 
-The listeners are `classic.Stop`, `classic.StopFailure`, `classic.PreToolUse`, `session.start`, `session.end` and
-`command.run`. Native calls stay in `register` or the top-level `nativeHost`: `$.process.run`, `$.session.cwd`,
+The listeners are `classic.Stop`, `classic.StopFailure`, `turn.start`, `turn.complete`, `classic.PreToolUse`,
+`session.start`, `session.end` and `command.run`. Native calls stay in `register` or the top-level `nativeHost`: `$.process.run`, `$.session.cwd`,
 `$.session.id`, `$.env.get`, `$.fs.read`, `$.prompt.submit`, `$.command.register`, `$.clock.every`, `$.ui.status`.
 
 Hooks modules are early access and may change between releases. `claude plugin validate` and `claude plugin test` have

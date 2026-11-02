@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, Skip, type World } from "../world.ts"
+import { binary, compiled, expect, harnesses, Skip, until, type World } from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -46,6 +46,52 @@ const result = async (w: World, id: string) =>
     harness: string
     payload: Record<string, unknown>
   }
+
+/** A session's live status as `vibest ls` shows it. */
+const status = async (w: World, id: string) =>
+  (await w.json<Array<{ id: string; status: string }>>(["ls"])).find((e) => e.id === id)?.status
+
+/**
+ * One real Claude session (`vibest run claude`) on a long answer, in a herdr session of its own, with the user's own Claude
+ * login: vibestd is started anew without CLAUDE_CONFIG_DIR, as S12 does, and the herdr session gets its environment.
+ * Archives the session and stops that herdr session at the end.
+ */
+const withClaudeSession = async (w: World, body: (s: { id: string; socket: string }) => Promise<void>) => {
+  const session = `${w.herdrSession}-claude`
+  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  await w.stopDaemon()
+  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
+  let id = ""
+  try {
+    const run = await w.ok(
+      [
+        "run",
+        "claude",
+        "--model",
+        "haiku",
+        "--session",
+        session,
+        "--",
+        "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper.",
+      ],
+      { timeoutMs: 120_000 },
+    )
+    id = (JSON.parse(run) as { id: string }).id
+    await body({ id, socket })
+  } finally {
+    if (id) await w.vibest(["archive", id], { timeoutMs: 60_000 })
+    await w.stopDaemon()
+    if (
+      await fs.stat(path.dirname(socket)).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      await w.run(w.root, ["herdr", "session", "stop", session])
+      await w.run(w.root, ["herdr", "session", "delete", session])
+    }
+  }
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -265,6 +311,93 @@ const checks: ReadonlyArray<Check> = [
         JSON.stringify(payload),
       )
       expect(await Bun.file(marker).exists(), "the project's own sessionStart hook did not run")
+    },
+  },
+  {
+    id: "I7",
+    title:
+      "Claude: an interactive turn stopped with Esc fires no Stop; the built plugin's turn.complete reports it once, as an interrupted (failed) result",
+    run: async (w) => {
+      for (const bin of ["tmux", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      // tmux, not herdr: a herdr pane's login shell puts the user's own `vibest` ahead of this build on PATH, and the
+      // plugin's hooks run `vibest` from PATH. tmux runs the command with `sh -c`, which keeps the build first.
+      const cwd = await workdir(w, "claude-esc")
+      const id = "e2e00007"
+      const tmux = (...args: Array<string>) =>
+        w.run(cwd, ["tmux", "-L", path.basename(w.root), ...args], { env: { CLAUDE_CONFIG_DIR: undefined } })
+      const screen = async () => (await tmux("capture-pane", "-p", "-t", "esc")).stdout
+      const lines = async () =>
+        (await fs.readFile(path.join(w.vibestHome, "reports", `${id}.jsonl`), "utf8").catch(() => ""))
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as { turn: string; payload?: Record<string, unknown> })
+      const env = [
+        `VIBEST_HOME=${w.vibestHome}`,
+        "VIBEST_AGENT=general",
+        `VIBEST_SESSION_ID=${id}`,
+        `PATH=${path.dirname(binary)}:$PATH`,
+        "CLAUDECODE=",
+        "CLAUDE_CODE_ENTRYPOINT=",
+      ].join(" ")
+      try {
+        const claude = `claude --plugin-dir ${path.join(harnesses, "claude")} --model haiku`
+        const started = await tmux("new-session", "-d", "-s", "esc", "-x", "200", "-y", "50", `env ${env} ${claude}`)
+        expect(started.code === 0, `tmux: ${started.stderr}`)
+        await until("Claude's prompt", async () => /trust this folder|❯/.test(await screen()), 60_000)
+        if (/trust this folder/.test(await screen())) await tmux("send-keys", "-t", "esc", "Down", "Enter")
+        await Bun.sleep(3_000)
+        const story = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
+        await tmux("send-keys", "-t", "esc", "-l", story)
+        await tmux("send-keys", "-t", "esc", "Enter")
+        await until("the turn's start line", async () => (await lines()).some((l) => l.turn === "start"), 60_000)
+        // Let the answer stream for a moment, then press Esc as the user would.
+        await Bun.sleep(8_000)
+        await tmux("send-keys", "-t", "esc", "Escape")
+        await until("a turn-end line", async () => (await lines()).some((l) => l.turn === "end"), 30_000).catch(
+          async (e: Error) => {
+            throw new Error(`${e.message}; screen:\n${await screen()}`)
+          },
+        )
+        await Bun.sleep(3_000)
+        const ends = (await lines()).filter((l) => l.turn === "end")
+        expect(ends.length === 1, `turn ends: ${JSON.stringify(ends).slice(0, 1000)}`)
+        const payload = ends[0]!.payload!
+        expect(
+          payload.hook_event_name === "TurnComplete" && payload.reason === "aborted",
+          `not a TurnComplete aborted: ${JSON.stringify(payload).slice(0, 500)}`,
+        )
+        const { payload: written } = await result(w, id)
+        expect(
+          written.error === "interrupted" &&
+            written.error_details === "the turn was stopped in its terminal (Esc) before it ended",
+          `result file: ${JSON.stringify(written).slice(0, 500)}`,
+        )
+      } finally {
+        await tmux("kill-server")
+      }
+    },
+  },
+  {
+    id: "I8",
+    title: "`vibest peek <id> [--lines N]` prints the session's terminal on demand; an unknown id is refused",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await withClaudeSession(w, async ({ id }) => {
+        await until("the session working", async () => (await status(w, id)) === "working", 120_000)
+        let screen = ""
+        await until(
+          "Claude's input box on the session's screen",
+          // The story may be in any language and scroll the prompt away; Claude's input box stays at the bottom.
+          async () => /❯/.test((screen = await w.ok(["peek", id]))),
+          60_000,
+        ).catch((e: Error) => {
+          throw new Error(`${e.message}; vibest peek printed:\n${screen}`)
+        })
+        const few = await w.ok(["peek", id, "--lines", "3"])
+        expect(few.trimEnd().split("\n").length <= 3, `--lines 3 printed:\n${few}`)
+        const unknown = await w.vibest(["peek", "nope0000"])
+        expect(unknown.code !== 0 && /NoSuchSession/.test(unknown.stderr), `${unknown.code}: ${unknown.stderr}`)
+      })
     },
   },
   {

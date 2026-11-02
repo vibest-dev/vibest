@@ -5,7 +5,8 @@
  * delivery through `$.prompt.submit`.
  *
  * Turn-end reports, the user prompt, and the tool guard are native `classic.Stop`, `classic.StopFailure`,
- * `classic.UserPromptSubmit` and `classic.PreToolUse` listeners, not command hooks. They call fixed argv
+ * `classic.UserPromptSubmit` and `classic.PreToolUse` listeners, not command hooks; a turn stopped with Esc (or ended on an
+ * error StopFailure did not report) is reported from `turn.complete`. They call fixed argv
  * `vibest integration stop --harness claude`, `vibest integration prompt --harness claude` and
  * `vibest integration guard --harness claude`. No shell, no VIBEST_COMMAND.
  *
@@ -310,19 +311,42 @@ export function register(on: On, _options?: unknown) {
   })
 
   // Side effect only. A bridge failure still returns next(e): never block or continue a stopped turn.
-  const reportStop = async <E, R>(host: Host, event: E, next: (event: E) => Promise<R>): Promise<R> => {
+  const reportStop = async (host: Host, report: object) => {
     try {
       const agent = await host.agent()
       const session = await host.vibestSession()
-      if (agent && session) await host.stop(JSON.stringify(event))
+      if (agent && session) await host.stop(JSON.stringify(report))
     } catch {
       // A missed report is not a blocked turn. vibestd scans a result file the bridge already wrote.
     }
-    return next(event)
   }
 
-  on("classic.Stop", ($, event, next) => reportStop(nativeHost($), event, next))
-  on("classic.StopFailure", ($, event, next) => reportStop(nativeHost($), event, next))
+  // Whether the running main-loop turn already reported its end through Stop or StopFailure: turn.complete then
+  // reports nothing. Cleared when the next main-loop turn starts, whichever of the two end events comes first.
+  let stopReported = false
+  const onStop = async (host: Host, event: { readonly agent_id?: string }) => {
+    if (!event.agent_id) stopReported = true
+    await reportStop(host, event)
+  }
+  // ponytail: turn.start carries no agentId, so a subagent's turn starting between the main loop's StopFailure and its
+  // turn.complete clears it too and that error is reported twice (the second, generic one may follow as a later result).
+  on("turn.start", async (_$, event, next) => {
+    stopReported = false
+    return next(event)
+  })
+  on("classic.Stop", async ($, event, next) => (await onStop(nativeHost($), event), next(event)))
+  on("classic.StopFailure", async ($, event, next) => (await onStop(nativeHost($), event), next(event)))
+  // A main-loop turn stopped with Esc fires neither: its end is reported here, as `TurnComplete` with the reason. An
+  // `error` end Claude also fires StopFailure for (it does, first, for a model that does not exist) is not reported twice.
+  on("turn.complete", async ($, event, next) => {
+    if (event.agentId === undefined && !stopReported && (event.reason === "aborted" || event.reason === "error"))
+      await reportStop(nativeHost($), {
+        hook_event_name: "TurnComplete",
+        reason: event.reason,
+        last_assistant_message: event.answer,
+      })
+    return next(event)
+  })
 
   // Side effect only. A bridge failure still returns next(e): never block the user's prompt. The coordinator's pane is the
   // normal conversation; a nested agent and a non-user source are not the person typing.

@@ -58,6 +58,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     command?: { matcher: { command: string }; hook: Function }
     stop?: Function
     stopFailure?: Function
+    turnStart?: Function
+    turnComplete?: Function
     prompt?: Function
     preTool?: Function
   } = {}
@@ -68,6 +70,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     else if (event === "command.run") hooks.command = { matcher: a as { command: string }, hook: b as Function }
     else if (event === "classic.Stop") hooks.stop = a as Function
     else if (event === "classic.StopFailure") hooks.stopFailure = a as Function
+    else if (event === "turn.start") hooks.turnStart = a as Function
+    else if (event === "turn.complete") hooks.turnComplete = a as Function
     else if (event === "classic.UserPromptSubmit") hooks.prompt = a as Function
     else if (event === "classic.PreToolUse") hooks.preTool = a as Function
     else throw new Error(`unexpected hook ${event}`)
@@ -188,6 +192,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       hooks.command!.hook($, { command: name, args: "" }, async () => ({})),
     stop: (event: object, next: Function = async (e: object) => e) => hooks.stop!($, event, next),
     stopFailure: (event: object, next: Function = async (e: object) => e) => hooks.stopFailure!($, event, next),
+    turnStart: (event: object, next: Function = async (e: object) => e) => hooks.turnStart!($, event, next),
+    turnComplete: (event: object, next: Function = async (e: object) => e) => hooks.turnComplete!($, event, next),
     prompt: (event: object, next: Function = async (e: object) => e) => hooks.prompt!($, event, next),
     preTool: (event: object, next: Function = async (e: object) => e) => hooks.preTool!($, event, next),
     /** One period of every live clock.every. */
@@ -768,6 +774,41 @@ describe("Claude plugin native listeners", () => {
       assert.deepStrictEqual(await h.stop(event, async () => below), below)
       assert.deepStrictEqual(h.runs, [])
     }
+  })
+
+  it("turn.complete reports a main-loop turn stopped with Esc or ended on an error, as TurnComplete, and returns next", async () => {
+    for (const reason of ["aborted", "error"]) {
+      const h = host(worker)
+      h.state.replies.stop = async () => pass()
+      await h.turnStart({ text: "go", turnId: "t1" })
+      const event = { reason, answer: "half", turnId: "t1", durationMs: 5, isAborted: reason === "aborted" }
+      assert.deepStrictEqual(await h.turnComplete(event, async () => ({ text: "shown" })), { text: "shown" })
+      assert.deepStrictEqual(h.runs, [["vibest", "integration", "stop", "--harness", "claude"]])
+      assert.deepStrictEqual(JSON.parse((h.inits[0] as { stdin: string }).stdin), {
+        hook_event_name: "TurnComplete",
+        reason,
+        last_assistant_message: "half",
+      })
+    }
+  })
+
+  it("turn.complete reports nothing for an answered turn, a subagent's turn, or a turn Stop / StopFailure already reported", async () => {
+    const h = host(worker)
+    h.state.replies.stop = async () => pass()
+    const end = { answer: "", turnId: "t1", durationMs: 5, isAborted: false }
+    await h.turnComplete({ ...end, reason: "answer" })
+    await h.turnComplete({ ...end, reason: "aborted", agentId: "sub" })
+    assert.deepStrictEqual(h.runs, [])
+    // StopFailure, then turn.complete with reason error for the same turn (what a model that does not exist does): one report.
+    await h.stopFailure({ hook_event_name: "StopFailure", session_id: "c1", error: "model_not_found" })
+    await h.turnComplete({ ...end, reason: "error" })
+    assert.strictEqual(h.runs.length, 1)
+    // A subagent's Stop does not count for the main loop's turn.
+    await h.turnStart({ text: "again", turnId: "t2" })
+    await h.stop({ hook_event_name: "Stop", agent_id: "sub", session_id: "c1" })
+    await h.turnComplete({ ...end, turnId: "t2", reason: "aborted" })
+    assert.strictEqual(h.runs.length, 3)
+    assert.strictEqual(JSON.parse((h.inits[2] as { stdin: string }).stdin).hook_event_name, "TurnComplete")
   })
 
   it("a failed stop bridge still returns next and does not block the turn", async () => {

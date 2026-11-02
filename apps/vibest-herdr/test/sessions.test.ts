@@ -2738,6 +2738,50 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a Claude turn stopped with Esc in its pane (TurnComplete aborted): a failed result that says it was interrupted",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      yield* writeResult(id, "claude", {
+        hook_event_name: "TurnComplete",
+        reason: "aborted",
+        last_assistant_message: "",
+        error: "interrupted",
+        error_details: "the turn was stopped in its terminal (Esc) before it ended",
+      })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
+      const row = yield* db.latestInbox(id, "result")
+      assert.include(row!.message, "<status>failed</status>")
+      assert.include(row!.message, "error: interrupted: the turn was stopped in its terminal (Esc) before it ended")
+      assert.notInclude(row!.message, "pane tail")
+    }),
+  )
+
+  test(
+    "vibest interrupt: the TurnComplete aborted report that Esc makes is not a result (no round is open)",
+    Effect.gen(function* () {
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      assert.include((yield* sessions.interrupt(id)).message, "interrupted")
+      yield* writeResult(
+        id,
+        "claude",
+        {
+          hook_event_name: "TurnComplete",
+          reason: "aborted",
+          error: "interrupted",
+        },
+        60_000,
+      )
+      yield* TestClock.adjust("2 minutes")
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
+      assert.isUndefined(yield* db.latestInbox(id, "result"))
+    }),
+  )
+
+  test(
     "interrupt delivers a result that is already in instead of discarding it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

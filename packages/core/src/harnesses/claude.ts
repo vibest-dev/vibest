@@ -61,8 +61,17 @@ const claudeSettings = (projectsDir: string) =>
     },
   })
 
-/** The turn-end events: Claude fires StopFailure instead of Stop when a turn ends on an API error. */
-const TURN_END = ["Stop", "StopFailure"]
+/**
+ * The turn-end events: Claude fires StopFailure instead of Stop when a turn ends on an API error, and neither when the
+ * turn is stopped with Esc; the plugin's turn.complete listener reports that end as `TurnComplete` with its reason.
+ */
+const TURN_END = ["Stop", "StopFailure", "TurnComplete"]
+
+/** A `TurnComplete` end as a failed result: `error` names what ended the turn (readResult joins it with the details). */
+const turnComplete = (event: Readonly<Record<string, unknown>>) =>
+  event.reason === "aborted"
+    ? { ...event, error: "interrupted", error_details: "the turn was stopped in its terminal (Esc) before it ended" }
+    : { ...event, error: "error", error_details: "the turn ended on an error" }
 
 /** Where Claude keeps the transcript of session `id` started at `root`: every non-alphanumeric of the path becomes `-`. */
 const transcript = Effect.fn("claudeTranscript")(function* (root: string, id: string) {
@@ -204,11 +213,11 @@ export const claude: HarnessAdapter = {
     if (typeof event.source === "string" && event.source !== "user") return undefined
     return { text: event.prompt }
   },
-  // The @vibest/claude plugin's classic.Stop / classic.StopFailure; a subagent's turn end is not the session's.
+  // The @vibest/claude plugin's classic.Stop / classic.StopFailure / turn.complete; a subagent's turn end is not the session's.
   turnEnd: (event, coordinator) => {
     if (event.agent_id || typeof event.hook_event_name !== "string" || !TURN_END.includes(event.hook_event_name))
       return undefined
-    if (!coordinator) return { result: event }
+    if (!coordinator) return { result: event.hook_event_name === "TurnComplete" ? turnComplete(event) : event }
     return typeof event.session_id === "string" && event.session_id !== ""
       ? { harnessSessionId: event.session_id }
       : undefined

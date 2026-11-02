@@ -20,6 +20,8 @@ export type TurnResult = {
   readonly error: string | undefined
   /** Cursor's `conversation_id` (in every hook's input), the id `--resume` takes; only a plain id, never one that reads as a flag. */
   readonly conversationId: string | undefined
+  /** A turn stopped in its terminal (Claude's `TurnComplete` with reason `aborted`): a result only for an open round. */
+  readonly interrupted: boolean
 }
 
 /** One line of `reports/<id>.jsonl` (runtime-port.md §5): a turn start with the user's prompt, or a turn end with the result. */
@@ -116,6 +118,7 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
           : undefined,
       conversationId:
         typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
+      interrupted: envelope.payload.hook_event_name === "TurnComplete" && envelope.payload.reason === "aborted",
     } satisfies TurnResult
   }).pipe(Effect.option)
 })

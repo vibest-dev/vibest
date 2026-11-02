@@ -431,6 +431,8 @@ export const sessionRounds = (deps: {
     if (session.turnState === "open") {
       if (found.mtimeMs <= session.turnPromptedAt) return "none" as const
     } else {
+      // A turn stopped with no round open is `vibest interrupt`'s own (that turn has no result) or no round of vibest's.
+      if (found.interrupted) return "none" as const
       const last = yield* db.latestRoundAt(session.id)
       if (last !== undefined && found.mtimeMs <= last) return "none" as const
     }

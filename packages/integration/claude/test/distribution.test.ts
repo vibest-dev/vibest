@@ -34,6 +34,8 @@ const EVENTS = [
   "command.run",
   "session.end",
   "session.start",
+  "turn.complete",
+  "turn.start",
 ]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))

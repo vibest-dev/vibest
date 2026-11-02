@@ -923,6 +923,26 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(turnEnd(reply, true))
   })
 
+  it("claude reports Stop and StopFailure as they are, and the plugin's TurnComplete as a failed result", () => {
+    const turnEnd = ADAPTERS.claude.turnEnd!
+    const stop = { hook_event_name: "Stop", session_id: "c1", last_assistant_message: "done" }
+    assert.deepStrictEqual(turnEnd(stop, false), { result: stop })
+    assert.isUndefined(turnEnd({ ...stop, agent_id: "sub" }, false))
+    assert.deepStrictEqual(turnEnd(stop, true), { harnessSessionId: "c1" })
+    const aborted = { hook_event_name: "TurnComplete", reason: "aborted", last_assistant_message: "" }
+    assert.deepStrictEqual(turnEnd(aborted, false), {
+      result: {
+        ...aborted,
+        error: "interrupted",
+        error_details: "the turn was stopped in its terminal (Esc) before it ended",
+      },
+    })
+    assert.deepStrictEqual(turnEnd({ ...aborted, reason: "error" }, false), {
+      result: { ...aborted, reason: "error", error: "error", error_details: "the turn ended on an error" },
+    })
+    assert.isUndefined(turnEnd(aborted, true))
+  })
+
   it("cursor reads a user prompt from beforeSubmitPrompt", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
