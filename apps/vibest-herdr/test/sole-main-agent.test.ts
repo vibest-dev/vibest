@@ -18,7 +18,7 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<s
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
 /** A client whose main agent runs in herdr terminal w1:p1; it records every call. `start` stands for CoordinatorSession and exec. */
-const fake = (stop: "stopped" | "running" | "moved" = "stopped") => {
+const fake = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
   const client = {
     "Project.RunningCoordinator": () =>
@@ -29,7 +29,7 @@ const fake = (stop: "stopped" | "running" | "moved" = "stopped") => {
     "Project.StopCoordinator": () =>
       Effect.sync(() => {
         calls.push("StopCoordinator")
-        return { result: stop }
+        return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
   } as unknown as Parameters<typeof soleMainAgent>[0]
   const start = Effect.sync(() => {
@@ -87,6 +87,17 @@ describe("soleMainAgent", () => {
         assert.isTrue(Exit.isFailure(exit), result)
         assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"], result)
       }
+    }).pipe(Effect.provide(stdio(true, typed("y\n")))),
+  )
+
+  it.effect("y but it cannot be moved from here: fails saying why, not that it did not exit; starts nothing", () =>
+    Effect.gen(function* () {
+      const f = fake("unsupported")
+      const exit = yield* Effect.exit(f.run)
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
+      assert.notInclude(String(exit), "did not exit")
+      assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"])
     }).pipe(Effect.provide(stdio(true, typed("y\n")))),
   )
 })

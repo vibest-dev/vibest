@@ -221,7 +221,7 @@ describe("Project.StopCoordinator", () => {
   )
 
   test(
-    "nothing signalled: a row that moved, a PID never recorded, a remote machine, a denied signal, or a terminal where the runtime sees no agent but a live PID",
+    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded, a remote machine, or no agent seen but a live PID",
     Effect.gen(function* () {
       const s = yield* launched
       const restore = s.db.coordinatorLaunch(s.key, "pi", false, s.origin, { pid: HARNESS })
@@ -229,14 +229,18 @@ describe("Project.StopCoordinator", () => {
       assert.deepStrictEqual(yield* s.stop, { result: "moved" })
       // No PID recorded (a main agent started by an older vibest).
       yield* s.db.coordinatorLaunch(s.key, "pi", false, s.origin)
-      assert.deepStrictEqual(yield* s.stop, { result: "running" })
+      const old = yield* s.stop
+      assert.strictEqual(old.result, "unsupported")
+      assert.include(old.reason, "started by an older vibest")
       // Another machine: its PID means nothing here.
       const remote = { ...s.origin, address: { machine: "elsewhere", id: s.paneId } }
       yield* s.db.coordinatorLaunch(s.key, "pi", false, remote, { pid: HARNESS })
-      assert.deepStrictEqual(
-        yield* s.c["Project.StopCoordinator"]({ runtime: remote.runtime, address: encodeAddress(remote.address) }),
-        { result: "running" },
-      )
+      const far = yield* s.c["Project.StopCoordinator"]({
+        runtime: remote.runtime,
+        address: encodeAddress(remote.address),
+      })
+      assert.strictEqual(far.result, "unsupported")
+      assert.include(far.reason, "another machine")
       yield* restore
       yield* s.processes.setSignalDenied(true)
       assert.deepStrictEqual(yield* s.stop, { result: "running" })
@@ -244,7 +248,9 @@ describe("Project.StopCoordinator", () => {
       // The harness exited unseen and a program of the user's runs there: its PID reads alive (reused), so left alone.
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       yield* s.herdr.addPane(s.paneId, "test", "/")
-      assert.deepStrictEqual(yield* s.stop, { result: "running" })
+      const unseen = yield* s.stop
+      assert.strictEqual(unseen.result, "unsupported")
+      assert.include(unseen.reason, "does not see its harness")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
       assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
       // Its PID exited: the harness is already gone, so it moves without a signal.

@@ -748,13 +748,12 @@ export const handlers = VibestRpcs.toLayer(
                 .pipe(
                   Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })),
                 )
-              const result = yield* stopAgent(h, place, {
+              return yield* stopAgent(h, place, {
                 pid: coord.pid,
                 detach: db.detachCoordinator(projectId, runtime, place),
                 reattach: db.reattachCoordinator(projectId, runtime, place),
                 wait: HARNESS_EXIT_WAIT,
               })
-              return { result }
             }),
           )
         }),

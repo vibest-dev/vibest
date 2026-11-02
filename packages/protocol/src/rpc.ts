@@ -556,12 +556,16 @@ export class VibestRpcs extends RpcGroup.make(
    * `vibest` moving the main agent to its own terminal: SIGTERM to the harness at address (opaque terminal JSON) in
    * `runtime`, its recorded PID only, then until it exited; its terminal and shell stay. stopped: gone, and what waits for
    * it is kept for the next launch. running: not stopped, nothing changed. moved: the row is no longer there.
+   * unsupported: nothing signalled or changed, because vibest cannot stop it from here; reason says why.
    */
   scoped(
     admitted(
       Rpc.make("Project.StopCoordinator", {
         payload: { runtime: Schema.String, address: Schema.String },
-        success: Schema.Struct({ result: Schema.Literals(["stopped", "running", "moved"]) }),
+        success: Schema.Struct({
+          result: Schema.Literals(["stopped", "running", "moved", "unsupported"]),
+          reason: Schema.optional(Schema.String),
+        }),
         error: Schema.Union([Forbidden, NotInRepository, RuntimeUnreachable, NoRuntime, InvalidCaller]),
       }),
     ),

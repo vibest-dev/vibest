@@ -229,6 +229,10 @@ export const soleMainAgent = <A, E, R>(
       const stopped = yield* client["Project.StopCoordinator"]({ runtime: running.runtime, address: running.address })
       if (stopped.result === "moved")
         return yield* new LaunchFailed({ message: "not starting: the main agent moved meanwhile; run vibest again" })
+      if (stopped.result === "unsupported")
+        return yield* new LaunchFailed({
+          message: `not starting: ${where} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
+        })
       if (stopped.result === "running")
         return yield* new LaunchFailed({
           message: `not starting: ${where} and did not exit; nothing changed. Exit it there first`,

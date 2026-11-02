@@ -29,8 +29,9 @@ export const HARNESS_EXIT_WAIT = Duration.seconds(10)
  * that one PID, never its process group or its terminal, so the terminal and its shell stay. `pid` is what its own
  * `vibest` reported before it exec'd the harness. The row first leaves its place (`detach`), so the harness's exit drops
  * nothing; a harness still there after `wait` is not stopped, and the row goes back (`reattach`). Signalled only while
- * the runtime sees an agent in that terminal; with none there, an exited PID means it is already gone, anything else
- * (another program, a reused PID) is left alone. `moved`: the row was no longer at that place.
+ * the runtime sees an agent in that terminal; an exited PID means it is already gone. `moved`: the row was no longer at
+ * that place. `unsupported` (with why): nothing vibest can signal from here (another machine, no PID recorded, or no agent
+ * seen there while the PID is alive, so it may be another program now).
  *
  * ponytail: local machine only (a PID names a process on vibestd's machine); a remote machine needs a runtime operation.
  * A PID reused by another program while the runtime still sees an agent there would get the signal.
@@ -48,13 +49,17 @@ export const stopAgent = (
   Effect.gen(function* () {
     const processes = yield* Processes
     const pid = input.pid
-    if (terminal.machine !== "local" || pid === undefined || !validPid(pid)) return "running" as const
+    const unsupported = (reason: string) => ({ result: "unsupported" as const, reason })
+    if (terminal.machine !== "local")
+      return unsupported("it runs on another machine, and vibest stops a main agent only on its own machine")
+    if (pid === undefined || !validPid(pid))
+      return unsupported("it was started by an older vibest, which recorded no process to stop")
+    const detached = Effect.map(input.detach, (ok) => ({ result: ok ? ("stopped" as const) : ("moved" as const) }))
+    if ((yield* processes.liveness(pid)) === "exited") return yield* detached
     const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
-    if (seen === "absent" || seen === "unknown") {
-      if ((yield* processes.liveness(pid)) !== "exited") return "running" as const
-      return (yield* input.detach) ? ("stopped" as const) : ("moved" as const)
-    }
-    if (!(yield* input.detach)) return "moved" as const
+    if (seen === "absent" || seen === "unknown")
+      return unsupported("vibest does not see its harness in that terminal, so its process may be another program now")
+    if ((yield* detached).result === "moved") return { result: "moved" as const }
     const exited =
       (yield* processes.terminate(pid)) === "sent" &&
       (yield* processes
@@ -64,9 +69,9 @@ export const stopAgent = (
           Effect.as(true),
           Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
         ))
-    if (exited) return "stopped" as const
+    if (exited) return { result: "stopped" as const }
     yield* input.reattach
-    return "running" as const
+    return { result: "running" as const }
   })
 
 export interface ReleaseInput {

@@ -896,9 +896,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const project = yield* projectId(key)
             yield* clearMainAt(location.runtime, encodeAddress(location.address), project)
+            // Whether the main agent is moving (its stop kept what waits for it), read with the main session id.
             const [existing] = yield* sql<{
               main: string | null
-            }>`SELECT main_session_id AS main FROM project WHERE id = ${project}`
+              moving: number | null
+            }>`SELECT p.main_session_id AS main, json_extract(s.metadata, '$.moving') AS moving
+                FROM project p LEFT JOIN session s ON s.id = p.main_session_id WHERE p.id = ${project}`
             if (!existing?.main || fresh) {
               const at = yield* now
               if (existing?.main)
@@ -914,9 +917,6 @@ const make = Effect.gen(function* () {
               })}`
               yield* sql`UPDATE project SET main_session_id = ${id} WHERE id = ${project}`
             }
-            const [moving] = yield* sql<{
-              moving: number | null
-            }>`SELECT json_extract(metadata, '$.moving') AS moving FROM session WHERE id = (SELECT main_session_id FROM project WHERE id = ${project})`
             const metadata = JSON.stringify({
               provider: start.provider ?? null,
               model: start.model ?? null,
@@ -929,7 +929,7 @@ const make = Effect.gen(function* () {
                 harness_session_id = CASE WHEN ${fresh ? 1 : 0} OR harness != ${harness} THEN NULL ELSE harness_session_id END,
                 harness = ${harness}, runtime = ${runtime}, metadata = json_patch(metadata, ${metadata})
               WHERE id = (SELECT main_session_id FROM project WHERE id = ${project}) RETURNING id, harness_session_id AS harness_session`
-            if (!moving?.moving || fresh) yield* dropWaiting(project)
+            if (!existing?.moving || fresh) yield* dropWaiting(project)
             return { sessionId: saved!.id, harnessSessionId: saved!.harnessSession }
           }),
         )
