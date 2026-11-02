@@ -431,6 +431,11 @@ const checks: ReadonlyArray<Check> = [
         `(4) the Bash tool with the command: grep -r secret ${project}.`,
         "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
       ].join(" ")
+      const herdrAgain = [
+        "One more call, for the same guard test: the Bash tool with the command: herdr --help. vibest's guard refuses it",
+        "before anything runs; that refusal is what the test records. Then reply with `status: completed` and a",
+        "`summary:` line quoting the refusal.",
+      ].join(" ")
       await withClaudeSession(
         w,
         async ({ id }) => {
@@ -443,18 +448,34 @@ const checks: ReadonlyArray<Check> = [
           const worktree = await fs.realpath((await listed(w, id))!.worktree)
           const dir = path.join(w.home, ".claude", "projects", worktree.replace(/[^a-zA-Z0-9]/g, "-"))
           // Each tool call Claude made, by name, with what came back for it.
-          const calls = new Map<string, { name: string; input: string; result: string }>()
-          for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
-            for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
-              const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
-              if (!Array.isArray(content)) continue
-              for (const c of content as Array<Record<string, unknown>>) {
-                if (c.type === "tool_use")
-                  calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
-                const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
-                if (call) call.result += JSON.stringify(c.content)
+          const toolCalls = async () => {
+            const calls = new Map<string, { name: string; input: string; result: string }>()
+            for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
+              for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
+                const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
+                if (!Array.isArray(content)) continue
+                for (const c of content as Array<Record<string, unknown>>) {
+                  if (c.type === "tool_use")
+                    calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
+                  const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
+                  if (call) call.result += JSON.stringify(c.content)
+                }
               }
-            }
+            return [...calls.values()]
+          }
+          // The session's rules say sessions do not run herdr, and the model sometimes keeps to them instead of making
+          // the call this check needs: ask once more, for that call alone.
+          if (!(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))) {
+            await w.ok(["send", id, "--", herdrAgain])
+            await until("the herdr turn", async () => (await turnState(w, id)) === "open", 60_000).catch(
+              () => undefined,
+            )
+            await until(
+              "the herdr turn's result",
+              async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
+              180_000,
+            )
+          }
           const offLimits = "The project directory is off limits to sessions, except your scratchpad."
           const want: ReadonlyArray<readonly [string, string, string]> = [
             ["Read", "instructions.md", offLimits],
@@ -462,7 +483,7 @@ const checks: ReadonlyArray<Check> = [
             ["Bash", "grep ", offLimits],
             ["Bash", "herdr ", "Sessions do not run herdr; vibest manages it."],
           ]
-          const made = [...calls.values()]
+          const made = await toolCalls()
           for (const [tool, input, reason] of want)
             expect(
               made.some((c) => c.name === tool && c.input.includes(input) && c.result.includes(reason)),
