@@ -114,7 +114,7 @@ describe("claude plugin distribution", () => {
     assert.strictEqual(readJson(path.join(pkg, "package.json")).name, "@vibest/claude")
     const manifest = readJson(path.join(pkg, "src/manifest.json"))
     assert.strictEqual(manifest.name, "vibest")
-    assert.strictEqual(manifest.repository, "https://github.com/iamdin/orchestrate-my-agent-cli")
+    assert.strictEqual(manifest.repository, "https://github.com/vibest-dev/vibest")
     assert.notProperty(manifest, "version", "the version comes only from package.json")
   })
 

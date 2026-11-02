@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install vibest: curl -fsSL https://github.com/iamdin/vibest/releases/latest/download/install.sh | sh
+# Install vibest: curl -fsSL https://github.com/vibest-dev/vibest/releases/latest/download/install.sh | sh
 #
 # Each version unpacks into its own directory, ~/.local/share/vibest/versions/<version>/ (bin/vibest, the harness
 # plugins, and herdr-plugin/ beside them; herdr-plugin is not linked), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
@@ -9,7 +9,7 @@
 #   VIBEST_BIN           instead of ~/.local/bin (remembered for later installs and `vibest update`)
 set -eu
 
-url=${VIBEST_DOWNLOAD_URL:-https://github.com/iamdin/vibest/releases/latest/download}
+url=${VIBEST_DOWNLOAD_URL:-https://github.com/vibest-dev/vibest/releases/latest/download}
 share=${VIBEST_INSTALL:-$HOME/.local/share/vibest}
 # The link directory an earlier install used, so `vibest update` (which sets only VIBEST_INSTALL) keeps it.
 bin=${VIBEST_BIN:-$(cat "$share/bin" 2>/dev/null || echo "$HOME/.local/bin")}

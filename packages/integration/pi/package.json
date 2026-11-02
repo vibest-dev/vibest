@@ -9,7 +9,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iamdin/orchestrate-my-agent-cli.git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
     "directory": "packages/integration/pi"
   },
   "files": [
