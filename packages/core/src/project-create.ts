@@ -219,9 +219,9 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
   return found.length > 0 ? found : undefined
 })
 
-/** Identity of a directory that is not a git repository: `VIBEST_PROJECT_ID`, else sha256(realpath)[:12], same as `repositoryKey`. */
+/** Identity of a directory that is not a git repository: `VIBEST_PROJECT_KEY`, else sha256(realpath)[:12], same as `repositoryKey`. */
 export const plainDirectoryKey = Effect.fn("plainDirectoryKey")(function* (directory: string) {
-  const override = yield* Config.option(Config.String("VIBEST_PROJECT_ID")).pipe(
+  const override = yield* Config.option(Config.String("VIBEST_PROJECT_KEY")).pipe(
     Effect.orElseSucceed(() => Option.none()),
   )
   if (Option.isSome(override) && override.value) return override.value

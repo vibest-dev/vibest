@@ -1,10 +1,17 @@
-import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, REPOSITORY_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
+import {
+  CALLER_HEADER,
+  PROTOCOL,
+  PROTOCOL_HEADER,
+  REPOSITORY_HEADER,
+  type SessionIdentity,
+  sessionHeaders as identityHeaders,
+} from "@vibest/protocol/protocol"
 import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 // The client side of vibest.sock (SPEC §12): one short connection per command. A missing daemon is started and waited for
 // (up to 10 s) unless the caller is an agent. The existing Ping preflight is the only Ping: it detects a daemon whose
 // Ping lacks this protocol before a mutation. Business requests carry their own headers and do not Ping again.
-import { Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Schema } from "effect"
+import { Config, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
@@ -67,15 +74,30 @@ export const cliHeaders = (repositoryRoot: string) => ({
   [REPOSITORY_HEADER]: repositoryRoot,
 })
 
-export const sessionHeaders = (sessionId: string, repositoryRoot?: string) => ({
-  ...protocolHeaders(),
-  [CALLER_HEADER]: "session",
-  [SESSION_HEADER]: sessionId,
-  ...(repositoryRoot === undefined ? {} : { [REPOSITORY_HEADER]: repositoryRoot }),
-})
+/** A session's headers (`@vibest/protocol`'s one definition); `more` adds the rest of its identity. */
+export const sessionHeaders = (
+  sessionId: string,
+  repositoryRoot?: string,
+  more?: Omit<SessionIdentity, "sessionId" | "repositoryRoot">,
+) => identityHeaders({ ...more, sessionId, repositoryRoot })
+
+/** The rest of a session's identity from its environment (vibestEnv / the main agent's launch) and its working directory. */
+const fromEnv = Effect.gen(function* () {
+  const read = (name: string) =>
+    Config.option(Config.String(name)).pipe(Effect.map((v) => Option.getOrUndefined(v) || undefined))
+  return {
+    projectId: yield* read("VIBEST_PROJECT_ID"),
+    agent: yield* read("VIBEST_AGENT"),
+    harness: yield* read("VIBEST_HARNESS"),
+    runtime: yield* read("VIBEST_RUNTIME"),
+    cwd: (yield* Path.Path).resolve("."),
+  }
+}).pipe(Effect.orElseSucceed(() => ({})))
 
 const claimHeaders = (claim: Claim) =>
-  claim._tag === "cli" ? cliHeaders(claim.repositoryRoot) : sessionHeaders(claim.sessionId, claim.repositoryRoot)
+  claim._tag === "cli"
+    ? Effect.succeed(cliHeaders(claim.repositoryRoot))
+    : Effect.map(fromEnv, (more) => sessionHeaders(claim.sessionId, claim.repositoryRoot, more))
 
 /** A client on socket, closed with the scope. The protocol is built into the caller's scope: Effect.provide(layer) would close the socket as soon as the client is made. */
 export const connect = (socket: string) =>
@@ -221,6 +243,6 @@ export const withVibest = <A, E, R>(
     if (incompatible) return yield* incompatible
     return yield* RpcClient.withHeaders(
       connect(layout.socket).pipe(Effect.flatMap((client) => f(client))),
-      claimHeaders(claim),
+      yield* claimHeaders(claim),
     )
   }).pipe(Effect.scoped)

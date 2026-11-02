@@ -1,5 +1,5 @@
 // Build the npm artifact in place (prepack), or the same shippable files into <outdir>.
-// Writes hooks/register.mjs, src/plugin.ts bundled with the client and adapters it imports into one import-free ES module,
+// Writes hooks/register.mjs, src/plugin.ts bundled with the header definition it imports into one import-free ES module,
 // and .claude-plugin/plugin.json: src/manifest.json stamped with this package.json's version, which Claude Code uses as
 // the plugin's cache version. Both are generated and ignored by Git. With <outdir> it also copies hooks/hooks.json,
 // README.md and LICENSE there, giving a complete standalone plugin directory. No src, tests, scripts or type cache.
@@ -30,6 +30,8 @@ const result = await Bun.build({
   naming: "register.mjs",
   target: "browser",
   format: "esm",
+  // Claude Code's `$.plugin` has no version: the module sends this one to vibestd (vibest-plugin-version).
+  define: { VIBEST_PLUGIN_VERSION: JSON.stringify(version) },
 })
 if (!result.success) {
   for (const log of result.logs) console.error(log)

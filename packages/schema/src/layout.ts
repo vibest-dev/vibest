@@ -7,6 +7,8 @@ export class Layout extends Context.Service<
     readonly home: string
     readonly database: string
     readonly socket: string
+    /** vibestd's HTTP socket (the Claude plugin's poll, ack and hooks). */
+    readonly httpSocket: string
     /** vibestd.pid: the running vibestd's PID and version (DaemonInfo), and its start lock (flock on this file); empty when none runs. */
     readonly daemonInfo: string
     readonly results: string
@@ -30,8 +32,6 @@ export class Layout extends Context.Service<
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (key: string) => string
     readonly scratch: (key: string) => string
-    /** One Claude inbox claim file. Callers pass ids this process generated, never a caller path. */
-    readonly inboxClaim: (generation: string, token: string) => string
   }
 >()("vibest/Layout") {
   static readonly make = (home: string) =>
@@ -41,6 +41,7 @@ export class Layout extends Context.Service<
         home,
         database: path.join(home, "vibest.db"),
         socket: path.join(home, "vibest.sock"),
+        httpSocket: path.join(home, "vibest-http.sock"),
         daemonInfo: path.join(home, "vibestd.pid"),
         results: path.join(home, "results"),
         reports: path.join(home, "reports"),
@@ -56,7 +57,6 @@ export class Layout extends Context.Service<
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (key) => path.join(home, "projects", key),
         scratch: (key) => path.join(home, "projects", key, "scratch"),
-        inboxClaim: (generation, token) => path.join(home, "inbox-claims", `${generation}-${token}`),
       })
     })
 

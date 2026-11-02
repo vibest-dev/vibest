@@ -303,7 +303,11 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
 
-  packages/integration/claude: {}
+  packages/integration/claude:
+    devDependencies:
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
 
   packages/integration/cursor: {}
 

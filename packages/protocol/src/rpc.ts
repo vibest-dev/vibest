@@ -170,7 +170,7 @@ export class ProtocolGate extends RpcMiddleware.Service<ProtocolGate>()("vibest/
   error: ProtocolRejected,
 }) {}
 
-/** Methods that change something, counted while they run. Refused with DaemonStopping while a Daemon.Stop drains (except Inbox.Ack/Release settling a delivery) and after it is accepted. */
+/** Methods that change something, counted while they run. Refused with DaemonStopping while a Daemon.Stop drains and after it is accepted. */
 export class Admission extends RpcMiddleware.Service<Admission>()("vibest/Admission", {
   error: DaemonStopping,
 }) {}
@@ -258,20 +258,6 @@ export type InboxMessage = typeof InboxMessage.Type
 
 /** One session and its latest result; null while it has none (a dropped result still shows). */
 export const SessionStatusInfo = Schema.Struct({ ...SessionInfo.fields, result: Schema.NullOr(InboxMessage) })
-
-/** One JSON object. The claim body is a file, never a field here. */
-export const InboxResult = Schema.Struct({
-  generation: Schema.optional(Schema.String),
-  token: Schema.optional(Schema.String),
-  file: Schema.optional(Schema.String),
-  acked: Schema.optional(Schema.Boolean),
-  released: Schema.optional(Schema.Boolean),
-  already: Schema.optional(Schema.Boolean),
-  empty: Schema.optional(Schema.Boolean),
-  error: Schema.optional(Schema.String),
-  bytes: Schema.optional(Schema.Number),
-})
-export type InboxResult = typeof InboxResult.Type
 
 export class VibestRpcs extends RpcGroup.make(
   Rpc.make("Ping", { success: PingResult }),
@@ -415,65 +401,6 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   /** Coordinator side (the Pi extension): this request's inbox rows, one string per batch, instead of the runtime's prompt. */
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
-  scoped(
-    admitted(
-      Rpc.make("Inbox.Attach", {
-        payload: {
-          claudeSessionId: Schema.String,
-          replace: Schema.Boolean,
-          terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
-        },
-        success: InboxResult,
-        error: Schema.Union([InvalidCaller, Forbidden, RuntimeUnreachable, RuntimeIncompatible]),
-      }),
-    ),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Inbox.Pull", {
-        payload: {
-          generation: Schema.String,
-          claudeSessionId: Schema.String,
-          terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
-        },
-        success: InboxResult,
-        error: Schema.Union([InvalidCaller, Forbidden, RuntimeUnreachable, RuntimeIncompatible]),
-      }),
-    ),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Inbox.Ack", {
-        payload: {
-          generation: Schema.String,
-          claudeSessionId: Schema.String,
-          token: Schema.String,
-          terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
-        },
-        success: InboxResult,
-        error: Schema.Union([InvalidCaller, Forbidden, RuntimeUnreachable, RuntimeIncompatible]),
-      }),
-    ),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Inbox.Release", {
-        payload: {
-          generation: Schema.String,
-          claudeSessionId: Schema.String,
-          token: Schema.String,
-          retry: Schema.Boolean,
-          terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
-        },
-        success: InboxResult,
-        error: Schema.Union([InvalidCaller, Forbidden, RuntimeUnreachable, RuntimeIncompatible]),
-      }),
-    ),
-  ),
   /** Hook side: the result file was just written. Protocol only; no caller. Returns at once, unknown ids are ignored. */
   protocol(admitted(Rpc.make("ResultReady", { payload: { sessionId: Schema.String } }))),
   /** Hook side: the user typed this into the session's pane. Protocol only; no caller. The main agent and vibest's own deliveries are ignored. */
@@ -500,7 +427,13 @@ export class VibestRpcs extends RpcGroup.make(
           /** The caller's own PID: it execs the harness, so this is the harness's (what StopCoordinator signals). */
           pid: Schema.optional(Schema.Number),
         },
-        success: Schema.Struct({ sessionId: Schema.String, harnessSessionId: Schema.NullOr(Schema.String) }),
+        success: Schema.Struct({
+          sessionId: Schema.String,
+          harnessSessionId: Schema.NullOr(Schema.String),
+          /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment (absent from an older vibestd). */
+          projectId: Schema.optional(Schema.Number),
+          runtime: Schema.optional(Schema.String),
+        }),
         error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
       }),
     ),

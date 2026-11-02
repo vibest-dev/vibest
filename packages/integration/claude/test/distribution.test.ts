@@ -26,7 +26,7 @@ const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'
 // exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
-const EVENTS = ["command.run", "prompt.submit", "session.end", "session.start", "tool.call", "turn.complete"]
+const EVENTS = ["prompt.submit", "session.start", "tool.call", "turn.complete", "ui.render"]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))
 
@@ -53,6 +53,8 @@ const problems = (dir: string): string[] => {
   if (IMPORT.test(text)) out.push("register.mjs imports")
   if (!REGISTER_DECLARED.test(text)) out.push("register.mjs has no top-level function register")
   if (!REGISTER_EXPORTED.test(text)) out.push("register.mjs does not export register")
+  // Claude Code refuses the module unless every $.env.get names its variable literally.
+  if (/\$\.env\.get\((?!")/.test(text)) out.push("register.mjs reads an environment variable by a computed name")
   return out
 }
 
@@ -80,7 +82,10 @@ const versioned = (version: string) => {
   const manifest = readJson(path.join(dir, "package.json"))
   // Outside the workspace pnpm would otherwise fetch its own latest release; pin the repository's.
   const { packageManager } = readJson(path.join(repo, "package.json"))
-  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ ...manifest, version, packageManager }, null, 2))
+  // The bundle's workspace import (@vibest/protocol) resolves through the package's own node_modules; nothing to install.
+  const { devDependencies: _bundled, ...rest } = manifest
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ ...rest, version, packageManager }, null, 2))
+  fs.symlinkSync(path.join(pkg, "node_modules"), path.join(dir, "node_modules"))
   return dir
 }
 

@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite"
 // One world per run: the user's own HOME (the harnesses' logins live in its keychain), a temp VIBEST_HOME, temp config
 // directories for each harness (Pi, Claude, Cursor read them from env), a scratch repository with a local bare origin, and
 // the vibest under test first on PATH. vibest writes nothing outside the temp root. Every process this run starts is stopped.
@@ -251,3 +252,30 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
 
 /** Is `bin` on the world's PATH? */
 export const onPath = (bin: string) => Bun.which(bin) !== null
+
+/**
+ * Sessions vibestd knows, without starting a harness: rows in a project of their own (`key`), for an integration that
+ * calls vibestd over HTTP, which answers only a known session. Starts vibestd first; returns the project id.
+ */
+export const knownSessions = async (
+  w: World,
+  key: string,
+  sessions: Record<string, string>,
+  directory = w.repository,
+) => {
+  await w.ok(["ls"])
+  const db = new Database(path.join(w.vibestHome, "vibest.db"))
+  try {
+    const project = db
+      .query<{ id: number }, [string]>("INSERT INTO project (directory) VALUES (?) RETURNING id")
+      .get(key)!.id
+    for (const [id, agent] of Object.entries(sessions))
+      db.run(
+        "INSERT INTO session (id, project_id, agent_type, harness, directory, created_at) VALUES (?, ?, ?, 'claude', ?, ?)",
+        [id, project, agent, directory, Date.now()],
+      )
+    return project
+  } finally {
+    db.close()
+  }
+}

@@ -1,13 +1,18 @@
-// The pre-tool guard as a harness plugin runs it: `vibest integration guard --harness <h>`, the tool call on stdin, the
-// agent's environment. Claude's and Cursor's plugins call it only for a vibest agent (I9 runs Cursor's for real); Pi's
-// extension applies the same rules in process (needs Pi running: runtime, not here).
+// The pre-tool guard as a harness plugin runs it. Cursor's: `vibest integration guard --harness cursor`, the tool call on
+// stdin, the agent's environment. Claude's: `POST /v1/hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
+// knows. Both plugins ask only for a vibest agent (I4, I9 run them for real); Pi's extension applies the same rules in
+// process (needs Pi running: runtime, not here).
 import path from "node:path"
 
+import { sessionHeaders } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
-import { binary, expect, type World } from "../world.ts"
+import { binary, expect, knownSessions, type World } from "../world.ts"
 
 type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
+
+/** The project of each world's Claude guard sessions, made on first use. */
+const projects = new WeakMap<World, Promise<number>>()
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
@@ -19,14 +24,29 @@ const ask = async (
   raw?: string,
 ): Promise<Answer> => {
   const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
+  if (harness === "claude" && agent !== undefined) {
+    const sessionId = `e2e-${agent}`
+    projects.set(
+      w,
+      projects.get(w) ?? knownSessions(w, "e2e/guard", { "e2e-general": "general", "e2e-coordinator": "coordinator" }),
+    )
+    const projectId = String(await projects.get(w))
+    const r = await fetch("http://vibestd/v1/hooks/claude/guard", {
+      method: "POST",
+      unix: path.join(w.vibestHome, "vibest-http.sock"),
+      headers: { ...sessionHeaders({ sessionId, projectId, agent, harness }), "content-type": "application/json" },
+      body: stdin,
+    })
+    const json = (await r.json()) as { deny?: string; error?: string }
+    if (r.status !== 200) return { code: r.status, decision: "none", reason: json.error ?? "" }
+    return { code: 0, decision: json.deny === undefined ? "none" : "deny", reason: json.deny ?? "" }
+  }
   const env = agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001" }
   const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", harness], { env, stdin })
   const out = r.stdout.trim()
   if (!out) return { code: r.code, decision: "none", reason: r.stderr }
   const json = JSON.parse(out)
-  if (harness === "cursor") return { code: r.code, decision: json.permission, reason: json.user_message ?? "" }
-  const d = json.hookSpecificOutput
-  return { code: r.code, decision: d?.permissionDecision ?? "none", reason: d?.permissionDecisionReason ?? "" }
+  return { code: r.code, decision: json.permission, reason: json.user_message ?? "" }
 }
 
 const shell = (harness: Harness) => (harness === "claude" ? "Bash" : "Shell")
@@ -80,7 +100,8 @@ const checks: ReadonlyArray<Check> = [
     id: "R4",
     title: "without a vibest agent the guard answers nothing and fails (the plugin does not ask it then)",
     run: async (w) => {
-      for (const h of both) {
+      // Claude's plugin makes no request without a vibest agent (packages/integration/claude/test/plugin.test.ts).
+      for (const h of ["cursor"] as const) {
         const a = await ask(w, h, undefined, shell(h), { command: "git status" })
         expect(a.code !== 0 && a.decision === "none", `${h}: ${JSON.stringify(a)}`)
       }
@@ -88,12 +109,12 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "R5",
-    title: "input vibest cannot read fails, which the plugin turns into a refusal",
+    title: "input vibest cannot read is refused: vibestd denies it over HTTP; the CLI fails, which the plugin refuses",
     run: async (w) => {
-      for (const h of both) {
-        const a = await ask(w, h, "general", shell(h), {}, "not json")
-        expect(a.code !== 0 && a.decision === "none", `${h}: ${JSON.stringify(a)}`)
-      }
+      const c = await ask(w, "claude", "general", "Bash", {}, "not json")
+      expect(c.decision === "deny", `claude: ${JSON.stringify(c)}`)
+      const a = await ask(w, "cursor", "general", "Shell", {}, "not json")
+      expect(a.code !== 0 && a.decision === "none", `cursor: ${JSON.stringify(a)}`)
     },
   },
 ]

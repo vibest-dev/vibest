@@ -248,9 +248,9 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `sending`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Into the main Agent** natively where the CLI allows it: the Claude plugin's inbox module (attach, pull, ack,
-  release with a generation and a claim token; claim file 0600, at most 4 MiB; `/vibest-reattach` is the only
-  replace) and the Pi extension's subscription stream. Otherwise typed through herdr `agent.prompt`. No main
+- **Into the main Agent** natively where the CLI allows it: the Claude plugin polls vibestd over HTTP on
+  `vibest-http.sock` (poll leases a batch for 30 s, ack by row id; a project that stops polling for 5 s gets its
+  leases back) and the Pi extension's subscription stream. Otherwise typed through herdr `agent.prompt`. No main
   Agent pane: Messages are `dropped`.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
@@ -729,11 +729,10 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
-  vibest.jsonc  vibest.db  vibest.sock  vibestd.pid  vibestd.log
+  vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
   results/<agent>.json       written by integrations
   rules/<agent>.md           written by the daemon
-  inbox-claims/              claim files of the Claude inbox
   projects/<project>/        knowledge (instructions.md, memory/, docs/) and scratch/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```

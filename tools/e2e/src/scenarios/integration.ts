@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, Skip, until, type World } from "../world.ts"
+import { binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -214,6 +214,8 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("claude")) throw new Skip("claude not on PATH")
       const cwd = await workdir(w, "claude-turn")
       const id = "e2e00004"
+      // The plugin talks to vibestd over HTTP, which answers only a session it knows.
+      const project = await knownSessions(w, "e2e/i4", { [id]: "general" }, cwd)
       // The user's own Claude config (its login and plugins); --no-session-persistence keeps the conversation out of it.
       const r = await w.run(
         cwd,
@@ -239,6 +241,8 @@ const checks: ReadonlyArray<Check> = [
             CLAUDE_CODE_ENTRYPOINT: undefined,
             VIBEST_AGENT: "general",
             VIBEST_SESSION_ID: id,
+            VIBEST_PROJECT_ID: String(project),
+            VIBEST_HARNESS: "claude",
           },
           timeoutMs: 240_000,
         },

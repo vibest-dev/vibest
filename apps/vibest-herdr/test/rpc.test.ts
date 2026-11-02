@@ -334,35 +334,6 @@ describe("vibest.sock", () => {
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         [
-          "Inbox.Attach",
-          c["Inbox.Attach"]({ claudeSessionId: "s", replace: false, terminal: "test/p", machine: { id: "local" } }),
-        ],
-        [
-          "Inbox.Pull",
-          c["Inbox.Pull"]({ generation: "g", claudeSessionId: "s", terminal: "test/p", machine: { id: "local" } }),
-        ],
-        [
-          "Inbox.Ack",
-          c["Inbox.Ack"]({
-            generation: "g",
-            claudeSessionId: "s",
-            token: "t",
-            terminal: "test/p",
-            machine: { id: "local" },
-          }),
-        ],
-        [
-          "Inbox.Release",
-          c["Inbox.Release"]({
-            generation: "g",
-            claudeSessionId: "s",
-            token: "t",
-            retry: false,
-            terminal: "test/p",
-            machine: { id: "local" },
-          }),
-        ],
-        [
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
         ],
@@ -685,7 +656,6 @@ describe("vibest.sock", () => {
           model: null,
           passEnv: CALLER_ENV,
           session: c["Project.CoordinatorSession"]({ harness, fresh, terminal: "test/p1" }),
-          record: () => Effect.die("refused before any record"),
         }).pipe(
           Effect.provide(
             Layer.succeed(Harness, {
@@ -744,7 +714,7 @@ describe("vibest.sock", () => {
       }
       yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
       yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
-      yield* db.coordinatorLaunch("r", "claude", false, {
+      yield* db.coordinatorLaunch("r", "cursor", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p9" },
       })
