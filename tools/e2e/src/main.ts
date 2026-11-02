@@ -12,9 +12,10 @@ import integration from "./scenarios/integration.ts"
 import guard from "./scenarios/guard.ts"
 import update from "./scenarios/update.ts"
 import start from "./scenarios/start.ts"
+import inbox from "./scenarios/inbox.ts"
 
 /** The checks by area, in the order they run; an area is selected by its name, a single check by its feature-map ID. */
-const areas: Record<string, ReadonlyArray<Check>> = { daemon, project, plugins, harness, integration, guard, update, start }
+const areas: Record<string, ReadonlyArray<Check>> = { daemon, project, plugins, harness, integration, guard, update, start, inbox }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")
 const only = process.argv.slice(2).filter((a) => a !== "--strict")
