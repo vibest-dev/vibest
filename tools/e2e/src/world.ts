@@ -150,7 +150,7 @@ export class World {
       p.exited,
     ])
     const result = { code, stdout, stderr }
-    this.log.push({ argv, cwd, result })
+    this.log.push({ argv: argv.map(redact), cwd, result })
     return result
   }
 
@@ -251,15 +251,34 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
 }
 
 /** Is `bin` on the world's PATH? */
+/** VIBEST_E2E_ENV: KEY=VALUE pairs, one per line, for the agents a real-model check starts. */
+const agentEnv = (process.env.VIBEST_E2E_ENV ?? "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+
+/** `text` with every VIBEST_E2E_ENV value replaced: they are never printed or kept as evidence. */
+export const redact = (text: string) =>
+  agentEnv.reduce((t, pair) => {
+    const value = pair.slice(pair.indexOf("=") + 1)
+    return value === "" ? t : t.split(value).join("<redacted>")
+  }, text)
+
 /**
  * The model of the agents a real-model check has vibest start, as vibest's own options (`vibest run` and the main
- * agent's `vibest` take the same `--provider` and `--model`). VIBEST_E2E_PROVIDER and VIBEST_E2E_MODEL choose it;
- * unset, Claude Haiku as before. The one place to change it. The World's own environment drops every VIBEST_*
- * variable, so these reach no agent except as these options.
+ * agent's `vibest` take the same `--provider`, `--model` and `--env`). VIBEST_E2E_PROVIDER and VIBEST_E2E_MODEL choose
+ * it, VIBEST_E2E_ENV adds environment (another Anthropic-compatible endpoint for Claude, say); unset, Claude Haiku as
+ * before. The one place to change it. The World's own environment drops every VIBEST_* variable, so these reach no
+ * agent except as these options.
  */
 export const agentModel = (): ReadonlyArray<string> => {
   const provider = process.env.VIBEST_E2E_PROVIDER
-  return [...(provider ? ["--provider", provider] : []), "--model", process.env.VIBEST_E2E_MODEL || "haiku"]
+  return [
+    ...(provider ? ["--provider", provider] : []),
+    "--model",
+    process.env.VIBEST_E2E_MODEL || "haiku",
+    ...agentEnv.flatMap((pair) => ["--env", pair]),
+  ]
 }
 
 export const onPath = (bin: string) => Bun.which(bin) !== null

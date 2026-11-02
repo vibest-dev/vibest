@@ -1182,6 +1182,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       yield* sh(repo, "clone", "-q", repo, clone)
       yield* sh(clone, "remote", "set-url", "origin", "https://github.com/A/b.git")
       assert.strictEqual(yield* repositoryKey(clone), "github.com/a/b")
+      // VIBEST_PROJECT_KEY overrides it (VIBEST_PROJECT_ID is the numeric project id, not this).
+      const overridden = yield* repositoryKey(repo).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { VIBEST_PROJECT_KEY: "my/key" } }))),
+      )
+      assert.strictEqual(overridden, "my/key")
     }),
   )
 

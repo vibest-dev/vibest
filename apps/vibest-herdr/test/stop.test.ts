@@ -3,13 +3,14 @@ import net from "node:net"
 // Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, protocolHeaders, sessionHeaders } from "@vibest/client/client"
+import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
+import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
 import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
@@ -96,7 +97,7 @@ const receiver = (repo: string, harness: "pi" | "claude") =>
       terminal: "wC:p1",
     })
     if (harness === "claude") yield* db.reportCoordinatorSession(sessionId, "claude", "claude-session")
-    const c = authed(raw, sessionHeaders(sessionId, repo, { projectId: String(projectId) }))
+    const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ harness: "pi", prompt: "work" })
     yield* until(db.getSession(worker), (w) => w?.turnState === "open")
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }

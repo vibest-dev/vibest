@@ -248,10 +248,11 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `sending`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Into the main Agent** natively where the CLI allows it: the Claude plugin polls vibestd over HTTP on
-  `vibest-http.sock` (poll leases a batch for 30 s, ack by row id; a project that stops polling for 5 s gets its
-  leases back) and the Pi extension's subscription stream. Otherwise typed through herdr `agent.prompt`. No main
-  Agent pane: Messages are `dropped`.
+- **Into the main Agent** natively where the CLI allows it, as its harness adapter's `inbox` says: `poll`, the
+  Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
+  sqlite; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
+  session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
+  `agent.prompt`. No main Agent pane: Messages are `dropped`.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever

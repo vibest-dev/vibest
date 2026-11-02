@@ -1,5 +1,6 @@
 import {
   type Claim,
+  claimHeaders,
   connect,
   type VibestClient,
   probe,
@@ -16,7 +17,7 @@ import { askYesNo, interactive, Layout, VibestCommand, writeAtomic } from "@vibe
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { promptOf, recordPrompt, recordTurnEnd, writeTerminalStatus } from "@vibest/core/results"
+import { jsonObject, promptOf, recordPrompt, recordTurnEnd, writeTerminalStatus } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
 // VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
@@ -726,11 +727,27 @@ const nonempty = (name: string) =>
     }),
   )
 
-/** Best-effort protocol notify. Does not start vibestd and sends no caller identity. */
-const notify = (timeout: Duration.Duration, send: (client: VibestClient) => Effect.Effect<void, unknown>) =>
+/**
+ * Best-effort notify from a harness hook, with the session's headers (its conversation id when the adapter reads one
+ * from `raw`). Does not start vibestd.
+ */
+const notify = (
+  timeout: Duration.Duration,
+  adapter: HarnessAdapter,
+  sessionId: string,
+  raw: string,
+  send: (client: VibestClient) => Effect.Effect<void, unknown>,
+) =>
   Effect.gen(function* () {
     const layout = yield* Layout
-    yield* RpcClient.withHeaders(connect(layout.socket).pipe(Effect.flatMap(send)), protocolHeaders())
+    const event = jsonObject(raw)
+    const harnessSessionId = event && adapter.conversationOf?.(event)
+    const headers = yield* claimHeaders({
+      _tag: "session",
+      sessionId,
+      ...(harnessSessionId ? { harnessSessionId } : {}),
+    })
+    yield* RpcClient.withHeaders(connect(layout.socket).pipe(Effect.flatMap(send)), headers)
   }).pipe(Effect.scoped, Effect.timeout(timeout), Effect.ignore)
 
 /**
@@ -746,7 +763,7 @@ export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
     if (!agent || !sessionId) return
     if (!(yield* recordTurnEnd(adapter, agent, sessionId, raw))) return
     yield* writeTerminalStatus("idle")
-    yield* notify(RESULT_READY_TIMEOUT, (client) => client.ResultReady({ sessionId }))
+    yield* notify(RESULT_READY_TIMEOUT, adapter, sessionId, raw, (client) => client.ResultReady({ sessionId }))
   }).pipe(Effect.ignore)
 
 /**
@@ -762,7 +779,7 @@ export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
     const text = promptOf(adapter, agent, raw)
     if (text === undefined) return
     // `Prompt` first: vibestd stamps the round at receipt, and the start line must not be older than that stamp.
-    yield* notify(RESULT_READY_TIMEOUT, (client) => client.Prompt({ sessionId, text }))
+    yield* notify(RESULT_READY_TIMEOUT, adapter, sessionId, raw, (client) => client.Prompt({ sessionId, text }))
     yield* recordPrompt(sessionId, text)
     yield* writeTerminalStatus("working")
   }).pipe(Effect.ignore)

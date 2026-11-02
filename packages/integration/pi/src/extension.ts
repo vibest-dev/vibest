@@ -9,7 +9,7 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { type ClientServices, connect, protocolHeaders, SocketConnector, withVibest } from "@vibest/client/client"
+import { claimHeaders, type ClientServices, connect, SocketConnector, withVibest } from "@vibest/client/client"
 import * as Guard from "@vibest/core/guard"
 import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { appendReportLine, writeTerminalStatus } from "@vibest/core/results"
@@ -58,6 +58,10 @@ const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
   return { text, error: message?.stopReason === "error" ? message.errorMessage || "error" : "" }
 }
 
+/** This Pi session's headers: its vibest session, its environment, and Pi's own session id. */
+const piHeaders = (sessionId: string, ctx: ExtensionContext) =>
+  claimHeaders({ _tag: "session", sessionId, harnessSessionId: ctx.sessionManager.getSessionId() })
+
 /** What an agent's layer needs; they share one type, so picking one is a plain conditional. */
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
 
@@ -72,12 +76,13 @@ const session = (sessionId: string): Role =>
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
       // `input` is the submitted prompt. `extension` is sendUserMessage, which is vibest's own text, not the user.
-      yield* pi.handle("input", (e) =>
+      yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
           // `Prompt` first: vibestd stamps the round at receipt, and the start line must not be older than that stamp.
+          const headers = yield* piHeaders(sessionId, ctx)
           yield* connect(layout.socket).pipe(
-            Effect.flatMap((client) => client.Prompt({ sessionId, text: e.text }, { headers: protocolHeaders() })),
+            Effect.flatMap((client) => client.Prompt({ sessionId, text: e.text }, { headers })),
             Effect.scoped,
             Effect.timeout("500 millis"),
             Effect.ignore,
@@ -106,8 +111,9 @@ const session = (sessionId: string): Role =>
             payload,
           })
           yield* writeTerminalStatus("idle")
+          const headers = yield* piHeaders(sessionId, ctx)
           yield* connect(layout.socket).pipe(
-            Effect.flatMap((client) => client.ResultReady({ sessionId }, { headers: protocolHeaders() })),
+            Effect.flatMap((client) => client.ResultReady({ sessionId }, { headers })),
             Effect.scoped,
             Effect.timeout("500 millis"),
             Effect.ignore,
@@ -132,12 +138,10 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
       const harnessSessionId = ctx.sessionManager.getSessionId()
       if (ctx.mode !== "tui" || (yield* Ref.get(reported)) === harnessSessionId) return
       // Never starts vibestd: `vibest` already did.
+      const headers = yield* piHeaders(sessionId, ctx)
       yield* connect(layout.socket).pipe(
         Effect.flatMap((client) =>
-          client.CoordinatorSessionReady(
-            { sessionId, harness: "pi", harnessSessionId },
-            { headers: protocolHeaders() },
-          ),
+          client.CoordinatorSessionReady({ sessionId, harness: "pi", harnessSessionId }, { headers }),
         ),
         Effect.scoped,
         Effect.timeout("1 second"),
@@ -188,34 +192,35 @@ const coordinator: Role = Layer.effectDiscard(
     yield* pi.handle("session_start", (_e, ctx) =>
       ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
     )
-    const subscribe = withVibest(
-      { _tag: "session", sessionId: sessionId.value },
-      (client) =>
-        client["Inbox.Subscribe"](undefined).pipe(
-          Stream.runForEach((content) =>
-            pi.sendMessage(
-              { customType: "vibest", content, display: false },
-              { triggerTurn: true, deliverAs: "followUp" },
+    const subscribe = (ctx: ExtensionContext) =>
+      withVibest(
+        { _tag: "session", sessionId: sessionId.value, harnessSessionId: ctx.sessionManager.getSessionId() },
+        (client) =>
+          client["Inbox.Subscribe"](undefined).pipe(
+            Stream.runForEach((content) =>
+              pi.sendMessage(
+                { customType: "vibest", content, display: false },
+                { triggerTurn: true, deliverAs: "followUp" },
+              ),
             ),
+            // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
+            // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
+            Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
           ),
-          // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
-          // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
-          Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
-        ),
-      // Never start vibestd from here: during `vibest daemon restart` the replacement may be between sockets.
-      { start: false },
-    ).pipe(
-      // The connection dropped or vibestd closed the stream (vibestd restarted): subscribe again; rows not yet taken stay pending.
-      Effect.retry({
-        while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
-        schedule: Schedule.spaced("2 seconds"),
-      }),
-      Effect.repeat(Schedule.spaced("2 seconds")),
-    )
+        // Never start vibestd from here: during `vibest daemon restart` the replacement may be between sockets.
+        { start: false },
+      ).pipe(
+        // The connection dropped or vibestd closed the stream (vibestd restarted): subscribe again; rows not yet taken stay pending.
+        Effect.retry({
+          while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
+          schedule: Schedule.spaced("2 seconds"),
+        }),
+        Effect.repeat(Schedule.spaced("2 seconds")),
+      )
     // Anything else ends the subscription; no handler is running, so tell the user.
     yield* Deferred.await(started).pipe(
       Effect.flatMap((ctx) =>
-        subscribe.pipe(
+        subscribe(ctx).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.void

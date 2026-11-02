@@ -6,13 +6,7 @@ import { AWAY, Inbox, LEASE, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
-import {
-  MISMATCH_ACTION,
-  MISSING_PROJECT_ID,
-  PROTOCOL,
-  sessionHeaders,
-  type SessionIdentity,
-} from "@vibest/protocol/protocol"
+import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
@@ -99,7 +93,11 @@ const project = Effect.gen(function* () {
   const projectId = main.projectId
   const handle = yield* Http.make
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body = "{}") =>
-    handle({ path, headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), ...who })), body })
+    handle({
+      path,
+      headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
+      body,
+    })
   return { db, herdr, main: main.sessionId, worker, projectId, call, inbox: yield* Inbox }
 })
 
@@ -108,13 +106,13 @@ const statusOf = (db: Db["Service"], worker: string) =>
 
 describe("vibestd's HTTP API", () => {
   test(
-    "the caller is checked: protocol 409, unknown session 404, missing or other project 403, a subagent's poll 403",
+    "the caller is checked: protocol 409, unknown session 404, missing or other project or harness 403, a subagent's poll 403",
     Effect.gen(function* () {
-      const { call, main, worker } = yield* project
+      const { call, db, main, worker, projectId } = yield* project
       const handle = yield* Http.make
       const raw = (headers: Record<string, string>) =>
         handle({ path: "/inbox/poll", headers: Headers.fromInput(headers), body: "{}" })
-      const own = sessionHeaders({ sessionId: main })
+      const own = sessionHeaders({ sessionId: main, harness: "claude" })
       // An older caller is told to restart itself; a newer one, that vibestd is old. Both with the command to run.
       const older = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL - 1) })
       assert.strictEqual(older.status, 409)
@@ -132,13 +130,28 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((newer.body as { error: string }).error, `vibestd is older (${VERSION}); run vibest update`)
       assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
-      // Missing project id: refused while MISSING_PROJECT_ID says so.
-      assert.strictEqual(MISSING_PROJECT_ID, "refuse")
+      // Missing project id: refused.
       assert.strictEqual((yield* raw(own)).status, 403)
+      // Another harness than the session's, or none: refused before anything is recorded.
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "" })).status, 403)
+      assert.strictEqual((yield* call("/hooks/cursor/guard", { sessionId: worker, harness: "claude" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
+      // The main agent moved to Pi under the same session id: the old Claude process neither polls nor renames the
+      // conversation, and Pi (which subscribes) has no poll either.
+      const key = (yield* db.projectKey(projectId))!
+      yield* db.coordinatorLaunch(key, "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      yield* db.noteHarnessSession(main, "pi-conversation")
+      const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
+      assert.strictEqual(old.status, 403)
+      assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
     }),
   )
 
@@ -167,7 +180,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "poll hands a batch out once, leased; ack delivers it; an expired lease hands it out again",
+    "poll hands a batch out once, each row leased; ack delivers it; an expired lease hands it out again",
     Effect.gen(function* () {
       const { call, db, inbox, main, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
@@ -180,8 +193,7 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker})`)
       assert.strictEqual(first.text, "hello")
       assert.strictEqual(yield* statusOf(db, worker), "sending")
-      // The lease is in the rows: `sending`, and the main agent's lease clock in its session metadata.
-      assert.isDefined(yield* db.leaseUntil(projectId))
+      // The lease is in sqlite: the row `sending`, its end in the main agent's session metadata.
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
@@ -191,6 +203,51 @@ describe("vibestd's HTTP API", () => {
       // Again: harmless, nothing changes.
       assert.deepStrictEqual(yield* inbox.ack(projectId, first.ids), [])
       assert.strictEqual((yield* call("/inbox/ack", { sessionId: main }, "{}")).status, 400)
+    }),
+  )
+
+  test(
+    "each row keeps its own lease: a newer batch does not renew an older one that nobody acked",
+    Effect.gen(function* () {
+      const { db, inbox, worker, projectId } = yield* project
+      // Polls every second, as the plugin does, so the away check never fires.
+      const wait = (seconds: number) =>
+        Effect.gen(function* () {
+          for (let i = 0; i < seconds; i++) {
+            yield* TestClock.adjust("1 second")
+            assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+          }
+        })
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "old", details: {} })
+      const old = yield* inbox.poll(projectId)
+      yield* wait(20)
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "new", details: {} })
+      const newer = yield* inbox.poll(projectId)
+      assert.notDeepEqual(newer.ids, old.ids)
+      yield* wait(9)
+      // 30 s after it went out the old row is handed out again; the newer one is still leased.
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, old.ids)
+      // Taken and given back in one ack: the old one delivered, the new one pending for the next poll.
+      assert.deepStrictEqual(yield* inbox.ack(projectId, old.ids, newer.ids), old.ids)
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, newer.ids)
+      assert.strictEqual(yield* statusOf(db, worker), "sending")
+    }),
+  )
+
+  test(
+    "a vibestd restart puts a polling main agent's handed-out rows back to pending",
+    Effect.gen(function* () {
+      const { db, inbox, worker, projectId } = yield* project
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
+      const { ids } = yield* inbox.poll(projectId)
+      yield* db.recoverSending(["claude"])
+      assert.strictEqual(yield* statusOf(db, worker), "pending")
+      // The next poll hands the row out again at once.
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, ids)
+      // A harness that does not poll: a cut-off delivery may have arrived, so it failed.
+      yield* db.recoverSending([])
+      assert.strictEqual(yield* statusOf(db, worker), "failed")
     }),
   )
 
@@ -276,7 +333,7 @@ describe("vibestd's HTTP API", () => {
               return await fetch("http://vibestd/inbox/poll", {
                 method: "POST",
                 unix: layout.httpSocket,
-                headers: sessionHeaders({ sessionId: main, projectId: String(projectId) }),
+                headers: sessionHeaders({ sessionId: main, projectId: String(projectId), harness: "claude" }),
                 body: "{}",
               } as RequestInit)
             } catch {

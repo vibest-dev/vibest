@@ -40,7 +40,7 @@ import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 
 import pkg from "../package.json" with { type: "json" }
-import { mismatchText, PROTOCOL } from "./protocol.ts"
+import { PROTOCOL } from "./protocol.ts"
 
 /**
  * The vibestd answering on the socket: its PID, a UUID it made at start (another vibestd, even at the same PID, has another),
@@ -113,7 +113,7 @@ export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("Pr
   }),
 }) {
   override get message() {
-    return `${this.method} refused: ${mismatchText(this.mismatch)}`
+    return `${this.method} refused: ${this.mismatch.message}`
   }
 }
 

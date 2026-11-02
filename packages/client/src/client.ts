@@ -1,12 +1,10 @@
 import {
   CALLER_HEADER,
-  mismatchText,
   PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
-  type SessionIdentity,
-  sessionHeaders as identityHeaders,
+  sessionHeaders,
 } from "@vibest/protocol/protocol"
 import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
@@ -58,7 +56,7 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
     const got = this.daemonProtocol === null ? "no protocol" : `protocol ${this.daemonProtocol}`
     const self = `vibest ${this.client.version} (${this.client.command.map(shellQuote).join(" ")})`
     const mismatch = protocolMismatch(PROTOCOL, this.daemonProtocol ?? 0, this.daemonVersion || "unknown")
-    return `${mismatchText(mismatch)}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}. A package-version difference alone does not require a restart.`
+    return `${mismatch.message}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}. A package-version difference alone does not require a restart.`
   }
 }
 
@@ -67,7 +65,13 @@ export type VibestClient = Effect.Success<ReturnType<typeof connect>>
 /** Who a scoped call is. A session does not declare itself coordinator. repositoryRoot on a session is the working directory, sent only for a coordinator. */
 export type Claim =
   | { readonly _tag: "cli"; readonly repositoryRoot: string }
-  | { readonly _tag: "session"; readonly sessionId: string; readonly repositoryRoot?: string }
+  | {
+      readonly _tag: "session"
+      readonly sessionId: string
+      readonly repositoryRoot?: string
+      /** The harness's own conversation id, when the caller knows it (Pi's session id). */
+      readonly harnessSessionId?: string
+    }
 
 export const protocolHeaders = () => ({ [PROTOCOL_HEADER]: String(PROTOCOL) })
 
@@ -76,13 +80,6 @@ export const cliHeaders = (repositoryRoot: string) => ({
   [CALLER_HEADER]: "cli",
   [REPOSITORY_HEADER]: repositoryRoot,
 })
-
-/** A session's headers (`@vibest/protocol`'s one definition); `more` adds the rest of its identity. */
-export const sessionHeaders = (
-  sessionId: string,
-  repositoryRoot?: string,
-  more?: Omit<SessionIdentity, "sessionId" | "repositoryRoot">,
-) => identityHeaders({ ...more, sessionId, repositoryRoot })
 
 /** The rest of a session's identity from its environment (vibestEnv / the main agent's launch) and its working directory. */
 const fromEnv = Effect.gen(function* () {
@@ -97,10 +94,18 @@ const fromEnv = Effect.gen(function* () {
   }
 }).pipe(Effect.orElseSucceed(() => ({})))
 
-const claimHeaders = (claim: Claim) =>
+/** The headers of a call as `claim`: a session's from its environment (@vibest/protocol `sessionHeaders`). */
+export const claimHeaders = (claim: Claim) =>
   claim._tag === "cli"
     ? Effect.succeed(cliHeaders(claim.repositoryRoot))
-    : Effect.map(fromEnv, (more) => sessionHeaders(claim.sessionId, claim.repositoryRoot, more))
+    : Effect.map(fromEnv, (more) =>
+        sessionHeaders({
+          ...more,
+          sessionId: claim.sessionId,
+          repositoryRoot: claim.repositoryRoot,
+          harnessSessionId: claim.harnessSessionId,
+        }),
+      )
 
 /** A client on socket, closed with the scope. The protocol is built into the caller's scope: Effect.provide(layer) would close the socket as soon as the client is made. */
 export const connect = (socket: string) =>

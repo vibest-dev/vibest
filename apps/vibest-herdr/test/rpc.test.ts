@@ -4,14 +4,7 @@ import net from "node:net"
 // client and by a raw JSON-RPC line the way a hook sends it.
 import { assert, describe, it } from "@effect/vitest"
 import { SocketConnector } from "@vibest/client/client"
-import {
-  cliHeaders,
-  connect,
-  incompatibleDaemon,
-  protocolHeaders,
-  sessionHeaders,
-  withVibest,
-} from "@vibest/client/client"
+import { cliHeaders, connect, incompatibleDaemon, protocolHeaders, withVibest } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Harness, type HarnessId, HarnessUnavailable } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
@@ -22,7 +15,7 @@ import { projectRoot } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused, Plugin } from "@vibest/plugin"
-import { MISMATCH_ACTION, PROTOCOL } from "@vibest/protocol/protocol"
+import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import * as Server from "@vibest/server/server"
@@ -67,7 +60,7 @@ const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string) => au
 const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
-    return authed(raw, sessionHeaders(sessionId, repositoryRoot, { projectId: row && String(row.projectId) }))
+    return authed(raw, sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(row.projectId) }))
   })
 
 const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
@@ -225,15 +218,31 @@ describe("vibest.sock", () => {
       assert.strictEqual(failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }))), "ProtocolRejected")
 
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders("nope") }))),
+        failureTag(
+          yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders({ sessionId: "nope" }) })),
+        ),
         "NoSuchSession",
       )
-      // A known session without its project id is refused, as over HTTP (MISSING_PROJECT_ID).
+      // A known session without its project id is refused, as over HTTP.
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders(id) }))),
+        failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders({ sessionId: id }) }))),
         "InvalidCaller",
       )
 
+      // The harness's conversation id rides on a session's calls: kept from the session's own harness (pi) alone.
+      const projectId = String((yield* db.sessionIdentity(id))!.projectId)
+      const as = (harness: string, harnessSessionId: string) =>
+        authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
+      yield* as("pi", "pi-1").Report({ message: "one" })
+      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
+      yield* as("claude", "other").Report({ message: "two" })
+      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
+      // An open hook call (ResultReady) carries it too.
+      yield* raw.ResultReady(
+        { sessionId: id },
+        { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
+      )
+      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-2")
       const w = yield* asSession(yield* client, id)
       yield* w.Report({ message: "half way" })
       const reported = yield* db.latestInbox(id, "report")

@@ -177,6 +177,13 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
       // The project's own scratch directory, the one place under projects the session's guard allows.
       assert.strictEqual(placed.env.VIBEST_SCRATCH, layout.scratch(yield* repositoryKey(repo)))
+      // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
+      // field (no terminal yet: the one it gets is opened after the env is fixed).
+      const identity = (yield* (yield* Db).sessionIdentity(id))!
+      assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
+      const runtime = JSON.parse(placed.env.VIBEST_RUNTIME!) as Record<string, unknown>
+      assert.deepStrictEqual(Object.keys(runtime).sort(), ["machine", "runtime"])
+      assert.strictEqual(runtime.machine, "local")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       const start = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(start.env.VIBEST_SESSION_ID, id)

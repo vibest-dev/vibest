@@ -3,6 +3,7 @@ import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
 import { claude } from "@vibest/core/harnesses/claude"
+import { cursor } from "@vibest/core/harnesses/cursor"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
@@ -74,7 +75,7 @@ const promptAt = (home: string, env: Record<string, string>, raw: string) =>
   )
 
 layer(Platform.services)("claude integration stop", (it) => {
-  it.effect("a worker writes the envelope, then notifies with protocol headers only", () =>
+  it.effect("a worker writes the envelope, then notifies with the session's headers", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -95,12 +96,17 @@ layer(Platform.services)("claude integration stop", (it) => {
         method: "ResultReady",
         params: { sessionId: "w1" },
         id: request?.id,
-        headers: [[PROTOCOL_HEADER, String(PROTOCOL)]],
+        headers: request?.headers,
         traceId: (request as { traceId?: unknown }).traceId,
         spanId: (request as { spanId?: unknown }).spanId,
         sampled: (request as { sampled?: unknown }).sampled,
       })
-      assert.deepStrictEqual(request?.headers, [[PROTOCOL_HEADER, String(PROTOCOL)]])
+      assert.deepInclude(Object.fromEntries(request?.headers as Array<[string, string]>), {
+        [PROTOCOL_HEADER]: String(PROTOCOL),
+        "vibest-caller": "session",
+        "vibest-session-id": "w1",
+        "vibest-agent": "general",
+      })
     }),
   )
 
@@ -242,6 +248,28 @@ layer(Platform.services)("claude integration stop", (it) => {
         yield* promptAt(home, env, raw)
       }
       assert.strictEqual(rpc(lines).length, 1)
+    }),
+  )
+
+  it.effect("Cursor's hook sends its conversation id with the session's headers", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("c-")
+      const lines: string[] = []
+      yield* listen(path.join(home, "vibest.sock"), lines)
+      const env = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1", VIBEST_PROJECT_ID: "7", VIBEST_HARNESS: "cursor" }
+      const raw = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: "go", conversation_id: "conv-1" })
+      yield* integrationPrompt(cursor, raw).pipe(
+        Effect.provideServiceEffect(Layout, Layout.make(home)),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+      )
+      const [request] = rpc(lines)
+      assert.deepInclude(Object.fromEntries(request?.headers as Array<[string, string]>), {
+        "vibest-session-id": "w1",
+        "vibest-project-id": "7",
+        "vibest-harness": "cursor",
+        "vibest-harness-session-id": "conv-1",
+      })
     }),
   )
 })
