@@ -163,6 +163,6 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
-/** vibest's one-line outcome of a turn, from any error; the summary when the final message is empty. */
+/** vibest's one-line outcome of a turn, from any error; used as the summary when the final message is empty or the turn failed. */
 export const outcome = (name: string, error: string | undefined) =>
   error ? `Agent "${name}" failed: ${error}` : `Agent "${name}" finished`

@@ -3473,6 +3473,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       // The model writing "failed" changes nothing; the harness reporting an error does.
       yield* finishTurn(a, "status: failed\nsummary: tests fail", "model_error")
       yield* until(a.db.latestInbox(a.id, "result"), (r) => r?.status === "delivered")
+      // A failed turn's summary is the error, not the reply's first line, so vibest ls says why.
+      const row = yield* a.db.latestInbox(a.id, "result")
+      assert.match(String(row!.details.summary), /^Agent ".*" failed: model_error$/)
+      assert.include(row!.message, "<result>\nstatus: failed\nsummary: tests fail")
       yield* settle
       assert.isFalse(yield* archived(a.db, a.id))
     }),

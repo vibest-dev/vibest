@@ -150,7 +150,7 @@ Format:
 
 - \`<branch>\` and \`<pushed>\` are left out when the agent is not on a branch
 - \`<status>\` is what vibest observed, not what the agent wrote: \`completed\` when its turn ended normally, \`failed\` when the harness or turn reported an error. A completed agent may still have failed at the task or be asking a question: read \`<result>\`
-- The \`<summary>\` is the first line of the agent's final message (about 120 characters), or vibest's own "finished" / "failed: {error}" when the message is empty
+- The \`<summary>\` is the first line of the agent's final message (about 120 characters), or vibest's own "finished" when the message is empty; for a failed turn it is "failed: {error}"
 - \`<result>\` is the agent's final message verbatim, followed by any error or check output
 - The \`<agent-id>\` value is the agent's id
 - A report may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says

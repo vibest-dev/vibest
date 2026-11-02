@@ -113,7 +113,10 @@ export const sessionRounds = (deps: {
     checkOutput = "",
   ) {
     const report = parseReport(text)
-    const summary = report.summary ?? outcome(session.name, error)
+    const status: ResultStatus = end === "completed" && !error ? "completed" : "failed"
+    // A failed turn shows its error, so vibest ls says why.
+    const summary =
+      status === "failed" ? outcome(session.name, error) : (report.summary ?? outcome(session.name, error))
     const worktree = yield* deps.worktreeOf(session)
     const repos = yield* workspaceGit(worktree)
     const g = repos ? undefined : yield* gitState(worktree)
@@ -123,7 +126,7 @@ export const sessionRounds = (deps: {
       agent: session.agent,
       harness: session.harnessId,
       name: session.name,
-      status: (end === "completed" && !error ? "completed" : "failed") satisfies ResultStatus,
+      status,
       branch: repos ? repos.map((r) => `${r.name}=${r.branch}`).join("\n") : (g?.branch ?? ""),
       pushed: repos ? repos.map((r) => `${r.name}=${r.pushed}`).join("\n") : String(g?.pushed ?? false),
       worktree,
