@@ -8,8 +8,9 @@ import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
 import * as VibestPlugin from "@vibest/plugin"
 import { Context, Effect, FileSystem, Layer } from "effect"
-import { ChildProcessSpawner } from "effect/process"
 import { SocketConnector } from "effect-herdr-sdk"
+import { ChildProcessSpawner } from "effect/process"
+
 import { HerdrPool } from "./pool.ts"
 import { fromPool } from "./terminal-runtime.ts"
 
@@ -21,7 +22,9 @@ const platform = Layer.mergeAll(
 )
 
 /** One pool of herdr sessions with its platform. */
-export const layer = HerdrPool.layer.pipe(Layer.provideMerge(Layer.provideMerge(NodeChildProcessSpawner.layer, platform)))
+export const layer = HerdrPool.layer.pipe(
+  Layer.provideMerge(Layer.provideMerge(NodeChildProcessSpawner.layer, platform)),
+)
 
 /**
  * The herdr runtime plugin: one pool for the plugin's lifetime, one Runtime registered under `kind: "herdr"`.

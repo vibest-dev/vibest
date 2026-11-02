@@ -22,7 +22,10 @@ export const RuntimeAddress = Schema.Struct({
 export type RuntimeAddress = typeof RuntimeAddress.Type
 
 /** Where a caller is: its own runtime socket when it runs inside the runtime, else a runtime session name. The runtime's to read as `Machine.target`. */
-export const RuntimeLocation = Schema.Union([Schema.Struct({ socketPath: Schema.String }), Schema.Struct({ session: Schema.String })])
+export const RuntimeLocation = Schema.Union([
+  Schema.Struct({ socketPath: Schema.String }),
+  Schema.Struct({ session: Schema.String }),
+])
 export type RuntimeLocation = typeof RuntimeLocation.Type
 
 /** A machine a caller names: `local`, or a saved machine; `target` is opaque to core (the runtime's to read). */
@@ -66,16 +69,27 @@ export class RuntimeIncompatible extends Schema.TaggedError<RuntimeIncompatible>
   message: Schema.String,
 }) {}
 
-export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSession", { id: Schema.String, message: Schema.String }) {}
-export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", { message: Schema.String }) {}
+export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSession", {
+  id: Schema.String,
+  message: Schema.String,
+}) {}
+export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
+  message: Schema.String,
+}) {}
 
-export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy", { id: Schema.String, message: Schema.String }) {}
+export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy", {
+  id: Schema.String,
+  message: Schema.String,
+}) {}
 export class LimitReached extends Schema.TaggedError<LimitReached>()("LimitReached", { limit: Schema.Number }) {
   override get message() {
     return `VIBEST_MAX_SESSIONS=${this.limit} sessions are already open (working or kept); vibest archive one first`
   }
 }
-export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", { id: Schema.String, message: Schema.String }) {}
+export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
+  id: Schema.String,
+  message: Schema.String,
+}) {}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
     return "no harness chosen: pass harness, or install a routing plugin"
@@ -83,7 +97,10 @@ export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHa
 }
 
 /** A session (or the workspace `vibest` opens) could not be started; `tail` is what its pane showed. */
-export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("LaunchFailed", { message: Schema.String, tail: Schema.String }) {}
+export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("LaunchFailed", {
+  message: Schema.String,
+  tail: Schema.String,
+}) {}
 
 export class NotInRepository extends Schema.TaggedError<NotInRepository>()("NotInRepository", { path: Schema.String }) {
   override get message() {

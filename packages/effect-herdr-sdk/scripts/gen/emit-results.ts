@@ -1,14 +1,18 @@
-import type { JSONSchema } from "./schema.js";
-import { emitDefs, tsType } from "./ts-type.js";
-import { METHOD_RESULT } from "./method-result-map.js";
+import { METHOD_RESULT } from "./method-result-map.js"
+import type { JSONSchema } from "./schema.js"
+import { emitDefs, tsType } from "./ts-type.js"
 
-const typeName = (tag: string) => "Result_" + tag.replace(/[^a-zA-Z0-9]/g, "_");
+const typeName = (tag: string) => "Result_" + tag.replace(/[^a-zA-Z0-9]/g, "_")
 
 export function emitResults(schema: JSONSchema, header: string): string {
-  const ok = schema.schemas.success_response as JSONSchema;
+  const ok = schema.schemas.success_response as JSONSchema
   const variants: Array<{ tag: string; name: string; ts: string }> = ok.$defs.ResponseResult.oneOf.map(
-    (v: JSONSchema) => ({ tag: v.properties.type.const as string, name: typeName(v.properties.type.const), ts: tsType(v) }),
-  );
+    (v: JSONSchema) => ({
+      tag: v.properties.type.const as string,
+      name: typeName(v.properties.type.const),
+      ts: tsType(v),
+    }),
+  )
   return `${header}
 ${emitDefs(ok.$defs, new Set(["ResponseResult"]))}
 
@@ -27,5 +31,5 @@ export type ResultTag = keyof ResultByTag;
 
 /** See scripts/gen/method-result-map.ts. */
 export const METHOD_RESULT = ${JSON.stringify(METHOD_RESULT, null, 2)} as const;
-`;
+`
 }

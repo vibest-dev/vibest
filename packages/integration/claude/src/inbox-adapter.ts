@@ -25,7 +25,8 @@ export const adaptAttach = (code: number, stdout: string): AttachReply => {
   if (!value) return { kind: "unparsed" }
   const generation = text(value, "generation")
   const error = text(value, "error")
-  if (generation !== undefined && generation !== "" && error === undefined && !flag(value, "empty")) return { kind: "attached", generation }
+  if (generation !== undefined && generation !== "" && error === undefined && !flag(value, "empty"))
+    return { kind: "attached", generation }
   if (error === "stale-receiver" && generation === undefined) return { kind: "stale-receiver" }
   if (error === "not-reported" && !("generation" in value)) return { kind: "not-reported" }
   return { kind: "unparsed" }
@@ -39,7 +40,8 @@ export const adaptPull = (code: number, stdout: string): PullReply => {
   const file = text(value, "file")
   const error = text(value, "error")
   const claim = token !== undefined && token !== "" && file !== undefined && file !== ""
-  if (contradictory(value, claim || flag(value, "empty") || flag(value, "acked") || flag(value, "released"))) return { kind: "unparsed" }
+  if (contradictory(value, claim || flag(value, "empty") || flag(value, "acked") || flag(value, "released")))
+    return { kind: "unparsed" }
   if (claim && error === undefined && value.empty !== true) return { kind: "claim", token: token!, file: file! }
   if (value.empty === true && !claim && error === undefined) return { kind: "none" }
   if (error === "too-large" && !claim) return { kind: "none" }

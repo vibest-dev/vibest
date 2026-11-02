@@ -21,7 +21,8 @@ const resolveLocal = (specifier: string, dir: string): { readonly file: string }
   }
 }
 
-const loader = (file: string) => (file.endsWith("x") ? (file.endsWith("tsx") ? "tsx" : "jsx") : /\.[cm]?ts$/.test(file) ? "ts" : "js")
+const loader = (file: string) =>
+  file.endsWith("x") ? (file.endsWith("tsx") ? "tsx" : "jsx") : /\.[cm]?ts$/.test(file) ? "ts" : "js"
 
 /** `entry` and the local files it imports, transitively, outside node_modules; `unresolved`: directories of local imports that do not resolve (yet). */
 export const graph = (entry: string) => {
@@ -65,7 +66,11 @@ export const keyLocalImports = (build: Bun.PluginBuilder) =>
     // Unresolved: Bun resolves it again and reports it.
     const resolved = resolveLocal(args.path, path.dirname(args.importer))
     if (!("file" in resolved)) return undefined
-    return { path: resolved.file.split(path.sep).includes("node_modules") ? resolved.file : `${resolved.file}?vibest-load=${n}` }
+    return {
+      path: resolved.file.split(path.sep).includes("node_modules")
+        ? resolved.file
+        : `${resolved.file}?vibest-load=${n}`,
+    }
   })
 
 /**
@@ -82,7 +87,8 @@ export const load = (entry: string, files: ReadonlyArray<string>): Promise<unkno
       }
     }),
   )
-  for (const key of Object.keys(nativeRequire.cache)) if (loading.has(key.replace(LOAD, ""))) delete nativeRequire.cache[key]
+  for (const key of Object.keys(nativeRequire.cache))
+    if (loading.has(key.replace(LOAD, ""))) delete nativeRequire.cache[key]
   const n = ++loads
   for (const file of loading) loadOf.set(file, n)
   return import(`${entry}?vibest-load=${n}`)

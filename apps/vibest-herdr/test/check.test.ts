@@ -1,7 +1,7 @@
 // The builtin check rule: a writing subagent's round reaches its parent only after the configured command passes.
 import process from "node:process"
+
 import { assert, describe, it } from "@effect/vitest"
-import { ChildProcessSpawner } from "effect/process"
 import { checkPlugin, runCheck } from "@vibest/core/check"
 import { Db } from "@vibest/core/db"
 import { Layout, worktreePath } from "@vibest/core/paths"
@@ -10,24 +10,42 @@ import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Duration, Effect, Fiber, FileSystem, Path, type Scope } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
+
 import { FakeRuntime, makeRepository, testLayer, type TestServices, until, untilVirtual, writeResult } from "./fakes.ts"
 
-const configured = (command: string, attempts: number) => ({ plugins: [{ plugin: checkPlugin, options: { command, attempts } }] })
+const configured = (command: string, attempts: number) => ({
+  plugins: [{ plugin: checkPlugin, options: { command, attempts } }],
+})
 
-const test = (name: string, command: string, attempts: number, program: Effect.Effect<void, unknown, TestServices | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer(configured(command, attempts)))))
+const test = (
+  name: string,
+  command: string,
+  attempts: number,
+  program: Effect.Effect<void, unknown, TestServices | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>,
+) => it.effect(name, () => program.pipe(Effect.provide(testLayer(configured(command, attempts)))))
 
 const spawnInput = (repo: string) =>
-  Effect.map(repositoryKey(repo), (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness: "pi" as const }))
+  Effect.map(repositoryKey(repo), (key) => ({
+    machine: { id: "local" },
+    root: repo,
+    key,
+    name: "task",
+    prompt: "do it",
+    harness: "pi" as const,
+  }))
 
 const spawnWorking = (repo: string) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
     const herdr = yield* FakeRuntime
-    yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
+    yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    })
     const { id } = yield* sessions.spawn(yield* spawnInput(repo))
     yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
     yield* sessions.check(id)
@@ -35,11 +53,20 @@ const spawnWorking = (repo: string) =>
   })
 
 /** The check command runs outside the lock, so wait until it has pasted a retry or delivered the result. */
-const finish = (w: { readonly id: string; readonly sessions: Sessions["Service"]; readonly db: Db["Service"]; readonly herdr: FakeRuntime["Service"] }, text: string, offsetMs: number) =>
+const finish = (
+  w: {
+    readonly id: string
+    readonly sessions: Sessions["Service"]
+    readonly db: Db["Service"]
+    readonly herdr: FakeRuntime["Service"]
+  },
+  text: string,
+  offsetMs: number,
+) =>
   Effect.gen(function* () {
     const before = (yield* promptsTo(w.herdr, w.id)).length
     yield* writeResult(w.id, "pi", { text }, offsetMs)
-    yield* w.herdr.endTurn((w.id))
+    yield* w.herdr.endTurn(w.id)
     yield* w.sessions.check(w.id)
     yield* until(
       Effect.all({ prompts: promptsTo(w.herdr, w.id), result: w.db.latestInbox(w.id, "result") }),
@@ -56,7 +83,10 @@ const promptsTo = (herdr: FakeRuntime["Service"], id: string) =>
 const messageRows = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    return yield* sql<{ status: string; input: string }>`SELECT status, input FROM message WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie)
+    return yield* sql<{
+      status: string
+      input: string
+    }>`SELECT status, input FROM message WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie)
   })
 
 describe("check rule", () => {
@@ -83,7 +113,7 @@ describe("check rule", () => {
 
   test(
     "fail-then-pass: a failing check sends the output tail, and a later pass lets the result go",
-    "n=0; [ -f .check-n ] && n=$(cat .check-n); n=$((n+1)); printf '%s\\n' \"$n\" > .check-n; printf 'check-fail-%s\\n' \"$n\"; [ \"$n\" -ge 2 ]",
+    'n=0; [ -f .check-n ] && n=$(cat .check-n); n=$((n+1)); printf \'%s\\n\' "$n" > .check-n; printf \'check-fail-%s\\n\' "$n"; [ "$n" -ge 2 ]',
     3,
     Effect.gen(function* () {
       const repo = yield* makeRepository
@@ -160,7 +190,7 @@ describe("check rule", () => {
       const w = yield* spawnWorking(repo)
       const before = (yield* promptsTo(w.herdr, w.id)).length
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: once" }, 1000)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
       yield* w.sessions.check(w.id)
       yield* until(promptsTo(w.herdr, w.id), (calls) => calls.length > before)
@@ -222,7 +252,7 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: red" }, 1000)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       const reply = yield* w.sessions.interrupt(w.id)
       assert.include(reply.message, "delivered")
       const row = yield* w.db.latestInbox(w.id, "result")
@@ -245,7 +275,7 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: slow" }, 1000)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
       const cwd = worktreePath(yield* Layout, (yield* w.db.getSession(w.id))!)!
       const pidFile = path.join(cwd, ".check.pid")
@@ -326,14 +356,18 @@ describe("check rule", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
       const before = yield* w.db.getSession(w.id)
-      const held = yield* w.herdr.hold("send", (w.id))
+      const held = yield* w.herdr.hold("send", w.id)
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: kept" }, 1000)
       yield* w.sessions.check(w.id)
       // The check command races a virtual timeout; pump the clock or that race never observes the process exit.
-      const pump = yield* Effect.forkChild(Effect.forever(TestClock.withLive(Effect.sleep("10 millis")).pipe(Effect.andThen(TestClock.adjust("500 millis")))))
+      const pump = yield* Effect.forkChild(
+        Effect.forever(
+          TestClock.withLive(Effect.sleep("10 millis")).pipe(Effect.andThen(TestClock.adjust("500 millis"))),
+        ),
+      )
       yield* held.reached
       yield* Fiber.interrupt(pump)
       const during = yield* w.db.getSession(w.id)
@@ -379,7 +413,7 @@ describe("check rule", () => {
       const waiting = yield* w.db.getSession(w.id)
       assert.strictEqual(waiting!.turnPromptedAt, before!.turnPromptedAt)
       assert.strictEqual(waiting!.turnState, "open")
-      yield* w.herdr.updateAgent((w.id), (agent) => ({ ...agent, status: "idle" }))
+      yield* w.herdr.updateAgent(w.id, (agent) => ({ ...agent, status: "idle" }))
       yield* w.sessions.check(w.id)
       yield* until(promptsTo(w.herdr, w.id), (calls) => calls.length > prompts)
       yield* until(w.db.getSession(w.id), (row) => !!row && row.turnPromptedAt !== before!.turnPromptedAt)
@@ -399,8 +433,8 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       const before = yield* w.db.getSession(w.id)
-      yield* w.herdr.endTurn((w.id))
-      yield* w.herdr.updateAgent((w.id), (agent) => ({ ...agent, registerPrompt: false }))
+      yield* w.herdr.endTurn(w.id)
+      yield* w.herdr.updateAgent(w.id, (agent) => ({ ...agent, registerPrompt: false }))
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: kept" }, 1000)
       yield* w.sessions.check(w.id)
       yield* untilVirtual(
@@ -433,7 +467,7 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       const prompts = (yield* promptsTo(w.herdr, w.id)).length
-      yield* w.herdr.updateAgent((w.id), (agent) => ({ ...agent, alive: false }))
+      yield* w.herdr.updateAgent(w.id, (agent) => ({ ...agent, alive: false }))
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: red" }, 1000)
       yield* w.sessions.check(w.id)
       yield* until(w.db.getSession(w.id), (row) => row?.turnState === "failed")
@@ -467,7 +501,7 @@ describe("check rule", () => {
       assert.include(row!.message, "CHECK_FAIL")
       assert.strictEqual((yield* promptsTo(w.herdr, w.id)).length, prompts)
       assert.notInclude((yield* w.db.latestInbox(w.id, "notice"))?.message ?? "", "could not be pasted")
-      yield* w.herdr.updateAgent((w.id), (agent) => ({ ...agent, status: "idle" }))
+      yield* w.herdr.updateAgent(w.id, (agent) => ({ ...agent, status: "idle" }))
       yield* w.sessions.check(w.id)
       assert.strictEqual((yield* promptsTo(w.herdr, w.id)).length, prompts)
       assert.notStrictEqual((yield* w.db.getSession(w.id))!.turnState, "open")
@@ -505,7 +539,7 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       yield* writeResult(w.id, "pi", { text: "status: failed\nsummary: limited", error: "model_not_found" }, 1000)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
       const row = yield* w.db.latestInbox(w.id, "result")
       assert.strictEqual(row!.details.error, "model_not_found")
@@ -527,7 +561,7 @@ describe("check rule", () => {
       const repo = yield* makeRepository
       const w = yield* spawnWorking(repo)
       yield* writeResult(w.id, "pi", { text: "status: completed\nsummary: running" }, 1000)
-      yield* w.herdr.endTurn((w.id))
+      yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
       const cwd = worktreePath(yield* Layout, (yield* w.db.getSession(w.id))!)!
       const pidFile = path.join(cwd, ".check.pid")

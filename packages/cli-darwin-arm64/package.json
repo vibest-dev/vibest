@@ -8,21 +8,21 @@
     "url": "git+https://github.com/vibest-dev/vibest.git",
     "directory": "packages/cli-darwin-arm64"
   },
+  "files": [
+    "bin/vibest",
+    "LICENSE"
+  ],
   "os": [
     "darwin"
   ],
   "cpu": [
     "arm64"
   ],
-  "files": [
-    "bin/vibest",
-    "LICENSE"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64",
     "prepack": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

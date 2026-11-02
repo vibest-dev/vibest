@@ -1,10 +1,11 @@
+import { shellQuote } from "@vibest/schema/layout"
+import { Config, Duration, Effect, Option, Schema } from "effect"
 // What the vibest CLI and the herdr plugin command need to say where they are: the caller's herdr location as
 // `Machine.target` (runtime-port.md §2, §4) and the terminal id of the pane it runs in, plus the two pane operations
 // `vibest` does in place. Everything herdr-specific about *being* a caller lives here.
 import { Herdr, type HerdrShape } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { Config, Duration, Effect, Option, Schema } from "effect"
-import { shellQuote } from "@vibest/schema/layout"
+
 import { encodeTarget } from "./terminal-runtime.ts"
 
 /** The caller's location: its own herdr socket inside herdr, otherwise a session name (default vibest). An explicit `--session` wins over the ambient socket. */
@@ -16,16 +17,21 @@ export const callerLocation = (named?: string) =>
   })
 
 /** The caller's location as the `Machine` the RPCs carry: local host, the herdr to reach as `target` JSON (§2). */
-export const callerMachine = (named?: string) => callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
+export const callerMachine = (named?: string) =>
+  callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
 
 /** What `vibest` in a coordinator's shell needs to find its own pane; a harness may hand its shell less than it got. */
 export const CALLER_ENV = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"] as const
 
-const SessionList = Schema.decodeUnknownEffect(Schema.fromJsonString(
-  Schema.Struct({
-    sessions: Schema.Array(Schema.Struct({ name: Schema.String, socket_path: Schema.String, running: Schema.Boolean })),
-  }),
-))
+const SessionList = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      sessions: Schema.Array(
+        Schema.Struct({ name: Schema.String, socket_path: Schema.String, running: Schema.Boolean }),
+      ),
+    }),
+  ),
+)
 
 /**
  * The pane this process runs in, as a terminal id (`<session>/<pane>`: pane ids repeat across herdr sessions, so both
@@ -52,7 +58,12 @@ const SHELL_TIMEOUT = Duration.seconds(10)
  */
 export const runAtRoot = (h: HerdrShape, paneId: string, root: string, argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    yield* h.call("pane.wait_for_output", { pane_id: paneId, source: "visible", match: { type: "regex", value: "\\S" }, timeout_ms: Duration.toMillis(SHELL_TIMEOUT) })
+    yield* h.call("pane.wait_for_output", {
+      pane_id: paneId,
+      source: "visible",
+      match: { type: "regex", value: "\\S" },
+      timeout_ms: Duration.toMillis(SHELL_TIMEOUT),
+    })
     const text = `cd ${shellQuote(root)} && ${argv.map(shellQuote).join(" ")}`
     yield* h.call("pane.send_text", { pane_id: paneId, text })
     yield* h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] })

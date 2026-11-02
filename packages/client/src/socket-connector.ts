@@ -4,4 +4,7 @@ import { Context, type Effect } from "effect"
 import type * as Socket from "effect/socket/Socket"
 
 /** Dial `endpoint` (a unix socket path). Like `WebSocketConstructor`, for local sockets. */
-export class SocketConnector extends Context.Service<SocketConnector, (endpoint: string) => Effect.Effect<Socket.Socket>>()("vibest/SocketConnector") {}
+export class SocketConnector extends Context.Service<
+  SocketConnector,
+  (endpoint: string) => Effect.Effect<Socket.Socket>
+>()("vibest/SocketConnector") {}

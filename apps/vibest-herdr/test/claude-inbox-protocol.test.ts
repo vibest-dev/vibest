@@ -1,23 +1,40 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "#platform"
-import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Ref, Stream } from "effect"
-import { SqlClient } from "effect/sql"
 import { writeClaimFile } from "@vibest/core/claude-inbox"
 import { Db, type SessionRow } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { registry, Runtimes } from "@vibest/core/runtimes"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
-import { FakeRuntime, makeRepository, tempDirectory, testLayer } from "./fakes.ts"
+import { registry, Runtimes } from "@vibest/core/runtimes"
 import { repositoryKey } from "@vibest/core/worktree"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Ref, Stream } from "effect"
+import { SqlClient } from "effect/sql"
 
-const test = (name: string, program: () => Effect.Effect<void, any, any>) => it.effect(name, () => program().pipe(Effect.provide(testLayer())))
+import * as Platform from "#platform"
+
+import { FakeRuntime, makeRepository, tempDirectory, testLayer } from "./fakes.ts"
+
+const test = (name: string, program: () => Effect.Effect<void, any, any>) =>
+  it.effect(name, () => program().pipe(Effect.provide(testLayer())))
 const session = (id: string): Omit<SessionRow, "projectId"> => ({
-  id, agent: "general", name: "n", harnessId: "pi", provider: null, model: null, harnessSessionId: null,
-  runtime: RUNTIME, address: { machine: "local", id: "default" },
-  status: "idle", startedAt: 1, exitedAt: null, turnState: "none", turnPromptedAt: 0, metadata: {}, createdAt: 1, lastActive: 1,
+  id,
+  agent: "general",
+  name: "n",
+  harnessId: "pi",
+  provider: null,
+  model: null,
+  harnessSessionId: null,
+  runtime: RUNTIME,
+  address: { machine: "local", id: "default" },
+  status: "idle",
+  startedAt: 1,
+  exitedAt: null,
+  turnState: "none",
+  turnPromptedAt: 0,
+  metadata: {},
+  createdAt: 1,
+  lastActive: 1,
 })
 const pane = "w1:p1"
 const claudeId = "claude-session-1"
@@ -28,7 +45,11 @@ const parkAfter = <A>(db: object, method: string, f: Effect.Effect<A, any, any>)
     const reached = yield* Deferred.make<void>()
     const never = yield* Deferred.make<void>()
     const original = (db as Mutable)[method] as (...args: Array<unknown>) => Effect.Effect<unknown>
-    ;(db as Mutable)[method] = (...args: Array<unknown>) => original(...args).pipe(Effect.tap(() => Deferred.succeed(reached, undefined)), Effect.andThen(Deferred.await(never)))
+    ;(db as Mutable)[method] = (...args: Array<unknown>) =>
+      original(...args).pipe(
+        Effect.tap(() => Deferred.succeed(reached, undefined)),
+        Effect.andThen(Deferred.await(never)),
+      )
     const fiber = yield* Effect.forkChild(f)
     yield* Deferred.await(reached)
     ;(db as Mutable)[method] = original
@@ -40,15 +61,24 @@ const ready = Effect.gen(function* () {
   const inbox = yield* Inbox
   const herdr = yield* FakeRuntime
   const key = yield* repositoryKey(yield* makeRepository)
-  const coord = yield* db.coordinatorLaunch(key, "claude", false, { runtime: RUNTIME, address: { machine: "local", id: pane } })
+  const coord = yield* db.coordinatorLaunch(key, "claude", false, {
+    runtime: RUNTIME,
+    address: { machine: "local", id: pane },
+  })
   yield* db.reportCoordinatorSession(coord.sessionId, "claude", claudeId)
   yield* herdr.seedAgent(pane)
   assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), key))
   const projectId = yield* db.projectId(key)
   const call = { projectId, terminal: pane, claudeSessionId: claudeId }
   const sql = yield* SqlClient.SqlClient
-  const status = (message: string) => sql<{ status: string }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE i.content = ${message} OR m.output = ${message}`.pipe(Effect.map((rows) => rows[0]?.status))
-  const add = (message: string) => db.insertInbox({ sessionId: "aaaaaaaa", kind: "result" as const, message, details: {} })
+  const status = (message: string) =>
+    sql<{
+      status: string
+    }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE i.content = ${message} OR m.output = ${message}`.pipe(
+      Effect.map((rows) => rows[0]?.status),
+    )
+  const add = (message: string) =>
+    db.insertInbox({ sessionId: "aaaaaaaa", kind: "result" as const, message, details: {} })
   return { db, inbox, key, coord, projectId, call, status, add }
 })
 
@@ -76,9 +106,13 @@ describe("Claude inbox protocol regressions", () => {
       const exit = yield* Effect.exit(writeClaimFile(fs, path, target, "body", "owned"))
       assert.isTrue(Exit.isFailure(exit))
       const names = yield* fs.readDirectory(dir)
-      assert.deepStrictEqual(names.filter((name) => name.endsWith(".tmp")), [])
+      assert.deepStrictEqual(
+        names.filter((name) => name.endsWith(".tmp")),
+        [],
+      )
       assert.strictEqual(yield* fs.readFileString(path.join(dir, "keep.txt")), "leave")
-    }).pipe(Effect.provide(Platform.services)))
+    }).pipe(Effect.provide(Platform.services)),
+  )
 
   test("release-retry interrupted after commit does not offer the old token", () =>
     Effect.gen(function* () {
@@ -86,7 +120,11 @@ describe("Claude inbox protocol regressions", () => {
       const generation = (yield* inbox.attach({ ...call, replace: false })).generation!
       yield* add("three")
       const first = yield* inbox.pull({ ...call, generation })
-      yield* parkAfter(db, "withCoordinatorWrite", inbox.release({ ...call, generation, token: first.token!, retry: true }))
+      yield* parkAfter(
+        db,
+        "withCoordinatorWrite",
+        inbox.release({ ...call, generation, token: first.token!, retry: true }),
+      )
       assert.strictEqual(yield* status("three"), "pending")
       const again = yield* inbox.pull({ ...call, generation })
       assert.notStrictEqual(again.token, first.token)
@@ -132,9 +170,15 @@ describe("Claude inbox protocol regressions", () => {
       const projectId = yield* db.projectId(key)
       const got = yield* Ref.make<Array<string>>([])
       const first = yield* Deferred.make<void>()
-      const fiber = yield* Effect.forkChild(inbox.stream(projectId).pipe(
-        Stream.runForEach((batch) => Ref.update(got, (seen) => [...seen, batch]).pipe(Effect.andThen(Deferred.succeed(first, undefined)))),
-      ))
+      const fiber = yield* Effect.forkChild(
+        inbox
+          .stream(projectId)
+          .pipe(
+            Stream.runForEach((batch) =>
+              Ref.update(got, (seen) => [...seen, batch]).pipe(Effect.andThen(Deferred.succeed(first, undefined))),
+            ),
+          ),
+      )
       yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "for-A", details: {} })
       yield* Deferred.await(first)
       yield* db.coordinatorLaunch(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "wB:pB" } })
@@ -143,7 +187,9 @@ describe("Claude inbox protocol regressions", () => {
       yield* inbox.reconcile(projectId)
       const seen = yield* Ref.get(got)
       const sql = yield* SqlClient.SqlClient
-      const row = yield* sql<{ status: string }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'for-B'`
+      const row = yield* sql<{
+        status: string
+      }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'for-B'`
       assert.notStrictEqual(row[0]?.status, "delivering")
       yield* Fiber.interrupt(fiber)
       assert.deepStrictEqual(seen, ["for-A"])
@@ -155,20 +201,30 @@ describe("Claude inbox protocol regressions", () => {
       const inbox = yield* Inbox
       const herdr = yield* FakeRuntime
       const key = yield* repositoryKey(yield* makeRepository)
-      const coord = yield* db.coordinatorLaunch(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: pane } })
+      const coord = yield* db.coordinatorLaunch(key, "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: pane },
+      })
       assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), key))
       const projectId = yield* db.projectId(key)
       const got = yield* Ref.make<Array<string>>([])
       const first = yield* Deferred.make<void>()
-      const fiber = yield* Effect.forkChild(inbox.stream(projectId).pipe(
-        Stream.runForEach((batch) => Ref.update(got, (seen) => [...seen, batch]).pipe(Effect.andThen(Deferred.succeed(first, undefined)))),
-      ))
+      const fiber = yield* Effect.forkChild(
+        inbox
+          .stream(projectId)
+          .pipe(
+            Stream.runForEach((batch) =>
+              Ref.update(got, (seen) => [...seen, batch]).pipe(Effect.andThen(Deferred.succeed(first, undefined))),
+            ),
+          ),
+      )
       yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "pi-1", details: {} })
       yield* Deferred.await(first)
       yield* db.coordinatorLaunch(key, "claude", false, { runtime: RUNTIME, address: { machine: "local", id: pane } })
       yield* db.reportCoordinatorSession(coord.sessionId, "claude", claudeId)
       yield* herdr.seedAgent(pane)
-      const generation = (yield* inbox.attach({ projectId, terminal: pane, claudeSessionId: claudeId, replace: false })).generation!
+      const generation = (yield* inbox.attach({ projectId, terminal: pane, claudeSessionId: claudeId, replace: false }))
+        .generation!
       yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "claude-1", details: {} })
       yield* inbox.reconcile(projectId)
       const native = yield* inbox.pull({ projectId, terminal: pane, claudeSessionId: claudeId, generation })
@@ -197,53 +253,73 @@ describe("Claude inbox protocol regressions", () => {
       const dbFile = path.join(home, "vibest.db")
       const stack = Inbox.layer.pipe(
         Layer.provideMerge(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(dbFile)))),
-        Layer.provideMerge(Layer.effect(Runtimes, Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])))),
+        Layer.provideMerge(
+          Layer.effect(
+            Runtimes,
+            Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
+          ),
+        ),
         Layer.provideMerge(FakeRuntime.layer()),
         Layer.provideMerge(Layer.effect(Layout, Layout.make(home))),
         Layer.provideMerge(builtinHarnesses),
         Layer.provideMerge(Drain.layer),
         Layer.provideMerge(Platform.services),
       )
-      const open = <A>(program: Effect.Effect<A, any, any>) => Effect.scoped(Effect.gen(function* () {
-        const context = yield* Layer.build(stack)
-        return yield* program.pipe(Effect.provide(context))
-      }))
-      const generation = yield* open(Effect.gen(function* () {
-        const db = yield* Db
-        const inbox = yield* Inbox
-        const herdr = yield* FakeRuntime
-        const key = yield* repositoryKey(yield* makeRepository)
-        const coord = yield* db.coordinatorLaunch(key, "claude", false, { runtime: RUNTIME, address: { machine: "local", id: pane } })
-        yield* db.reportCoordinatorSession(coord.sessionId, "claude", claudeId)
-        yield* herdr.seedAgent(pane)
-        assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), key))
-        const projectId = yield* db.projectId(key)
-        const call = { projectId, terminal: pane, claudeSessionId: claudeId }
-        const attached = yield* inbox.attach({ ...call, replace: false })
-        yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "result", message: "body", details: {} })
-        const pulled = yield* inbox.pull({ ...call, generation: attached.generation! })
-        assert.isString(pulled.token)
-        yield* fs.writeFileString(path.join(home, "inbox-claims", "keep.txt"), "leave")
-        return attached.generation!
-      }))
-      yield* open(Effect.gen(function* () {
-        const db = yield* Db
-        const inbox = yield* Inbox
-        const herdr = yield* FakeRuntime
-        const projectId = (yield* db.coordinators)[0]!.projectId
-        yield* herdr.seedAgent(pane)
-        const call = { projectId, terminal: pane, claudeSessionId: claudeId }
-        const pulled = yield* inbox.pull({ ...call, generation })
-        assert.strictEqual(pulled.error, "stale-receiver")
-        yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "result", message: "later", details: {} })
-        yield* inbox.deliver(projectId)
-        assert.strictEqual((yield* herdr.callsTo("send")).length, 0)
-        assert.strictEqual(yield* fs.readFileString(path.join(home, "inbox-claims", "keep.txt")), "leave")
-        const sql = yield* SqlClient.SqlClient
-        const body = yield* sql<{ status: string }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'body'`
-        const later = yield* sql<{ status: string }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'later'`
-        assert.strictEqual(body[0]?.status, "failed")
-        assert.strictEqual(later[0]?.status, "pending")
-      }))
-    }).pipe(Effect.provide(Platform.services)))
+      const open = <A>(program: Effect.Effect<A, any, any>) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(stack)
+            return yield* program.pipe(Effect.provide(context))
+          }),
+        )
+      const generation = yield* open(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const inbox = yield* Inbox
+          const herdr = yield* FakeRuntime
+          const key = yield* repositoryKey(yield* makeRepository)
+          const coord = yield* db.coordinatorLaunch(key, "claude", false, {
+            runtime: RUNTIME,
+            address: { machine: "local", id: pane },
+          })
+          yield* db.reportCoordinatorSession(coord.sessionId, "claude", claudeId)
+          yield* herdr.seedAgent(pane)
+          assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), key))
+          const projectId = yield* db.projectId(key)
+          const call = { projectId, terminal: pane, claudeSessionId: claudeId }
+          const attached = yield* inbox.attach({ ...call, replace: false })
+          yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "result", message: "body", details: {} })
+          const pulled = yield* inbox.pull({ ...call, generation: attached.generation! })
+          assert.isString(pulled.token)
+          yield* fs.writeFileString(path.join(home, "inbox-claims", "keep.txt"), "leave")
+          return attached.generation!
+        }),
+      )
+      yield* open(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const inbox = yield* Inbox
+          const herdr = yield* FakeRuntime
+          const projectId = (yield* db.coordinators)[0]!.projectId
+          yield* herdr.seedAgent(pane)
+          const call = { projectId, terminal: pane, claudeSessionId: claudeId }
+          const pulled = yield* inbox.pull({ ...call, generation })
+          assert.strictEqual(pulled.error, "stale-receiver")
+          yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "result", message: "later", details: {} })
+          yield* inbox.deliver(projectId)
+          assert.strictEqual((yield* herdr.callsTo("send")).length, 0)
+          assert.strictEqual(yield* fs.readFileString(path.join(home, "inbox-claims", "keep.txt")), "leave")
+          const sql = yield* SqlClient.SqlClient
+          const body = yield* sql<{
+            status: string
+          }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'body'`
+          const later = yield* sql<{
+            status: string
+          }>`SELECT i.delivery_status AS status FROM inbox i LEFT JOIN message m ON m.id = i.result_message_id WHERE m.output = 'later'`
+          assert.strictEqual(body[0]?.status, "failed")
+          assert.strictEqual(later[0]?.status, "pending")
+        }),
+      )
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })

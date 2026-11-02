@@ -9,12 +9,15 @@ type Entry = { id: string; agent: string; harness: string; routing?: { trace: Ar
 
 const mains = async (w: World) => (await w.json<Array<Entry>>(["ls"])).filter((e) => e.agent === "main")
 const start = (w: World) =>
-  w.ok(["--harness", "pi", "--session", w.herdrSession, "--headless", "--env", `PI_CODING_AGENT_DIR=${w.config.pi}`], { timeoutMs: 60_000 })
+  w.ok(["--harness", "pi", "--session", w.herdrSession, "--headless", "--env", `PI_CODING_AGENT_DIR=${w.config.pi}`], {
+    timeoutMs: 60_000,
+  })
 
 const checks: ReadonlyArray<Check> = [
   {
     id: "S1",
-    title: "in a project directory, `vibest` starts its main agent in this run's herdr session; `vibest ls` shows it first",
+    title:
+      "in a project directory, `vibest` starts its main agent in this run's herdr session; `vibest ls` shows it first",
     run: async (w) => {
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
@@ -23,7 +26,10 @@ const checks: ReadonlyArray<Check> = [
       await until("the main agent in vibest ls", async () => (await mains(w)).length === 1, 30_000)
       const [main] = await mains(w)
       expect(main!.harness === "pi", `main agent: ${JSON.stringify(main)}`)
-      expect(main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"), `routing: ${JSON.stringify(main)}`)
+      expect(
+        main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
+        `routing: ${JSON.stringify(main)}`,
+      )
     },
   },
 ]

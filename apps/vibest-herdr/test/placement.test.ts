@@ -1,17 +1,25 @@
 // Every session is a tab beside the project's main agent. A worktree is vibest's own (detached), never herdr's.
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
+
 import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
 
 const spawnInput = (repo: string) =>
-  Effect.map(repositoryKey(repo), (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness: "pi" as const }))
+  Effect.map(repositoryKey(repo), (key) => ({
+    machine: { id: "local" },
+    root: repo,
+    key,
+    name: "task",
+    prompt: "do it",
+    harness: "pi" as const,
+  }))
 
 describe("placement", () => {
   test(
@@ -24,24 +32,38 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } })
+      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "main:coord" },
+      })
 
-      const { id } = yield* sessions.spawn((yield* spawnInput(repo)))
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const wt = (yield* sessions.get(id)).worktree
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.near, placed.project, placed.cwd], ["main:coord", repo, wt])
-      assert.strictEqual((yield* herdr.agent((id)))!.terminal.split(":")[0], "main")
+      assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "main")
       assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
       const shown = (yield* herdr.callsTo("present"))[0]!
-      assert.deepInclude(shown, { terminal: (yield* herdr.agent((id)))!.terminal, info: { agent: "general", harness: "pi", title: "task", definition: "general", session: id, project: yield* repositoryDirectoryName(repo), live: "1" } })
+      assert.deepInclude(shown, {
+        terminal: (yield* herdr.agent(id))!.terminal,
+        info: {
+          agent: "general",
+          harness: "pi",
+          title: "task",
+          definition: "general",
+          session: id,
+          project: yield* repositoryDirectoryName(repo),
+          live: "1",
+        },
+      })
 
       // The runtime came back (its labels gone): every live session's terminal is labelled again.
       yield* PubSub.publish(herdr.events, { type: "reset", machine: "local" })
       yield* until(herdr.callsTo("present"), (calls) => calls.length > 1)
 
       yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn((id))
+      yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.deepInclude(yield* sessions.remove(id), { pane: "closed", worktree: "removed" })
       assert.isFalse(yield* fs.exists(wt))
@@ -58,7 +80,13 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } }, { projectDirectory: repo })
+      yield* db.coordinatorLaunch(
+        yield* repositoryKey(repo),
+        "pi",
+        false,
+        { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } },
+        { projectDirectory: repo },
+      )
 
       const a = yield* sessions.spawn(yield* spawnInput(repo))
       const b = yield* sessions.spawn({ ...(yield* spawnInput(repo)), name: "second" })
@@ -67,7 +95,7 @@ describe("placement", () => {
       yield* until(herdr.callsTo("present"), (calls) => calls.at(-1)!.info.live === "2")
 
       // The harness of a exits: its terminal relabels the workspace without it.
-      yield* herdr.updateAgent((a.id), (agent) => ({ ...agent, alive: false }))
+      yield* herdr.updateAgent(a.id, (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(a.id)
       assert.deepInclude((yield* herdr.callsTo("present")).at(-1)!.info, { live: "1" })
 
@@ -89,14 +117,17 @@ describe("placement", () => {
       // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, { runtime: "other", address: { machine: "local", id: "w1:coord" } })
+      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+        runtime: "other",
+        address: { machine: "local", id: "w1:coord" },
+      })
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(placed.near, undefined)
       // Its workspace still resolves by the project; only the other runtime's terminal does not place it.
-      assert.strictEqual((yield* herdr.agent((id)))!.terminal.split(":")[0], "w1")
+      assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "w1")
     }),
   )
 })

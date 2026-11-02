@@ -1,5 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
 
@@ -40,7 +41,9 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const pid = await w.daemonPid()
       await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home-v2"))
-      await until("the edited plugin loaded", async () => (await list(w)).some((p) => p.id === "home-v2" && p.status === "active"))
+      await until("the edited plugin loaded", async () =>
+        (await list(w)).some((p) => p.id === "home-v2" && p.status === "active"),
+      )
       expect((await w.daemonPid()) === pid, "vibestd restarted")
     },
   },
@@ -51,7 +54,10 @@ const checks: ReadonlyArray<Check> = [
       await write(path.join(w.vibestHome, "plugins", "broken.ts"), "export default 42\n")
       await until("the failure reported", async () => {
         const all = await list(w)
-        return all.some((p) => p.status === "failed" && p.source.endsWith("broken.ts")) && all.some((p) => p.id === "home-v2" && p.status === "active")
+        return (
+          all.some((p) => p.status === "failed" && p.source.endsWith("broken.ts")) &&
+          all.some((p) => p.id === "home-v2" && p.status === "active")
+        )
       })
       await fs.rm(path.join(w.vibestHome, "plugins", "broken.ts"))
     },
@@ -60,8 +66,13 @@ const checks: ReadonlyArray<Check> = [
     id: "G4",
     title: "a refusing agent.start.before blocks run with its reason, before any worktree",
     run: async (w) => {
-      await write(path.join(w.vibestHome, "plugins", "refuse.ts"), plugin("refuse", `() => Effect.fail(new AgentRefused({ reason: "e2e says no" }))`))
-      await until("the refusing plugin active", async () => (await list(w)).some((p) => p.id === "refuse" && p.status === "active"))
+      await write(
+        path.join(w.vibestHome, "plugins", "refuse.ts"),
+        plugin("refuse", `() => Effect.fail(new AgentRefused({ reason: "e2e says no" }))`),
+      )
+      await until("the refusing plugin active", async () =>
+        (await list(w)).some((p) => p.id === "refuse" && p.status === "active"),
+      )
       const worktrees = path.join(w.vibestHome, "worktrees")
       const before = await fs.readdir(worktrees).catch(() => [])
       const r = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], { timeoutMs: 60_000 })
@@ -70,7 +81,10 @@ const checks: ReadonlyArray<Check> = [
       expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
       const { length } = await w.json<Array<unknown>>(["ls", "--all"])
       expect(length === 0, "a session row was written")
-      expect((await list(w)).some((p) => p.id === "refuse" && p.refused === 1), "the refusal was not counted")
+      expect(
+        (await list(w)).some((p) => p.id === "refuse" && p.refused === 1),
+        "the refusal was not counted",
+      )
       await fs.rm(path.join(w.vibestHome, "plugins", "refuse.ts"))
     },
   },

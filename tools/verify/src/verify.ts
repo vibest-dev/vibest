@@ -13,7 +13,11 @@ const only = process.argv.slice(2)
 
 const step = (title: string, argv: ReadonlyArray<string>, options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) => {
   console.log(`\n== verify: ${title}`)
-  const r = childProcess.spawnSync(argv[0]!, argv.slice(1), { cwd: options.cwd ?? root, env: options.env ?? process.env, stdio: "inherit" })
+  const r = childProcess.spawnSync(argv[0]!, argv.slice(1), {
+    cwd: options.cwd ?? root,
+    env: options.env ?? process.env,
+    stdio: "inherit",
+  })
   if (r.status !== 0) {
     console.error(`\nverify: ${title} failed (${r.error?.message ?? `exit ${r.status ?? r.signal}`})`)
     process.exit(1)
@@ -41,16 +45,24 @@ const e2e = (method: string, install: string) =>
 // install.sh, as `curl … | sh` runs it, from a release made of this checkout; its link and versions go into the temp directory.
 const release = path.join(dir, "release")
 const curl = path.join(dir, "curl")
-step("build the release archive", ["bun", "scripts/build-archive.ts", target, release], { cwd: path.join(root, "apps/vibest-herdr") })
+step("build the release archive", ["bun", "scripts/build-archive.ts", target, release], {
+  cwd: path.join(root, "apps/vibest-herdr"),
+})
 step("install.sh", ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "apps/vibest-herdr/install.sh")}`], {
-  env: { ...process.env, VIBEST_DOWNLOAD_URL: `file://${release}`, VIBEST_INSTALL: path.join(curl, "share"), VIBEST_BIN: path.join(curl, "bin") },
+  env: {
+    ...process.env,
+    VIBEST_DOWNLOAD_URL: `file://${release}`,
+    VIBEST_INSTALL: path.join(curl, "share"),
+    VIBEST_BIN: path.join(curl, "bin"),
+  },
 })
 e2e("curl", curl)
 
 // npm, as `npm i -g @vibest/cli` installs it.
 const packs = path.join(dir, "packs")
 fs.mkdirSync(packs)
-for (const pkg of [path.join(root, "apps/vibest-herdr"), platform]) step(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg })
+for (const pkg of [path.join(root, "apps/vibest-herdr"), platform])
+  step(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg })
 const npm = path.join(dir, "npm")
 const tarballs = fs.readdirSync(packs).map((f) => path.join(packs, f))
 step("npm install", ["npm", "install", "--no-audit", "--no-fund", "--prefix", npm, ...tarballs])
@@ -65,7 +77,10 @@ if (only.length === 0) {
   for (const line of fs.readFileSync(path.join(root, "docs/testing/feature-map.md"), "utf8").split("\n")) {
     if (line.startsWith("## ")) section = line.slice(3)
     const m = /^\| [A-Z]+\d+ \| (.+?) \| (agent|runtime) \|/.exec(line)
-    if (m) manual.push(`  ${section}: ${m[1]!.replaceAll("`", "")}${m[2] === "agent" ? " (an agent checks it)" : " (needs the Agent runtime)"}`)
+    if (m)
+      manual.push(
+        `  ${section}: ${m[1]!.replaceAll("`", "")}${m[2] === "agent" ? " (an agent checks it)" : " (needs the Agent runtime)"}`,
+      )
   }
   if (manual.length) console.log(`Not proven by a script (docs/testing/feature-map.md):\n${manual.join("\n")}`)
 }

@@ -1,11 +1,14 @@
 // Session rules (SPEC §11.5). Written once per session to ~/.vibest/rules/<id>.md.
 import { Effect, FileSystem, Path } from "effect"
+
 import { shellQuote } from "./paths.ts"
 
 export const INJECT_LIMIT = 16000
 
 const truncate = (text: string, what: string) =>
-  text.length <= INJECT_LIMIT ? text : `${text.slice(0, INJECT_LIMIT)}\n\n[${what} truncated at ${INJECT_LIMIT} characters]`
+  text.length <= INJECT_LIMIT
+    ? text
+    : `${text.slice(0, INJECT_LIMIT)}\n\n[${what} truncated at ${INJECT_LIMIT} characters]`
 
 /** How an agent types vibest in its shell: `vibest`, or `bun …/main.ts` when vibest runs from source. */
 const invocation = (vibest: ReadonlyArray<string>) => vibest.map(shellQuote).join(" ")
@@ -21,7 +24,10 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
     .filter((f) => f.endsWith(".md"))
     .sort()
   const entries = yield* Effect.forEach(files, (f) =>
-    read(path.join(memoryDir, f)).pipe(Effect.map((body) => `### ${f}\n${body}`), Effect.orElseSucceed(() => "")),
+    read(path.join(memoryDir, f)).pipe(
+      Effect.map((body) => `### ${f}\n${body}`),
+      Effect.orElseSucceed(() => ""),
+    ),
   )
   return {
     instructions: truncate(instructions, "instructions"),

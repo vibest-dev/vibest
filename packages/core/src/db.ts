@@ -1,3 +1,5 @@
+import { MessageStatus } from "@vibest/schema/model"
+import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 // The only place with SQL (docs/design/schema.md: project, session, inbox, message). One schema, no migrations: an
 // empty database gets it in one transaction; any other file is accepted only when its version pragmas and required
 // objects already match. `inspectSchema` only reads;
@@ -6,11 +8,10 @@
 // `sql.withTransaction`.
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
+
 import { roundSql } from "./db-rounds.ts"
 import { HARNESS_IDS, type HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
-import { MessageStatus } from "@vibest/schema/model"
-import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
@@ -29,7 +30,8 @@ const decodeRuntime = (raw: string): { readonly kind: string; readonly machine: 
 const addressJson = (runtime: { readonly kind: string; readonly machine: string; readonly id: string }) =>
   JSON.stringify({ machine: runtime.machine, id: runtime.id })
 /** `encodedAddress` is `encodeAddress` output, the shape callers pass as a place guard. */
-const runtimeMatching = (type: string, encodedAddress: string) => encodeRuntime(type, JSON.parse(encodedAddress) as RuntimeAddress)
+const runtimeMatching = (type: string, encodedAddress: string) =>
+  encodeRuntime(type, JSON.parse(encodedAddress) as RuntimeAddress)
 
 const Metadata = Schema.Struct({
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -62,53 +64,64 @@ const Metadata = Schema.Struct({
    * reported in it (its shell and foreground processes, never argv or env), and `exited` once signal 0 found every one
    * of them gone.
    */
-  stop: Schema.optional(Schema.Array(Schema.Struct({ pane: Schema.String, pids: Schema.Array(Schema.Number), exited: Schema.Boolean }))),
+  stop: Schema.optional(
+    Schema.Array(Schema.Struct({ pane: Schema.String, pids: Schema.Array(Schema.Number), exited: Schema.Boolean })),
+  ),
   /**
    * Claude inbox attachment intent. Not a live generation: this process's registry is authoritative, and a restart
    * leaves the marker here while pull of the stored generation is stale. Paste stays off while it is set on claude.
    */
-  bridge: Schema.optional(Schema.Struct({
-    generation: Schema.String,
-    claudeSessionId: Schema.String,
-    runtime: Schema.String,
-    address: Schema.String,
-  })),
+  bridge: Schema.optional(
+    Schema.Struct({
+      generation: Schema.String,
+      claudeSessionId: Schema.String,
+      runtime: Schema.String,
+      address: Schema.String,
+    }),
+  ),
   /**
    * The check rule, on the open round: how many commands have finished, the stored outcome of the current result
    * (`mtime`), and one acceptance entry per finished command. `deliverFailed`: interrupt will deliver a failing
    * check instead of pasting it, and it stays until that result is written. Cleared when the round ends.
    */
-  check: Schema.optional(Schema.Struct({
-    mtime: Schema.Number,
-    attempts: Schema.Number,
-    ran: Schema.optional(Schema.Struct({ ok: Schema.Boolean, tail: Schema.String })),
-    acceptance: Schema.Array(Schema.Struct({
-      reviewer: Schema.Literal("check"),
-      outcome: Schema.Literals(["pass", "fail"]),
-      summary: Schema.String,
-      time: Schema.Number,
-    })),
-    deliverFailed: Schema.optional(Schema.Boolean),
-  })),
+  check: Schema.optional(
+    Schema.Struct({
+      mtime: Schema.Number,
+      attempts: Schema.Number,
+      ran: Schema.optional(Schema.Struct({ ok: Schema.Boolean, tail: Schema.String })),
+      acceptance: Schema.Array(
+        Schema.Struct({
+          reviewer: Schema.Literal("check"),
+          outcome: Schema.Literals(["pass", "fail"]),
+          summary: Schema.String,
+          time: Schema.Number,
+        }),
+      ),
+      deliverFailed: Schema.optional(Schema.Boolean),
+    }),
+  ),
   /**
    * Real usage-limit tries for this session, oldest first: the (harness, provider) pairs that already hit a limit,
    * kept across moves and across a vibestd restart. Skips inside one move are not kept here.
    */
-  attempts: Schema.optional(Schema.Array(Schema.Struct({
-    harness: Schema.String,
-    provider: Schema.optional(Schema.String),
-    outcome: Schema.Literal("limited"),
-    at: Schema.Number,
-  }))),
+  attempts: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        harness: Schema.String,
+        provider: Schema.optional(Schema.String),
+        outcome: Schema.Literal("limited"),
+        at: Schema.Number,
+      }),
+    ),
+  ),
 })
-export type CoordinatorBridge = NonNullable<typeof Metadata.Type["bridge"]>
+export type CoordinatorBridge = NonNullable<(typeof Metadata.Type)["bridge"]>
 const BridgeValue = Schema.Struct({
   generation: Schema.String,
   claudeSessionId: Schema.String,
   runtime: Schema.String,
   address: Schema.String,
 })
-
 
 /** `set` is true when an attachment is stored, even if it does not decode. Corrupt intent still suppresses paste. */
 const bridgeFrom = (raw: unknown): { readonly set: boolean; readonly bridge: CoordinatorBridge | undefined } => {
@@ -265,17 +278,23 @@ export const migrate = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   if ((yield* inspectSchema) === "empty") {
     // The write lock makes the recheck authoritative: a concurrent empty open either installs or sees the winner.
-    const installed = yield* sql.withTransaction(Effect.gen(function* () {
-      if ((yield* objectCount) !== 0) return false
-      for (const statement of SCHEMA) yield* sql.unsafe(statement)
-      return true
-    }))
+    const installed = yield* sql.withTransaction(
+      Effect.gen(function* () {
+        if ((yield* objectCount) !== 0) return false
+        for (const statement of SCHEMA) yield* sql.unsafe(statement)
+        return true
+      }),
+    )
     if (installed) return
   }
   if ((yield* inspectSchema) !== "ready") return yield* mismatch(0, 0, "empty after install")
 })
 
-const newId = Effect.sync(() => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, "0"))
+const newId = Effect.sync(() =>
+  Math.floor(Math.random() * 0x100000000)
+    .toString(16)
+    .padStart(8, "0"),
+)
 
 /**
  * What a subagent keeps in `session.metadata`: the session metadata, its label, provider and model,
@@ -312,7 +331,17 @@ type SessionColumns = {
 
 const fromColumns = (row: SessionColumns, status: AgentStatus) => {
   // `promptedSeq` is a pre-port metadata key no build reads; stripped so it leaves with the row's next write.
-  const { name, provider, model, startedAt, exitedAt, promptedSeq: _promptedSeq, lastActive, task: _task, ...rest } = JSON.parse(row.metadata) as SessionMetadata & { readonly promptedSeq?: number }
+  const {
+    name,
+    provider,
+    model,
+    startedAt,
+    exitedAt,
+    promptedSeq: _promptedSeq,
+    lastActive,
+    task: _task,
+    ...rest
+  } = JSON.parse(row.metadata) as SessionMetadata & { readonly promptedSeq?: number }
   const located = row.runtimeJson === null ? undefined : decodeRuntime(row.runtimeJson)
   return {
     id: row.id,
@@ -337,7 +366,22 @@ const fromColumns = (row: SessionColumns, status: AgentStatus) => {
 }
 const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 
-const toMetadata = (session: Omit<SessionRow, "id" | "projectId" | "agent" | "harnessId" | "harnessSessionId" | "runtime" | "address" | "status" | "turnState" | "turnPromptedAt" | "createdAt">): SessionMetadata => ({
+const toMetadata = (
+  session: Omit<
+    SessionRow,
+    | "id"
+    | "projectId"
+    | "agent"
+    | "harnessId"
+    | "harnessSessionId"
+    | "runtime"
+    | "address"
+    | "status"
+    | "turnState"
+    | "turnPromptedAt"
+    | "createdAt"
+  >,
+): SessionMetadata => ({
   ...session.metadata,
   name: session.name,
   provider: session.provider,
@@ -365,12 +409,20 @@ type InboxSql = {
 
 /** Kind is not a column: a result points at a message; a user row is a send; system is a notice; anything else is a report. */
 const toInbox = (row: InboxSql) => {
-  const kind: InboxKind = row.resultMessageId !== null ? "result" : row.senderType === "system" ? "notice" : row.senderType === "user" ? "send" : "report"
-  const sessionId = kind === "send"
-    ? row.recipientSessionId
-    : kind === "notice"
-      ? (row.senderId ?? row.recipientSessionId)
-      : (row.senderId ?? row.reportedSession ?? row.recipientSessionId)
+  const kind: InboxKind =
+    row.resultMessageId !== null
+      ? "result"
+      : row.senderType === "system"
+        ? "notice"
+        : row.senderType === "user"
+          ? "send"
+          : "report"
+  const sessionId =
+    kind === "send"
+      ? row.recipientSessionId
+      : kind === "notice"
+        ? (row.senderId ?? row.recipientSessionId)
+        : (row.senderId ?? row.reportedSession ?? row.recipientSessionId)
   return {
     id: row.id,
     sessionId,
@@ -453,47 +505,68 @@ const make = Effect.gen(function* () {
   const readSession = (id: string) => selectSessions([sql`a.id = ${id}`], true).pipe(Effect.map((rows) => rows[0]))
 
   const findCoordinators = (project?: number) =>
-    sql<{ id: string; projectId: number; harnessId: string; harnessSessionId: string | null; runtime: string | null; directory: string; createdAt: number; metadata: string }>`
+    sql<{
+      id: string
+      projectId: number
+      harnessId: string
+      harnessSessionId: string | null
+      runtime: string | null
+      directory: string
+      createdAt: number
+      metadata: string
+    }>`
       SELECT a.id, a.project_id, a.harness AS harness_id, a.harness_session_id, a.runtime, a.directory, a.created_at, a.metadata
       FROM session a JOIN project p ON p.main_session_id = a.id ${project === undefined ? sql`` : sql`WHERE p.id = ${project}`} ORDER BY a.id`.pipe(
-      Effect.flatMap((rows) => decodeCoordinators(rows.map((row) => {
-        const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-        const { provider, model, routing, projectDirectory } = JSON.parse(row.metadata) as {
-          provider?: string | null
-          model?: string | null
-          routing?: unknown
-          projectDirectory?: unknown
-        }
-        return {
-          id: row.id,
-          projectId: row.projectId,
-          harnessId: row.harnessId,
-          harnessSessionId: row.harnessSessionId,
-          runtime: located?.kind ?? null,
-          address: located === undefined ? null : addressJson(located),
-          directory: row.directory,
-          ...(typeof projectDirectory === "string" && projectDirectory !== "" ? { projectDirectory } : {}),
-          createdAt: row.createdAt,
-          provider: provider ?? null,
-          model: model ?? null,
-          ...(routing === undefined ? {} : { routing }),
-        }
-      }))),
+      Effect.flatMap((rows) =>
+        decodeCoordinators(
+          rows.map((row) => {
+            const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
+            const { provider, model, routing, projectDirectory } = JSON.parse(row.metadata) as {
+              provider?: string | null
+              model?: string | null
+              routing?: unknown
+              projectDirectory?: unknown
+            }
+            return {
+              id: row.id,
+              projectId: row.projectId,
+              harnessId: row.harnessId,
+              harnessSessionId: row.harnessSessionId,
+              runtime: located?.kind ?? null,
+              address: located === undefined ? null : addressJson(located),
+              directory: row.directory,
+              ...(typeof projectDirectory === "string" && projectDirectory !== "" ? { projectDirectory } : {}),
+              createdAt: row.createdAt,
+              provider: provider ?? null,
+              model: model ?? null,
+              ...(routing === undefined ? {} : { routing }),
+            }
+          }),
+        ),
+      ),
     )
 
   const inbox = (where: string, params: ReadonlyArray<unknown> = [], order = "m.id") =>
-    sql.unsafe(`SELECT m.id, m.recipient_session_id, m.sender_type, m.sender_id, m.content, m.result_message_id, m.delivery_status,
+    sql
+      .unsafe(
+        `SELECT m.id, m.recipient_session_id, m.sender_type, m.sender_id, m.content, m.result_message_id, m.delivery_status,
       msg.output AS reported_output, msg.session_id AS reported_session, msg.metadata AS reported_metadata
-      ${INBOX_FROM} WHERE ${where} ORDER BY ${order}`, params).pipe(
-      Effect.map((rows) => (rows as ReadonlyArray<InboxSql>).map(toInbox)),
-      Effect.flatMap(decodeInbox),
-    )
+      ${INBOX_FROM} WHERE ${where} ORDER BY ${order}`,
+        params,
+      )
+      .pipe(
+        Effect.map((rows) => (rows as ReadonlyArray<InboxSql>).map(toInbox)),
+        Effect.flatMap(decodeInbox),
+      )
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(`m.id IN (${ids.map(() => "?").join(", ")})`, ids)
   const userSend = `m.sender_type = 'user' AND m.id != coalesce(json_extract(s.metadata, '$.task'), -1)`
   const findSend = (sessionId: string, status: InboxStatus) =>
     inbox(`m.recipient_session_id = ? AND ${userSend} AND m.delivery_status = ?`, [sessionId, storedStatus(status)])
 
-  const { roundStatus, openRound, bindOpenRound, closeRound, latestRoundAt, coverRound, rescheduleSource } = roundSql(sql, now)
+  const { roundStatus, openRound, bindOpenRound, closeRound, latestRoundAt, coverRound, rescheduleSource } = roundSql(
+    sql,
+    now,
+  )
 
   /**
    * A `send` goes to the subagent and always waits for it. The rest go to the sender's parent (`parent_session_id`, else
@@ -506,8 +579,8 @@ const make = Effect.gen(function* () {
       const toAgent = row.kind === "send"
       const [main] = toAgent
         ? []
-        // The parent while it has not ended; after `vibest --new` ended it, the project's current main agent.
-        : yield* sql<{ main: string | null; present: number }>`WITH r AS (
+        : // The parent while it has not ended; after `vibest --new` ended it, the project's current main agent.
+          yield* sql<{ main: string | null; present: number }>`WITH r AS (
               SELECT CASE WHEN parent.id IS NOT NULL AND parent.ended_at IS NULL THEN parent.id ELSE p.main_session_id END AS main
               FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session parent ON parent.id = s.parent_session_id
               WHERE s.id = ${row.sessionId})
@@ -519,7 +592,16 @@ const make = Effect.gen(function* () {
         senderType: toAgent ? "user" : row.kind === "notice" ? "system" : "session",
         ...(toAgent ? {} : { senderId: row.sessionId }),
         content: result ? "" : row.message,
-        ...(result ? { resultMessageId: yield* closeRound(row.sessionId, row.message, status ?? roundStatus(row.details.status), row.details) } : {}),
+        ...(result
+          ? {
+              resultMessageId: yield* closeRound(
+                row.sessionId,
+                row.message,
+                status ?? roundStatus(row.details.status),
+                row.details,
+              ),
+            }
+          : {}),
         deliveryStatus: toAgent || (main?.main && Number(main.present) === 1) ? "pending" : "dropped",
       })} RETURNING id`
       return (yield* inboxIn([inserted!.id]))[0]!
@@ -548,7 +630,8 @@ const make = Effect.gen(function* () {
       // The terminal lives inside the runtime column (`{kind, machine, id}`): recording where the session runs rewrites it.
       if (patch.address !== undefined) columns.runtime = encodeRuntime(current.runtime, patch.address)
       const stopped = !!(next.metadata.archived || next.metadata.removed)
-      if (stopped !== !!(current.metadata.archived || current.metadata.removed)) columns.endedAt = stopped ? next.lastActive : null
+      if (stopped !== !!(current.metadata.archived || current.metadata.removed))
+        columns.endedAt = stopped ? next.lastActive : null
       yield* sql`UPDATE session SET ${sql.update(columns)} WHERE id = ${id}`
       // The open turn is the message with status `working`. "open" starts one (or re-stamps it) unless one is already
       // open (a user-typed prompt inserts its own); an end closes it.
@@ -557,7 +640,9 @@ const make = Effect.gen(function* () {
           yield* sql`UPDATE message SET started_at = ${next.turnPromptedAt} WHERE session_id = ${id} AND status = 'working'`
           yield* bindOpenRound(id)
         } else {
-          const working = yield* sql<{ id: number }>`SELECT id FROM message WHERE session_id = ${id} AND status = 'working' LIMIT 1`
+          const working = yield* sql<{
+            id: number
+          }>`SELECT id FROM message WHERE session_id = ${id} AND status = 'working' LIMIT 1`
           if (working.length === 0) yield* openRound(id, next.turnPromptedAt)
         }
       } else if (patch.turnState !== undefined && patch.turnState !== "none" && current.turnState === "open") {
@@ -573,11 +658,13 @@ const make = Effect.gen(function* () {
     sql`UPDATE inbox SET delivery_status = 'dropped'
       WHERE delivery_status = 'pending' AND sender_type != 'user'
       AND recipient_session_id = (SELECT main_session_id FROM project WHERE id = ${projectId})
-      ${guard === "absent"
-        ? sql`AND NOT EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime IS NOT NULL)`
-        : guard
-          ? sql`AND EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime = ${runtimeMatching(guard.runtime, guard.address)})`
-          : sql``}`
+      ${
+        guard === "absent"
+          ? sql`AND NOT EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime IS NOT NULL)`
+          : guard
+            ? sql`AND EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime = ${runtimeMatching(guard.runtime, guard.address)})`
+            : sql``
+      }`
 
   /** Clear the place of every main agent at it (outside `except`), and drop what was waiting for them. */
   const clearMainAt = (runtime: string, address: string, except?: number) =>
@@ -589,7 +676,9 @@ const make = Effect.gen(function* () {
     })
 
   const unusedId = newId.pipe(
-    Effect.flatMap((id) => sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => (rows.length > 0 ? undefined : id)))),
+    Effect.flatMap((id) =>
+      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => (rows.length > 0 ? undefined : id))),
+    ),
     Effect.repeat({ until: (id) => id !== undefined }),
     Effect.map((id) => id!),
   )
@@ -599,70 +688,118 @@ const make = Effect.gen(function* () {
 
     /** The project id for `key`, if one exists. Does not create a row. */
     projectByKey: (key: string) =>
-      sql<{ id: number }>`SELECT id FROM project WHERE directory = ${key}`.pipe(Effect.map((rows) => rows[0]?.id), Effect.orDie),
+      sql<{ id: number }>`SELECT id FROM project WHERE directory = ${key}`.pipe(
+        Effect.map((rows) => rows[0]?.id),
+        Effect.orDie,
+      ),
 
     projectKey: (id: number) =>
-      sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`.pipe(Effect.map((rows) => rows[0]?.directory), Effect.orDie),
+      sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.directory),
+        Effect.orDie,
+      ),
 
     /** Where the session works: its worktree (a peer's is its owner's). */
     sessionDirectory: (id: string) =>
-      sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => rows[0]?.directory), Effect.orDie),
+      sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.directory),
+        Effect.orDie,
+      ),
 
     /**
      * Insert a subagent of project `key`, working in `cwd` (a `--peer` borrows its owner's), with its
      * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
      * already running (one transaction).
      */
-    insertSession: (row: Omit<SessionRow, "projectId">, key: string, max?: number, cwd = "", task?: string, parentSessionId?: string) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          if (max !== undefined) {
-            const n = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM session a
+    insertSession: (
+      row: Omit<SessionRow, "projectId">,
+      key: string,
+      max?: number,
+      cwd = "",
+      task?: string,
+      parentSessionId?: string,
+    ) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            if (max !== undefined) {
+              const n =
+                (yield* sql<{ n: number }>`SELECT count(*) AS n FROM session a
               WHERE ${notMain} AND json_extract(metadata, '$.exitedAt') IS NULL`)[0]?.n ?? 0
-            if (n >= max) return false
-          }
-          const project = yield* projectId(key)
-          const owner = row.metadata.peer === undefined ? undefined : (yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${row.metadata.peer}`)[0]
-          const stopped = row.metadata.archived || row.metadata.removed
-          yield* sql`INSERT INTO session ${sql.insert({
-            id: row.id, projectId: project, ...(parentSessionId === undefined ? {} : { parentSessionId }), agentType: row.agent, harness: row.harnessId, directory: owner?.directory ?? cwd,
-            runtime: encodeRuntime(row.runtime, row.address), harnessSessionId: row.harnessSessionId,
-            metadata: JSON.stringify(toMetadata(row)), createdAt: row.createdAt, ...(stopped ? { endedAt: row.lastActive } : {}),
-          })}`
-          if (task !== undefined) {
-            const [taskRow] = yield* sql<{ id: number }>`INSERT INTO inbox ${sql.insert({
-              recipientSessionId: row.id, senderType: "user", content: task, deliveryStatus: "delivered",
-            })} RETURNING id`
-            yield* sql`UPDATE session SET metadata = json_set(metadata, '$.task', ${taskRow!.id}) WHERE id = ${row.id}`
-          }
-          if (row.turnState === "open") yield* openRound(row.id, row.turnPromptedAt)
-          else if (row.turnState !== "none")
-            yield* sql`INSERT INTO message ${sql.insert({
-              sessionId: row.id, input: "", status: row.turnState, startedAt: row.turnPromptedAt, endedAt: row.turnPromptedAt,
+              if (n >= max) return false
+            }
+            const project = yield* projectId(key)
+            const owner =
+              row.metadata.peer === undefined
+                ? undefined
+                : (yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${row.metadata.peer}`)[0]
+            const stopped = row.metadata.archived || row.metadata.removed
+            yield* sql`INSERT INTO session ${sql.insert({
+              id: row.id,
+              projectId: project,
+              ...(parentSessionId === undefined ? {} : { parentSessionId }),
+              agentType: row.agent,
+              harness: row.harnessId,
+              directory: owner?.directory ?? cwd,
+              runtime: encodeRuntime(row.runtime, row.address),
+              harnessSessionId: row.harnessSessionId,
+              metadata: JSON.stringify(toMetadata(row)),
+              createdAt: row.createdAt,
+              ...(stopped ? { endedAt: row.lastActive } : {}),
             })}`
-          statuses.set(row.id, row.status)
-          return true
-        }),
-      ).pipe(Effect.orDie),
+            if (task !== undefined) {
+              const [taskRow] = yield* sql<{ id: number }>`INSERT INTO inbox ${sql.insert({
+                recipientSessionId: row.id,
+                senderType: "user",
+                content: task,
+                deliveryStatus: "delivered",
+              })} RETURNING id`
+              yield* sql`UPDATE session SET metadata = json_set(metadata, '$.task', ${taskRow!.id}) WHERE id = ${row.id}`
+            }
+            if (row.turnState === "open") yield* openRound(row.id, row.turnPromptedAt)
+            else if (row.turnState !== "none")
+              yield* sql`INSERT INTO message ${sql.insert({
+                sessionId: row.id,
+                input: "",
+                status: row.turnState,
+                startedAt: row.turnPromptedAt,
+                endedAt: row.turnPromptedAt,
+              })}`
+            statuses.set(row.id, row.status)
+            return true
+          }),
+        )
+        .pipe(Effect.orDie),
 
-    sessionExists: (id: string) => sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => rows.length > 0), Effect.orDie),
+    sessionExists: (id: string) =>
+      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
       sql<{ id: string; projectId: number; agent: string }>`SELECT a.id, a.project_id,
           CASE WHEN p.main_session_id = a.id THEN 'coordinator' ELSE a.agent_type END AS agent
-        FROM session a JOIN project p ON p.id = a.project_id WHERE a.id = ${id}`.pipe(Effect.map((rows) => rows[0]), Effect.orDie),
+        FROM session a JOIN project p ON p.id = a.project_id WHERE a.id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
 
-    updateSession: (id: string, patch: SessionPatch) => sql.withTransaction(updateSession(id, patch)).pipe(Effect.orDie),
+    updateSession: (id: string, patch: SessionPatch) =>
+      sql.withTransaction(updateSession(id, patch)).pipe(Effect.orDie),
 
     /** `projectId` limits to one project; `stopped` includes subagents whose process is gone and ended main conversations. */
     listSessions: (filter: { projectId?: number; stopped?: boolean } = {}) =>
-      selectSessions([
-        ...(filter.projectId === undefined ? [] : [sql`a.project_id = ${filter.projectId}`]),
-        ...(filter.stopped ? [] : [sql`json_extract(a.metadata, '$.exitedAt') IS NULL`]),
-      ], filter.stopped === true).pipe(Effect.orDie),
+      selectSessions(
+        [
+          ...(filter.projectId === undefined ? [] : [sql`a.project_id = ${filter.projectId}`]),
+          ...(filter.stopped ? [] : [sql`json_extract(a.metadata, '$.exitedAt') IS NULL`]),
+        ],
+        filter.stopped === true,
+      ).pipe(Effect.orDie),
 
     /**
      * Task text and latest message for `ls` / `result`. The task is the first delivered inbox row from the user or
@@ -688,10 +825,20 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => {
           const briefs = new Map<string, SessionBrief>()
           for (const row of rows) {
-            const status = row.messageStatus !== null && MESSAGE_STATUSES.has(row.messageStatus) ? row.messageStatus as MessageStatusName : undefined
+            const status =
+              row.messageStatus !== null && MESSAGE_STATUSES.has(row.messageStatus)
+                ? (row.messageStatus as MessageStatusName)
+                : undefined
             briefs.set(row.id, {
               task: row.task ?? null,
-              latest: status === undefined ? null : { status, summary: summaryOf(row.messageMetadata, row.messageOutput), endedAt: row.endedAt ?? null },
+              latest:
+                status === undefined
+                  ? null
+                  : {
+                      status,
+                      summary: summaryOf(row.messageMetadata, row.messageOutput),
+                      endedAt: row.endedAt ?? null,
+                    },
             })
           }
           return briefs
@@ -702,12 +849,19 @@ const make = Effect.gen(function* () {
     /** Every project's main agent. */
     coordinators: findCoordinators().pipe(Effect.orDie),
 
-    coordinatorOf: (projectId: number) => findCoordinators(projectId).pipe(Effect.map((rows) => rows[0]), Effect.orDie),
+    coordinatorOf: (projectId: number) =>
+      findCoordinators(projectId).pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
 
     /** The project whose main agent is at this place, if any. */
     coordinatorAt: (runtime: string, address: RuntimeAddress) =>
       sql<{ project: number }>`SELECT a.project_id AS project FROM session a JOIN project p ON p.main_session_id = a.id
-        WHERE a.runtime = ${encodeRuntime(runtime, address)}`.pipe(Effect.map((rows) => rows[0]?.project), Effect.orDie),
+        WHERE a.runtime = ${encodeRuntime(runtime, address)}`.pipe(
+        Effect.map((rows) => rows[0]?.project),
+        Effect.orDie,
+      ),
 
     /**
      * Point the project's main agent at this start, creating it on first use. Its id is stable across restarts and
@@ -735,12 +889,21 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const project = yield* projectId(key)
             yield* clearMainAt(location.runtime, encodeAddress(location.address), project)
-            const [existing] = yield* sql<{ main: string | null }>`SELECT main_session_id AS main FROM project WHERE id = ${project}`
+            const [existing] = yield* sql<{
+              main: string | null
+            }>`SELECT main_session_id AS main FROM project WHERE id = ${project}`
             if (!existing?.main || fresh) {
               const at = yield* now
-              if (existing?.main) yield* sql`UPDATE session SET runtime = NULL, ended_at = ${at} WHERE id = ${existing.main}`
+              if (existing?.main)
+                yield* sql`UPDATE session SET runtime = NULL, ended_at = ${at} WHERE id = ${existing.main}`
               yield* sql`INSERT INTO session ${sql.insert({
-                id, projectId: project, agentType: "main", harness, directory: key, runtime, createdAt: at,
+                id,
+                projectId: project,
+                agentType: "main",
+                harness,
+                directory: key,
+                runtime,
+                createdAt: at,
               })}`
               yield* sql`UPDATE project SET main_session_id = ${id} WHERE id = ${project}`
             }
@@ -764,7 +927,9 @@ const make = Effect.gen(function* () {
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
       sql`UPDATE session SET harness_session_id = ${harnessSessionId}
         WHERE id = ${sessionId} AND id IN (SELECT main_session_id FROM project) AND harness = ${harness} RETURNING id`.pipe(
-        Effect.tap((rows) => (rows.length === 0 ? Effect.logDebug(`main agent session report ignored for ${sessionId}`) : Effect.void)),
+        Effect.tap((rows) =>
+          rows.length === 0 ? Effect.logDebug(`main agent session report ignored for ${sessionId}`) : Effect.void,
+        ),
         Effect.asVoid,
         Effect.orDie,
       ),
@@ -777,31 +942,40 @@ const make = Effect.gen(function* () {
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
     insertSend: (sessionId: string, message: string) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          const s = yield* findSession(sessionId)
-          if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
-        }),
-      ).pipe(Effect.orDie),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const s = yield* findSession(sessionId)
+            if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
+            return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
+          }),
+        )
+        .pipe(Effect.orDie),
 
     /** End the subagent (`stopped`) unless a Message to it is pending; false then. One transaction with `insertSend`'s. */
     archiveIfNoPending: (id: string) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          const s = yield* findSession(id)
-          if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
-          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true }, lastActive: yield* now })
-          return true
-        }),
-      ).pipe(Effect.orDie),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const s = yield* findSession(id)
+            if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
+            yield* updateSession(id, {
+              metadata: { ...s.metadata, archived: true, removed: true },
+              lastActive: yield* now,
+            })
+            return true
+          }),
+        )
+        .pipe(Effect.orDie),
 
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          yield* updateSession(id, { turnState: end, ...patch })
-        }),
-      ).pipe(Effect.orDie),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* updateSession(id, { turnState: end, ...patch })
+          }),
+        )
+        .pipe(Effect.orDie),
 
     /** Latest time on any message. Undefined: no round yet. A result file that is not newer was already delivered. */
     latestRoundAt: (sessionId: string) => latestRoundAt(sessionId).pipe(Effect.orDie),
@@ -814,32 +988,45 @@ const make = Effect.gen(function* () {
 
     /** Open a user-typed round. False when a round is already working. One transaction with the session row. */
     beginUserTurn: (id: string, text: string, patch: SessionPatch) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          const open = yield* sql<{ id: number }>`SELECT id FROM message WHERE session_id = ${id} AND status = 'working' LIMIT 1`
-          if (open.length > 0) return false
-          const at = patch.turnPromptedAt ?? (yield* now)
-          yield* sql`INSERT INTO message ${sql.insert({ sessionId: id, input: text, status: "working", startedAt: at })}`
-          yield* updateSession(id, { ...patch, turnState: "open", turnPromptedAt: at })
-          return true
-        }),
-      ).pipe(Effect.orDie),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const open = yield* sql<{
+              id: number
+            }>`SELECT id FROM message WHERE session_id = ${id} AND status = 'working' LIMIT 1`
+            if (open.length > 0) return false
+            const at = patch.turnPromptedAt ?? (yield* now)
+            yield* sql`INSERT INTO message ${sql.insert({ sessionId: id, input: text, status: "working", startedAt: at })}`
+            yield* updateSession(id, { ...patch, turnState: "open", turnPromptedAt: at })
+            return true
+          }),
+        )
+        .pipe(Effect.orDie),
 
     /** Close the open round (output, status, metadata) and point the result at it, in one transaction with the session row. */
     finishTurn: (id: string, patch: SessionPatch, row: NewInboxRow) =>
-      sql.withTransaction(
-        Effect.gen(function* () {
-          const inserted = yield* insertInboxRow(row, row.kind === "result" ? roundStatus(patch.turnState) : undefined)
-          yield* updateSession(id, patch)
-          return inserted
-        }),
-      ).pipe(Effect.orDie),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const inserted = yield* insertInboxRow(
+              row,
+              row.kind === "result" ? roundStatus(patch.turnState) : undefined,
+            )
+            yield* updateSession(id, patch)
+            return inserted
+          }),
+        )
+        .pipe(Effect.orDie),
 
     pendingInbox: (sessionId: string) => findSend(sessionId, "pending").pipe(Effect.orDie),
 
     inboxWithStatus: (sessionId: string, status: InboxStatus) => findSend(sessionId, status).pipe(Effect.orDie),
 
-    coordinatorPending: (projectId: number) => inbox(`m.sender_type != 'user' AND m.delivery_status = 'pending' AND m.recipient_session_id = (SELECT main_session_id FROM project WHERE id = ?)`, [projectId]).pipe(Effect.orDie),
+    coordinatorPending: (projectId: number) =>
+      inbox(
+        `m.sender_type != 'user' AND m.delivery_status = 'pending' AND m.recipient_session_id = (SELECT main_session_id FROM project WHERE id = ?)`,
+        [projectId],
+      ).pipe(Effect.orDie),
 
     /** Claimed deliveries must settle before a planned shutdown; pending Messages wait for the next vibestd. */
     sendingInbox: inbox(`m.delivery_status = 'delivering'`).pipe(
@@ -848,19 +1035,35 @@ const make = Effect.gen(function* () {
     ),
 
     /** Projects with main-Agent-bound Messages waiting (the reconcile tick). */
-    pendingProjects: sql<{ project: number }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.recipient_session_id
-      WHERE m.delivery_status = 'pending' AND m.sender_type != 'user'`.pipe(Effect.map((rows) => rows.map((r) => r.project)), Effect.orDie),
+    pendingProjects: sql<{
+      project: number
+    }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.recipient_session_id
+      WHERE m.delivery_status = 'pending' AND m.sender_type != 'user'`.pipe(
+      Effect.map((rows) => rows.map((r) => r.project)),
+      Effect.orDie,
+    ),
 
-    dropWaiting: (projectId: number, guard?: { readonly runtime: string; readonly address: string } | "absent") => dropWaiting(projectId, guard).pipe(Effect.asVoid, Effect.orDie),
+    dropWaiting: (projectId: number, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
+      dropWaiting(projectId, guard).pipe(Effect.asVoid, Effect.orDie),
 
     /**
      * Claim `pending` Messages. Main-Agent-bound claims also require the main agent still at the place the caller read.
      * Only the returned ids are delivered.
      */
-    claim: (ids: ReadonlyArray<number>, guard?: { readonly projectId: number; readonly runtime: string; readonly address: string; readonly harnessId?: string }) =>
+    claim: (
+      ids: ReadonlyArray<number>,
+      guard?: {
+        readonly projectId: number
+        readonly runtime: string
+        readonly address: string
+        readonly harnessId?: string
+      },
+    ) =>
       (ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
-        : sql<{ id: number }>`UPDATE inbox SET delivery_status = 'delivering' WHERE ${sql.in("id", ids)} AND delivery_status = 'pending'
+        : sql<{
+            id: number
+          }>`UPDATE inbox SET delivery_status = 'delivering' WHERE ${sql.in("id", ids)} AND delivery_status = 'pending'
             ${guard ? sql`AND EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${guard.projectId} AND a.runtime = ${runtimeMatching(guard.runtime, guard.address)}${guard.harnessId ? sql` AND a.harness = ${guard.harnessId}` : sql``})` : sql``}
             RETURNING id`.pipe(Effect.map((rows) => rows.map((r) => r.id)))
       ).pipe(Effect.orDie),
@@ -869,10 +1072,13 @@ const make = Effect.gen(function* () {
     sendingAmong: (ids: ReadonlyArray<number>) =>
       (ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
-        : sql<{ id: number }>`SELECT id FROM inbox WHERE ${sql.in("id", ids)} AND delivery_status = 'delivering'`.pipe(Effect.map((rows) => rows.map((r) => r.id)))
+        : sql<{ id: number }>`SELECT id FROM inbox WHERE ${sql.in("id", ids)} AND delivery_status = 'delivering'`.pipe(
+            Effect.map((rows) => rows.map((r) => r.id)),
+          )
       ).pipe(Effect.orDie),
 
-    inboxRows: (ids: ReadonlyArray<number>) => (ids.length === 0 ? Effect.succeed([] as ReadonlyArray<InboxRow>) : inboxIn(ids)).pipe(Effect.orDie),
+    inboxRows: (ids: ReadonlyArray<number>) =>
+      (ids.length === 0 ? Effect.succeed([] as ReadonlyArray<InboxRow>) : inboxIn(ids)).pipe(Effect.orDie),
 
     /** Move rows and return only the ids that were in `from`. A short result means the transition did not happen. */
     transitionInbox: (ids: ReadonlyArray<number>, status: InboxStatus, from: InboxStatus) =>
@@ -900,11 +1106,21 @@ const make = Effect.gen(function* () {
           ? inbox(`m.sender_type = 'system' AND m.sender_id = ?`, [sessionId], "m.id DESC LIMIT 1")
           : kind === "result"
             ? inbox(`m.result_message_id IS NOT NULL AND m.sender_id = ?`, [sessionId], "m.id DESC LIMIT 1")
-            : inbox(`m.sender_type = 'session' AND m.result_message_id IS NULL AND m.sender_id = ?`, [sessionId], "m.id DESC LIMIT 1")
-      ).pipe(Effect.map((rows) => rows[0]), Effect.orDie),
+            : inbox(
+                `m.sender_type = 'session' AND m.result_message_id IS NULL AND m.sender_id = ?`,
+                [sessionId],
+                "m.id DESC LIMIT 1",
+              )
+      ).pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
 
     projectOfSession: (sessionId: string) =>
-      sql<{ project: number }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(Effect.map((rows) => rows[0]?.project), Effect.orDie),
+      sql<{ project: number }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(
+        Effect.map((rows) => rows[0]?.project),
+        Effect.orDie,
+      ),
 
     /**
      * Run `body`, commit, then `publish`. `restore` covers only the body, so the body can still be cancelled
@@ -963,7 +1179,9 @@ export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResul
 
 /** A claimed main-Agent-bound Message whose delivery was cut off: it may or may not have arrived. Subagent-bound `delivering` rows stay for `check`. */
 const recoverSending = (sql: SqlClient.SqlClient) =>
-  sql`UPDATE inbox SET delivery_status = 'failed' WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(Effect.asVoid)
+  sql`UPDATE inbox SET delivery_status = 'failed' WHERE delivery_status = 'delivering' AND sender_type != 'user'`.pipe(
+    Effect.asVoid,
+  )
 
 export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibest/Db") {
   /** Opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`). */

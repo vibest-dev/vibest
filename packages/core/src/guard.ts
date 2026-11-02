@@ -7,6 +7,7 @@
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
+
 import { Layout, VibestCommand } from "./paths.ts"
 
 /** A tool call as the harness reports it: its tool name (any case), its arguments, and the agent's cwd. */
@@ -16,7 +17,20 @@ export interface ToolCall {
   readonly cwd: string
 }
 
-const PATH_TOOLS = new Set(["read", "write", "edit", "multiedit", "notebookedit", "ls", "grep", "glob", "find", "delete", "list", "readlints"])
+const PATH_TOOLS = new Set([
+  "read",
+  "write",
+  "edit",
+  "multiedit",
+  "notebookedit",
+  "ls",
+  "grep",
+  "glob",
+  "find",
+  "delete",
+  "list",
+  "readlints",
+])
 /** Path tools that read a whole tree: given a directory above the project, they reach into it. */
 const SEARCH_TOOLS = new Set(["grep", "glob", "find"])
 const EDIT_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"])
@@ -129,8 +143,15 @@ const base = (word: string) => word.slice(word.lastIndexOf("/") + 1)
 /** Programs that run the rest of their words as a command, each with its options that take a value. */
 const WRAPPERS: Readonly<Record<string, ReadonlyArray<string>>> = {
   env: ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"],
-  command: [], builtin: [], exec: ["-a"], nohup: [], time: [], nice: ["-n"], timeout: ["-s", "-k"],
-  sudo: ["-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"], xargs: ["-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"],
+  command: [],
+  builtin: [],
+  exec: ["-a"],
+  nohup: [],
+  time: [],
+  nice: ["-n"],
+  timeout: ["-s", "-k"],
+  sudo: ["-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"],
+  xargs: ["-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"],
 }
 const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "do", "while", "until"])
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
@@ -163,7 +184,12 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
           i++
           break
         }
-        if (name === "env") identity ||= o === "-" || o === "--ignore-environment" || /^-[^-]*i/.test(o) || IDENTITY.test(o.replace(/^(?:-u|--unset=)/, ""))
+        if (name === "env")
+          identity ||=
+            o === "-" ||
+            o === "--ignore-environment" ||
+            /^-[^-]*i/.test(o) ||
+            IDENTITY.test(o.replace(/^(?:-u|--unset=)/, ""))
         if (WRAPPERS[name]!.includes(o)) {
           if (name === "env" && (o === "-u" || o === "--unset")) identity ||= IDENTITY.test(argv[i + 1] ?? "")
           i++
@@ -172,7 +198,9 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
       if (name === "timeout") i++
     } else if (SHELLS.has(name)) {
       const c = argv.findIndex((x, j) => j > i && /^-[a-z]*c[a-z]*$/.test(x))
-      return c === -1 ? [{ argv: argv.slice(i), identity }] : splitCommand(argv[c + 1] ?? "").flatMap((a) => programs(a, identity))
+      return c === -1
+        ? [{ argv: argv.slice(i), identity }]
+        : splitCommand(argv[c + 1] ?? "").flatMap((a) => programs(a, identity))
     } else if (name === "eval") {
       return splitCommand(argv.slice(i + 1).join(" ")).flatMap((a) => programs(a, identity))
     } else {
@@ -184,7 +212,9 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
 /** The programs `command` runs. An identity variable unset, exported or assigned anywhere in it counts for each of them. */
 const programsOf = (command: string): ReadonlyArray<Program> => {
   const all = splitCommand(command).flatMap((argv) => programs(argv))
-  const changed = all.some((p) => p.argv.length === 0 || (SETTERS.has(p.argv[0]!) && p.argv.slice(1).some((w) => IDENTITY.test(w))))
+  const changed = all.some(
+    (p) => p.argv.length === 0 || (SETTERS.has(p.argv[0]!) && p.argv.slice(1).some((w) => IDENTITY.test(w))),
+  )
   return changed ? all.map((p) => ({ ...p, identity: true })) : all
 }
 
@@ -204,23 +234,32 @@ const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsW
  * Reason an agent may not run this shell command, if any. Everything else runs, whatever program or shell syntax it
  * uses: an vibest command an agent may not run is refused by vibest itself (cli.ts userOnly, server.ts ACCESS).
  */
-export const shellBlock = (command: string, vibest: ReadonlyArray<string>, coordinator: boolean): string | undefined => {
+export const shellBlock = (
+  command: string,
+  vibest: ReadonlyArray<string>,
+  coordinator: boolean,
+): string | undefined => {
   for (const p of programsOf(command)) {
     const [program = "", ...rest] = p.argv
     const name = base(program)
-    if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest))) return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
+    if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest)))
+      return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
     if (coordinator && HARNESS_CLIS.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
-    if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest))) return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
+    if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
+      return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
     const args = vibestArgs(vibest, p.argv)
     if (args === undefined) continue
     // The caller's role is these variables (cli.ts `caller`): without them vibest would speak to vibestd as the user.
-    if (p.identity) return "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused."
+    if (p.identity)
+      return "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused."
     // The harness's turn-end hook runs it; an agent running it would report a turn end that did not happen.
     const words = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined)
     const at = words.indexOf("integration")
-    if (at !== -1 && words[at + 1] === "stop") return "vibest integration stop is the harness's turn-end hook, not an agent command."
-    if (at !== -1 && words[at + 1] === "prompt") return "vibest integration prompt is the harness's user-prompt hook, not an agent command."
+    if (at !== -1 && words[at + 1] === "stop")
+      return "vibest integration stop is the harness's turn-end hook, not an agent command."
+    if (at !== -1 && words[at + 1] === "prompt")
+      return "vibest integration prompt is the harness's user-prompt hook, not an agent command."
   }
   return undefined
 }
@@ -237,7 +276,10 @@ const physical = (p: string) =>
     for (const segment of p.split(path.sep)) {
       if (segment === "" || segment === ".") continue
       if (segment === "..") current = path.dirname(current)
-      else current = Option.getOrElse(yield* fs.realPath(path.join(current, segment)).pipe(Effect.option), () => path.join(current, segment))
+      else
+        current = Option.getOrElse(yield* fs.realPath(path.join(current, segment)).pipe(Effect.option), () =>
+          path.join(current, segment),
+        )
     }
     return current
   })
@@ -265,7 +307,9 @@ export const toolPath = (raw: string, base: string, home: string) =>
   })
 
 /** One agent's rules: the reason to refuse `call`, if any. */
-export type Rules = (call: ToolCall) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem>
+export type Rules = (
+  call: ToolCall,
+) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem>
 
 /** The coordinator: the shared shell denials plus its own, and no file edits (a session makes changes). */
 export const coordinator: Rules = (call) =>
@@ -312,7 +356,8 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     })
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
   /** Off limits: inside the project but not in the scratchpad; with search, also a directory above the Project. */
-  const blocked = (target: string, search: boolean) => (inScratch(target) ? false : inside(target, projects)) || (search && inside(projects, target))
+  const blocked = (target: string, search: boolean) =>
+    (inScratch(target) ? false : inside(target, projects)) || (search && inside(projects, target))
   const tool = call.tool.toLowerCase()
 
   if (SHELL_TOOLS.has(tool)) {
@@ -386,11 +431,13 @@ export const hook = (raw: string) =>
     // The base: the call's cwd, else the only workspace root; absolute, or vibest cannot tell where paths lead.
     const roots = input.workspace_roots ?? []
     const base = input.cwd || (roots.length === 1 ? roots[0] : undefined)
-    if (!base || !path.isAbsolute(base)) return yield* Effect.fail(new Error("the hook input has no absolute working directory"))
+    if (!base || !path.isAbsolute(base))
+      return yield* Effect.fail(new Error("the hook input has no absolute working directory"))
     // A Shell call's own directory, read the way Cursor reads it (empty: the default; then normalized, as Cursor's
     // path.resolve does); anything else malformed refuses.
     const own = input.tool_input.cwd
-    if (own !== undefined && typeof own !== "string") return yield* Effect.fail(new Error("tool_input.cwd is not a string"))
+    if (own !== undefined && typeof own !== "string")
+      return yield* Effect.fail(new Error("tool_input.cwd is not a string"))
     const ownPath = own ? yield* toolPath(own, base, yield* Config.String("HOME")) : base
     if (ownPath === undefined) return yield* Effect.fail(new Error("tool_input.cwd is a file URL vibest cannot read"))
     const cwd = path.normalize(ownPath)

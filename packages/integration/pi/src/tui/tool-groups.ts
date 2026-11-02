@@ -7,7 +7,15 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works
 
 // Values Pi hands to the handlers and renderers. Their shapes differ across Pi versions, so they are read defensively.
 type Host = any
-type Row = { id: string; name: string; args?: Host; parentId?: string; isError: boolean; isPartial: boolean; result?: Host }
+type Row = {
+  id: string
+  name: string
+  args?: Host
+  parentId?: string
+  isError: boolean
+  isPartial: boolean
+  result?: Host
+}
 type RowFields = { [K in keyof Row]?: Row[K] | undefined }
 type Group = { settled: boolean; expanded: boolean; members: Row[] }
 type ToolGroupsApi = {
@@ -48,8 +56,12 @@ export default function (pi: ToolGroupsApi) {
   function frameComponent(renderers: Host, component: Host, outputPad: unknown) {
     if (renderers?.renderShell === "self") return component
     return {
-      invalidate() { component.invalidate?.() },
-      render(width: number) { return frameLines(renderers, component, width, outputPad) },
+      invalidate() {
+        component.invalidate?.()
+      },
+      render(width: number) {
+        return frameLines(renderers, component, width, outputPad)
+      },
     }
   }
 
@@ -58,7 +70,9 @@ export default function (pi: ToolGroupsApi) {
   }
 
   function oneLine(text: unknown, limit: number) {
-    const flat = String(text ?? "").replace(/\s+/g, " ").trim()
+    const flat = String(text ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
     if (!flat) return ""
     if (flat.length <= limit) return flat
     return flat.slice(0, Math.max(1, limit - 1)) + "\u2026"
@@ -66,18 +80,21 @@ export default function (pi: ToolGroupsApi) {
 
   function primaryArg(name: string, args: Host) {
     if (args === undefined || args === null) return ""
-    if (typeof args !== "object" || Array.isArray(args)) return oneLine(typeof args === "string" ? args : JSON.stringify(args), 40)
-    const preferred = ({
-      read: ["path", "file_path"],
-      write: ["path", "file_path"],
-      edit: ["path", "file_path"],
-      ls: ["path"],
-      bash: ["command"],
-      powershell: ["command"],
-      grep: ["pattern"],
-      find: ["pattern", "path"],
-      tool_search: ["query"],
-    } as Record<string, string[]>)[name] || ["path", "file_path", "command", "query", "pattern", "url"]
+    if (typeof args !== "object" || Array.isArray(args))
+      return oneLine(typeof args === "string" ? args : JSON.stringify(args), 40)
+    const preferred = (
+      {
+        read: ["path", "file_path"],
+        write: ["path", "file_path"],
+        edit: ["path", "file_path"],
+        ls: ["path"],
+        bash: ["command"],
+        powershell: ["command"],
+        grep: ["pattern"],
+        find: ["pattern", "path"],
+        tool_search: ["query"],
+      } as Record<string, string[]>
+    )[name] || ["path", "file_path", "command", "query", "pattern", "url"]
     const sensitive = /token|secret|password|authorization|credential|api[_-]?key/i
     for (const key of preferred) {
       if (sensitive.test(key)) continue
@@ -96,7 +113,11 @@ export default function (pi: ToolGroupsApi) {
     if (Array.isArray(result?.content)) {
       for (const part of result.content) if (part?.type === "text" && part.text) texts.push(part.text)
     }
-    const line = texts.join("\n").split("\n").find((item) => item.trim()) ?? ""
+    const line =
+      texts
+        .join("\n")
+        .split("\n")
+        .find((item) => item.trim()) ?? ""
     return line.trim()
   }
 
@@ -212,7 +233,13 @@ export default function (pi: ToolGroupsApi) {
       if (!Array.isArray(nested)) return
       for (const call of nested) {
         if (!call?.id || calls.has(call.id)) continue
-        remember(call.id, { name: call.name, args: call.arguments, parentId: message.toolCallId, isError: call.status === "error", isPartial: call.status === "unfinished" })
+        remember(call.id, {
+          name: call.name,
+          args: call.arguments,
+          parentId: message.toolCallId,
+          isError: call.status === "error",
+          isPartial: call.status === "unfinished",
+        })
       }
       return
     }
@@ -220,7 +247,8 @@ export default function (pi: ToolGroupsApi) {
     const toolCalls = message.content.filter((part: Host) => part?.type === "toolCall" && part.id)
     const hasBody = message.content.some((part: Host) => part?.type === "text" && String(part.text ?? "").trim())
     if (!hasBody) {
-      for (const call of toolCalls) if (!byId.has(call.id)) place(call.id, call.name, open ?? newGroup(), call.arguments)
+      for (const call of toolCalls)
+        if (!byId.has(call.id)) place(call.id, call.name, open ?? newGroup(), call.arguments)
       return
     }
     let group = bodyGroup.get(message)
@@ -253,7 +281,7 @@ export default function (pi: ToolGroupsApi) {
     if (!ops.length) return
     const paths: string[] = []
     for (const op of ops) {
-      const path = op.args && typeof op.args === "object" ? op.args.path ?? op.args.file_path : undefined
+      const path = op.args && typeof op.args === "object" ? (op.args.path ?? op.args.file_path) : undefined
       if (typeof path !== "string" || !path) return verb + " " + ops.length
       paths.push(path)
     }
@@ -301,7 +329,18 @@ export default function (pi: ToolGroupsApi) {
     if (listed) parts.push(listed)
     const search = named("tool_search").length
     if (search) parts.push(times(search, "tool search", "tool searches"))
-    const known = new Set(["codemode", "read", "write", "edit", "bash", "powershell", "grep", "find", "ls", "tool_search"])
+    const known = new Set([
+      "codemode",
+      "read",
+      "write",
+      "edit",
+      "bash",
+      "powershell",
+      "grep",
+      "find",
+      "ls",
+      "tool_search",
+    ])
     const other = all.filter((item) => item.name && !known.has(item.name)).length
     if (other) parts.push(times(other, "other tool call", "other tool calls"))
     const failed = all.filter((item) => item.isError).length
@@ -310,7 +349,7 @@ export default function (pi: ToolGroupsApi) {
   }
 
   function callPath(args: Host) {
-    const path = args && typeof args === "object" ? args.path ?? args.file_path : undefined
+    const path = args && typeof args === "object" ? (args.path ?? args.file_path) : undefined
     return typeof path === "string" && path ? path : undefined
   }
 
@@ -423,7 +462,11 @@ export default function (pi: ToolGroupsApi) {
       if (active) note({ role: "custom", display: args[2] })
       return id
     }
-    try { manager.appendCustomMessageEntry = wrapper } catch { return }
+    try {
+      manager.appendCustomMessageEntry = wrapper
+    } catch {
+      return
+    }
     unwatch = () => {
       active = false
       if (manager.appendCustomMessageEntry !== wrapper) return
@@ -443,18 +486,32 @@ export default function (pi: ToolGroupsApi) {
   })
   pi.on("session_compact", (_event, ctx) => replay(ctx))
   pi.on("session_tree", (_event, ctx) => replay(ctx))
-  pi.on("agent_start", () => { runActive = true })
+  pi.on("agent_start", () => {
+    runActive = true
+  })
   pi.on("agent_end", () => stopRun())
   pi.on("message_start", (event) => note(event?.message))
   pi.on("message_update", (event) => note(event?.message))
   pi.on("tool_execution_start", (event) => {
     if (!event?.toolCallId) return
     runActive = true
-    remember(event.toolCallId, { name: event.toolName, args: event.args, parentId: event.parentToolCallId, isPartial: true })
+    remember(event.toolCallId, {
+      name: event.toolName,
+      args: event.args,
+      parentId: event.parentToolCallId,
+      isPartial: true,
+    })
   })
   pi.on("tool_execution_end", (event) => {
     if (!event?.toolCallId) return
-    remember(event.toolCallId, { name: event.toolName, args: event.args, parentId: event.parentToolCallId, isError: event.isError === true, isPartial: false, result: event.result })
+    remember(event.toolCallId, {
+      name: event.toolName,
+      args: event.args,
+      parentId: event.parentToolCallId,
+      isError: event.isError === true,
+      isPartial: false,
+      result: event.result,
+    })
   })
 
   pi.registerToolRenderer((toolName, next) => {
@@ -463,84 +520,123 @@ export default function (pi: ToolGroupsApi) {
     const later = next()
     if (later?.isVibestToolGroups === true) return later
     return {
-    isVibestToolGroups: true,
-    renderShell: "self",
-    renderCall(args: unknown, theme: Host, ctx: Host) {
-      if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
-      if (ctx?.invalidate) invalidators.set(ctx.toolCallId, ctx.invalidate)
-      let group = byId.get(ctx.toolCallId)
-      if (!group) group = place(ctx.toolCallId, toolName, open ?? newGroup(), args)
-      const row = group.members.find((item) => item.id === ctx.toolCallId)
-      if (row) {
-        row.name = toolName
-        if (args !== undefined) row.args = args
-      }
-      const renderers = (() => { try { return next() } catch { return undefined } })()
-      // The original renderer runs on every host update, even while hidden, so its timers, async redraws and component reuse keep working.
-      let native: Host
-      if (renderers?.renderCall) {
-        try { native = renderers.renderCall(args, theme, { ...ctx, expanded: true, lastComponent: ctx.lastComponent?.native }) } catch { native = undefined }
-      }
-      const body = native ? frameComponent(renderers, native, ctx.outputPad) : { render(innerWidth: number) {
-        const { pad, limit } = gutter(innerWidth, ctx.outputPad)
-        return indent(plainCall(toolName, args, limit), pad)
-      } }
-      return {
-        native,
-        invalidate() { native?.invalidate?.() },
-        render(width: number) {
-          const current = byId.get(ctx.toolCallId)
-          if (!current) return []
-          const isAnchor = current.members[0]?.id === ctx.toolCallId
-          if (isAnchor && ctx.expanded !== current.expanded) {
-            current.expanded = ctx.expanded
-            const ids = current.members.map((member) => member.id)
-            queueMicrotask(() => {
-              for (const id of ids) if (id !== ctx.toolCallId) invalidators.get(id)?.()
-            })
+      isVibestToolGroups: true,
+      renderShell: "self",
+      renderCall(args: unknown, theme: Host, ctx: Host) {
+        if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
+        if (ctx?.invalidate) invalidators.set(ctx.toolCallId, ctx.invalidate)
+        let group = byId.get(ctx.toolCallId)
+        if (!group) group = place(ctx.toolCallId, toolName, open ?? newGroup(), args)
+        const row = group.members.find((item) => item.id === ctx.toolCallId)
+        if (row) {
+          row.name = toolName
+          if (args !== undefined) row.args = args
+        }
+        const renderers = (() => {
+          try {
+            return next()
+          } catch {
+            return undefined
           }
-          const { pad, limit } = gutter(width, ctx.outputPad)
-          // The group's title row is drawn in the theme's muted foreground.
-          const paint = (line: string) => typeof theme?.fg === "function" ? theme.fg("muted", line) : line
-          const title = indent(fit(header(current), limit).map(paint), pad)
-          if (!current.expanded) return isAnchor ? title : []
-          if (showNative(ctx, current)) return isAnchor ? [...title, ...body.render(width)] : body.render(width)
-          const row = current.members.find((item) => item.id === ctx.toolCallId)
-          const lines = indent(compactText(row!, limit), pad)
-          if (isAnchor) lines.unshift(...title)
-          lines.push(...indent(nestedLines(ctx.toolCallId, limit), pad))
-          return lines
-        },
-      }
-    },
-    renderResult(result: Host, options: Host, theme: unknown, ctx: Host) {
-      if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
-      const group = byId.get(ctx.toolCallId) ?? place(ctx.toolCallId, toolName, open ?? newGroup())
-      const row = group.members.find((item) => item.id === ctx.toolCallId)!
-      const changed = row.result !== result || row.isError !== ctx.isError || row.isPartial !== ctx.isPartial
-      row.result = result
-      row.isError = ctx.isError
-      row.isPartial = ctx.isPartial
-      if (row !== group.members[0] && changed) ping(group.members[0]?.id)
-      const renderers = (() => { try { return next() } catch { return undefined } })()
-      let native: Host
-      if (renderers?.renderResult) {
-        try { native = renderers.renderResult(result, { ...options, expanded: true }, theme, { ...ctx, lastComponent: ctx.lastComponent?.native }) } catch { native = undefined }
-      }
-      const body = native ? frameComponent(renderers, native, ctx.outputPad) : { render(innerWidth: number) {
-        const { pad, limit } = gutter(innerWidth, ctx.outputPad)
-        return indent(plainResult(result, ctx.isError, limit), pad)
-      } }
-      return {
-        native,
-        invalidate() { native?.invalidate?.() },
-        render(width: number) {
-          const current = byId.get(ctx.toolCallId)
-          if (!current?.expanded || !showNative(ctx, current)) return []
-          return body.render(width)
-        },
-      }
-    },
+        })()
+        // The original renderer runs on every host update, even while hidden, so its timers, async redraws and component reuse keep working.
+        let native: Host
+        if (renderers?.renderCall) {
+          try {
+            native = renderers.renderCall(args, theme, {
+              ...ctx,
+              expanded: true,
+              lastComponent: ctx.lastComponent?.native,
+            })
+          } catch {
+            native = undefined
+          }
+        }
+        const body = native
+          ? frameComponent(renderers, native, ctx.outputPad)
+          : {
+              render(innerWidth: number) {
+                const { pad, limit } = gutter(innerWidth, ctx.outputPad)
+                return indent(plainCall(toolName, args, limit), pad)
+              },
+            }
+        return {
+          native,
+          invalidate() {
+            native?.invalidate?.()
+          },
+          render(width: number) {
+            const current = byId.get(ctx.toolCallId)
+            if (!current) return []
+            const isAnchor = current.members[0]?.id === ctx.toolCallId
+            if (isAnchor && ctx.expanded !== current.expanded) {
+              current.expanded = ctx.expanded
+              const ids = current.members.map((member) => member.id)
+              queueMicrotask(() => {
+                for (const id of ids) if (id !== ctx.toolCallId) invalidators.get(id)?.()
+              })
+            }
+            const { pad, limit } = gutter(width, ctx.outputPad)
+            // The group's title row is drawn in the theme's muted foreground.
+            const paint = (line: string) => (typeof theme?.fg === "function" ? theme.fg("muted", line) : line)
+            const title = indent(fit(header(current), limit).map(paint), pad)
+            if (!current.expanded) return isAnchor ? title : []
+            if (showNative(ctx, current)) return isAnchor ? [...title, ...body.render(width)] : body.render(width)
+            const row = current.members.find((item) => item.id === ctx.toolCallId)
+            const lines = indent(compactText(row!, limit), pad)
+            if (isAnchor) lines.unshift(...title)
+            lines.push(...indent(nestedLines(ctx.toolCallId, limit), pad))
+            return lines
+          },
+        }
+      },
+      renderResult(result: Host, options: Host, theme: unknown, ctx: Host) {
+        if (ctx?.toolCallId) expandedById.set(ctx.toolCallId, ctx.expanded === true)
+        const group = byId.get(ctx.toolCallId) ?? place(ctx.toolCallId, toolName, open ?? newGroup())
+        const row = group.members.find((item) => item.id === ctx.toolCallId)!
+        const changed = row.result !== result || row.isError !== ctx.isError || row.isPartial !== ctx.isPartial
+        row.result = result
+        row.isError = ctx.isError
+        row.isPartial = ctx.isPartial
+        if (row !== group.members[0] && changed) ping(group.members[0]?.id)
+        const renderers = (() => {
+          try {
+            return next()
+          } catch {
+            return undefined
+          }
+        })()
+        let native: Host
+        if (renderers?.renderResult) {
+          try {
+            native = renderers.renderResult(result, { ...options, expanded: true }, theme, {
+              ...ctx,
+              lastComponent: ctx.lastComponent?.native,
+            })
+          } catch {
+            native = undefined
+          }
+        }
+        const body = native
+          ? frameComponent(renderers, native, ctx.outputPad)
+          : {
+              render(innerWidth: number) {
+                const { pad, limit } = gutter(innerWidth, ctx.outputPad)
+                return indent(plainResult(result, ctx.isError, limit), pad)
+              },
+            }
+        return {
+          native,
+          invalidate() {
+            native?.invalidate?.()
+          },
+          render(width: number) {
+            const current = byId.get(ctx.toolCallId)
+            if (!current?.expanded || !showNative(ctx, current)) return []
+            return body.render(width)
+          },
+        }
+      },
     }
   })
 }

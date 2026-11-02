@@ -2,6 +2,7 @@
 // (GET https://api.anthropic.com/api/oauth/usage). Nothing here reads the `--output-format stream-json`
 // stream yet; when something does, its `rate_limit_event` parsing comes back with it.
 import type { SubscriptionAccount, SubscriptionLimit } from "@vibest/schema/subscription"
+
 import { clampPercent, num, record } from "./index.ts"
 
 /** `claude auth status --json`: `{ loggedIn, authMethod, apiProvider, subscriptionType, … }`. */
@@ -11,7 +12,9 @@ export const claudeAccount = (status: unknown): SubscriptionAccount => {
   // Verified: "claude.ai" with subscriptionType "max". Anything else signed in (API key, apiKeyHelper, Bedrock,
   // Vertex) has no subscription windows: assumed from the field's name, not seen on this machine.
   if (s.authMethod !== "claude.ai") return { kind: "api-key" }
-  return typeof s.subscriptionType === "string" ? { kind: "subscription", plan: s.subscriptionType } : { kind: "subscription" }
+  return typeof s.subscriptionType === "string"
+    ? { kind: "subscription", plan: s.subscriptionType }
+    : { kind: "subscription" }
 }
 
 const ENDPOINT_WINDOWS: ReadonlyArray<readonly [key: string, window: string]> = [
@@ -34,6 +37,13 @@ export const claudeUsage = (body: unknown): ReadonlyArray<SubscriptionLimit> => 
     if (!w || used === undefined) return []
     const reset = typeof w.resets_at === "string" ? Date.parse(w.resets_at) : NaN
     const percent = clampPercent(used)
-    return [{ window, percent, status: percent >= 100 ? "limited" : "available", resetTime: Number.isNaN(reset) ? null : reset }]
+    return [
+      {
+        window,
+        percent,
+        status: percent >= 100 ? "limited" : "available",
+        resetTime: Number.isNaN(reset) ? null : reset,
+      },
+    ]
   })
 }

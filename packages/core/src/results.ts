@@ -1,5 +1,6 @@
 // Result files and turn-report lines written by the integrations (SPEC §5.3, runtime-port.md §5), and the session report format.
 import { Effect, FileSystem, Option, Path, Schema } from "effect"
+
 import { Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
 
 /** `{harness, ts, payload}`; payload is the harness's hook input, verbatim. */
@@ -24,14 +25,24 @@ export type TurnResult = {
 /** One line of `reports/<id>.jsonl` (runtime-port.md §5): a turn start with the user's prompt, or a turn end with the result. */
 export type ReportLine =
   | { readonly turn: "start"; readonly ts: number; readonly prompt: string }
-  | { readonly turn: "end"; readonly ts: number; readonly harness: HarnessId; readonly payload: Readonly<Record<string, unknown>> }
+  | {
+      readonly turn: "end"
+      readonly ts: number
+      readonly harness: HarnessId
+      readonly payload: Readonly<Record<string, unknown>>
+    }
 
 export const encodeReportLine = (line: ReportLine) => `${JSON.stringify(line)}\n`
 
 const ReportLineJson = Schema.fromJsonString(
   Schema.Union([
     Schema.Struct({ turn: Schema.Literals(["start"]), ts: Schema.Number, prompt: Schema.String }),
-    Schema.Struct({ turn: Schema.Literals(["end"]), ts: Schema.Number, harness: Schema.Literals(HARNESS_IDS), payload: Schema.Record(Schema.String, Schema.Unknown) }),
+    Schema.Struct({
+      turn: Schema.Literals(["end"]),
+      ts: Schema.Number,
+      harness: Schema.Literals(HARNESS_IDS),
+      payload: Schema.Record(Schema.String, Schema.Unknown),
+    }),
   ]),
 )
 
@@ -97,8 +108,14 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
       harness: envelope.harness,
       mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (d) => d.getTime() }),
       text: typeof text === "string" ? text : "",
-      error: typeof error === "string" && error ? (typeof details === "string" && details ? `${error}: ${details}` : error) : undefined,
-      conversationId: typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
+      error:
+        typeof error === "string" && error
+          ? typeof details === "string" && details
+            ? `${error}: ${details}`
+            : error
+          : undefined,
+      conversationId:
+        typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
     } satisfies TurnResult
   }).pipe(Effect.option)
 })
@@ -137,7 +154,11 @@ const escapeText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
  * A result or message as the coordinator reads it, shaped like Claude Code's task notifications: one child element per
  * field (empty ones left out), then the agent's own text, unescaped.
  */
-export const envelope = (tag: string, fields: ReadonlyArray<readonly [string, string]>, text: readonly [tag: string, body: string]) =>
+export const envelope = (
+  tag: string,
+  fields: ReadonlyArray<readonly [string, string]>,
+  text: readonly [tag: string, body: string],
+) =>
   [
     `<${tag}>`,
     ...fields.filter(([, v]) => v !== "").map(([k, v]) => `<${k}>${escapeText(v)}</${k}>`),

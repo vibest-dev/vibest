@@ -45,8 +45,11 @@ export const configDir = Effect.fn("configDir")(function* (dev = false) {
   const home = yield* env("HOME")
   if (Option.isSome(home)) return path.join(home.value, ".config", appDir)
   // Rust's temp_dir(): TMPDIR else /tmp on POSIX. ponytail: Windows GetTempPath also falls back to the Windows dir; TMP/TEMP covers real setups.
-  const temp = yield* (windows ? firstEnv("TMP", "TEMP") : firstEnv("TMPDIR"))
-  return path.join(Option.getOrElse(temp, () => (windows ? "C:\\Windows\\Temp" : "/tmp")), appDir)
+  const temp = yield* windows ? firstEnv("TMP", "TEMP") : firstEnv("TMPDIR")
+  return path.join(
+    Option.getOrElse(temp, () => (windows ? "C:\\Windows\\Temp" : "/tmp")),
+    appDir,
+  )
 })
 
 /**
@@ -59,7 +62,9 @@ export const defaultSocketPath = Effect.fn("defaultSocketPath")(function* (optio
   if (Option.isSome(override)) return override.value
   const path = yield* Path.Path
   const dir = yield* configDir(options.dev ?? false)
-  return options.sessionName ? path.join(dir, "sessions", options.sessionName, "herdr.sock") : path.join(dir, "herdr.sock")
+  return options.sessionName
+    ? path.join(dir, "sessions", options.sessionName, "herdr.sock")
+    : path.join(dir, "herdr.sock")
 })
 
 /**

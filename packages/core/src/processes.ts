@@ -49,24 +49,30 @@ export interface LsofRun {
   readonly stderr: string
 }
 
-export class Processes extends Context.Service<Processes, {
-  /** Signal 0 to `pid`. A reused PID reads as alive: that can only keep more, never signal it. */
-  readonly liveness: (pid: number) => Effect.Effect<Liveness>
-  /** SIGTERM. `sent` includes already gone (ESRCH). `denied` is any other failure: not a confirmed stop. */
-  readonly terminateGroup: (group: number) => Effect.Effect<"sent" | "denied">
-  /**
-   * PIDs of this user's processes whose cwd is in one of `dirs` (a directory and its other spellings, e.g. its real
-   * path); undefined when the listing cannot be trusted to be complete.
-   */
-  readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
-}>()("vibest/Processes") {
+export class Processes extends Context.Service<
+  Processes,
+  {
+    /** Signal 0 to `pid`. A reused PID reads as alive: that can only keep more, never signal it. */
+    readonly liveness: (pid: number) => Effect.Effect<Liveness>
+    /** SIGTERM. `sent` includes already gone (ESRCH). `denied` is any other failure: not a confirmed stop. */
+    readonly terminateGroup: (group: number) => Effect.Effect<"sent" | "denied">
+    /**
+     * PIDs of this user's processes whose cwd is in one of `dirs` (a directory and its other spellings, e.g. its real
+     * path); undefined when the listing cannot be trusted to be complete.
+     */
+    readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
+  }
+>()("vibest/Processes") {
   /** `lsof +w -a -u <uid> -d cwd -Fpfn0`, an argument array (no shell); see `cwdHolders` for what counts as an answer. */
   static readonly layer = (platform: ProcessPlatform) =>
     Layer.effect(
       Processes,
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const lsof = (uid: number) => runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+        const lsof = (uid: number) =>
+          runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          )
         return Processes.of({
           liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
           terminateGroup: (group) =>
@@ -76,7 +82,7 @@ export class Processes extends Context.Service<Processes, {
                 platform.terminateGroup(group)
                 return "sent" as const
               } catch (e) {
-                return (e as { readonly code?: unknown }).code === "ESRCH" ? "sent" as const : "denied" as const
+                return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
               }
             }),
           cwdUsers: (dirs) =>
@@ -99,11 +105,20 @@ export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Du
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const handle = yield* spawner.spawn(ChildProcess.make(command, args, { forceKillAfter: LSOF_KILL_AFTER }))
     const [stdout, stderr, exitCode] = yield* Effect.all(
-      [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr)), handle.exitCode],
+      [
+        Stream.mkString(Stream.decodeText(handle.stdout)),
+        Stream.mkString(Stream.decodeText(handle.stderr)),
+        handle.exitCode,
+      ],
       { concurrency: "unbounded" },
     )
     return { exitCode, stdout, stderr } satisfies LsofRun
-  }).pipe(Effect.scoped, Effect.timeoutOption(timeout), Effect.map(Option.getOrUndefined), Effect.orElseSucceed(() => undefined))
+  }).pipe(
+    Effect.scoped,
+    Effect.timeoutOption(timeout),
+    Effect.map(Option.getOrUndefined),
+    Effect.orElseSucceed(() => undefined),
+  )
 
 /**
  * The holders of `dirs` in one lsof run, or undefined unless the run is trustworthy: it finished with exit 0 and
@@ -113,7 +128,11 @@ export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Du
  * Names lsof could not print as they are (`\n`, `^X`, `\xNN` escapes) and `(deleted)` working directories are matched
  * conservatively: anything they could stand for that is in `dirs` counts as a holder.
  */
-export const cwdHolders = (run: LsofRun | undefined, self: number, dirs: ReadonlyArray<string>): ReadonlyArray<number> | undefined => {
+export const cwdHolders = (
+  run: LsofRun | undefined,
+  self: number,
+  dirs: ReadonlyArray<string>,
+): ReadonlyArray<number> | undefined => {
   if (run === undefined || run.exitCode !== 0 || run.stderr.trim() !== "") return undefined
   const holders = new Set<number>()
   let pid: number | undefined

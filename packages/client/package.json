@@ -2,8 +2,8 @@
   "name": "@vibest/client",
   "version": "0.0.1-beta.13",
   "private": true,
-  "type": "module",
   "license": "MIT",
+  "type": "module",
   "exports": {
     "./*": "./src/*.ts"
   },

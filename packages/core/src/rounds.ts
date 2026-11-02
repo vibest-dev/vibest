@@ -1,3 +1,6 @@
+import type * as VibestPlugin from "@vibest/plugin"
+import { HookFailed } from "@vibest/schema/plugin"
+import { NoSuchSession, NotReady, SessionBusy } from "@vibest/schema/session"
 // The round lifecycle of one session: ending a turn, delivering its queued messages, collecting a hook-written
 // result (through the builtin check rule when it is configured), and recording a user-typed round (SPEC §8.3, §8.4,
 // §11). Everything here runs under the session's lock, held by `check`, `deliver`, `interrupt` or `remove` in
@@ -6,26 +9,35 @@
 // what everything here talks to (runtime-port.md §3).
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Option, Ref, Schedule, type Scope, Semaphore } from "effect"
 import type { FileSystem } from "effect"
-import type * as VibestPlugin from "@vibest/plugin"
+
 import { runCheck } from "./check.ts"
-import type { LimitMove } from "./move.ts"
-import { errorMessage, type IdleInput } from "./plugins.ts"
-import { HookFailed } from "@vibest/schema/plugin"
-import { type InboxRow, type InboxStatus, type NewInboxRow, type SessionPatch, type SessionRow, type TurnState } from "./db.ts"
+import {
+  type InboxRow,
+  type InboxStatus,
+  type NewInboxRow,
+  type SessionPatch,
+  type SessionRow,
+  type TurnState,
+} from "./db.ts"
 import { Harnesses, type HarnessAdapter } from "./harness.ts"
 import { nextBatch } from "./inbox.ts"
-import { type AgentState, type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "./results.ts"
+import type { LimitMove } from "./move.ts"
+import { errorMessage, type IdleInput } from "./plugins.ts"
 import { workspaceGit } from "./project-create.ts"
+import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "./results.ts"
+import { type AgentState, type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 import { gitState } from "./worktree.ts"
-import { NoSuchSession, NotReady, SessionBusy } from "@vibest/schema/session"
 
 export const sessionRounds = (deps: {
   readonly db: {
     readonly finishTurn: (id: string, patch: SessionPatch, row: NewInboxRow) => Effect.Effect<InboxRow>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
-    readonly setInboxStatus: (ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus) => Effect.Effect<ReadonlyArray<InboxRow>>
+    readonly setInboxStatus: (
+      ids: ReadonlyArray<number>,
+      status: InboxStatus,
+      from?: InboxStatus,
+    ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly latestRoundAt: (sessionId: string) => Effect.Effect<number | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly coverRound: (sessionId: string, at: number) => Effect.Effect<void>
@@ -47,7 +59,9 @@ export const sessionRounds = (deps: {
     readonly endedAt: Ref.Ref<number | undefined>
     readonly blockedNotified: Ref.Ref<boolean>
     /** Check command in flight for one result mtime. */
-    readonly checking: Ref.Ref<{ readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined>
+    readonly checking: Ref.Ref<
+      { readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined
+    >
     /** A continuation paste is in flight. Its wait holds no lock, so a second check must not paste too. */
     readonly pasting: Ref.Ref<boolean>
   }>
@@ -58,7 +72,11 @@ export const sessionRounds = (deps: {
   readonly plugins: { readonly idle: (input: IdleInput) => Effect.Effect<VibestPlugin.AgentIdle, HookFailed> }
   readonly paneTail: (h: Runtime, terminal: Terminal | undefined) => Effect.Effect<string>
   /** The turn was picked up: the runtime reports it working, or a turn-start report line of the round exists (§5). */
-  readonly pickedUp: (h: Runtime, session: SessionRow, terminal: Terminal) => Effect.Effect<boolean, unknown, FileSystem.FileSystem>
+  readonly pickedUp: (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+  ) => Effect.Effect<boolean, unknown, FileSystem.FileSystem>
   readonly busy: (state: AgentState) => boolean
   /** Interrupt key, then wait for the agent to settle; false when it did not within the wait. */
   readonly interruptAgent: (h: Runtime, session: SessionRow, terminal: Terminal) => Effect.Effect<boolean, RuntimeError>
@@ -66,9 +84,20 @@ export const sessionRounds = (deps: {
   readonly stopWait: Duration.Duration
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
-  readonly undelivered: (session: SessionRow, rows: ReadonlyArray<{ readonly id: number; readonly message: string }>, reason: string) => Effect.Effect<unknown>
+  readonly undelivered: (
+    session: SessionRow,
+    rows: ReadonlyArray<{ readonly id: number; readonly message: string }>,
+    reason: string,
+  ) => Effect.Effect<unknown>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
-  readonly prompt: (h: Runtime, session: SessionRow, terminal: Terminal, text: string, onHandover?: Effect.Effect<void>, options?: { readonly keepRound?: boolean }) => Effect.Effect<string | undefined, NotReady | RuntimeError, FileSystem.FileSystem>
+  readonly prompt: (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    text: string,
+    onHandover?: Effect.Effect<void>,
+    options?: { readonly keepRound?: boolean },
+  ) => Effect.Effect<string | undefined, NotReady | RuntimeError, FileSystem.FileSystem>
   /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
@@ -98,7 +127,9 @@ export const sessionRounds = (deps: {
       pushed: repos ? repos.map((r) => `${r.name}=${r.pushed}`).join("\n") : String(g?.pushed ?? false),
       worktree,
     }
-    const body = [text, error ? `error: ${error}` : "", tail ? `terminal tail:\n${tail}` : ""].filter(Boolean).join("\n\n")
+    const body = [text, error ? `error: ${error}` : "", tail ? `terminal tail:\n${tail}` : ""]
+      .filter(Boolean)
+      .join("\n\n")
     const message = envelope(
       "agent-result",
       [
@@ -126,7 +157,13 @@ export const sessionRounds = (deps: {
         sessionId: session.id,
         kind: "result",
         message,
-        details: { ...info, summary: report.summary, remember: report.remember, error, ...(acceptance && acceptance.length > 0 ? { acceptance } : {}) },
+        details: {
+          ...info,
+          summary: report.summary,
+          remember: report.remember,
+          error,
+          ...(acceptance && acceptance.length > 0 ? { acceptance } : {}),
+        },
       },
     )
     yield* inbox.announce(row)
@@ -136,43 +173,71 @@ export const sessionRounds = (deps: {
    * Queued messages for an idle session: one wake = one delivery, consecutive rows from one sender merged (SPEC §11.1, §11.4).
    * The batch goes pending → sending (handed to the runtime) → delivered, or failed with the owner told; only its own rows.
    */
-  const deliverQueued = Effect.fn("Sessions.deliverQueued")(function* (h: Runtime, session: SessionRow, terminal: Terminal) {
+  const deliverQueued = Effect.fn("Sessions.deliverQueued")(function* (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+  ) {
     const pending = yield* db.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
-    yield* deps.prompt(h, session, terminal, batch.map((r) => r.message).join("\n\n"), db.claim(ids).pipe(Effect.tap((got) => Effect.sync(() => claimed.push(...got))))).pipe(
-      Effect.flatMap((notStarted) => {
-        const rows = batch.filter((r) => claimed.includes(r.id))
-        if (rows.length === 0) return Effect.void
-        return notStarted ? deps.undelivered(session, rows, notStarted) : db.setInboxStatus(claimed, "delivered", "sending")
-      }),
-      Effect.onExit((exit) => (Exit.isSuccess(exit) || claimed.length === 0 ? Effect.void : db.setInboxStatus(claimed, "failed", "sending"))),
-      // The runtime refused or the session never got ready: failed, the owner told.
-      Effect.catchTags({
-        // The connection breaking (§ one error type) is not a refusal: before the handover it stays pending for the
-        // next check; after, it may have arrived, so it is not sent again (no blind replay); the owner decides.
-        RuntimeError: (e) =>
-          e.code === "unreachable"
-            ? db.pendingInbox(session.id).pipe(
+    yield* deps
+      .prompt(
+        h,
+        session,
+        terminal,
+        batch.map((r) => r.message).join("\n\n"),
+        db.claim(ids).pipe(Effect.tap((got) => Effect.sync(() => claimed.push(...got)))),
+      )
+      .pipe(
+        Effect.flatMap((notStarted) => {
+          const rows = batch.filter((r) => claimed.includes(r.id))
+          if (rows.length === 0) return Effect.void
+          return notStarted
+            ? deps.undelivered(session, rows, notStarted)
+            : db.setInboxStatus(claimed, "delivered", "sending")
+        }),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit) || claimed.length === 0 ? Effect.void : db.setInboxStatus(claimed, "failed", "sending"),
+        ),
+        // The runtime refused or the session never got ready: failed, the owner told.
+        Effect.catchTags({
+          // The connection breaking (§ one error type) is not a refusal: before the handover it stays pending for the
+          // next check; after, it may have arrived, so it is not sent again (no blind replay); the owner decides.
+          RuntimeError: (e) =>
+            e.code === "unreachable"
+              ? db.pendingInbox(session.id).pipe(
+                  Effect.flatMap((pending) =>
+                    pending.some((r) => claimed.includes(r.id))
+                      ? Effect.fail(e)
+                      : deps.undelivered(
+                          session,
+                          batch.filter((r) => claimed.includes(r.id)),
+                          `the connection to ${session.runtime} broke after the message was handed over (${e.message}); it may have reached the session`,
+                        ),
+                  ),
+                )
+              : deps.undelivered(
+                  session,
+                  batch.filter((r) => claimed.includes(r.id)),
+                  e.message,
+                ),
+          // ready() throws before the handover claim: an empty claimed list is not a failed delivery.
+          NotReady: (e) => {
+            const rows = batch.filter((r) => claimed.includes(r.id))
+            if (rows.length > 0) return deps.undelivered(session, rows, e.message)
+            return db
+              .pendingInbox(session.id)
+              .pipe(
                 Effect.flatMap((pending) =>
-                  pending.some((r) => claimed.includes(r.id))
-                    ? Effect.fail(e)
-                    : deps.undelivered(session, batch.filter((r) => claimed.includes(r.id)), `the connection to ${session.runtime} broke after the message was handed over (${e.message}); it may have reached the session`),
+                  ids.some((id) => pending.some((r) => r.id === id)) ? Effect.fail(e) : Effect.void,
                 ),
               )
-            : deps.undelivered(session, batch.filter((r) => claimed.includes(r.id)), e.message),
-        // ready() throws before the handover claim: an empty claimed list is not a failed delivery.
-        NotReady: (e) => {
-          const rows = batch.filter((r) => claimed.includes(r.id))
-          if (rows.length > 0) return deps.undelivered(session, rows, e.message)
-          return db.pendingInbox(session.id).pipe(
-            Effect.flatMap((pending) => (ids.some((id) => pending.some((r) => r.id === id)) ? Effect.fail(e) : Effect.void)),
-          )
-        },
-      }),
-    )
+          },
+        }),
+      )
   })
 
   /** Filled in once the locked check exists: the command fiber must not close over it while it is being defined. */
@@ -186,56 +251,83 @@ export const sessionRounds = (deps: {
   const settleCheck = (id: string, mtime: number, command: string, cwd: string, token: number) =>
     Effect.gen(function* () {
       const ran = yield* runCheck(command, cwd)
-      yield* deps.locked(id)(Effect.gen(function* () {
-        const session = yield* db.getSession(id)
-        if (!session || session.turnState !== "open") return
-        const result = yield* readResult(layout.resultFile(id)).pipe(Effect.provideService(Harnesses, harnesses))
-        if (Option.isNone(result) || result.value.mtimeMs !== mtime) return
-        if (session.metadata.check?.mtime === mtime && session.metadata.check.ran) return
-        const previous = session.metadata.check
-        const time = yield* Clock.currentTimeMillis
-        yield* db.updateSession(id, {
-          metadata: {
-            ...session.metadata,
-            check: {
-              mtime,
-              attempts: (previous?.attempts ?? 0) + 1,
-              ran,
-              acceptance: [...(previous?.acceptance ?? []), { reviewer: "check" as const, outcome: ran.ok ? "pass" as const : "fail" as const, summary: ran.tail, time }],
-              ...(previous?.deliverFailed ? { deliverFailed: true } : {}),
+      yield* deps.locked(id)(
+        Effect.gen(function* () {
+          const session = yield* db.getSession(id)
+          if (!session || session.turnState !== "open") return
+          const result = yield* readResult(layout.resultFile(id)).pipe(Effect.provideService(Harnesses, harnesses))
+          if (Option.isNone(result) || result.value.mtimeMs !== mtime) return
+          if (session.metadata.check?.mtime === mtime && session.metadata.check.ran) return
+          const previous = session.metadata.check
+          const time = yield* Clock.currentTimeMillis
+          yield* db.updateSession(id, {
+            metadata: {
+              ...session.metadata,
+              check: {
+                mtime,
+                attempts: (previous?.attempts ?? 0) + 1,
+                ran,
+                acceptance: [
+                  ...(previous?.acceptance ?? []),
+                  {
+                    reviewer: "check" as const,
+                    outcome: ran.ok ? ("pass" as const) : ("fail" as const),
+                    summary: ran.tail,
+                    time,
+                  },
+                ],
+                ...(previous?.deliverFailed ? { deliverFailed: true } : {}),
+              },
             },
-          },
-          lastActive: time,
-        })
-      }))
+            lastActive: time,
+          })
+        }),
+      )
       yield* nextCheck.run(id)
     }).pipe(
       // Not under the session lock: remove interrupts this fiber while it holds that lock.
-      Effect.ensuring(Effect.gen(function* () {
-        const tracked = yield* deps.track(id)
-        yield* Ref.update(tracked.checking, (current) => current?.token === token ? undefined : current)
-      })),
+      Effect.ensuring(
+        Effect.gen(function* () {
+          const tracked = yield* deps.track(id)
+          yield* Ref.update(tracked.checking, (current) => (current?.token === token ? undefined : current))
+        }),
+      ),
       deps.logged(`check command ${id}`),
     )
 
   /** The row may still take a continuation paste: the turn is open and interrupt did not choose delivery. */
   const stillPastable = (id: string) =>
-    deps.locked(id)(db.getSession(id).pipe(
-      Effect.map((session) => !!session && session.turnState === "open" && session.metadata.check?.deliverFailed !== true),
-    ))
+    deps.locked(id)(
+      db
+        .getSession(id)
+        .pipe(
+          Effect.map(
+            (session) => !!session && session.turnState === "open" && session.metadata.check?.deliverFailed !== true,
+          ),
+        ),
+    )
 
   /** Poll until the turn is picked up (§5), or false after `confirmTimeout`. Writes nothing. */
   const awaitPickup = (h: Runtime, session: SessionRow, terminal: Terminal) =>
-    deps.pickedUp(h, session, terminal).pipe(
-      Effect.repeat({ until: (picked) => picked, schedule: TICK }),
-      Effect.timeoutOrElse({ duration: deps.confirmTimeout, orElse: () => Effect.succeed(false) }),
-    )
+    deps
+      .pickedUp(h, session, terminal)
+      .pipe(
+        Effect.repeat({ until: (picked) => picked, schedule: TICK }),
+        Effect.timeoutOrElse({ duration: deps.confirmTimeout, orElse: () => Effect.succeed(false) }),
+      )
 
   /**
    * Prompt, Enter, one re-paste. Stops when `pickup` is true. Writes nothing.
    * `allow` false (a continuation whose turn closed, or `deliverFailed`) stops before the next send: `"stopped"`.
    */
-  const pasteText = (h: Runtime, session: SessionRow, terminal: Terminal, text: string, pickup: Effect.Effect<boolean, unknown, FileSystem.FileSystem>, allow: Effect.Effect<boolean, unknown>) => {
+  const pasteText = (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    text: string,
+    pickup: Effect.Effect<boolean, unknown, FileSystem.FileSystem>,
+    allow: Effect.Effect<boolean, unknown>,
+  ) => {
     const send = h.send(terminal, { text })
     return Effect.gen(function* () {
       if (!(yield* allow)) return "stopped" as const
@@ -247,7 +339,7 @@ export const sessionRounds = (deps: {
       if (!(yield* allow)) return "stopped" as const
       // Re-paste once only, so a task never runs twice.
       yield* send.pipe(Effect.ignore)
-      return (yield* pickup) ? true as const : false as const
+      return (yield* pickup) ? (true as const) : (false as const)
     })
   }
 
@@ -259,11 +351,13 @@ export const sessionRounds = (deps: {
    */
   const continuePaste = (h: Runtime, session: SessionRow, terminal: Terminal, text: string, mtimeMs: number) => {
     const unpasted = (reason: string) =>
-      deps.locked(session.id)(Effect.gen(function* () {
-        const row = yield* db.getSession(session.id)
-        if (!row || row.turnState !== "open" || row.metadata.check?.deliverFailed === true) return
-        yield* deps.notice(row, `${session.id}: the check output could not be pasted; ${reason}`)
-      }))
+      deps.locked(session.id)(
+        Effect.gen(function* () {
+          const row = yield* db.getSession(session.id)
+          if (!row || row.turnState !== "open" || row.metadata.check?.deliverFailed === true) return
+          yield* deps.notice(row, `${session.id}: the check output could not be pasted; ${reason}`)
+        }),
+      )
     return Effect.gen(function* () {
       // Stamped before the paste, and pickup is proven against that stamp: the round's own earlier start line does not count.
       const pasted = yield* Clock.currentTimeMillis
@@ -277,19 +371,23 @@ export const sessionRounds = (deps: {
       )
       if (started === "stopped") return
       if (started === true) {
-        return yield* deps.locked(session.id)(Effect.gen(function* () {
-          const row = yield* db.getSession(session.id)
-          if (!row || row.turnState !== "open" || row.metadata.check?.deliverFailed === true) return
-          const tracked = yield* deps.track(session.id)
-          yield* Ref.set(tracked.endedAt, undefined)
-          yield* Ref.set(tracked.blockedNotified, false)
-          yield* Ref.set(tracked.sawWorking, true)
-          const at = Math.max(pasted, mtimeMs)
-          yield* db.updateSession(session.id, { turnState: "open", turnPromptedAt: at })
-        }))
+        return yield* deps.locked(session.id)(
+          Effect.gen(function* () {
+            const row = yield* db.getSession(session.id)
+            if (!row || row.turnState !== "open" || row.metadata.check?.deliverFailed === true) return
+            const tracked = yield* deps.track(session.id)
+            yield* Ref.set(tracked.endedAt, undefined)
+            yield* Ref.set(tracked.blockedNotified, false)
+            yield* Ref.set(tracked.sawWorking, true)
+            const at = Math.max(pasted, mtimeMs)
+            yield* db.updateSession(session.id, { turnState: "open", turnPromptedAt: at })
+          }),
+        )
       }
       const tail = yield* deps.paneTail(h, terminal)
-      yield* unpasted(`task_not_started: ${session.id} did not start working on the message.\n\nterminal tail:\n${tail}`)
+      yield* unpasted(
+        `task_not_started: ${session.id} did not start working on the message.\n\nterminal tail:\n${tail}`,
+      )
     }).pipe(Effect.catch((error) => unpasted(errorMessage(Cause.fail(error)))))
   }
 
@@ -359,21 +457,24 @@ export const sessionRounds = (deps: {
     const tracked = yield* deps.track(session.id)
     const stored = session.metadata.check
     const same = stored?.mtime === found.mtimeMs ? stored : undefined
-    const idle = yield* deps.plugins.idle({
-      sessionId: session.id,
-      agentType: session.agent,
-      directory,
-      answer: found.text,
-      checkAttempts: same?.attempts ?? stored?.attempts ?? 0,
-      ran: same?.ran,
-    }).pipe(
-      // A crashed or timed-out idle callback is never skipped silently: the round is delivered failed with its error.
-      Effect.catchTag("HookFailed", (hook) =>
-        finish(session, "failed", found.text, `agent.idle failed: ${hook.message}`).pipe(
-          Effect.andThen(db.coverRound(session.id, found.mtimeMs)),
-          Effect.as(undefined),
-        )),
-    )
+    const idle = yield* deps.plugins
+      .idle({
+        sessionId: session.id,
+        agentType: session.agent,
+        directory,
+        answer: found.text,
+        checkAttempts: same?.attempts ?? stored?.attempts ?? 0,
+        ran: same?.ran,
+      })
+      .pipe(
+        // A crashed or timed-out idle callback is never skipped silently: the round is delivered failed with its error.
+        Effect.catchTag("HookFailed", (hook) =>
+          finish(session, "failed", found.text, `agent.idle failed: ${hook.message}`).pipe(
+            Effect.andThen(db.coverRound(session.id, found.mtimeMs)),
+            Effect.as(undefined),
+          ),
+        ),
+      )
     if (idle === undefined) return "delivered" as const
     const stop = mode === "stop" || stored?.deliverFailed === true
     if (same?.ran === undefined && idle.command !== undefined) {
@@ -390,14 +491,20 @@ export const sessionRounds = (deps: {
       if (running?.mtime === found.mtimeMs) return "pending" as const
       const token = ++nextToken
       // ponytail: not counted by Drain (a check can run for minutes); a planned restart kills it and the next vibestd runs it again from the start.
-      const fiber = yield* Effect.forkIn(settleCheck(session.id, found.mtimeMs, idle.command, directory, token), deps.scope)
+      const fiber = yield* Effect.forkIn(
+        settleCheck(session.id, found.mtimeMs, idle.command, directory, token),
+        deps.scope,
+      )
       yield* Ref.set(tracked.checking, { mtime: found.mtimeMs, fiber, token })
       return "pending" as const
     }
     if (stop && (idle.prompt !== undefined || idle.output !== undefined)) {
       if (liveState !== undefined && deps.busy(liveState) && !(yield* deps.interruptAgent(h, session, terminal))) {
         yield* rememberStop(session, found.mtimeMs)
-        return yield* new SessionBusy({ id: session.id, message: `${session.id} did not stop within ${Duration.format(deps.stopWait)}; it may still be working` })
+        return yield* new SessionBusy({
+          id: session.id,
+          message: `${session.id} did not stop within ${Duration.format(deps.stopWait)}; it may still be working`,
+        })
       }
       yield* finish(session, "failed", found.text, "check failed", idle.output ?? idle.prompt ?? "")
       yield* db.coverRound(session.id, found.mtimeMs)
@@ -450,7 +557,8 @@ export const sessionRounds = (deps: {
           if (!current || current.turnState === "open") return false
           const opened = yield* db.beginUserTurn(id, text, { turnPromptedAt: now, lastActive: now })
           // A working round showed up after the read. The text is not a second round, and it is not silent.
-          if (!opened) yield* Effect.logWarning(`prompt ${id}: a round is already open; the typed text was not recorded`)
+          if (!opened)
+            yield* Effect.logWarning(`prompt ${id}: a round is already open; the typed text was not recorded`)
         })
         yield* lock.withPermit(record)
       }),

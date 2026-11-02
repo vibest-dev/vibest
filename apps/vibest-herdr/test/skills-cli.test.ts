@@ -1,38 +1,58 @@
-// Builtin skills: the invocations they print, and how each harness plugin ships and exposes them.
-import { assert, describe, it } from "@effect/vitest"
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
+// Builtin skills: the invocations they print, and how each harness plugin ships and exposes them.
+import { assert, describe, it } from "@effect/vitest"
 import { type CoordinatorInput, HARNESS_IDS, type LaunchInput } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS } from "@vibest/core/harnesses"
+
 import { ARCHIVE_ROOTS } from "../scripts/archive-layout.ts"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const skills = path.join(root, "packages/skills")
 
 const skillFiles = () =>
-  fs.readdirSync(skills, { withFileTypes: true })
+  fs
+    .readdirSync(skills, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skills, entry.name, "SKILL.md")))
     .map((entry) => path.join(skills, entry.name, "SKILL.md"))
     .sort()
 
 /** A line's `vibest …` commands: a fence line, or each backtick span. */
 const commandsOn = (line: string) => {
-  const spans = [...line.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!.trim()).filter((span) => span.startsWith("vibest "))
+  const spans = [...line.matchAll(/`([^`\n]+)`/g)]
+    .map((match) => match[1]!.trim())
+    .filter((span) => span.startsWith("vibest "))
   const bare = line.trim()
   if (bare.startsWith("vibest ")) spans.push(bare)
   return spans
 }
 
 const launch = (pluginDir: string): LaunchInput => ({
-  worktree: "/wt", scratch: "/scratch", rules: "rules", rulesFile: "/rules.md", projectsDir: "/projects",
-  provider: null, model: null, sessionId: "uuid", resume: false, pluginDir, vibest: ["vibest"],
+  worktree: "/wt",
+  scratch: "/scratch",
+  rules: "rules",
+  rulesFile: "/rules.md",
+  projectsDir: "/projects",
+  provider: null,
+  model: null,
+  sessionId: "uuid",
+  resume: false,
+  pluginDir,
+  vibest: ["vibest"],
   env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" },
 })
 
 const coordinator = (pluginDir: string): CoordinatorInput => ({
-  root: "/repo", rules: "", rulesFile: "/r.md", provider: null, model: null, sessionId: null, pluginDir,
+  root: "/repo",
+  rules: "",
+  rulesFile: "/r.md",
+  provider: null,
+  model: null,
+  sessionId: null,
+  pluginDir,
   env: { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00" },
 })
 
@@ -90,10 +110,14 @@ describe("builtin skills", () => {
 
     const harnesses = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-skills-"))
     try {
-      const built = childProcess.spawnSync("bun", [path.join(root, "apps/vibest-herdr/scripts/build-harnesses.ts"), harnesses], {
-        cwd: root,
-        encoding: "utf8",
-      })
+      const built = childProcess.spawnSync(
+        "bun",
+        [path.join(root, "apps/vibest-herdr/scripts/build-harnesses.ts"), harnesses],
+        {
+          cwd: root,
+          encoding: "utf8",
+        },
+      )
       assert.strictEqual(built.status, 0, built.stderr + built.stdout)
       assert.isFalse(fs.existsSync(path.join(harnesses, "main-skills")))
 
@@ -143,7 +167,8 @@ describe("builtin skills", () => {
         if (args.includes("--tools")) assert.notInclude(args[args.indexOf("--tools") + 1]!.split(","), "Skill", id)
       }
 
-      const files = JSON.parse(fs.readFileSync(path.join(root, "apps/vibest-herdr/package.json"), "utf8")).files as Array<string>
+      const files = JSON.parse(fs.readFileSync(path.join(root, "apps/vibest-herdr/package.json"), "utf8"))
+        .files as Array<string>
       assert.include(files, "harnesses")
       assert.include(ARCHIVE_ROOTS, "harnesses")
     } finally {

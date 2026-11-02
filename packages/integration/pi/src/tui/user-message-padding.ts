@@ -26,7 +26,13 @@ function readLease(proto: object): Lease | undefined {
 }
 
 function writeLease(proto: object, lease: Lease | undefined) {
-  if (lease) Object.defineProperty(proto, "vibestCompactUserMessagesLease", { value: lease, configurable: true, enumerable: false, writable: false })
+  if (lease)
+    Object.defineProperty(proto, "vibestCompactUserMessagesLease", {
+      value: lease,
+      configurable: true,
+      enumerable: false,
+      writable: false,
+    })
   else delete (proto as Record<string, unknown>).vibestCompactUserMessagesLease
 }
 
@@ -61,7 +67,8 @@ function compact(this: unknown, original: (width: number) => string[], width: nu
       }
     }
     const lines = original.call(this, width)
-    if (!Array.isArray(lines) || lines.length !== 1 || typeof lines[0] !== "string" || !lines[0].startsWith(INVERTED)) return lines
+    if (!Array.isArray(lines) || lines.length !== 1 || typeof lines[0] !== "string" || !lines[0].startsWith(INVERTED))
+      return lines
     const copy = lines.slice()
     copy[0] = LEADING + lines[0].slice(INVERTED.length)
     return copy
@@ -94,7 +101,10 @@ export default function compactUserMessages(pi: {
     let lease = readLease(message)
     if (!isFramePaint(paint, lease, nativePaint)) return () => {}
     if (lease) lease.owners.add(owner)
-    else if ((nativeRender === undefined || render === nativeRender) && (nativePaint === undefined || paint === nativePaint)) {
+    else if (
+      (nativeRender === undefined || render === nativeRender) &&
+      (nativePaint === undefined || paint === nativePaint)
+    ) {
       let framing = false
       const next: Lease = {
         by: compactUserMessages,
