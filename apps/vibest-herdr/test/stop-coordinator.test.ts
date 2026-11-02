@@ -14,20 +14,31 @@ import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
-import { authed, FakeRuntime, makeRepository, TEST_HERDR, testLayer, type TestServices, untilVirtual } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  makeRepository,
+  TEST_HERDR,
+  testLayer,
+  type TestOptions,
+  type TestServices,
+  until,
+  untilVirtual,
+} from "./fakes.ts"
 
-const served = () =>
+const served = (options: TestOptions) =>
   Server.layer.pipe(
     Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
-    Layer.provideMerge(testLayer()),
+    Layer.provideMerge(testLayer(options)),
   )
 
 const test = <E>(
   name: string,
   program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
   timeout?: number,
-) => it.effect(name, () => program.pipe(Effect.provide(served())), timeout)
+  options: TestOptions = {},
+) => it.effect(name, () => program.pipe(Effect.provide(served(options))), timeout)
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 
@@ -115,7 +126,7 @@ describe("Project.StopCoordinator", () => {
   )
 
   test(
-    "moved or absent while the runtime call is in flight: moved, after one close of the terminal the stop knew",
+    "the row moved or is gone before the stop: moved, nothing closed; a terminal where the runtime sees no agent: running, nothing closed",
     Effect.gen(function* () {
       const s = yield* launched
       const { db, herdr, c, origin, address, key, otherKey } = s
@@ -132,25 +143,25 @@ describe("Project.StopCoordinator", () => {
         ["project", db.coordinatorLaunch(otherKey, "pi", false, { runtime: origin.runtime, address: origin.address })],
         ["absent", db.clearCoordinator(origin.runtime, origin.address)],
       ] as const
-      const blocks = [
-        ["close", () => herdr.hold("close")],
-        ["process", () => herdr.hold("process", s.paneId)],
-      ] as const
       const restore = db.coordinatorLaunch(key, "pi", false, origin)
-      for (const [awaited, block] of blocks) {
-        for (const [change, mutate] of changes) {
-          yield* restore
-          yield* herdr.seedAgent(s.paneId)
-          const closedBefore = (yield* herdr.callsTo("close")).length
-          const held = yield* block()
-          const stopping = yield* Effect.forkChild(c["Project.StopCoordinator"]({ runtime: origin.runtime, address }))
-          yield* held.reached.pipe(Effect.andThen(mutate), Effect.ensuring(held.release()))
-          assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "moved" }, `${change} during ${awaited}`)
-          const closed = (yield* herdr.callsTo("close")).slice(closedBefore)
-          assert.deepStrictEqual(closed, [{ terminal: s.paneId }], `${change} during ${awaited}`)
-        }
+      for (const [change, mutate] of changes) {
+        yield* restore
+        // Held at the agent read, the first runtime call: the row changes before the stop looks at it.
+        const held = yield* herdr.hold("state", s.paneId)
+        const stopping = yield* Effect.forkChild(c["Project.StopCoordinator"]({ runtime: origin.runtime, address }))
+        yield* held.reached.pipe(Effect.andThen(mutate), Effect.ensuring(held.release()))
+        assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "moved" }, change)
       }
+      yield* restore
+      // The harness exited unseen and the user runs something else there: the runtime names no agent, a program runs.
+      yield* herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
+      yield* herdr.addPane(s.paneId, "test", "/")
+      assert.deepStrictEqual(yield* c["Project.StopCoordinator"]({ runtime: origin.runtime, address }), {
+        result: "running",
+      })
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+      assert.isTrue(HashMap.has(yield* herdr.panes, s.paneId))
     }),
     20_000,
   )
@@ -194,5 +205,24 @@ describe("Project.StopCoordinator", () => {
       assert.strictEqual((yield* db.coordinatorOf(yield* db.projectId(key)))!.address?.id, "test/p2")
     }),
     20_000,
+  )
+
+  test(
+    "the close's own exited event clears the row first: still stopped, and another terminal starts it",
+    Effect.gen(function* () {
+      const { db, herdr, c, paneId, origin, address, key } = yield* launched
+      const projectId = yield* db.projectId(key)
+      // Held at the first liveness read after the close, until the exited event has cleared the row.
+      const reading = yield* herdr.hold("process", paneId)
+      const stopping = yield* Effect.forkChild(c["Project.StopCoordinator"]({ runtime: origin.runtime, address }))
+      yield* reading.reached
+      yield* until(db.coordinatorOf(projectId), (row) => !row?.address || row.address.id === "")
+      yield* reading.release()
+      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
+      yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p2", runtime: TEST_HERDR })
+      assert.strictEqual((yield* db.coordinatorOf(projectId))!.address?.id, "test/p2")
+    }),
+    20_000,
+    { statusEvents: true },
   )
 })

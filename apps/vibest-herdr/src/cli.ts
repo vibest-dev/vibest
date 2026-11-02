@@ -205,7 +205,6 @@ const run = Command.make(
   ),
 )
 
-/** Replaces this process (from #platform). */
 /**
  * One main agent per project: `start` runs only when no other terminal runs the project's main agent, or once the user
  * answered y and that one's terminal was closed with nothing left running in it. A no, no answer within two minutes, EOF
@@ -234,6 +233,7 @@ export const soleMainAgent = <A, E, R>(
     return yield* start
   })
 
+/** Replaces this process (from #platform). */
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
 /** `vibest [--new] [--harness <h>]`: the flags of the command line's own command, which opens the project's main agent. */
