@@ -7,5 +7,10 @@
   "printWidth": 120,
   "trailingComma": "all",
   "experimentalSortImports": {},
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "packages/effect-herdr-sdk/src/generated/**"]
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "packages/effect-herdr-sdk/src/generated/**",
+    "packages/effect-herdr-sdk/schema/**"
+  ]
 }
