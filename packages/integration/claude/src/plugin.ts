@@ -182,7 +182,7 @@ export function register(on: On, _options?: unknown) {
     // Another protocol: vibestd says what to run. Shown until a request goes through again.
     if (reply.status === 409) {
       mismatched = true
-      host.status(`VIBEST: ${errorOf(reply.body) ?? "vibest was updated; restart this agent to continue"}`)
+      host.status(`VIBEST: ${errorOf(reply.body) ?? "vibest was updated; run vibest update"}`)
     } else if (mismatched) {
       mismatched = false
       host.status(undefined)

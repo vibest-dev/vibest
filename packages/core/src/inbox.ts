@@ -360,19 +360,20 @@ export class Inbox extends Context.Service<
           }),
         )
 
-      // The Claude plugin's leases, this process only: a restart puts its `sending` rows back to pending (Db.recoverSending).
-      const leases = new Map<number, { readonly projectId: number; readonly until: number }>()
+      // The Claude plugin's leases live in the rows: `sending` rows of the project's main agent, and one lease clock on
+      // that session (`metadata.leaseUntil`). In memory only the last poll per project, for the away check; its entry
+      // goes when the project is away. A restart puts `sending` rows back to pending (Db.recoverSending).
       const lastPoll = new Map<number, number>()
-      /** Leased rows of `projectId` that `expired` picks go back to pending. Run under the project's lock. */
-      const unlease = (projectId: number, expired: (until: number) => boolean) =>
-        Effect.suspend(() => {
-          const ids: Array<number> = []
-          for (const [id, lease] of leases)
-            if (lease.projectId === projectId && expired(lease.until)) {
-              leases.delete(id)
-              ids.push(id)
-            }
-          return db.transitionInbox(ids, "pending", "sending")
+      /** The project's leased rows go back to pending. Run under the project's lock. */
+      const unlease = (projectId: number) =>
+        Effect.gen(function* () {
+          const leased = yield* db.coordinatorLeased(projectId)
+          yield* db.transitionInbox(
+            leased.map((r) => r.id),
+            "pending",
+            "sending",
+          )
+          yield* db.setLeaseUntil(projectId, undefined)
         })
 
       const poll = (projectId: number) =>
@@ -382,15 +383,12 @@ export class Inbox extends Context.Service<
           const empty: Polled = { ids: [], line: "", text: "" }
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
-          yield* withLock(
-            `unlease project ${projectId}`,
-            projectId,
-            unlease(projectId, (until) => until <= now),
-            true,
-          )
-          const rows = yield* claimNext(projectId, undefined, (ids) => {
-            for (const id of ids) leases.set(id, { projectId, until: now + Duration.toMillis(LEASE) })
-          })
+          // A lease that ran out (or none recorded) puts the rows still out back first.
+          const until = yield* db.leaseUntil(projectId)
+          const expired = until === undefined ? (yield* db.coordinatorLeased(projectId)).length > 0 : until <= now
+          if (expired) yield* withLock(`unlease project ${projectId}`, projectId, unlease(projectId), true)
+          const rows = yield* claimNext(projectId, undefined, () => undefined)
+          if (rows !== undefined) yield* db.setLeaseUntil(projectId, now + Duration.toMillis(LEASE))
           if (rows === undefined) return empty
           const last = rows.at(-1)!
           const session = last.kind === "notice" ? undefined : yield* db.getSession(last.sessionId)
@@ -408,9 +406,12 @@ export class Inbox extends Context.Service<
           Effect.uninterruptible(
             Effect.gen(function* () {
               // Only this project's rows: leased to it, or back to pending after its lease ran out.
-              const pending = new Set((yield* db.coordinatorPending(projectId)).map((r) => r.id))
-              const own = ids.filter((id) => leases.get(id)?.projectId === projectId || pending.has(id))
-              for (const id of own) leases.delete(id)
+              const mine = new Set(
+                [...(yield* db.coordinatorLeased(projectId)), ...(yield* db.coordinatorPending(projectId))].map(
+                  (r) => r.id,
+                ),
+              )
+              const own = ids.filter((id) => mine.has(id))
               const rows = [
                 ...(yield* db.setInboxStatus(own, "delivered", "sending")),
                 ...(yield* db.setInboxStatus(own, "delivered", "pending")),
@@ -429,12 +430,7 @@ export class Inbox extends Context.Service<
           for (const [projectId, at] of lastPoll) {
             if (now - at <= Duration.toMillis(AWAY)) continue
             lastPoll.delete(projectId)
-            yield* withLock(
-              `unlease project ${projectId}`,
-              projectId,
-              unlease(projectId, () => true),
-              true,
-            )
+            yield* withLock(`unlease project ${projectId}`, projectId, unlease(projectId), true)
           }
         }).pipe(Effect.repeat(Schedule.spaced("1 second"))),
         scope,

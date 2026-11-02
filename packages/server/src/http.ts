@@ -64,11 +64,6 @@ export const make = Effect.gen(function* () {
   const drain = yield* Drain
   const harnesses = yield* Harnesses
   const layout = yield* Layout
-  // What each session last said; only a change is written (the conversation id) or logged (the version).
-  const conversations = new Map<string, string>()
-  /** The integration version each session last sent, for upgrades; this process only. */
-  const versions = new Map<string, string>()
-
   const header = (headers: Headers.Headers, name: string) => Option.getOrUndefined(Headers.get(headers, name))
 
   /** The calling session, checked: its row, else the reply that refuses the request. */
@@ -85,15 +80,12 @@ export const make = Effect.gen(function* () {
       const project = header(headers, PROJECT_HEADER)
       if (project === undefined ? MISSING_PROJECT_ID === "refuse" : project !== String(row.projectId))
         return failure(403, `session ${row.id} is not in project ${project ?? "(no vibest-project-id)"}`)
+      // Kept in the session's row, written only when it changed; vibestd holds nothing per session in memory.
       const conversation = header(headers, HARNESS_SESSION_HEADER)
-      if (conversation && conversations.get(row.id) !== conversation) {
-        if (yield* db.noteHarnessSession(row.id, conversation))
-          yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
-        conversations.set(row.id, conversation)
-      }
+      if (conversation && (yield* db.noteHarnessSession(row.id, conversation)))
+        yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
       const version = header(headers, PLUGIN_VERSION_HEADER)
-      if (version && versions.get(row.id) !== version) {
-        versions.set(row.id, version)
+      if (version && (yield* db.noteIntegrationVersion(row.id, version))) {
         yield* Effect.logInfo(`session ${row.id} runs integration ${version}`).pipe(
           Effect.annotateLogs({
             agent: header(headers, AGENT_HEADER) ?? "",

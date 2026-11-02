@@ -121,15 +121,15 @@ describe("vibestd's HTTP API", () => {
       assert.deepInclude(older.body, {
         protocol: PROTOCOL,
         version: VERSION,
-        message: `vibest was updated to ${VERSION}; restart this agent to continue`,
-        action: MISMATCH_ACTION.restartAgent,
+        message: `vibest was updated to ${VERSION}; run vibest update to restart this agent on it`,
+        action: MISMATCH_ACTION,
       })
       const newer = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL + 1) })
       assert.deepInclude(newer.body, {
-        message: `vibestd is older (${VERSION}); upgrade it`,
-        action: MISMATCH_ACTION.upgradeDaemon,
+        message: `vibestd is older (${VERSION}); run vibest update`,
+        action: "vibest update",
       })
-      assert.include((newer.body as { error: string }).error, `Run: ${MISMATCH_ACTION.upgradeDaemon}`)
+      assert.strictEqual((newer.body as { error: string }).error, `vibestd is older (${VERSION}); run vibest update`)
       assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
       // Missing project id: refused while MISSING_PROJECT_ID says so.
@@ -143,7 +143,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the harness's conversation id is recorded when it changes, for the main agent and a subagent alike",
+    "the harness's conversation id and the plugin version are recorded in the row when they change, for the main agent and a subagent alike",
     Effect.gen(function* () {
       const { call, db, main, worker, projectId } = yield* project
       const conversation = (id: string) =>
@@ -153,13 +153,15 @@ describe("vibestd's HTTP API", () => {
       for (const id of [main, worker]) {
         yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
         assert.strictEqual(yield* conversation(id), "c1")
-        // Written by someone else meanwhile: an unchanged header does not write again.
-        yield* db.noteHarnessSession(id, "other")
-        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
-        assert.strictEqual(yield* conversation(id), "other")
+        // The same id again: the row already holds it, nothing is written.
+        assert.isFalse(yield* db.noteHarnessSession(id, "c1"))
         // After /clear the plugin sends the new id: the latest wins.
         yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c2" }, JSON.stringify({ ids: [] }))
         assert.strictEqual(yield* conversation(id), "c2")
+        // The plugin version lives in the session's row (no per-session state in vibestd's memory).
+        yield* call("/inbox/ack", { sessionId: id, pluginVersion: "1.2.3" }, JSON.stringify({ ids: [] }))
+        assert.isFalse(yield* db.noteIntegrationVersion(id, "1.2.3"))
+        assert.isTrue(yield* db.noteIntegrationVersion(id, "1.2.4"))
       }
     }),
   )
@@ -178,6 +180,8 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker})`)
       assert.strictEqual(first.text, "hello")
       assert.strictEqual(yield* statusOf(db, worker), "sending")
+      // The lease is in the rows: `sending`, and the main agent's lease clock in its session metadata.
+      assert.isDefined(yield* db.leaseUntil(projectId))
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)

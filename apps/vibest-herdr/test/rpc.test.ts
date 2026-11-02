@@ -89,14 +89,11 @@ describe("vibest.sock", () => {
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
       // Says what happened and what to run: a caller without the header predates it, so it is told to restart.
       const said = String(Exit.isFailure(rejected) && Cause.pretty(rejected.cause))
-      assert.include(
-        said,
-        `vibest was updated to ${VERSION}; restart this agent to continue. Run: ${MISMATCH_ACTION.restartAgent}`,
-      )
+      assert.include(said, `vibest was updated to ${VERSION}; run ${MISMATCH_ACTION} to restart this agent on it`)
       const newer = yield* Effect.exit(raw.List({}, { headers: { "vibest-protocol": String(PROTOCOL + 1) } }))
       assert.include(
         String(Exit.isFailure(newer) && Cause.pretty(newer.cause)),
-        `Run: ${MISMATCH_ACTION.upgradeDaemon}`,
+        `vibestd is older (${VERSION}); run ${MISMATCH_ACTION}`,
       )
       assert.strictEqual(failureTag(yield* Effect.exit(raw.List({}, { headers: protocolHeaders() }))), "InvalidCaller")
       assert.strictEqual(
@@ -1077,7 +1074,7 @@ describe("vibest.sock", () => {
       assert.include(said, "vibestd 0.0.0 (pid unknown, command unknown)")
       assert.include(said, `vibest ${VERSION} (`)
       assert.include(said, "kill -TERM <pid>")
-      assert.include(said, `vibestd is older (0.0.0); upgrade it. Run: ${MISMATCH_ACTION.upgradeDaemon}`)
+      assert.include(said, "vibestd is older (0.0.0); run vibest update")
       // An older build of the same package version (protocol 2, its Ping without `runtimes`): told plainly, never a SchemaError.
       const older = yield* serve({ protocol: 2, version: VERSION, runtimeSessions: [] })
       const olderRefused = yield* Effect.exit(
