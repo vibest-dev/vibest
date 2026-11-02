@@ -177,6 +177,8 @@ export const CoordinatorRow = Schema.Struct({
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   routing: Schema.optional(Routing),
+  /** The harness's PID: the `vibest` that exec'd it reported its own (Project.CoordinatorSession). Absent on older rows. */
+  pid: Schema.optional(Schema.Number),
 })
 export type CoordinatorRow = typeof CoordinatorRow.Type
 
@@ -521,11 +523,12 @@ const make = Effect.gen(function* () {
         decodeCoordinators(
           rows.map((row) => {
             const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-            const { provider, model, routing, projectDirectory } = JSON.parse(row.metadata) as {
+            const { provider, model, routing, projectDirectory, pid } = JSON.parse(row.metadata) as {
               provider?: string | null
               model?: string | null
               routing?: unknown
               projectDirectory?: unknown
+              pid?: unknown
             }
             return {
               id: row.id,
@@ -540,6 +543,7 @@ const make = Effect.gen(function* () {
               provider: provider ?? null,
               model: model ?? null,
               ...(routing === undefined ? {} : { routing }),
+              ...(typeof pid === "number" ? { pid } : {}),
             }
           }),
         ),
@@ -660,7 +664,8 @@ const make = Effect.gen(function* () {
       AND recipient_session_id = (SELECT main_session_id FROM project WHERE id = ${projectId})
       ${
         guard === "absent"
-          ? sql`AND NOT EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime IS NOT NULL)`
+          ? // A main agent moving to another terminal (`detachCoordinator`) has no place either, but its rows wait for it.
+            sql`AND NOT EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND (a.runtime IS NOT NULL OR json_extract(a.metadata, '$.moving') = 1))`
           : guard
             ? sql`AND EXISTS (SELECT 1 FROM session a JOIN project p ON p.main_session_id = a.id WHERE p.id = ${projectId} AND a.runtime = ${runtimeMatching(guard.runtime, guard.address)})`
             : sql``
@@ -866,8 +871,9 @@ const make = Effect.gen(function* () {
     /**
      * Point the project's main agent at this start, creating it on first use. Its id is stable across restarts and
      * harness switches; `fresh` (`vibest --new`) ends the current conversation and starts another (a new main session).
-     * `start` is what scheduling chose (kept in its metadata, for `vibest ls`). Another project's main agent still
-     * recorded at this pane loses the place, and both projects drop what was waiting.
+     * `start` is what scheduling chose (kept in its metadata, for `vibest ls`), and the PID its harness will have. Another
+     * project's main agent still recorded at this pane loses the place, and both projects drop what was waiting; so does
+     * this one, unless it is moving here (`detachCoordinator`): then what waits for it is delivered here.
      */
     coordinatorLaunch: (
       key: string,
@@ -880,6 +886,7 @@ const make = Effect.gen(function* () {
         readonly routing?: unknown
         /** The project directory. Stored beside the key; never written into `directory`. */
         readonly projectDirectory?: string | undefined
+        readonly pid?: number | undefined
       } = {},
     ) =>
       Effect.gen(function* () {
@@ -907,9 +914,14 @@ const make = Effect.gen(function* () {
               })}`
               yield* sql`UPDATE project SET main_session_id = ${id} WHERE id = ${project}`
             }
+            const [moving] = yield* sql<{
+              moving: number | null
+            }>`SELECT json_extract(metadata, '$.moving') AS moving FROM session WHERE id = (SELECT main_session_id FROM project WHERE id = ${project})`
             const metadata = JSON.stringify({
               provider: start.provider ?? null,
               model: start.model ?? null,
+              pid: start.pid ?? null,
+              moving: null,
               ...(start.routing ? { routing: start.routing } : {}),
               ...(start.projectDirectory ? { projectDirectory: start.projectDirectory } : {}),
             })
@@ -917,7 +929,7 @@ const make = Effect.gen(function* () {
                 harness_session_id = CASE WHEN ${fresh ? 1 : 0} OR harness != ${harness} THEN NULL ELSE harness_session_id END,
                 harness = ${harness}, runtime = ${runtime}, metadata = json_patch(metadata, ${metadata})
               WHERE id = (SELECT main_session_id FROM project WHERE id = ${project}) RETURNING id, harness_session_id AS harness_session`
-            yield* dropWaiting(project)
+            if (!moving?.moving || fresh) yield* dropWaiting(project)
             return { sessionId: saved!.id, harnessSessionId: saved!.harnessSession }
           }),
         )
@@ -933,6 +945,25 @@ const make = Effect.gen(function* () {
         Effect.asVoid,
         Effect.orDie,
       ),
+
+    /**
+     * The main agent leaves its place to move to another terminal (Project.StopCoordinator), before its harness is
+     * stopped: no place, so its exit drops nothing (`clearCoordinator` no longer matches), and what waits for it stays
+     * pending for the launch that follows. False when it is no longer at that place.
+     */
+    detachCoordinator: (projectId: number, runtime: string, address: RuntimeAddress) =>
+      sql<{ id: string }>`UPDATE session SET runtime = NULL, metadata = json_patch(metadata, '{"moving":true}')
+        WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})
+        AND runtime = ${encodeRuntime(runtime, address)} RETURNING id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
+    /** Undo `detachCoordinator` when its harness did not stop: back at its place, unless something took the row since. */
+    reattachCoordinator: (projectId: number, runtime: string, address: RuntimeAddress) =>
+      sql`UPDATE session SET runtime = ${encodeRuntime(runtime, address)}, metadata = json_patch(metadata, '{"moving":null}')
+        WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})
+        AND runtime IS NULL AND json_extract(metadata, '$.moving') = 1`.pipe(Effect.asVoid, Effect.orDie),
 
     /** The runtime's `pane_closed` of a main agent's pane: it is gone, and what was waiting for it is dropped. */
     clearCoordinator: (runtime: string, address: RuntimeAddress) =>

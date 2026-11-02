@@ -233,7 +233,7 @@ export const makeRepository = Effect.gen(function* () {
   return root
 }).pipe(Effect.orDie)
 
-/** Signal 0, the cwd listing, and foreground-group SIGTERM, as the test sets them. A PID not set has exited. `terminateGroup` records the group and does not signal it. */
+/** Signal 0, the cwd listing, and SIGTERM, as the test sets them. A PID not set has exited. `terminate` records the PID and marks it exited (unless ignored); it never signals. */
 export class FakeProcesses extends Context.Service<
   FakeProcesses,
   {
@@ -242,11 +242,13 @@ export class FakeProcesses extends Context.Service<
     readonly setCwdUsers: (users: ReadonlyArray<number> | undefined) => Effect.Effect<void>
     /** Every PID signal 0 was asked about, in order. */
     readonly probed: Effect.Effect<ReadonlyArray<number>>
-    /** Every foreground group `terminateGroup` was asked to SIGTERM, in order. Never a real signal. */
+    /** Every PID `terminate` was asked to SIGTERM, in order. Never a real signal. */
     readonly signaled: Effect.Effect<ReadonlyArray<number>>
-    /** Next `terminateGroup` returns `denied` and records nothing. */
+    /** `terminate` returns `denied` and records nothing. */
     readonly setSignalDenied: (denied: boolean) => Effect.Effect<void>
-    /** Hold the next `terminateGroup` (already inside the coordinator write transaction) until `release`. */
+    /** `terminate` is recorded, but the process ignores it: it stays as it was. */
+    readonly setSignalIgnored: (ignored: boolean) => Effect.Effect<void>
+    /** Hold the next `terminate` until `release`. */
     readonly holdSignal: () => Effect.Effect<{
       readonly reached: Effect.Effect<void>
       readonly release: () => Effect.Effect<void>
@@ -270,6 +272,7 @@ export class FakeProcesses extends Context.Service<
       const probed = yield* Ref.make<ReadonlyArray<number>>([])
       const signaled = yield* Ref.make<ReadonlyArray<number>>([])
       const denied = yield* Ref.make(false)
+      const ignored = yield* Ref.make(false)
       const signalGate = yield* Ref.make(
         Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
       )
@@ -292,6 +295,7 @@ export class FakeProcesses extends Context.Service<
         probed: Ref.get(probed),
         signaled: Ref.get(signaled),
         setSignalDenied: (d) => Ref.set(denied, d),
+        setSignalIgnored: (i) => Ref.set(ignored, i),
         holdSignal: () => holdNext(signalGate),
         holdCwd: () => holdNext(cwdGate),
         setCwdDelay: (d) => Ref.set(cwdDelay, d),
@@ -301,7 +305,7 @@ export class FakeProcesses extends Context.Service<
               Effect.andThen(Ref.get(states)),
               Effect.map((m) => Option.getOrElse(HashMap.get(m, pid), (): Liveness => "exited")),
             ),
-          terminateGroup: (group) =>
+          terminate: (pid) =>
             Effect.gen(function* () {
               const gate = yield* Ref.modify(
                 signalGate,
@@ -320,7 +324,8 @@ export class FakeProcesses extends Context.Service<
                 for (let i = 0; i < 8; i++) yield* Effect.yieldNow
               }
               if (yield* Ref.get(denied)) return "denied" as const
-              yield* Ref.update(signaled, (s) => [...s, group])
+              yield* Ref.update(signaled, (s) => [...s, pid])
+              if (!(yield* Ref.get(ignored))) yield* Ref.update(states, HashMap.set(pid, "exited" as Liveness))
               return "sent" as const
             }),
           cwdUsers: () =>

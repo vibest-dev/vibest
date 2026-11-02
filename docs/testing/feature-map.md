@@ -110,7 +110,7 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S7  | `run --archive-on-completion`                                                                                     | runtime                                                         |
 | S8  | self-heal: daemon killed mid-turn; pane closed mid-turn; bad model → `LaunchFailed`                               | runtime                                                         |
 | S9  | limits: `VIBEST_MAX_SESSIONS`                                                                                     | runtime                                                         |
-| S10 | `vibest` main Agent: parent workspace, resume, `--new`, rules file                                                | runtime                                                         |
+| S10 | `vibest` main Agent: parent workspace, resume, `--new`, rules file, move to another terminal (y)                  | move: `tools/e2e` S10; the rest: runtime                        |
 | S11 | Claude inbox bridge: `inbox attach/pull/ack/release`, `integration stop`                                          | runtime                                                         |
 | S12 | Pi coordinator: inbox push, Pi TUI tool groups render                                                             | inbox push: `tools/e2e` S12; tool groups: runtime (agent)       |
 | S13 | herdr status push: a status change reaches vibestd without the poll                                               | runtime                                                         |

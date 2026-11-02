@@ -8,9 +8,9 @@ import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 
 import { Db, type SessionRow } from "./db.ts"
 import { Layout, resolveWorktree } from "./paths.ts"
-import { Processes } from "./processes.ts"
+import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
-import { alive, type Runtime, type Terminal } from "./runtimes.ts"
+import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
@@ -21,39 +21,52 @@ type ProcessState = RemoveOutcome["processes"]
 export const CWD_POLL = Duration.millis(500)
 export const CWD_WAIT = Duration.seconds(10)
 
+/** How long a stopped main agent's harness has to exit after SIGTERM. */
+export const HARNESS_EXIT_WAIT = Duration.seconds(10)
+
 /**
- * Stop the agent a coordinator's terminal runs, without closing it (the RPC `Project.StopCoordinator`): the harness's
- * interrupt key, then until it is no longer working. `moved`: the row was no longer the one asked about. `running`: it
- * did not settle. The write transaction the old signal needed is gone with the signal: `stillThere` is asked again
- * after the wait.
+ * End a main agent's harness so that it can start in another terminal (the RPC `Project.StopCoordinator`): SIGTERM to
+ * that one PID, never its process group or its terminal, so the terminal and its shell stay. `pid` is what its own
+ * `vibest` reported before it exec'd the harness. The row first leaves its place (`detach`), so the harness's exit drops
+ * nothing; a harness still there after `wait` is not stopped, and the row goes back (`reattach`). Signalled only while
+ * the runtime sees an agent in that terminal; with none there, an exited PID means it is already gone, anything else
+ * (another program, a reused PID) is left alone. `moved`: the row was no longer at that place.
+ *
+ * ponytail: local machine only (a PID names a process on vibestd's machine); a remote machine needs a runtime operation.
+ * A PID reused by another program while the runtime still sees an agent there would get the signal.
  */
 export const stopAgent = (
   h: Runtime,
   terminal: Terminal,
   input: {
-    readonly interruptKey: string
-    readonly stillThere: Effect.Effect<boolean>
+    readonly pid: number | undefined
+    readonly detach: Effect.Effect<boolean>
+    readonly reattach: Effect.Effect<void>
     readonly wait: Duration.Duration
   },
 ) =>
   Effect.gen(function* () {
-    if (!(yield* input.stillThere)) return "moved" as const
-    yield* h.send(terminal, { keys: [input.interruptKey] }).pipe(Effect.ignore)
-    // No `state` member: the terminal's own program decides (§5's `process` fallback).
-    const settled: Effect.Effect<boolean> =
-      h.state === undefined
-        ? alive(h, terminal).pipe(Effect.map((running) => !running))
-        : h.state(terminal).pipe(
-            Effect.option,
-            Effect.map(Option.map((state) => state !== "working" && state !== "blocked")),
-            Effect.map((idle) => Option.getOrElse(idle, () => false)),
-          )
-    const stopped = yield* settled.pipe(
-      Effect.repeat({ until: (idle) => idle, schedule: Schedule.spaced("500 millis") }),
-      Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
-    )
-    if (!(yield* input.stillThere)) return "moved" as const
-    return stopped ? ("stopped" as const) : ("running" as const)
+    const processes = yield* Processes
+    const pid = input.pid
+    if (terminal.machine !== "local" || pid === undefined || !validPid(pid)) return "running" as const
+    const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
+    if (seen === "absent" || seen === "unknown") {
+      if ((yield* processes.liveness(pid)) !== "exited") return "running" as const
+      return (yield* input.detach) ? ("stopped" as const) : ("moved" as const)
+    }
+    if (!(yield* input.detach)) return "moved" as const
+    const exited =
+      (yield* processes.terminate(pid)) === "sent" &&
+      (yield* processes
+        .liveness(pid)
+        .pipe(
+          Effect.repeat({ until: (l) => l === "exited", schedule: Schedule.spaced("200 millis") }),
+          Effect.as(true),
+          Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
+        ))
+    if (exited) return "stopped" as const
+    yield* input.reattach
+    return "running" as const
   })
 
 export interface ReleaseInput {

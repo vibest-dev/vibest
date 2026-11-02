@@ -1,8 +1,8 @@
 // What vibest can tell about processes when it removes a session (SPEC §8.6a): whether a PID it recorded still exists, and
 // which of this user's processes have their working directory in the worktree. vibest never signals a process it found
 // or recorded (vibestd is replaced through Daemon.Stop, never a signal); herdr's pane.close does that for
-// the pane it closes. The only process that listing ends is its own lsof helper. `terminateGroup` is SIGTERM to a
-// caller-supplied foreground group (Project.StopCoordinator), not to a PID found or recorded here.
+// the pane it closes. The only process that listing ends is its own lsof helper. `terminate` is SIGTERM to one main
+// agent's harness, the PID its own `vibest` reported before it exec'd the harness (Project.StopCoordinator).
 import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -23,11 +23,11 @@ export const livenessOf = (probe: () => void): Liveness => {
 /** A PID vibest may ask about: a positive integer, never 0 or -1 (a process group, every process). */
 export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
 
-/** What the runtime gives (src/platform): signal 0, SIGTERM to a foreground group, and vibestd's own PID and numeric user id (undefined: none). */
+/** What the runtime gives (src/platform): signal 0, SIGTERM to one process, and vibestd's own PID and numeric user id (undefined: none). */
 export interface ProcessPlatform {
   readonly liveness: (pid: number) => Liveness
-  /** SIGTERM to process group `group` (a positive pid). Throws what the system said. */
-  readonly terminateGroup: (group: number) => void
+  /** SIGTERM to the one process `pid` (positive; never a group). Throws what the system said. */
+  readonly terminate: (pid: number) => void
   readonly pid: number
   readonly uid: number | undefined
 }
@@ -54,8 +54,8 @@ export class Processes extends Context.Service<
   {
     /** Signal 0 to `pid`. A reused PID reads as alive: that can only keep more, never signal it. */
     readonly liveness: (pid: number) => Effect.Effect<Liveness>
-    /** SIGTERM. `sent` includes already gone (ESRCH). `denied` is any other failure: not a confirmed stop. */
-    readonly terminateGroup: (group: number) => Effect.Effect<"sent" | "denied">
+    /** SIGTERM to one process. `sent` includes already gone (ESRCH). `denied` is any other failure, or an invalid PID. */
+    readonly terminate: (pid: number) => Effect.Effect<"sent" | "denied">
     /**
      * PIDs of this user's processes whose cwd is in one of `dirs` (a directory and its other spellings, e.g. its real
      * path); undefined when the listing cannot be trusted to be complete.
@@ -75,11 +75,11 @@ export class Processes extends Context.Service<
           )
         return Processes.of({
           liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
-          terminateGroup: (group) =>
+          terminate: (pid) =>
             Effect.sync(() => {
-              if (!validPid(group)) return "denied" as const
+              if (!validPid(pid) || pid === platform.pid) return "denied" as const
               try {
-                platform.terminateGroup(group)
+                platform.terminate(pid)
                 return "sent" as const
               } catch (e) {
                 return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
