@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       # Persistent caches live beside _work, so checkout stays clean without actions/cache tarballs
-      # on every run. See .github/scripts/bootstrap-ci-runner.sh.
+      # on every run. The runner user creates them, so they need no setup on the host.
       - name: Prepare persistent CI caches
         run: |
           cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"

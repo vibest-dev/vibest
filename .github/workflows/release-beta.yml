@@ -21,7 +21,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, vibest, rn]
     steps:
       - uses: actions/checkout@v4
-      # Persistent caches beside _work, as in ci.yml. See .github/scripts/bootstrap-ci-runner.sh.
+      # Persistent caches beside _work, as in ci.yml.
       - name: Prepare persistent CI caches
         run: |
           cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
