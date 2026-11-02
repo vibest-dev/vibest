@@ -242,12 +242,30 @@ layer(Platform.services)("role rules", (it) => {
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
           )
-        // Every key shape: a repository key with slashes, a hash, a nested group.
-        for (const key of ["github.com/owner/repo", "0123456789ab", "gitlab.com/group/sub/repo"]) {
+        // Every key shape: a repository key with slashes, a hash, a nested group, and a key with a segment named scratch.
+        for (const key of [
+          "github.com/owner/repo",
+          "0123456789ab",
+          "gitlab.com/group/sub/repo",
+          "github.com/o/scratch",
+        ]) {
           const project = path.join(projects, key)
-          for (const entry of ["instructions.md", "docs/a.md", "docs/sub/b.md", "memory/c.md"]) {
+          for (const entry of [
+            "instructions.md",
+            "docs/a.md",
+            "docs/sub/b.md",
+            "memory/c.md",
+            // A segment named scratch around a project's entries does not make them a scratchpad.
+            "docs/scratch/x.md",
+            "memory/scratch/x.md",
+            "scratch/docs/a.md",
+            "scratch/memory/a.md",
+          ]) {
             const file = path.join(project, entry)
             const dir = path.dirname(file)
+            // On disk: a search's reach is read from what is below its directory.
+            yield* fs.makeDirectory(dir, { recursive: true })
+            yield* fs.writeFileString(file, "secret\n")
             for (const [tool, input] of [
               ["Read", { file_path: file }],
               ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
@@ -274,6 +292,12 @@ layer(Platform.services)("role rules", (it) => {
             ["Glob", { pattern: `${vibestHome}/**/instructions.md` }],
           ] as const)
             assert.isString(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
+          // An instructions.md under a scratch segment is the project's (the key may end in scratch), not a scratchpad's.
+          assert.strictEqual(
+            yield* asSession("Read", { file_path: path.join(project, "scratch", "instructions.md") }),
+            "The project directory is off limits to sessions, except your scratchpad.",
+            key,
+          )
           const scratch = path.join(project, "scratch", "pane:s", "w1:p1", "notes.md")
           assert.isUndefined(yield* asSession("Read", { file_path: scratch }), key)
           assert.isUndefined(yield* asSession("Glob", { pattern: "*.md", path: path.dirname(scratch) }), key)

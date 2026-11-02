@@ -1,5 +1,5 @@
-// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude PreToolUse
-// (Cursor preToolUse) through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
+// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude's plugin tool.call
+// (in PreToolUse's shape) and Cursor's preToolUse through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
 // names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
 // may not touch the project directory except a scratchpad (projects/**/scratch). Which vibest commands an agent may run is
@@ -328,6 +328,8 @@ export const coordinator: Rules = (call) =>
   })
 
 const OFF_LIMITS = "The project directory is off limits to sessions, except your scratchpad."
+/** A project's own entries: never a session's, wherever a `scratch` segment sits around them. */
+const STORE_ENTRIES = new Set(["instructions.md", "docs", "memory"])
 
 /** Shell words that may stand for a path: a word, or the value of `--opt=value` / `VAR=value`. */
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
@@ -342,10 +344,14 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   const projects = yield* physical(layout.projects)
   const vibestHome = yield* physical(layout.home)
   const projectsRoot = path.join(vibestHome, "projects")
-  // projects/<key>/scratch and below. The key can contain slashes; another project's scratch is allowed.
+  // projects/<key>/scratch and below. The key can contain slashes; another project's scratch is allowed. A `scratch`
+  // segment cannot be told from part of a key (github.com/o/scratch), so a path naming a project's instructions.md,
+  // docs or memory anywhere is never scratch (what Claude's `--settings` denied: a scratchpad's own docs/ or memory/ too).
   const inScratch = (target: string) => {
     const rel = path.relative(projectsRoot, target)
-    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) && rel.split(path.sep).includes("scratch")
+    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false
+    const parts = rel.split(path.sep)
+    return parts.includes("scratch") && !parts.some((p) => STORE_ENTRIES.has(p))
   }
   const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
   /**
@@ -358,9 +364,25 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
     })
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
-  /** Off limits: inside the project but not in the scratchpad; with search, also a directory above the Project. */
+  const fs = yield* FileSystem.FileSystem
+  /** Whether a project's own entries are anywhere below `dir` (a directory a search would walk). */
+  // ponytail: walks the whole directory on each search call inside a scratch segment; scratchpads are small.
+  const holdsEntries = (dir: string) =>
+    fs.readDirectory(dir, { recursive: true }).pipe(
+      Effect.map((entries) => entries.some((e) => e.split(path.sep).some((p) => STORE_ENTRIES.has(p)))),
+      Effect.orElseSucceed(() => false),
+    )
+  /**
+   * Off limits: inside the project but not in the scratchpad; with search, also a directory above the Project, or one
+   * under a scratch segment that holds a project's entries (a key such as github.com/o/scratch puts them there).
+   */
   const blocked = (target: string, search: boolean) =>
-    (inScratch(target) ? false : inside(target, projects)) || (search && inside(projects, target))
+    Effect.gen(function* () {
+      if (search && inside(projects, target)) return true
+      if (!inside(target, projects)) return false
+      if (!inScratch(target)) return true
+      return search && (yield* holdsEntries(target))
+    })
   const tool = call.tool.toLowerCase()
 
   if (SHELL_TOOLS.has(tool)) {
@@ -371,7 +393,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     // A regex cannot sandbox a shell; this catches the project named directly, which is what an honest mistake looks like.
     const search = SHELL_SEARCH.test(command)
     // The shell starts in the project (a cwd the call chose): every bare file name is inside it.
-    if (blocked(yield* physical(call.cwd), false)) return OFF_LIMITS
+    if (yield* blocked(yield* physical(call.cwd), false)) return OFF_LIMITS
     for (const word of command.match(SHELL_WORDS) ?? []) {
       if (!word.includes("/") && !word.startsWith("~") && !word.includes(".vibest")) continue
       // Globs and variables around vibest's home could expand to anything in it.
@@ -379,7 +401,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       const targets = yield* resolve(word)
       if (targets === undefined) return BAD_URL
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
-      if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
+      for (const t of targets) if (t === vibestHome || (yield* blocked(t, search))) return OFF_LIMITS
       // Relative to a directory an earlier `cd` moved to, which the hook does not see.
       if (word.includes(".vibest/projects") && !targets.every(inScratch)) return OFF_LIMITS
     }
@@ -393,13 +415,13 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     if (raw === undefined || raw === "") continue
     const targets = yield* resolve(raw)
     if (targets === undefined) return BAD_URL
-    if (targets.some((t) => blocked(t, search))) return OFF_LIMITS
+    for (const t of targets) if (yield* blocked(t, search)) return OFF_LIMITS
   }
   return undefined
 })
 
 /**
- * Claude's PreToolUse hook input. Cursor's preToolUse has the same three, but its `cwd` may
+ * The hook input in Claude's PreToolUse shape, which the Claude plugin's tool.call builds. Cursor's preToolUse has the same three, but its `cwd` may
  * be empty or left out (then its one workspace root) and a Shell call carries its own working directory in `tool_input.cwd`.
  */
 const decodePreToolUse = Schema.decodeUnknownEffect(
