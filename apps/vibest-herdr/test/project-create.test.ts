@@ -203,9 +203,25 @@ describe("project create", () => {
       const sources = yield* tempDirectory("vibest-sources-")
       const app = yield* repository(sources, "app")
       // Checkout of the clone runs smudge and waits, so the interrupt lands while the directory exists. clean is cat, so adding the attribute does not wait.
-      yield* sh(app, "config", "filter.slow.clean", "cat")
-      yield* sh(app, "config", "filter.slow.smudge", "sleep 30")
-      yield* sh(app, "config", "filter.slow.required", "true")
+      // A clone does not copy the source's config, so the filter comes from the environment of every git this test runs.
+      const slow = { "filter.slow.clean": "cat", "filter.slow.smudge": "sleep 30", "filter.slow.required": "true" }
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          process.env.GIT_CONFIG_COUNT = String(Object.keys(slow).length)
+          Object.entries(slow).forEach(([key, value], i) => {
+            process.env[`GIT_CONFIG_KEY_${i}`] = key
+            process.env[`GIT_CONFIG_VALUE_${i}`] = value
+          })
+        }),
+        () =>
+          Effect.sync(() => {
+            delete process.env.GIT_CONFIG_COUNT
+            Object.keys(slow).forEach((_, i) => {
+              delete process.env[`GIT_CONFIG_KEY_${i}`]
+              delete process.env[`GIT_CONFIG_VALUE_${i}`]
+            })
+          }),
+      )
       yield* fs.writeFileString(path.join(app, ".gitattributes"), "README.md filter=slow\n")
       yield* sh(app, "add", ".gitattributes")
       yield* sh(app, "commit", "-q", "-m", "slow")
