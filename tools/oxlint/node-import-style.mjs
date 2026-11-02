@@ -45,6 +45,7 @@ const nodeImportStyle = {
     const reexport = (node) => {
       const source = node.source?.value
       if (typeof source !== "string" || !isBuiltin(source) || node.exportKind === "type") return
+      if (node.specifiers?.length > 0 && node.specifiers.every((s) => s.exportKind === "type")) return
       context.report({
         node,
         message: `Do not re-export from Node builtins: import ${camelize(firstSegment(source))} from "node:${bareName(source)}" where it is used.`,

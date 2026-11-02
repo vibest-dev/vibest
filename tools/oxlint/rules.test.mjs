@@ -36,6 +36,7 @@ import fsPromises from "node:fs/promises"
 import type { Stats } from "node:fs"
 import { type Dirent } from "node:fs"
 export type { Stats } from "node:fs"
+export { type Stats as FsStats } from "node:fs"
 export const all = [childProcess, fs, fsPromises] as unknown as [Stats, Dirent]
 `),
     ).toEqual([])

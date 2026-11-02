@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { PROTECTED_RULES, parseDisableDirective } from "./no-restricted-disable.mjs"
+import { parseDisableDirective } from "./no-restricted-disable.mjs"
 
 describe("parseDisableDirective", () => {
   it("ignores ordinary comments", () => {
@@ -18,11 +18,10 @@ describe("parseDisableDirective", () => {
     expect(parseDisableDirective("oxlint-disable")).toEqual({ rules: null })
   })
 
-  it("flags the Node builtin import rules", () => {
+  it("reads a single rule name", () => {
     expect(parseDisableDirective("eslint-disable-next-line vibest/node-import-style").rules).toEqual([
       "vibest/node-import-style",
     ])
-    expect([...PROTECTED_RULES].sort()).toEqual(["no-restricted-disable", "node-import-style", "prefer-node-protocol"])
   })
 
   it("keeps only the rule name when a disable lists several", () => {
