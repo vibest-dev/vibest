@@ -60,6 +60,12 @@ try {
       outcome = e instanceof Skip ? "skip" : "fail"
       detail = redact(e instanceof Error ? e.message : String(e))
     }
+    // A pane outside this world's herdr sessions (the user's own `vibest`, say) fails the check, whatever it proved.
+    const foreign = world.foreignTerminals()
+    if (foreign.length > 0) {
+      outcome = "fail"
+      detail = `${detail ? `${detail}\n` : ""}terminals outside this run's herdr sessions: ${foreign.join(", ")}`
+    }
     results.push({ id: check.id, title: check.title, outcome, ...(detail ? { detail } : {}) })
     console.log(
       `${outcome.toUpperCase().padEnd(4)} ${area}: ${check.title}${detail ? `\n     ${detail.split("\n").join("\n     ")}` : ""}`,
