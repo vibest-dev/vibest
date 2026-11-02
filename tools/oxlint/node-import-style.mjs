@@ -41,6 +41,16 @@ const nodeImportStyle = {
   create(context) {
     const declarations = []
 
+    // `export { readFileSync } from "node:fs"` and `export * from "node:fs"` are named imports by another name.
+    const reexport = (node) => {
+      const source = node.source?.value
+      if (typeof source !== "string" || !isBuiltin(source) || node.exportKind === "type") return
+      context.report({
+        node,
+        message: `Do not re-export from Node builtins: import ${camelize(firstSegment(source))} from "node:${bareName(source)}" where it is used.`,
+      })
+    }
+
     return {
       ImportDeclaration(node) {
         const source = node.source.value
@@ -64,6 +74,9 @@ const nodeImportStyle = {
           }
         }
       },
+
+      ExportNamedDeclaration: reexport,
+      ExportAllDeclaration: reexport,
 
       "Program:exit"() {
         const expectedFor = canonicalNames(declarations)
