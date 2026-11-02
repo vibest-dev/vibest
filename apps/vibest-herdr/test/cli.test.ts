@@ -107,7 +107,7 @@ describe.concurrent("vibest CLI", () => {
       assert.include(live, listed[0]!.status)
       // result: the session with its latest result, null before the first. The task is not cut.
       assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, result: null })
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: kept finding" })
+      yield* writeResult(id, "pi", { text: "kept finding\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const done = decodeJson((yield* run(["result", id])).stdout) as {

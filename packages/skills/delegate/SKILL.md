@@ -21,7 +21,7 @@ Its id is <id>.
 vibest run <harness> --archive-on-completion -- '<task>'
 ```
 
-`--archive-on-completion` is only for a session you will not message again after it completes. It archives once the session reports completed and that result has reached you. The branch is kept. Do not `vibest send` it after that. A `needs_input` or `failed` result has not archived it: send the answer to the id it printed; the flag still archives the completed result that follows. A reviewer that gets later rounds is the pipeline skill and must stay open, without this flag.
+`--archive-on-completion` is only for a session you will not message again after it completes. It archives once the session reports completed and that result has reached you. The branch is kept. Do not `vibest send` it after that. Any turn that ends normally archives it, a question included, so do not use it for a session that may need an answer. A `failed` result has not archived it: send the correction to the id it printed; the flag still archives the completed result that follows. A reviewer that gets later rounds is the pipeline skill and must stay open, without this flag.
 
 - `<harness>` is `pi`, `claude` or `cursor` (`auto` only when a spawn plugin chooses).
 - Each session gets its own new worktree.
@@ -36,10 +36,10 @@ Tell the user in one or two lines what is running, then end your turn. Never gue
 
 ## Check the result
 
-An `<agent-result>` is a claim. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
+An `<agent-result>` is a claim. Its `<status>` is only whether the turn ended normally (`completed`) or with an error (`failed`); whether the work succeeded is in the `<result>` text. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
 
-- `status: needs_input` → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
-- `status: failed`, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.
+- The result asks a question → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
+- `<status>failed</status>`, a result that reports a failure, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.
 - A result or notice that says the turn ended without a report, was interrupted in its pane, or did not start (`task_not_started`) carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
 
 Then say what changed, the evidence, and the branch. `<id>` is the id the run printed, for either kind of run.

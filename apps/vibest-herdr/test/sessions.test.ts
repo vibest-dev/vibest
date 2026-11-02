@@ -196,7 +196,7 @@ describe.concurrent("Sessions", () => {
     "hook result + ResultReady ends the turn and becomes a result row for the owner",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: done it\n\n## Remember\nuse bun" })
+      yield* writeResult(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
       yield* sessions.resultReady(id)
       const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
       assert.strictEqual(w.turnState, "completed")
@@ -204,9 +204,11 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(row!.kind, "result")
       assert.include(
         row!.message,
-        `<agent-result>\n<agent-id>${id}</agent-id>\n<status>completed</status>\n<summary>Agent "task" finished</summary>\n<harness>pi</harness>\n<worktree>`,
+        `<agent-result>\n<agent-id>${id}</agent-id>\n<status>completed</status>\n<summary>Done it.</summary>\n<harness>pi</harness>\n<worktree>`,
       )
-      assert.deepInclude(row!.details, { summary: "done it", remember: "use bun" })
+      // The final message verbatim, nothing parsed out of it.
+      assert.include(row!.message, "<result>\n\nDone it.\nstatus: failed\n\n## Remember\nuse bun\n</result>")
+      assert.deepInclude(row!.details, { status: "completed", summary: "Done it.", remember: "use bun" })
     }),
     { hooked: ["pi"] },
   )
@@ -368,6 +370,8 @@ describe.concurrent("Sessions", () => {
       const row = yield* db.latestInbox(id, "result")
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the turn ended without a report")
+      // No final message: the summary is vibest's own outcome.
+      assert.include(row!.message, `<summary>Agent "task" failed: the turn ended without a report`)
       assert.include(row!.message, `to see its terminal, run: vibest peek ${id}`)
       // The fake runtime's screen ("pane tail") is never in what an agent gets.
       assert.notInclude(row!.message, "pane tail")
@@ -3334,9 +3338,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   const finishTurn = (
     w: { readonly id: string; readonly sessions: Sessions["Service"]; readonly herdr: FakeRuntime["Service"] },
     text: string,
+    error?: string,
   ) =>
     Effect.gen(function* () {
-      yield* writeResult(w.id, "pi", { text })
+      yield* writeResult(w.id, "pi", error ? { text, error } : { text })
       yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
     })
@@ -3465,7 +3470,8 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const a = yield* archiveSession(repo)
-      yield* finishTurn(a, "status: failed\nsummary: tests fail")
+      // The model writing "failed" changes nothing; the harness reporting an error does.
+      yield* finishTurn(a, "status: failed\nsummary: tests fail", "model_error")
       yield* until(a.db.latestInbox(a.id, "result"), (r) => r?.status === "delivered")
       yield* settle
       assert.isFalse(yield* archived(a.db, a.id))
@@ -3474,11 +3480,11 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "never after a needs_input turn; the flag stays, so the next completed result archives it",
+    "never after a failed turn; the flag stays, so the next completed result archives it",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const b = yield* archiveSession(repo)
-      yield* finishTurn(b, "status: needs_input\nsummary: which one?")
+      yield* finishTurn(b, "which one?", "model_error")
       yield* until(b.db.latestInbox(b.id, "result"), (r) => r?.status === "delivered")
       yield* settle
       assert.isFalse(yield* archived(b.db, b.id))
@@ -3591,17 +3597,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a reply with no status line is not archived, and a notice says so",
+    "a reply with no status line ends normally, so it is archived: the status is what vibest observed",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
-      yield* finishTurn(w, "DONE-1234")
-      const notice = yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
-      assert.strictEqual(
-        notice,
-        `${w.id} not archived (vibest run --archive-on-completion): its reply had no status line; vibest archive ${w.id} once it is done`,
-      )
-      yield* settle
-      assert.isFalse(yield* archived(w.db, w.id))
+      yield* finishTurn(w, "status: needs_input\nDONE-1234")
+      yield* until(archived(w.db, w.id), (x) => x)
+      const row = yield* w.db.latestInbox(w.id, "result")
+      assert.include(row!.message, "<status>completed</status>")
     }),
   )
 
@@ -3785,11 +3787,11 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "the newer delivered result is failed, needs_input or unknown, a message waits, or a new turn began: the waiting archive does not archive on it",
+    "the newer delivered result is failed, a message waits, or a new turn began: the waiting archive does not archive on it",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const repo = yield* makeRepository
-      for (const newer of ["failed", "needs_input", "unknown", "message", "turn"]) {
+      for (const newer of ["failed", "message", "turn"]) {
         const w = yield* archiveSession(repo)
         const completed = newer === "message" || newer === "turn"
         const first = yield* firstWaiting(w, { status: completed ? "completed" : newer })

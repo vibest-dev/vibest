@@ -151,7 +151,7 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
       yield* c.Send({ id, message: "follow up" })
       assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: fixed it\nand more" })
+      yield* writeResult(id, "pi", { text: "\nfixed it\nand more" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const after = (yield* c.List({})).find((w) => w.id === id)!.latest

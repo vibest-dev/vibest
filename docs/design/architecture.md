@@ -205,9 +205,9 @@ or change values.
 **Agent lifetime** (`vibest run --once`, else the definition's `lifetime`, else the configuration default, which
 is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
 
-- `once`: the Agent ends `completed` when its answer reports `completed`, that result was delivered to the main
-  Agent, no Message for it is pending, and it is still idle (omac `--archive-on-completion`); a `failed` or
-  `needs_input` answer keeps it. Ending closes the pane and releases its Workspace (§3.3).
+- `once`: the Agent ends `completed` when its turn ended normally (`completed`), that result was delivered to the main
+  Agent, no Message for it is pending, and it is still idle (omac `--archive-on-completion`); a `failed` turn
+  (the harness or turn reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
 - `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
   and every new answer returns to the main Agent. `vibest stop <agent>` ends it, closes the pane, and releases
   its Workspace.
@@ -228,8 +228,8 @@ opens no such Message; when that turn ends, the user's text and the subagent's a
 `results/<agent>.json` and then notifies the daemon (Claude `last_assistant_message`, Cursor and Pi `text`); a result counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
 `--json` a structured result validated against the requested schema; `herdr agent read` is last.
 
-The subagent's rules ask for a final reply with `status: completed | failed | needs_input`, `summary:`, the body,
-and an optional `## Remember` (omac `results.ts`). The main Agent receives (omac `results.ts`, `sessions.ts`):
+The subagent's rules ask for a final reply whose first line is a one-sentence summary, then the body, and an
+optional `## Remember` (omac `results.ts`). The status is what vibest observed of the turn, never parsed from the reply. The main Agent receives (omac `results.ts`, `sessions.ts`):
 
 ```
 <agent-result>

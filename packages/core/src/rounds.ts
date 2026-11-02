@@ -24,7 +24,7 @@ import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
 import { errorMessage, type IdleInput } from "./plugins.ts"
 import { workspaceGit } from "./project-create.ts"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "./results.ts"
+import { envelope, isUsageLimitError, outcome, parseReport, readResult, type ResultStatus } from "./results.ts"
 import { type AgentState, peekHint, type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 import { gitState } from "./worktree.ts"
 
@@ -113,6 +113,7 @@ export const sessionRounds = (deps: {
     checkOutput = "",
   ) {
     const report = parseReport(text)
+    const summary = report.summary ?? outcome(session.name, error)
     const worktree = yield* deps.worktreeOf(session)
     const repos = yield* workspaceGit(worktree)
     const g = repos ? undefined : yield* gitState(worktree)
@@ -122,7 +123,7 @@ export const sessionRounds = (deps: {
       agent: session.agent,
       harness: session.harnessId,
       name: session.name,
-      status: error ? "failed" : report.status,
+      status: (end === "completed" && !error ? "completed" : "failed") satisfies ResultStatus,
       branch: repos ? repos.map((r) => `${r.name}=${r.branch}`).join("\n") : (g?.branch ?? ""),
       pushed: repos ? repos.map((r) => `${r.name}=${r.pushed}`).join("\n") : String(g?.pushed ?? false),
       worktree,
@@ -135,7 +136,7 @@ export const sessionRounds = (deps: {
       [
         ["agent-id", session.id],
         ["status", info.status],
-        ["summary", outcome(session.name, info.status, error)],
+        ["summary", summary],
         ["harness", session.harnessId],
         ["branch", info.branch],
         ["pushed", repos ? info.pushed : info.branch ? info.pushed : ""],
@@ -159,7 +160,7 @@ export const sessionRounds = (deps: {
         message,
         details: {
           ...info,
-          summary: report.summary,
+          summary,
           remember: report.remember,
           error,
           ...(acceptance && acceptance.length > 0 ? { acceptance } : {}),

@@ -123,32 +123,24 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
   }).pipe(Effect.option)
 })
 
-export type ReportStatus = "completed" | "failed" | "needs_input" | "unknown"
+/** What vibest observed of a turn: `completed` when the harness ended it normally, `failed` on an error. Never the model's own words. */
+export type ResultStatus = "completed" | "failed"
 
 export interface Report {
-  readonly status: ReportStatus
+  /** The first non-empty line of the final message, cut to about 120 characters; undefined when the message is empty. */
   readonly summary: string | undefined
   readonly remember: string | undefined
 }
 
-/**
- * `status:` / `summary:` on any line (models sometimes put them last; full-width colon accepted), or right after a sentence
- * end (Cursor joins a turn's messages without a line break), and the optional `## Remember` section.
- */
+/** The final message's first non-empty line as its summary, and the optional `## Remember` section. */
 export function parseReport(text: string): Report {
-  const lines = text.split("\n")
-  const field = (name: string) => {
-    // Any leading non-word run: markdown emphasis, list bullets, a TUI's "⏺ " bullet.
-    const re = new RegExp(`(?:^[^\\p{L}\\p{N}\\n]*|[.。!！?？]\\s*)${name}[*_]*\\s*[:：]\\s*(.+?)\\s*$`, "iu")
-    for (const l of lines) {
-      const m = re.exec(l)
-      if (m) return m[1]!.replace(/^[*_\s]+|[*_\s]+$/g, "")
-    }
-  }
-  const s = field("status")?.toLowerCase()
-  const status: ReportStatus = s === "completed" || s === "failed" || s === "needs_input" ? s : "unknown"
+  const first = text
+    .split("\n")
+    .find((l) => l.trim() !== "")
+    ?.trim()
+  const summary = first && first.length > 120 ? `${first.slice(0, 119)}…` : first
   const remember = /^##\s*Remember\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im.exec(text)?.[1]!.trim()
-  return { status, summary: field("summary"), remember: remember || undefined }
+  return { summary, remember: remember || undefined }
 }
 
 const escapeText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -171,12 +163,6 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
-/** vibest's one-line outcome of a turn, from the report's status and any error. */
-export const outcome = (name: string, status: ReportStatus, error: string | undefined) => {
-  const agent = `Agent "${name}"`
-  if (error) return `${agent} failed: ${error}`
-  if (status === "completed") return `${agent} finished`
-  if (status === "failed") return `${agent} reported a failure`
-  if (status === "needs_input") return `${agent} is waiting for an answer`
-  return `${agent} finished without a status line`
-}
+/** vibest's one-line outcome of a turn, from any error; the summary when the final message is empty. */
+export const outcome = (name: string, error: string | undefined) =>
+  error ? `Agent "${name}" failed: ${error}` : `Agent "${name}" finished`
