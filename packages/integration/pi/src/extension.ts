@@ -147,6 +147,9 @@ const coordinator: Role = Layer.effectDiscard(
     const subscribe = withVibest({ _tag: "session", sessionId: sessionId.value }, (client) =>
       client["Inbox.Subscribe"](undefined).pipe(
         Stream.runForEach((content) => pi.sendMessage({ customType: "vibest", content, display: false }, { triggerTurn: true, deliverAs: "followUp" })),
+        // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
+        // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
+        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
       ),
       // Never start vibestd from here: during `vibest daemon restart` the replacement may be between sockets.
       { start: false },
