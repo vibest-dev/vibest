@@ -32,12 +32,16 @@ describe("SQLite", () => {
   it.effect("vibest.db and its wal and shm are mode 0600, including files that were looser", () =>
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-mode-")}/vibest.db`
-      const open = Effect.void.pipe(Effect.provide(database(file)))
-      yield* open
-      assert.deepStrictEqual(yield* modes(file), { db: 0o600, wal: 0o600, shm: 0o600 })
-      yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.chmod(path, 0o644))))
-      yield* open
-      assert.deepStrictEqual(yield* modes(file), { db: 0o600, wal: 0o600, shm: 0o600 })
+      // The modes are read while the connection is open: closing the last connection may delete -wal and -shm
+      // (SQLite's default, as on Linux), or keep them (Apple's system SQLite).
+      const openModes = modes(file).pipe(Effect.provide(database(file)))
+      assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
+      // Looser files left from before, whether or not SQLite kept -wal and -shm. An empty -wal and -shm are valid.
+      yield* Effect.promise(() => Promise.all([file, `${file}-wal`, `${file}-shm`].map(async (path) => {
+        await (await fs.open(path, "a")).close()
+        await fs.chmod(path, 0o644)
+      })))
+      assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
     }).pipe(Effect.provide(Platform.services)))
 
   it.effect("a writable transaction is BEGIN IMMEDIATE and busy_timeout is 5000", () =>
