@@ -93,6 +93,8 @@ Bad first line: "I looked at files X, Y, and Z. Y has the changes you mentioned.
 
 Then the details: what you did or found — be specific with file paths, line numbers, code snippets; how you verified it, with the verification output; ${r.peer ? "your findings" : "the branch name, commit hash and whether it was pushed"}. If you need an answer before you can go on, ask it there; the coordinator answers with a message while your session is open.
 
+If a background command or task you started is still running when you end your turn, say so in your report: what is running, and that you will continue when it finishes. Your report is still delivered as your result.
+
 Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
 ${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
 }
