@@ -108,19 +108,22 @@ jobs:
           retention-days: 7
 
   # The same tarballs on a GitHub-hosted arm64 Mac: @vibest/cli installed with the darwin-arm64 binary and run.
+  # GitHub-hosted time is kept minimal: no install, build, typecheck or test here (the build job did them), only the
+  # check script (run by Node, which strips its types) on the downloaded tarballs. Like every job here, it runs only
+  # for a v* tag or the owner's workflow_dispatch canary, never for a pull request.
   darwin:
     needs: build
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
+          sparse-checkout: tools/verify/src/release-artifacts.ts
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v4
         with:
           node-version: 26.13.0
@@ -131,15 +134,17 @@ jobs:
       - name: Check the tarballs
         env:
           VERSION: ${{ needs.build.outputs.version }}
-        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
+        run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
 
   publish:
     needs: [build, darwin]
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
-    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners.
+    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners. It only downloads the
+    # artifact and publishes it (npm, then the GitHub Release of a tag): no checkout, install, build or check.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # the GitHub Release of a v* tag
       id-token: write # npm trusted publishing (OIDC) and provenance
