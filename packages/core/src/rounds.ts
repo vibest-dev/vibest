@@ -4,7 +4,7 @@ import { NoSuchSession, NotReady } from "@vibest/schema/session"
 // held by `check`, `deliver`, `interrupt` or `remove` in sessions.ts — except `userPrompt`, which stamps the round at
 // hook receipt and takes the lock only to record it. The terminal the row addresses is what everything here talks to
 // (runtime-port.md §3).
-import { Clock, Effect, Exit, Option, Ref } from "effect"
+import { Clock, Effect, Exit, Ref } from "effect"
 import type { FileSystem } from "effect"
 
 import {
@@ -17,12 +17,13 @@ import {
   type TurnState,
   failureOf,
 } from "./db.ts"
-import { Harnesses, type HarnessAdapter } from "./harness.ts"
+import type { HarnessAdapter } from "./harness.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
 import { workspaceGit } from "./project-create.ts"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult, type ResultStatus } from "./results.ts"
+import { envelope, isUsageLimitError, outcome, parseReport, type ResultStatus } from "./results.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
+import type { TurnEnded } from "./turn-ends.ts"
 import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
@@ -47,7 +48,11 @@ export const sessionRounds = (deps: {
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
   readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
-  readonly layout: { readonly resultFile: (id: string) => string; readonly reportFile: (id: string) => string }
+  /** The turn ends the integrations reported (turn-ends.ts). */
+  readonly turnEnds: {
+    readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
+    readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
+  }
   readonly harnesses: {
     readonly all: ReadonlyArray<HarnessAdapter>
     readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
@@ -75,14 +80,14 @@ export const sessionRounds = (deps: {
   /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, inbox, layout, harnesses } = deps
+  const { db, inbox, turnEnds, harnesses } = deps
 
   const finish = Effect.fn("Sessions.finish")(function* (
     session: SessionRow,
     end: Extract<TurnState, "completed" | "failed" | "lost">,
     text: string,
     error: string | undefined,
-    /** A result file's time: the turn ends no earlier, so the same file is not taken again. */
+    /** The reported turn end's time: the turn ends no earlier, so the same report is not taken again. */
     at?: number,
   ) {
     const report = parseReport(text)
@@ -206,35 +211,40 @@ export const sessionRounds = (deps: {
   })
 
   /**
-   * Ends the turn if the integration already wrote its result. An open round takes a file newer than its prompt. No open
-   * round takes a file newer than the last round (closed or not); `closeRound` inserts that round with empty input,
-   * and the file's time is stamped on the message, so the same file is not delivered twice.
+   * Ends the turn if the integration already reported its end (TurnEnds). An open round takes an end newer than its
+   * prompt. No open round takes an end newer than the last round (closed or not); `closeRound` inserts that round with
+   * empty input, and the end's time is stamped on its `turn.end`, so the same end is not delivered twice.
    * `delivered`: the round went to the parent.
    */
-  const collectResult = Effect.fn("Sessions.collectResult")(function* (h: Runtime, session: SessionRow) {
+  const collectResult = Effect.fn("Sessions.collectResult")(function* (
+    /** Undefined: the session has no runtime vibestd can reach; its turn end is still written, a limit move is not made. */
+    h: Runtime | undefined,
+    session: SessionRow,
+  ) {
     const terminal = session.address
-    const result = yield* readResult(layout.resultFile(session.id)).pipe(Effect.provideService(Harnesses, harnesses))
-    if (Option.isNone(result)) return "none" as const
-    const found = result.value
+    const found = yield* turnEnds.latest(session.id)
+    if (found === undefined) return "none" as const
     if (session.turnState === "open") {
-      if (found.mtimeMs <= session.turnPromptedAt) return "none" as const
+      if (found.at <= session.turnPromptedAt) return "none" as const
     } else {
       // A turn stopped with no round open is `vibest interrupt`'s own (that turn has no result) or no round of vibest's.
       if (found.interrupted) return "none" as const
       const last = yield* db.latestRoundAt(session.id)
-      if (last !== undefined && found.mtimeMs <= last) return "none" as const
+      if (last !== undefined && found.at <= last) return "none" as const
     }
-    // A late file from the harness this session just left is not this round. Leave it: the new harness's write replaces it.
+    // A late end from the harness this session just left is not this round. Leave it: the new harness's end replaces it.
     if (found.harness !== session.harnessId) return "none" as const
     // A usage limit moves the session to another harness (agent.fail); the open round stays the one that finishes.
     if (found.error && isUsageLimitError(found.error)) {
+      if (h === undefined) return "none" as const
       yield* deps.limitMove.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, found.error)
       return "delivered" as const
     }
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.mtimeMs)
+    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at)
+    yield* turnEnds.written(session.id, found)
     return "delivered" as const
   })
 
@@ -255,8 +265,8 @@ export const sessionRounds = (deps: {
         const { prompting } = yield* deps.track(id)
         if (yield* Ref.get(prompting)) return
         // Stamped at hook receipt: the lock can be held for seconds (a delivery, an interrupt, a removal), and the
-        // typed turn may already be over when it frees. A later stamp would drop that turn's result file. `at`: the
-        // caller's stamp at receipt, when it already wrote the turn-start line with it.
+        // typed turn may already be over when it frees. A later stamp would drop that turn's reported end. `at`: the
+        // caller's stamp at receipt, when it already noted the turn start with it.
         const now = at ?? (yield* Clock.currentTimeMillis)
         // vibest opens its own rounds before handing text over; their echo, and anything typed during a round, is not a round.
         const record = Effect.gen(function* () {

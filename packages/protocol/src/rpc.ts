@@ -416,7 +416,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
   /**
    * Hook side: a harness plugin's turn-end event, verbatim JSON. vibestd reads it with the harness adapter's `turnEnd` and
-   * writes the result file and the turn-end report line. Protocol only; no caller. Unknown ids, another harness than
+   * keeps the turn end and writes the result. Protocol only; no caller. Unknown ids, another harness than
    * the session's, and events the adapter ignores change nothing.
    */
   protocol(
@@ -428,7 +428,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   /**
    * Hook side: a harness plugin's prompt event, verbatim JSON. vibestd reads it with the adapter's `userPrompt`, writes the
-   * turn-start report line, and records the round. Protocol only; no caller. The main agent and vibest's own deliveries
+   * turn start, and records the round. Protocol only; no caller. The main agent and vibest's own deliveries
    * are ignored.
    */
   protocol(

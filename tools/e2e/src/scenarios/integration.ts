@@ -40,12 +40,33 @@ const workdir = async (w: World, name: string) => {
   return dir
 }
 
-/** The session's result envelope, once its plugin wrote it. */
-const result = async (w: World, id: string) =>
-  JSON.parse(await fs.readFile(path.join(w.vibestHome, "results", `${id}.json`), "utf8")) as {
-    harness: string
-    payload: Record<string, unknown>
+/** The session's result as `vibest result` shows it, once vibestd wrote it from the plugin's turn end. */
+const resultMessage = async (w: World, id: string) => {
+  let message = ""
+  await until(`${id}'s result`, async () => (message = (await latest(w, id))?.message ?? "") !== "", 30_000)
+  return message
+}
+
+/**
+ * `run(marker)`, with `marker` created once `vibest result` shows a result for session `id` (until-file.py stops the
+ * harness when it appears).
+ */
+const untilResult = async <A>(w: World, id: string, run: (marker: string) => Promise<A>) => {
+  const marker = path.join(w.root, `${id}.result`)
+  let done = false
+  const poll = (async () => {
+    while (!done) {
+      if (await latest(w, id).catch(() => undefined)) return fs.writeFile(marker, "")
+      await Bun.sleep(1000)
+    }
+  })()
+  try {
+    return await run(marker)
+  } finally {
+    done = true
+    await poll
   }
+}
 
 /** A session as `vibest ls` shows it. */
 const listed = async (w: World, id: string) =>
@@ -59,13 +80,12 @@ const turnState = async (w: World, id: string) => (await listed(w, id))?.turnSta
 const latest = async (w: World, id: string) =>
   (await w.json<{ result?: { id: number; message: string } | null }>(["result", id])).result ?? undefined
 
-/** The turn-end payloads in a session's report lines, oldest first. */
+/** The turn ends vibestd received for a session, oldest first, as vibestd.log lists them. */
 const ends = async (w: World, id: string) =>
-  (await fs.readFile(path.join(w.vibestHome, "reports", `${id}.jsonl`), "utf8").catch(() => ""))
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { turn: string; payload?: Record<string, unknown> })
-    .flatMap((l) => (l.turn === "end" && l.payload ? [l.payload] : []))
+  (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
+    const found = new RegExp(`turn end ${id} \\((\\w+)(, interrupted)?\\)`).exec(l)
+    return found ? [{ harness: found[1]!, interrupted: found[2] !== undefined }] : []
+  })
 
 const STORY = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
 
@@ -175,39 +195,41 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       const cwd = await workdir(w, "pi-turn")
       const id = "e2e00003"
-      // The extension sends its turn end to vibestd, which writes the result file for a session it knows.
+      // The extension sends its turn end to vibestd, which writes the result for a session it knows.
       const project = await knownSessions(w, "e2e/i3", { [id]: "general" }, cwd, "pi")
       // The user's own Pi config (its login and extensions); --no-session keeps the conversation out of it.
-      const r = await w.run(
-        cwd,
-        [
-          "python3",
-          "-I",
-          untilFile,
-          path.join(w.vibestHome, "results", `${id}.json`),
-          "180",
-          "pi",
-          "--no-session",
-          "-e",
-          path.join(harnesses, "pi", "extension.mjs"),
-          PROMPT,
-        ],
-        {
-          env: {
-            PI_CODING_AGENT_DIR: undefined,
-            VIBEST_AGENT: "general",
-            VIBEST_SESSION_ID: id,
-            VIBEST_PROJECT_ID: String(project),
-            VIBEST_HARNESS: "pi",
-            VIBEST_COMMAND: JSON.stringify([binary]),
+      const r = await untilResult(w, id, (marker) =>
+        w.run(
+          cwd,
+          [
+            "python3",
+            "-I",
+            untilFile,
+            marker,
+            "180",
+            "pi",
+            "--no-session",
+            "-e",
+            path.join(harnesses, "pi", "extension.mjs"),
+            PROMPT,
+          ],
+          {
+            env: {
+              PI_CODING_AGENT_DIR: undefined,
+              VIBEST_AGENT: "general",
+              VIBEST_SESSION_ID: id,
+              VIBEST_PROJECT_ID: String(project),
+              VIBEST_HARNESS: "pi",
+              VIBEST_COMMAND: JSON.stringify([binary]),
+            },
+            timeoutMs: 240_000,
           },
-          timeoutMs: 240_000,
-        },
+        ),
       )
-      expect(r.code === 0, `no result file within 180s; screen:\n${plain(r.stderr)}`)
+      expect(r.code === 0, `no result within 180s; screen:\n${plain(r.stderr)}`)
       expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      const { harness, payload } = await result(w, id)
-      expect(harness === "pi" && /pong/.test(String(payload.text)), JSON.stringify(payload))
+      const message = await resultMessage(w, id)
+      expect(/<harness>pi<\/harness>/.test(message) && /pong/.test(message), message)
     },
   },
   {
@@ -274,8 +296,8 @@ const checks: ReadonlyArray<Check> = [
       )
       expect(/Agents must not control herdr/.test(r.stdout), "no guard refusal in the transcript")
       expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      const { harness, payload } = await result(w, id)
-      expect(harness === "claude" && /pong/.test(String(payload.last_assistant_message)), JSON.stringify(payload))
+      const message = await resultMessage(w, id)
+      expect(/<harness>claude<\/harness>/.test(message) && /pong/.test(message), message)
     },
   },
   {
@@ -305,33 +327,35 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const id = "e2e00005"
-      // `vibest integration stop` sends the turn end to vibestd, which writes the result file for a session it knows.
+      // `vibest integration stop` sends the turn end to vibestd, which writes the result for a session it knows.
       const project = await knownSessions(w, "e2e/i5", { [id]: "general" }, cwd, "cursor")
-      const r = await w.run(
-        cwd,
-        [
-          "python3",
-          "-I",
-          untilFile,
-          path.join(w.vibestHome, "results", `${id}.json`),
-          "240",
-          "cursor-agent",
-          "--trust",
-          "--force",
-          "--plugin-dir",
-          path.join(harnesses, "cursor"),
-          PROMPT,
-        ],
-        {
-          env: {
-            VIBEST_AGENT: "general",
-            VIBEST_SESSION_ID: id,
-            VIBEST_PROJECT_ID: String(project),
-            VIBEST_HARNESS: "cursor",
-            PATH: `${bin}:${w.env().PATH}`,
+      const r = await untilResult(w, id, (marker) =>
+        w.run(
+          cwd,
+          [
+            "python3",
+            "-I",
+            untilFile,
+            marker,
+            "240",
+            "cursor-agent",
+            "--trust",
+            "--force",
+            "--plugin-dir",
+            path.join(harnesses, "cursor"),
+            PROMPT,
+          ],
+          {
+            env: {
+              VIBEST_AGENT: "general",
+              VIBEST_SESSION_ID: id,
+              VIBEST_PROJECT_ID: String(project),
+              VIBEST_HARNESS: "cursor",
+              PATH: `${bin}:${w.env().PATH}`,
+            },
+            timeoutMs: 300_000,
           },
-          timeoutMs: 300_000,
-        },
+        ),
       )
       const log = await fs.readFile(calls, "utf8").catch(() => "")
       expect(
@@ -339,12 +363,9 @@ const checks: ReadonlyArray<Check> = [
         `no guard refusal recorded:\n${log}\nscreen:\n${plain(r.stderr)}`,
       )
       expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      expect(r.code === 0, `no result file within 240s; vibest calls:\n${log}\nscreen:\n${plain(r.stderr)}`)
-      const { harness, payload } = await result(w, id)
-      expect(
-        harness === "cursor" && payload.hook_event_name === "afterAgentResponse" && /pong/.test(String(payload.text)),
-        JSON.stringify(payload),
-      )
+      expect(r.code === 0, `no result within 240s; vibest calls:\n${log}\nscreen:\n${plain(r.stderr)}`)
+      const message = await resultMessage(w, id)
+      expect(/<harness>cursor<\/harness>/.test(message) && /pong/.test(message), message)
       expect(await Bun.file(marker).exists(), "the project's own sessionStart hook did not run")
     },
   },
@@ -366,7 +387,7 @@ const checks: ReadonlyArray<Check> = [
               /summary: e2e answer/.test(first?.message ?? ""),
             `answer result: ${first?.message.slice(0, 500)}`,
           )
-          const aborted = async () => (await ends(w, id)).filter((p) => p.reason === "aborted").length
+          const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
           // The person presses Esc in the pane: one result, failed, that says the turn was interrupted.
           await w.ok(["send", id, STORY])

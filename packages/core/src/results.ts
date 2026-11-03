@@ -1,63 +1,7 @@
-// Result files and turn-report lines, written by vibestd alone from the turn events the integrations send it (SPEC §5.3,
-// runtime-port.md §5), and the session report format.
-import { Effect, FileSystem, Option, Path, Schema } from "effect"
+// The session report format, a harness's turn input and the terminal status escape (runtime-port.md §5).
+import { Effect, FileSystem } from "effect"
 
-import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
-import { Layout, writeAtomic } from "./paths.ts"
-
-/** `{harness, ts, payload}`; payload is the harness's hook input, verbatim. */
-const Envelope = Schema.fromJsonString(
-  Schema.Struct({
-    harness: Schema.Literals(HARNESS_IDS),
-    ts: Schema.Number,
-    payload: Schema.Record(Schema.String, Schema.Unknown),
-  }),
-)
-const decodeEnvelope = Schema.decodeUnknownEffect(Envelope)
-
-export type TurnResult = {
-  readonly harness: HarnessId
-  readonly mtimeMs: number
-  readonly text: string
-  readonly error: string | undefined
-  /** Cursor's `conversation_id` (in every hook's input), the id `--resume` takes; only a plain id, never one that reads as a flag. */
-  readonly conversationId: string | undefined
-  /** A turn stopped in its terminal (`aborted: true`, Claude's and Pi's): a result only for an open round. */
-  readonly interrupted: boolean
-}
-
-/** One line of `reports/<id>.jsonl` (runtime-port.md §5): a turn start with the user's prompt, or a turn end with the result. */
-export type ReportLine =
-  | { readonly turn: "start"; readonly ts: number; readonly prompt: string }
-  | {
-      readonly turn: "end"
-      readonly ts: number
-      readonly harness: HarnessId
-      readonly payload: Readonly<Record<string, unknown>>
-    }
-
-const encodeReportLine = (line: ReportLine) => `${JSON.stringify(line)}\n`
-
-const ReportLineJson = Schema.fromJsonString(
-  Schema.Union([
-    Schema.Struct({ turn: Schema.Literals(["start"]), ts: Schema.Number, prompt: Schema.String }),
-    Schema.Struct({
-      turn: Schema.Literals(["end"]),
-      ts: Schema.Number,
-      harness: Schema.Literals(HARNESS_IDS),
-      payload: Schema.Record(Schema.String, Schema.Unknown),
-    }),
-  ]),
-)
-
-/** Append one report line (runtime-port.md §5). One write, append mode; a lost line is only a lost fast path. */
-const appendReportLine = (file: string, line: ReportLine) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    yield* fs.makeDirectory(path.dirname(file), { recursive: true })
-    yield* fs.writeFileString(file, encodeReportLine(line), { flag: "a" })
-  })
+import { type HarnessAdapter } from "./harness.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {
@@ -69,60 +13,12 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
-/**
- * A harness plugin's turn end, as vibestd receives it (RPC `TurnEnd`, or the HTTP hook): the adapter's
- * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
- */
-export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>
-  Effect.gen(function* () {
-    const event = jsonObject(raw)
-    const outcome = event && adapter.turnEnd?.(event, agent === "coordinator")
-    if (!outcome) return false
-    const layout = yield* Layout
-    const path = yield* Path.Path
-    const file = layout.resultFile(sessionId)
-    // The session id comes from the caller. Keep the file as one name inside the results directory.
-    if (path.basename(file) !== `${sessionId}.json` || path.dirname(file) !== layout.results) return false
-    yield* writeAtomic(
-      file,
-      JSON.stringify({ harness: adapter.id, ts: Math.floor(Date.now() / 1000), payload: outcome.result }),
-    )
-    yield* appendReportLine(layout.reportFile(sessionId), {
-      turn: "end",
-      ts: Date.now(),
-      harness: adapter.id,
-      payload: outcome.result,
-    })
-    return true
-  })
-
 /** A harness plugin's prompt event: the text a round starts with, or undefined (the main agent, a nested agent, not the user). */
 export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) => {
   const event = jsonObject(raw)
   const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
   return prompt?.text.trim() ? prompt.text : undefined
 }
-
-/** The prompt's turn-start report line, at `ts`: never older than the stamp vibestd gives the round. */
-export const recordPrompt = (sessionId: string, text: string, ts = Date.now()) =>
-  Effect.flatMap(Layout, (layout) =>
-    appendReportLine(layout.reportFile(sessionId), { turn: "start", ts, prompt: text }),
-  )
-
-/** Every report line of a session, oldest first; unreadable lines are skipped, a missing file is empty. */
-export const readReportLines = (file: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const text = yield* fs.readFileString(file).pipe(Effect.option)
-    if (Option.isNone(text)) return [] as ReadonlyArray<ReportLine>
-    const lines: Array<ReportLine> = []
-    for (const raw of text.value.split("\n")) {
-      if (raw.trim() === "") continue
-      const line = yield* Effect.option(Schema.decodeUnknownEffect(ReportLineJson)(raw))
-      if (Option.isSome(line)) lines.push(line.value)
-    }
-    return lines
-  })
 
 /**
  * OSC 7501 to this process's terminal (runtime-port.md §5): the agent state as one escape sequence a terminal runtime
@@ -146,34 +42,6 @@ export const isUsageLimitError = (error: string | undefined) => {
   const head = error?.split(":")[0]
   return head !== undefined && head !== "" && /rate[_ -]?limits?\b|usage limits?\b|too many requests/i.test(head)
 }
-
-/** The last turn in a result file; None if missing, unreadable or not an vibest envelope. */
-export const readResult = Effect.fn("readResult")(function* (file: string) {
-  const fs = yield* FileSystem.FileSystem
-  return yield* Effect.gen(function* () {
-    const info = yield* fs.stat(file)
-    const envelope = yield* decodeEnvelope(yield* fs.readFileString(file))
-    const text = envelope.payload[(yield* Harnesses).get(envelope.harness).resultField]
-    const error = envelope.payload.error
-    // `error` names what ended the turn (Claude's `interrupted`, `refusal`, `error`), `error_details` the text.
-    const details = envelope.payload.error_details
-    const conversation = envelope.payload.conversation_id
-    return {
-      harness: envelope.harness,
-      mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (d) => d.getTime() }),
-      text: typeof text === "string" ? text : "",
-      error:
-        typeof error === "string" && error
-          ? typeof details === "string" && details
-            ? `${error}: ${details}`
-            : error
-          : undefined,
-      conversationId:
-        typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
-      interrupted: envelope.payload.aborted === true,
-    } satisfies TurnResult
-  }).pipe(Effect.option)
-})
 
 /** What vibest observed of a turn: `completed` when the harness ended it normally, `failed` on an error. Never the model's own words. */
 export type ResultStatus = "completed" | "failed"

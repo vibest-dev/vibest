@@ -782,7 +782,7 @@ const notify = (
 /**
  * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`, Cursor's): its adapter's `turnEnd` reads
  * the event. Missing identity, a non-object, or an event the adapter ignores sends nothing. Failures exit 0. Writes
- * OSC 7501 idle (runtime-port.md §5) and sends the event as `TurnEnd`; vibestd writes the result file and report line.
+ * OSC 7501 idle (runtime-port.md §5) and sends the event as `TurnEnd`; vibestd keeps the turn end and writes the result.
  */
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
@@ -798,7 +798,7 @@ export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
 /**
  * A harness plugin's user-prompt bridge (`vibest integration prompt --harness <h>`): its adapter's `userPrompt` reads the
  * event. The main agent, a nested agent, or text that is not the user typing sends nothing. Failures exit 0. Sends the
- * event as `Prompt` (vibestd writes the turn-start line and records the round), then OSC 7501 working.
+ * event as `Prompt` (vibestd notes the turn start and records the round), then OSC 7501 working.
  */
 export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {

@@ -24,6 +24,7 @@ import {
   type TestServices,
   until,
   writeResult,
+  resultText,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -314,7 +315,7 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "archive keeps the stored result and earlier inbox rows after the result and rules files are removed",
+    "archive keeps the stored result and earlier inbox rows after the rules file is removed",
     Effect.gen(function* () {
       // testLayer gives this run its own temp VIBEST_HOME; nothing here touches ~/.vibest.
       const fs = yield* FileSystem.FileSystem
@@ -347,12 +348,12 @@ describe("vibest CLI", () => {
       const before = decodeJson((yield* run(["result", id])).stdout) as { result: { kind: string; message: string } }
       assert.strictEqual(before.result.kind, "result")
       assert.include(before.result.message, "kept finding")
-      assert.isTrue(yield* fs.exists(layout.resultFile(id)))
+      // Written into the result row, the turn end is no longer kept in memory.
+      assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(layout.rulesFile(id)))
 
       const archived = yield* run(["archive", id])
       assert.strictEqual(archived.code, 0, archived.stderr)
-      assert.isFalse(yield* fs.exists(layout.resultFile(id)))
       assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
 
       const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; result: object }

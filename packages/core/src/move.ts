@@ -3,7 +3,7 @@ import { isLimited, stillLimited } from "@vibest/plugin"
 import type { Subscription } from "@vibest/schema/subscription"
 // The usage-limit move (architecture.md §8): a round that failed on a usage limit restarts the same session, in its
 // same worktree with the same task, on another harness the `agent.fail` chain chooses; the open round stays the one
-// that finishes. Runs under the session's lock, wherever the limit surfaced (a turn's result file, a launch start
+// that finishes. Runs under the session's lock, wherever the limit surfaced (a turn's reported end, a launch start
 // that died on the login's own limit). Everything a plugin host cannot decide — terminals, rows, the round — is here.
 import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -97,7 +97,8 @@ export const sessionMove = (deps: {
     text: string,
     error: string | undefined,
   ) => Effect.Effect<unknown, unknown, MovePlatform>
-  readonly resultFile: (id: string) => string
+  /** The reported turn ends: the old harness's end is dropped (turn-ends.ts). */
+  readonly turnEnds: { readonly drop: (id: string) => Effect.Effect<void> }
   readonly rulesFile: (id: string) => string
   readonly fs: {
     readonly remove: (
@@ -313,7 +314,7 @@ export const sessionMove = (deps: {
       // agent ever runs. In place only its harness ends; otherwise its terminal closes.
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* deps.fs.remove(deps.resultFile(row.id), { force: true })
+          yield* deps.turnEnds.drop(row.id)
           yield* deps.finish(
             row,
             "failed",
@@ -325,7 +326,7 @@ export const sessionMove = (deps: {
       } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {
-          yield* deps.fs.remove(deps.resultFile(row.id), { force: true })
+          yield* deps.turnEnds.drop(row.id)
           yield* deps.finish(
             row,
             "failed",
@@ -394,7 +395,7 @@ export const sessionMove = (deps: {
         exitedAt: null,
       })
       row = (yield* db.getSession(row.id))!
-      yield* deps.fs.remove(deps.resultFile(row.id), { force: true })
+      yield* deps.turnEnds.drop(row.id)
       const rules = yield* deps.fs.readFileString(deps.rulesFile(row.id)).pipe(Effect.orElseSucceed(() => ""))
       const text =
         rules !== "" && harnesses.get(row.harnessId).rulesInPrompt

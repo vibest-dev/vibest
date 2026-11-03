@@ -42,7 +42,6 @@ export const sessionPlacement = (deps: {
     readonly scratch: (key: string) => string
     readonly rulesFile: (id: string) => string
     readonly project: (key: string) => string
-    readonly resultFile: (id: string) => string
   }
   readonly fs: {
     readonly makeDirectory: (
@@ -224,7 +223,6 @@ export const sessionPlacement = (deps: {
     yield* undoOnFailure(writeAtomic(layout.rulesFile(session.id), rules), () =>
       fs.remove(layout.rulesFile(session.id), { force: true }),
     )
-    yield* undoOnFailure(Effect.void, () => fs.remove(layout.resultFile(session.id), { force: true }))
     // The same limit-move a failed start always had: it runs inside the scope, so the rules and worktree the move reuses are still there.
     const openOrMove = (
       open: Effect.Effect<
