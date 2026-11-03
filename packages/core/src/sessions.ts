@@ -121,6 +121,8 @@ export const TAIL_LINES = 30
 export const POLL = Duration.seconds(5)
 export const STOP_WAIT = Duration.seconds(10)
 const TICK = Schedule.spaced("500 millis")
+/** How long a polling subagent's launch waits for its runtime to know the agent (herdr: 60 reads, as a typed prompt). */
+const RUNTIME_MARK = Duration.seconds(30)
 
 type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
 
@@ -708,8 +710,19 @@ export class Sessions extends Context.Service<
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
           // Its integration polls the task row once the harness is up; a harness that never gets ready fails the launch.
-          if (polls(session))
-            return yield* awaitReady(h, terminal, harnesses.get(session.harnessId), session.id).pipe(Effect.asVoid)
+          if (polls(session)) {
+            yield* awaitReady(h, terminal, harnesses.get(session.harnessId), session.id)
+            // The launch holds the lock, so its poll waits for this: a runtime that tracks agents (herdr) marks one ready
+            // only once it has read it idle, and drops one whose first turn outlasts its start window unmarked. Read it
+            // until the runtime knows it, bounded as a typed first prompt waits for the same mark.
+            if (h.state !== undefined)
+              yield* agentState(h, terminal).pipe(
+                Effect.repeat({ until: settled, schedule: TICK }),
+                Effect.timeout(RUNTIME_MARK),
+                Effect.ignore,
+              )
+            return
+          }
           const first = harnesses.get(session.harnessId).rulesInPrompt
             ? `${rules}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
@@ -1037,10 +1050,13 @@ export class Sessions extends Context.Service<
        * integration's `turn.start` (or ack) naming the rows is the proof it took them (`consumed`). Empty when it is
        * busy, blocked, being restarted or stopping, or nothing waits.
        */
-      const poll = (id: string) =>
-        locked(id)(
+      const poll = (id: string) => {
+        const empty = { ids: [] as ReadonlyArray<number>, line: "", text: "" }
+        // Held (its launch, a delivery, an interrupt): nothing now, and no wait that outlasts the poller's own timeout and
+        // leaves rows leased to a request nobody reads. It polls again within a second.
+        if (locks.busy(id)) return Effect.succeed(empty)
+        return locked(id)(
           Effect.gen(function* () {
-            const empty = { ids: [] as ReadonlyArray<number>, line: "", text: "" }
             if ((yield* drain.phase) !== "open" || restarting.has(id)) return empty
             const session = yield* db.getSession(id)
             if (!session || !polls(session) || session.metadata.archived || session.metadata.removed) return empty
@@ -1063,6 +1079,7 @@ export class Sessions extends Context.Service<
             return { ids: claimed, line: body, text: body }
           }),
         )
+      }
 
       /**
        * The integration took rows `ids` (its `turn.start` names them, or it acked them): they are delivered, bound to the

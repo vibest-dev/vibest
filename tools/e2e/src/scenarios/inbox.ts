@@ -7,6 +7,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
 import { agentModel, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
@@ -331,7 +332,7 @@ const curl = async (
   body: object = {},
 ) => {
   const headers = {
-    "vibest-protocol": who.protocol ?? "5",
+    "vibest-protocol": who.protocol ?? String(PROTOCOL),
     "vibest-caller": "session",
     "vibest-session-id": who.main,
     "vibest-project-id": String(who.projectId),
