@@ -198,18 +198,18 @@ describe("Daemon.Stop", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       // The runtime never shows the turn working (a fast turn), so the hook's start line is the launch's only pickup proof.
-      const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
+      const { id } = yield* (yield* cli(repo)).Spawn({ harness: "cursor", prompt: "work" })
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
-      // What the Pi extension sends to /events for that turn's `input` and `agent_settled`.
+      // A typed harness's turn start and end, as its integration sends them to /events.
       const handle = yield* Http.make
       const projectId = String((yield* (yield* Db).sessionIdentity(id))!.projectId)
       const hook = (event: object) =>
         Effect.forkScoped(
           handle({
             path: "/events",
-            headers: Headers.fromInput(sessionHeaders({ sessionId: id, projectId, harness: "pi" })),
+            headers: Headers.fromInput(sessionHeaders({ sessionId: id, projectId, harness: "cursor" })),
             body: JSON.stringify(event),
           }),
         )

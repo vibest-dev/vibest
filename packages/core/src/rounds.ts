@@ -4,7 +4,7 @@ import { NoSuchSession, NotReady } from "@vibest/schema/session"
 // held by `check`, `deliver`, `interrupt` or `remove` in sessions.ts — except `userPrompt`, which stamps the round at
 // hook receipt and takes the lock only to record it. The terminal the row addresses is what everything here talks to
 // (runtime-port.md §3).
-import { Clock, Effect, Exit, Ref } from "effect"
+import { Clock, Effect, Exit } from "effect"
 import type { FileSystem } from "effect"
 
 import {
@@ -53,8 +53,8 @@ export const sessionRounds = (deps: {
     readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
     readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
   }
-  /** The session's in-memory state: the flag set while vibest itself pastes a prompt. */
-  readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
+  /** Whether the session's integration takes its rows itself (`/inbox/poll`): then nothing is typed in. */
+  readonly polls: (session: SessionRow) => boolean
   /** The session's lock alone, not counted by Drain (a typed prompt records its round). */
   readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
@@ -151,6 +151,8 @@ export const sessionRounds = (deps: {
     session: SessionRow,
     terminal: Terminal,
   ) {
+    // Its integration polls for them (`Sessions.poll`).
+    if (deps.polls(session)) return
     const pending = yield* db.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
@@ -251,8 +253,8 @@ export const sessionRounds = (deps: {
   /**
    * RPC `Prompt`: the user typed into this session's terminal while no round was open: that opens one, `inbox_id` null and
    * the typed text as its input. It ends like any round, with one result to the parent. The main agent is not recorded.
-   * `prompt` holds the lock across the send, which is what fires this hook. That echo is not a round: the flag
-   * around those sends returns at once, so the hook cannot deadlock. Anything else waits for the lock, then records
+   * A paste of vibest's own (`prompt` opens its round first) or rows the integration polled (the round opens at the
+   * poll) fire this hook too: that echo finds the round open and records nothing. Waits for the lock, then records
    * unless a round is already open.
    */
   const userPrompt = (id: string, text: string, at?: number) =>
@@ -262,8 +264,6 @@ export const sessionRounds = (deps: {
         const session = yield* db.getSession(id)
         // getSession never returns the running main agent; an ended main conversation does come back, and is not a round either.
         if (!session || session.agent === "main") return
-        const { prompting } = yield* deps.track(id)
-        if (yield* Ref.get(prompting)) return
         // Stamped at hook receipt: the lock can be held for seconds (a delivery, an interrupt, a removal), and the
         // typed turn may already be over when it frees. A later stamp would drop that turn's reported end. `at`: the
         // caller's stamp at receipt, when it already noted the turn start with it.

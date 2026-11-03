@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import { readPing } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { Harness, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
+import { Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
 import { BUILTIN } from "@vibest/core/harnesses"
 
 const HARNESS_IDS = Object.keys(BUILTIN)
@@ -26,12 +26,14 @@ import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
+  Cause,
   Clock,
   Config,
   Context,
   Deferred,
   type Duration,
   Effect,
+  Exit,
   FileSystem,
   HashMap,
   Layer,
@@ -417,6 +419,8 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly pluginTimeout?: Duration.Input
   /** Wraps the Db that Sessions, Inbox and the test all see, to stop a call at a chosen point. */
   readonly db?: (db: Db["Service"]) => Db["Service"]
+  /** false: a polling harness's integration never asks for its rows (they stay pending, or their lease runs out). */
+  readonly integrationPolls?: boolean
 }
 
 const harnessOf = (options: TestOptions) =>
@@ -495,6 +499,48 @@ const over = (options: TestOptions) => {
       const sessions = yield* Sessions
       yield* Ref.set(fake.onActivity, (session, status) =>
         sessions.activity(session, status === "working" ? "working" : { blocked: "permission" }),
+      )
+      // An integrated harness reports the turn an interrupt key stopped (Claude's aborted turn.complete, Pi's aborted
+      // agent_settled), received just after.
+      const turnEnds = yield* TurnEnds
+      const harnessesOf = yield* Harnesses
+      const rows = yield* Db
+      yield* Ref.set(fake.onStopped, (session) =>
+        Effect.gen(function* () {
+          const row = yield* rows.getSession(session)
+          if (!row || !harnessesOf.get(row.harnessId).reportsState) return
+          const at = (yield* Clock.currentTimeMillis) + 1
+          yield* turnEnds.ended(
+            session,
+            turnEndFrom(row.harnessId, { text: "", aborted: true, error: "interrupted" }, at),
+          )
+        }),
+      )
+      // A polling harness's integration (the Claude plugin, the Pi extension) asks for its rows itself: each batch
+      // goes into its terminal (recorded as a `send`, as the fake shows a prompt) and is reported taken. Off with
+      // `integrationPolls: false` (an integration that never asks).
+      if (options.integrationPolls === false) return
+      const db = yield* Db
+      const harnesses = yield* Harnesses
+      yield* Effect.gen(function* () {
+        for (const row of yield* db.listSessions()) {
+          if (row.agent === "main" || row.address.id === "" || harnesses.find(row.harnessId)?.delivery !== "poll")
+            continue
+          // Asked only when something waits for it (a real one asks every second), so no lock is taken for nothing.
+          if (row.turnState === "open" || (yield* db.pendingInbox(row.id)).length === 0) continue
+          // Only a running harness asks.
+          const at = yield* fake.agent(row.id)
+          if (!at?.agent.alive) continue
+          const batch = yield* sessions.poll(row.id)
+          if (batch.ids.length === 0) continue
+          const taken = yield* fake.runtime.send(row.address, { text: batch.text }).pipe(Effect.exit)
+          yield* Exit.isSuccess(taken) ? sessions.consumed(row.id, batch.ids) : sessions.release(row.id, batch.ids)
+        }
+      }).pipe(
+        Effect.catchCause((cause) => Effect.logWarning(`fake integration poll: ${Cause.pretty(cause)}`)),
+        Effect.andThen(yieldToIo),
+        Effect.forever,
+        Effect.forkScoped,
       )
     }),
   )

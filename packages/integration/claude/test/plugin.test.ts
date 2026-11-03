@@ -208,17 +208,34 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual([h.requests, h.every], [[], []])
   })
 
-  it("a worker reports its turn end and the person's prompt, and polls nothing", async () => {
+  it("a worker reports its turn end and the person's prompt, and takes its own rows: the line is their full text", async () => {
     const h = host(WORKER)
     await h.start()
-    assert.deepStrictEqual(h.every, [])
+    assert.lengthOf(h.every, 1)
     await h.turnComplete({ reason: "answer", answer: "done" })
     await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/events", "/events", "/events"])
-    assert.deepStrictEqual(h.requests[1]!.body, { type: "turn.end", outcome: "completed", text: "done" })
-    assert.deepStrictEqual(h.requests[2]!.body, { type: "turn.start", origin: "typed", text: "next" })
+    const events = h.requests.filter((r) => r.url.endsWith("/events")).map((r) => r.body)
+    assert.deepStrictEqual(events.slice(1), [
+      { type: "turn.end", outcome: "completed", text: "done" },
+      { type: "turn.start", origin: "typed", text: "next" },
+    ])
+    // Its task arrives by poll: submitted as its own text, reported as the turn start that took row 7, no context.
+    h.state.answer = (r) =>
+      r.url.endsWith("/inbox/poll")
+        ? { status: 200, body: { ids: [7], line: "fix it", text: "fix it" } }
+        : { status: 204 }
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["fix it"])
+    const passed = (await h.prompt("fix it", { kind: "plugin", name: "vibest" })) as { context?: unknown }
+    assert.isUndefined(passed.context)
+    await settle()
+    assert.deepInclude(
+      h.requests.map((r) => r.body),
+      { type: "turn.start", origin: "inbox", text: "fix it", inbox: [7] },
+    )
   })
 
   it("turn ends as neutral events: aborted is interrupted, an API error with a limit text is limited", async () => {

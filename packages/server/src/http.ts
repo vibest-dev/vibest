@@ -4,8 +4,10 @@ import { Agents } from "@vibest/core/agents"
 // a session, named by the shared session headers (@vibest/protocol `sessionHeaders`); the transport is not part of it.
 // Paths carry no version: the only one is PROTOCOL in the `vibest-protocol` header, as for RPC.
 //
-//   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
-//   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
+//   /inbox/poll                  → { ids, line, text }  the caller's next batch, each row leased: the main agent's
+//                                                       results and notices (Inbox.poll), any other session's tasks and
+//                                                       sends (Sessions.poll, which opens its round)
+//   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack, Sessions.consumed); a settlement, so still
 //                                                       taken while stopping
 //   /events IntegrationEvent     → 204                  ready, conversation, turn.start, turn.end, blocked (hooks.ts);
 //                                                       a settlement, so still taken while stopping
@@ -15,8 +17,8 @@ import { Agents } from "@vibest/core/agents"
 //                                                       the CLI's own format); a settlement
 //
 // Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
-// action), 404 no such session or route, 403 another project, another harness than the session's, or a poll from what is
-// not a main agent whose harness polls, 503 vibestd is stopping.
+// action), 404 no such session or route, 403 another project, another harness than the session's, or a poll from a session
+// whose harness does not poll, 503 vibestd is stopping.
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import * as Guard from "@vibest/core/guard"
@@ -125,24 +127,30 @@ export const make = Effect.gen(function* () {
       const who = yield* identify(request.headers)
       if ("status" in who) return who
       if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's main agent`)
         if (harnesses.find(who.harness)?.delivery !== "poll")
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
-        if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))
+        // The main agent takes its project's results and notices (Inbox); any other session its own tasks and sends.
+        const main = who.agent === "coordinator"
+        if (request.path === POLL_ROUTE) return ok(yield* main ? inbox.poll(who.projectId) : sessions.poll(who.id))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")
+        const { ids, release = [] } = body.value
         return yield* admitted(
           "inbox ack",
           true,
-          Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
+          main
+            ? Effect.map(inbox.ack(who.projectId, ids, release), (acked) => ok({ acked }))
+            : sessions
+                .consumed(who.id, ids)
+                .pipe(Effect.andThen(sessions.release(who.id, release)), Effect.as(ok({ acked: ids }))),
         )
       }
-      const caller = { id: who.id, agent: who.agent, harness: who.harness }
+      const caller = { id: who.id, agent: who.agent, harness: who.harness, projectId: who.projectId }
       const events = (list: ReadonlyArray<IntegrationEvent>, label: string) =>
         admitted(
           label,
           true,
-          Effect.forEach(list, (event) => Hooks.apply(db, sessions, caller, event), { discard: true }).pipe(
+          Effect.forEach(list, (event) => Hooks.apply(db, sessions, inbox, caller, event), { discard: true }).pipe(
             Effect.as(ok()),
             Effect.catch((e) => Effect.succeed(failure(500, `the event was not recorded: ${String(e)}`))),
           ),

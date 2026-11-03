@@ -89,6 +89,8 @@ const project = Effect.gen(function* () {
     prompt: "do it",
     harness: "claude",
   })
+  // Its launch is over and its integration took the task.
+  yield* until(db.getSession(worker), (w) => w?.turnState === "open")
   const projectId = main.projectId
   const handle = yield* Http.make
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body: unknown = {}) =>
@@ -146,7 +148,8 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "" })).status, 403)
       assert.strictEqual((yield* call("/guard", { sessionId: worker, harness: "cursor" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
+      // A subagent whose harness polls takes its own rows.
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 200)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
       // The main agent moved to Pi under the same session id: the old Claude process neither polls nor renames the

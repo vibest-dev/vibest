@@ -2,13 +2,19 @@
 // `/hook`): vibestd keeps turn starts and ends in memory (TurnEnds, through Sessions), which writes them as events. No
 // file. One code path for every harness, built-in or a plugin's.
 import type { Db } from "@vibest/core/db"
+import type { Inbox } from "@vibest/core/inbox"
 import type { Sessions } from "@vibest/core/sessions"
 import { turnEndOf } from "@vibest/core/turn-ends"
 import type { IntegrationEvent } from "@vibest/protocol/protocol"
 import { Clock, Effect, Schema } from "effect"
 
 /** The calling session, already checked: its id, its agent (`coordinator` for a main agent) and its harness. */
-export type HookCaller = { readonly id: string; readonly agent: string; readonly harness: string }
+export type HookCaller = {
+  readonly id: string
+  readonly agent: string
+  readonly harness: string
+  readonly projectId: number
+}
 
 const Failure = Schema.Struct({ kind: Schema.Literals(["limited", "auth", "other"]), message: Schema.String })
 
@@ -52,7 +58,13 @@ export const ToolCallSchema = Schema.Struct({
  * One event of `who`. The main agent's turns are no result and no round (its turns are opened by the person or by
  * results); a typed turn start opens a round for any other session (the user typed into its pane).
  */
-export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: HookCaller, event: IntegrationEvent) =>
+export const apply = (
+  db: Db["Service"],
+  sessions: Sessions["Service"],
+  inbox: Inbox["Service"],
+  who: HookCaller,
+  event: IntegrationEvent,
+) =>
   Effect.gen(function* () {
     switch (event.type) {
       case "ready": {
@@ -69,6 +81,11 @@ export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: Hoo
         return
       }
       case "turn.start": {
+        // The rows this turn took (a polling integration names them): delivered, bound to the turn.
+        if (event.inbox !== undefined && event.inbox.length > 0) {
+          if (who.agent === "coordinator") yield* inbox.ack(who.projectId, event.inbox)
+          else yield* sessions.consumed(who.id, event.inbox)
+        }
         if (who.agent === "coordinator") return
         if (event.origin === "typed" && event.text.trim() !== "") {
           // One stamp, taken now: `userPrompt` notes the start at once (before it may wait for the session's lock, held

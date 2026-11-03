@@ -7,9 +7,10 @@
  *   VIBEST_SESSION_ID set), as the neutral integration events (`/events`: ready, turn.end, turn.start) and the neutral
  *   tool call (`/guard`). turn.complete fires for every main-loop turn end (reason answer, aborted, refusal or error;
  *   Stop fires for no Esc) and carries no API error kind: an error whose answer reads as a usage limit is `limited`.
- * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
- *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
- *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
+ * - The session's inbox: a poll every POLL_MS only queues what vibestd hands out (the main agent's results and notices,
+ *   a subagent's tasks and sends). The AbovePrompt render hook submits one queued batch per draw as its one line (a
+ *   subagent's line is its rows' full text); this module's own prompt.submit hook reports the turn start with the
+ *   batch's row ids and attaches the full text as context to a line that does not already hold it. (A submit from outside a hook's call stack, as a clock
  *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll. A
  *   batch that mixes rows already taken with new ones (handed out again after a lease ran out or vibestd restarted):
  *   the taken ones are acked and the new ones given back, so they come alone and no text is shown twice.
@@ -185,7 +186,7 @@ export function register(on: On, _options?: unknown) {
   // rows of a mixed batch, given back on the next ack.
   const queue: Array<Polled> = []
   const seen = new Set<number>()
-  const full = new Map<string, Array<string>>()
+  const full = new Map<string, Array<{ readonly text: string; readonly ids: ReadonlyArray<number> }>>()
   let unacked: Array<number> = []
   let release: Array<number> = []
   let polling = false
@@ -288,16 +289,16 @@ export function register(on: On, _options?: unknown) {
     }
   }
 
-  /** Keep `text` for the prompt.submit hook under `line`; the oldest lines go past FULL_MAX. */
-  const keep = (line: string, text: string) => {
+  /** Keep `text` and its row ids for the prompt.submit hook under `line`; the oldest lines go past FULL_MAX. */
+  const keep = (line: string, text: string, ids: ReadonlyArray<number>) => {
     const list = full.get(line)
-    if (list) list.push(text)
-    else full.set(line, [text])
+    if (list) list.push({ text, ids })
+    else full.set(line, [{ text, ids }])
     while (full.size > FULL_MAX) full.delete(full.keys().next().value!)
   }
   const forget = (line: string, text: string) => {
     const list = full.get(line)
-    const at = list?.lastIndexOf(text) ?? -1
+    const at = list?.findLastIndex((k) => k.text === text) ?? -1
     if (list && at >= 0) list.splice(at, 1)
     if (list?.length === 0) full.delete(line)
   }
@@ -314,7 +315,7 @@ export function register(on: On, _options?: unknown) {
         ...(conversation ? { conversation } : {}),
       } satisfies IntegrationEvent)
     }
-    if (timer === undefined && (await identity(host))?.agent === "coordinator") {
+    if (timer === undefined && (await identity(host))) {
       timer = host.every(POLL_MS, () => void tick(host))
       void tick(host)
     }
@@ -328,7 +329,7 @@ export function register(on: On, _options?: unknown) {
       const host = nativeHost($)
       draining = true
       queue.shift()
-      keep(batch.line, batch.text)
+      keep(batch.line, batch.text, batch.ids)
       // Started here, inside the hook; its answer is handled when it comes, without holding the draw.
       host.submit(batch.line).then(
         (r) => {
@@ -366,11 +367,19 @@ export function register(on: On, _options?: unknown) {
     const host = nativeHost($)
     if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
       const list = full.get(event.text)
-      const text = list?.shift()
+      const kept = list?.shift()
       if (list?.length === 0) full.delete(event.text)
-      // A one-line notice is its own full text: the prompt already holds it, so it is not sent a second time.
-      if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
-      return next({ ...event, context: [...(event.context ?? []), text] })
+      if (kept === undefined) return next(event)
+      // The turn this submit starts took these rows.
+      void report(host, EVENTS_ROUTE, {
+        type: "turn.start",
+        origin: "inbox",
+        text: kept.text,
+        inbox: [...kept.ids],
+      } satisfies IntegrationEvent)
+      // A subagent's rows and a one-line notice are their own full text: the prompt already holds it, so it is not sent a second time.
+      if (event.text.trimEnd().endsWith(kept.text.trim())) return next(event)
+      return next({ ...event, context: [...(event.context ?? []), kept.text] })
     }
     const typed = event.origin.kind === "composer" || event.origin.kind === "bridge"
     if (typed && event.text.trim() !== "" && (await identity(host).catch(() => undefined)))

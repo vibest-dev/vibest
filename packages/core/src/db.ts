@@ -402,7 +402,8 @@ const resultDetails = (content: string, end: TurnEnd | undefined) => {
 
 const toInbox = (row: InboxSql) => {
   const kind = row.kind as InboxKind
-  const sessionId = kind === "send" ? row.recipientSessionId! : (row.senderSessionId ?? row.recipientSessionId ?? "")
+  const sessionId =
+    kind === "send" || kind === "task" ? row.recipientSessionId! : (row.senderSessionId ?? row.recipientSessionId ?? "")
   return {
     id: row.id,
     sessionId,
@@ -622,11 +623,11 @@ const make = Effect.gen(function* () {
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: number) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
   /**
-   * What Sessions delivers to `sessionId`: its pending sends, and the results, reports and notices addressed to it
+   * What Sessions delivers to `sessionId`: its pending tasks (a polling integration's) and sends, and the results, reports and notices addressed to it
    * unless it is its project's entry session (Inbox delivers those).
    */
   const findPending = (sessionId: string) =>
-    inbox(sql`m.recipient_session_id = ${sessionId} AND m.status = 'pending' AND (m.kind = 'send'
+    inbox(sql`m.recipient_session_id = ${sessionId} AND m.status = 'pending' AND (m.kind IN ('send', 'task')
       OR (m.kind <> 'task' AND m.recipient_session_id IS NOT (SELECT p.entry_session_id FROM session s
         JOIN project p ON p.id = s.project_id WHERE s.id = ${sessionId})))`)
 
@@ -1158,6 +1159,8 @@ const make = Effect.gen(function* () {
       parentSessionId?: string,
       /** Where its results go (`vibest run --report-to`); default its parent, else the project's entry session. */
       reportToSessionId?: string,
+      /** The task waits for the session's integration to poll it, instead of being typed in at launch. */
+      taskPending = false,
     ) =>
       sql
         .withTransaction(
@@ -1226,7 +1229,7 @@ const make = Effect.gen(function* () {
                 kind: "task",
                 sender: parentSessionId ?? null,
                 content: task,
-                status: "delivered",
+                status: taskPending ? "pending" : "delivered",
               })
             if (row.turnState !== "none") {
               const turnId = yield* appendEvent({
@@ -1726,6 +1729,17 @@ const make = Effect.gen(function* () {
         .pipe(Effect.orDie),
 
     pendingInbox: (sessionId: string) => findPending(sessionId).pipe(Effect.orDie),
+
+    /** Which of `ids` are rows addressed to `sessionId`. */
+    ownInbox: (sessionId: string, ids: ReadonlyArray<number>) =>
+      ids.length === 0
+        ? Effect.succeed([] as ReadonlyArray<number>)
+        : sql<{
+            id: number
+          }>`SELECT id FROM inbox WHERE recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}`.pipe(
+            Effect.map((rows) => rows.map((r) => r.id)),
+            Effect.orDie,
+          ),
 
     /** Who the open turn's result goes to (`replyTo`), before `agent.result` sees it. */
     replyTo: (id: string) => replyTo(id).pipe(Effect.orDie),

@@ -93,8 +93,12 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **An addressable inbox per session**: every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
   natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
-  read with `vibest inbox`. Today only the main agent polls (Claude and Pi alike); subagents are typed into, a
-  result addressed to a subagent (a lead, a peer, a pipeline stage) included.
+  read with `vibest inbox`. A subagent whose integration polls (Claude, Pi) takes its own task, sends and results
+  (`/inbox/poll`, then the `turn.start` that names the row ids, or an ack): the poll opens the round, the named rows
+  are delivered into it, and a lease that runs out with none taken gives them back and closes the round as not
+  started. Its turns are what its integration reports (turn.start, turn.end, blocked); of the runtime only whether
+  the harness still runs counts, so neither a lost turn nor an interrupt's end is read from the runtime's idle. Any
+  other harness (Cursor, a shell-hook plugin) is typed into; its pasted text's echo finds its round open.
 - **Reply routing is data**, in one function (`Db.replyTo`), `replyTo(turn)`, evaluated when a turn ends:
   1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
      each once.

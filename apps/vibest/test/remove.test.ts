@@ -49,6 +49,8 @@ const workingSession = Effect.gen(function* () {
   })
   yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
   yield* sessions.check(id)
+  // Its integration takes the task once the harness is up: the round opens then.
+  yield* until(db.getSession(id), (w) => w?.turnState === "open")
   const pane = (yield* herdr.agent(id))!.terminal
   const row = (yield* db.getSession(id))!
   const worktree = yield* db.sessionDirectory(row.id)

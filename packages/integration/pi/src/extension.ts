@@ -99,6 +99,7 @@ const session = (sessionId: string): Role =>
           ? Effect.void
           : report(sessionId, { type: "turn.start", origin: "typed", text: e.text }),
       )
+      yield* inboxLoop(sessionId, true)
       yield* pi.handle("agent_settled", (e, ctx) =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
@@ -157,8 +158,52 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
   yield* pi.handle("agent_end", (_event, ctx) => conversation(ctx))
 })
 
-/** How often the coordinator asks vibestd for its next inbox batch. */
+/** How often a session asks vibestd for its next inbox batch. */
 const POLL_MS = 1000
+
+/**
+ * The session's inbox (the same poll and ack as the Claude plugin's, over the HTTP socket): each batch leased, sent to
+ * Pi as a custom message (a turn starts when Pi is idle, otherwise it queues as a follow-up), the turn start that took
+ * it reported with its row ids, and acked. An ack that failed is sent again before the next poll; a batch Pi did not
+ * take goes back (`release`). Only the TUI session takes the rows: Pi children (print / RPC mode) inherit the
+ * environment. `display`: shown in the TUI (a subagent's task), or seen by the model alone (the main agent's results).
+ */
+const inboxLoop = Effect.fn("inboxLoop")(function* (sessionId: string, display: boolean) {
+  const pi = yield* Pi
+  const started = yield* Deferred.make<ExtensionContext>()
+  yield* pi.handle("session_start", (_e, ctx) =>
+    ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
+  )
+  const layout = yield* Layout
+  const headers = yield* piHeaders(sessionId)
+  let unacked: ReadonlyArray<number> = []
+  let release: ReadonlyArray<number> = []
+  const once = Effect.gen(function* () {
+    if (unacked.length > 0 || release.length > 0) {
+      const r = yield* hookPost(layout.httpSocket, ACK_ROUTE, headers, { ids: unacked, release })
+      if (r.status !== 200) return
+      unacked = []
+      release = []
+    }
+    const r = yield* hookPost(layout.httpSocket, POLL_ROUTE, headers, {})
+    if (r.status !== 200 || !isPolled(r.body) || r.body.ids.length === 0) return
+    const batch = r.body
+    const taken = yield* pi
+      .sendMessage({ customType: "vibest", content: batch.text, display }, { triggerTurn: true, deliverAs: "followUp" })
+      .pipe(Effect.exit)
+    if (taken._tag !== "Success") {
+      release = batch.ids
+      return
+    }
+    unacked = batch.ids
+    yield* report(sessionId, { type: "turn.start", origin: "inbox", text: batch.text, inbox: batch.ids })
+  })
+  // vibestd away or restarting: the next tick tries again; rows not taken stay pending (their lease runs out).
+  yield* Deferred.await(started).pipe(
+    Effect.andThen(once.pipe(Effect.ignore, Effect.repeat(Schedule.spaced(`${POLL_MS} millis`)))),
+    Effect.forkScoped,
+  )
+})
 
 /** Inbox rows for this pane, as custom messages the model sees but the TUI hides: a turn starts when Pi is idle, otherwise they queue as follow-ups. */
 const coordinator: Role = Layer.effectDiscard(
@@ -180,41 +225,7 @@ const coordinator: Role = Layer.effectDiscard(
     const sessionId = yield* Config.option(Config.String("VIBEST_SESSION_ID"))
     if (Option.isNone(sessionId)) return
     yield* reportSession(sessionId.value)
-    // Pi children of the coordinator (print / RPC mode) inherit VIBEST_AGENT; only the TUI session takes the rows.
-    const started = yield* Deferred.make<ExtensionContext>()
-    yield* pi.handle("session_start", (_e, ctx) =>
-      ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
-    )
-    // The same poll and ack as the Claude plugin's (HTTP socket): each batch leased, acked once Pi took it. An ack
-    // that failed is sent again before the next poll; a batch Pi did not take goes back (`release`).
-    const layout = yield* Layout
-    const headers = yield* piHeaders(sessionId.value)
-    let unacked: ReadonlyArray<number> = []
-    let release: ReadonlyArray<number> = []
-    const once = Effect.gen(function* () {
-      if (unacked.length > 0 || release.length > 0) {
-        const r = yield* hookPost(layout.httpSocket, ACK_ROUTE, headers, { ids: unacked, release })
-        if (r.status !== 200) return
-        unacked = []
-        release = []
-      }
-      const r = yield* hookPost(layout.httpSocket, POLL_ROUTE, headers, {})
-      if (r.status !== 200 || !isPolled(r.body) || r.body.ids.length === 0) return
-      const batch = r.body
-      const taken = yield* pi
-        .sendMessage(
-          { customType: "vibest", content: batch.text, display: false },
-          { triggerTurn: true, deliverAs: "followUp" },
-        )
-        .pipe(Effect.exit)
-      if (taken._tag === "Success") unacked = batch.ids
-      else release = batch.ids
-    })
-    // vibestd away or restarting: the next tick tries again; rows not taken stay pending (their lease runs out).
-    yield* Deferred.await(started).pipe(
-      Effect.andThen(once.pipe(Effect.ignore, Effect.repeat(Schedule.spaced(`${POLL_MS} millis`)))),
-      Effect.forkScoped,
-    )
+    yield* inboxLoop(sessionId.value, false)
   }),
 )
 

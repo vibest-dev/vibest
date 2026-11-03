@@ -125,6 +125,8 @@ export class FakeRuntime extends Context.Service<
     readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
     /** What the harness's integration reports when its agent starts working or blocks (testLayer: `Sessions.activity`). */
     readonly onActivity: Ref.Ref<(session: string, status: "working" | "blocked") => Effect.Effect<void>>
+    /** What the harness's integration reports when an interrupt key stops its running turn (testLayer: an interrupted turn end). */
+    readonly onStopped: Ref.Ref<(session: string) => Effect.Effect<void>>
     /** The next `n` texts are accepted without moving the agent, so confirm times out. */
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
@@ -140,6 +142,7 @@ export class FakeRuntime extends Context.Service<
       const holds = yield* Ref.make(HashMap.empty<HoldMethod, Hold>())
       const events = yield* PubSub.unbounded<RuntimeEvent>()
       const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
+      const onStopped = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
       const onActivity = yield* Ref.make<(session: string, status: "working" | "blocked") => Effect.Effect<void>>(
         () => Effect.void,
       )
@@ -416,8 +419,14 @@ export class FakeRuntime extends Context.Service<
               )
                 yield* updateAgent(terminal.id, (current) => ({ ...current, status: "working", seq: current.seq + 1 }))
               const interrupts = (input.keys ?? []).some((key) => key === "esc" || key === "ctrl+c")
-              if (interrupts && !options.interruptIgnored && (agent.status === "working" || agent.status === "blocked"))
+              if (
+                interrupts &&
+                !options.interruptIgnored &&
+                (agent.status === "working" || agent.status === "blocked")
+              ) {
                 yield* updateAgent(terminal.id, (current) => ({ ...current, status: "idle", seq: current.seq + 1 }))
+                if (agent.vibestSession !== undefined) yield* (yield* Ref.get(onStopped))(agent.vibestSession)
+              }
             }),
           ),
         read: (terminal, lines) =>
@@ -576,6 +585,7 @@ export class FakeRuntime extends Context.Service<
         events,
         onStarted,
         onActivity,
+        onStopped,
       })
     })
 

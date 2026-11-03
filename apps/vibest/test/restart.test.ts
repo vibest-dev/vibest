@@ -61,6 +61,8 @@ const started = Effect.gen(function* () {
   })
   yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)
   yield* sessions.check(id)
+  // Its integration takes the task once the harness is up: the round opens then.
+  yield* until(db.getSession(id), (w) => w?.turnState === "open")
   const pid = (yield* db.getSession(id))!.metadata.pid!
   return { db, sessions, id, pid }
 })

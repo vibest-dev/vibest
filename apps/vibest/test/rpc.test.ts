@@ -166,8 +166,6 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(listed.get(id)!.latest, open)
       for (const row of listed.values()) assert.include(["idle", "working", "blocked", "done", "unknown"], row.status)
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
-      yield* c.Send({ id, message: "follow up" })
-      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
       yield* writeResult(id, "pi", { text: "\nfixed it\nand more" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -175,6 +173,9 @@ describe("vibest.sock", () => {
       assert.strictEqual(after?.status, "completed")
       assert.strictEqual(after?.summary, "fixed it")
       assert.isNumber(after?.endedAt)
+      // A follow-up is not the task.
+      yield* c.Send({ id, message: "follow up" })
+      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
     }),
   )
@@ -470,8 +471,7 @@ describe("vibest.sock", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "while busy")
+      yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)!.text === "while busy")
 
       // Idle: delivered by vibestd although the connection that sent it is already closed.
       yield* writeResult(id, "pi", { text: "status: completed" }, 2000)

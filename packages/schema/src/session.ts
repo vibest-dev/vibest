@@ -7,8 +7,8 @@ export type AgentStatus = typeof AgentStatus.Type
 /** The coordinator's current turn on a session (SPEC §8.1): `open` while a dispatched message is in flight, then how it ended. */
 export const TurnState = Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"])
 export type TurnState = typeof TurnState.Type
-/** `send` to the session; `report` / `result` / `notice` to its project's coordinator. */
-export const InboxKind = Schema.Literals(["send", "report", "result", "notice"])
+/** `task` (its first prompt, while a polling integration has not taken it) and `send` to the session; `report` / `result` / `notice` to their recipient. */
+export const InboxKind = Schema.Literals(["task", "send", "report", "result", "notice"])
 export type InboxKind = typeof InboxKind.Type
 /** `sending`: claimed for delivery, not yet confirmed. `dropped`: nobody was there to take it; never delivered. */
 export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])

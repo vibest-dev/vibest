@@ -1,3 +1,4 @@
+import type { Polled } from "@vibest/protocol/protocol"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -53,7 +54,7 @@ import {
   preflight,
   type HarnessAdapter,
 } from "./harness.ts"
-import { Inbox } from "./inbox.ts"
+import { Inbox, LEASE, nextBatch, text as inboxText } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeRepositoryDirectory } from "./paths.ts"
@@ -128,8 +129,11 @@ interface Tracked {
   readonly sawWorking: Ref.Ref<boolean>
   readonly endedAt: Ref.Ref<number | undefined>
   readonly blockedNotified: Ref.Ref<boolean>
-  /** True while core is sending the prompt text. The hook that fires then is the paste's echo, not a typed round. */
-  readonly prompting: Ref.Ref<boolean>
+  /**
+   * The rows its integration polled and has not yet said it took (`consumed`), and when they go back to pending. The
+   * round opened at the poll; a lease that ends with none taken closes it again as not started.
+   */
+  readonly lease: Ref.Ref<{ readonly ids: ReadonlyArray<number>; readonly until: number } | undefined>
   readonly stopping: Ref.Ref<boolean>
 }
 
@@ -137,7 +141,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   sawWorking: Ref.make(false),
   endedAt: Ref.make<number | undefined>(undefined),
   blockedNotified: Ref.make(false),
-  prompting: Ref.make(false),
+  lease: Ref.make<{ readonly ids: ReadonlyArray<number>; readonly until: number } | undefined>(undefined),
   stopping: Ref.make(false),
 })
 
@@ -223,6 +227,12 @@ export class Sessions extends Context.Service<
     ) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
+    /** `/inbox/poll` of a session whose integration takes its rows itself: its next batch, leased; the round opens. */
+    readonly poll: (id: string) => Effect.Effect<Polled>
+    /** The integration took rows `ids` (its `turn.start` names them, or `/inbox/ack`): delivered, bound to its round. */
+    readonly consumed: (id: string, ids: ReadonlyArray<number>) => Effect.Effect<void>
+    /** Rows the integration gave back (`/inbox/ack` `release`): pending again. */
+    readonly release: (id: string, ids: ReadonlyArray<number>) => Effect.Effect<void>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
     readonly republish: Effect.Effect<number>
     /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
@@ -301,7 +311,7 @@ export class Sessions extends Context.Service<
           let next = map
           for (const [id, r] of map) {
             if (live.has(id) || locks.busy(id)) continue
-            const inFlight = (yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting))
+            const inFlight = (yield* Ref.get(r.stopping)) || (yield* Ref.get(r.lease)) !== undefined
             if (!inFlight) next = HashMap.remove(next, id)
           }
           return next
@@ -375,6 +385,8 @@ export class Sessions extends Context.Service<
 
       /** The runtime a row's `runtime.kind` routes to; `NoRuntime` when no loaded plugin registered it. */
       const live = (session: SessionRow) => runtimes.route(session.runtime)
+      /** Its integration takes its rows itself (`poll`, then `consumed`): vibest types nothing into it. */
+      const polls = (session: SessionRow) => harnesses.find(session.harnessId)?.delivery === "poll"
 
       /** Ready for input (§5). A harness whose integration reports it (`ready: "integration"`) is ready once that report
        * is on its row (a restart or move removes the previous one); any other once the runtime's `state` says idle,
@@ -507,20 +519,31 @@ export class Sessions extends Context.Service<
         return state !== undefined && busy(state)
       }
 
-      /** Interrupt key, then wait for the agent to settle (core polls its state; false when it did not within STOP_WAIT). Caller holds the lock. */
-      const settleAfterInterrupt = (h: Runtime, terminal: Terminal) =>
-        agentState(h, terminal).pipe(
-          Effect.map((seen) => {
-            const state = stateOf(seen)
-            return state !== undefined && state !== "working" && state !== "blocked"
-          }),
+      /**
+       * Wait for the agent to settle (false when it did not within STOP_WAIT). An integrated harness has settled once it
+       * reported the end of the round open since `session.turnPromptedAt` (or none is open); any other once the runtime's
+       * state is neither working nor blocked. Caller holds the lock.
+       */
+      const settleAfterInterrupt = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+        (harnesses.get(session.harnessId).reportsState
+          ? Effect.map(
+              turnEnds.latest(session.id),
+              (end) => session.turnState !== "open" || (end !== undefined && end.at > session.turnPromptedAt),
+            )
+          : agentState(h, terminal).pipe(
+              Effect.map((seen) => {
+                const state = stateOf(seen)
+                return state !== undefined && state !== "working" && state !== "blocked"
+              }),
+            )
+        ).pipe(
           Effect.repeat({ until: (idle) => idle, schedule: TICK }),
           Effect.timeoutOrElse({ duration: STOP_WAIT, orElse: () => Effect.succeed(false) }),
         )
       const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) =>
         Effect.gen(function* () {
           yield* h.send(terminal, { keys: [harnesses.get(session.harnessId).interruptKey] }).pipe(Effect.ignore)
-          return yield* settleAfterInterrupt(h, terminal)
+          return yield* settleAfterInterrupt(h, session, terminal)
         })
 
       type Collected = "none" | "delivered"
@@ -576,10 +599,8 @@ export class Sessions extends Context.Service<
         yield* Ref.set(r.blockedNotified, false)
         yield* Ref.set(r.sawWorking, false)
         yield* db.updateSession(session.id, { status: state, turnState: "open", turnPromptedAt: now, lastActive: now })
-        const send = Ref.set(r.prompting, true).pipe(
-          Effect.andThen(h.send(terminal, { text })),
-          Effect.ensuring(Ref.set(r.prompting, false)),
-        )
+        // Its echo (the harness reports the pasted text as a typed turn start) finds this round open and opens none.
+        const send = h.send(terminal, { text })
         // A miss undoes the round opened above — unless a move will try the next harness on it.
         const missed = options?.keepRound
           ? Effect.void
@@ -619,7 +640,7 @@ export class Sessions extends Context.Service<
         db,
         inbox,
         turnEnds,
-        track,
+        polls,
         lock: locks.withLock,
         worktreeOf,
         undelivered,
@@ -656,6 +677,9 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
+          // Its integration polls the task row once the harness is up; a harness that never gets ready fails the launch.
+          if (polls(session))
+            return yield* awaitReady(h, terminal, harnesses.get(session.harnessId), session.id).pipe(Effect.asVoid)
           const first = harnesses.get(session.harnessId).rulesInPrompt
             ? `${rules}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
@@ -902,6 +926,8 @@ export class Sessions extends Context.Service<
               decision.prompt,
               input.parentSessionId,
               input.reportTo,
+              // A polling integration takes its task itself; any other gets it typed in at launch.
+              adapter.delivery === "poll",
             )
             if (!inserted) {
               // The directory this spawn reserved goes again (still empty: nothing was started in it).
@@ -973,6 +999,84 @@ export class Sessions extends Context.Service<
         if (!(yield* Ref.getAndSet(r.blockedNotified, true))) yield* blockedNotice(session, now.blocked)
       })
 
+      /**
+       * `/inbox/poll` of a session whose integration takes its rows itself: its next batch (consecutive rows from one
+       * sender) when it is idle, each row leased for LEASE. The round opens here, as `prompt` opens it before a paste; the
+       * integration's `turn.start` (or ack) naming the rows is the proof it took them (`consumed`). Empty when it is
+       * busy, blocked, being restarted or stopping, or nothing waits.
+       */
+      const poll = (id: string) =>
+        locked(id)(
+          Effect.gen(function* () {
+            const empty = { ids: [] as ReadonlyArray<number>, line: "", text: "" }
+            if ((yield* drain.phase) !== "open" || restarting.has(id)) return empty
+            const session = yield* db.getSession(id)
+            if (!session || !polls(session) || session.metadata.archived || session.metadata.removed) return empty
+            if (session.turnState === "open" || session.status === "blocked") return empty
+            const pending = yield* db.pendingInbox(id)
+            if (pending.length === 0) return empty
+            const batch = nextBatch(pending)
+            const claimed = yield* db.claim(batch.map((r) => r.id))
+            if (claimed.length === 0) return empty
+            const rows = batch.filter((r) => claimed.includes(r.id))
+            const now = yield* Clock.currentTimeMillis
+            const r = yield* track(id)
+            yield* Ref.set(r.endedAt, undefined)
+            yield* Ref.set(r.blockedNotified, false)
+            yield* Ref.set(r.sawWorking, false)
+            yield* Ref.set(r.lease, { ids: claimed, until: now + Duration.toMillis(LEASE) })
+            yield* db.updateSession(id, { turnState: "open", turnPromptedAt: now, lastActive: now })
+            // A session's prompt is its rows' own text: the model follows the prompt, not context beside it.
+            const body = inboxText(rows)
+            return { ids: claimed, line: body, text: body }
+          }),
+        )
+
+      /**
+       * The integration took rows `ids` (its `turn.start` names them, or it acked them): they are delivered, bound to the
+       * round the poll opened. Taken after that round was given up (its lease ran out): the round opens again. Only the
+       * session's own leased or pending rows count; repeating is harmless.
+       */
+      const consumed = (id: string, ids: ReadonlyArray<number>) =>
+        locks.withLock(id)(
+          Effect.gen(function* () {
+            if (ids.length === 0) return
+            const r = yield* track(id)
+            yield* Ref.update(r.lease, (l) => {
+              const left = l?.ids.filter((x) => !ids.includes(x)) ?? []
+              return left.length === 0 ? undefined : { ...l!, ids: left }
+            })
+            const mine = yield* db.ownInbox(id, ids)
+            if (mine.length === 0) return
+            const session = yield* db.getSession(id)
+            if (session && session.turnState !== "open") {
+              const now = yield* Clock.currentTimeMillis
+              yield* db.updateSession(id, { turnState: "open", turnPromptedAt: now, lastActive: now })
+            }
+            yield* db.setInboxStatus(mine, "sending", "pending")
+            yield* db.setInboxStatus(mine, "delivered", "sending")
+            yield* Ref.set(r.sawWorking, true)
+          }),
+        )
+
+      /** Rows a polling integration gave back (`/inbox/ack` `release`), or whose lease ran out: pending again; with none of the batch taken, the round closes as not started. */
+      const release = (id: string, ids: ReadonlyArray<number>) =>
+        locks.withLock(id)(
+          Effect.gen(function* () {
+            if (ids.length === 0) return
+            const r = yield* track(id)
+            yield* Ref.update(r.lease, (l) => {
+              const left = l?.ids.filter((x) => !ids.includes(x)) ?? []
+              return left.length === 0 ? undefined : { ...l!, ids: left }
+            })
+            const back = yield* db.setInboxStatus(ids, "pending", "sending")
+            if (back.length === 0) return
+            const session = yield* db.getSession(id)
+            if (session?.turnState === "open" && !(yield* db.turnTaken(id)))
+              yield* db.updateSession(id, { turnState: "not_started", lastActive: yield* Clock.currentTimeMillis })
+          }),
+        )
+
       const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
         if (!session) return
@@ -998,22 +1102,27 @@ export class Sessions extends Context.Service<
         const h = routed.value
         const terminal = session.address
         const r = yield* track(id)
+        // Rows its integration polled and never said it took: pending again (released outside this lock's holder).
+        const lease = yield* Ref.get(r.lease)
+        if (lease !== undefined && (yield* Clock.currentTimeMillis) >= lease.until) {
+          yield* Effect.logInfo(`lease ended ${id}: rows ${lease.ids.join(",")} back to pending`)
+          yield* Ref.set(r.lease, undefined)
+          const back = yield* db.setInboxStatus(lease.ids, "pending", "sending")
+          if (back.length > 0 && open && !(yield* db.turnTaken(id))) {
+            yield* db.updateSession(id, { turnState: "not_started", lastActive: yield* Clock.currentTimeMillis })
+            return
+          }
+        }
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
         // Unreachable is no answer: this check tries again on the next poll, the row untouched.
         if (Option.isNone(maybe)) return
         const seen = maybe.value
         const reported = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
-        // An integrated harness reports working and blocked itself (`activity`): of the runtime only idle counts (a turn
-        // that ended without its event) and whether it is gone. Any other: the runtime's state as it reports it now;
-        // `unknown` is no answer, the process fallback decides (§5).
+        // An integrated harness reports its turns and blocks itself (turn.start, turn.end, blocked): of the runtime only
+        // whether it is gone counts. Any other: the runtime's state as it reports it now; `unknown` is no answer, the
+        // process fallback decides (§5).
         const own = harnesses.get(session.harnessId).reportsState
-        const state = !own
-          ? reported
-          : session.status === "blocked"
-            ? "blocked"
-            : reported === "idle"
-              ? "idle"
-              : undefined
+        const state = !own ? reported : session.status === "blocked" ? "blocked" : undefined
         if (!own && state !== undefined && session.status !== state)
           yield* db.updateSession(session.id, { status: state })
         if (!own && (state === "working" || state === "blocked")) yield* Ref.set(r.sawWorking, true)
@@ -1188,10 +1297,11 @@ export class Sessions extends Context.Service<
                 const collected = yield* collectResult(h, session)
                 if (collected === "delivered")
                   return { message: `${id} had already finished its turn; its result is delivered` }
-                const seen = yield* agentState(h, terminal)
-                const state = stateOf(seen)
-                if (state === undefined || !busy(state))
-                  return { message: `${id} is not working; nothing to interrupt` }
+                // An integrated harness works between its turn start and end; any other as the runtime sees it.
+                const integrated = harnesses.get(session.harnessId).reportsState
+                const state = integrated ? undefined : stateOf(yield* agentState(h, terminal))
+                const working = integrated ? session.turnState === "open" : state !== undefined && busy(state)
+                if (!working) return { message: `${id} is not working; nothing to interrupt` }
                 // Waiting under the lock: no check sees the stopped turn as one whose hook never fired.
                 if (!(yield* interruptAgent(h, session, terminal)))
                   return yield* new SessionBusy({
@@ -1340,7 +1450,7 @@ export class Sessions extends Context.Service<
                     `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
                   )
                 // The runtime can still read `working` right after the turn-end hook.
-                const settled = yield* settleAfterInterrupt(h, terminal)
+                const settled = yield* settleAfterInterrupt(h, session, terminal)
                 if (!settled)
                   return yield* skip(
                     `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
@@ -1526,6 +1636,9 @@ export class Sessions extends Context.Service<
             yield* turnEnds.started(id, now)
             yield* userPrompt(id, text, now)
           }),
+        poll: (id) => poll(id).pipe(Effect.provideContext(platform), Effect.orDie),
+        consumed: (id, ids) => consumed(id, ids).pipe(Effect.orDie),
+        release: (id, ids) => release(id, ids).pipe(Effect.orDie),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)
