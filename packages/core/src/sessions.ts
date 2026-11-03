@@ -222,7 +222,7 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
-    /** RPC `ResultReady` from a hook: schedule a check and return at once (SPEC §7, §9). */
+    /** A turn end vibestd just recorded (RPC `TurnEnd`, or the HTTP hook): schedule a check and return at once (SPEC §7, §9). */
     readonly resultReady: (id: string) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>

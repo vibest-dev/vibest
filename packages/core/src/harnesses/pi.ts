@@ -111,4 +111,17 @@ export const pi: HarnessAdapter = {
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
     return { text: event.text }
   },
+  // The extension's turn end: Pi's `agent_settled` with the last reply `agent_end` saw (`text`, `error`), as it sends it.
+  turnEnd: (event, coordinator) => {
+    if (coordinator || event.type !== "agent_settled") return undefined
+    const aborted = event.aborted === true
+    const error = typeof event.error === "string" ? event.error : ""
+    return {
+      result: {
+        text: typeof event.text === "string" ? event.text : "",
+        error: error || (aborted ? "aborted" : ""),
+        aborted,
+      },
+    }
+  },
 }

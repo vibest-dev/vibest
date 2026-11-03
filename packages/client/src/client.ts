@@ -11,7 +11,20 @@ import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 // The client side of vibest.sock (SPEC §12): one short connection per command. A missing daemon is started and waited for
 // (up to 10 s) unless the caller is an agent. The existing Ping preflight is the only Ping: it detects a daemon whose
 // Ping lacks this protocol before a mutation. Business requests carry their own headers and do not Ping again.
-import { Config, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Schema } from "effect"
+import {
+  Cause,
+  Config,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Schedule,
+  Schema,
+} from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
@@ -130,6 +143,44 @@ export const connect = (socket: string) =>
       Layer.provide(RpcSerialization.layerNdJsonRpc()),
     ),
   ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
+
+/** How long one try of a harness hook's request (`TurnEnd`, `Prompt`) may take to connect and return. */
+export const HOOK_TIMEOUT = Duration.seconds(2)
+/** The pause before the one retry: long enough for a vibestd handoff to start listening again. */
+export const HOOK_RETRY_DELAY = Duration.millis(300)
+
+/** Connecting failed before anything was sent: nothing listens on the socket, or there is no socket. */
+const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
+const notConnected = (error: unknown) => {
+  if (!Predicate.hasProperty(error, "reason") || !Predicate.hasProperty(error.reason, "_tag")) return false
+  if (error.reason._tag !== "SocketOpenError" || !Predicate.hasProperty(error.reason, "cause")) return false
+  const cause = error.reason.cause
+  return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) && CONNECT_CODES.has(cause.code)
+}
+
+/**
+ * A harness hook's one request to vibestd, with `headers`; it never starts vibestd and never fails. Only a try whose
+ * connection could not be made at all (ECONNREFUSED, ENOENT) is tried once more. Once the request may have been sent
+ * (a dropped connection, an error answer, a timeout) it is not: vibestd may have handled it, and a second turn end would
+ * be delivered twice.
+ */
+export const hookCall = (
+  socket: string,
+  headers: Readonly<Record<string, string>>,
+  send: (client: VibestClient) => Effect.Effect<void, unknown>,
+) => {
+  const once = RpcClient.withHeaders(connect(socket).pipe(Effect.flatMap(send)), headers).pipe(
+    Effect.scoped,
+    Effect.timeout(HOOK_TIMEOUT),
+    Effect.exit,
+  )
+  return Effect.gen(function* () {
+    const first = yield* once
+    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return
+    yield* Effect.sleep(HOOK_RETRY_DELAY)
+    yield* once
+  })
+}
 
 /** One Ping, or none if nothing answered in time. Does not judge protocol. */
 export const readPing = (socket: string) =>

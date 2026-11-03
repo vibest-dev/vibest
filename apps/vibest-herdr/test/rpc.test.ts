@@ -217,14 +217,20 @@ describe("vibest.sock", () => {
         bare.Report({ message: "x" }),
       ]
       for (const call of calls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected")
-      yield* bare.ResultReady({ sessionId: id }, { headers: protocolHeaders() })
-      assert.strictEqual(failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }))), "ProtocolRejected")
+      yield* bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }))),
+        "ProtocolRejected",
+      )
       // An integration's call names its version, which is recorded even when its protocol is refused.
-      yield* bare.ResultReady({ sessionId: id }, { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) })
+      yield* bare.TurnEnd(
+        { sessionId: id, harness: "pi", event: "{}" },
+        { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) },
+      )
       assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.2.3", protocol: PROTOCOL })
       const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "1.0.0" }), "vibest-protocol": "1" }
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }, { headers: old }))),
+        failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: old }))),
         "ProtocolRejected",
       )
       assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.0.0", protocol: 1 })
@@ -249,9 +255,9 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
       yield* as("claude", "other").Report({ message: "two" })
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
-      // An open hook call (ResultReady) carries it too.
-      yield* raw.ResultReady(
-        { sessionId: id },
+      // An open hook call (TurnEnd) carries it too.
+      yield* raw.TurnEnd(
+        { sessionId: id, harness: "pi", event: "{}" },
         { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
       )
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-2")
@@ -439,13 +445,17 @@ describe("vibest.sock", () => {
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
-      yield* bare.ResultReady({ sessionId: id }, { headers: protocolHeaders() })
+      yield* bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
       yield* bare.CoordinatorSessionReady(
         { sessionId: "unknown", harness: "pi", harnessSessionId: "s1" },
         { headers: protocolHeaders() },
       )
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }, { headers: { "vibest-protocol": "0" } }))),
+        failureTag(
+          yield* Effect.exit(
+            bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: { "vibest-protocol": "0" } }),
+          ),
+        ),
         "ProtocolRejected",
       )
 
@@ -456,7 +466,7 @@ describe("vibest.sock", () => {
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",
-        "ResultReady",
+        "TurnEnd",
         "Prompt",
         "CoordinatorSessionReady",
       ]
@@ -621,12 +631,16 @@ describe("vibest.sock", () => {
         })
       assert.deepStrictEqual(
         yield* ask(
-          `{"jsonrpc":"2.0","id":"hook:1","method":"ResultReady","params":{"sessionId":"deadbeef"},"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
+          `{"jsonrpc":"2.0","id":"hook:1","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"},"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
         ),
         '{"jsonrpc":"2.0","id":"hook:1","result":null}',
       )
       assert.include(
-        yield* ask('{"jsonrpc":"2.0","id":"hook:2","method":"ResultReady","params":{"sessionId":"deadbeef"}}\n') ?? "",
+        yield* (
+          ask(
+            '{"jsonrpc":"2.0","id":"hook:2","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"}}\n',
+          ) ?? ""
+        ),
         "ProtocolRejected",
       )
     }),

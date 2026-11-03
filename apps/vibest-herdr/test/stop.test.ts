@@ -134,7 +134,11 @@ describe("Daemon.Stop", () => {
         "DaemonStopping",
       )
       assert.strictEqual(
-        tagOf(yield* Effect.exit(raw.ResultReady({ sessionId: "x" }, { headers: protocolHeaders() }))),
+        tagOf(
+          yield* Effect.exit(
+            raw.TurnEnd({ sessionId: "x", harness: "pi", event: "{}" }, { headers: protocolHeaders() }),
+          ),
+        ),
         "DaemonStopping",
       )
       assert.strictEqual(yield* stop(repo), "DaemonStopping")

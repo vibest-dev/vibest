@@ -202,7 +202,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "hook result + ResultReady ends the turn and becomes a result row for the owner",
+    "hook result + TurnEnd ends the turn and becomes a result row for the owner",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
@@ -223,7 +223,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "herdr's push of a status change runs the check: no poll, no ResultReady",
+    "herdr's push of a status change runs the check: no poll, no TurnEnd",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, db } = yield* spawnWorking(yield* makeRepository)
@@ -248,7 +248,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "ResultReady for an unknown session is ignored",
+    "TurnEnd for an unknown session is ignored",
     Effect.gen(function* () {
       yield* (yield* Sessions).resultReady("ffffffff")
     }),

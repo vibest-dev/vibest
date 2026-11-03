@@ -1,7 +1,7 @@
 import { spawnDaemon } from "@vibest/client/client"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
@@ -60,11 +60,13 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
+
+import * as Hooks from "./hooks.ts"
 
 const placeOf = (kind: string, address: RuntimeAddress) =>
   address.id !== "" ? `${kind} terminal ${address.id}` : `${kind} (no terminal)`
@@ -165,7 +167,7 @@ const ACCESS = {
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",
-  ResultReady: "open",
+  TurnEnd: "open",
   Prompt: "open",
   CoordinatorSessionReady: "open",
   Report: "session",
@@ -248,7 +250,7 @@ const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id
   })
 
 /**
- * An open method's session headers (a hook's ResultReady or Prompt, no caller check): the conversation id is kept when
+ * An open method's session headers (a hook's TurnEnd or Prompt, no caller check): the conversation id is kept when
  * they name this session and its project.
  */
 const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
@@ -378,6 +380,25 @@ export const handlers = VibestRpcs.toLayer(
     const shutdown = yield* Shutdown
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const harnesses = yield* Harnesses
+    const files = yield* Effect.context<FileSystem.FileSystem | Path.Path | Layout>()
+
+    /**
+     * A hook's turn event for session `sessionId` of `harness`: an unknown id, or another harness than the session's (an
+     * old process after a switch), changes nothing.
+     */
+    const hook = <E>(
+      sessionId: string,
+      harness: string,
+      headers: Headers.Headers,
+      run: (who: Hooks.HookCaller) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
+    ) =>
+      Effect.gen(function* () {
+        yield* noteOpen(db, headers, sessionId)
+        const row = yield* db.sessionIdentity(sessionId)
+        if (!row || row.harness !== harness) return
+        yield* run(row)
+      }).pipe(Effect.provideContext(files), Effect.orDie)
 
     /** A coordinator's or the command line's request; a session's is refused. */
     const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -776,11 +797,12 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      ResultReady: ({ sessionId }, { headers }) =>
-        Effect.andThen(noteOpen(db, headers, sessionId), sessions.resultReady(sessionId)),
+      // The same code as the HTTP hook routes (hooks.ts). A failed write dies: the caller sees a failure, not a retry.
+      TurnEnd: ({ sessionId, harness, event }, { headers }) =>
+        hook(sessionId, harness, headers, (who) => Hooks.turnEnd(sessions, harnesses.get(harness), who, event)),
 
-      Prompt: ({ sessionId, text }, { headers }) =>
-        Effect.andThen(noteOpen(db, headers, sessionId), sessions.userPrompt(sessionId, text)),
+      Prompt: ({ sessionId, harness, event }, { headers }) =>
+        hook(sessionId, harness, headers, (who) => Hooks.prompt(sessions, harnesses.get(harness), who, event)),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {

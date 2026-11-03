@@ -1,4 +1,5 @@
-// Result files and turn-report lines written by the integrations (SPEC §5.3, runtime-port.md §5), and the session report format.
+// Result files and turn-report lines, written by vibestd alone from the turn events the integrations send it (SPEC §5.3,
+// runtime-port.md §5), and the session report format.
 import { Effect, FileSystem, Option, Path, Schema } from "effect"
 
 import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
@@ -35,7 +36,7 @@ export type ReportLine =
       readonly payload: Readonly<Record<string, unknown>>
     }
 
-export const encodeReportLine = (line: ReportLine) => `${JSON.stringify(line)}\n`
+const encodeReportLine = (line: ReportLine) => `${JSON.stringify(line)}\n`
 
 const ReportLineJson = Schema.fromJsonString(
   Schema.Union([
@@ -49,8 +50,8 @@ const ReportLineJson = Schema.fromJsonString(
   ]),
 )
 
-/** Append one report line (the integration side of runtime-port.md §5). One write, append mode; a lost line is only a lost fast path. */
-export const appendReportLine = (file: string, line: ReportLine) =>
+/** Append one report line (runtime-port.md §5). One write, append mode; a lost line is only a lost fast path. */
+const appendReportLine = (file: string, line: ReportLine) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -69,7 +70,7 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
 }
 
 /**
- * A harness plugin's turn end, wherever it arrives (`vibest integration stop`, or vibestd's HTTP hook): the adapter's
+ * A harness plugin's turn end, as vibestd receives it (RPC `TurnEnd`, or the HTTP hook): the adapter's
  * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
  */
 export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>

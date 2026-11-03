@@ -414,10 +414,30 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   /** Coordinator side (the Pi extension): this request's inbox rows, one string per batch, instead of the runtime's prompt. */
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
-  /** Hook side: the result file was just written. Protocol only; no caller. Returns at once, unknown ids are ignored. */
-  protocol(admitted(Rpc.make("ResultReady", { payload: { sessionId: Schema.String } }))),
-  /** Hook side: the user typed this into the session's pane. Protocol only; no caller. The main agent and vibest's own deliveries are ignored. */
-  protocol(admitted(Rpc.make("Prompt", { payload: { sessionId: Schema.String, text: Schema.String } }))),
+  /**
+   * Hook side: a harness plugin's turn-end event, verbatim JSON. vibestd reads it with the harness adapter's `turnEnd` and
+   * writes the result file and the turn-end report line. Protocol only; no caller. Unknown ids, another harness than
+   * the session's, and events the adapter ignores change nothing.
+   */
+  protocol(
+    admitted(
+      Rpc.make("TurnEnd", {
+        payload: { sessionId: Schema.String, harness: Schema.Literals(HARNESS_IDS), event: Schema.String },
+      }),
+    ),
+  ),
+  /**
+   * Hook side: a harness plugin's prompt event, verbatim JSON. vibestd reads it with the adapter's `userPrompt`, writes the
+   * turn-start report line, and records the round. Protocol only; no caller. The main agent and vibest's own deliveries
+   * are ignored.
+   */
+  protocol(
+    admitted(
+      Rpc.make("Prompt", {
+        payload: { sessionId: Schema.String, harness: Schema.Literals(HARNESS_IDS), event: Schema.String },
+      }),
+    ),
+  ),
   /**
    * `vibest`, before it execs: upsert the repository's coordinator row at its terminal. sessionId is that row's id
    * (VIBEST_SESSION_ID); harnessSessionId is the conversation to reopen, null with fresh or a harness switch.

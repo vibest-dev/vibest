@@ -3,6 +3,7 @@ import {
   claimHeaders,
   cliHeaders,
   connect,
+  hookCall,
   type VibestClient,
   probe,
   protocolHeaders,
@@ -18,7 +19,7 @@ import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic }
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { jsonObject, promptOf, recordPrompt, recordTurnEnd, writeTerminalStatus } from "@vibest/core/results"
+import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
 // VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
@@ -730,9 +731,6 @@ const subscriptions = Command.make("subscriptions", {}, () =>
   vibest((client) => client.Subscriptions().pipe(Effect.flatMap(json))),
 ).pipe(Command.withDescription("Print each harness login and its usage limits, as vibestd last read them"))
 
-/** How long a worker's ResultReady may take to connect and return. The result file is already written. */
-export const RESULT_READY_TIMEOUT = Duration.millis(500)
-
 const nonempty = (name: string) =>
   Config.option(Config.String(name)).pipe(
     Effect.map((value) => {
@@ -742,11 +740,10 @@ const nonempty = (name: string) =>
   )
 
 /**
- * Best-effort notify from a harness hook, with the session's headers (its conversation id when the adapter reads one
- * from `raw`). Does not start vibestd.
+ * A harness hook's event, sent to vibestd as it came (`hookCall`: a timeout and one retry), with the session's headers
+ * and its conversation id when the adapter reads one from `raw`. Does not start vibestd; writes no file.
  */
 const notify = (
-  timeout: Duration.Duration,
   adapter: HarnessAdapter,
   sessionId: string,
   raw: string,
@@ -761,40 +758,37 @@ const notify = (
       sessionId,
       ...(harnessSessionId ? { harnessSessionId } : {}),
     })
-    yield* RpcClient.withHeaders(connect(layout.socket).pipe(Effect.flatMap(send)), headers)
-  }).pipe(Effect.scoped, Effect.timeout(timeout), Effect.ignore)
+    yield* hookCall(layout.socket, headers, send)
+  }).pipe(Effect.ignore)
 
 /**
  * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`, Cursor's): its adapter's `turnEnd` reads
- * the event. Missing identity, a non-object, or an event the adapter ignores writes nothing and sends nothing. Failures
- * exit 0. Writes the result file, the turn-end report line and OSC 7501 idle (runtime-port.md §5); the ResultReady push
- * stays the fast path.
+ * the event. Missing identity, a non-object, or an event the adapter ignores sends nothing. Failures exit 0. Writes
+ * OSC 7501 idle (runtime-port.md §5) and sends the event as `TurnEnd`; vibestd writes the result file and report line.
  */
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
     const agent = yield* nonempty("VIBEST_AGENT")
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
-    if (!(yield* recordTurnEnd(adapter, agent, sessionId, raw))) return
+    const event = jsonObject(raw)
+    if (!event || !adapter.turnEnd?.(event, agent === "coordinator")) return
     yield* writeTerminalStatus("idle")
-    yield* notify(RESULT_READY_TIMEOUT, adapter, sessionId, raw, (client) => client.ResultReady({ sessionId }))
+    yield* notify(adapter, sessionId, raw, (client) => client.TurnEnd({ sessionId, harness: adapter.id, event: raw }))
   }).pipe(Effect.ignore)
 
 /**
  * A harness plugin's user-prompt bridge (`vibest integration prompt --harness <h>`): its adapter's `userPrompt` reads the
- * event. The main agent, a nested agent, or text that is not the user typing sends nothing. Failures exit 0. Records the
- * turn start and OSC 7501 working (runtime-port.md §5).
+ * event. The main agent, a nested agent, or text that is not the user typing sends nothing. Failures exit 0. Sends the
+ * event as `Prompt` (vibestd writes the turn-start line and records the round), then OSC 7501 working.
  */
 export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
     const agent = yield* nonempty("VIBEST_AGENT")
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
-    const text = promptOf(adapter, agent, raw)
-    if (text === undefined) return
-    // `Prompt` first: vibestd stamps the round at receipt, and the start line must not be older than that stamp.
-    yield* notify(RESULT_READY_TIMEOUT, adapter, sessionId, raw, (client) => client.Prompt({ sessionId, text }))
-    yield* recordPrompt(sessionId, text)
+    if (promptOf(adapter, agent, raw) === undefined) return
+    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
     yield* writeTerminalStatus("working")
   }).pipe(Effect.ignore)
 

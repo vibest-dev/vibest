@@ -328,7 +328,7 @@ const curl = async (
   body: object = {},
 ) => {
   const headers = {
-    "vibest-protocol": who.protocol ?? "4",
+    "vibest-protocol": who.protocol ?? "5",
     "vibest-caller": "session",
     "vibest-session-id": who.main,
     "vibest-project-id": String(who.projectId),
