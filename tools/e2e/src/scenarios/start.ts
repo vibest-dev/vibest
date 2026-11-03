@@ -2,6 +2,7 @@
 // run's own herdr session whose shell runs `vibest` again and becomes the project's main agent. S1's Pi runs with this
 // run's PI_CODING_AGENT_DIR (passed with --env), never the user's. S10 and S10-pi move a running main agent to another
 // terminal with a real herdr and harness (the user's own login and config); S10-pi runs only with VIBEST_E2E_MODEL set.
+import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import net from "node:net"
 import os from "node:os"
@@ -173,8 +174,19 @@ const move = (harness: "claude" | "pi"): Check => ({
         "A's conversation written",
         async () => {
           if (harness === "pi") return await piWrote(w.repository)
-          // Claude starts with the conversation id vibest chose (--session-id).
-          conversation = await harnessFlag(socket, a, "claude", "--session-id")
+          // The plugin reports Claude's own conversation id; vibestd keeps it in the main session's row.
+          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          try {
+            conversation =
+              (
+                db
+                  .query("SELECT s.harness_session_id AS c FROM session s JOIN project p ON p.main_session_id = s.id")
+                  .get() as { c: string | null } | null
+              )?.c ?? undefined
+          } finally {
+            db.close()
+          }
+          if (conversation === undefined) return false
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))
             if (await Bun.file(path.join(projects, dir, `${conversation}.jsonl`)).exists()) return true
           return false
