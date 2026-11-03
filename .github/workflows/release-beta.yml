@@ -3,6 +3,7 @@ name: Release
 # One entry point and one version for every package: the workspace members.
 # A v* tag publishes that version under `beta`, and as the latest GitHub Release (install.sh and an archive per platform).
 # Manual runs (workflow_dispatch) publish one canary version of every package to npm only.
+# Only the owner starts it: the tag comes from `pnpm release` (.agents/rules/release.md); anyone else's run is skipped.
 on:
   push:
     tags: ["v*"]
@@ -18,6 +19,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.actor == github.repository_owner || github.actor == 'iamdin'
     # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners.
     runs-on: ubuntu-latest
     steps:
@@ -38,7 +40,7 @@ jobs:
         run: |
           version=$(node -p 'require("./apps/vibest-herdr/package.json").version')
           # The same files as the root `release` script. A package left behind fails the run before anything is published.
-          for f in apps/*/package.json packages/*/package.json tools/verify/package.json; do
+          for f in apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json; do
             v=$(node -p "const j = require('./$f'); [j.version, j.version].join(' ')")
             if [ "$v" != "$version $version" ]; then echo "::error::$f is $v, not $version"; exit 1; fi
           done
