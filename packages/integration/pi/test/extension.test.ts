@@ -19,10 +19,11 @@ import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
+import { TurnEnds } from "@vibest/core/turn-ends"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
-import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Schema, Scope } from "effect"
+import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -453,7 +454,6 @@ describe("pi-vibest", () => {
     "Session: guard on tool calls (its scratchpad is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
     Effect.gen(function* () {
       const layout = yield* Layout
-      const fs = yield* FileSystem.FileSystem
       yield* (yield* Db).insertSession(
         {
           id: "abcd1234",
@@ -510,12 +510,11 @@ describe("pi-vibest", () => {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
       yield* s.emit("agent_settled", { aborted: false }, { isIdle: () => true })
-      const written = Schema.decodeUnknownSync(
-        Schema.fromJsonString(Schema.Struct({ harness: Schema.String, payload: Schema.Unknown })),
-      )(yield* fs.readFileString(layout.resultFile("abcd1234")))
-      assert.deepStrictEqual(written, {
+      assert.deepInclude(yield* (yield* TurnEnds).latest("abcd1234"), {
         harness: "pi",
-        payload: { text: "status: completed" },
+        text: "status: completed",
+        error: undefined,
+        interrupted: false,
       })
     }),
   )

@@ -26,6 +26,7 @@ import {
   until,
   untilVirtual,
   writeResult,
+  resultText,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -182,12 +183,11 @@ describe.concurrent("vibest rm: process proof", () => {
     "worktree already gone: its result and rules files are removed once its processes are proven exited",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       /** The session's worktree deleted outside vibest, and its result and rules files with recognizable contents. */
       const seeded = (w: Effect.Success<typeof idleSession>) =>
         Effect.gen(function* () {
           yield* fs.remove(w.worktree, { recursive: true })
-          yield* fs.writeFileString(layout.resultFile(w.id), `result of ${w.id}`)
+          yield* writeResult(w.id, "pi", { text: `result of ${w.id}` })
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
@@ -196,14 +196,14 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* a.herdr.runtime.close({ machine: "local", id: a.pane })
       yield* seeded(a)
       assert.deepInclude(yield* a.sessions.remove(a.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.isFalse(yield* fs.exists(layout.resultFile(a.id)))
+      assert.strictEqual(yield* resultText(a.id), "")
       assert.isFalse(yield* fs.exists(a.rules))
 
       // Its terminal closed by vibest rm and no process in it: both go as well.
       const b = yield* idleSession
       yield* seeded(b)
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.isFalse(yield* fs.exists(layout.resultFile(b.id)))
+      assert.strictEqual(yield* resultText(b.id), "")
       assert.isFalse(yield* fs.exists(b.rules))
     }),
   )

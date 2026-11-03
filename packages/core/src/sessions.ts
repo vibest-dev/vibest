@@ -13,7 +13,7 @@ import {
 // different sessions proceed in parallel. A session is addressed by its row's terminal — `runtime { kind }` routes the
 // call to the registered Runtime (runtime-port.md §3), `address { machine, id }` names the terminal in it. Core follows
 // each Agent with the runtime's `state` and `events` when they exist, else by polling (§5), and a turn ends when the
-// agent goes idle after working or its process exits; the result is the integration's report (the result file).
+// agent goes idle after working or its process exits; the result is the integration's turn end (TurnEnds).
 import {
   Cause,
   Clock,
@@ -64,7 +64,6 @@ import { listProjectRepositories, projectRoot, workspaceGit } from "./project-cr
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Restarting } from "./restarting.ts"
-import { readReportLines } from "./results.ts"
 import { sessionRounds } from "./rounds.ts"
 import {
   agentState,
@@ -83,6 +82,7 @@ import {
   type AgentSeen,
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
+import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
 import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 /**
  * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
@@ -124,7 +124,7 @@ type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcess
 
 /** In-memory only; rebuilt from sqlite and the runtime after a restart. Dropped once the session has ended (`forget`). */
 interface Tracked {
-  /** When the open turn was last seen working: a state, an event, or a turn-start report line (its file is the durable proof). */
+  /** When the open turn was last seen working: a state, an event, or a reported turn start. */
   readonly sawWorking: Ref.Ref<boolean>
   readonly endedAt: Ref.Ref<number | undefined>
   readonly blockedNotified: Ref.Ref<boolean>
@@ -212,7 +212,9 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
-    /** A turn end vibestd just recorded (RPC `TurnEnd`, or the HTTP hook): schedule a check and return at once (SPEC §7, §9). */
+    /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
+    readonly turnEnded: (id: string, end: TurnEnded) => Effect.Effect<void>
+    /** Schedule a check of session `id` and return at once (what `turnEnded` does after keeping the end). */
     readonly resultReady: (id: string) => Effect.Effect<void>
     /** An integration's report of what the harness does in its open turn (`turn.start`, a tool call, `blocked`). */
     readonly activity: (
@@ -224,7 +226,12 @@ export class Sessions extends Context.Service<
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
     readonly republish: Effect.Effect<number>
     /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
-    readonly inMemory: Effect.Effect<{ readonly tracked: number; readonly locks: number }>
+    readonly inMemory: Effect.Effect<{
+      readonly tracked: number
+      readonly locks: number
+      readonly turnEnds: number
+      readonly turnStarts: number
+    }>
     /** The live agents (main agents too) whose recorded integration is not this vibestd's (`vibest update`). */
     readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
     /** Restart these agents in place: subagents first, at most RESTART_CONCURRENCY at a time, then main agents. */
@@ -255,6 +262,7 @@ export class Sessions extends Context.Service<
       const removal = yield* Remove.make
       const processes = yield* Processes
       const restarting = yield* Restarting
+      const turnEnds = yield* TurnEnds
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
 
@@ -289,6 +297,7 @@ export class Sessions extends Context.Service<
               .filter((row) => !row.metadata.archived && !row.metadata.removed)
               .map((row) => row.id),
           )
+          yield* turnEnds.sweep((id) => live.has(id) || locks.busy(id))
           let next = map
           for (const [id, r] of map) {
             if (live.has(id) || locks.busy(id)) continue
@@ -461,14 +470,14 @@ export class Sessions extends Context.Service<
 
       /**
        * One look (§5): the integration reported the turn start (`activity`), the runtime reports it working or blocked
-       * (a harness without such an integration), or a turn-start report line of this round exists.
+       * (a harness without such an integration), or the integration reported a typed turn start of this round.
        */
       const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal) =>
         Effect.gen(function* () {
           const r = yield* track(session.id)
           if (yield* Ref.get(r.sawWorking)) return true
           if (harnesses.get(session.harnessId).reportsState)
-            return yield* reportStartedSince(session.id, session.turnPromptedAt)
+            return yield* turnEnds.startedSince(session.id, session.turnPromptedAt)
           const seen = yield* agentState(h, terminal)
           const state = stateOf(seen)
           if (state === "working" || state === "blocked") {
@@ -476,8 +485,8 @@ export class Sessions extends Context.Service<
             yield* db.updateSession(session.id, { status: state })
             return true
           }
-          // A turn-start line dated this round is the proof the report file carries across a restart (the Ref alone cannot).
-          if (yield* reportStartedSince(session.id, session.turnPromptedAt)) {
+          // A turn start the integration reported for this round (the Ref alone misses one that came and went between looks).
+          if (yield* turnEnds.startedSince(session.id, session.turnPromptedAt)) {
             yield* Ref.set(r.sawWorking, true)
             return true
           }
@@ -517,22 +526,13 @@ export class Sessions extends Context.Service<
       type Collected = "none" | "delivered"
       // Assigned once `collectResult` exists. `prompt` runs only after `Sessions.make` finishes.
       let collectResult: (
-        h: Runtime,
+        h: Runtime | undefined,
         session: SessionRow,
       ) => Effect.Effect<
         Collected,
         RuntimeError | NoSuchSession | PlatformError.PlatformError,
         ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
       > = () => Effect.die("collectResult")
-
-      /** Whether a turn-start report line of the round prompted at `at` exists: the pickup proof §5 compares, durable
-       * in the report file. No start line is older than its round's stamp (the HTTP hook writes its line with the stamp
-       * it hands `userPrompt`, the CLI hook sends `Prompt` first). */
-      const reportStartedSince = (id: string, at: number) =>
-        readReportLines(layout.reportFile(id)).pipe(
-          Effect.map((lines) => lines.some((line) => line.turn === "start" && line.ts >= at)),
-          Effect.orElseSucceed(() => false),
-        )
 
       /**
        * Send a turn and confirm it started. Returns why not (no screen text: the tail goes to vibestd.log) when the session never picked it up
@@ -618,8 +618,7 @@ export class Sessions extends Context.Service<
       const rounds = sessionRounds({
         db,
         inbox,
-        layout,
-        harnesses,
+        turnEnds,
         track,
         lock: locks.withLock,
         worktreeOf,
@@ -699,7 +698,7 @@ export class Sessions extends Context.Service<
         locate,
         finish,
         launchArgv,
-        resultFile: layout.resultFile,
+        turnEnds,
         rulesFile: layout.rulesFile,
         fs: { remove: (p, o) => fs.remove(p, o), readFileString: (p) => fs.readFileString(p) },
         uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
@@ -990,7 +989,13 @@ export class Sessions extends Context.Service<
             cutOff,
             "vibestd stopped while handing it to the session; it may or may not have arrived",
           )
-        const h = yield* live(session)
+        const routed = yield* live(session).pipe(Effect.option)
+        // No runtime routes it (none recorded, or not registered): its reported turn end is still its result.
+        if (Option.isNone(routed)) {
+          yield* collectResult(undefined, session)
+          return yield* live(session)
+        }
+        const h = routed.value
         const terminal = session.address
         const r = yield* track(id)
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
@@ -1044,9 +1049,12 @@ export class Sessions extends Context.Service<
           return
         }
         yield* Ref.set(r.blockedNotified, false)
-        // Worked: seen working in this process, or a turn-start report line of this round — the report file carries the
-        // proof across a vibestd restart, so a lost turn is lost, not "not started" (§5).
-        const worked = (yield* Ref.get(r.sawWorking)) || (yield* reportStartedSince(id, session.turnPromptedAt))
+        // Worked: seen working in this process, a turn start reported for this round, or the stored proof that survives a
+        // vibestd restart (the turn was typed, or a message was delivered into it), so a lost turn is lost, not "not started" (§5).
+        const worked =
+          (yield* Ref.get(r.sawWorking)) ||
+          (yield* turnEnds.startedSince(id, session.turnPromptedAt)) ||
+          (yield* db.turnTaken(id))
         const idle = s === "idle"
         const ended = idle && worked
         const now = yield* Clock.currentTimeMillis
@@ -1467,7 +1475,18 @@ export class Sessions extends Context.Service<
         scope,
       )
 
-      const resultReady = (id: string) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid)
+      // A settlement: a turn that ended during a drain (`vibest update`, `vibest daemon restart`) is still written.
+      const resultReady = (id: string) =>
+        Effect.forkIn(
+          locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
+          scope,
+        ).pipe(Effect.asVoid)
+      const turnEnded = (id: string, end: TurnEnded) =>
+        turnEnds.ended(id, end).pipe(
+          // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
+          Effect.andThen(Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)),
+          Effect.andThen(resultReady(id)),
+        )
 
       // ---- restart in place (`vibest update`): restart.ts ----
       const { outdated, restart, restartLater } = sessionRestart({
@@ -1476,9 +1495,8 @@ export class Sessions extends Context.Service<
         harnesses,
         processes,
         restarting,
+        turnEnds,
         inbox,
-        layout,
-        fs,
         scope,
         locked: (id) => locked(id),
         launchArgv: (session, resume, key) => launchArgv(session, resume, key).pipe(Effect.provideContext(platform)),
@@ -1498,13 +1516,22 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
+        turnEnded,
         resultReady,
         activity: (id, now) => activity(id, now).pipe(Effect.provideContext(platform), Effect.orDie),
-        userPrompt,
+        // The start is noted before the round waits for the lock: a send still confirming sees it (pickup proof).
+        userPrompt: (id: string, text: string, at?: number) =>
+          Effect.gen(function* () {
+            const now = at ?? (yield* Clock.currentTimeMillis)
+            yield* turnEnds.started(id, now)
+            yield* userPrompt(id, text, now)
+          }),
         republish: republish().pipe(Effect.provideContext(platform)),
-        inMemory: SynchronizedRef.get(tracked).pipe(
-          Effect.map((map) => ({ tracked: HashMap.size(map), locks: locks.size() })),
-        ),
+        inMemory: Effect.gen(function* () {
+          const map = yield* SynchronizedRef.get(tracked)
+          const { ends, starts } = yield* turnEnds.size
+          return { tracked: HashMap.size(map), locks: locks.size(), turnEnds: ends, turnStarts: starts }
+        }),
         outdated,
         restart,
         restartLater,

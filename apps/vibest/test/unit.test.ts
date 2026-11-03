@@ -19,8 +19,9 @@ import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult, resultPayload } from "@vibest/core/results"
+import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
 import { coordinatorRules } from "@vibest/core/rules"
+import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import {
   copyIncluded,
   git,
@@ -33,13 +34,13 @@ import {
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Launch from "@vibest/vibest/launch"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { encodeJson, makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
+import { makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
 
 const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
@@ -158,7 +159,8 @@ describe("Db", () => {
       assert.isTrue(Exit.isFailure(exit))
       const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
       assert.match(pretty, /SchemaMismatch/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
+      assert.include(pretty, "move it aside to start empty")
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -429,7 +431,10 @@ describe("Db", () => {
         )
         assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa"), [])
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "none")
+        assert.isFalse(yield* db.turnTaken("aaaaaaaa"), "no open turn")
         yield* db.updateSession("aaaaaaaa", { status: "working", turnState: "open", turnPromptedAt: 5 })
+        // The task delivered into the open turn is the stored proof it was taken up (after a vibestd restart too).
+        assert.isTrue(yield* db.turnTaken("aaaaaaaa"))
         assert.strictEqual(
           (yield* sql<{ status: string }>`SELECT status FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`)[0]
             ?.status,
@@ -442,7 +447,7 @@ describe("Db", () => {
         })
         yield* db.finishTurn(
           "aaaaaaaa",
-          { status: "completed", output: "the answer", failure: { kind: "other", message: "late" }, cause: "move" },
+          { status: "completed", output: "the answer", failure: { message: "late" } },
           { turnState: "completed" },
           { sessionId: "aaaaaaaa", kind: "result", message: "<summary>done</summary>", details: { summary: "done" } },
         )
@@ -459,8 +464,7 @@ describe("Db", () => {
         assert.deepStrictEqual(JSON.parse(end!.data), {
           status: "completed",
           output: "the answer",
-          failure: { kind: "other", message: "late" },
-          cause: "move",
+          failure: { message: "late" },
         })
         assert.isNotNull(turns[0]!.endedAt)
         assert.deepInclude((yield* db.latestInbox("aaaaaaaa", "result"))!.details, { summary: "done" })
@@ -733,6 +737,25 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("a version 1 vibest database is refused, naming its path and the release's migration script", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
+      yield* writeSql(file, [
+        `PRAGMA application_id = ${APPLICATION_ID}`,
+        "PRAGMA user_version = 1",
+        "CREATE TABLE project (id INTEGER)",
+      ])
+      const before = yield* fs.readFile(file)
+      const pretty = yield* refusal(file)
+      assert.include(pretty, `${file} is from an older vibest`)
+      assert.include(pretty, "migration script given with this release")
+      assert.include(pretty, "move it aside to start empty")
+      assert.notInclude(pretty, "scripts/migrate")
+      assert.deepStrictEqual(yield* fs.readFile(file), before)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -747,7 +770,7 @@ describe("Db", () => {
       assert.match(pretty, /SchemaMismatch/)
       assert.match(pretty, /application_id 0x0, v1/)
       assert.notMatch(pretty, /0x76696265/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
       assert.deepStrictEqual(yield* fs.readFile(file), before)
       assert.isFalse(yield* fs.exists(`${file}-wal`))
       assert.isFalse(yield* fs.exists(`${file}-shm`))
@@ -934,22 +957,6 @@ describe("HarnessAdapter", () => {
     )
   })
 
-  it("a neutral turn end as the kept result payload: interrupted, failed, and a usage limit as rate_limit", () => {
-    assert.deepStrictEqual(resultPayload({ type: "turn.end", outcome: "completed", text: "done" }), { text: "done" })
-    assert.deepInclude(resultPayload({ type: "turn.end", outcome: "interrupted" }), {
-      aborted: true,
-      error: "interrupted",
-    })
-    assert.deepStrictEqual(
-      resultPayload({ type: "turn.end", outcome: "failed", failure: { kind: "limited", message: "usage limit" } }),
-      { text: "", error: "rate_limit", error_details: "usage limit" },
-    )
-    assert.deepStrictEqual(
-      resultPayload({ type: "turn.end", outcome: "failed", failure: { kind: "other", message: "boom" } }),
-      { text: "", error: "error", error_details: "boom" },
-    )
-  })
-
   it("claude starts with no --settings: its deny rules are the plugin's tool guard (guard.test)", () => {
     assert.notInclude(ADAPTERS.claude.launchArgs(input), "--settings")
   })
@@ -1096,29 +1103,28 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       }),
   )
 
-  it.effect("result files: text field per harness; error marks failure; junk is ignored", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* tempDirectory("vibest-res-")
-      const read = (name: string, body?: string) =>
-        Effect.gen(function* () {
-          const file = path.join(dir, name)
-          if (body !== undefined) yield* fs.writeFileString(file, body)
-          return Option.getOrUndefined(yield* readResult(file))
-        })
-      assert.deepInclude(yield* read("a.json", encodeJson({ harness: "claude", ts: 1, payload: { text: "hi" } })), {
+  it.effect("turn ends: a payload's text and error; a neutral turn.end's outcome", () =>
+    Effect.sync(() => {
+      assert.deepInclude(turnEndFrom("claude", { text: "hi" }, 5), {
         harness: "claude",
+        at: 5,
         text: "hi",
         error: undefined,
+        interrupted: false,
       })
-      assert.deepInclude(
-        yield* read("b.json", encodeJson({ harness: "pi", ts: 1, payload: { text: "", error: "boom" } })),
-        { error: "boom" },
+      assert.deepInclude(turnEndFrom("pi", { text: "", error: "boom", error_details: "why" }, 1), {
+        error: "boom: why",
+      })
+      assert.deepInclude(turnEndOf("claude", { type: "turn.end", outcome: "completed", text: "done" }, 1), {
+        text: "done",
+        error: undefined,
+      })
+      assert.deepInclude(turnEndOf("pi", { type: "turn.end", outcome: "interrupted" }, 1), { interrupted: true })
+      assert.match(
+        turnEndOf("pi", { type: "turn.end", outcome: "failed", failure: { kind: "limited", message: "slow" } }, 1)
+          .error!,
+        /^rate_limit: slow/,
       )
-      assert.isUndefined(yield* read("c.json", "{"))
-      assert.isUndefined(yield* read("d.json", encodeJson({ agent: "claude", payload: {} })))
-      assert.isUndefined(yield* read("missing.json"))
     }),
   )
 

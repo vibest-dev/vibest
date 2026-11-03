@@ -301,8 +301,8 @@ by `vibest interrupt`. Text the user types into a subagent's pane is recorded as
 opens no such Message; when that turn ends, the user's text and the subagent's answer go to the main Agent as one
 `notice` (information, delivered with its next input, never a task it must act on).
 
-**Results** come through the best channel (D11): the integration sends its turn-end event to the daemon, which writes the agent's last answer to
-`results/<agent>.json` (the neutral `text`); a result counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
+**Results** come through the best channel (D11): the integration sends its turn-end event to the daemon, which keeps the agent's last answer in memory
+(the neutral `text`) and writes it as the turn's `turn.end` and result row; a turn end counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
 `--json` a structured result validated against the requested schema; `herdr agent read` is last.
 
 The subagent's rules ask for a final reply whose first line is a one-sentence summary, then the body, and an
@@ -483,8 +483,8 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   inbox row's queue and status changes) in `docs/design/schema.md` are the state, changed in transactions. The
   conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
   task is its `task` inbox row. Rows are never deleted.
-- Files keep one writer each and are written to a temporary file and renamed (omac write model): result files
-  and rules files by the daemon; never the user's harness configuration.
+- Files keep one writer each and are written to a temporary file and renamed (omac write model): rules files
+  by the daemon; never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
 
 ## 7. Plugin architecture (Effect only)
@@ -808,7 +808,6 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
-  results/<agent>.json       written by the daemon
   rules/<agent>.md           written by the daemon
   projects/<project>/        knowledge (instructions.md, memory/, docs/) and scratch/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)

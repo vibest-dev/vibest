@@ -2,7 +2,7 @@ import { MessageStatus } from "@vibest/schema/model"
 import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 // The only place with SQL (docs/design/schema.md, version 2: project, session, inbox, event). One schema, no
 // migrations: an empty database gets it in one transaction; any other file is accepted only when its version pragmas
-// and required objects already match, and a version 1 file is refused with the command of the one-time migration.
+// and required objects already match, and a version 1 file is refused, naming the one-time migration script given with the release.
 // `inspectSchema` only reads; the driver must run it on a read-only connection before opening an existing file
 // writable. One SQLite connection through effect/sql (the driver comes from #platform); rows are decoded with Schema;
 // multi-row changes run in `sql.withTransaction`.
@@ -14,7 +14,6 @@ import { SqlClient, type Statement } from "effect/sql"
 
 import type { HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
-import { isUsageLimitError } from "./results.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
@@ -115,9 +114,6 @@ export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
 export const APPLICATION_ID = 0x76696265
 export const SCHEMA_VERSION = 2
 
-/** The one-time migration of a version 1 file (docs/design/schema.md, Moving from version 1). */
-export const MIGRATE_V2_COMMAND = "bun apps/vibest/scripts/migrate-db-v2.ts"
-
 export const SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `PRAGMA user_version = ${SCHEMA_VERSION}`,
@@ -156,7 +152,6 @@ export const SCHEMA = [
   `CREATE INDEX inbox_status ON inbox (status, recipient_session_id)`,
   `CREATE INDEX inbox_recipient ON inbox (recipient_session_id, kind, id)`,
   `CREATE INDEX inbox_result ON inbox (result_event_id) WHERE result_event_id IS NOT NULL`,
-  `CREATE INDEX inbox_user ON inbox (sender_session_id, id) WHERE recipient_session_id IS NULL`,
   `CREATE TABLE event (
     id         INTEGER PRIMARY KEY,
     at         INTEGER NOT NULL,
@@ -183,13 +178,16 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   version: Schema.Number,
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
+  /** The database file, set by the driver that opened it. */
+  file: Schema.optional(Schema.String),
 }) {
   override get message() {
+    const file = this.file ?? "vibest.db"
     if (this.applicationId === APPLICATION_ID && this.version === 1)
-      return `vibest.db is version 1; this vibest reads version 2 and never migrates by itself. Stop vibestd, then run once from a vibest checkout: ${MIGRATE_V2_COMMAND} ~/.vibest/vibest.db (it backs the file up first)`
+      return `${file} is from an older vibest (database version 1); this vibest reads version 2 and never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
     const extra = this.detail === undefined ? "" : `, ${this.detail}`
-    return `vibest.db is not this vibest's schema (application_id ${id}, v${this.version}${extra}); stop vibestd and move ~/.vibest/vibest.db away to start over`
+    return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}); stop vibestd and move it aside to start empty`
   }
 }
 
@@ -383,16 +381,13 @@ export type TurnEnd = {
   readonly status: (typeof ROUND_STATUS)[number]
   /** The harness's last answer text. */
   readonly output?: string
-  readonly failure?: { readonly kind: "limited" | "auth" | "other"; readonly message: string }
-  /** Set only on an end vibest made itself. */
-  readonly cause?: "interrupt" | "limited" | "restart" | "move"
+  /** The harness's error. */
+  readonly failure?: { readonly message: string }
 }
 
-/** A harness error as `turn.end` failure: limited when it is a usage limit; none for an empty error. */
+/** A harness error as `turn.end` failure; none for an empty error. */
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
-  error === undefined || error === ""
-    ? undefined
-    : { kind: isUsageLimitError(error) ? "limited" : "other", message: error }
+  error === undefined || error === "" ? undefined : { message: error }
 
 /** What a result row says, from the `turn.end` it reports and its rendered text. */
 const resultDetails = (content: string, end: TurnEnd | undefined) => {
@@ -642,19 +637,12 @@ const make = Effect.gen(function* () {
       Effect.map((rows) => rows[0]?.id),
     )
 
-  /** The rows turn `open` consumed, with those of the turns it continues (`resumes`), oldest first. */
+  /** The rows turn `open` consumed, oldest first. */
   const turnRows = (open: number) =>
-    Effect.gen(function* () {
-      const chain = yield* sql<{ id: number }>`WITH RECURSIVE c(id) AS (SELECT ${open}
-          UNION SELECT json_extract(e.data, '$.resumes') FROM event e JOIN c ON e.id = c.id
-          WHERE json_extract(e.data, '$.resumes') IS NOT NULL) SELECT id FROM c`
-      return yield* sql<{ content: string; kind: string; sender: string | null }>`SELECT i.content, i.kind,
-          i.sender_session_id AS sender FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e
-          WHERE e.type = 'inbox.status' AND json_extract(e.data, '$.to') = 'delivered' AND ${sql.in(
-            "e.turn_id",
-            chain.map((c) => c.id),
-          )}) ORDER BY i.id`
-    })
+    sql<{ content: string; kind: string; sender: string | null }>`SELECT i.content, i.kind,
+        i.sender_session_id AS sender FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e
+        WHERE e.type = 'inbox.status' AND json_extract(e.data, '$.to') = 'delivered' AND e.turn_id = ${open})
+      ORDER BY i.id`
 
   /**
    * Who the result of `id`'s open turn goes to (architecture.md, reply routing; `null` is the user, `[]` nobody):
@@ -696,7 +684,7 @@ const make = Effect.gen(function* () {
    * Move the rows `where` selects to `to`, one `inbox.status` event each; returns the ids that moved. A row moved to
    * delivered names the turn its recipient has open (the turn that consumed it), if any.
    */
-  const moveInbox = (where: Statement.Fragment, to: string, reason?: string) =>
+  const moveInbox = (where: Statement.Fragment, to: string) =>
     sql.withTransaction(
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -721,7 +709,7 @@ const make = Effect.gen(function* () {
             inboxId: r.id,
             turnId,
             at,
-            data: { from: r.status, to, ...(reason === undefined ? {} : { reason }) },
+            data: { to },
           })
         }
         return moved.map((r) => r.id)
@@ -748,7 +736,7 @@ const make = Effect.gen(function* () {
       const id = inserted!.id
       const at = yield* now
       const sessionId = row.recipient ?? row.sender!
-      yield* appendEvent({ sessionId, type: "inbox.queued", inboxId: id, at, data: { kind: row.kind } })
+      yield* appendEvent({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
       // A task's delivery is the first turn that takes it (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
         yield* appendEvent({
@@ -756,7 +744,7 @@ const make = Effect.gen(function* () {
           type: "inbox.status",
           inboxId: id,
           at,
-          data: { from: "pending", to: row.status },
+          data: { to: row.status },
         })
       return id
     })
@@ -774,12 +762,12 @@ const make = Effect.gen(function* () {
           inboxId: task.id,
           turnId,
           at,
-          data: { from: "pending", to: "delivered" },
+          data: { to: "delivered" },
         })
     })
 
   /** End session `id`'s current process (`process.end`), unless it already ended or it has none. */
-  const endProcess = (id: string, reason: EndReason, at?: number, detail?: string) =>
+  const endProcess = (id: string, reason: EndReason, at?: number) =>
     Effect.gen(function* () {
       const found = yield* anySession(id)
       const current = found?.current
@@ -789,7 +777,7 @@ const make = Effect.gen(function* () {
         type: "process.end",
         processId: current.id,
         ...(at === undefined ? {} : { at }),
-        data: { reason, ...(detail === undefined ? {} : { detail }) },
+        data: { reason },
       })
       integrations.delete(id)
       return true
@@ -841,7 +829,7 @@ const make = Effect.gen(function* () {
           type: "turn.start",
           processId: found?.current?.id,
           at: t,
-          data: { by: "delivery" },
+          data: {},
         })
       prompted.delete(turnId)
       return yield* appendEvent({
@@ -854,7 +842,6 @@ const make = Effect.gen(function* () {
           status: end.status,
           ...(end.output === undefined ? {} : { output: end.output }),
           ...(end.failure === undefined ? {} : { failure: end.failure }),
-          ...(end.cause === undefined ? {} : { cause: end.cause }),
         },
       })
     })
@@ -1023,7 +1010,7 @@ const make = Effect.gen(function* () {
             type: "turn.start",
             processId: (yield* anySession(id))!.current?.id,
             at,
-            data: { by: "delivery" },
+            data: {},
           })
           yield* linkTask(id, turnId, at)
         }
@@ -1247,7 +1234,7 @@ const make = Effect.gen(function* () {
                 type: "turn.start",
                 processId,
                 at: row.turnPromptedAt,
-                data: { by: "delivery" },
+                data: {},
               })
               yield* linkTask(row.id, turnId, row.turnPromptedAt)
               if (row.turnState !== "open")
@@ -1539,7 +1526,7 @@ const make = Effect.gen(function* () {
             const { current, conversation } = yield* conversationOf(id)
             if (current === undefined) return
             yield* endProcess(id, "restart")
-            const { resume: _, ...start } = current.start
+            const { resume: _, pid: __, ...start } = current.start
             yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
           }),
         )
@@ -1628,7 +1615,22 @@ const make = Effect.gen(function* () {
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       sql.withTransaction(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
 
-    /** Latest time on any turn. Undefined: no turn yet. A result file that is not newer was already delivered. */
+    /**
+     * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
+     * or an inbox row was delivered into it. False with no open turn.
+     */
+    turnTaken: (id: string) =>
+      Effect.gen(function* () {
+        const turn = yield* openTurn(id)
+        if (turn === undefined) return false
+        const [row] = yield* sql<{ taken: number }>`SELECT (json_extract(t.data, '$.typed') IS NOT NULL OR EXISTS (
+            SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+              AND json_extract(e.data, '$.to') = 'delivered')) AS taken
+          FROM event t WHERE t.id = ${turn}`
+        return row?.taken === 1
+      }).pipe(Effect.orDie),
+
+    /** Latest time on any turn. Undefined: no turn yet. A turn end that is not newer was already delivered. */
     latestRoundAt: (sessionId: string) =>
       sql<{ at: number | null }>`SELECT max(at) AS at FROM event WHERE session_id = ${sessionId}
         AND type IN ('turn.start', 'turn.end')`.pipe(
@@ -1653,7 +1655,6 @@ const make = Effect.gen(function* () {
           const [t] = yield* sql<{
             typed: string | null
           }>`SELECT json_extract(data, '$.typed') AS typed FROM event WHERE id = ${open}`
-          // A continuation turn (`resumes`) consumed nothing new: the rows of the turn it continues are its input.
           const rows = yield* turnRows(open)
           working = t?.typed ?? rows.map((r) => r.content).join("\n\n")
         }
@@ -1692,7 +1693,7 @@ const make = Effect.gen(function* () {
               type: "turn.start",
               processId: (yield* anySession(id))?.current?.id,
               at,
-              data: { by: "typed", typed: text },
+              data: { typed: text },
             })
             yield* updateSession(id, rest)
             return true
@@ -1702,7 +1703,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
-     * session row. `at`: no earlier than this (a result file's time), so that file is not taken again.
+     * session row. `at`: no earlier than this (the reported turn end's time), so that end is not taken again.
      */
     finishTurn: (
       id: string,
@@ -1765,7 +1766,6 @@ const make = Effect.gen(function* () {
         : moveInbox(
             sql`${sql.in("id", ids)} AND status = 'delivering' AND recipient_session_id = ${entryOf(projectIdValue)}`,
             "pending",
-            "lease_ended",
           ).pipe(Effect.orDie),
 
     /**
@@ -1808,8 +1808,8 @@ const make = Effect.gen(function* () {
               JOIN event p ON p.id = ${currentStart(sql`s.id`)}
               WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`json_extract(p.data, '$.harness') IN ${sql.in(pollHarnesses)}`})`
             const claimed = sql`status = 'delivering' AND kind NOT IN ${sql.literal(TO_SESSION)}`
-            yield* moveInbox(sql`${claimed} AND ${polling}`, "pending", "recovered")
-            yield* moveInbox(claimed, "failed", "recovered")
+            yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
+            yield* moveInbox(claimed, "failed")
           }),
         )
         .pipe(Effect.asVoid, Effect.orDie),

@@ -11,13 +11,13 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, Fiber, FileSystem, Layer, type Scope } from "effect"
+import { Clock, Effect, Fiber, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until } from "./fakes.ts"
+import { FakeRuntime, makeRepository, testLayer, type TestServices, until, resultText, startedSince } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -308,11 +308,9 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the prompt hook writes its start line at once, while the session's lock is held, with the round's stamp",
+    "the prompt hook notes its turn start at once, while the session's lock is held, with the round's stamp",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
-      const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       yield* until(db.getSession(worker), (s) => s?.turnState === "open")
@@ -325,11 +323,7 @@ describe("vibestd's HTTP API", () => {
       const hook = yield* Effect.forkChild(
         call("/events", { sessionId: worker }, { type: "turn.start", origin: "typed", text: "do it" }),
       )
-      const start = yield* until(
-        fs.readFileString(layout.reportFile(worker)).pipe(Effect.orElseSucceed(() => "")),
-        (text) => text.includes('"turn":"start"'),
-      )
-      assert.include(start, `"ts":${stamp}`)
+      yield* until(startedSince(worker, stamp), (seen) => seen)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.strictEqual((yield* Fiber.join(hook)).status, 204)
@@ -337,10 +331,9 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "events and guard: the result file and report lines are vibestd's to write",
+    "events and guard: vibestd keeps the turn start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
-      const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const prompt = yield* call(
         "/events",
@@ -348,17 +341,17 @@ describe("vibestd's HTTP API", () => {
         { type: "turn.start", origin: "typed", text: "next step" },
       )
       assert.strictEqual(prompt.status, 204)
-      assert.include(yield* fs.readFileString(layout.reportFile(worker)), '"prompt":"next step"')
+      assert.isTrue(yield* startedSince(worker, 0))
       const end = yield* call(
         "/events",
         { sessionId: worker },
         { type: "turn.end", outcome: "completed", text: "Fixed the guard." },
       )
       assert.strictEqual(end.status, 204)
-      assert.include(yield* fs.readFileString(layout.resultFile(worker)), "Fixed the guard.")
+      assert.include(yield* resultText(worker), "Fixed the guard.")
       // The main agent's turn end is no result.
       yield* call("/events", { sessionId: main }, { type: "turn.end", outcome: "completed", text: "x" })
-      assert.isFalse(yield* fs.exists(layout.resultFile(main)))
+      assert.strictEqual(yield* resultText(main), "")
       assert.strictEqual((yield* call("/events", { sessionId: worker }, { type: "nope" })).status, 400)
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
       const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
@@ -381,7 +374,6 @@ describe("vibestd's HTTP API", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const sessions = yield* Sessions
-      const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const repo = yield* makeRepository
       const key = yield* repositoryKey(repo)
@@ -408,7 +400,7 @@ describe("vibestd's HTTP API", () => {
         })
       const end = yield* hook("afterAgentResponse", { conversation_id: "c-1", text: "Done." })
       assert.deepStrictEqual(end, { status: 200, body: {} })
-      assert.include(yield* fs.readFileString(layout.resultFile(id)), "Done.")
+      assert.include(yield* resultText(id), "Done.")
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-1")
       const denied = yield* hook("preToolUse", {
         tool_name: "Write",

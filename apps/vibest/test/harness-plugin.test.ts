@@ -10,8 +10,9 @@ import type { Harness } from "@vibest/plugin"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
-import { Effect, FileSystem } from "effect"
+import { Effect } from "effect"
 import * as Headers from "effect/http/Headers"
+import { TestClock } from "effect/testing"
 
 import { FakeRuntime, makeRepository, testLayer, until } from "./fakes.ts"
 import { hookcliPlugin } from "./fixtures/harness-hookcli.ts"
@@ -110,6 +111,8 @@ it.effect(
       assert.strictEqual((refused.body as { output: { decision: string } }).output.decision, "deny")
       const allowed = yield* hook("pre_tool", { tool: "Read", input: { file_path: "src/a.ts" }, cwd: repo })
       assert.deepStrictEqual((allowed.body as { output: unknown }).output, { decision: "allow" })
+      // A turn end counts only when it is newer than the prompt it answers.
+      yield* TestClock.adjust("1 second")
       assert.strictEqual((yield* hook("reply", { text: "parser done\nstatus: completed" })).status, 200)
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -122,9 +125,7 @@ it.effect(
 
       // The next turn, interrupted: the interrupt key goes in, the stop hook says aborted, and no result arrives.
       const results = (yield* db.latestInbox(id, "result"))!.id
-      // The test clock stays at 0 while the first turn's result file has a real time, so it would read as newer than the
-      // next prompt: take it away, as the real clock's later prompt would make it older.
-      yield* (yield* FileSystem.FileSystem).remove(layout.resultFile(id))
+      yield* TestClock.adjust("1 second")
       yield* sessions.send(id, "now the tests")
       yield* until(db.getSession(id), (s) => s?.turnState === "open")
       yield* herdr.updateAgent(id, (a) => ({ ...a, status: "working" }))

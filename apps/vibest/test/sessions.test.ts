@@ -2,11 +2,11 @@
 // `it.effect` runs on TestClock: time stands still unless a test moves it, so polls and timeouts only fire on purpose.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
-import { resultPayload } from "@vibest/core/results"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { repositoryKey } from "@vibest/core/worktree"
@@ -42,6 +42,8 @@ import {
   until,
   untilVirtual,
   writeResult,
+  resultText,
+  dropResult,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -54,7 +56,12 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   )
 
 /** The result payload vibestd writes for an interrupted turn end (the Claude plugin's turn.complete aborted). */
-const claudeEnd = (_reason: "aborted") => resultPayload({ type: "turn.end", outcome: "interrupted", text: "" })
+const claudeEnd = (_reason: "aborted") => ({
+  text: "",
+  aborted: true,
+  error: "interrupted",
+  error_details: "the turn was stopped in its terminal (Esc) before it ended",
+})
 
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
@@ -185,6 +192,21 @@ describe.concurrent("Sessions", () => {
       ])
       assert.include(yield* fs.readFileString(layout.rulesFile(id)), `You are agent ${id}`)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, "do it")
+    }),
+  )
+
+  test(
+    "a turn end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
+    Effect.gen(function* () {
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const drain = yield* Drain
+      assert.isTrue(yield* drain.begin)
+      yield* writeResult(id, "pi", { text: "done while draining" })
+      yield* sessions.resultReady(id)
+      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
+      assert.strictEqual(w.turnState, "completed")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "done while draining")
+      yield* drain.reopen
     }),
   )
 
@@ -429,13 +451,13 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
       assert.strictEqual(yield* db.liveStatuses, 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       // Concurrent checks, as the poll and a runtime event run them: none leaves a lock behind.
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
-      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
       assert.strictEqual(yield* db.liveStatuses, 0)
       // The next poll drops the flags of the session that is no longer live.
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
@@ -449,6 +471,8 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
       assert.include((yield* db.latestInbox(id, "result"))!.message, "done again")
+      // The written turn end is not kept (its text is in the result row now).
+      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0 })
       // A live session between turns keeps its flags, across polls too; archived, the next poll drops them, though it
       // no longer checks the row (archive set exitedAt).
       yield* TestClock.adjust("10 seconds")
@@ -457,6 +481,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.remove(id)
       assert.strictEqual(yield* db.liveStatuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0, turnStarts: 0 })
       // Results reached the coordinator through the project's lock, which is gone too.
       assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),
@@ -913,7 +938,7 @@ describe.concurrent("Sessions", () => {
         )
 
       // No result file of an earlier turn to stand in for this one's.
-      yield* (yield* FileSystem.FileSystem).remove((yield* Layout).resultFile(id))
+      yield* dropResult(id)
       // herdr takes the first message's prompt and then refuses it; the second message is accepted meanwhile.
       const held = yield* herdr.hold("send", id)
       yield* sessions.send(id, "first")
@@ -956,7 +981,7 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* (yield* FileSystem.FileSystem).remove((yield* Layout).resultFile(id))
+      yield* dropResult(id)
       const notices = sqlNotices(id)
 
       const held = yield* herdr.hold("send", id)
@@ -1177,8 +1202,6 @@ describe.concurrent("Sessions", () => {
     "a turn-end rate limit moves the subagent to another harness and the task's round carries the result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const sql = yield* SqlClient.SqlClient
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       const project = (yield* db.getSession(id))!.projectId
@@ -1212,11 +1235,11 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       // A mismatched harness is ignored. The file stays until the new harness replaces it.
-      assert.include(yield* fs.readFileString(layout.resultFile(id)), "stale")
+      assert.include(yield* resultText(id), "stale")
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      assert.include(yield* fs.readFileString(layout.resultFile(id)), "stale")
+      assert.include(yield* resultText(id), "stale")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -1835,12 +1858,11 @@ describe.concurrent("Sessions", () => {
     "a limit on a typed turn resends that text, not the original task",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const fs = yield* FileSystem.FileSystem
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* fs.remove((yield* Layout).resultFile(id))
+      yield* dropResult(id)
       yield* sessions.userPrompt(id, "typed follow-up")
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
@@ -1855,12 +1877,11 @@ describe.concurrent("Sessions", () => {
     "a limit on a follow-up resends the newest delivered row, not the first task",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const fs = yield* FileSystem.FileSystem
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* fs.remove((yield* Layout).resultFile(id))
+      yield* dropResult(id)
       yield* sessions.send(id, "add tests")
       yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests")
       yield* writeResult(id, "pi", { error: "rate_limit" })
@@ -1876,12 +1897,11 @@ describe.concurrent("Sessions", () => {
     "a limit on a merged follow-up resends that batch, not only its last row",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const fs = yield* FileSystem.FileSystem
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* fs.remove((yield* Layout).resultFile(id))
+      yield* dropResult(id)
       const held = yield* herdr.hold("state", id)
       yield* sessions.send(id, "add tests")
       yield* held.reached
@@ -2272,58 +2292,6 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
     { noRun: true },
-  )
-
-  const lateResult = { on: false, text: "", id: "" }
-  test(
-    "a late result from the old harness does not delete the new one",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      lateResult.id = id
-      lateResult.text = JSON.stringify({
-        harness: "pi",
-        ts: 0,
-        payload: { error: "rate_limit", text: "status: completed\nsummary: stale" },
-      })
-      lateResult.on = true
-      yield* writeResult(id, "claude", { text: "status: completed\nsummary: kept" })
-      yield* sessions.check(id)
-      assert.isFalse(lateResult.on)
-      assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", turnState: "open" })
-      assert.include(yield* fs.readFileString(layout.resultFile(id)), "kept")
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      const result = (yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)).find(
-        (row) => row.kind === "result",
-      )
-      assert.include(result!.message, "kept")
-      assert.notInclude(result!.message, "stale")
-    }),
-    {
-      readFile: (fs) =>
-        new Proxy(fs, {
-          get(target, prop) {
-            if (prop === "readFileString") {
-              return (path: string, encoding?: string) => {
-                if (lateResult.on && lateResult.id !== "" && path.endsWith(`/${lateResult.id}.json`)) {
-                  lateResult.on = false
-                  return Effect.succeed(lateResult.text)
-                }
-                return target.readFileString(path, encoding)
-              }
-            }
-            const value: unknown = Reflect.get(target, prop, target)
-            return typeof value === "function" ? value.bind(target) : value
-          },
-        }),
-    },
   )
 
   test(
@@ -3125,7 +3093,7 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
       assert.include(borrower.reasons.join("\n"), `session ${third.id} still works in it`)
       assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
-      assert.isFalse(yield* fs.exists(layout.resultFile(id)))
+      assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(worktree))
 
       // The other borrower is still live, so a second archive of the owner still keeps the directory.

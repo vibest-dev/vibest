@@ -11,18 +11,12 @@ export class Layout extends Context.Service<
     readonly httpSocket: string
     /** vibestd.pid: the running vibestd's PID and version (DaemonInfo), and its start lock (flock on this file); empty when none runs. */
     readonly daemonInfo: string
-    readonly results: string
-    /** `reports/<id>.jsonl`: one line per turn start and turn end the harness integration writes (runtime-port.md §5). */
-    readonly reports: string
     readonly worktrees: string
     readonly projects: string
     /** vibest.json: the plugin list (plugins.md §4). */
     readonly config: string
     /** Plugins found by directory listing. */
     readonly plugins: string
-    readonly resultFile: (id: string) => string
-    /** One turn report line file: `reports/<id>.jsonl`, appended by the integrations. */
-    readonly reportFile: (id: string) => string
     readonly rulesFile: (id: string) => string
     /** The Coordinator's rules for one repository, rewritten on every `vibest`. */
     readonly coordinatorRules: (key: string) => string
@@ -41,14 +35,10 @@ export class Layout extends Context.Service<
         socket: path.join(home, "vibest.sock"),
         httpSocket: path.join(home, "vibest-http.sock"),
         daemonInfo: path.join(home, "vibestd.pid"),
-        results: path.join(home, "results"),
-        reports: path.join(home, "reports"),
         worktrees: path.join(home, "worktrees"),
         projects: path.join(home, "projects"),
         config: path.join(home, "vibest.json"),
         plugins: path.join(home, "plugins"),
-        resultFile: (id) => path.join(home, "results", `${id}.json`),
-        reportFile: (id) => path.join(home, "reports", `${id}.jsonl`),
         rulesFile: (id) => path.join(home, "rules", `${id}.md`),
         coordinatorRules: (key) => path.join(home, "coordinator", `${key}.md`),
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),

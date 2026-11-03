@@ -18,6 +18,7 @@ import { Restarting } from "@vibest/core/restarting"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
 import { coordinatorPlugin } from "@vibest/plugin-coordinator"
@@ -84,17 +85,29 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     },
   })
 
-/** What the integration does: write the result file, dated `offsetMs` from the (virtual) now. */
+/** What the integration does: report a turn end, received `offsetMs` from the (virtual) now. */
 export const writeResult = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const layout = yield* Layout
-    const file = layout.resultFile(id)
-    yield* fs.makeDirectory(layout.results, { recursive: true })
-    yield* fs.writeFileString(file, encodeJson({ harness, ts: 0, payload }))
-    // FileSystem.utimes takes a Date, or a number in seconds (passed through to the runtime).
-    const at = new Date((yield* Clock.currentTimeMillis) + offsetMs)
-    yield* fs.utimes(file, at, at)
+    const at = (yield* Clock.currentTimeMillis) + offsetMs
+    yield* (yield* TurnEnds).ended(id, turnEndFrom(harness as HarnessId, payload as Record<string, unknown>, at))
+  })
+
+/** The latest reported turn end's text for session `id` ("" with none): what a result file held before. */
+export const resultText = (id: string) =>
+  Effect.gen(function* () {
+    return (yield* (yield* TurnEnds).latest(id))?.text ?? ""
+  })
+
+/** Whether a turn start was reported for session `id` at or after `at`. */
+export const startedSince = (id: string, at: number) =>
+  Effect.gen(function* () {
+    return yield* (yield* TurnEnds).startedSince(id, at)
+  })
+
+/** Forget session `id`'s reported turn end, as if none had come. */
+export const dropResult = (id: string) =>
+  Effect.gen(function* () {
+    yield* (yield* TurnEnds).drop(id)
   })
 
 /** git in tests: a failure is a bug in the test. */
@@ -404,8 +417,6 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly pluginTimeout?: Duration.Input
   /** Wraps the Db that Sessions, Inbox and the test all see, to stop a call at a chosen point. */
   readonly db?: (db: Db["Service"]) => Db["Service"]
-  /** Wraps the FileSystem Sessions reads, so one read can answer differently from the file. */
-  readonly readFile?: (fs: FileSystem.FileSystem) => FileSystem.FileSystem
 }
 
 const harnessOf = (options: TestOptions) =>
@@ -513,13 +524,8 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(home),
         Layer.provideMerge(Drain.layer),
         Layer.provideMerge(Restarting.layer),
-        Layer.provideMerge(
-          options.readFile
-            ? Layer.effect(FileSystem.FileSystem, Effect.map(FileSystem.FileSystem, options.readFile)).pipe(
-                Layer.provideMerge(Platform.services),
-              )
-            : Platform.services,
-        ),
+        Layer.provideMerge(TurnEnds.layer),
+        Layer.provideMerge(Platform.services),
       ),
     ),
   )

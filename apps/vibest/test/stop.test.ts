@@ -11,20 +11,7 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
-import {
-  Cause,
-  Context,
-  Deferred,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  Option,
-  Schedule,
-  type Scope,
-} from "effect"
+import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schedule, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 
 import * as Platform from "#platform"
@@ -41,6 +28,7 @@ import {
   until,
   untilVirtual,
   writeResult,
+  resultText,
 } from "./fakes.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
@@ -208,7 +196,6 @@ describe("Daemon.Stop", () => {
     "a spawn's turn start and end from its harness hook settle while draining: the launch confirms and the Stop is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const layout = yield* Layout
       const repo = yield* makeRepository
       // The runtime never shows the turn working (a fast turn), so the hook's start line is the launch's only pickup proof.
       const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
@@ -231,7 +218,7 @@ describe("Daemon.Stop", () => {
       assert.strictEqual(yield* settled(stopping), "accepted")
       assert.strictEqual((yield* Fiber.join(prompted)).status, 204)
       assert.strictEqual((yield* Fiber.join(ended)).status, 204)
-      assert.include(yield* (yield* FileSystem.FileSystem).readFileString(layout.resultFile(id)), "done")
+      assert.include(yield* resultText(id), "done")
     }),
     { promptsIgnored: true },
   )

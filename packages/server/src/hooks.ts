@@ -1,9 +1,9 @@
 // A harness integration's neutral events (HTTP `/events`, or a shell-hook CLI's raw hook decoded by its adapter at
-// `/hook`): vibestd alone writes what they say (the session's events, result file and report lines), then tells Sessions.
-// One code path for every harness, built-in or a plugin's.
+// `/hook`): vibestd keeps turn starts and ends in memory (TurnEnds, through Sessions), which writes them as events. No
+// file. One code path for every harness, built-in or a plugin's.
 import type { Db } from "@vibest/core/db"
-import { recordPrompt, recordTurnEnd } from "@vibest/core/results"
 import type { Sessions } from "@vibest/core/sessions"
+import { turnEndOf } from "@vibest/core/turn-ends"
 import type { IntegrationEvent } from "@vibest/protocol/protocol"
 import { Clock, Effect, Schema } from "effect"
 
@@ -71,11 +71,9 @@ export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: Hoo
       case "turn.start": {
         if (who.agent === "coordinator") return
         if (event.origin === "typed" && event.text.trim() !== "") {
-          // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the session's
-          // lock, held through a send's whole confirm) stamps the round with the same time.
-          const at = yield* Clock.currentTimeMillis
-          yield* recordPrompt(who.id, event.text, at)
-          yield* sessions.userPrompt(who.id, event.text, at)
+          // One stamp, taken now: `userPrompt` notes the start at once (before it may wait for the session's lock, held
+          // through a send's whole confirm) and stamps the round with the same time.
+          yield* sessions.userPrompt(who.id, event.text, yield* Clock.currentTimeMillis)
         }
         // The harness works on its open round: the pickup proof, and its status.
         yield* sessions.activity(who.id, "working")
@@ -83,7 +81,7 @@ export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: Hoo
       }
       case "turn.end": {
         if (who.agent === "coordinator") return
-        if (yield* recordTurnEnd(who.harness, who.id, event)) yield* sessions.resultReady(who.id)
+        yield* sessions.turnEnded(who.id, turnEndOf(who.harness, event, yield* Clock.currentTimeMillis))
         return
       }
       case "blocked":
