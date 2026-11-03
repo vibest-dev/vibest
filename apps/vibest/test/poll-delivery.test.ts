@@ -133,6 +133,20 @@ test(
 )
 
 test(
+  "the ack the integration sends on its next poll, after the turn it took the rows into ended, opens no turn",
+  Effect.gen(function* () {
+    const { db, sessions, id, call } = yield* started
+    const batch = (yield* call("/inbox/poll", {})).body as { ids: Array<number> }
+    yield* call("/events", { type: "turn.start", origin: "inbox", text: "do it", inbox: batch.ids })
+    yield* writeResult(id, "pi", { text: "done" })
+    yield* sessions.check(id)
+    assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+    yield* call("/inbox/ack", { ids: batch.ids })
+    assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+  }),
+)
+
+test(
   "an interrupt waits for the interrupted turn end its integration reports, not for the runtime's idle",
   Effect.gen(function* () {
     const { db, sessions, id, call } = yield* started

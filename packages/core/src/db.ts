@@ -1731,13 +1731,14 @@ const make = Effect.gen(function* () {
 
     pendingInbox: (sessionId: string) => findPending(sessionId).pipe(Effect.orDie),
 
-    /** Which of `ids` are rows addressed to `sessionId`. */
+    /** Which of `ids` are rows addressed to `sessionId` and not yet delivered (pending, or leased by a poll). */
     ownInbox: (sessionId: string, ids: ReadonlyArray<number>) =>
       ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
         : sql<{
             id: number
-          }>`SELECT id FROM inbox WHERE recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}`.pipe(
+          }>`SELECT id FROM inbox WHERE recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}
+            AND status IN ('pending', 'delivering')`.pipe(
             Effect.map((rows) => rows.map((r) => r.id)),
             Effect.orDie,
           ),
