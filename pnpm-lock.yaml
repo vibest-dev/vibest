@@ -365,6 +365,9 @@ importers:
 
   packages/protocol:
     dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema

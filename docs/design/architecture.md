@@ -124,9 +124,9 @@ subagents. Everything else in this list is planned; each item says what runs tod
   HTTP socket, `POST /events` with `ready`, `conversation`, `turn.start` (origin typed or inbox, and the inbox
   row ids the turn consumed), `turn.end` (outcome completed, failed or interrupted; text; failure `{ kind: limited
   | auth | other, message }`) and `blocked`; `POST /guard` with a neutral `ToolCall { kind, name, command?,
-  paths }`. vibestd parses no harness's own payload; a CLI with only shell hooks (Cursor) decodes in its own
-  process through `vibest integration event <hook>`. Today each harness reaches vibestd its own way (Claude over
-  HTTP, Pi and Cursor over RPC `TurnEnd` and `Prompt`) and the adapter decodes the raw event in vibestd.
+  paths, cwd }` (kind also `search`). The Claude plugin and the Pi extension post these events themselves; a CLI
+  with only shell hooks (Cursor) runs `vibest integration event --harness <id> <hook>`, which posts the raw payload
+  to `POST /hook`, and vibestd decodes it with that harness adapter's `decode`.
 
 ### 1.1 Orchestration
 
@@ -188,7 +188,7 @@ on `schema` and `protocol` only. Plugin types derive from the client API.
 | `plugin-harnesses`      | Builtin: one harness adapter module per CLI (launch side, and how its vibest plugin loads).                                                                                                         |
 | `integration/claude`    | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`. |
 | `integration/pi`        | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                           |
-| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                          |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration event`). Loaded with `cursor-agent --plugin-dir`.                                                                                   |
 | `plugin-git`            | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                        |
 | `plugin-harness-choice` | Builtin plugin `@vibest/plugin-harness-choice` (id `harness-choice`): the default harness choice and limit move (§9). The product bundles it and loads it first.                                    |
 | `plugin-guard`          | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
@@ -299,7 +299,7 @@ opens no such Message; when that turn ends, the user's text and the subagent's a
 `notice` (information, delivered with its next input, never a task it must act on).
 
 **Results** come through the best channel (D11): the integration sends its turn-end event to the daemon, which writes the agent's last answer to
-`results/<agent>.json` (Claude `last_assistant_message`, Cursor and Pi `text`); a result counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
+`results/<agent>.json` (the neutral `text`); a result counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
 `--json` a structured result validated against the requested schema; `herdr agent read` is last.
 
 The subagent's rules ask for a final reply whose first line is a one-sentence summary, then the body, and an

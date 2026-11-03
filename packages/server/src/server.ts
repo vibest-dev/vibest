@@ -61,13 +61,11 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
-
-import * as Hooks from "./hooks.ts"
 
 const placeOf = (kind: string, address: RuntimeAddress) =>
   address.id !== "" ? `${kind} terminal ${address.id}` : `${kind} (no terminal)`
@@ -168,9 +166,6 @@ const ACCESS = {
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",
-  TurnEnd: "open",
-  Prompt: "open",
-  CoordinatorSessionReady: "open",
   Report: "session",
   Spawn: "agent",
   Launch: "agent",
@@ -194,7 +189,6 @@ const ACCESS = {
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
   "Session.Start": "self",
-  "Session.Ready": "self",
   "Agents.Outdated": "cli",
   "Agents.Restart": "cli",
 } as const satisfies Record<
@@ -230,21 +224,14 @@ export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
-/**
- * A harness hook's turn start or end records what the agent already did: a settlement, still taken while a Stop drains.
- * Refused, a spawn's first turn would never show its pickup proof (its launch then holds the drain open), and a turn
- * end would lose its result.
- */
-const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
-
-/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains, except settlements. Only at the RPC entry. */
+/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains. Only at the RPC entry; integration events (settlements) come over HTTP. */
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
     const drain = yield* Drain
     return Admission.of((effect, { rpc }) =>
       Effect.acquireUseRelease(
-        drain.admit(rpc._tag, SETTLEMENTS.has(rpc._tag)),
+        drain.admit(rpc._tag, false),
         (leave) => (leave ? effect : Effect.fail(new DaemonStopping({ method: rpc._tag }))),
         (leave) => leave ?? Effect.void,
       ),
@@ -264,18 +251,6 @@ const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id
     if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
     if (yield* db.noteHarnessSession(row.id, conversation))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
-  })
-
-/**
- * An open method's session headers (a hook's TurnEnd or Prompt, no caller check): the conversation id is kept when
- * they name this session and its project.
- */
-const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
-  Effect.gen(function* () {
-    if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
-    const row = yield* db.sessionIdentity(sessionId)
-    if (row && Option.getOrUndefined(header(headers, PROJECT_HEADER)) === String(row.projectId))
-      yield* noteConversation(db, headers, row)
   })
 
 /** Missing, mixed, or malformed caller headers. Never becomes cli. */
@@ -400,24 +375,6 @@ export const handlers = VibestRpcs.toLayer(
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
-    const files = yield* Effect.context<FileSystem.FileSystem | Path.Path | Layout>()
-
-    /**
-     * A hook's turn event for session `sessionId` of `harness`: an unknown id, or another harness than the session's (an
-     * old process after a switch), changes nothing.
-     */
-    const hook = <E>(
-      sessionId: string,
-      harness: string,
-      headers: Headers.Headers,
-      run: (who: Hooks.HookCaller) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
-    ) =>
-      Effect.gen(function* () {
-        yield* noteOpen(db, headers, sessionId)
-        const row = yield* db.sessionIdentity(sessionId)
-        if (!row || row.harness !== harness) return
-        yield* run(row)
-      }).pipe(Effect.provideContext(files), Effect.orDie)
 
     /** A coordinator's or the command line's request; a session's is refused. */
     const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -819,13 +776,6 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      // The same code as the HTTP hook routes (hooks.ts). A failed write dies: the caller sees a failure, not a retry.
-      TurnEnd: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who) => Hooks.turnEnd(sessions, harnesses.get(harness), who, event)),
-
-      Prompt: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who) => Hooks.prompt(sessions, harnesses.get(harness), who, event)),
-
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.StartMain")
@@ -976,19 +926,11 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      "Session.Ready": ({ id, pid }) =>
-        Effect.gen(function* () {
-          yield* self("Session.Ready", id)
-          yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
-        }),
-
       "Agents.Outdated": () => cliOnly("Agents.Outdated").pipe(Effect.andThen(sessions.outdated)),
 
       "Agents.Restart": ({ ids, after }) =>
         cliOnly("Agents.Restart").pipe(Effect.andThen(sessions.restartLater(ids, after))),
 
-      CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
-        db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
       "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
       "Project.List": (input) => scope("Project.List").pipe(Effect.flatMap((s) => project.list(s, input))),
       "Project.Read": (input) => scope("Project.Read").pipe(Effect.flatMap((s) => project.read(s, input))),

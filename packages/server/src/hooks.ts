@@ -1,30 +1,88 @@
-// A harness plugin's turn events, wherever they arrive (the RPC `TurnEnd` / `Prompt`, or the HTTP hook routes): vibestd
-// alone writes the result file and the report lines (runtime-port.md §5), then tells Sessions.
-import type { HarnessAdapter } from "@vibest/core/harness"
-import { promptOf, recordPrompt, recordTurnEnd } from "@vibest/core/results"
+// A harness integration's neutral events (HTTP `/events`, or a shell-hook CLI's raw hook decoded by its adapter at
+// `/hook`): vibestd alone writes what they say (the session's events, result file and report lines), then tells Sessions.
+// One code path for every harness, built-in or a plugin's.
+import type { Db } from "@vibest/core/db"
+import { recordPrompt, recordTurnEnd } from "@vibest/core/results"
 import type { Sessions } from "@vibest/core/sessions"
-import { Clock, Effect } from "effect"
+import type { IntegrationEvent } from "@vibest/protocol/protocol"
+import { Clock, Effect, Schema } from "effect"
 
-/** The calling session, already checked: its id and its agent (`coordinator` for a main agent). */
-export type HookCaller = { readonly id: string; readonly agent: string }
+/** The calling session, already checked: its id, its agent (`coordinator` for a main agent) and its harness. */
+export type HookCaller = { readonly id: string; readonly agent: string; readonly harness: string }
 
-/** The adapter's `turnEnd` reads `raw`; a result writes the result file and its report line, and schedules a check. */
-export const turnEnd = (sessions: Sessions["Service"], adapter: HarnessAdapter, who: HookCaller, raw: string) =>
-  Effect.gen(function* () {
-    if (yield* recordTurnEnd(adapter, who.agent, who.id, raw)) yield* sessions.resultReady(who.id)
-  })
+const Failure = Schema.Struct({ kind: Schema.Literals(["limited", "auth", "other"]), message: Schema.String })
+
+/** `IntegrationEvent` on the wire. */
+export const IntegrationEventSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("ready"),
+    pid: Schema.optionalKey(Schema.Int),
+    conversation: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({ type: Schema.Literal("conversation"), conversation: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("turn.start"),
+    origin: Schema.Literals(["typed", "inbox"]),
+    text: Schema.String,
+    inbox: Schema.optionalKey(Schema.Array(Schema.Number)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("turn.end"),
+    outcome: Schema.Literals(["completed", "failed", "interrupted"]),
+    text: Schema.optionalKey(Schema.String),
+    failure: Schema.optionalKey(Failure),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("blocked"),
+    reason: Schema.Literals(["permission", "question"]),
+    detail: Schema.optionalKey(Schema.String),
+  }),
+])
+
+/** `ToolCall` on the wire. */
+export const ToolCallSchema = Schema.Struct({
+  kind: Schema.Literals(["shell", "edit", "read", "search", "other"]),
+  name: Schema.String,
+  command: Schema.optionalKey(Schema.String),
+  paths: Schema.Array(Schema.String),
+  cwd: Schema.String,
+})
 
 /**
- * The adapter's `userPrompt` reads `raw`; the user's text writes the turn-start line and records the round. One stamp,
- * taken now: the start line is written at once, and `userPrompt` (which may wait for the session's lock, held through
- * a send's whole confirm) stamps the round with the same time, so the line is never older than it and the pending
- * send sees its pickup proof while it still waits.
+ * One event of `who`. The main agent's turns are no result and no round (its turns are opened by the person or by
+ * results); a typed turn start opens a round for any other session (the user typed into its pane).
  */
-export const prompt = (sessions: Sessions["Service"], adapter: HarnessAdapter, who: HookCaller, raw: string) =>
+export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: HookCaller, event: IntegrationEvent) =>
   Effect.gen(function* () {
-    const text = promptOf(adapter, who.agent, raw)
-    if (text === undefined) return
-    const at = yield* Clock.currentTimeMillis
-    yield* recordPrompt(who.id, text, at)
-    yield* sessions.userPrompt(who.id, text, at)
+    switch (event.type) {
+      case "ready": {
+        yield* db.patchLive(who.id, {
+          ready: yield* Clock.currentTimeMillis,
+          ...(event.pid === undefined ? {} : { pid: event.pid }),
+        })
+        if (event.conversation) yield* db.noteHarnessSession(who.id, event.conversation)
+        return
+      }
+      case "conversation": {
+        if (yield* db.noteHarnessSession(who.id, event.conversation))
+          yield* Effect.logInfo(`session ${who.id} is in conversation ${event.conversation}`)
+        return
+      }
+      case "turn.start": {
+        if (event.origin !== "typed" || who.agent === "coordinator" || event.text.trim() === "") return
+        // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the session's
+        // lock, held through a send's whole confirm) stamps the round with the same time.
+        const at = yield* Clock.currentTimeMillis
+        yield* recordPrompt(who.id, event.text, at)
+        yield* sessions.userPrompt(who.id, event.text, at)
+        return
+      }
+      case "turn.end": {
+        if (who.agent === "coordinator") return
+        if (yield* recordTurnEnd(who.harness, who.id, event)) yield* sessions.resultReady(who.id)
+        return
+      }
+      case "blocked":
+        yield* Effect.logInfo(`session ${who.id} is blocked on a ${event.reason}`)
+    }
   })

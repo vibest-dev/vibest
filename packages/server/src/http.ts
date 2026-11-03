@@ -6,10 +6,12 @@
 //   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
 //   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
 //                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line (TurnEnd); a
-//                                                       settlement, so still taken while stopping
-//   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt); a settlement
-//   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
+//   /events IntegrationEvent     → 204                  ready, conversation, turn.start, turn.end, blocked (hooks.ts);
+//                                                       a settlement, so still taken while stopping
+//   /guard { tool }              → { deny? }            Guard.check of the neutral ToolCall with the session's own agent
+//   /hook { hook, payload }      → { output? }          a shell-hook CLI's raw hook: its adapter's decode turns it into
+//                                                       events (as /events) or a tool call (as /guard, answered in
+//                                                       the CLI's own format); a settlement
 //
 // Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
 // action), 404 no such session or route, 403 another project, another harness than the session's, or a poll from what is
@@ -27,7 +29,10 @@ import {
   PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
   ACK_ROUTE,
-  parseHookRoute,
+  EVENTS_ROUTE,
+  GUARD_ROUTE,
+  HOOK_ROUTE,
+  type IntegrationEvent,
   POLL_ROUTE,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -35,7 +40,7 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
+import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -57,7 +62,11 @@ const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { 
 const AckBody = Schema.fromJsonString(
   Schema.Struct({ ids: Schema.Array(Schema.Number), release: Schema.optional(Schema.Array(Schema.Number)) }),
 )
-const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
+const EventBody = Schema.fromJsonString(Hooks.IntegrationEventSchema)
+const GuardBody = Schema.fromJsonString(Schema.Struct({ tool: Hooks.ToolCallSchema }))
+const HookBody = Schema.fromJsonString(
+  Schema.Struct({ hook: Schema.String, payload: Schema.Record(Schema.String, Schema.Unknown) }),
+)
 
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
@@ -126,48 +135,51 @@ export const make = Effect.gen(function* () {
           Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
         )
       }
-      // The integration, once at the harness's start: it takes input now (rpc.ts Session.Ready).
-      if (request.path === "/session/ready") {
-        // `pid`: the harness's own process, which a restart signals.
-        const pid = Option.getOrUndefined(
-          yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
-        )?.pid
-        yield* db.patchLive(who.id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
-        return ok()
-      }
-      const hook = parseHookRoute(request.path)
-      if (!hook || !harnesses.find(hook.harness)) return failure(404, `no route ${request.path}`)
-      if (hook.harness !== who.harness)
-        return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
-      const adapter = harnesses.get(hook.harness)
-      if (hook.hook === "turn-end")
-        return yield* admitted(
-          "hook turn-end",
+      const caller = { id: who.id, agent: who.agent, harness: who.harness }
+      const events = (list: ReadonlyArray<IntegrationEvent>, label: string) =>
+        admitted(
+          label,
           true,
-          Hooks.turnEnd(sessions, adapter, who, request.body).pipe(
+          Effect.forEach(list, (event) => Hooks.apply(db, sessions, caller, event), { discard: true }).pipe(
             Effect.as(ok()),
-            Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`))),
-          ),
-        )
-      if (hook.hook === "prompt")
-        return yield* admitted(
-          "hook prompt",
-          true,
-          Hooks.prompt(sessions, adapter, who, request.body).pipe(
-            Effect.as(ok()),
-            Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`))),
+            Effect.catch((e) => Effect.succeed(failure(500, `the event was not recorded: ${String(e)}`))),
           ),
         )
       // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
-      const key = yield* db.projectKey(who.projectId)
-      const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
-      return yield* Guard.check(who.agent, request.body).pipe(
-        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
-        Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
-        Effect.catch((e) =>
-          Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),
-        ),
-      )
+      const guard = (tool: Guard.ToolCall) =>
+        Effect.gen(function* () {
+          const key = yield* db.projectKey(who.projectId)
+          const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
+          return yield* Guard.check(who.agent, tool).pipe(
+            Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
+            Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),
+          )
+        })
+      if (request.path === EVENTS_ROUTE) {
+        const body = yield* Schema.decodeUnknownEffect(EventBody)(request.body).pipe(Effect.option)
+        if (Option.isNone(body)) return failure(400, "the body is not an integration event")
+        return yield* events([body.value], `event ${body.value.type}`)
+      }
+      if (request.path === GUARD_ROUTE) {
+        const body = yield* Schema.decodeUnknownEffect(GuardBody)(request.body).pipe(Effect.option)
+        if (Option.isNone(body)) return ok({ deny: "vibest could not read this tool call; it is refused." })
+        const reason = yield* guard(body.value.tool)
+        return ok(reason === undefined ? {} : { deny: reason })
+      }
+      if (request.path === HOOK_ROUTE) {
+        const adapter = harnesses.find(who.harness)
+        const body = yield* Schema.decodeUnknownEffect(HookBody)(request.body).pipe(Effect.option)
+        if (Option.isNone(body)) return failure(400, "the body is not { hook, payload }")
+        const decoded = adapter?.decode?.(body.value.hook, body.value.payload)
+        if (decoded === undefined) return ok({})
+        if ("tool" in decoded) {
+          const reason = yield* guard(decoded.tool)
+          return ok({ output: adapter?.guardAnswer?.(reason) ?? (reason === undefined ? {} : { deny: reason }) })
+        }
+        const reply = yield* events(decoded, `hook ${body.value.hook}`)
+        return reply.status === 204 ? ok({}) : reply
+      }
+      return failure(404, `no route ${request.path}`)
     })
 
   return handle

@@ -2,12 +2,15 @@
 
 vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`):
 
-- **the tool guard**: before each tool call of a vibest agent, `vibest integration guard --harness cursor` decides; it
-  refuses an agent driving herdr itself or reading the project store's files directly. It runs fail-closed.
-- **a typed prompt**: `beforeSubmitPrompt` goes to `vibest integration prompt --harness cursor`, which sends it to
-  vibestd; vibestd opens a round when the user typed it. A failure does not block the prompt.
-- **the turn end**: `afterAgentResponse` and `stop` go to `vibest integration stop --harness cursor`, which sends the
-  event to vibestd; vibestd writes the session's result.
+Every hook sends its raw payload to `vibest integration event --harness cursor <hook>`; vibestd decodes it with the
+cursor adapter (`packages/core/src/harnesses/cursor.ts`) into the neutral integration events.
+
+- **the tool guard**: `preToolUse` gets vibestd's answer; it refuses an agent driving herdr itself or reading the
+  project store's files directly. It runs fail-closed.
+- **a typed prompt**: `beforeSubmitPrompt` is a typed turn start; vibestd opens a round. A failure does not block the
+  prompt.
+- **the turn end**: `afterAgentResponse` (the reply) and `stop` (a status other than completed) are turn ends; vibestd
+  writes the session's result. Every hook's `conversation_id` is the session's conversation.
 
 Outside a vibest agent (no `VIBEST_AGENT` in the environment) the hooks do nothing.
 

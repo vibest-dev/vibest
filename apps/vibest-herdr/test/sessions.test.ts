@@ -3,10 +3,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
-import { claude } from "@vibest/core/harnesses/claude"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
+import { resultPayload } from "@vibest/core/results"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { repositoryKey } from "@vibest/core/worktree"
@@ -54,16 +54,8 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
     (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
   )
 
-/** The result payload `vibest integration stop` writes for the Claude plugin's turn.complete with `reason`. */
-const claudeEnd = (reason: string) =>
-  (
-    claude.turnEnd!(
-      { hook_event_name: "TurnComplete", session_id: "c1", reason, last_assistant_message: "" },
-      false,
-    ) as {
-      readonly result: object
-    }
-  ).result
+/** The result payload vibestd writes for an interrupted turn end (the Claude plugin's turn.complete aborted). */
+const claudeEnd = (_reason: "aborted") => resultPayload({ type: "turn.end", outcome: "interrupted", text: "" })
 
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
@@ -1003,16 +995,14 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "Cursor: herdr reports no session id, so the hook's conversation id is kept and the session resumes with it",
+    "Cursor: herdr reports no session id, so the integration's conversation event is kept and the session resumes with it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
       assert.isNull((yield* db.getSession(id))!.harnessSessionId)
-      yield* writeResult(id, "cursor", {
-        hook_event_name: "afterAgentResponse",
-        conversation_id: "c-123",
-        text: "status: completed",
-      })
+      // What Cursor's decode turns its hooks' conversation_id into (an /events `conversation`).
+      yield* db.noteHarnessSession(id, "c-123")
+      yield* writeResult(id, "cursor", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-123")
@@ -1021,29 +1011,6 @@ describe.concurrent("Sessions", () => {
       yield* sessions.send(id, "next")
       const calls = yield* until(herdr.callsTo("open"), (c) => c.length > starts)
       assert.deepStrictEqual(calls.at(-1)!.argv.slice(0, 2), ["cursor-agent", "--resume=c-123"])
-      // A later turn's id does not replace the one the session resumes with.
-      yield* writeResult(id, "cursor", { conversation_id: "c-other", text: "status: completed" }, 5000)
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-123")
-      // Once herdr reports an id, it replaces the fallback.
-      yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "h-9")
-    }),
-  )
-
-  test(
-    "Cursor: a conversation id that would read as a flag is never kept",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      for (const bad of ["-f", "--yolo", "--force", "a b", ""]) {
-        const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
-        yield* writeResult(id, "cursor", { conversation_id: bad, text: "status: completed" })
-        yield* herdr.endTurn(id)
-        yield* sessions.check(id)
-        assert.isNull((yield* db.getSession(id))!.harnessSessionId, bad)
-      }
     }),
   )
 
@@ -1173,7 +1140,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.strictEqual(tasks[0]!.n, 1)
 
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
+      yield* writeResult(id, "claude", { text: "status: completed\nsummary: moved" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const result = (yield* db.coordinatorPending(moved.projectId)).find((row) => row.kind === "result")
@@ -1238,7 +1205,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(open[0]!.inbox, open[0]!.task)
 
       // Older than this round, then a newer file from the harness we left: neither is this round's result.
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: early" }, -60_000)
+      yield* writeResult(id, "claude", { text: "status: completed\nsummary: early" }, -60_000)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       yield* writeResult(id, "pi", { error: "rate_limit", text: "status: completed\nsummary: stale" })
@@ -1256,7 +1223,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude"],
       )
 
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
+      yield* writeResult(id, "claude", { text: "status: completed\nsummary: moved" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.deepStrictEqual(yield* rounds(), [{ status: "completed", inbox: open[0]!.inbox, task: open[0]!.task }])
@@ -2327,7 +2294,7 @@ describe.concurrent("Sessions", () => {
         payload: { error: "rate_limit", text: "status: completed\nsummary: stale" },
       })
       lateResult.on = true
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: kept" })
+      yield* writeResult(id, "claude", { text: "status: completed\nsummary: kept" })
       yield* sessions.check(id)
       assert.isFalse(lateResult.on)
       assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", turnState: "open" })

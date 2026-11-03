@@ -1,8 +1,9 @@
+import type { IntegrationEvent } from "@vibest/protocol/protocol"
 // Result files and turn-report lines, written by vibestd alone from the turn events the integrations send it (SPEC §5.3,
 // runtime-port.md §5), and the session report format.
 import { Effect, FileSystem, Option, Path, Schema } from "effect"
 
-import { type HarnessAdapter, Harnesses, type HarnessId } from "./harness.ts"
+import type { HarnessId } from "./harness.ts"
 import { Layout, writeAtomic } from "./paths.ts"
 
 /** `{harness, ts, payload}`; payload is the harness's hook input, verbatim. */
@@ -20,8 +21,6 @@ export type TurnResult = {
   readonly mtimeMs: number
   readonly text: string
   readonly error: string | undefined
-  /** Cursor's `conversation_id` (in every hook's input), the id `--resume` takes; only a plain id, never one that reads as a flag. */
-  readonly conversationId: string | undefined
   /** A turn stopped in its terminal (`aborted: true`, Claude's and Pi's): a result only for an open round. */
   readonly interrupted: boolean
 }
@@ -69,39 +68,41 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
-/**
- * A harness plugin's turn end, as vibestd receives it (RPC `TurnEnd`, or the HTTP hook): the adapter's
- * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
- */
-export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>
+/** A neutral turn end (`IntegrationEvent` turn.end). */
+export type IntegrationTurnEnd = Extract<IntegrationEvent, { readonly type: "turn.end" }>
+
+/** A turn end as the result payload vibest keeps: the reply, and what ended it (`rate_limit` for a usage limit). */
+export const resultPayload = (end: IntegrationTurnEnd): Readonly<Record<string, unknown>> => {
+  const text = end.text ?? ""
+  if (end.outcome === "completed") return { text }
+  if (end.outcome === "interrupted")
+    return {
+      text,
+      aborted: true,
+      error: "interrupted",
+      error_details: "the turn was stopped in its terminal (Esc) before it ended",
+    }
+  const kind = end.failure?.kind
+  return {
+    text,
+    error: kind === "limited" ? "rate_limit" : kind === "auth" ? "auth" : "error",
+    error_details: end.failure?.message ?? "the turn ended on an error",
+  }
+}
+
+/** A session's turn end: its result file and its turn-end report line. False for a session id that is not one file name. */
+export const recordTurnEnd = (harness: HarnessId, sessionId: string, end: IntegrationTurnEnd) =>
   Effect.gen(function* () {
-    const event = jsonObject(raw)
-    const outcome = event && adapter.turnEnd?.(event, agent === "coordinator")
-    if (!outcome) return false
     const layout = yield* Layout
     const path = yield* Path.Path
     const file = layout.resultFile(sessionId)
     // The session id comes from the caller. Keep the file as one name inside the results directory.
     if (path.basename(file) !== `${sessionId}.json` || path.dirname(file) !== layout.results) return false
-    yield* writeAtomic(
-      file,
-      JSON.stringify({ harness: adapter.id, ts: Math.floor(Date.now() / 1000), payload: outcome.result }),
-    )
-    yield* appendReportLine(layout.reportFile(sessionId), {
-      turn: "end",
-      ts: Date.now(),
-      harness: adapter.id,
-      payload: outcome.result,
-    })
+    const payload = resultPayload(end)
+    yield* writeAtomic(file, JSON.stringify({ harness, ts: Math.floor(Date.now() / 1000), payload }))
+    yield* appendReportLine(layout.reportFile(sessionId), { turn: "end", ts: Date.now(), harness, payload })
     return true
   })
-
-/** A harness plugin's prompt event: the text a round starts with, or undefined (the main agent, a nested agent, not the user). */
-export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) => {
-  const event = jsonObject(raw)
-  const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
-  return prompt?.text.trim() ? prompt.text : undefined
-}
 
 /** The prompt's turn-start report line, at `ts`: never older than the stamp vibestd gives the round. */
 export const recordPrompt = (sessionId: string, text: string, ts = Date.now()) =>
@@ -124,28 +125,7 @@ export const readReportLines = (file: string) =>
     return lines
   })
 
-/**
- * OSC 7501 to this process's terminal (runtime-port.md §5): the agent state as one escape sequence a terminal runtime
- * reads from the pane stream (rex and tern; herdr detects its own integration instead). Best effort on `/dev/tty`: no
- * terminal, or one that does not want it, changes nothing.
- */
-export const writeTerminalStatus = (state: "working" | "idle" | "blocked") =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    yield* Effect.gen(function* () {
-      const handle = yield* fs.open("/dev/tty", { flag: "w" })
-      yield* handle.write(new TextEncoder().encode(`\x1b]7501;${state}\x1b\\`))
-    }).pipe(Effect.scoped, Effect.option)
-  }).pipe(Effect.ignore)
-
-/**
- * A limit code (`rate_limit`) or the provider's own limit text (`usage limit`, `too many requests`).
- * Only the text before the first colon is read; a message with no colon is read whole. Not `error_details`, not the answer.
- */
-export const isUsageLimitError = (error: string | undefined) => {
-  const head = error?.split(":")[0]
-  return head !== undefined && head !== "" && /rate[_ -]?limits?\b|usage limits?\b|too many requests/i.test(head)
-}
+export { isUsageLimitError } from "@vibest/protocol/tools"
 
 /** The last turn in a result file; None if missing, unreadable or not an vibest envelope. */
 export const readResult = Effect.fn("readResult")(function* (file: string) {
@@ -153,11 +133,10 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
   return yield* Effect.gen(function* () {
     const info = yield* fs.stat(file)
     const envelope = yield* decodeEnvelope(yield* fs.readFileString(file))
-    const text = envelope.payload[(yield* Harnesses).find(envelope.harness)?.resultField ?? "text"]
+    const text = envelope.payload.text
     const error = envelope.payload.error
     // `error` names what ended the turn (Claude's `interrupted`, `refusal`, `error`), `error_details` the text.
     const details = envelope.payload.error_details
-    const conversation = envelope.payload.conversation_id
     return {
       harness: envelope.harness,
       mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (d) => d.getTime() }),
@@ -168,8 +147,6 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
             ? `${error}: ${details}`
             : error
           : undefined,
-      conversationId:
-        typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
       interrupted: envelope.payload.aborted === true,
     } satisfies TurnResult
   }).pipe(Effect.option)

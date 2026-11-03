@@ -169,10 +169,14 @@ describe("Claude plugin requests", () => {
   it("every request goes to $VIBEST_HOME/vibest-http.sock with the session's headers and the current conversation", async () => {
     const h = host()
     await h.start()
-    // First that the harness takes input (rpc.ts Session.Ready), then the main agent's first poll.
+    // First that the harness takes input (a ready event), then the main agent's first poll.
     const [ready, poll] = h.requests
-    assert.strictEqual(ready!.url, "http://vibestd/session/ready")
-    assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
+    assert.strictEqual(ready!.url, "http://vibestd/events")
+    assert.deepStrictEqual(
+      ready!.body,
+      { type: "ready", pid: 4242, conversation: "c1" },
+      "with Claude Code's own pid, which a restart signals",
+    )
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
@@ -211,22 +215,31 @@ describe("Claude plugin requests", () => {
     await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/session/ready", "/hooks/claude/turn-end", "/hooks/claude/prompt"])
-    assert.deepStrictEqual(h.requests[1]!.body, {
-      hook_event_name: "TurnComplete",
-      session_id: "c1",
-      reason: "answer",
-      last_assistant_message: "done",
-    })
-    assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
+    assert.deepStrictEqual(h.paths(), ["/events", "/events", "/events"])
+    assert.deepStrictEqual(h.requests[1]!.body, { type: "turn.end", outcome: "completed", text: "done" })
+    assert.deepStrictEqual(h.requests[2]!.body, { type: "turn.start", origin: "typed", text: "next" })
   })
 
-  it("the main agent's turn end is not reported", async () => {
-    const h = host()
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
-    await h.turnComplete({ reason: "answer", answer: "x" })
+  it("turn ends as neutral events: aborted is interrupted, an API error with a limit text is limited", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => ({ status: 204 })
+    await h.turnComplete({ reason: "aborted", answer: "half" })
+    await h.turnComplete({ reason: "error", answer: "rate_limit: usage limit reached" })
+    await h.turnComplete({ reason: "refusal", refusal: { category: "cyber", explanation: "no" } })
     await settle()
-    assert.deepStrictEqual(h.paths(), [])
+    assert.deepStrictEqual(
+      h.requests.map((r) => r.body),
+      [
+        { type: "turn.end", outcome: "interrupted", text: "half" },
+        {
+          type: "turn.end",
+          outcome: "failed",
+          text: "rate_limit: usage limit reached",
+          failure: { kind: "limited", message: "rate_limit: usage limit reached" },
+        },
+        { type: "turn.end", outcome: "failed", text: "", failure: { kind: "other", message: "cyber: no" } },
+      ],
+    )
   })
 
   it("a report vibestd did not take is tried again later", async () => {
@@ -237,7 +250,7 @@ describe("Claude plugin requests", () => {
     await settle()
     down = false
     await h.fire(1000)
-    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/turn-end"])
+    assert.deepStrictEqual(h.paths(), ["/events", "/events"])
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
@@ -382,7 +395,9 @@ describe("Claude plugin guard", () => {
     const h = host(WORKER)
     h.state.answer = () => ({ status: 200, body: { deny: "no" } })
     assert.deepStrictEqual(await h.preTool({ tool: "Write", file_path: "/x", tool_use_id: "t" }), { deny: "no" })
-    assert.deepStrictEqual(h.requests[0]!.body, { tool_name: "Write", tool_input: { file_path: "/x" }, cwd: "/work" })
+    assert.deepStrictEqual(h.requests[0]!.body, {
+      tool: { kind: "edit", name: "Write", paths: ["/x"], cwd: "/work" },
+    })
     h.state.answer = () => ({ status: 200, body: {} })
     assert.deepStrictEqual(await h.preTool({ tool: "Read" }), { tool: "Read" })
     h.state.answer = () => ({ status: 403, body: { error: "session w1 is not in project 7" } })

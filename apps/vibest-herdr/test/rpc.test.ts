@@ -68,6 +68,14 @@ const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E
     ? Option.match(Cause.findErrorOption(exit.cause), { onNone: () => "defect", onSome: (e) => e._tag })
     : "success"
 
+/** What a main agent's integration's `conversation` event does (HTTP /events): kept from the session's own harness only. */
+const conversationReport = (sessionId: string, harness: string, conversation: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    if ((yield* db.sessionIdentity(sessionId))?.harness === harness)
+      yield* db.noteHarnessSession(sessionId, conversation)
+  })
+
 describe("vibest.sock", () => {
   test(
     "a direct request succeeds without Hello; missing or bad caller is refused and does not become cli",
@@ -203,10 +211,7 @@ describe("vibest.sock", () => {
       const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const launch = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "s1" },
-        { headers: protocolHeaders() },
-      )
+      yield* conversationReport(launch.sessionId, "claude", "s1")
 
       const bare = yield* client
       const calls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
@@ -217,20 +222,14 @@ describe("vibest.sock", () => {
         bare.Report({ message: "x" }),
       ]
       for (const call of calls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected")
-      yield* bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
-      assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }))),
-        "ProtocolRejected",
-      )
+      yield* bare.Republish(undefined, { headers: protocolHeaders() })
+      assert.strictEqual(failureTag(yield* Effect.exit(bare.Republish(undefined))), "ProtocolRejected")
       // An integration's call names its version, which is recorded even when its protocol is refused.
-      yield* bare.TurnEnd(
-        { sessionId: id, harness: "pi", event: "{}" },
-        { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) },
-      )
+      yield* bare.Republish(undefined, { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) })
       assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.2.3", protocol: PROTOCOL })
       const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "1.0.0" }), "vibest-protocol": "1" }
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: old }))),
+        failureTag(yield* Effect.exit(bare.Republish(undefined, { headers: old }))),
         "ProtocolRejected",
       )
       assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.0.0", protocol: 1 })
@@ -255,12 +254,6 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
       yield* as("claude", "other").Report({ message: "two" })
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
-      // An open hook call (TurnEnd) carries it too.
-      yield* raw.TurnEnd(
-        { sessionId: id, harness: "pi", event: "{}" },
-        { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
-      )
-      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-2")
       const w = yield* asSession(yield* client, id)
       yield* w.Report({ message: "half way" })
       const reported = yield* db.latestInbox(id, "report")
@@ -285,14 +278,8 @@ describe("vibest.sock", () => {
       assert.strictEqual(failureTag(yield* Effect.exit(Stream.runDrain(w["Inbox.Subscribe"](undefined)))), "Forbidden")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       // The refused launch rotated nothing: the Coordinator's launch id and report watermark still hold.
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "stale" },
-        { headers: protocolHeaders() },
-      )
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "s2" },
-        { headers: protocolHeaders() },
-      )
+      yield* conversationReport(launch.sessionId, "claude", "stale")
+      yield* conversationReport(launch.sessionId, "claude", "s2")
       assert.strictEqual(
         (yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
           .harnessSessionId,
@@ -400,7 +387,6 @@ describe("vibest.sock", () => {
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
         // Another session's start or report: a session speaks only for itself.
         ["Session.Start", c["Session.Start"]({ id: "other000" })],
-        ["Session.Ready", c["Session.Ready"]({ id: "other000" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
       ]
@@ -410,12 +396,6 @@ describe("vibest.sock", () => {
       const w = yield* asSession(yield* client, id)
       for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
-
-      // A main agent's integration reports its own harness ready; a subagent's its own.
-      yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
-      yield* w["Session.Ready"]({ id, pid: 4242 })
-      assert.isDefined(yield* db.readyAt(id))
-      assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
 
       // Another project's coordinator can read a session, not manage it, and does not list it.
       const b = yield* asCoordinator(yield* makeRepository, "p2")
@@ -445,17 +425,10 @@ describe("vibest.sock", () => {
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
-      yield* bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
-      yield* bare.CoordinatorSessionReady(
-        { sessionId: "unknown", harness: "pi", harnessSessionId: "s1" },
-        { headers: protocolHeaders() },
-      )
+      yield* bare.Republish(undefined, { headers: protocolHeaders() })
+      yield* conversationReport("unknown", "pi", "s1")
       assert.strictEqual(
-        failureTag(
-          yield* Effect.exit(
-            bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: { "vibest-protocol": "0" } }),
-          ),
-        ),
+        failureTag(yield* Effect.exit(bare.Republish(undefined, { headers: { "vibest-protocol": "0" } }))),
         "ProtocolRejected",
       )
 
@@ -466,9 +439,6 @@ describe("vibest.sock", () => {
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",
-        "TurnEnd",
-        "Prompt",
-        "CoordinatorSessionReady",
       ]
       assert.sameMembers(covered, [...VibestRpcs.requests.keys()])
     }),
@@ -631,16 +601,12 @@ describe("vibest.sock", () => {
         })
       assert.deepStrictEqual(
         yield* ask(
-          `{"jsonrpc":"2.0","id":"hook:1","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"},"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
+          `{"jsonrpc":"2.0","id":"hook:1","method":"Republish","params":null,"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
         ),
-        '{"jsonrpc":"2.0","id":"hook:1","result":null}',
+        '{"jsonrpc":"2.0","id":"hook:1","result":0}',
       )
       assert.include(
-        yield* (
-          ask(
-            '{"jsonrpc":"2.0","id":"hook:2","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"}}\n',
-          ) ?? ""
-        ),
+        yield* ask('{"jsonrpc":"2.0","id":"hook:2","method":"Republish","params":null}\n') ?? "",
         "ProtocolRejected",
       )
     }),
@@ -653,10 +619,10 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const first = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
       assert.isNull(first.harnessSessionId)
-      yield* c.CoordinatorSessionReady({ sessionId: first.sessionId, harness: "claude", harnessSessionId: "c1" })
+      yield* conversationReport(first.sessionId, "claude", "c1")
       yield* until(savedSession(first.sessionId), (id) => id === "c1")
       // Another harness's report does not count. The same id is reused on relaunch.
-      yield* c.CoordinatorSessionReady({ sessionId: first.sessionId, harness: "pi", harnessSessionId: "x0" })
+      yield* conversationReport(first.sessionId, "pi", "x0")
       const second = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
       assert.strictEqual(second.sessionId, first.sessionId)
       assert.strictEqual(second.harnessSessionId, "c1")
@@ -664,7 +630,7 @@ describe("vibest.sock", () => {
       const fresh = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(fresh.sessionId, first.sessionId)
       assert.isNull(fresh.harnessSessionId)
-      yield* c.CoordinatorSessionReady({ sessionId: fresh.sessionId, harness: "claude", harnessSessionId: "c3" })
+      yield* conversationReport(fresh.sessionId, "claude", "c3")
       assert.strictEqual(yield* savedSession(fresh.sessionId), "c3")
     }),
   )
@@ -704,10 +670,10 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const claude = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
-      yield* c.CoordinatorSessionReady({ sessionId: claude.sessionId, harness: "claude", harnessSessionId: "c1" })
+      yield* conversationReport(claude.sessionId, "claude", "c1")
       const pi = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       assert.strictEqual(pi.sessionId, claude.sessionId)
-      yield* c.CoordinatorSessionReady({ sessionId: pi.sessionId, harness: "pi", harnessSessionId: "x1" })
+      yield* conversationReport(pi.sessionId, "pi", "x1")
       const refused = (
         harness: HarnessId,
         fresh: boolean,
@@ -748,8 +714,8 @@ describe("vibest.sock", () => {
       }
       // A refused launch does not call CoordinatorSession, so the saved conversation stands. A claude report no longer matches.
       assert.strictEqual(yield* savedSession(pi.sessionId), "x1")
-      yield* c.CoordinatorSessionReady({ sessionId: pi.sessionId, harness: "claude", harnessSessionId: "c2" })
-      yield* c.CoordinatorSessionReady({ sessionId: pi.sessionId, harness: "pi", harnessSessionId: "x2" })
+      yield* conversationReport(pi.sessionId, "claude", "c2")
+      yield* conversationReport(pi.sessionId, "pi", "x2")
       assert.strictEqual(yield* savedSession(pi.sessionId), "x2")
     }),
   )

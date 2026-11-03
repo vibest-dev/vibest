@@ -74,8 +74,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 ## 5. Agent state, one direction
 
 - The harness integration (the plugin vibest loads into each CLI agent) writes only OSC 7501 status to its tty. It sends
-  each turn start (the user's prompt) and turn end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
-  `TurnEnd` on vibest.sock (a timeout, one retry), or the HTTP hook routes (Claude). vibestd alone writes
+  each turn start (the user's prompt) and turn end (the result) to vibestd as a neutral integration event on
+  vibest-http.sock (`/events`; a shell-hook CLI's raw hook through `/hook`). vibestd alone writes
   `<VIBEST_HOME>/reports/<id>.jsonl` and `results/<id>.json` from them.
 - Core follows each Agent with `events` (else polling `process`) and `state` when present. When a turn ends (state
   idle after working, or the process exited), core reads the report file's new lines (`readFile`) and delivers the

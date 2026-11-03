@@ -2,6 +2,43 @@
 // another with `context.harness.register`). Core reads these fields and never branches on a harness id.
 import type { Effect, FileSystem, Path } from "effect"
 
+/**
+ * What every harness integration reports, whatever the CLI: one contract (a plugin harness implements it too).
+ * - ready: the harness takes input; `pid` is its own process (what a restart signals).
+ * - conversation: the harness's conversation id changed (/clear, a first turn end).
+ * - turn.start: a turn began; `origin` typed (the person, in the pane) or inbox (vibest's delivery, `inbox` its row ids).
+ * - turn.end: a turn ended; `failure.kind` limited makes a usage-limit move possible.
+ * - blocked: waiting on a permission or a question.
+ */
+export type IntegrationEvent =
+  | { readonly type: "ready"; readonly pid?: number; readonly conversation?: string }
+  | { readonly type: "conversation"; readonly conversation: string }
+  | {
+      readonly type: "turn.start"
+      readonly origin: "typed" | "inbox"
+      readonly text: string
+      readonly inbox?: ReadonlyArray<number>
+    }
+  | {
+      readonly type: "turn.end"
+      readonly outcome: "completed" | "failed" | "interrupted"
+      readonly text?: string
+      readonly failure?: { readonly kind: "limited" | "auth" | "other"; readonly message: string }
+    }
+  | { readonly type: "blocked"; readonly reason: "permission" | "question"; readonly detail?: string }
+
+/**
+ * A tool call as the guard reads it, whatever the CLI calls the tool: its kind, its own name (any case), the shell
+ * command, the paths it names (as given: relative to `cwd`, `~`, or a file URL), and the working directory.
+ */
+export interface ToolCall {
+  readonly kind: "shell" | "edit" | "read" | "search" | "other"
+  readonly name: string
+  readonly command?: string
+  readonly paths: ReadonlyArray<string>
+  readonly cwd: string
+}
+
 /** One model as the harness reports it; vibest fills in the harness and the requested provider. */
 export interface RawModel {
   readonly model: string
@@ -93,20 +130,14 @@ export interface HarnessAdapter {
   readonly models: ModelLister
   /** The pre-tool hook's answer in the harness's format; `reason` refuses the call. Absent: the harness guards over HTTP. */
   readonly guardAnswer?: (reason: string | undefined) => unknown
-  /** Field of a built-in turn-end payload holding the last reply. */
-  readonly resultField?: string
-  /** A built-in integration's raw turn end as a result payload; undefined ignores it. */
-  readonly turnEnd?: (
-    event: Readonly<Record<string, unknown>>,
-    coordinator: boolean,
-  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
-  /** A built-in integration's raw prompt event: the user's text, or undefined. */
-  readonly userPrompt?: (
-    event: Readonly<Record<string, unknown>>,
-    coordinator: boolean,
-  ) => { readonly text: string } | undefined
-  /** The conversation id in a raw hook event, for a harness that reports it with every hook. */
-  readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
+  /**
+   * For a CLI that only has shell hooks: its raw hook payload (forwarded by `vibest integration event --harness <id>
+   * <hook>`) as neutral events, or as the tool call its pre-tool hook asks about. Undefined ignores it.
+   */
+  readonly decode?: (
+    hook: string,
+    payload: Readonly<Record<string, unknown>>,
+  ) => ReadonlyArray<IntegrationEvent> | { readonly tool: ToolCall } | undefined
   /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
   readonly canResume?: (
     root: string,

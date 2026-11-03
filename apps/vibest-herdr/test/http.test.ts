@@ -91,11 +91,11 @@ const project = Effect.gen(function* () {
   })
   const projectId = main.projectId
   const handle = yield* Http.make
-  const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body = "{}") =>
+  const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body: unknown = {}) =>
     handle({
       path,
       headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
-      body,
+      body: typeof body === "string" ? body : JSON.stringify(body),
     })
   return { db, herdr, main: main.sessionId, worker, projectId, call, inbox: yield* Inbox }
 })
@@ -144,7 +144,7 @@ describe("vibestd's HTTP API", () => {
       // Another harness than the session's, or none: refused before anything is recorded.
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "" })).status, 403)
-      assert.strictEqual((yield* call("/hooks/cursor/guard", { sessionId: worker, harness: "claude" })).status, 403)
+      assert.strictEqual((yield* call("/guard", { sessionId: worker, harness: "cursor" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
@@ -323,11 +323,7 @@ describe("vibestd's HTTP API", () => {
       yield* TestClock.adjust("3 seconds")
       const stamp = yield* Clock.currentTimeMillis
       const hook = yield* Effect.forkChild(
-        call(
-          "/hooks/claude/prompt",
-          { sessionId: worker },
-          JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
-        ),
+        call("/events", { sessionId: worker }, { type: "turn.start", origin: "typed", text: "do it" }),
       )
       const start = yield* until(
         fs.readFileString(layout.reportFile(worker)).pipe(Effect.orElseSucceed(() => "")),
@@ -341,50 +337,87 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "turn-end, prompt and guard hooks: the result file and report lines are vibestd's to write",
+    "events and guard: the result file and report lines are vibestd's to write",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const prompt = yield* call(
-        "/hooks/claude/prompt",
+        "/events",
         { sessionId: worker },
-        JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
+        { type: "turn.start", origin: "typed", text: "next step" },
       )
       assert.strictEqual(prompt.status, 204)
       assert.include(yield* fs.readFileString(layout.reportFile(worker)), '"prompt":"next step"')
       const end = yield* call(
-        "/hooks/claude/turn-end",
+        "/events",
         { sessionId: worker },
-        JSON.stringify({
-          hook_event_name: "TurnComplete",
-          reason: "answer",
-          last_assistant_message: "Fixed the guard.",
-        }),
+        { type: "turn.end", outcome: "completed", text: "Fixed the guard." },
       )
       assert.strictEqual(end.status, 204)
       assert.include(yield* fs.readFileString(layout.resultFile(worker)), "Fixed the guard.")
       // The main agent's turn end is no result.
-      yield* call(
-        "/hooks/claude/turn-end",
-        { sessionId: main },
-        JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
-      )
+      yield* call("/events", { sessionId: main }, { type: "turn.end", outcome: "completed", text: "x" })
       assert.isFalse(yield* fs.exists(layout.resultFile(main)))
+      assert.strictEqual((yield* call("/events", { sessionId: worker }, { type: "nope" })).status, 400)
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
       const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
-      const tool = (file: string) =>
-        JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
-      const other = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
+      const tool = (file: string) => ({ tool: { kind: "edit", name: "Write", paths: [file], cwd: "/tmp" } })
+      const other = yield* call("/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
       // ...but its own scratch is its to use, as VIBEST_SCRATCH in its terminal says.
-      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
+      const own = yield* call("/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
       // The main agent edits nothing.
-      const coordinator = yield* call("/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))
+      const coordinator = yield* call("/guard", { sessionId: main }, tool("/tmp/x"))
       assert.isString((coordinator.body as { deny?: string }).deny)
-      const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
+      const bad = yield* call("/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
+    }),
+  )
+
+  test(
+    "a shell-hook CLI's raw hook is decoded by its adapter: Cursor's turn end is a result, its pre-tool hook a guard answer",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sessions = yield* Sessions
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const key = yield* repositoryKey(repo)
+      const main = yield* db.coordinatorLaunch(key, "claude", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const { id } = yield* sessions.spawn({
+        machine: { id: "local" },
+        root: repo,
+        key,
+        name: "Cursor work",
+        prompt: "do it",
+        harness: "cursor",
+      })
+      const handle = yield* Http.make
+      const hook = (name: string, payload: Record<string, unknown>) =>
+        handle({
+          path: "/hook",
+          headers: Headers.fromInput(
+            sessionHeaders({ sessionId: id, projectId: String(main.projectId), harness: "cursor" }),
+          ),
+          body: JSON.stringify({ hook: name, payload }),
+        })
+      const end = yield* hook("afterAgentResponse", { conversation_id: "c-1", text: "Done." })
+      assert.deepStrictEqual(end, { status: 200, body: {} })
+      assert.include(yield* fs.readFileString(layout.resultFile(id)), "Done.")
+      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-1")
+      const denied = yield* hook("preToolUse", {
+        tool_name: "Write",
+        tool_input: { file_path: `${layout.projects}/elsewhere/x` },
+        cwd: "/tmp",
+      })
+      assert.strictEqual(denied.status, 200)
+      assert.notDeepEqual((denied.body as { output: unknown }).output, {})
+      assert.deepStrictEqual(yield* hook("unknownHook", {}), { status: 200, body: {} })
     }),
   )
 

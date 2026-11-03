@@ -3,7 +3,7 @@ import {
   claimHeaders,
   cliHeaders,
   connect,
-  hookCall,
+  hookPost,
   type VibestClient,
   probe,
   protocolHeaders,
@@ -11,15 +11,14 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import * as Guard from "@vibest/core/guard"
-import { Harness, type HarnessAdapter, Harnesses, type HarnessId, preflight } from "@vibest/core/harness"
+import { Harness, Harnesses, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
 import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
+import { jsonObject } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
 // VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
@@ -52,7 +51,7 @@ import { herdrCommands } from "./herdr-plugin.ts"
 import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
 export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
-import { PROTOCOL } from "@vibest/protocol/protocol"
+import { HARNESS_HEADER, HOOK_ROUTE, PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
 
 /** A prompt, message or entry that is empty or only whitespace. */
@@ -762,102 +761,37 @@ const nonempty = (name: string) =>
     }),
   )
 
-/**
- * A harness hook's event, sent to vibestd as it came (`hookCall`: a timeout and one retry), with the session's headers
- * and its conversation id when the adapter reads one from `raw`. Does not start vibestd; writes no file.
- */
-const notify = (
-  adapter: HarnessAdapter,
-  sessionId: string,
-  raw: string,
-  send: (client: VibestClient) => Effect.Effect<void, unknown>,
-) =>
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const event = jsonObject(raw)
-    const harnessSessionId = event && adapter.conversationOf?.(event)
-    const headers = yield* claimHeaders({
-      _tag: "session",
-      sessionId,
-      ...(harnessSessionId ? { harnessSessionId } : {}),
-    })
-    yield* hookCall(layout.socket, headers, send)
-  }).pipe(Effect.ignore)
-
-/**
- * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`, Cursor's): its adapter's `turnEnd` reads
- * the event. Missing identity, a non-object, or an event the adapter ignores sends nothing. Failures exit 0. Writes
- * OSC 7501 idle (runtime-port.md §5) and sends the event as `TurnEnd`; vibestd writes the result file and report line.
- */
-export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
-  Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
-    const event = jsonObject(raw)
-    if (!event || !adapter.turnEnd?.(event, agent === "coordinator")) return
-    yield* writeTerminalStatus("idle")
-    yield* notify(adapter, sessionId, raw, (client) => client.TurnEnd({ sessionId, harness: adapter.id, event: raw }))
-  }).pipe(Effect.ignore)
-
-/**
- * A harness plugin's user-prompt bridge (`vibest integration prompt --harness <h>`): its adapter's `userPrompt` reads the
- * event. The main agent, a nested agent, or text that is not the user typing sends nothing. Failures exit 0. Sends the
- * event as `Prompt` (vibestd writes the turn-start line and records the round), then OSC 7501 working.
- */
-export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
-  Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
-    if (promptOf(adapter, agent, raw) === undefined) return
-    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
-    yield* writeTerminalStatus("working")
-  }).pipe(Effect.ignore)
-
 const hookHarness = Flag.String("harness").pipe(Flag.withDescription("The harness whose hook this is"))
 
-const stop = Command.make("stop", { harness: hookHarness }, (o) =>
+/**
+ * A shell-hook CLI's bridge (`vibest integration event --harness <h> <hook>`, Cursor's): the raw hook payload on stdin
+ * goes to vibestd's `/hook` as it came, where the adapter's decode reads it; whatever vibestd answers for the hook to
+ * print (a guard answer in the CLI's format) is printed. No vibest session in the environment, or no answer: exit 1,
+ * which a fail-closed hook turns into a refusal. Does not start vibestd; writes no file.
+ */
+const event = Command.make("event", { harness: hookHarness, hook: Argument.String("hook") }, (o) =>
   Effect.gen(function* () {
-    yield* integrationStop(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
+    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
+    if (!sessionId || !(yield* nonempty("VIBEST_AGENT"))) return yield* Effect.fail(new Error("not a vibest session"))
+    const payload = jsonObject(yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)))
+    if (payload === undefined) return yield* Effect.fail(new Error("the hook's stdin is not a JSON object"))
+    const headers = yield* claimHeaders({ _tag: "session", sessionId })
+    const reply = yield* hookPost(
+      (yield* Layout).httpSocket,
+      HOOK_ROUTE,
+      { ...headers, [HARNESS_HEADER]: o.harness },
+      {
+        hook: o.hook,
+        payload,
+      },
     )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
-)
-
-const prompt = Command.make("prompt", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    yield* integrationPrompt(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
-    )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's user-prompt bridge: the prompt event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
-)
-
-// Any failure exits non-zero, which the hook script turns into a refusal.
-const guard = Command.make("guard", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    const { guardAnswer } = (yield* Harnesses).get(o.harness)
-    if (!guardAnswer) return yield* Effect.fail(new Error(`${o.harness} has no pre-tool hook`))
-    // No VIBEST_AGENT fails: the hook refuses.
-    const agent = yield* Config.String("VIBEST_AGENT")
-    const answer = guardAnswer(
-      yield* Guard.check(agent, yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin))),
-    )
-    if (answer !== undefined) yield* json(answer)
+    if (reply.status !== 200) return yield* Effect.fail(new Error(`vibestd answered ${reply.status}`))
+    const output = (reply.body as { output?: unknown } | undefined)?.output
+    if (output !== undefined) yield* json(output)
   }),
 ).pipe(
   Command.withDescription(
-    "Pre-tool hook: reads the harness's pre-tool input on stdin, prints its answer when the rules of the agent in VIBEST_AGENT refuse the call",
+    "A shell-hook harness's bridge: the hook's JSON payload on stdin, forwarded to vibestd; prints the answer the hook expects",
   ),
 )
 
@@ -898,9 +832,9 @@ const integrationStart = (exec: Exec) =>
 const integration = (exec: Exec) =>
   Command.make("integration").pipe(
     Command.withDescription(
-      "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
+      "Internal: called by a shell-hook harness's hooks and by a main agent's restart; not for direct use",
     ),
-    Command.withSubcommands([guard, prompt, stop, integrationStart(exec)]),
+    Command.withSubcommands([event, integrationStart(exec)]),
   )
 
 /** herdr's own integration line per harness: herdr knows an agent's status only through it. */
@@ -1369,7 +1303,7 @@ const update = Command.make(
   ({ yes }) =>
     Effect.gen(function* () {
       // The user, or the project's main agent from its own shell: its integration is the one an update replaces.
-      if (Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) !== Guard.COORDINATOR)
+      if (Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) !== "coordinator")
         yield* userOnly("update")
       const self = yield* VibestCommand
       const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))

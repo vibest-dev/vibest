@@ -227,13 +227,6 @@ export const sessionRounds = (deps: {
       yield* deps.limitMove.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, found.error)
       return "delivered" as const
     }
-    // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
-    if (
-      harnesses.get(session.harnessId).conversation === "reported" &&
-      !session.harnessSessionId &&
-      found.conversationId
-    )
-      yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
     yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.mtimeMs)
     return "delivered" as const
   })

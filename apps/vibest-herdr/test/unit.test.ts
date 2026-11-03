@@ -20,7 +20,7 @@ import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "@vibest/core/results"
+import { envelope, isUsageLimitError, outcome, parseReport, readResult, resultPayload } from "@vibest/core/results"
 import { coordinatorRules } from "@vibest/core/rules"
 import {
   copyIncluded,
@@ -905,86 +905,49 @@ describe("HarnessAdapter", () => {
     assert.strictEqual(after(ADAPTERS.pi.coordinatorArgs!(coordinator), "-e"), `${dir}/extension.mjs`)
   })
 
-  it("cursor reports its turn ends", () => {
-    const turnEnd = ADAPTERS.cursor.turnEnd!
-    const reply = { hook_event_name: "afterAgentResponse", text: "done" }
-    assert.deepStrictEqual(turnEnd(reply, false), { result: reply })
-    assert.isUndefined(turnEnd({ hook_event_name: "stop", status: "completed" }, false))
-    assert.deepStrictEqual(turnEnd({ hook_event_name: "stop", status: "aborted" }, false), {
-      result: { hook_event_name: "stop", status: "aborted", error: "the turn ended with status aborted" },
-    })
-    assert.isUndefined(turnEnd(reply, true))
+  it("cursor's decode: its hooks as neutral events, its preToolUse as a tool call", () => {
+    const decode = ADAPTERS.cursor.decode!
+    const conversation = { type: "conversation", conversation: "c-1" } as const
+    assert.deepStrictEqual(decode("afterAgentResponse", { conversation_id: "c-1", text: "done" }), [
+      conversation,
+      { type: "turn.end", outcome: "completed", text: "done" },
+    ])
+    assert.deepStrictEqual(decode("stop", { status: "completed" }), [])
+    assert.deepStrictEqual(decode("stop", { status: "error" }), [
+      { type: "turn.end", outcome: "failed", failure: { kind: "other", message: "the turn ended with status error" } },
+    ])
+    assert.deepStrictEqual(decode("beforeSubmitPrompt", { prompt: "look here" }), [
+      { type: "turn.start", origin: "typed", text: "look here" },
+    ])
+    assert.deepStrictEqual(decode("beforeSubmitPrompt", { prompt: "  " }), [])
+    // An id that reads as a flag is no conversation.
+    assert.deepStrictEqual(decode("afterAgentResponse", { conversation_id: "-x", text: "" }), [
+      { type: "turn.end", outcome: "completed", text: "" },
+    ])
+    assert.deepStrictEqual(
+      decode("preToolUse", { tool_name: "Shell", tool_input: { command: "ls", cwd: "sub" }, cwd: "/w" }),
+      { tool: { kind: "shell", name: "Shell", command: "ls", paths: [], cwd: "/w/sub" } },
+    )
+    assert.deepStrictEqual(
+      decode("preToolUse", { tool_name: "Read", tool_input: { path: "a" }, cwd: "", workspace_roots: ["/r"] }),
+      { tool: { kind: "read", name: "Read", paths: ["a"], cwd: "/r" } },
+    )
   })
 
-  it("claude reports every reason of the plugin's TurnComplete: answer as it is, aborted, refusal and error failed", () => {
-    const turnEnd = ADAPTERS.claude.turnEnd!
-    const answer = {
-      hook_event_name: "TurnComplete",
-      session_id: "c1",
-      reason: "answer",
-      last_assistant_message: "done",
-    }
-    assert.deepStrictEqual(turnEnd(answer, false), { result: answer })
-    assert.isUndefined(turnEnd(answer, true))
-    const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(aborted, false), {
-      result: {
-        ...aborted,
-        aborted: true,
-        error: "interrupted",
-        error_details: "the turn was stopped in its terminal (Esc) before it ended",
-      },
+  it("a neutral turn end as the kept result payload: interrupted, failed, and a usage limit as rate_limit", () => {
+    assert.deepStrictEqual(resultPayload({ type: "turn.end", outcome: "completed", text: "done" }), { text: "done" })
+    assert.deepInclude(resultPayload({ type: "turn.end", outcome: "interrupted" }), {
+      aborted: true,
+      error: "interrupted",
     })
-    assert.isUndefined(turnEnd(aborted, true))
-    const error = { ...answer, reason: "error", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(error, false), {
-      result: { ...error, error: "error", error_details: "the turn ended on an API error" },
-    })
-    assert.deepStrictEqual(turnEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
-      result: {
-        ...error,
-        last_assistant_message: " API Error: 500 ",
-        error: "error",
-        error_details: "the turn ended on an API error",
-      },
-    })
-    const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
-    assert.deepStrictEqual(turnEnd(refusal, false), {
-      result: { ...refusal, error: "refusal", error_details: "cyber: not that" },
-    })
-    assert.deepStrictEqual(turnEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
-      result: {
-        ...refusal,
-        refusal: { category: null, explanation: null },
-        error: "refusal",
-        error_details: "the model refused to answer",
-      },
-    })
-    // Classic events are not reported any more; nor is a coordinator end without its Claude session id.
-    for (const name of ["Stop", "StopFailure", "SubagentStop"])
-      assert.isUndefined(turnEnd({ ...answer, hook_event_name: name }, false), name)
-    assert.isUndefined(turnEnd({ ...answer, session_id: "" }, true))
-  })
-
-  it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
-    const userPrompt = ADAPTERS.claude.userPrompt!
-    const typed = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
-    assert.deepStrictEqual(userPrompt(typed, false), { text: "look here" })
-    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }, false), { text: "look here" })
-    assert.isUndefined(userPrompt(typed, true))
-    assert.isUndefined(userPrompt({ ...typed, text: "  " }, false))
-    for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
-      assert.isUndefined(userPrompt({ ...typed, origin }, false), String(origin))
-    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
-  })
-
-  it("cursor reads a user prompt from beforeSubmitPrompt", () => {
-    const userPrompt = ADAPTERS.cursor.userPrompt!
-    const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
-    assert.deepStrictEqual(userPrompt(event, false), { text: "look here" })
-    assert.isUndefined(userPrompt(event, true))
-    assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }, false))
-    assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
+    assert.deepStrictEqual(
+      resultPayload({ type: "turn.end", outcome: "failed", failure: { kind: "limited", message: "usage limit" } }),
+      { text: "", error: "rate_limit", error_details: "usage limit" },
+    )
+    assert.deepStrictEqual(
+      resultPayload({ type: "turn.end", outcome: "failed", failure: { kind: "other", message: "boom" } }),
+      { text: "", error: "error", error_details: "boom" },
+    )
   })
 
   it("claude starts with no --settings: its deny rules are the plugin's tool guard (guard.test)", () => {
@@ -1144,14 +1107,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           if (body !== undefined) yield* fs.writeFileString(file, body)
           return Option.getOrUndefined(yield* readResult(file))
         })
-      assert.deepInclude(
-        yield* read("a.json", encodeJson({ harness: "claude", ts: 1, payload: { last_assistant_message: "hi" } })),
-        {
-          harness: "claude",
-          text: "hi",
-          error: undefined,
-        },
-      )
+      assert.deepInclude(yield* read("a.json", encodeJson({ harness: "claude", ts: 1, payload: { text: "hi" } })), {
+        harness: "claude",
+        text: "hi",
+        error: undefined,
+      })
       assert.deepInclude(
         yield* read("b.json", encodeJson({ harness: "pi", ts: 1, payload: { text: "", error: "boom" } })),
         { error: "boom" },

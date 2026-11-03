@@ -1,10 +1,12 @@
+import type { Harness } from "@vibest/plugin"
+
 /**
  * Wire protocol, the only version, for RPC and HTTP alike (the `vibest-protocol` header; HTTP paths carry none).
  * Independent of the package version in package.json. Bump only when a request a current daemon accepts would be
  * misunderstood; old versions are not served. An additive feature does not bump it: it gets a flag in Ping's
  * `capabilities`, and a client uses it only when the flag is there.
  */
-export const PROTOCOL = 5
+export const PROTOCOL = 6
 
 /**
  * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents
@@ -62,13 +64,19 @@ export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
  */
 export const POLL_ROUTE = "/inbox/poll"
 export const ACK_ROUTE = "/inbox/ack"
-export type HookKind = "turn-end" | "prompt" | "guard"
-export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
-/** The harness and hook a path names, or undefined. */
-export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
-  const m = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/.exec(path)
-  return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
-}
+/** A neutral integration event (`IntegrationEvent`) → 204. */
+export const EVENTS_ROUTE = "/events"
+/** `{ tool: ToolCall }` → `{ deny?: string }`. */
+export const GUARD_ROUTE = "/guard"
+/**
+ * A shell-hook CLI's raw hook payload `{ hook, payload }`, forwarded by `vibest integration event`: the adapter's
+ * `decode` reads it in vibestd. → `{ output?: unknown }`, what the hook prints (the guard answer in the CLI's format).
+ */
+export const HOOK_ROUTE = "/hook"
+
+/** The neutral integration contract (`@vibest/plugin` Harness): what every integration sends, built-in or a plugin's. */
+export type IntegrationEvent = Harness.IntegrationEvent
+export type ToolCall = Harness.ToolCall
 
 /** `POLL_ROUTE`'s answer: the main agent's next batch, leased (empty `ids`: none). */
 export type Polled = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }

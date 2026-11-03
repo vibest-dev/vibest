@@ -69,7 +69,6 @@ export const pi: HarnessAdapter = {
   conversation: "assigned",
   rulesInPrompt: false,
   interruptKey: "esc",
-  resultField: "text",
   delivery: "subscribe",
   reportsReady: true,
   checkProvider: () => undefined,
@@ -104,24 +103,5 @@ export const pi: HarnessAdapter = {
       { id: "vibest-models", type: "get_available_models" },
     ),
     answer: piModels,
-  },
-  // Pi's `input` event. `extension` is sendUserMessage, which vibest uses for its own deliveries.
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.source === "extension" || event.type !== "input") return undefined
-    if (typeof event.text !== "string" || event.text.trim() === "") return undefined
-    return { text: event.text }
-  },
-  // The extension's turn end: Pi's `agent_settled` with the last reply `agent_end` saw (`text`, `error`), as it sends it.
-  turnEnd: (event, coordinator) => {
-    if (coordinator || event.type !== "agent_settled") return undefined
-    const aborted = event.aborted === true
-    const error = typeof event.error === "string" ? event.error : ""
-    return {
-      result: {
-        text: typeof event.text === "string" ? event.text : "",
-        error: error || (aborted ? "aborted" : ""),
-        aborted,
-      },
-    }
   },
 }

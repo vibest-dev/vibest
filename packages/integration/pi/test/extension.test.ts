@@ -20,6 +20,7 @@ import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
+import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
 import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Schema, Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -50,11 +51,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }))
 
-const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
-  Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
-)
+const served = Layer.mergeAll(
+  Server.layer.pipe(
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  ),
+  Http.layer.pipe(
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.httpServer(layout.httpSocket)))),
+  ),
+).pipe(Layer.provideMerge(Project.layer), Layer.provideMerge(testLayer()))
 
 const test = <E>(
   name: string,
@@ -94,7 +98,7 @@ const session = (env: Record<string, string>) =>
         return results
       })
     const config = ConfigProvider.layer(
-      ConfigProvider.fromUnknown({ HOME: layout.home, VIBEST_HOME: layout.home, ...env }),
+      ConfigProvider.fromUnknown({ HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_HARNESS: "pi", ...env }),
     )
     yield* Effect.promise(() => Pi.runMain(api, extension.pipe(Layer.provide(services), Layer.provide(config))))
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
@@ -402,7 +406,7 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* bash("vibest send abcd1234 'more'"), [undefined])
       assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts daemon"), [undefined])
       assert.deepStrictEqual(yield* bash("jq . a.json > /tmp/b"), [undefined])
-      assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234"), [
+      assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= vibest rm abcd1234"), [
         {
           block: true,
           reason:
@@ -477,12 +481,13 @@ describe("pi-vibest", () => {
         },
         "r",
       )
-      const scratch = `${layout.projects}/k/scratch/pane:test/w1:p7`
+      // vibestd's guard reads the session's own project scratch (key r), whatever the pane's environment says.
+      const scratch = `${layout.scratch("r")}/pane:test/w1:p7`
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234",
+        VIBEST_PROJECT_ID: String(yield* (yield* Db).projectId("r")),
         VIBEST_COMMAND: '["vibest"]',
-        VIBEST_SCRATCH: `${layout.projects}/k/scratch`,
       })
       yield* s.emit("session_start", {}, { mode: "tui" })
       const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
@@ -500,13 +505,12 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* call("bash", { command: "vibest rm abcd1234" }), [undefined])
       assert.deepStrictEqual(yield* call("write", { path: `${scratch}/abcd1234-notes.md` }), [undefined])
       assert.deepStrictEqual(yield* call("bash", { command: `cat ${scratch}/a.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memory/a.md` }), offLimits)
+      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/r/memory/a.md` }), offLimits)
       assert.deepStrictEqual(yield* call("read", { path: `${scratch}/../../../memory/a.md` }), offLimits)
       assert.deepStrictEqual(yield* call("bash", { command: `cat ${scratch}/../../../memory/a.md` }), offLimits)
-      assert.deepStrictEqual(
-        yield* call("bash", { command: `cat ${layout.projects}/k/scratch/pane:test/w2:p1/a.md` }),
-        [undefined],
-      )
+      assert.deepStrictEqual(yield* call("bash", { command: `cat ${layout.scratch("r")}/pane:test/w2:p1/a.md` }), [
+        undefined,
+      ])
       yield* s.emit("agent_end", {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
@@ -516,7 +520,7 @@ describe("pi-vibest", () => {
       )(yield* fs.readFileString(layout.resultFile("abcd1234")))
       assert.deepStrictEqual(written, {
         harness: "pi",
-        payload: { text: "status: completed", error: "", aborted: false },
+        payload: { text: "status: completed" },
       })
     }),
   )
@@ -556,7 +560,12 @@ describe("pi-vibest", () => {
         }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234' ORDER BY id`.pipe(
           Effect.orDie,
         )
-      const s = yield* session({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234", VIBEST_COMMAND: '["vibest"]' })
+      const s = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: "abcd1234",
+        VIBEST_PROJECT_ID: String(yield* db.projectId("r")),
+        VIBEST_COMMAND: '["vibest"]',
+      })
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
       yield* s.emit("input", { type: "input", text: "vibest handed this over", source: "extension" })
@@ -580,15 +589,10 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "VIBEST_AGENT without VIBEST_SESSION_ID: the guard still applies, only the result file is left out",
+    "VIBEST_AGENT without VIBEST_SESSION_ID: vibestd cannot place the caller, so the extension stays inert",
     Effect.gen(function* () {
-      const layout = yield* Layout
       const s = yield* session({ VIBEST_AGENT: "general", VIBEST_COMMAND: '["vibest"]' })
-      assert.deepStrictEqual([...s.handlers.keys()].sort(), ["session_shutdown", "tool_call"])
-      const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memory/a.md` }), [
-        { block: true, reason: "The project directory is off limits to sessions, except your scratchpad." },
-      ])
+      assert.deepStrictEqual([...s.handlers.keys()].sort(), ["session_shutdown"])
     }),
   )
 
@@ -605,6 +609,7 @@ describe("pi-vibest", () => {
       const env = {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: String(launched.projectId),
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
       }
@@ -679,7 +684,7 @@ describe("pi-vibest", () => {
       let connections = 0
       const proxy = net.createServer((socket) => {
         const isFirst = connections++ === 0
-        const upstream = net.connect(layout.socket)
+        const upstream = net.connect(layout.httpSocket)
         if (isFirst) first.upstream = upstream
         upstream.on("data", (chunk) => {
           if (isFirst) first.answered = true
@@ -689,13 +694,16 @@ describe("pi-vibest", () => {
         socket.on("data", (chunk) => (isFirst && !first.released ? first.held.push(chunk) : upstream.write(chunk)))
       })
       yield* Effect.acquireRelease(
-        Effect.callback<void>((resume) => void proxy.listen(path.join(home, "vibest.sock"), () => resume(Effect.void))),
+        Effect.callback<void>(
+          (resume) => void proxy.listen(path.join(home, "vibest-http.sock"), () => resume(Effect.void)),
+        ),
         () => Effect.sync(() => proxy.close()),
       )
       const notes: Array<string> = []
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: String(launched.projectId),
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_HOME: home,
@@ -735,7 +743,7 @@ describe("pi-vibest", () => {
       const server = net.createServer(() => {})
       yield* Effect.acquireRelease(
         Effect.callback<void>(
-          (resume) => void server.listen(path.join(hanging, "vibest.sock"), () => resume(Effect.void)),
+          (resume) => void server.listen(path.join(hanging, "vibest-http.sock"), () => resume(Effect.void)),
         ),
         () => Effect.sync(() => server.close()),
       )

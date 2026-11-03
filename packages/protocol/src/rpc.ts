@@ -414,30 +414,6 @@ export class VibestRpcs extends RpcGroup.make(
   /** Coordinator side (the Pi extension): this request's inbox rows, one string per batch, instead of the runtime's prompt. */
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
   /**
-   * Hook side: a harness plugin's turn-end event, verbatim JSON. vibestd reads it with the harness adapter's `turnEnd` and
-   * writes the result file and the turn-end report line. Protocol only; no caller. Unknown ids, another harness than
-   * the session's, and events the adapter ignores change nothing.
-   */
-  protocol(
-    admitted(
-      Rpc.make("TurnEnd", {
-        payload: { sessionId: Schema.String, harness: Schema.String, event: Schema.String },
-      }),
-    ),
-  ),
-  /**
-   * Hook side: a harness plugin's prompt event, verbatim JSON. vibestd reads it with the adapter's `userPrompt`, writes the
-   * turn-start report line, and records the round. Protocol only; no caller. The main agent and vibest's own deliveries
-   * are ignored.
-   */
-  protocol(
-    admitted(
-      Rpc.make("Prompt", {
-        payload: { sessionId: Schema.String, harness: Schema.String, event: Schema.String },
-      }),
-    ),
-  ),
-  /**
    * `vibest`, before it execs: upsert the repository's coordinator row at its terminal. sessionId is that row's id
    * (VIBEST_SESSION_ID); harnessSessionId is the conversation to reopen, null with fresh or a harness switch.
    */
@@ -537,17 +513,6 @@ export class VibestRpcs extends RpcGroup.make(
       }),
     ),
   ),
-  /**
-   * Coordinator side (the Pi extension, the Stop hook), off the turn's path: the conversation id harness made for
-   * coordinator session sessionId. Protocol only; no caller. The last report for that session and harness wins; anything else is ignored.
-   */
-  protocol(
-    admitted(
-      Rpc.make("CoordinatorSessionReady", {
-        payload: { sessionId: Schema.String, harness: Schema.String, harnessSessionId: Schema.String },
-      }),
-    ),
-  ),
   scoped(Rpc.make("Project.Info", { success: ProjectInfoResult, error: Schema.Union([Forbidden, NotInRepository]) })),
   scoped(
     Rpc.make("Project.List", {
@@ -627,16 +592,6 @@ export class VibestRpcs extends RpcGroup.make(
         /** The main agent's `vibest --env`, from vibestd's memory (absent after vibestd was stopped or restarted without a handoff). */
         env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
       }),
-      error: Schema.Union([Forbidden, NoSuchSession]),
-    }),
-  ),
-  /**
-   * The harness's integration, once at its start: the harness takes input now, and `pid` is the harness's own process (a
-   * restart signals it). vibestd waits for this before it hands the harness its first turn, or a restarted one its next.
-   */
-  scoped(
-    Rpc.make("Session.Ready", {
-      payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),

@@ -11,20 +11,7 @@ import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 // The client side of vibest.sock (SPEC §12): one short connection per command. A missing daemon is started and waited for
 // (up to 10 s) unless the caller is an agent. The existing Ping preflight is the only Ping: it detects a daemon whose
 // Ping lacks this protocol before a mutation. Business requests carry their own headers and do not Ping again.
-import {
-  Cause,
-  Config,
-  Duration,
-  Effect,
-  Exit,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Predicate,
-  Schedule,
-  Schema,
-} from "effect"
+import { Cause, Config, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcSerialization } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
@@ -144,43 +131,104 @@ export const connect = (socket: string) =>
     ),
   ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
 
-/** How long one try of a harness hook's request (`TurnEnd`, `Prompt`) may take to connect and return. */
+/** How long one try of an integration's HTTP request may take to connect and return. */
 export const HOOK_TIMEOUT = Duration.seconds(2)
 /** The pause before the one retry: long enough for a vibestd handoff to start listening again. */
 export const HOOK_RETRY_DELAY = Duration.millis(300)
 
-/** Connecting failed before anything was sent: nothing listens on the socket, or there is no socket. */
-const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
-const notConnected = (error: unknown) => {
-  if (!Predicate.hasProperty(error, "reason") || !Predicate.hasProperty(error.reason, "_tag")) return false
-  if (error.reason._tag !== "SocketOpenError" || !Predicate.hasProperty(error.reason, "cause")) return false
-  const cause = error.reason.cause
-  return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) && CONNECT_CODES.has(cause.code)
+/** The status and body of an HTTP/1.1 answer read whole: `Content-Length` or chunked, else to the close. */
+const parseAnswer = (raw: string) => {
+  const split = raw.indexOf("\r\n\r\n")
+  if (split === -1) return undefined
+  const head = raw.slice(0, split).split("\r\n")
+  const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(head[0] ?? "")?.[1] ?? Number.NaN)
+  const field = (name: string) =>
+    head
+      .find((h) => h.toLowerCase().startsWith(`${name}:`))
+      ?.slice(name.length + 1)
+      .trim()
+  let body = raw.slice(split + 4)
+  const length = field("content-length")
+  if (length !== undefined) {
+    if (new TextEncoder().encode(body).length < Number(length)) return undefined
+  } else if (field("transfer-encoding")?.toLowerCase() === "chunked") {
+    if (!body.endsWith("0\r\n\r\n")) return undefined
+    let out = ""
+    for (let at = 0; ;) {
+      const eol = body.indexOf("\r\n", at)
+      const size = Number.parseInt(body.slice(at, eol), 16)
+      if (!size) break
+      out += body.slice(eol + 2, eol + 2 + size)
+      at = eol + 2 + size + 2
+    }
+    body = out
+  }
+  let parsed: unknown
+  try {
+    parsed = body === "" ? undefined : JSON.parse(body)
+  } catch {
+    parsed = undefined
+  }
+  return Number.isNaN(status) ? undefined : { status, body: parsed }
 }
 
 /**
- * A harness hook's one request to vibestd, with `headers`; it never starts vibestd and never fails. Only a try whose
- * connection could not be made at all (ECONNREFUSED, ENOENT) is tried once more. Once the request may have been sent
- * (a dropped connection, an error answer, a timeout) it is not: vibestd may have handled it, and a second turn end would
- * be delivered twice.
+ * A `POST route` with a JSON body to vibestd's HTTP socket (`vibest-http.sock`), on the platform's socket: its status
+ * and parsed body. One request per connection.
  */
-export const hookCall = (
-  socket: string,
+export const httpPost = (socketPath: string, route: string, headers: Readonly<Record<string, string>>, body: unknown) =>
+  Effect.gen(function* () {
+    const socket = yield* Effect.flatMap(SocketConnector, (dial) => dial(socketPath))
+    const payload = JSON.stringify(body)
+    const lines = [
+      `POST ${route} HTTP/1.1`,
+      "host: vibestd",
+      "connection: close",
+      "content-type: application/json",
+      `content-length: ${new TextEncoder().encode(payload).length}`,
+      ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
+    ]
+    const write = yield* socket.writer
+    const pull = yield* Socket.readerBytes(socket)
+    yield* write.write(`${lines.join("\r\n")}\r\n\r\n${payload}`)
+    const decoder = new TextDecoder()
+    let raw = ""
+    for (;;) {
+      const chunk = yield* pull.pipe(Effect.option)
+      if (chunk._tag === "None") break
+      for (const c of chunk.value) raw += decoder.decode(c, { stream: true })
+      const answer = parseAnswer(raw)
+      if (answer) return answer
+    }
+    const answer = parseAnswer(raw)
+    if (!answer) return yield* Effect.fail(new Error(`vibestd gave no answer on ${socketPath}`))
+    return answer
+  }).pipe(Effect.scoped)
+
+/**
+ * An integration's one request to vibestd's HTTP socket; it never starts vibestd. Only a try whose connection could not
+ * be made at all (ECONNREFUSED, ENOENT) is tried once more: once sent, vibestd may have handled it.
+ */
+export const hookPost = (
+  socketPath: string,
+  route: string,
   headers: Readonly<Record<string, string>>,
-  send: (client: VibestClient) => Effect.Effect<void, unknown>,
+  body: unknown,
 ) => {
-  const once = RpcClient.withHeaders(connect(socket).pipe(Effect.flatMap(send)), headers).pipe(
-    Effect.scoped,
-    Effect.timeout(HOOK_TIMEOUT),
-    Effect.exit,
-  )
+  const once = httpPost(socketPath, route, headers, body).pipe(Effect.timeout(HOOK_TIMEOUT), Effect.exit)
   return Effect.gen(function* () {
     const first = yield* once
-    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return
+    if (Exit.isSuccess(first)) return first.value
+    const code = Option.getOrUndefined(Cause.findErrorOption(first.cause)) as { code?: unknown } | undefined
+    if (!CONNECT_CODES.has(String(code?.code))) return yield* Effect.failCause(first.cause)
     yield* Effect.sleep(HOOK_RETRY_DELAY)
-    yield* once
+    const second = yield* once
+    return Exit.isSuccess(second) ? second.value : yield* Effect.failCause(second.cause)
   })
 }
+
+/** Connecting failed before anything was sent: nothing listens on the socket, or there is no socket. */
+const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
 
 /** One Ping, or none if nothing answered in time. Does not judge protocol. */
 export const readPing = (socket: string) =>

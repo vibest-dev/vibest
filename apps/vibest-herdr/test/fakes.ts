@@ -463,7 +463,7 @@ const over = (options: TestOptions) => {
     ),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
   // The fake harness's integration: it reports ready, with its harness's pid, once `open` or `run` started it (rpc.ts
-  // Session.Ready).
+  // `ready` event).
   const integration = Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime

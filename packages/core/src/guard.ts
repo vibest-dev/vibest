@@ -1,49 +1,19 @@
-// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude's plugin tool.call
-// (in PreToolUse's shape) and Cursor's preToolUse through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
-// names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
+// The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT), on the neutral ToolCall each
+// integration sends to vibestd's `/guard` (Cursor's preToolUse through its adapter's decode). A call is allowed unless a rule here
+// names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest hook bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
 // may not touch the projects directory except its project's scratch directory (VIBEST_SCRATCH): not another project's
 // scratch, and not its own project's instructions.md, docs or memory, for every harness. Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
-import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
+import type { ToolCall as ProtocolToolCall } from "@vibest/protocol/protocol"
+import { Config, Effect, FileSystem, Option, Path } from "effect"
 
 import { Layout, VibestCommand } from "./paths.ts"
 
-/** A tool call as the harness reports it: its tool name (any case), its arguments, and the agent's cwd. */
-export interface ToolCall {
-  readonly tool: string
-  readonly input: Readonly<Record<string, unknown>>
-  readonly cwd: string
-}
-
-const PATH_TOOLS = new Set([
-  "read",
-  "write",
-  "edit",
-  "multiedit",
-  "notebookedit",
-  "notebookread",
-  "ls",
-  "grep",
-  "glob",
-  "find",
-  "delete",
-  "list",
-  "readlints",
-])
-/** Path tools that read a whole tree: given a directory above the project, they reach into it. */
-const SEARCH_TOOLS = new Set(["grep", "glob", "find"])
-const EDIT_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"])
-/** Cursor's file writes, which the coordinator's harnesses do not use. Same refusal. */
-const fileWritingTool = (tool: string) => {
-  const name = tool.toLowerCase()
-  return EDIT_TOOLS.has(name) || name === "delete" || name === "strreplace"
-}
-/** Cursor's is Shell `{command, cwd}`. */
-const SHELL_TOOLS = new Set(["bash", "powershell", "shell"])
-const shellCommand = (input: Readonly<Record<string, unknown>>) => str(input.command)
+/** A tool call in the neutral shape every integration sends (@vibest/protocol ToolCall): no harness tool names here. */
+export type ToolCall = ProtocolToolCall
 
 /** The `)` closing the `(` at `open`, or -1. ponytail: quotes inside are not followed, so a quoted `)` ends it early. */
 const closing = (s: string, open: number) => {
@@ -260,10 +230,8 @@ export const shellBlock = (
     // The harness's turn-end hook runs it; an agent running it would report a turn end that did not happen.
     const words = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined)
     const at = words.indexOf("integration")
-    if (at !== -1 && words[at + 1] === "stop")
-      return "vibest integration stop is the harness's turn-end hook, not an agent command."
-    if (at !== -1 && words[at + 1] === "prompt")
-      return "vibest integration prompt is the harness's user-prompt hook, not an agent command."
+    if (at !== -1 && words[at + 1] === "event")
+      return "vibest integration event is the harness's hook bridge, not an agent command."
   }
   return undefined
 }
@@ -287,8 +255,6 @@ const physical = (p: string) =>
     }
     return current
   })
-
-const str = (value: unknown) => (typeof value === "string" ? value : undefined)
 
 /**
  * A path as Cursor's tools take it (cursor-agent's path-utils `o1`): a `file://` URL as its path (the URL standard parses
@@ -318,13 +284,11 @@ export type Rules = (
 /** The coordinator: the shared shell denials plus its own, and no file edits (a session makes changes). */
 export const coordinator: Rules = (call) =>
   Effect.gen(function* () {
-    const tool = call.tool.toLowerCase()
-    if (SHELL_TOOLS.has(tool)) {
-      const command = shellCommand(call.input)
-      if (command === undefined) return "The shell call has no command string; refused."
-      return shellBlock(command, yield* VibestCommand, true)
+    if (call.kind === "shell") {
+      if (call.command === undefined) return "The shell call has no command string; refused."
+      return shellBlock(call.command, yield* VibestCommand, true)
     }
-    if (fileWritingTool(call.tool)) return "The coordinator does not edit files; hand the change to a session."
+    if (call.kind === "edit") return "The coordinator does not edit files; hand the change to a session."
     return undefined
   })
 
@@ -362,10 +326,8 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   /** Off limits: inside the projects directory but not the session's scratch; with search, also a directory above it. */
   const blocked = (target: string, search: boolean) =>
     (search && inside(projects, target)) || (inside(target, projects) && !inScratch(target))
-  const tool = call.tool.toLowerCase()
-
-  if (SHELL_TOOLS.has(tool)) {
-    const command = shellCommand(call.input)
+  if (call.kind === "shell") {
+    const command = call.command
     if (command === undefined) return "The shell call has no command string; refused."
     const reason = shellBlock(command, yield* VibestCommand, false)
     if (reason) return reason
@@ -386,11 +348,9 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     }
     return undefined
   }
-  if (!PATH_TOOLS.has(tool)) return undefined
-  const search = SEARCH_TOOLS.has(tool)
-  // A Glob pattern may itself be a path: its part before the first wildcard.
-  const pattern = tool === "glob" ? str(call.input.pattern)?.split(/[*?[{]/)[0] : undefined
-  for (const raw of [str(call.input.file_path), str(call.input.notebook_path), str(call.input.path), pattern]) {
+  if (call.kind === "other") return undefined
+  const search = call.kind === "search"
+  for (const raw of call.paths) {
     if (raw === undefined || raw === "") continue
     const targets = yield* resolve(raw)
     if (targets === undefined) return BAD_URL
@@ -399,21 +359,6 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   return undefined
 })
 
-/**
- * The hook input in Claude's PreToolUse shape, which the Claude plugin's tool.call builds. Cursor's preToolUse has the same three, but its `cwd` may
- * be empty or left out (then its one workspace root) and a Shell call carries its own working directory in `tool_input.cwd`.
- */
-const decodePreToolUse = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    Schema.Struct({
-      tool_name: Schema.String,
-      tool_input: Schema.Record(Schema.String, Schema.Unknown),
-      cwd: Schema.optional(Schema.String),
-      workspace_roots: Schema.optional(Schema.Array(Schema.String)),
-    }),
-  ),
-)
-
 /** The built-in agents: the main agent (`vibest`), and `general`, the agent every spawned session runs. */
 export const COORDINATOR = "coordinator"
 export const GENERAL = "general"
@@ -421,28 +366,11 @@ export const GENERAL = "general"
 /** The rules of `agent` (VIBEST_AGENT): the coordinator's, or every other session's. */
 export const rulesOf = (agent: string): Rules => (agent === COORDINATOR ? coordinator : session)
 
-/**
- * The rules of `agent` (VIBEST_AGENT for `vibest integration guard`, the session's own for vibestd's HTTP guard) applied
- * to one pre-tool hook input (`raw`, as the harness sent it): the reason to refuse the call, if any; the harness adapter
- * words the answer. Any failure (input vibest cannot read) makes the hook refuse.
- */
-export const check = (agent: string, raw: string) =>
+/** The rules of `agent` applied to one neutral tool call: the reason to refuse it, if any. */
+export const check = (agent: string, call: ToolCall) =>
   Effect.gen(function* () {
-    const rules = rulesOf(agent)
-    const input = yield* decodePreToolUse(raw)
     const path = yield* Path.Path
-    // The base: the call's cwd, else the only workspace root; absolute, or vibest cannot tell where paths lead.
-    const roots = input.workspace_roots ?? []
-    const base = input.cwd || (roots.length === 1 ? roots[0] : undefined)
-    if (!base || !path.isAbsolute(base))
-      return yield* Effect.fail(new Error("the hook input has no absolute working directory"))
-    // A Shell call's own directory, read the way Cursor reads it (empty: the default; then normalized, as Cursor's
-    // path.resolve does); anything else malformed refuses.
-    const own = input.tool_input.cwd
-    if (own !== undefined && typeof own !== "string")
-      return yield* Effect.fail(new Error("tool_input.cwd is not a string"))
-    const ownPath = own ? yield* toolPath(own, base, yield* Config.String("HOME")) : base
-    if (ownPath === undefined) return yield* Effect.fail(new Error("tool_input.cwd is a file URL vibest cannot read"))
-    const cwd = path.normalize(ownPath)
-    return yield* rules({ tool: input.tool_name, input: input.tool_input, cwd })
+    if (!path.isAbsolute(call.cwd))
+      return yield* Effect.fail(new Error("the tool call has no absolute working directory"))
+    return yield* rulesOf(agent)({ ...call, cwd: path.normalize(call.cwd) })
   })

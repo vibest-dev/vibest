@@ -65,7 +65,7 @@ describe("@vibest/cursor", () => {
     assert.deepStrictEqual(run("preToolUse", { ...agent, FAKE_OUT: deny }, '{"tool_name":"Shell"}'), {
       code: 0,
       stdout: deny,
-      calls: 'integration guard --harness cursor <{"tool_name":"Shell"}>',
+      calls: 'integration event --harness cursor preToolUse <{"tool_name":"Shell"}>',
     })
     assert.strictEqual(run("preToolUse", { ...agent, FAKE_EXIT: "1" }).code, 2)
   })
@@ -74,18 +74,26 @@ describe("@vibest/cursor", () => {
     const own = path.join(dir, "own vibest")
     fs.writeFileSync(own, `#!/bin/sh\necho "own $* <$(cat)>" >> ${calls}\n`, { mode: 0o755 })
     const viaSh = run("stop", { ...agent, VIBEST_COMMAND: JSON.stringify(["sh", own]) }, "{}")
-    assert.strictEqual(viaSh.calls, "own integration stop --harness cursor <{}>")
+    assert.strictEqual(viaSh.calls, "own integration event --harness cursor stop <{}>")
     const escaped = run("stop", { ...agent, VIBEST_COMMAND: '["/x\\"y"]' }, "{}")
-    assert.strictEqual(escaped.calls, "integration stop --harness cursor <{}>")
+    assert.strictEqual(escaped.calls, "integration event --harness cursor stop <{}>")
   })
 
-  it("a vibest agent's turn end goes to `vibest integration stop`, and never fails the hook", () => {
+  it("a vibest agent's turn end goes to `vibest integration event`, and never fails the hook", () => {
     const r = run("afterAgentResponse", { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, '{"text":"done"}')
-    assert.deepStrictEqual(r, { code: 0, stdout: "", calls: 'integration stop --harness cursor <{"text":"done"}>' })
+    assert.deepStrictEqual(r, {
+      code: 0,
+      stdout: "",
+      calls: 'integration event --harness cursor afterAgentResponse <{"text":"done"}>',
+    })
   })
 
-  it("a vibest agent's prompt goes to `vibest integration prompt`, and never blocks the prompt", () => {
+  it("a vibest agent's prompt goes to `vibest integration event`, and never blocks the prompt", () => {
     const r = run("beforeSubmitPrompt", { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, '{"prompt":"look"}')
-    assert.deepStrictEqual(r, { code: 0, stdout: "", calls: 'integration prompt --harness cursor <{"prompt":"look"}>' })
+    assert.deepStrictEqual(r, {
+      code: 0,
+      stdout: "",
+      calls: 'integration event --harness cursor beforeSubmitPrompt <{"prompt":"look"}>',
+    })
   })
 })

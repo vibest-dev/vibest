@@ -4,9 +4,12 @@
 // plugin root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status.
 import pkg from "../package.json" with { type: "json" }
 
-/** The hook script: only a vibest agent (VIBEST_AGENT, set in the pane vibest starts) is checked or reported. */
+/**
+ * The hook script: only a vibest agent (VIBEST_AGENT and VIBEST_SESSION_ID, set in the pane vibest starts) is checked or
+ * reported. Every hook's raw payload goes to `vibest integration event`; vibestd decodes it with the cursor adapter.
+ */
 export const HOOK = `#!/bin/sh
-# @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`vibest integration prompt\` when the user submits, \`vibest integration stop\` at a turn end.
+# @vibest/cursor ${pkg.version}: each hook's payload to \`vibest integration event --harness cursor <hook>\`.
 # The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
 # cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
 vibest() {
@@ -29,25 +32,21 @@ vibest() {
   command vibest "$@"
 }
 case "\${1:-}" in
-  guard)
+  preToolUse)
     # preToolUse runs fail-closed, where no answer refuses: outside vibest, allow (it grants no approval).
     if [ -z "\${VIBEST_AGENT:-}" ]; then cat >/dev/null; echo '{"permission":"allow"}'; exit 0; fi
-    vibest integration guard --harness cursor || { echo "vibest integration guard failed; the tool call is refused." >&2; exit 2; }
+    vibest integration event --harness cursor preToolUse || { echo "vibest integration event failed; the tool call is refused." >&2; exit 2; }
     ;;
-  prompt)
-    # beforeSubmitPrompt can block the prompt. A missed report must not: the turn still runs.
+  *)
+    # A missed report must not block the prompt or fail the turn.
     if [ -z "\${VIBEST_AGENT:-}" ] || [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
-    vibest integration prompt --harness cursor >/dev/null 2>&1 || true
-    ;;
-  stop)
-    if [ -z "\${VIBEST_AGENT:-}" ] || [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
-    vibest integration stop --harness cursor >/dev/null 2>&1 || true
+    vibest integration event --harness cursor "$1" >/dev/null 2>&1 || true
     ;;
 esac
 exit 0
 `
 
-const hook = (action: string) => ({ command: `sh ./hooks/vibest.sh ${action}` })
+const hook = (name: string) => ({ command: `sh ./hooks/vibest.sh ${name}` })
 
 /** Every file of the plugin, by its path inside the plugin directory. */
 export const files: Readonly<Record<string, string>> = {
@@ -57,9 +56,9 @@ export const files: Readonly<Record<string, string>> = {
       version: 1,
       hooks: {
         // A crash, timeout or missing answer refuses the call; Cursor otherwise lets it through.
-        preToolUse: [{ ...hook("guard"), failClosed: true }],
-        beforeSubmitPrompt: [hook("prompt")],
-        afterAgentResponse: [hook("stop")],
+        preToolUse: [{ ...hook("preToolUse"), failClosed: true }],
+        beforeSubmitPrompt: [hook("beforeSubmitPrompt")],
+        afterAgentResponse: [hook("afterAgentResponse")],
         stop: [hook("stop")],
       },
     },

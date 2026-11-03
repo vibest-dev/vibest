@@ -3,7 +3,7 @@ import net from "node:net"
 // Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
+import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
@@ -12,6 +12,7 @@ import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
+import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
 import {
   Cause,
@@ -27,6 +28,7 @@ import {
   type Scope,
   Stream,
 } from "effect"
+import * as Headers from "effect/http/Headers"
 
 import * as Platform from "#platform"
 
@@ -151,14 +153,6 @@ describe("Daemon.Stop", () => {
         ),
         "DaemonStopping",
       )
-      assert.strictEqual(
-        tagOf(
-          yield* Effect.exit(
-            raw.TurnEnd({ sessionId: "x", harness: "pi", event: "{}" }, { headers: protocolHeaders() }),
-          ),
-        ),
-        "DaemonStopping",
-      )
       assert.strictEqual(yield* stop(repo), "DaemonStopping")
       // Reads still answer.
       assert.isAbove((yield* user.List({})).length, 0)
@@ -221,24 +215,27 @@ describe("Daemon.Stop", () => {
       const herdr = yield* FakeRuntime
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const raw = yield* client
       // The runtime never shows the turn working (a fast turn), so the hook's start line is the launch's only pickup proof.
       const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
-      // What the Pi extension sends for that turn's `input` and `agent_settled`.
-      const hook = (call: "Prompt" | "TurnEnd", event: object) =>
+      // What the Pi extension sends to /events for that turn's `input` and `agent_settled`.
+      const handle = yield* Http.make
+      const projectId = String((yield* (yield* Db).sessionIdentity(id))!.projectId)
+      const hook = (event: object) =>
         Effect.forkScoped(
-          Effect.exit(
-            raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
-          ),
+          handle({
+            path: "/events",
+            headers: Headers.fromInput(sessionHeaders({ sessionId: id, projectId, harness: "pi" })),
+            body: JSON.stringify(event),
+          }),
         )
-      const prompted = yield* hook("Prompt", { type: "input", text: "work", source: "interactive" })
-      const ended = yield* hook("TurnEnd", { type: "agent_settled", text: "done", error: "", aborted: false })
+      const prompted = yield* hook({ type: "turn.start", origin: "typed", text: "work" })
+      const ended = yield* hook({ type: "turn.end", outcome: "completed", text: "done" })
       assert.strictEqual(yield* settled(stopping), "accepted")
-      assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
-      assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
+      assert.strictEqual((yield* Fiber.join(prompted)).status, 204)
+      assert.strictEqual((yield* Fiber.join(ended)).status, 204)
       assert.include(yield* (yield* FileSystem.FileSystem).readFileString(layout.resultFile(id)), "done")
     }),
     { promptsIgnored: true },

@@ -203,7 +203,7 @@ describe("Project.StopCoordinator", () => {
     "y after a restart in place: SIGTERM to the pid the restarted harness reported ready with, its terminal kept",
     Effect.gen(function* () {
       const s = yield* launched
-      // `vibest update` ran the harness again in the same terminal; its integration reported the new pid (Session.Ready).
+      // `vibest update` ran the harness again in the same terminal; its integration reported the new pid (a ready event).
       yield* s.processes.set(7777, "alive")
       yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })

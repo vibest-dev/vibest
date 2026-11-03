@@ -275,7 +275,7 @@ const checks: ReadonlyArray<Check> = [
       expect(/Agents must not control herdr/.test(r.stdout), "no guard refusal in the transcript")
       expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
       const { harness, payload } = await result(w, id)
-      expect(harness === "claude" && /pong/.test(String(payload.last_assistant_message)), JSON.stringify(payload))
+      expect(harness === "claude" && /pong/.test(String(payload.text)), JSON.stringify(payload))
     },
   },
   {
@@ -305,7 +305,7 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const id = "e2e00005"
-      // `vibest integration stop` sends the turn end to vibestd, which writes the result file for a session it knows.
+      // `vibest integration event` sends each hook to vibestd, which writes the result file for a session it knows.
       const project = await knownSessions(w, "e2e/i5", { [id]: "general" }, cwd, "cursor")
       const r = await w.run(
         cwd,
@@ -335,16 +335,13 @@ const checks: ReadonlyArray<Check> = [
       )
       const log = await fs.readFile(calls, "utf8").catch(() => "")
       expect(
-        /^integration guard --harness cursor => .*"permission":"deny".*herdr/m.test(log),
+        /^integration event --harness cursor preToolUse => .*"permission":"deny".*herdr/m.test(log),
         `no guard refusal recorded:\n${log}\nscreen:\n${plain(r.stderr)}`,
       )
       expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
       expect(r.code === 0, `no result file within 240s; vibest calls:\n${log}\nscreen:\n${plain(r.stderr)}`)
       const { harness, payload } = await result(w, id)
-      expect(
-        harness === "cursor" && payload.hook_event_name === "afterAgentResponse" && /pong/.test(String(payload.text)),
-        JSON.stringify(payload),
-      )
+      expect(harness === "cursor" && /pong/.test(String(payload.text)), JSON.stringify(payload))
       expect(await Bun.file(marker).exists(), "the project's own sessionStart hook did not run")
     },
   },
@@ -366,7 +363,7 @@ const checks: ReadonlyArray<Check> = [
               /summary: e2e answer/.test(first?.message ?? ""),
             `answer result: ${first?.message.slice(0, 500)}`,
           )
-          const aborted = async () => (await ends(w, id)).filter((p) => p.reason === "aborted").length
+          const aborted = async () => (await ends(w, id)).filter((p) => p.aborted === true).length
 
           // The person presses Esc in the pane: one result, failed, that says the turn was interrupted.
           await w.ok(["send", id, STORY])

@@ -39,29 +39,6 @@ const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
 const vibestReport = (vibest: ReadonlyArray<string>) =>
   [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
 
-/**
- * The plugin's turn.complete report (`TurnComplete`) as a result: `answer` as it is;
- * `aborted` marked so (readResult: a result only while vibest's round is open, so `vibest interrupt`'s own Esc is none);
- * `refusal` and `error` failed. turn.complete carries no API error kind, so `error` names no cause (no usage-limit move).
- */
-const turnComplete = (event: Readonly<Record<string, unknown>>) => {
-  if (event.reason === "answer") return event
-  if (event.reason === "aborted")
-    return {
-      ...event,
-      aborted: true,
-      error: "interrupted",
-      error_details: "the turn was stopped in its terminal (Esc) before it ended",
-    }
-  if (event.reason === "refusal") {
-    const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
-    const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
-    return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
-  }
-  // The answer stays the result's text; repeating it here would print it twice.
-  return { ...event, error: "error", error_details: "the turn ended on an API error" }
-}
-
 /** Where Claude keeps the transcript of session `id` started at `root`: every non-alphanumeric of the path becomes `-`. */
 const transcript = Effect.fn("claudeTranscript")(function* (root: string, id: string) {
   const path = yield* Path.Path
@@ -133,7 +110,6 @@ export const claude: HarnessAdapter = {
   rulesInPrompt: false,
   interruptKey: "esc",
   startup: claudeStartup,
-  resultField: "last_assistant_message",
   delivery: "poll",
   reportsReady: true,
   checkProvider: anthropicOnly("claude"),
@@ -182,16 +158,6 @@ export const claude: HarnessAdapter = {
     ),
     answer: claudeModels,
   },
-  // The plugin's prompt.submit: only what the person submitted, at the terminal (composer) or through Remote Control
-  // (bridge); a task notification, a scheduled trigger, a peer or a plugin's prompt is not the person.
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.hook_event_name !== "PromptSubmit") return undefined
-    if (event.origin !== "composer" && event.origin !== "bridge") return undefined
-    return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
-  },
-  // The plugin's main-loop turn.complete, whatever its reason. The main agent's turn ends are no result.
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
   // `--resume` of a session Claude never wrote fails (an id vibest chose up front before it took reported ones).
   canResume: (root, sessionId) =>
     Effect.flatMap(transcript(root, sessionId), (file) =>

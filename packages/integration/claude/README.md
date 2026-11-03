@@ -3,15 +3,16 @@
 One ordinary Claude Code plugin, one hooks module. Every call to vibest is an HTTP request from `$.http.fetch` to
 vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibest` process.
 
-- `turn.complete` posts each main-loop turn end to `/hooks/claude/turn-end` with its `reason`, the answer and the
-  current Claude session id. vibest maps the reason: `answer` is the result as it is; `aborted` is an interrupted
-  (failed) result when the person pressed Esc, and nothing when `vibest interrupt` (or remove, archive) stopped the
-  turn; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
-  coordinator vibestd records only the conversation id.
-- `prompt.submit` posts a worker's prompt with its `origin.kind` to `/hooks/claude/prompt`; vibest keeps only what
-  the person submitted (`composer`, or `bridge` for Remote Control).
-- `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
-  refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
+- `session.start` posts a `ready` event (Claude Code's pid and conversation) to `/events`.
+- `turn.complete` posts each main-loop turn end to `/events` as a neutral `turn.end`: `answer` is completed, `aborted`
+  interrupted, `refusal` and `error` failed (an error whose text is a usage limit has `failure.kind: "limited"`).
+  vibestd delivers an interrupted turn as a failed result when the person pressed Esc, and nothing when `vibest
+  interrupt` (or remove, archive) stopped it. A subagent's loop (`agentId` set) reports nothing; a coordinator's turn
+  end is no result.
+- `prompt.submit` posts what the person submitted (`composer`, or `bridge` for Remote Control) as a typed `turn.start`.
+- `tool.call` posts each tool call, a subagent's included, as a neutral tool call to `/guard` and returns `{ deny }`
+  when vibest refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is
+  refused.
 - The **coordinator inbox**: from `session.start`, a coordinator polls `/inbox/poll` every second. A batch comes as
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`

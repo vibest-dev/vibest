@@ -3,9 +3,10 @@
  * vibest goes over vibestd's HTTP socket (`$VIBEST_HOME/vibest-http.sock`, packages/server/src/http.ts) with the shared
  * session headers (@vibest/protocol `sessionHeaders`): no `vibest` process, no files.
  *
- * - `turn.complete`, `prompt.submit` and `tool.call` for every VIBEST session (VIBEST_AGENT and VIBEST_SESSION_ID set):
- *   the turn end, the person's prompt and the tool guard. turn.complete fires for every main-loop turn end (reason
- *   answer, aborted, refusal or error; Stop fires for no Esc) and carries no API error kind.
+ * - `session.start`, `turn.complete`, `prompt.submit` and `tool.call` for every VIBEST session (VIBEST_AGENT and
+ *   VIBEST_SESSION_ID set), as the neutral integration events (`/events`: ready, turn.end, turn.start) and the neutral
+ *   tool call (`/guard`). turn.complete fires for every main-loop turn end (reason answer, aborted, refusal or error;
+ *   Stop fires for no Esc) and carries no API error kind: an error whose answer reads as a usage limit is `limited`.
  * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
  *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
  *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
@@ -20,7 +21,17 @@
  * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts).
  * The AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
  */
-import { ACK_ROUTE, hookRoute, isPolled, POLL_ROUTE, type Polled, sessionHeaders } from "@vibest/protocol/protocol"
+import {
+  ACK_ROUTE,
+  EVENTS_ROUTE,
+  GUARD_ROUTE,
+  type IntegrationEvent,
+  isPolled,
+  POLL_ROUTE,
+  type Polled,
+  sessionHeaders,
+} from "@vibest/protocol/protocol"
+import { isUsageLimitError, toolCallOf } from "@vibest/protocol/tools"
 import type { EngineInterface, On, Register } from "claude-code"
 
 /** This plugin's version, inlined by scripts/build.ts (Claude Code's `$.plugin` has no version). */
@@ -133,6 +144,35 @@ const errorOf = (body: unknown) =>
   typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
     ? (body as { error: string }).error
     : undefined
+
+/** turn.complete as the neutral turn end. */
+const turnEnd = (event: {
+  readonly reason: string
+  readonly answer?: string
+  readonly refusal?: unknown
+}): IntegrationEvent => {
+  const text = event.answer ?? ""
+  if (event.reason === "answer") return { type: "turn.end", outcome: "completed", text }
+  if (event.reason === "aborted") return { type: "turn.end", outcome: "interrupted", text }
+  if (event.reason === "refusal") {
+    const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
+    const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
+    return {
+      type: "turn.end",
+      outcome: "failed",
+      text,
+      failure: { kind: "other", message: why || "the model refused to answer" },
+    }
+  }
+  return {
+    type: "turn.end",
+    outcome: "failed",
+    text,
+    failure: isUsageLimitError(text)
+      ? { kind: "limited", message: text }
+      : { kind: "other", message: "the turn ended on an API error" },
+  }
+}
 
 // A top-level function declaration: Claude Code's loader accepts `register` in no other shape.
 export function register(on: On, _options?: unknown) {
@@ -264,7 +304,12 @@ export function register(on: On, _options?: unknown) {
     // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready).
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.pid().catch(() => undefined)
-      void report(host, "/session/ready", pid === undefined ? {} : { pid })
+      const conversation = await host.conversation().catch(() => undefined)
+      void report(host, EVENTS_ROUTE, {
+        type: "ready",
+        ...(pid === undefined ? {} : { pid }),
+        ...(conversation ? { conversation } : {}),
+      } satisfies IntegrationEvent)
     }
     if (timer === undefined && (await identity(host))?.agent === "coordinator") {
       timer = host.every(POLL_MS, () => void tick(host))
@@ -303,25 +348,17 @@ export function register(on: On, _options?: unknown) {
   })
 
   // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
-  // (agentId set) is not the session's; the main agent's has no result (its conversation id goes with every poll).
+  // (agentId set) is not the session's. vibestd keeps no result of a main agent's turn.
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
       const host = nativeHost($)
-      const who = await identity(host).catch(() => undefined)
-      if (who && who.agent !== "coordinator")
-        void report(host, hookRoute("claude", "turn-end"), {
-          hook_event_name: "TurnComplete",
-          session_id: await host.conversation().catch(() => ""),
-          reason: event.reason,
-          last_assistant_message: event.answer,
-          ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
-        })
+      if (await identity(host).catch(() => undefined)) void report(host, EVENTS_ROUTE, turnEnd(event))
     }
     return next(event)
   })
 
-  // This module's own submit (a polled batch's line): its full text goes with it as context. Anything else is reported;
-  // vibestd keeps only what the person submitted (origin composer or bridge), and never the main agent's.
+  // This module's own submit (a polled batch's line): its full text goes with it as context. What the person submitted
+  // (origin composer or bridge) is a typed turn start; vibestd opens no round for the main agent.
   on("prompt.submit", async ($, event, next) => {
     const host = nativeHost($)
     if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
@@ -332,23 +369,23 @@ export function register(on: On, _options?: unknown) {
       if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
       return next({ ...event, context: [...(event.context ?? []), text] })
     }
-    const who = await identity(host).catch(() => undefined)
-    if (who && who.agent !== "coordinator")
-      await report(host, hookRoute("claude", "prompt"), {
-        hook_event_name: "PromptSubmit",
+    const typed = event.origin.kind === "composer" || event.origin.kind === "bridge"
+    if (typed && event.text.trim() !== "" && (await identity(host).catch(() => undefined)))
+      await report(host, EVENTS_ROUTE, {
+        type: "turn.start",
+        origin: "typed",
         text: event.text,
-        origin: event.origin.kind,
-      })
+      } satisfies IntegrationEvent)
     return next(event)
   })
 
   on("tool.call", async ($, event, next) => {
     const host = nativeHost($)
     if (!(await host.env("VIBEST_AGENT"))) return next(event)
-    const body = { tool_name: event.tool, tool_input: toolInput(event), cwd: await host.cwd() }
+    const body = { tool: toolCallOf(event.tool, toolInput(event), await host.cwd()) }
     for (let n = 0; ; n++) {
       try {
-        const r = await post(host, hookRoute("claude", "guard"), body, GUARD_TRY_MS)
+        const r = await post(host, GUARD_ROUTE, body, GUARD_TRY_MS)
         if (r.status === 200) {
           const deny = (r.body as { deny?: unknown } | undefined)?.deny
           return typeof deny === "string" ? { deny } : next(event)

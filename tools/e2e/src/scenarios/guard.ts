@@ -1,18 +1,26 @@
-// The pre-tool guard as a harness plugin runs it. Cursor's: `vibest integration guard --harness cursor`, the tool call on
-// stdin, the agent's environment. Claude's: `POST /hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
-// knows. Both plugins ask only for a vibest agent (I4, I9 run them for real); Pi's extension applies the same rules in
-// process (needs Pi running: runtime, not here).
+// The pre-tool guard as a harness plugin runs it. Cursor's: `vibest integration event --harness cursor preToolUse`, the
+// hook's payload on stdin, the agent's environment (vibestd decodes it with the cursor adapter). Claude's: `POST /guard`
+// on vibestd's HTTP socket with the neutral tool call, as a session vibestd knows. Both plugins ask only for a vibest
+// agent (I4, I9 run them for real); Pi's extension posts to `/guard` the same way (needs Pi running: runtime, not here).
 import path from "node:path"
 
 import { sessionHeaders } from "../../../../packages/protocol/src/protocol.ts"
+import { toolCallOf } from "../../../../packages/protocol/src/tools.ts"
 import type { Check } from "../check.ts"
 import { binary, expect, knownSessions, type World } from "../world.ts"
 
 type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
 
-/** The project of each world's Claude guard sessions, made on first use. */
-const projects = new WeakMap<World, Promise<number>>()
+/** The project of each world's guard sessions per harness, made on first use. */
+const projects = new WeakMap<World, Map<Harness, Promise<number>>>()
+const projectOf = (w: World, harness: Harness) => {
+  const own = projects.get(w) ?? new Map<Harness, Promise<number>>()
+  projects.set(w, own)
+  const sessions = { [`e2e-${harness}-general`]: "general", [`e2e-${harness}-coordinator`]: "coordinator" }
+  if (!own.has(harness)) own.set(harness, knownSessions(w, `e2e/guard-${harness}`, sessions, w.repository, harness))
+  return own.get(harness)!
+}
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
@@ -23,26 +31,33 @@ const ask = async (
   input: Record<string, unknown>,
   raw?: string,
 ): Promise<Answer> => {
-  const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
+  const sessionId = `e2e-${harness}-${agent}`
   if (harness === "claude" && agent !== undefined) {
-    const sessionId = `e2e-${agent}`
-    projects.set(
-      w,
-      projects.get(w) ?? knownSessions(w, "e2e/guard", { "e2e-general": "general", "e2e-coordinator": "coordinator" }),
-    )
-    const projectId = String(await projects.get(w))
-    const r = await fetch("http://vibestd/hooks/claude/guard", {
+    const projectId = String(await projectOf(w, harness))
+    const r = await fetch("http://vibestd/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
       headers: { ...sessionHeaders({ sessionId, projectId, agent, harness }), "content-type": "application/json" },
-      body: stdin,
+      body: raw ?? JSON.stringify({ tool: toolCallOf(tool, input, w.repository) }),
     })
     const json = (await r.json()) as { deny?: string; error?: string }
     if (r.status !== 200) return { code: r.status, decision: "none", reason: json.error ?? "" }
     return { code: 0, decision: json.deny === undefined ? "none" : "deny", reason: json.deny ?? "" }
   }
-  const env = agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001" }
-  const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", harness], { env, stdin })
+  const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
+  const env =
+    agent === undefined
+      ? {}
+      : {
+          VIBEST_AGENT: agent,
+          VIBEST_SESSION_ID: sessionId,
+          VIBEST_PROJECT_ID: String(await projectOf(w, harness)),
+          VIBEST_HARNESS: harness,
+        }
+  const r = await w.run(w.repository, [binary, "integration", "event", "--harness", harness, "preToolUse"], {
+    env,
+    stdin,
+  })
   const out = r.stdout.trim()
   if (!out) return { code: r.code, decision: "none", reason: r.stderr }
   const json = JSON.parse(out)

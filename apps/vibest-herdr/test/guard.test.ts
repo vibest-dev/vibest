@@ -1,10 +1,11 @@
-// `vibest integration guard` (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
+// The guard (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
+import { toolCallOf } from "@vibest/protocol/tools"
 import { LaunchFailed } from "@vibest/schema/session"
 import type { Host } from "@vibest/server/daemon"
 import { Cause, ConfigProvider, Crypto, Effect, Exit, FileSystem, Option, Path, Queue, Stdio, Terminal } from "effect"
@@ -54,11 +55,11 @@ describe("Shell denials", () => {
       "if true; then ls; fi",
       "",
       // Quoted text is data, here-document bodies and comments too.
-      "vibest run pi 'herdr pane list; vibest integration stop'",
+      "vibest run pi 'herdr pane list; vibest integration event'",
       "git commit -m 'herdr pane list'",
-      'rg "vibest integration stop" src',
+      'rg "vibest integration event" src',
       "/usr/bin/bun /src/main.ts report -- 'env -u VIBEST_AGENT vibest rm x'",
-      "vibest run pi - <<'EOF'\nherdr pane list\nvibest integration stop\nEOF",
+      "vibest run pi - <<'EOF'\nherdr pane list\nvibest integration event\nEOF",
       "ls # herdr pane list",
       "echo 'claude -p x' && echo \"gh auth token\"",
       // vibest decides who may run its commands (cli.ts userOnly, server.ts ACCESS), not the guard.
@@ -75,7 +76,7 @@ describe("Shell denials", () => {
       "vibest project write memory a.md -- x",
       "/usr/bin/bun /src/main.ts interrupt abcd1234",
       "/usr/local/bin/vibest archive abcd1234",
-      "vibest send x -- integration stop",
+      "vibest send x -- integration event",
       // Reading the identity is not changing it.
       "echo $VIBEST_SESSION_ID",
       "printenv VIBEST_AGENT",
@@ -126,23 +127,21 @@ describe("Shell denials", () => {
         assert.match(reason ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT/, command)
   })
 
-  it("refuse vibest integration stop, the harness's turn-end hook, however it is wrapped", () => {
+  it("refuse vibest integration event, the harness's hook bridge, however it is wrapped", () => {
     for (const command of [
-      "vibest integration stop",
-      "/usr/bin/bun /src/main.ts integration stop",
-      "vibest --log-level debug integration stop < x.json",
-      "echo '{}' | vibest integration stop",
-      "x=`vibest integration stop`",
-      "nohup timeout 5 vibest integration stop",
-      "bash -c 'vibest integration stop'",
+      "vibest integration event",
+      "/usr/bin/bun /src/main.ts integration event",
+      "vibest --log-level debug integration event < x.json",
+      "echo '{}' | vibest integration event",
+      "x=`vibest integration event`",
+      "nohup timeout 5 vibest integration event",
+      "bash -c 'vibest integration event'",
     ])
       for (const reason of both(command))
-        assert.match(reason ?? "", /^vibest integration stop is the harness's turn-end hook/, command)
+        assert.match(reason ?? "", /^vibest integration event is the harness's hook bridge/, command)
   })
 
-  it("refuse vibest integration prompt, the harness's user-prompt hook", () => {
-    for (const reason of both("vibest integration prompt --harness claude"))
-      assert.match(reason ?? "", /^vibest integration prompt is the harness's user-prompt hook/)
+  it("other integration commands are vibest's own to check", () => {
     assert.isUndefined(shellBlock("vibest integration guard", source, false))
   })
 
@@ -204,7 +203,7 @@ layer(Platform.services)("role rules", (it) => {
       yield* fs.makeDirectory(path.join(vibestHome, "projects"), { recursive: true })
       yield* fs.symlink(path.join(vibestHome, "projects"), path.join(home, "link"))
       const as = (rules: Rules) => (tool: string, input: Record<string, unknown>) =>
-        rules({ tool, input, cwd: home }).pipe(
+        rules(toolCallOf(tool, input, home)).pipe(
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
         )
@@ -244,7 +243,7 @@ layer(Platform.services)("role rules", (it) => {
         for (const dir of [own, other, path.join(project, "docs"), path.join(project, "memory")])
           yield* fs.makeDirectory(dir, { recursive: true })
         const asSession = (tool: string, input: Record<string, unknown>, scratch: string | null = own) =>
-          session({ tool, input, cwd: worktree }).pipe(
+          session(toolCallOf(tool, input, worktree)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(
               ConfigProvider.layer(
@@ -311,7 +310,7 @@ layer(Platform.services)("role rules", (it) => {
         yield* fs.makeDirectory(path.join(project, "docs"), { recursive: true })
         yield* fs.symlink(project, path.join(home, "p"))
         const asSession = (tool: string, command: string, cwd: string) =>
-          session({ tool, input: { command }, cwd }).pipe(
+          session(toolCallOf(tool, { command }, cwd)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: scratch }))),
           )
@@ -335,7 +334,7 @@ layer(Platform.services)("role rules", (it) => {
       yield* fs.makeDirectory(scratch, { recursive: true })
       const own = path.join(vibestHome, "projects", "k", "scratch")
       const asSession = (tool: string, input: Record<string, unknown>) =>
-        session({ tool, input, cwd: home }).pipe(
+        session(toolCallOf(tool, input, home)).pipe(
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: own }))),
         )
@@ -378,7 +377,7 @@ layer(Platform.services)("role rules", (it) => {
         yield* fs.symlink(peer, path.join(scratch, "peer"))
         yield* fs.symlink(path.join(project, "docs", "sub"), path.join(scratch, "deep"))
         const asSession = (tool: string, input: Record<string, unknown>) =>
-          session({ tool, input, cwd: home }).pipe(
+          session(toolCallOf(tool, input, home)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(
               ConfigProvider.layer(
@@ -438,7 +437,7 @@ layer(Platform.services)("role rules", (it) => {
     () =>
       Effect.gen(function* () {
         const as = (rules: Rules, tool: string, command: string) =>
-          rules({ tool, input: { command }, cwd: "/" }).pipe(
+          rules(toolCallOf(tool, { command }, "/")).pipe(
             Effect.provideService(VibestCommand, source),
             Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
@@ -456,7 +455,7 @@ layer(Platform.services)("role rules", (it) => {
             for (const command of [
               "env -u VIBEST_AGENT vibest rm abcd1234",
               "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234",
-              "vibest integration stop",
+              "vibest integration event",
               "herdr pane list",
             ])
               assert.isString(yield* as(rules, tool, command), `${tool}: ${command}`)
@@ -465,7 +464,7 @@ layer(Platform.services)("role rules", (it) => {
         // Not a shell call vibest can read: refused, not let through.
         for (const rules of [coordinator, session])
           assert.isString(
-            yield* rules({ tool: "Bash", input: {}, cwd: "/" }).pipe(
+            yield* rules(toolCallOf("Bash", {}, "/")).pipe(
               Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
               Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
             ),
@@ -476,7 +475,7 @@ layer(Platform.services)("role rules", (it) => {
   it.effect("Coordinator: no file edits by any tool, unknown tools allowed", () =>
     Effect.gen(function* () {
       const as = (tool: string, input: Record<string, unknown>) =>
-        coordinator({ tool, input, cwd: "/" }).pipe(
+        coordinator(toolCallOf(tool, input, "/")).pipe(
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
         )
