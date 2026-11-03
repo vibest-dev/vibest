@@ -114,13 +114,13 @@ describe.skipIf(rex === undefined)("rex runtime on an isolated Rex server", () =
   )
 
   it.live(
-    "a bare harness name on vibestd's PATH runs, though Rex's login shell PATH lacks its directory",
+    "a bare harness name on vibestd's PATH runs, and runs again with run, though Rex's login shell PATH lacks its directory",
     () =>
       Effect.gen(function* () {
         // As pi in ~/.bun/bin: on the PATH of the vibest that asked, not on the one a non-interactive login shell sets.
         const bin = path.join(dir, "bin")
         fs.mkdirSync(bin, { recursive: true })
-        fs.writeFileSync(path.join(bin, "vbt-fake-harness"), "#!/bin/sh\necho vbt-harness-ran\nsleep 30\n", {
+        fs.writeFileSync(path.join(bin, "vbt-fake-harness"), "#!/bin/sh\necho vbt-harness-ran\nsleep 1\n", {
           mode: 0o755,
         })
         const runtime = yield* make({ server, settle: "5 seconds", path: `${bin}:${process.env["PATH"] ?? ""}` })
@@ -134,8 +134,15 @@ describe.skipIf(rex === undefined)("rex runtime on an isolated Rex server", () =
           yield* Effect.sleep("100 millis")
           screen = yield* runtime.read(terminal, 20).pipe(Effect.orElseSucceed(() => ""))
         }
-        yield* runtime.close(terminal)
         assert.include(screen, "vbt-harness-ran")
+        // Once it ended, `run` starts it again in the same block's shell, with the same PATH.
+        yield* runtime.run!(terminal, ["vbt-fake-harness"])
+        for (let i = 0; i < 200 && screen.split("vbt-harness-ran").length < 3; i++) {
+          yield* Effect.sleep("100 millis")
+          screen = yield* runtime.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
+        }
+        yield* runtime.close(terminal)
+        assert.isAtLeast(screen.split("vbt-harness-ran").length, 3, screen)
       }).pipe(Effect.scoped),
     60_000,
   )

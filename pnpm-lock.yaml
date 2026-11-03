@@ -389,6 +389,9 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
       effect:
         specifier: 4.0.2
         version: 4.0.2

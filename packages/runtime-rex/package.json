@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@vibest/plugin": "workspace:*",
+    "@vibest/schema": "workspace:*",
     "effect": "catalog:"
   }
 }

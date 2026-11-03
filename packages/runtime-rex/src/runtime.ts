@@ -11,6 +11,7 @@ import readline from "node:readline"
 
 import { Runtime as RuntimeApi } from "@vibest/plugin"
 import type * as VibestPlugin from "@vibest/plugin"
+import { shellQuote } from "@vibest/schema/layout"
 import { Duration, Effect, Queue, Semaphore, Stream } from "effect"
 
 export type Runtime = VibestPlugin.Runtime.Runtime
@@ -106,6 +107,25 @@ interface ProcessInfo {
   readonly child?: Proc | null
   readonly foreground?: Proc | null
 }
+
+/** The shell `vibest` itself wraps the main agent in (core's `openInParentWorkspace`): such an argv keeps a shell already. */
+const WRAP = '"$@"; exec "${SHELL:-/bin/sh}"'
+const wrapped = (argv: ReadonlyArray<string>) => argv[0] === "sh" && argv[1] === "-c" && argv[2] === WRAP
+
+/** A shell alone at its prompt (once its program ended) is the block's foreground, with nothing below it. */
+const shellAlone = (info: ProcessInfo) => {
+  const fg = info.foreground
+  return (
+    info.last_exit === null &&
+    !!fg &&
+    !!info.child &&
+    fg.pid === info.child.pid &&
+    SHELLS.has(fg.name.replace(/^-/, ""))
+  )
+}
+
+/** How long `run` waits for a terminal to come back to its shell. */
+const RUN_TIMEOUT = 30_000
 
 const sleep = (ms: number) => Effect.sleep(Duration.millis(ms))
 
@@ -218,16 +238,15 @@ export const make = (options: Options = {}): Effect.Effect<Runtime> =>
     const processOf: Runtime["process"] = (terminal) =>
       Effect.gen(function* () {
         const info = yield* method<ProcessInfo>(terminal, "process")
-        const fg = info.foreground
         const code = info.last_exit?.exit_code
         const result =
           info.last_exit !== null
             ? code !== undefined && code >= 0
               ? { running: false, exitCode: code }
               : { running: false }
-            : // A shell alone at its prompt (the main agent's shell after its harness exited) is not a running program.
-              fg && info.child && fg.pid === info.child.pid && SHELLS.has(fg.name.replace(/^-/, ""))
-              ? { running: yield* hasChildren(fg.pid) }
+            : // A shell alone at its prompt (the agent's shell after its harness exited) is not a running program.
+              shellAlone(info)
+              ? { running: yield* hasChildren(info.foreground!.pid) }
               : { running: true }
         lastRunning.set(terminal.id, result.running)
         return result
@@ -249,19 +268,42 @@ export const make = (options: Options = {}): Effect.Effect<Runtime> =>
         }
       })
 
+    // Rex runs argv through a non-interactive login shell, which does not read the user's .zshrc: its PATH can lack
+    // the harness (pi in ~/.bun/bin). The PATH of vibestd, which the vibest that started it handed on, goes in front.
+    const withPath = (env: Readonly<Record<string, string>>) => {
+      const searchPath = env["PATH"] ?? options.path ?? process.env["PATH"]
+      return Object.entries({ ...env, ...(searchPath ? { PATH: searchPath } : {}) }).map(([k, v]) => `${k}=${v}`)
+    }
+
+    /** Once the block is back at its shell (its program ended), type argv there and Enter. No retry. */
+    const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+      Effect.gen(function* () {
+        const deadline = Date.now() + RUN_TIMEOUT
+        for (;;) {
+          const info = yield* method<ProcessInfo>(terminal, "process")
+          if (info.last_exit !== null)
+            return yield* error("not_found", `${terminal.id}: its program ended and Rex kept no shell in it`)
+          if (shellAlone(info) && !(yield* hasChildren(info.foreground!.pid))) break
+          if (Date.now() > deadline)
+            return yield* error("busy", `${terminal.id} did not come back to its shell within ${RUN_TIMEOUT / 1000} s`)
+          yield* sleep(300)
+        }
+        const line = ["/usr/bin/env", ...withPath({}), ...argv].map(shellQuote).join(" ")
+        yield* method(terminal, "write", { data: `${line}\r` })
+      })
+
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
         yield* local(machine)
         // Rex runs argv through a non-interactive login shell, which does not read the user's .zshrc: its PATH can lack
         // the harness (pi in ~/.bun/bin). The PATH of vibestd, which the vibest that started it handed on, goes in front.
-        const searchPath = input.env["PATH"] ?? options.path ?? process.env["PATH"]
-        const env = Object.entries({ ...input.env, ...(searchPath ? { PATH: searchPath } : {}) }).map(
-          ([k, v]) => `${k}=${v}`,
-        )
+        const env = withPath(input.env)
+        // A shell stays after the program, as in a herdr pane: `run` starts the harness there again (a restart in place).
+        const argv = wrapped(input.argv) ? input.argv : ["sh", "-c", WRAP, "sh", ...input.argv]
         const block = {
           flavor: SHELL,
           label: input.label.slice(0, 128),
-          options: { command: [...(env.length > 0 ? ["/usr/bin/env", ...env] : []), ...input.argv], cwd: input.cwd },
+          options: { command: ["/usr/bin/env", ...env, ...argv], cwd: input.cwd },
         }
         const focus = input.focus === true
         const window = (session: string) =>
@@ -451,7 +493,19 @@ export const make = (options: Options = {}): Effect.Effect<Runtime> =>
       Stream.forever,
     )
 
-    return { kind: KIND, status, open, send, read, process: processOf, close, events, present, exec } satisfies Runtime
+    return {
+      kind: KIND,
+      status,
+      open,
+      send,
+      read,
+      process: processOf,
+      close,
+      run,
+      events,
+      present,
+      exec,
+    } satisfies Runtime
   })
 
 /** Whether `pid` has child processes (a shell running something). ponytail: local pgrep; a remote machine needs exec. */
