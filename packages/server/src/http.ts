@@ -156,9 +156,12 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const text = promptOf(adapter, who.agent, request.body)
             if (text === undefined) return ok()
-            // `userPrompt` first: vibestd stamps the round, and the start line must not be older than that stamp.
-            yield* sessions.userPrompt(who.id, text)
-            yield* recordPrompt(who.id, text)
+            // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the
+            // session's lock, held through a send's whole confirm) stamps the round with the same time, so the line
+            // is never older than it and the pending send sees its pickup proof while it still waits.
+            const at = yield* Clock.currentTimeMillis
+            yield* recordPrompt(who.id, text, at)
+            yield* sessions.userPrompt(who.id, text, at)
             return ok()
           }).pipe(Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`)))),
         )

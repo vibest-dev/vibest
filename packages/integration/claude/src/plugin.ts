@@ -328,8 +328,9 @@ export function register(on: On, _options?: unknown) {
       const list = full.get(event.text)
       const text = list?.shift()
       if (list?.length === 0) full.delete(event.text)
-      if (text !== undefined) return next({ ...event, context: [...(event.context ?? []), text] })
-      return next(event)
+      // A one-line notice is its own full text: the prompt already holds it, so it is not sent a second time.
+      if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
+      return next({ ...event, context: [...(event.context ?? []), text] })
     }
     const who = await identity(host).catch(() => undefined)
     if (who && who.agent !== "coordinator")

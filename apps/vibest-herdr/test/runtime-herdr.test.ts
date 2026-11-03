@@ -11,9 +11,11 @@ import { callerLocation } from "@vibest/runtime-herdr/caller"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
-import { ConfigProvider, Effect, Exit, Layer, Option, Ref, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Ref, Stream } from "effect"
 import { FileSystem } from "effect"
+import { HerdrError, type HerdrShape } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -141,6 +143,81 @@ const withRuntime = <A, E, R>(use: (runtime: TerminalRuntime.Runtime) => Effect.
     })
     return yield* use(runtime)
   })
+
+type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effect<unknown, HerdrError>
+
+/** The terminal runtime over a scripted herdr client (no server). Every call is recorded with its params. */
+const scriptedRuntime = (answer: Scripted) =>
+  Effect.gen(function* () {
+    const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
+    const client: HerdrShape = {
+      socketPath: "/nowhere",
+      subscribe: () => Stream.empty,
+      // Lazy, as the real client's: a retry sends the request again.
+      call: ((method: string, params: Record<string, unknown>) =>
+        Effect.suspend(() => {
+          calls.push({ method, params })
+          return answer(method, params)
+        })) as HerdrShape["call"],
+    }
+    const pool = HerdrPool.of({
+      resolve: () => Effect.succeed("s"),
+      client: () => Effect.succeed(client),
+      events: Stream.empty,
+      restarts: Stream.empty,
+      sessions: Effect.succeed(["s"]),
+    })
+    const runtime = yield* fromPool({
+      pool,
+      spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+      fs: undefined,
+      scope: yield* Effect.scope,
+    })
+    return { runtime, calls }
+  })
+
+const herdrError = (method: string, code: string) => Effect.fail(new HerdrError({ method, code, message: code }))
+
+/**
+ * `send` to a started agent: herdr refuses `agent.prompt` with agent_not_ready for the first `notReady` calls (its
+ * agent.start launch still pending), then takes it. The methods called, agent.get left out.
+ */
+const scriptedSend = (notReady: number) =>
+  Effect.gen(function* () {
+    let refused = 0
+    const { runtime, calls } = yield* scriptedRuntime((method) => {
+      if (method === "agent.get")
+        return Effect.succeed({ agent: { name: "s-abcd1234", pane_id: "w1:p2", agent: "claude" } })
+      if (method === "agent.prompt" && refused < notReady) {
+        refused++
+        return herdrError(method, "agent_not_ready")
+      }
+      return Effect.succeed({})
+    })
+    const sending = yield* Effect.forkChild(
+      runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234"), { text: "line one\nline two" }),
+    )
+    yield* TestClock.adjust("40 seconds")
+    yield* Fiber.join(sending)
+    return calls.map((c) => c.method).filter((m) => m !== "agent.get")
+  }).pipe(Effect.provide(Platform.services))
+
+describe("send to an agent herdr started", () => {
+  it.effect("waits until herdr marks it ready, then prompts it: no text typed into a launch still pending", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* scriptedSend(3), ["agent.prompt", "agent.prompt", "agent.prompt", "agent.prompt"])
+    }),
+  )
+
+  it.effect("an agent herdr never marks ready gets the text as one paste with Enter (pane.send_input)", () =>
+    Effect.gen(function* () {
+      const calls = yield* scriptedSend(Number.POSITIVE_INFINITY)
+      assert.strictEqual(calls.filter((m) => m === "agent.prompt").length, 61)
+      assert.strictEqual(calls.at(-1), "pane.send_input")
+      assert.notInclude(calls, "pane.send_text")
+    }),
+  )
+})
 
 describe("terminal ids", () => {
   it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty; the caller's location is the machine target", () => {

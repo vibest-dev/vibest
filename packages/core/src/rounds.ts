@@ -544,7 +544,7 @@ export const sessionRounds = (deps: {
    * around those sends returns at once, so the hook cannot deadlock. Anything else waits for the lock, then records
    * unless a round is already open.
    */
-  const userPrompt = (id: string, text: string) =>
+  const userPrompt = (id: string, text: string, at?: number) =>
     deps.logged(`prompt ${id}`)(
       Effect.gen(function* () {
         if (text.trim() === "") return
@@ -554,8 +554,9 @@ export const sessionRounds = (deps: {
         const { prompting } = yield* deps.track(id)
         if (yield* Ref.get(prompting)) return
         // Stamped at hook receipt: the lock can be held for seconds (a delivery, an interrupt, a removal), and the
-        // typed turn may already be over when it frees. A later stamp would drop that turn's result file.
-        const now = yield* Clock.currentTimeMillis
+        // typed turn may already be over when it frees. A later stamp would drop that turn's result file. `at`: the
+        // caller's stamp at receipt, when it already wrote the turn-start line with it.
+        const now = at ?? (yield* Clock.currentTimeMillis)
         // vibest opens its own rounds before handing text over; their echo, and anything typed during a round, is not a round.
         const record = Effect.gen(function* () {
           const current = yield* db.getSession(id)
