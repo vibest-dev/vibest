@@ -38,7 +38,7 @@ Four SQLite tables, one purpose each:
 ## DDL
 
 ```sql
-PRAGMA application_id = 1986618981;  -- "vibe"
+PRAGMA application_id = 1986617957;  -- 0x76696265, "vibe"
 PRAGMA user_version = 2;
 
 CREATE TABLE project (
