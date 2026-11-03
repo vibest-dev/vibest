@@ -74,6 +74,11 @@ export interface HarnessAdapter {
    */
   readonly inbox: "prompt" | "subscribe" | "poll"
   /**
+   * Its integration reloads vibest's plugin in place from the directory vibestd syncs (`Layout.harnessPlugin`), so
+   * `vibest update` does not restart it (update-restart.md 1; Claude). Otherwise it is restarted in place.
+   */
+  readonly reloads: boolean
+  /**
    * How vibestd knows a started harness takes input: its integration reports it with one request at its start
    * (`integration`: Session.Ready, or the HTTP `/session/ready`), or the runtime's agent state (`runtime`).
    */

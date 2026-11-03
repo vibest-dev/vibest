@@ -70,8 +70,8 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const { db, sessions, id } = yield* started
       assert.deepStrictEqual(
-        (yield* sessions.outdated).map((a) => [a.id, a.integration, a.working, a.blocked]),
-        [[id, null, true, null]],
+        (yield* sessions.outdated).map((a) => [a.id, a.integration, a.working, a.blocked, a.reloads]),
+        [[id, null, true, null, false]],
       )
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       assert.deepStrictEqual(yield* sessions.outdated, [])
@@ -142,7 +142,7 @@ describe("restart in place", () => {
   })
 
   /** The project's main agent at `test/coord`, working, on harness `harness`, its harness pid 100. */
-  const workingMain = (harness: "cursor" | "pi") =>
+  const workingMain = (harness: "claude" | "cursor" | "pi") =>
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
@@ -172,6 +172,18 @@ describe("restart in place", () => {
       assert.include(outcome!.message, "start it again yourself")
       assert.deepStrictEqual(yield* processes.signaled, [])
       assert.deepStrictEqual(yield* herdr.callsTo("run"), [])
+    }),
+  )
+
+  test(
+    "a Claude main agent on an old integration (one started before this vibest included): listed as reloading in place",
+    Effect.gen(function* () {
+      const { db, id } = yield* workingMain("claude")
+      yield* db.noteIntegration(id, { version: "0.0.1", protocol: PROTOCOL })
+      assert.deepStrictEqual(
+        (yield* (yield* Sessions).outdated).map((a) => [a.id, a.reloads]),
+        [[id, true]],
+      )
     }),
   )
 

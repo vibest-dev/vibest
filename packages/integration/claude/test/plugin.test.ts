@@ -223,11 +223,7 @@ describe("Claude plugin requests", () => {
     // First that the harness takes input (rpc.ts Session.Ready), then the main agent's first poll.
     const [ready, poll] = h.requests
     assert.strictEqual(ready!.url, "http://vibestd/session/ready")
-    assert.deepStrictEqual(
-      ready!.body,
-      { pid: 4242, plugin: "/p" },
-      "with Claude Code's own pid, which a restart signals, and the directory it loaded this module from",
-    )
+    assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {

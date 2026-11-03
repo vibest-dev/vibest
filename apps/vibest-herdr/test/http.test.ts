@@ -421,26 +421,6 @@ describe("vibestd's HTTP API", () => {
     }),
   )
 
-  test(
-    "the ready report: an integration loaded from the plugin directory vibestd syncs reloads, any other does not",
-    Effect.gen(function* () {
-      const { call, db, worker } = yield* project
-      const layout = yield* Layout
-      const fs = yield* FileSystem.FileSystem
-      yield* fs.makeDirectory(layout.harnessPlugin("claude"), { recursive: true })
-      const ready = (body: object) => call("/session/ready", { sessionId: worker }, JSON.stringify(body))
-      assert.strictEqual((yield* ready({ pid: 4242, plugin: layout.harnessPlugin("claude") })).status, 204)
-      assert.isTrue((yield* db.getSession(worker))!.metadata.reloads)
-      assert.strictEqual((yield* db.getSession(worker))!.metadata.pid, 4242)
-      // An install's own directory (an agent started before the sync), or a module that does not say.
-      yield* ready({ pid: 4242, plugin: "/somewhere/harnesses/claude" })
-      assert.isUndefined((yield* db.getSession(worker))!.metadata.reloads)
-      yield* ready({ plugin: layout.harnessPlugin("claude") })
-      yield* ready({ pid: 4242 })
-      assert.isUndefined((yield* db.getSession(worker))!.metadata.reloads)
-    }),
-  )
-
   it.effect("served on a unix socket", () =>
     Effect.gen(function* () {
       const { main, projectId } = yield* project

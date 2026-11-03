@@ -11,7 +11,7 @@
 6. Per-harness differences (launch arguments, resume, `canResume`) live in the harness adapter (`packages/core/src/harness.ts`, `packages/core/src/harnesses/`). Core never branches on a harness id; it reads adapter fields.
 7. Every harness integration, current or future, states and provides for updates ([update-restart.md](update-restart.md)):
    1. how it loads vibest's plugin from `${VIBEST_HOME}/harnesses/<id>`, the directory vibestd syncs when it starts;
-   2. whether it reloads that plugin in place, and what triggers the reload;
+   2. whether it reloads that plugin in place (its adapter's `reloads`, set per harness), and what triggers the reload;
    3. if it reloads, what survives it: state in harness state that outlives a reload, work that must finish awaited inside a hook, and only the newest load polls or subscribes;
    4. if it cannot reload, it reports its harness pid and readiness, so vibest restarts it in place;
    5. if it does neither, the update lists it to be restarted by hand.

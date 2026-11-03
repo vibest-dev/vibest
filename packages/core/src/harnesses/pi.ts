@@ -71,6 +71,7 @@ export const pi: HarnessAdapter = {
   interruptKey: "esc",
   resultField: "text",
   inbox: "subscribe",
+  reloads: false,
   ready: "integration",
   checkProvider: () => undefined,
   launchArgs: (i) => [

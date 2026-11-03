@@ -124,8 +124,6 @@ function nativeHost($: EngineInterface) {
     conversation: () => $.session.id(),
     cwd: () => $.session.cwd(),
     plugin: () => $.plugin.name,
-    /** The directory this module was loaded from: vibestd tells by it whether it reloads (its own synced copy). */
-    root: () => $.plugin.root,
     fetch: (socketPath: string, path: string, headers: Record<string, string>, body: string) =>
       $.http.fetch(`http://vibestd${path}`, { method: "POST", socketPath, headers, body }),
     submit: (text: string) => $.prompt.submit({ text }),
@@ -381,10 +379,9 @@ export function register(on: On, _options?: unknown) {
     // A reload runs this again: the record survives it, and this load polls from now on.
     await load(host)
     await update(host, (s) => ({ ...s, generation }))
-    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready). `plugin`:
-    // where this module was loaded from, so vibestd knows whether it reloads when vibestd syncs its copy.
+    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready).
     const pid = await host.pid().catch(() => undefined)
-    void report(host, "/session/ready", { ...(pid === undefined ? {} : { pid }), plugin: host.root() })
+    void report(host, "/session/ready", pid === undefined ? {} : { pid })
     if (saved.reports.length > 0) void flush(host)
     if (timer === undefined && who.agent === "coordinator") {
       timer = host.every(POLL_MS, () => void tick(host))

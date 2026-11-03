@@ -20,6 +20,7 @@ export const cursor: HarnessAdapter = {
   interruptKey: "ctrl+c",
   resultField: "text",
   inbox: "prompt",
+  reloads: false,
   ready: "runtime",
   checkProvider: anthropicOnly("cursor"),
   launchArgs: (i) => [

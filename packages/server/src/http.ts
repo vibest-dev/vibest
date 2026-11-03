@@ -36,7 +36,7 @@ import {
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { isHarnessId } from "@vibest/schema/session"
-import { Clock, ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect"
+import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -57,9 +57,7 @@ const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { 
 const AckBody = Schema.fromJsonString(
   Schema.Struct({ ids: Schema.Array(Schema.Number), release: Schema.optional(Schema.Array(Schema.Number)) }),
 )
-const ReadyBody = Schema.fromJsonString(
-  Schema.Struct({ pid: Schema.optional(Schema.Int), plugin: Schema.optional(Schema.String) }),
-)
+const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
@@ -69,8 +67,6 @@ export const make = Effect.gen(function* () {
   const drain = yield* Drain
   const harnesses = yield* Harnesses
   const layout = yield* Layout
-  const fs = yield* FileSystem.FileSystem
-  const real = (dir: string) => fs.realPath(dir).pipe(Effect.orElseSucceed(() => dir))
   const header = (headers: Headers.Headers, name: string) => Option.getOrUndefined(Headers.get(headers, name))
 
   /** The calling session, checked: its row, else the reply that refuses the request. */
@@ -132,18 +128,11 @@ export const make = Effect.gen(function* () {
       }
       // The integration, once at the harness's start: it takes input now (rpc.ts Session.Ready).
       if (request.path === "/session/ready") {
-        // `pid`: the harness's own process, which a restart signals. `plugin`: where its integration was loaded from;
-        // the directory vibestd syncs reloads in place, so `vibest update` leaves it running (update-restart.md 1).
-        const body = Option.getOrUndefined(
+        // `pid`: the harness's own process, which a restart signals.
+        const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
-        )
-        const reloads =
-          body?.plugin !== undefined && (yield* real(body.plugin)) === (yield* real(layout.harnessPlugin(who.harness)))
-        yield* db.patchLive(who.id, {
-          ready: yield* Clock.currentTimeMillis,
-          reloads: reloads || null,
-          ...(body?.pid === undefined ? {} : { pid: body.pid }),
-        })
+        )?.pid
+        yield* db.patchLive(who.id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
         return ok()
       }
       const hook = parseHookRoute(request.path)
