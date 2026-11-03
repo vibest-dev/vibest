@@ -923,7 +923,6 @@ const make = Effect.gen(function* () {
         )
       }).pipe(Effect.orDie),
 
-    /** The conversation an integration reports for session `id` (main agent or not): the latest wins. True when it changed. */
     /** The integration version the session's requests carry, written only when it changed; true when it did. */
     noteIntegrationVersion: (id: string, version: string) =>
       sql<{ id: string }>`UPDATE session SET metadata = json_set(metadata, '$.integrationVersion', ${version})

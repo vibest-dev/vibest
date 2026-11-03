@@ -279,6 +279,16 @@ export const alive = (pid: number) => {
   }
 }
 
+/** One row of vibest.db, read while vibestd runs. */
+export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
+  const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+  try {
+    return (db.query(sql).get(...args) ?? undefined) as A | undefined
+  } finally {
+    db.close()
+  }
+}
+
 export const until = async (what: string, ok: () => Promise<boolean> | boolean, timeoutMs = 10_000) => {
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)

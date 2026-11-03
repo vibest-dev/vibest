@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite"
 // The Claude main agent's inbox over HTTP (feature-map S11, S15) and the Pi main agent's (S12). Pi: every result reaches
 // the real Pi TUI coordinator as a turn of its own, the
 // later ones included. The main agent's model is a fake OpenAI-compatible endpoint served here (models.json in a
@@ -8,7 +7,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, expect, Skip, until, type World } from "../world.ts"
+import { agentModel, expect, row, Skip, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -153,16 +152,6 @@ const dropHerdrSession = async (w: World, session: string) => {
   ) {
     await w.run(w.root, ["herdr", "session", "stop", session])
     await w.run(w.root, ["herdr", "session", "delete", session])
-  }
-}
-
-/** One row of vibest.db, read while vibestd runs. */
-const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
-  const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
-  try {
-    return (db.query(sql).get(...args) ?? undefined) as A | undefined
-  } finally {
-    db.close()
   }
 }
 

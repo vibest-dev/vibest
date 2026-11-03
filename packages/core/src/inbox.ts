@@ -5,25 +5,12 @@ import type { Polled } from "@vibest/protocol/protocol"
 // A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
 // vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
-import {
-  Cause,
-  Clock,
-  Context,
-  Duration,
-  Effect,
-  Exit,
-  HashMap,
-  Layer,
-  Option,
-  PubSub,
-  Queue,
-  Schedule,
-  Stream,
-} from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
 
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { Harnesses } from "./harness.ts"
+import { keyedLock } from "./keyed-lock.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export const RECONCILE = Duration.seconds(10)
@@ -117,6 +104,8 @@ export class Inbox extends Context.Service<
       ids: ReadonlyArray<number>,
       release?: ReadonlyArray<number>,
     ) => Effect.Effect<ReadonlyArray<number>>
+    /** Project locks held or waited on (vibestd-state.md 3): tests check it shrinks back. */
+    readonly locks: Effect.Effect<number>
   }
 >()("vibest/Inbox") {
   static readonly layer = Layer.effect(
@@ -156,41 +145,44 @@ export class Inbox extends Context.Service<
       const locks = keyedLock<number>()
 
       const withLock = <A, E, R>(label: string, projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
-        drain.work(label, lock(projectId).pipe(Effect.flatMap((s) => s.withPermit(body))), settlement)
+        drain.work(label, locks.withLock(projectId)(body), settlement)
 
       const deliver = (projectId: number) =>
-        drain.work(
+        withLock(
           `deliver project ${projectId}`,
-          lock(projectId).pipe(
-            Effect.flatMap((s) =>
-              s.withPermit(
-                Effect.gen(function* () {
-                  const coord = yield* db.coordinatorOf(projectId)
-                  if (!coord?.address || coord.address.id === "" || !coord.runtime)
-                    return yield* db.dropWaiting(projectId, "absent")
-                  const address = encodeAddress(coord.address)
-                  const guard = { projectId, runtime: coord.runtime, address }
-                  const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-                  if (Option.isNone(h)) return
-                  const presence = yield* coordinatorIdle(h.value, coord.address)
-                  if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-                  if (presence !== "idle") return
-                  // Its harness takes its rows itself (`stream`, `poll`); they wait until it does.
-                  const mode = inboxOf(coord.harnessId)
-                  if (mode === "subscribe" || mode === "poll") return
-                  const batch = nextBatch(yield* db.coordinatorPending(projectId))
-                  if (batch.length === 0) return
-                  const claimed = yield* db.claim(
-                    batch.map((r) => r.id),
-                    guard,
-                  )
-              }),
+          projectId,
+          Effect.gen(function* () {
+            const coord = yield* db.coordinatorOf(projectId)
+            if (!coord?.address || coord.address.id === "" || !coord.runtime)
+              return yield* db.dropWaiting(projectId, "absent")
+            const address = encodeAddress(coord.address)
+            const guard = { projectId, runtime: coord.runtime, address }
+            const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+            if (Option.isNone(h)) return
+            const presence = yield* coordinatorIdle(h.value, coord.address)
+            if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
+            if (presence !== "idle") return
+            // Its harness takes its rows itself (`stream`, `poll`); they wait until it does.
+            const mode = inboxOf(coord.harnessId)
+            if (mode === "subscribe" || mode === "poll") return
+            const batch = nextBatch(yield* db.coordinatorPending(projectId))
+            if (batch.length === 0) return
+            const claimed = yield* db.claim(
+              batch.map((r) => r.id),
+              guard,
             )
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`),
-              ),
-            ),
+            if (claimed.length === 0) return
+            const body = text(batch.filter((r) => claimed.includes(r.id)))
+            yield* h.value
+              .send(coord.address, { text: body })
+              .pipe(
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit) ? markDelivered(claimed) : db.setInboxStatus(claimed, "failed", "sending"),
+                ),
+              )
+          }).pipe(
+            Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
+          ),
         )
 
       const announce = (row: InboxRow) =>
@@ -413,6 +405,7 @@ export class Inbox extends Context.Service<
         delivered: Queue.take(delivered),
         poll,
         ack,
+        locks: Effect.sync(() => locks.size()),
       })
     }),
   )
