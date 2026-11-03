@@ -17,7 +17,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
-import { pingOf, runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
+import { pingOf, recordedInfo, runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({
@@ -148,7 +148,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           yield* startDaemon.pipe(Effect.provideService(VibestCommand, self))
           const old = yield* ping
           // Ping says who answered, the same vibestd vibestd.pid records: its own argv, as it runs (bun and main.ts from source).
-          const info = Option.getOrThrow(yield* readDaemonInfo(layout.daemonInfo))
+          const info = yield* recordedInfo(layout.daemonInfo, old.instance)
           assert.deepStrictEqual(
             [old.pid, old.instance, old.command, old.startedAt],
             [info.pid, info.instance, info.command, info.startedAt],

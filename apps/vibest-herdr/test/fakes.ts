@@ -517,6 +517,17 @@ export const pingOf = (socket: string) =>
     return yield* Effect.die(new Error(`no Ping answer on ${socket}`))
   })
 
+/** vibestd.pid once it records the vibestd `instance`: vibestd writes it just after its socket answers Ping. */
+export const recordedInfo = (daemonInfo: string, instance: string | undefined) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const info = yield* readDaemonInfo(daemonInfo)
+      if (Option.isSome(info) && info.value.instance === instance) return info.value
+      yield* Effect.sleep("50 millis")
+    }
+    return yield* Effect.die(new Error(`${daemonInfo} never recorded vibestd ${instance}`))
+  })
+
 /** SIGTERM whatever vibestd `daemonInfo` (a vibestd.pid) names now, and wait for it to exit: a test's own cleanup. */
 export const stopRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
