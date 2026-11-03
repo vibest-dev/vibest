@@ -31,15 +31,6 @@ export const terminalOf = (session: string, paneId: string, name?: string): Term
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
 })
 
-/** What `open` started in a terminal: herdr's agent kind and the working directory, carried in the terminal id. */
-export interface Launch {
-  readonly kind: string
-  readonly cwd: string
-}
-
-/** The tail of a terminal id for an agent `open` started: `<name>#<kind>#<cwd, URI-encoded>` (no `/` in it). */
-export const launchTail = (name: string, launch: Launch) => `${name}#${launch.kind}#${encodeURIComponent(launch.cwd)}`
-
 /** The session, pane and agent name a terminal id names (the name only for one whose agent `open` started); undefined when it is not one of ours. */
 export const parseTerminal = (
   terminal: Terminal,
@@ -50,25 +41,7 @@ export const parseTerminal = (
   const named = rest.indexOf("/")
   const paneId = named === -1 ? rest : rest.slice(0, named)
   if (paneId === "" || (named !== -1 && named === rest.length - 1)) return undefined
-  const tail = named === -1 ? undefined : rest.slice(named + 1)
-  return { session: terminal.id.slice(0, at), paneId, name: tail?.split("#")[0] }
-}
-
-/**
- * The id after the pane (`tail`, as `terminalOf` takes it) and what `open` started there, when the id says (ids from
- * before it carry the agent name alone).
- */
-export const launchOf = (
-  terminal: Terminal,
-): { readonly tail: string | undefined; readonly launch: Launch | undefined } => {
-  const rest = terminal.id.split("/").slice(2).join("/")
-  const tail = rest === "" ? undefined : rest
-  const [, kind, cwd] = tail === undefined ? [] : tail.split("#")
-  try {
-    return { tail, launch: kind && cwd ? { kind, cwd: decodeURIComponent(cwd) } : undefined }
-  } catch {
-    return { tail, launch: undefined }
-  }
+  return { session: terminal.id.slice(0, at), paneId, name: named === -1 ? undefined : rest.slice(named + 1) }
 }
 
 /** The caller's herdr location, as `Machine.target` (runtime-port.md §4): opaque to core, ours to read. */
@@ -333,39 +306,18 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     /** The agent of this terminal, and how to address it: for a named terminal, only the agent `open` named, while it
      * still sits in this pane (a reused pane id is someone else's); for an unnamed one (the main agent, whose harness a
      * shell ran), the agent herdr detected holding the pane, never a named one (`open` named it for another terminal). undefined when none. */
-    const ours = (h: HerdrShape, paneId: string, name: string | undefined, launch?: Launch) =>
+    const ours = (h: HerdrShape, paneId: string, name: string | undefined) =>
       Effect.gen(function* () {
         if (name !== undefined) {
           const started = yield* named(h, name)
-          if (started !== undefined)
-            return started.pane_id === paneId ? { agent: started, target: name, detected: false } : undefined
-          return launch === undefined ? undefined : yield* renamed(h, paneId, name, launch)
+          return started !== undefined && started.pane_id === paneId
+            ? { agent: started, target: name, detected: false }
+            : undefined
         }
         const holds = yield* holder(h, paneId)
         if (holds !== undefined && (holds.name ?? undefined) === undefined)
           return { agent: holds, target: paneId, detected: true }
         return undefined
-      })
-
-    /**
-     * herdr drops a started agent's name when its launch does not settle in agent.start's timeout, while the agent keeps
-     * running in the pane. The one rule that knows it again: the pane still holds an unnamed agent of the kind `open`
-     * started under `name`, in the same working directory. The name is put back (herdr refuses while the launch is still
-     * pending; the pane addresses it then). undefined when the rule does not hold.
-     */
-    const renamed = (h: HerdrShape, paneId: string, name: string, want: Launch) =>
-      Effect.gen(function* () {
-        const holds = yield* holder(h, paneId)
-        if (holds === undefined || (holds.name ?? undefined) !== undefined || holds.agent !== want.kind)
-          return undefined
-        const real = (dir: string) =>
-          fs === undefined ? Effect.succeed(dir) : fs.realPath(dir).pipe(Effect.orElseSucceed(() => dir))
-        const expected = yield* real(want.cwd)
-        const dirs = [holds.cwd, holds.foreground_cwd].filter((d): d is string => typeof d === "string" && d !== "")
-        if (Option.isNone(yield* Effect.findFirst(dirs, (d) => Effect.map(real(d), (r) => r === expected))))
-          return undefined
-        yield* h.call("agent.rename", { target: paneId, name }).pipe(Effect.ignore)
-        return { agent: holds, target: paneId, detected: false }
       })
 
     /** herdr's agent.start: it types the harness into the pane's shell once that shell is idle, and names it `name`. */
@@ -458,9 +410,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const name = agentNameOf(input.env)
         const kind = input.argv.length > 0 ? agentKindOf(input.argv[0]!) : undefined
         const agent = kind !== undefined
-        // The terminal id carries what was started, so the agent is known again once herdr drops its name (`ours`).
-        const tail = agent ? launchTail(name, { kind, cwd: input.cwd }) : undefined
-        if (tail !== undefined) names.set(`${session}/${paneId}`, tail)
+        if (agent) names.set(`${session}/${paneId}`, name)
         else names.delete(`${session}/${paneId}`)
         const tabId = split ? undefined : (yield* failWith(h.call("pane.get", { pane_id: paneId }))).pane.tab_id
         // Everything after the terminal exists is undone when it fails: a start that dies inside it (a harness on
@@ -491,7 +441,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           (error) => undo().pipe(Effect.andThen(Effect.fail(error))),
         )
         yield* watch(session, paneId)
-        return terminalOf(session, paneId, tail)
+        return terminalOf(session, paneId, agent === true ? name : undefined)
       })
 
     /** The session and pane a terminal id names, or a not_found error. */
@@ -513,7 +463,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const h = yield* client(place.session)
         // The agent of this terminal — addressed by its `open` name or, for one herdr detected (the main agent), by
         // its pane. `agent.prompt` submits (Enter), as a prompt does; the pane fallback only types.
-        const found = yield* ours(h, place.paneId, place.name, launchOf(terminal).launch)
+        const found = yield* ours(h, place.paneId, place.name)
         if (found !== undefined) {
           // herdr refuses a prompt to an agent it has not marked ready yet (`agent_not_ready`): one `open` started is
           // marked once herdr sees it idle. Prompted before that, it works without the mark, and herdr drops its name
@@ -672,11 +622,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const place = yield* at(terminal, "state")
         const h = yield* client(place.session)
         yield* watch(place.session, place.paneId)
-        const found = yield* ours(h, place.paneId, place.name, launchOf(terminal).launch)
+        const found = yield* ours(h, place.paneId, place.name)
         // A row from before this vibestd (a restart, a migrated `s-<id>` row) teaches the name its events must carry,
         // once its agent is found in the pane (a stale row on a reused pane id must not rename the live one).
-        if (found !== undefined && place.name !== undefined)
-          names.set(`${place.session}/${place.paneId}`, launchOf(terminal).tail!)
+        if (found !== undefined && place.name !== undefined) names.set(`${place.session}/${place.paneId}`, place.name)
         // No agent of ours in the pane: not_found, so core reads "absent" — a reused pane id is not this terminal.
         if (found === undefined)
           return yield* new RuntimeApi.RuntimeError({
@@ -692,7 +641,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "session")
         const h = yield* client(place.session)
-        const found = yield* ours(h, place.paneId, place.name, launchOf(terminal).launch)
+        const found = yield* ours(h, place.paneId, place.name)
         return found !== undefined ? (found.agent.agent_session?.value ?? null) : null
       })
 
