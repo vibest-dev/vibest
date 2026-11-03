@@ -121,3 +121,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S13 | herdr status push: a status change reaches vibestd without the poll                                               | runtime                                                         |
 | S14 | several repositories: separate Projects, one Project per repository wherever you stand in it, runs in two at once | agent (story S13 in [e2e-user-stories.md](e2e-user-stories.md)) |
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
+| S16 | Rex runtime (`"runtime": "rex"`): main Agent and its Pi subagent in Rex blocks; the result reaches the main Agent | `tools/e2e` S16 (an isolated Rex server)                        |

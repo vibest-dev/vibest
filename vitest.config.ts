@@ -11,6 +11,7 @@ export default defineConfig({
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
       "packages/core/src/**/*.test.ts",
+      "packages/runtime-rex/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
     ],
     // Within a file, concurrent tests share one worker. 5s is too tight once several git or bun tests overlap.

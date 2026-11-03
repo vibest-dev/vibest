@@ -24,7 +24,14 @@ import { jsonObject, promptOf, recordPrompt, recordTurnEnd, writeTerminalStatus 
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
 // Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
-import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
+import {
+  CALLER_ENV as HERDR_CALLER_ENV,
+  ambientHerdr,
+  callerMachine,
+  callerTerminal as herdrTerminal,
+  runAtRoot,
+} from "@vibest/runtime-herdr/caller"
+import * as RexCaller from "@vibest/runtime-rex/runtime"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
@@ -53,6 +60,11 @@ export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
+
+/** The terminal this process runs in, as its runtime names it: a herdr pane, else a Rex block. */
+const callerTerminal = Effect.map(herdrTerminal, (terminal) => terminal ?? RexCaller.callerTerminal())
+/** What `vibest` in the main agent's shell needs to find its own terminal, in either runtime. */
+const CALLER_ENV = [...HERDR_CALLER_ENV, ...RexCaller.CALLER_ENV]
 
 /** A prompt, message or entry that is empty or only whitespace. */
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
