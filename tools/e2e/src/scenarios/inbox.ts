@@ -273,9 +273,9 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
         )
       },
       90_000,
-    ).catch((e: Error) => {
+    ).catch(async (e: Error) => {
       const tail = entries.slice(-8).map((x) => `${x.type}: ${x.raw.slice(0, 300)}`)
-      throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}`)
+      throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}\nits screen:\n${await screen()}`)
     })
     return entries
   }
@@ -291,9 +291,10 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
     return shown(`General Agent "${title}" completed (${sub})`, marker)
   }
+  const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
   const typeIn = async (text: string) => {
     await herdr(socket, "pane.send_text", { pane_id: pane(), text })
-    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+    await enter()
   }
   /** The main agent's Claude process in its pane. */
   const claude = async () => {
@@ -315,7 +316,9 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     start,
     result,
     typeIn,
+    enter,
     claude,
+    screen,
     close: () => dropHerdrSession(w, session),
   }
 }
@@ -433,15 +436,42 @@ const checks: ReadonlyArray<Check> = [
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
 
-        // Mid-turn: the main agent is busy in a turn of its own when the result comes; it still arrives.
-        await c.typeIn("Run the shell command `sleep 40` with the Bash tool, then reply with one word: slept")
+        // Mid-turn: the main agent is busy in a turn of its own when the result comes; it still arrives. Claude refuses a
+        // standalone `sleep`, so the turn waits in a Bash call for a file this check creates once the result is in.
+        const go = path.join(w.root, "cmmid-go")
+        const wait = `until [ -e ${go} ]; do sleep 1; done`
+        await c.typeIn(
+          `Run this exact command with the Bash tool in the foreground, not in the background, and wait for it: ${wait} Then reply with one word: waited`,
+        )
+        let typed = Date.now()
         await until(
           "the main agent's own turn running",
-          async () => (await transcript(w, c!.repo)).some((e) => e.type === "assistant" && e.raw.includes("sleep 40")),
+          async () => {
+            const entries = await transcript(w, c!.repo)
+            if (entries.some((e) => e.type === "assistant" && e.raw.includes(go))) return true
+            // The enter typed right behind the text is sometimes swallowed and the text stays in the input box: again.
+            if (!entries.some((e) => e.type === "user" && e.text.includes(wait)) && Date.now() - typed > 5_000) {
+              await c!.enter()
+              typed = Date.now()
+            }
+            return false
+          },
           60_000,
-        )
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; its screen:\n${await c!.screen()}`)
+        })
+        const results = () =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_session_id = ?",
+            c!.main,
+            a,
+          )?.n ?? 0
         const before = c.delivered(a)
+        const queued = results()
         await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
+        await until("the cmmid result queued while the main agent's turn runs", () => results() > queued, 180_000)
+        await fs.writeFile(go, "")
         await c.result(a, "Answer probe alpha", "cmmid", before)
 
         // curl --unix-socket, as the plugin: with the plugin stopped, a curl poll takes the row and leases it; nobody
@@ -608,6 +638,64 @@ const checks: ReadonlyArray<Check> = [
                 ?.message ?? ""
             ).includes("done-held"),
           60_000,
+        )
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S19",
+    title:
+      "a Pi subagent with herdr's own Pi hook starts its first turn within seconds of vibest run: vibest daemon restart is not refused and vibest interrupt stops it while the model still holds the turn",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = heldModel()
+      const session = `${w.herdrSession}-confirm`
+      try {
+        const repo = await project(w, "confirm")
+        const dir = await piDir(w, "pi-confirm", model.url)
+        // herdr's Pi hook, as a user who ran `herdr integration install pi` has it: herdr then reads Pi's state from
+        // the hook alone, and an idle Pi sends it nothing more.
+        const hook = await w.run(w.root, ["herdr", "integration", "install", "pi"], {
+          env: { PI_CODING_AGENT_DIR: dir },
+        })
+        expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
+        const env = `PI_CODING_AGENT_DIR=${dir}`
+        const zdot = path.join(w.root, "zdotdir-confirm")
+        await fs.mkdir(zdot, { recursive: true })
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        const sub = (
+          JSON.parse(
+            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("confirm")], {
+              cwd: repo,
+              timeoutMs: 60_000,
+            }),
+          ) as { id: string }
+        ).id
+        const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
+        // herdr refuses agent.prompt until it marks the agent ready, and it marks one only when the agent is read.
+        await until("the subagent's first turn at the model", () => model.held() > 0, 15_000)
+        const t0 = Date.now()
+        const restart = await w.tty(["daemon", "restart"], "y\n", {
+          cwd: repo,
+          env: { ZDOTDIR: zdot },
+          timeoutMs: 60_000,
+        })
+        expect(
+          restart.code === 0,
+          `vibest daemon restart exited ${restart.code} after ${Date.now() - t0} ms: ${restart.stderr}${restart.stdout}\nvibestd.log:\n${await log()}`,
+        )
+        const stop = await w.vibest(["interrupt", sub], { cwd: repo, timeoutMs: 60_000 })
+        expect(
+          stop.code === 0 && stop.stdout.includes("interrupted"),
+          `vibest interrupt exited ${stop.code}: ${stop.stderr}${stop.stdout}\nvibestd.log:\n${await log()}`,
         )
       } finally {
         model.stop()
