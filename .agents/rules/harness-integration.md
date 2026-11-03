@@ -2,6 +2,7 @@
 
 1. Results and messages never come from a pane's screen. No screen text is pushed to an agent; `vibest peek` is only for the main agent to look when asked.
 2. Claude is integrated through its native hooks module only (`turn.complete`, `prompt.submit`, `tool.call`): no `settings.json`, no `--settings`, no classic hooks. The plugin loads at launch with `--plugin-dir` and is never installed (see [user-file-mutation-safety.md](user-file-mutation-safety.md)).
+   - One exception, read only: the module's `classic.Stop` listener reads `background_tasks`, which `turn.complete` lacks, so a turn that leaves background work running goes to the parent as a message and the round stays open. Turn ends are still reported from `turn.complete`.
 3. The Claude plugin reaches vibestd only with `$.http.fetch` over the Unix socket; it does not run the `vibest` CLI. `$.env.get` takes literal names.
 4. A delivered message shows as one line in the harness UI; its full text goes with it as `prompt.submit` context. Nothing is injected into the system prompt.
    - Line: `<Type> Agent "<title>" <status> (<session id>)`, for example `General Agent "Fix guard scratch rule" completed (349f65b2)`.

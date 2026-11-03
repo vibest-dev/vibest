@@ -25,9 +25,13 @@ export type TurnResult = {
   readonly interrupted: boolean
 }
 
-/** One line of `reports/<id>.jsonl` (runtime-port.md §5): a turn start with the user's prompt, or a turn end with the result. */
+/**
+ * One line of `reports/<id>.jsonl` (runtime-port.md §5): a turn start with the user's prompt, a turn end with the result,
+ * or a turn that ended while its background work still runs (`progress`: the round waits for the turn after it).
+ */
 export type ReportLine =
   | { readonly turn: "start"; readonly ts: number; readonly prompt: string }
+  | { readonly turn: "progress"; readonly ts: number }
   | {
       readonly turn: "end"
       readonly ts: number
@@ -40,6 +44,7 @@ export const encodeReportLine = (line: ReportLine) => `${JSON.stringify(line)}\n
 const ReportLineJson = Schema.fromJsonString(
   Schema.Union([
     Schema.Struct({ turn: Schema.Literals(["start"]), ts: Schema.Number, prompt: Schema.String }),
+    Schema.Struct({ turn: Schema.Literals(["progress"]), ts: Schema.Number }),
     Schema.Struct({
       turn: Schema.Literals(["end"]),
       ts: Schema.Number,
@@ -70,7 +75,8 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
 
 /**
  * A harness plugin's turn end, wherever it arrives (`vibest integration stop`, or vibestd's HTTP hook): the adapter's
- * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
+ * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line: `true`. Progress
+ * writes only its report line and is answered with its text, which the caller hands the parent. Else `false`.
  */
 export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>
   Effect.gen(function* () {
@@ -78,6 +84,10 @@ export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId:
     const outcome = event && adapter.turnEnd?.(event, agent === "coordinator")
     if (!outcome) return false
     const layout = yield* Layout
+    if ("progress" in outcome) {
+      yield* appendReportLine(layout.reportFile(sessionId), { turn: "progress", ts: Date.now() })
+      return { progress: outcome.progress }
+    }
     const path = yield* Path.Path
     const file = layout.resultFile(sessionId)
     // The session id comes from the caller. Keep the file as one name inside the results directory.
@@ -213,6 +223,17 @@ export const envelope = (
     `</${text[0]}>`,
     `</${tag}>`,
   ].join("\n")
+
+/** A message from session `session` to its parent before its result (`vibest report`, a turn that left background work running). */
+export const agentMessage = (session: { readonly id: string; readonly name: string }, message: string) =>
+  envelope(
+    "agent-message",
+    [
+      ["agent-id", session.id],
+      ["summary", `Agent "${session.name}" sent a message before finishing`],
+    ],
+    ["message", message],
+  )
 
 /** vibest's one-line outcome of a turn, from any error; used as the summary when the final message is empty or the turn failed. */
 export const outcome = (name: string, error: string | undefined) =>

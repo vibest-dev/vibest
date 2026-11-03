@@ -6,6 +6,10 @@
  * - `turn.complete`, `prompt.submit` and `tool.call` for every VIBEST session (VIBEST_AGENT and VIBEST_SESSION_ID set):
  *   the turn end, the person's prompt and the tool guard. turn.complete fires for every main-loop turn end (reason
  *   answer, aborted, refusal or error; Stop fires for no Esc) and carries no API error kind.
+ * - `classic.Stop`, read only for its `background_tasks`: turn.complete does not say whether background work (a
+ *   background shell, a background subagent) still runs, and Claude Code (2.1.317, measured) raises Stop for the same
+ *   turn right before it (an Esc raises no Stop). The turn end report carries that list, so vibestd delivers such a
+ *   turn as progress and keeps the round open for the turn Claude starts when the work ends.
  * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
  *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
  *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
@@ -150,6 +154,8 @@ export function register(on: On, _options?: unknown) {
   let failures = 0
   let mismatched = false
   let timer: { cancel: () => void } | undefined
+  // Background work the last classic.Stop listed, for the turn.complete of the same turn; read once.
+  let background: ReadonlyArray<unknown> = []
 
   /** The session's identity from its environment, or undefined outside VIBEST. */
   const identity = async (host: Host) => {
@@ -302,10 +308,18 @@ export function register(on: On, _options?: unknown) {
     return next(e)
   })
 
+  // The main loop's Stop (a subagent's is SubagentStop): what background work this turn leaves running.
+  on("classic.Stop", async (_$, event, next) => {
+    background = event.background_tasks ?? []
+    return next(event)
+  })
+
   // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
   // (agentId set) is not the session's; the main agent's has no result (its conversation id goes with every poll).
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
+      const running = background
+      background = []
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
       if (who && who.agent !== "coordinator")
@@ -315,6 +329,7 @@ export function register(on: On, _options?: unknown) {
           reason: event.reason,
           last_assistant_message: event.answer,
           ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
+          ...(running.length > 0 ? { background_tasks: running } : {}),
         })
     }
     return next(event)

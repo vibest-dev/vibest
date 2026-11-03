@@ -92,12 +92,14 @@ export interface HarnessAdapter {
   readonly guardAnswer?: (reason: string | undefined) => unknown
   /**
    * A turn end the harness's own plugin hands to vibest (`vibest integration stop`, or vibestd's HTTP hook): a
-   * session's result payload; undefined ignores it. Absent: the harness reports turn ends another way.
+   * session's result payload; `progress`, the text of a turn that ended while its background work still runs (the round
+   * stays open for the turn the harness starts when that work ends); undefined ignores it. Absent: the harness reports
+   * turn ends another way.
    */
   readonly turnEnd?: (
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
-  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
+  ) => { readonly result: Readonly<Record<string, unknown>> } | { readonly progress: string } | undefined
   /**
    * A prompt the harness plugin hands to vibest (`vibest integration prompt`, or vibestd's HTTP hook). Undefined ignores it: the main agent,
    * a nested agent, or text that is not the user typing.

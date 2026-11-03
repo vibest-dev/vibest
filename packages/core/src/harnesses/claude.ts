@@ -189,9 +189,16 @@ export const claude: HarnessAdapter = {
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  // The plugin's main-loop turn.complete, whatever its reason. The main agent's turn ends are no result.
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
+  // The plugin's main-loop turn.complete, whatever its reason. The main agent's turn ends are no result. An answer that
+  // leaves background work running (the Stop before it listed it) is progress: Claude starts a turn of its own when
+  // that work ends, and that turn's end is the result.
+  turnEnd: (event, coordinator) => {
+    if (coordinator || event.hook_event_name !== "TurnComplete") return undefined
+    const background = event.background_tasks
+    if (event.reason === "answer" && Array.isArray(background) && background.length > 0)
+      return { progress: typeof event.last_assistant_message === "string" ? event.last_assistant_message : "" }
+    return { result: turnComplete(event) }
+  },
   // `--resume` of a session Claude never wrote fails (an id vibest chose up front before it took reported ones).
   canResume: (root, sessionId) =>
     Effect.flatMap(transcript(root, sessionId), (file) =>

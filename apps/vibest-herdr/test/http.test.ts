@@ -388,6 +388,52 @@ describe("vibestd's HTTP API", () => {
     }),
   )
 
+  test(
+    "a turn end that leaves background work running is a message to the parent; the round stays open for the next turn's result",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      yield* until(db.getSession(worker), (s) => s?.turnState === "open")
+      yield* sessions.check(worker)
+      const end = (text: string, background: ReadonlyArray<object>) =>
+        call(
+          "/hooks/claude/turn-end",
+          { sessionId: worker },
+          JSON.stringify({
+            hook_event_name: "TurnComplete",
+            reason: "answer",
+            last_assistant_message: text,
+            ...(background.length > 0 ? { background_tasks: background } : {}),
+          }),
+        )
+      const shell = { id: "b1", type: "shell", status: "running", description: "tests", command: "pnpm test" }
+      assert.strictEqual((yield* end("Tests are running; I will report when they finish.", [shell])).status, 204)
+      const message = yield* db.latestInbox(worker, "report")
+      assert.include(message!.message, "<agent-message>")
+      assert.include(message!.message, `<summary>Agent "Fix the guard" sent a message before finishing</summary>`)
+      assert.include(message!.message, "Tests are running; I will report when they finish.")
+      assert.isFalse(yield* fs.exists(layout.resultFile(worker)), "no result file: the round is not over")
+      assert.include(yield* fs.readFileString(layout.reportFile(worker)), '"turn":"progress"')
+      // Idle past the hook grace while the background work runs: not a lost turn.
+      yield* herdr.endTurn(worker)
+      yield* sessions.check(worker)
+      yield* TestClock.adjust("11 seconds")
+      yield* sessions.check(worker)
+      assert.strictEqual((yield* db.getSession(worker))!.turnState, "open")
+      assert.isUndefined(yield* db.latestInbox(worker, "result"))
+      // The turn Claude starts when the work ends: its end is the round's one result.
+      assert.strictEqual((yield* end("All 12 tests pass.", [])).status, 204)
+      const result = yield* until(db.latestInbox(worker, "result"), (r) => r !== undefined)
+      assert.include(result!.message, "<status>completed</status>")
+      assert.include(result!.message, "All 12 tests pass.")
+      assert.notInclude(result!.message, "Tests are running")
+      assert.strictEqual((yield* db.getSession(worker))!.turnState, "completed")
+    }),
+  )
+
   it.effect("served on a unix socket", () =>
     Effect.gen(function* () {
       const { main, projectId } = yield* project

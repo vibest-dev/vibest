@@ -775,7 +775,7 @@ export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
     const agent = yield* nonempty("VIBEST_AGENT")
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
-    if (!(yield* recordTurnEnd(adapter, agent, sessionId, raw))) return
+    if ((yield* recordTurnEnd(adapter, agent, sessionId, raw)) !== true) return
     yield* writeTerminalStatus("idle")
     yield* notify(RESULT_READY_TIMEOUT, adapter, sessionId, raw, (client) => client.ResultReady({ sessionId }))
   }).pipe(Effect.ignore)

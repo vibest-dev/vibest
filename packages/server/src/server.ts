@@ -10,7 +10,7 @@ import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
-import { envelope } from "@vibest/core/results"
+import { agentMessage } from "@vibest/core/results"
 import {
   agentState,
   type Machine,
@@ -751,14 +751,7 @@ export const handlers = VibestRpcs.toLayer(
           yield* inbox.enqueue({
             sessionId: session.id,
             kind: "report",
-            message: envelope(
-              "agent-message",
-              [
-                ["agent-id", session.id],
-                ["summary", `Agent "${session.name}" sent a message before finishing`],
-              ],
-              ["message", message],
-            ),
+            message: agentMessage(session, message),
             details: {},
           })
         }),

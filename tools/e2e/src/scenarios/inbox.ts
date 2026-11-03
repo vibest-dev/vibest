@@ -4,6 +4,8 @@
 // PI_CODING_AGENT_DIR of this check) that drives it as the delegate skill does: `vibest run`, then `vibest send` on
 // the result. vibestd, herdr, Pi and the subagent's harness are the real ones.
 // S18: a Pi subagent on a model that holds its first turn past herdr's agent.start window keeps its terminal.
+// S19: a Claude subagent on a fake Anthropic endpoint that ends a turn while its background command runs: the main agent
+// gets that turn as one message and the turn Claude starts when the command ends as the round's one result.
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -139,6 +141,91 @@ const heldModel = () => {
       server.stop(true)
     },
   }
+}
+
+/**
+ * A fake Anthropic Messages endpoint for a Claude subagent (S19). The main loop (its requests list the Bash tool): a task
+ * naming `bg-probe` starts a background `sleep`; the tool's answer gets the interim text; the task notification of that
+ * command gets the final text. Every other request (a title, a quota probe) gets "ok". The prompt is matched in every
+ * message since the last assistant one: Claude sends reminders as content of their own around it.
+ */
+const anthropicModel = () => {
+  const seen: Array<string> = []
+  let n = 0
+  const sse = (blocks: Array<{ text: string } | { tool: string; input: object }>, stop: string) => {
+    const events: Array<[string, object]> = [
+      [
+        "message_start",
+        {
+          type: "message_start",
+          message: {
+            id: `msg_${++n}`,
+            type: "message",
+            role: "assistant",
+            model: "claude-fake",
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          },
+        },
+      ],
+    ]
+    blocks.forEach((b, index) => {
+      const start =
+        "text" in b ? { type: "text", text: "" } : { type: "tool_use", id: `toolu_${n}`, name: b.tool, input: {} }
+      const delta =
+        "text" in b
+          ? { type: "text_delta", text: b.text }
+          : { type: "input_json_delta", partial_json: JSON.stringify(b.input) }
+      events.push(["content_block_start", { type: "content_block_start", index, content_block: start }])
+      events.push(["content_block_delta", { type: "content_block_delta", index, delta }])
+      events.push(["content_block_stop", { type: "content_block_stop", index }])
+    })
+    events.push(["message_delta", { type: "message_delta", delta: { stop_reason: stop }, usage: { output_tokens: 1 } }])
+    events.push(["message_stop", { type: "message_stop" }])
+    return new Response(events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join(""), {
+      headers: { "content-type": "text/event-stream" },
+    })
+  }
+  const flat = (content: unknown): string =>
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((c: { type?: string; text?: string; content?: unknown }) =>
+              c.type === "tool_result" ? `<tool_result>${flat(c.content)}` : (c.text ?? ""),
+            )
+            .join("\n")
+        : ""
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const url = new URL(req.url)
+      if (url.pathname.endsWith("/count_tokens")) return Response.json({ input_tokens: 1 })
+      if (!url.pathname.endsWith("/messages")) return Response.json({})
+      const body = (await req.json()) as { messages?: Array<Message>; tools?: Array<{ name?: string }> }
+      const messages = body.messages ?? []
+      const from = messages.findLastIndex((m) => m.role === "assistant") + 1
+      const turn = messages
+        .slice(from)
+        .map((m) => flat(m.content))
+        .join("\n")
+      if (!(body.tools ?? []).some((t) => t.name === "Bash")) return sse([{ text: "ok" }], "end_turn")
+      seen.push(turn.slice(0, 500))
+      if (turn.includes("<task-notification>"))
+        return sse([{ text: "final-report: the background command finished" }], "end_turn")
+      if (turn.includes("<tool_result>")) return sse([{ text: "progress-interim: the command still runs" }], "end_turn")
+      if (turn.includes("bg-probe"))
+        return sse(
+          [{ tool: "Bash", input: { command: "sleep 15; echo bgdone", description: "wait", run_in_background: true } }],
+          "tool_use",
+        )
+      return sse([{ text: "ok" }], "end_turn")
+    },
+  })
+  return { seen, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
 /** A git repository of its own under the world's root: a project of its own, so its main agent is this check's. */
@@ -616,6 +703,92 @@ const checks: ReadonlyArray<Check> = [
         )
       } finally {
         model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S19",
+    title:
+      "a Claude subagent that ends its turn while its background command runs: the main agent gets that turn as one message, and the turn Claude starts when the command ends as the round's one result",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const main = fakeModel("none")
+      const claude = anthropicModel()
+      const session = `${w.herdrSession}-background`
+      try {
+        const repo = await project(w, "background")
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-background", main.url)}`
+        // The Claude subagent reads the world's CLAUDE_CONFIG_DIR: onboarded, no auto-mode dialogs, Bash allowed.
+        await fs.writeFile(
+          path.join(w.config.claude, "settings.json"),
+          JSON.stringify({
+            disableAutoMode: "disable",
+            permissions: { defaultMode: "default", disableAutoMode: "disable", allow: ["Bash"] },
+          }),
+        )
+        await fs.writeFile(
+          path.join(w.config.claude, ".claude.json"),
+          JSON.stringify({ hasCompletedOnboarding: true, theme: "dark" }),
+        )
+        const zdot = path.join(w.root, "zdotdir-background")
+        await fs.mkdir(zdot, { recursive: true })
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        const fake = [
+          `ANTHROPIC_BASE_URL=${claude.url}`,
+          "ANTHROPIC_AUTH_TOKEN=fake",
+          "NO_PROXY=127.0.0.1,localhost",
+          "no_proxy=127.0.0.1,localhost",
+        ].flatMap((pair) => ["--env", pair])
+        const sub = (
+          JSON.parse(
+            await w.ok(
+              ["run", "claude", "--session", session, ...fake, "--title", "Wait for the probe", "--", "bg-probe"],
+              { cwd: repo, timeoutMs: 120_000 },
+            ),
+          ) as { id: string }
+        ).id
+        // A result row keeps its text in the round it closed (result_message_id); a message row in its content.
+        const count = (where: string) =>
+          row<{ n: number }>(w, `SELECT count(*) AS n FROM inbox WHERE sender_id = ? AND ${where}`, sub)?.n ?? 0
+        const saw = (tag: string, text: string) => main.seen.filter((m) => m.includes(tag) && m.includes(text)).length
+        const why = async () =>
+          `; Claude's model saw ${JSON.stringify(claude.seen, null, 1)}; the main agent's model saw ${JSON.stringify(main.seen, null, 1)}; vibestd.log:\n${(await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-3000)}`
+        await until(
+          "the round's result at the main agent",
+          () => saw("<agent-result>", "final-report") > 0,
+          180_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}${await why()}`)
+        })
+        // Nothing more comes after the result.
+        await Bun.sleep(10_000)
+        const counts = {
+          message: saw("<agent-message>", "progress-interim"),
+          result: saw("<agent-result>", "final-report"),
+          interimResult: saw("<agent-result>", "progress-interim"),
+          reports: count("content LIKE '<agent-message>%'"),
+          results: count("result_message_id IS NOT NULL"),
+        }
+        expect(
+          JSON.stringify(counts) ===
+            JSON.stringify({ message: 1, result: 1, interimResult: 0, reports: 1, results: 1 }),
+          `expected one message and one result, got ${JSON.stringify(counts)}${await why()}`,
+        )
+        const rounds = row<{ n: number; empty: number }>(
+          w,
+          "SELECT count(*) AS n, sum(input = '') AS empty FROM message WHERE session_id = ?",
+          sub,
+        )
+        expect(rounds?.n === 1 && !rounds.empty, `rounds of the subagent: ${JSON.stringify(rounds)}`)
+      } finally {
+        main.stop()
+        claude.stop()
         await dropHerdrSession(w, session)
       }
     },

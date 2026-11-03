@@ -134,6 +134,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     /** What the prompt.submit hook passes on for `text` from `origin`. */
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
     turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
+    stop: (event: object) => hooks["classic.Stop"]!($, event, pass),
     preTool: (event: object) => hooks["tool.call"]!($, event, pass),
     /** Fire every pending clock.after of `ms`. */
     fire: async (ms: number) => {
@@ -218,6 +219,25 @@ describe("Claude plugin requests", () => {
       last_assistant_message: "done",
     })
     assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
+  })
+
+  it("a turn whose Stop lists running background work reports that list with its turn end; the next turn has none", async () => {
+    const h = host(WORKER)
+    const shell = { id: "b1", type: "shell", status: "running", description: "tests", command: "pnpm test" }
+    await h.stop({ hook_event_name: "Stop", background_tasks: [shell] })
+    await h.turnComplete({ reason: "answer", answer: "still running" })
+    await h.stop({ hook_event_name: "Stop", background_tasks: [] })
+    await h.turnComplete({ reason: "answer", answer: "report" })
+    // An Esc raises no Stop: nothing left over from an earlier turn rides along.
+    await h.stop({ hook_event_name: "Stop", background_tasks: [shell] })
+    await h.turnComplete({ reason: "answer", answer: "again" })
+    await h.turnComplete({ reason: "aborted", answer: "" })
+    await settle()
+    const bodies = h.requests.map((r) => r.body as Record<string, unknown>)
+    assert.deepStrictEqual(bodies[0]!.background_tasks, [shell])
+    assert.notProperty(bodies[1], "background_tasks")
+    assert.deepStrictEqual(bodies[2]!.background_tasks, [shell])
+    assert.notProperty(bodies[3], "background_tasks")
   })
 
   it("the main agent's turn end is not reported", async () => {

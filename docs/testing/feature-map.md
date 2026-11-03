@@ -123,3 +123,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S14 | several repositories: separate Projects, one Project per repository wherever you stand in it, runs in two at once | agent (story S13 in [e2e-user-stories.md](e2e-user-stories.md)) |
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
 | S18 | a subagent whose first turn outlasts herdr's agent.start window keeps its terminal (no false exit)                | inbox: `tools/e2e` S18                                          |
+| S19 | a Claude turn that ends while its background work runs: one message to the main agent, one result for the round   | inbox: `tools/e2e` S19                                          |

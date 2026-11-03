@@ -26,7 +26,8 @@ const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'
 // exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
-const EVENTS = ["prompt.submit", "session.start", "tool.call", "turn.complete", "ui.render"]
+// classic.Stop is read only for its background_tasks (turn.complete has none); turn ends are reported from turn.complete.
+const EVENTS = ["classic.Stop", "prompt.submit", "session.start", "tool.call", "turn.complete", "ui.render"]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))
 
@@ -236,7 +237,7 @@ describe("claude plugin distribution", () => {
     assert.match(bundle, /on\("turn\.complete"/)
     assert.match(bundle, /on\("prompt\.submit"/)
     assert.match(bundle, /on\("tool\.call"/)
-    assert.notMatch(bundle, /on\("classic\./)
+    assert.notMatch(bundle, /on\("classic\.(?!Stop")/)
     assert.notMatch(bundle, /vibest-hook\.sh|VIBEST_COMMAND/)
   })
 })

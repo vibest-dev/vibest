@@ -6,7 +6,8 @@
 //   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
 //   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
 //                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line, ResultReady
+//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line, ResultReady;
+//                                                       a turn that left background work running: a message instead
 //   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt)
 //   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
 //
@@ -19,7 +20,7 @@ import * as Guard from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
-import { promptOf, recordPrompt, recordTurnEnd } from "@vibest/core/results"
+import { agentMessage, promptOf, recordPrompt, recordTurnEnd } from "@vibest/core/results"
 import { Sessions } from "@vibest/core/sessions"
 import {
   HARNESS_HEADER,
@@ -145,7 +146,19 @@ export const make = Effect.gen(function* () {
           "hook turn-end",
           false,
           Effect.gen(function* () {
-            if (yield* recordTurnEnd(adapter, who.agent, who.id, request.body)) yield* sessions.resultReady(who.id)
+            const recorded = yield* recordTurnEnd(adapter, who.agent, who.id, request.body)
+            if (recorded === true) yield* sessions.resultReady(who.id)
+            else if (recorded !== false) {
+              // Background work still runs: the turn's text goes to the parent as a message, the round stays open.
+              const session = yield* db.getSession(who.id)
+              if (session)
+                yield* inbox.enqueue({
+                  sessionId: session.id,
+                  kind: "report",
+                  message: agentMessage(session, recorded.progress),
+                  details: {},
+                })
+            }
             return ok()
           }).pipe(Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`)))),
         )

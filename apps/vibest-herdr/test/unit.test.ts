@@ -968,6 +968,30 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(turnEnd({ ...answer, session_id: "" }, true))
   })
 
+  it("claude: an answer that leaves background work running is progress, not the result", () => {
+    const turnEnd = ADAPTERS.claude.turnEnd!
+    const shell = { id: "b1", type: "shell", status: "running", description: "tests" }
+    const answer = {
+      hook_event_name: "TurnComplete",
+      session_id: "c1",
+      reason: "answer",
+      last_assistant_message: "tests still running",
+    }
+    assert.deepStrictEqual(turnEnd({ ...answer, background_tasks: [shell] }, false), {
+      progress: "tests still running",
+    })
+    assert.isUndefined(
+      turnEnd({ ...answer, background_tasks: [shell] }, true),
+      "the main agent's turn ends are no result",
+    )
+    assert.deepStrictEqual(turnEnd({ ...answer, background_tasks: [] }, false), {
+      result: { ...answer, background_tasks: [] },
+    })
+    // A failed turn is the result whatever still runs.
+    const error = { ...answer, reason: "error", background_tasks: [shell] }
+    assert.strictEqual((turnEnd(error, false) as { result: { error: string } }).result.error, "error")
+  })
+
   it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
     const userPrompt = ADAPTERS.claude.userPrompt!
     const typed = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }

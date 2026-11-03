@@ -548,6 +548,14 @@ export class Sessions extends Context.Service<
           Effect.orElseSucceed(() => false),
         )
 
+      /** The round prompted at `at` last reported a turn that left background work running: the harness starts the
+       * next turn itself when that work ends, so an idle agent has not lost its turn. */
+      const waitingOnBackground = (id: string, at: number) =>
+        readReportLines(layout.reportFile(id)).pipe(
+          Effect.map((lines) => lines.filter((line) => line.ts >= at).at(-1)?.turn === "progress"),
+          Effect.orElseSucceed(() => false),
+        )
+
       /**
        * Send a turn and confirm it started. Returns why not (no screen text: the tail goes to vibestd.log) when the session never picked it up
        * and the integration wrote no result; the caller tells the owner. A result already on disk is delivered instead, and
@@ -1042,6 +1050,9 @@ export class Sessions extends Context.Service<
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         if (now - endedAt! <= Duration.toMillis(HOOK_GRACE)) return
+        // ponytail: waits as long as the background work runs; a harness that dies is caught by the exit path above,
+        // one whose next turn never reports is not caught.
+        if (yield* waitingOnBackground(id, session.turnPromptedAt)) return
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
