@@ -163,6 +163,8 @@ export const make = Effect.gen(function* () {
       if (request.path === GUARD_ROUTE) {
         const body = yield* Schema.decodeUnknownEffect(GuardBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return ok({ deny: "vibest could not read this tool call; it is refused." })
+        // A tool call is the harness at work: a session that waited on the person goes on.
+        if (who.agent !== "coordinator") yield* sessions.activity(who.id, "working")
         const reason = yield* guard(body.value.tool)
         return ok(reason === undefined ? {} : { deny: reason })
       }

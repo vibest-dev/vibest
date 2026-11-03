@@ -421,6 +421,28 @@ describe("vibestd's HTTP API", () => {
     }),
   )
 
+  test(
+    "state from events: blocked is one notice with its reason, a tool call or a turn start is working again",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      yield* until(db.getSession(worker), (s) => s?.turnState === "open")
+      const event = (body: object) => call("/events", { sessionId: worker }, body)
+      assert.strictEqual((yield* event({ type: "blocked", reason: "question" })).status, 204)
+      yield* event({ type: "blocked", reason: "question" })
+      assert.strictEqual((yield* db.getSession(worker))!.status, "blocked")
+      const notice = yield* db.latestInbox(worker, "notice")
+      assert.include(notice!.message, `${worker} (claude) has been waiting for an answer to its question since`)
+      // The person answered: its next tool call is the harness at work.
+      yield* call("/guard", { sessionId: worker }, { tool: { kind: "read", name: "Read", paths: [], cwd: "/tmp" } })
+      assert.strictEqual((yield* db.getSession(worker))!.status, "working")
+      yield* event({ type: "blocked", reason: "permission" })
+      assert.strictEqual((yield* db.getSession(worker))!.status, "blocked")
+      assert.include((yield* db.latestInbox(worker, "notice"))!.message, "waiting for a permission decision")
+      yield* event({ type: "turn.start", origin: "inbox", text: "" })
+      assert.strictEqual((yield* db.getSession(worker))!.status, "working")
+    }),
+  )
+
   it.effect("served on a unix socket", () =>
     Effect.gen(function* () {
       const { main, projectId } = yield* project

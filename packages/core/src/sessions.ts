@@ -210,6 +210,11 @@ export class Sessions extends Context.Service<
     readonly check: (id: string) => Effect.Effect<void>
     /** A turn end vibestd just recorded (RPC `TurnEnd`, or the HTTP hook): schedule a check and return at once (SPEC §7, §9). */
     readonly resultReady: (id: string) => Effect.Effect<void>
+    /** An integration's report of what the harness does in its open turn (`turn.start`, a tool call, `blocked`). */
+    readonly activity: (
+      id: string,
+      now: "working" | { readonly blocked: "permission" | "question" },
+    ) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
@@ -365,7 +370,7 @@ export class Sessions extends Context.Service<
       const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
       const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessAdapter, id: string) =>
         Effect.gen(function* () {
-          const reports = adapter.reportsReady
+          const reports = adapter.reportsState
           if (h.state === undefined && !reports) return "unknown" as AgentState
           const step = adapter.startup ? yield* adapter.startup : undefined
           const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
@@ -449,10 +454,16 @@ export class Sessions extends Context.Service<
         ]
       })
 
-      /** One look (§5): the runtime reports it working or blocked, or the integration wrote a turn-start report line of this round. */
+      /**
+       * One look (§5): the integration reported the turn start (`activity`), the runtime reports it working or blocked
+       * (a harness without such an integration), or a turn-start report line of this round exists.
+       */
       const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal) =>
         Effect.gen(function* () {
           const r = yield* track(session.id)
+          if (yield* Ref.get(r.sawWorking)) return true
+          if (harnesses.get(session.harnessId).reportsState)
+            return yield* reportStartedSince(session.id, session.turnPromptedAt)
           const seen = yield* agentState(h, terminal)
           const state = stateOf(seen)
           if (state === "working" || state === "blocked") {
@@ -911,6 +922,36 @@ export class Sessions extends Context.Service<
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
 
+      /** The owner is told once per wait: the session waits on the person. */
+      const blockedNotice = (session: SessionRow, reason: "permission" | "question") =>
+        Effect.gen(function* () {
+          const since = new Date(yield* Clock.currentTimeMillis)
+          const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
+          const what = reason === "permission" ? "a permission decision" : "an answer to its question"
+          yield* notice(
+            session,
+            `${session.id} (${session.harnessId}) has been waiting for ${what} since ${hhmm}. Run vibest peek ${session.id} to see the request.`,
+          )
+        })
+
+      /**
+       * What an integration reported the harness doing in its open turn: working (a turn start, a tool call) or blocked
+       * on the person (told once per wait). Outside a turn it changes nothing. No lock: status is memory only.
+       */
+      const activity = Effect.fn("Sessions.activity")(function* (
+        id: string,
+        now: "working" | { readonly blocked: "permission" | "question" },
+      ) {
+        const session = yield* db.getSession(id)
+        if (!session || session.turnState !== "open") return
+        const r = yield* track(id)
+        yield* Ref.set(r.sawWorking, true)
+        const status = now === "working" ? "working" : "blocked"
+        if (session.status !== status) yield* db.updateSession(id, { status })
+        if (now === "working") return yield* Ref.set(r.blockedNotified, false)
+        if (!(yield* Ref.getAndSet(r.blockedNotified, true))) yield* blockedNotice(session, now.blocked)
+      })
+
       const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
         if (!session) return
@@ -934,11 +975,26 @@ export class Sessions extends Context.Service<
         // Unreachable is no answer: this check tries again on the next poll, the row untouched.
         if (Option.isNone(maybe)) return
         const seen = maybe.value
-        // Status is the runtime's, as it reports it now. `unknown` is no answer: the process fallback decides (§5).
-        const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
-        if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
-        if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
-        if ((yield* collectResult(h, session)) !== "none") return
+        const reported = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
+        // An integrated harness reports working and blocked itself (`activity`): of the runtime only idle counts (a turn
+        // that ended without its event) and whether it is gone. Any other: the runtime's state as it reports it now;
+        // `unknown` is no answer, the process fallback decides (§5).
+        const own = harnesses.get(session.harnessId).reportsState
+        const state = !own
+          ? reported
+          : session.status === "blocked"
+            ? "blocked"
+            : reported === "idle"
+              ? "idle"
+              : undefined
+        if (!own && state !== undefined && session.status !== state)
+          yield* db.updateSession(session.id, { status: state })
+        if (!own && (state === "working" || state === "blocked")) yield* Ref.set(r.sawWorking, true)
+        if ((yield* collectResult(h, session)) !== "none") {
+          // Its turn ended (the integration said so): idle until it reports the next start.
+          if (own) yield* db.updateSession(id, { status: "idle" })
+          return
+        }
         if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
           if (session.startedAt === null) {
             // vibestd died mid-spawn (SPEC §5.5 spawn).
@@ -953,27 +1009,16 @@ export class Sessions extends Context.Service<
           yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
           return
         }
-        // A harness whose ids the runtime knows by watching it (Cursor): its record replaces a conversation id adopted from a report.
-        if (harnesses.get(session.harnessId).conversation === "reported" && h.session !== undefined) {
-          const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
-          if (sessionId !== null && sessionId !== session.harnessSessionId)
-            yield* db.updateSession(id, { harnessSessionId: sessionId })
-        }
-
         const s = state ?? "unknown"
         if (!open) {
+          // Its turn ended (the integration said so): idle until it reports the next start.
+          if (own && session.status !== "idle" && session.status !== "blocked")
+            yield* db.updateSession(id, { status: "idle" })
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
         }
         if (s === "blocked") {
-          if (!(yield* Ref.getAndSet(r.blockedNotified, true))) {
-            const since = new Date(yield* Clock.currentTimeMillis)
-            const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
-            yield* notice(
-              session,
-              `${id} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
-            )
-          }
+          if (!(yield* Ref.getAndSet(r.blockedNotified, true))) yield* blockedNotice(session, "permission")
           return
         }
         yield* Ref.set(r.blockedNotified, false)
@@ -1043,7 +1088,9 @@ export class Sessions extends Context.Service<
         const terminal = session.address
         const seen = yield* agentState(h, terminal)
         const state = stateOf(seen)
-        if (state !== undefined && state !== "unknown" && busy(state)) return
+        // An integrated harness is busy only within a turn or while blocked (both checked above).
+        if (!harnesses.get(session.harnessId).reportsState && state !== undefined && state !== "unknown" && busy(state))
+          return
         if (seen === "absent" || (state === "unknown" && !(yield* alive(h, terminal)))) {
           if (harnesses.get(session.harnessId).conversation === "reported" && !session.harnessSessionId)
             return yield* new NoSuchSession({
@@ -1430,6 +1477,7 @@ export class Sessions extends Context.Service<
         list,
         check: checkLocked,
         resultReady,
+        activity: (id, now) => activity(id, now).pipe(Effect.provideContext(platform), Effect.orDie),
         userPrompt,
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: SynchronizedRef.get(tracked).pipe(

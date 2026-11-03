@@ -17,7 +17,7 @@ const fake: Harness.HarnessAdapter = {
   rulesInPrompt: false,
   interruptKey: "esc",
   delivery: "type",
-  reportsReady: false,
+  reportsState: false,
   checkProvider: () => undefined,
   // A per-session config directory under scratch: how a plugin harness loads its own integration for one session.
   launchArgs: (i) => ["--session", i.sessionId!, "--config", `${i.scratch}/fakecli`, "--rules", i.rulesFile],

@@ -111,7 +111,7 @@ export const claude: HarnessAdapter = {
   interruptKey: "esc",
   startup: claudeStartup,
   delivery: "poll",
-  reportsReady: true,
+  reportsState: true,
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),

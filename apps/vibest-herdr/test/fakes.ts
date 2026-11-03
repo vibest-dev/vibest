@@ -474,36 +474,48 @@ const over = (options: TestOptions) => {
       )
     }),
   )
+  // And its turn starts and blocks, as `Sessions.activity` hears them from vibestd (hooks.ts).
+  const activity = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const fake = yield* FakeRuntime
+      const sessions = yield* Sessions
+      yield* Ref.set(fake.onActivity, (session, status) =>
+        sessions.activity(session, status === "working" ? "working" : { blocked: "permission" }),
+      )
+    }),
+  )
   return Layer.provideMerge(FakeRuntime.layer(options))(
-    Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
-      Layer.provideMerge(integration),
-      Layer.provideMerge(plugins),
-      Layer.provideMerge(Inbox.layer),
-      Layer.provideMerge(
-        (options.db ? Layer.effect(Db, Effect.map(Db, options.db)).pipe(Layer.provide(Db.layer)) : Db.layer).pipe(
-          Layer.provideMerge(Platform.sqlite(":memory:")),
+    ((layer) => activity.pipe(Layer.provideMerge(layer)))(
+      Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
+        Layer.provideMerge(integration),
+        Layer.provideMerge(plugins),
+        Layer.provideMerge(Inbox.layer),
+        Layer.provideMerge(
+          (options.db ? Layer.effect(Db, Effect.map(Db, options.db)).pipe(Layer.provide(Db.layer)) : Db.layer).pipe(
+            Layer.provideMerge(Platform.sqlite(":memory:")),
+          ),
         ),
-      ),
-      Layer.provideMerge(runtime),
-      Layer.provideMerge(harnessOf(options)),
-      Layer.provideMerge(BuiltinHarnesses.layer),
-      Layer.provideMerge(
-        Layer.effect(
-          Processes,
-          Effect.gen(function* () {
-            return (yield* FakeProcesses).processes
-          }),
-        ).pipe(Layer.provideMerge(FakeProcesses.layer)),
-      ),
-      Layer.provideMerge(home),
-      Layer.provideMerge(Drain.layer),
-      Layer.provideMerge(Restarting.layer),
-      Layer.provideMerge(
-        options.readFile
-          ? Layer.effect(FileSystem.FileSystem, Effect.map(FileSystem.FileSystem, options.readFile)).pipe(
-              Layer.provideMerge(Platform.services),
-            )
-          : Platform.services,
+        Layer.provideMerge(runtime),
+        Layer.provideMerge(harnessOf(options)),
+        Layer.provideMerge(BuiltinHarnesses.layer),
+        Layer.provideMerge(
+          Layer.effect(
+            Processes,
+            Effect.gen(function* () {
+              return (yield* FakeProcesses).processes
+            }),
+          ).pipe(Layer.provideMerge(FakeProcesses.layer)),
+        ),
+        Layer.provideMerge(home),
+        Layer.provideMerge(Drain.layer),
+        Layer.provideMerge(Restarting.layer),
+        Layer.provideMerge(
+          options.readFile
+            ? Layer.effect(FileSystem.FileSystem, Effect.map(FileSystem.FileSystem, options.readFile)).pipe(
+                Layer.provideMerge(Platform.services),
+              )
+            : Platform.services,
+        ),
       ),
     ),
   )

@@ -69,12 +69,16 @@ export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: Hoo
         return
       }
       case "turn.start": {
-        if (event.origin !== "typed" || who.agent === "coordinator" || event.text.trim() === "") return
-        // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the session's
-        // lock, held through a send's whole confirm) stamps the round with the same time.
-        const at = yield* Clock.currentTimeMillis
-        yield* recordPrompt(who.id, event.text, at)
-        yield* sessions.userPrompt(who.id, event.text, at)
+        if (who.agent === "coordinator") return
+        if (event.origin === "typed" && event.text.trim() !== "") {
+          // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the session's
+          // lock, held through a send's whole confirm) stamps the round with the same time.
+          const at = yield* Clock.currentTimeMillis
+          yield* recordPrompt(who.id, event.text, at)
+          yield* sessions.userPrompt(who.id, event.text, at)
+        }
+        // The harness works on its open round: the pickup proof, and its status.
+        yield* sessions.activity(who.id, "working")
         return
       }
       case "turn.end": {
@@ -83,6 +87,8 @@ export const apply = (db: Db["Service"], sessions: Sessions["Service"], who: Hoo
         return
       }
       case "blocked":
+        if (who.agent === "coordinator") return
         yield* Effect.logInfo(`session ${who.id} is blocked on a ${event.reason}`)
+        yield* sessions.activity(who.id, { blocked: event.reason })
     }
   })

@@ -136,6 +136,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
     turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
     preTool: (event: object) => hooks["tool.call"]!($, event, pass),
+    toolCheck: (event: object, verdict: object) => hooks["tool.check"]!($, event, async () => verdict),
     /** Fire every pending clock.after of `ms`. */
     fire: async (ms: number) => {
       for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
@@ -402,6 +403,22 @@ describe("Claude plugin guard", () => {
     assert.deepStrictEqual(await h.preTool({ tool: "Read" }), { tool: "Read" })
     h.state.answer = () => ({ status: 403, body: { error: "session w1 is not in project 7" } })
     assert.match((await h.preTool({ tool: "Read" })).deny, /not in project 7/)
+  })
+
+  it("an ask verdict reports blocked on a permission; AskUserQuestion, once allowed, blocked on a question", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => ({ status: 200, body: {} })
+    const check = (decision: string, toolUseId?: string) =>
+      h.toolCheck({ tool: "Bash", input: {}, ...(toolUseId ? { tool_use_id: toolUseId } : {}) }, { decision })
+    assert.deepStrictEqual(await check("allow", "t1"), { decision: "allow" })
+    assert.deepStrictEqual(await check("ask"), { decision: "ask" }, "a query is no wait")
+    assert.lengthOf(h.requests, 0)
+    assert.deepStrictEqual(await check("ask", "t2"), { decision: "ask" })
+    await settle()
+    assert.deepStrictEqual(h.requests.at(-1)!.body, { type: "blocked", reason: "permission", detail: "Bash" })
+    await h.preTool({ tool: "AskUserQuestion", questions: [] })
+    await settle()
+    assert.deepStrictEqual(h.requests.at(-1)!.body, { type: "blocked", reason: "question" })
   })
 
   it("nothing answering: tried again after 100, 300 and 900 ms, then refused", async () => {

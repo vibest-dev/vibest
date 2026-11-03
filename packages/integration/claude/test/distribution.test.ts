@@ -26,7 +26,7 @@ const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'
 // exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
-const EVENTS = ["prompt.submit", "session.start", "tool.call", "turn.complete", "ui.render"]
+const EVENTS = ["prompt.submit", "session.start", "tool.call", "tool.check", "turn.complete", "ui.render"]
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"))
 

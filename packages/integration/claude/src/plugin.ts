@@ -140,6 +140,9 @@ const parse = (text: string): unknown => {
   }
 }
 
+/** Claude Code's tool that puts a question to the person (not in the pinned declarations' tool list). */
+const QUESTION_TOOL = "AskUserQuestion"
+
 const errorOf = (body: unknown) =>
   typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
     ? (body as { error: string }).error
@@ -379,6 +382,21 @@ export function register(on: On, _options?: unknown) {
     return next(event)
   })
 
+  // A call core puts to the person (verdict ask, outside bypass mode): the session waits on a permission decision.
+  on("tool.check", async ($, event, next) => {
+    const verdict = await next(event)
+    if (event.tool_use_id !== undefined && verdict.decision === "ask") {
+      const host = nativeHost($)
+      if (await identity(host).catch(() => undefined))
+        void report(host, EVENTS_ROUTE, {
+          type: "blocked",
+          reason: "permission",
+          detail: event.tool,
+        } satisfies IntegrationEvent)
+    }
+    return verdict
+  })
+
   on("tool.call", async ($, event, next) => {
     const host = nativeHost($)
     if (!(await host.env("VIBEST_AGENT"))) return next(event)
@@ -388,7 +406,11 @@ export function register(on: On, _options?: unknown) {
         const r = await post(host, GUARD_ROUTE, body, GUARD_TRY_MS)
         if (r.status === 200) {
           const deny = (r.body as { deny?: unknown } | undefined)?.deny
-          return typeof deny === "string" ? { deny } : next(event)
+          if (typeof deny === "string") return { deny }
+          // The model asks the person: the session waits on an answer until its next tool call or turn.
+          if ((event.tool as string) === QUESTION_TOOL && (await identity(host).catch(() => undefined)))
+            void report(host, EVENTS_ROUTE, { type: "blocked", reason: "question" } satisfies IntegrationEvent)
+          return next(event)
         }
         if (r.status < 500) return { deny: `vibest refused the tool call: ${errorOf(r.body) ?? `status ${r.status}`}` }
       } catch {

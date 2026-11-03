@@ -83,7 +83,7 @@ export const blockedOf = (
   pid: number | undefined,
   harnessSessionId: string | null,
 ) =>
-  !adapter.reportsReady
+  !adapter.reportsState
     ? "its harness has no integration that reports its pid and when it is ready; quit it and start it again yourself"
     : h?.run === undefined
       ? "its runtime cannot start a program in its terminal again; quit it and start it again yourself"
@@ -361,7 +361,7 @@ export const sessionRestart = (deps: {
     })
 
   /** Only a harness whose integration reports its version can be on an old one; any other is never listed. */
-  const reports = (harness: HarnessId) => harnesses.find(harness)?.reportsReady === true
+  const reports = (harness: HarnessId) => harnesses.find(harness)?.reportsState === true
 
   const outdated = Effect.gen(function* () {
     const agents = (yield* db.listSessions()).filter(

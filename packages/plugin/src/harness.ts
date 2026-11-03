@@ -120,8 +120,12 @@ export interface HarnessAdapter {
    * HTTP `/inbox/poll`, or `subscribe`, the RPC stream).
    */
   readonly delivery: "type" | "poll" | "subscribe"
-  /** The integration reports when the harness takes input (`ready` event); absent: the runtime's agent state says so. */
-  readonly reportsReady: boolean
+  /**
+   * The integration reports what the harness does: `ready` when it takes input, `turn.start` when it works, `blocked`
+   * when it waits on the person. vibest then reads only liveness from the runtime (and idle, for a turn that ended
+   * without its event). False: the runtime's agent state says all of it.
+   */
+  readonly reportsState: boolean
   /** Error message when this harness cannot use `provider`, else undefined. */
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>

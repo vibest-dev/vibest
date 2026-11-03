@@ -70,7 +70,7 @@ export const pi: HarnessAdapter = {
   rulesInPrompt: false,
   interruptKey: "esc",
   delivery: "subscribe",
-  reportsReady: true,
+  reportsState: true,
   checkProvider: () => undefined,
   launchArgs: (i) => [
     "--session-id",

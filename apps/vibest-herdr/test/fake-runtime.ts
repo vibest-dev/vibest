@@ -123,6 +123,8 @@ export class FakeRuntime extends Context.Service<
     readonly reachable: Ref.Ref<boolean>
     /** What the harness's integration does once a harness `open` started is up (testLayer: report it ready to vibestd). */
     readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
+    /** What the harness's integration reports when its agent starts working or blocks (testLayer: `Sessions.activity`). */
+    readonly onActivity: Ref.Ref<(session: string, status: "working" | "blocked") => Effect.Effect<void>>
     /** The next `n` texts are accepted without moving the agent, so confirm times out. */
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
@@ -138,6 +140,9 @@ export class FakeRuntime extends Context.Service<
       const holds = yield* Ref.make(HashMap.empty<HoldMethod, Hold>())
       const events = yield* PubSub.unbounded<RuntimeEvent>()
       const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
+      const onActivity = yield* Ref.make<(session: string, status: "working" | "blocked") => Effect.Effect<void>>(
+        () => Effect.void,
+      )
       let counter = 0
       const next = () => Effect.sync(() => ++counter)
 
@@ -161,7 +166,16 @@ export class FakeRuntime extends Context.Service<
             id === undefined
               ? Effect.void
               : Effect.gen(function* () {
+                  const before = Option.getOrUndefined(HashMap.get(yield* Ref.get(agents), id))
                   yield* Ref.update(agents, (map) => HashMap.modify(map, id, f))
+                  const now = Option.getOrUndefined(HashMap.get(yield* Ref.get(agents), id))
+                  // The harness's own integration sees it start working or block (a status change, or a new turn).
+                  if (
+                    now?.vibestSession !== undefined &&
+                    (now.status === "working" || now.status === "blocked") &&
+                    (before?.status !== now.status || before.seq !== now.seq)
+                  )
+                    yield* (yield* Ref.get(onActivity))(now.vibestSession, now.status)
                   if (options.statusEvents) {
                     const after = Option.getOrThrow(HashMap.get(yield* Ref.get(agents), id))
                     yield* PubSub.publish(events, {
@@ -561,6 +575,7 @@ export class FakeRuntime extends Context.Service<
         skipPromptUpdates,
         events,
         onStarted,
+        onActivity,
       })
     })
 
