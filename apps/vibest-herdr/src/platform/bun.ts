@@ -8,7 +8,7 @@ import path from "node:path"
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
-import { inspectSchema, SQL_NAMES } from "@vibest/core/db"
+import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
@@ -20,9 +20,7 @@ import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
-import { SqlClient } from "effect/sql"
 
-import { migrateLegacyTerminalIds } from "../legacy-terminal-ids.ts"
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
 /**
@@ -71,6 +69,23 @@ const privateDatabase = (filename: string) =>
     }
   })
 
+/** `inspectSchema` on a read-only connection to `filename`; a refusal names the file. */
+const inspectFile = (filename: string) =>
+  inspectSchema.pipe(
+    Effect.provide(sqliteLayer(filename, true)),
+    Effect.scoped,
+    Effect.mapError((e) =>
+      e instanceof SchemaMismatch
+        ? new SchemaMismatch({
+            version: e.version,
+            applicationId: e.applicationId,
+            ...(e.detail === undefined ? {} : { detail: e.detail }),
+            file: filename,
+          })
+        : e,
+    ),
+  )
+
 /**
  * The SqlClient `Db` runs on (bun:sqlite). An existing file is judged by `inspectSchema` on a read-only connection,
  * which can see committed WAL frames and does not checkpoint. A mismatch fails before any writable open, so the
@@ -83,15 +98,7 @@ export const sqlite = (filename: string) =>
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
         yield* privateDatabase(filename)
-        if (existed) yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
-        // The herdr product's one-off migration runs on its own short-lived writable connection before core reads the
-        // table (legacy-terminal-ids.ts): any left of the pre-port rows are rewritten before `Db` ever sees them.
-        if (existed)
-          yield* sqliteLayer(filename, false).pipe(
-            Layer.build,
-            Effect.flatMap((context) => migrateLegacyTerminalIds(effect.Context.get(context, SqlClient.SqlClient))),
-            Effect.scoped,
-          )
+        if (existed) yield* inspectFile(filename)
       }
       return sqliteLayer(filename, false)
     }),
@@ -101,7 +108,7 @@ export const sqlite = (filename: string) =>
 export const checkDatabase = (filename: string) =>
   Effect.gen(function* () {
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
-    yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
+    yield* inspectFile(filename)
   }).pipe(Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))))
 
 export const runMain = BunRuntime.runMain

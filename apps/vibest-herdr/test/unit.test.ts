@@ -40,7 +40,7 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { encodeJson, makeRepository, sh, tempDirectory } from "./fakes.ts"
+import { encodeJson, makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
 
 const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
@@ -129,7 +129,7 @@ describe("Db", () => {
   /** Each test gets its own in-memory database. */
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
 
-  it.effect("an empty file gets v1; a foreign file is refused", () =>
+  it.effect("an empty file gets the schema; a foreign file is refused", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
       const file = path.join(yield* tempDirectory("vibest-db-"), "vibest.db")
@@ -159,7 +159,8 @@ describe("Db", () => {
       assert.isTrue(Exit.isFailure(exit))
       const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
       assert.match(pretty, /SchemaMismatch/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
+      assert.include(pretty, "move it aside to start empty")
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -201,7 +202,7 @@ describe("Db", () => {
           [first.sessionId, "aaaaaaaa"],
         )
         assert.deepStrictEqual(yield* db.listSessions(), [])
-        const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE directory = 'r'`)
+        const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
         assert.isTrue(Exit.isFailure(deleted))
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
@@ -218,22 +219,23 @@ describe("Db", () => {
           const sql = yield* SqlClient.SqlClient
           const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
           yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
-          yield* sql`INSERT INTO message (session_id, input, status, metadata, started_at) VALUES ('aaaaaaaa', 'typed', 'working', '{}', 1)`
-          const inbox = (senderType: string, senderId: string | null, content: string, deliveryStatus: string) =>
-            sql`INSERT INTO inbox (recipient_session_id, sender_type, sender_id, content, delivery_status)
-          VALUES ('aaaaaaaa', ${senderType}, ${senderId}, ${content}, ${deliveryStatus})`
-          yield* inbox("session", parent.sessionId, "from parent", "delivered")
-          yield* inbox("user", null, "later send", "delivered")
-          yield* inbox("session", "cccccccc", "from stranger", "delivered")
-          yield* inbox("user", null, "still pending", "pending")
+          yield* db.beginUserTurn("aaaaaaaa", "typed", { turnPromptedAt: 1 })
+          const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
+            sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
+          VALUES ('aaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
+          yield* inbox("send", parent.sessionId, "from parent", "delivered")
+          yield* inbox("send", null, "later send", "delivered")
+          yield* inbox("notice", parent.sessionId, "a notice", "delivered")
+          yield* inbox("send", null, "still pending", "pending")
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
             working: "typed",
             delivered: "later send",
             parentSessionId: parent.sessionId,
           })
-          yield* sql`UPDATE message SET input = '' WHERE session_id = 'aaaaaaaa'`
+          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
+          yield* db.beginUserTurn("aaaaaaaa", "", { turnPromptedAt: 2 })
           assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).working, "")
-          yield* sql`UPDATE message SET status = 'completed' WHERE session_id = 'aaaaaaaa'`
+          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
             working: "",
             delivered: "later send",
@@ -255,32 +257,28 @@ describe("Db", () => {
         const sql = yield* SqlClient.SqlClient
         const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
         yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
-        const [task] = yield* sql<{
-          id: number
-        }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa' AND content = 'do it'`
-        yield* sql`INSERT INTO inbox (recipient_session_id, sender_type, content, delivery_status) VALUES ('aaaaaaaa', 'user', 'add tests', 'delivered')`
-        const [follow] = yield* sql<{
-          id: number
-        }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa' AND content = 'add tests'`
-        yield* sql`INSERT INTO message (session_id, inbox_id, input, status, metadata, started_at, ended_at)
-        VALUES ('aaaaaaaa', ${task!.id}, 'do it', 'completed', '{}', 1, 2)`
-        yield* sql`INSERT INTO message (session_id, inbox_id, input, status, metadata, started_at, ended_at)
-        VALUES ('aaaaaaaa', ${follow!.id}, '', 'completed', '{}', 3, 4)`
-        yield* sql`INSERT INTO message (session_id, input, status, metadata, started_at) VALUES ('aaaaaaaa', '', 'working', '{}', 5)`
-        const row = (senderType: string, senderId: string | null, content: string, deliveryStatus = "delivered") =>
-          sql`INSERT INTO inbox (recipient_session_id, sender_type, sender_id, content, delivery_status)
-          VALUES ('aaaaaaaa', ${senderType}, ${senderId}, ${content}, ${deliveryStatus})`
-        yield* row("session", parent.sessionId, "from parent")
-        yield* row("user", null, "and docs")
+        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
+        yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
+        // The second turn consumed a send; the open third consumed nothing.
+        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 3 })
+        const follow = yield* db.insertSend("aaaaaaaa", "add tests")
+        yield* db.setInboxStatus([follow!.id], "delivered")
+        yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
+        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
+        const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
+          sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
+          VALUES ('aaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
+        yield* row("send", parent.sessionId, "from parent")
+        yield* row("send", null, "and docs")
         assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).delivered, "and docs")
-        yield* row("user", null, "also types")
+        yield* row("send", null, "also types")
         assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
           working: "",
           delivered: "and docs\n\nalso types",
           parentSessionId: parent.sessionId,
         })
-        yield* row("user", null, "still pending", "pending")
-        yield* row("session", "cccccccc", "from stranger")
+        yield* row("send", null, "still pending", "pending")
+        yield* row("notice", parent.sessionId, "a notice")
         assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).delivered, "and docs\n\nalso types")
       }),
     ),
@@ -297,13 +295,15 @@ describe("Db", () => {
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         const [old] = yield* sql<{
           endedAt: number | null
-          runtime: string | null
-        }>`SELECT ended_at, runtime FROM session WHERE id = ${first.sessionId}`
+        }>`SELECT ended_at FROM session WHERE id = ${first.sessionId}`
         assert.isNotNull(old!.endedAt)
-        assert.isNull(old!.runtime)
+        const ends = yield* sql<{
+          reason: string
+        }>`SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ${first.sessionId} AND type = 'process.end'`
+        assert.strictEqual(ends.at(-1)?.reason, "archived")
         const [project] = yield* sql<{
           main: string
-        }>`SELECT main_session_id AS main FROM project WHERE directory = 'r'`
+        }>`SELECT entry_session_id AS main FROM project WHERE key = 'r'`
         assert.strictEqual(project!.main, renewed.sessionId)
         assert.deepStrictEqual(yield* db.listSessions(), [])
         assert.isUndefined(yield* db.getSession(renewed.sessionId))
@@ -334,54 +334,56 @@ describe("Db", () => {
     ),
   )
 
-  it.effect("opening a round takes the newest delivered inbox row; the next round with none is empty", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        const round = (id: string) =>
-          sql<{
-            inboxId: number | null
-            input: string
-          }>`SELECT inbox_id, input FROM message WHERE session_id = ${id} AND status = 'working'`
-        yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
-        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
-        const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`
-        const [opened] = yield* round("aaaaaaaa")
-        assert.strictEqual(opened!.inboxId, task!.id)
-        assert.strictEqual(opened!.input, "do it")
-        yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
-        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 9 })
-        const [again] = yield* round("aaaaaaaa")
-        assert.isNull(again!.inboxId)
-        assert.strictEqual(again!.input, "")
+  it.effect(
+    "a turn's input is the rows delivered while it is open, or its task; the next turn with none is empty",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const sql = yield* SqlClient.SqlClient
+          const round = (id: string) =>
+            sql<{
+              inboxId: number | null
+              input: string
+            }>`SELECT inbox_id, input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
+          yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
+          yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
+          const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`
+          const [opened] = yield* round("aaaaaaaa")
+          assert.strictEqual(opened!.inboxId, task!.id)
+          assert.strictEqual(opened!.input, "do it")
+          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
+          yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 9 })
+          const [again] = yield* round("aaaaaaaa")
+          assert.isNull(again!.inboxId)
+          assert.strictEqual(again!.input, "")
 
-        yield* db.insertSession(session("bbbbbbbb"), "r")
-        const sent = yield* db.insertSend("bbbbbbbb", "ping")
-        yield* db.setInboxStatus([sent!.id], "delivered")
-        yield* db.updateSession("bbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
-        const [sendRound] = yield* round("bbbbbbbb")
-        assert.strictEqual(sendRound!.inboxId, sent!.id)
-        assert.strictEqual(sendRound!.input, "ping")
+          yield* db.insertSession(session("bbbbbbbb"), "r")
+          const sent = yield* db.insertSend("bbbbbbbb", "ping")
+          yield* db.updateSession("bbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
+          yield* db.setInboxStatus([sent!.id], "delivered")
+          const [sendRound] = yield* round("bbbbbbbb")
+          assert.strictEqual(sendRound!.inboxId, sent!.id)
+          assert.strictEqual(sendRound!.input, "ping")
 
-        yield* db.insertSession(session("cccccccc"), "r")
-        const first = yield* db.insertSend("cccccccc", "add a test")
-        const second = yield* db.insertSend("cccccccc", "also update the readme")
-        yield* db.setInboxStatus([first!.id, second!.id], "delivered")
-        yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 4 })
-        const [merged] = yield* round("cccccccc")
-        assert.strictEqual(merged!.inboxId, second!.id)
-        assert.strictEqual(merged!.input, "add a test\n\nalso update the readme")
-        // The next round takes only what came after the whole merged batch.
-        yield* db.updateSession("cccccccc", { turnState: "completed" })
-        const third = yield* db.insertSend("cccccccc", "and the docs")
-        yield* db.setInboxStatus([third!.id], "delivered")
-        yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 6 })
-        const [next] = yield* round("cccccccc")
-        assert.strictEqual(next!.inboxId, third!.id)
-        assert.strictEqual(next!.input, "and the docs")
-      }),
-    ),
+          yield* db.insertSession(session("cccccccc"), "r")
+          const first = yield* db.insertSend("cccccccc", "add a test")
+          const second = yield* db.insertSend("cccccccc", "also update the readme")
+          yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 4 })
+          yield* db.setInboxStatus([first!.id, second!.id], "delivered")
+          const [merged] = yield* round("cccccccc")
+          assert.strictEqual(merged!.inboxId, second!.id)
+          assert.strictEqual(merged!.input, "add a test\n\nalso update the readme")
+          // The next round takes only what came after the whole merged batch.
+          yield* db.updateSession("cccccccc", { turnState: "completed" })
+          const third = yield* db.insertSend("cccccccc", "and the docs")
+          yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 6 })
+          yield* db.setInboxStatus([third!.id], "delivered")
+          const [next] = yield* round("cccccccc")
+          assert.strictEqual(next!.inboxId, third!.id)
+          assert.strictEqual(next!.input, "and the docs")
+        }),
+      ),
   )
 
   it.effect("beginUserTurn is false when a round is already working and leaves that input", () =>
@@ -392,9 +394,10 @@ describe("Db", () => {
         yield* db.insertSession(session("aaaaaaaa"), "r")
         assert.isTrue(yield* db.beginUserTurn("aaaaaaaa", "kept", { turnPromptedAt: 1 }))
         assert.isFalse(yield* db.beginUserTurn("aaaaaaaa", "dropped", { turnPromptedAt: 2 }))
-        assert.deepStrictEqual(yield* sql<{ input: string }>`SELECT input FROM message WHERE session_id = 'aaaaaaaa'`, [
-          { input: "kept" },
-        ])
+        assert.deepStrictEqual(
+          yield* sql<{ input: string }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`,
+          [{ input: "kept" }],
+        )
       }),
     ),
   )
@@ -423,14 +426,15 @@ describe("Db", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
         assert.deepStrictEqual(
-          yield* sql`SELECT sender_type, content, delivery_status FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`,
-          [{ senderType: "user", content: "do it", deliveryStatus: "delivered" }],
+          yield* sql`SELECT kind, content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`,
+          [{ kind: "task", content: "do it", status: "delivered" }],
         )
         assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa"), [])
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "none")
         yield* db.updateSession("aaaaaaaa", { status: "working", turnState: "open", turnPromptedAt: 5 })
         assert.strictEqual(
-          (yield* sql<{ status: string }>`SELECT status FROM message WHERE session_id = 'aaaaaaaa'`)[0]?.status,
+          (yield* sql<{ status: string }>`SELECT status FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`)[0]
+            ?.status,
           "working",
         )
         assert.deepInclude(yield* db.getSession("aaaaaaaa"), {
@@ -440,19 +444,25 @@ describe("Db", () => {
         })
         yield* db.finishTurn(
           "aaaaaaaa",
+          { status: "completed", output: "the answer", failure: { message: "late" } },
           { turnState: "completed" },
-          { sessionId: "aaaaaaaa", kind: "result", message: "r", details: { summary: "done" } },
+          { sessionId: "aaaaaaaa", kind: "result", message: "<summary>done</summary>", details: { summary: "done" } },
         )
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "completed")
         const turns = yield* sql<{
           status: string
           output: string
           endedAt: number | null
-          metadata: string
-        }>`SELECT status, output, ended_at, metadata FROM message WHERE session_id = 'aaaaaaaa'`
+        }>`SELECT status, output, ended_at FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`
         assert.strictEqual(turns.length, 1)
-        assert.deepInclude(turns[0], { status: "completed", output: "r" })
-        assert.deepInclude(JSON.parse(turns[0]!.metadata), { summary: "done" })
+        assert.deepInclude(turns[0], { status: "completed", output: "<summary>done</summary>" })
+        // The whole turn.end data, as finishTurn was given it.
+        const [end] = yield* sql<{ data: string }>`SELECT data FROM event WHERE type = 'turn.end'`
+        assert.deepStrictEqual(JSON.parse(end!.data), {
+          status: "completed",
+          output: "the answer",
+          failure: { message: "late" },
+        })
         assert.isNotNull(turns[0]!.endedAt)
         assert.deepInclude((yield* db.latestInbox("aaaaaaaa", "result"))!.details, { summary: "done" })
         yield* db.closeTurn("aaaaaaaa", "interrupted", {})
@@ -468,12 +478,12 @@ describe("Db", () => {
       yield* db.insertSession(session("bbbbbbbb"), "r")
       yield* db.insertSession(session("cccccccc"), "r")
       yield* db.insertSession(session("aaaaaaaa"), "r")
-      yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb' WHERE id = 'aaaaaaaa'`
-      yield* sql`UPDATE project SET main_session_id = 'cccccccc'`
+      yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb', report_to_session_id = 'bbbbbbbb' WHERE id = 'aaaaaaaa'`
+      yield* sql`UPDATE project SET entry_session_id = 'cccccccc'`
       const recipient = Effect.flatMap(
         sql<{
           recipient: string
-        }>`SELECT recipient_session_id AS recipient FROM inbox WHERE result_message_id IS NOT NULL ORDER BY id DESC LIMIT 1`,
+        }>`SELECT recipient_session_id AS recipient FROM inbox WHERE kind = 'result' ORDER BY id DESC LIMIT 1`,
         (rows) => Effect.succeed(rows[0]?.recipient),
       )
       const round = (summary: string) =>
@@ -481,6 +491,7 @@ describe("Db", () => {
           yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
           yield* db.finishTurn(
             "aaaaaaaa",
+            { status: "completed" },
             { turnState: "completed" },
             { sessionId: "aaaaaaaa", kind: "result", message: summary, details: { summary } },
           )
@@ -494,66 +505,62 @@ describe("Db", () => {
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
-  it.effect(
-    "sessionBriefs: the task is the first delivered inbox row from the parent or the user; latest is the newest message",
-    () =>
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(session("bbbbbbbb"), "r")
-        yield* db.insertSession(session("aaaaaaaa"), "r")
-        yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb' WHERE id = 'aaaaaaaa'`
-        const inbox = (senderType: string, senderId: string | null, content: string, deliveryStatus: string) =>
-          sql`INSERT INTO inbox (recipient_session_id, sender_type, sender_id, content, delivery_status)
-          VALUES ('aaaaaaaa', ${senderType}, ${senderId}, ${content}, ${deliveryStatus})`
-        yield* inbox("system", "bbbbbbbb", "from system", "delivered")
-        yield* inbox("plugin", "plug", "from plugin", "delivered")
-        yield* inbox("session", "cccccccc", "from stranger", "delivered")
-        yield* inbox("user", null, "not delivered", "pending")
-        yield* inbox("session", "bbbbbbbb", "from parent", "delivered")
-        yield* inbox("user", null, "later send", "delivered")
-        yield* sql`INSERT INTO message (session_id, input, output, status, metadata, started_at, ended_at)
-        VALUES ('aaaaaaaa', '', 'old\nstuff', 'completed', '{"summary":"old summary"}', 1, 10)`
-        yield* sql`INSERT INTO message (session_id, input, output, status, metadata, started_at, ended_at)
-        VALUES ('aaaaaaaa', '', 'new line\nmore', 'failed', '{"branch":"x"}', 2, 20)`
+  it.effect("sessionBriefs: the task is the session's task row; latest is its newest turn", () =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sql = yield* SqlClient.SqlClient
+      /** A turn of `id` from `at`; with `end`, its `turn.end` and the result row that reports it. */
+      const turn = (id: string, at: number, end?: { at: number; status: string; output?: string; result?: string }) =>
+        Effect.gen(function* () {
+          const [start] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
+            VALUES (${at}, ${id}, 'turn.start', '{"by":"delivery"}') RETURNING id`
+          if (end === undefined) return
+          const data = JSON.stringify({
+            status: end.status,
+            ...(end.output === undefined ? {} : { output: end.output }),
+          })
+          const [last] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, turn_id, data)
+            VALUES (${end.at}, ${id}, 'turn.end', ${start!.id}, ${data}) RETURNING id`
+          if (end.result !== undefined)
+            yield* sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, result_event_id, status)
+              VALUES (${id}, 'result', ${id}, ${end.result}, ${last!.id}, 'dropped')`
+        })
+      yield* db.insertSession(session("bbbbbbbb"), "r")
+      yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "from parent", "bbbbbbbb")
+      yield* db.insertSend("aaaaaaaa", "later send")
+      yield* turn("aaaaaaaa", 1, { at: 10, status: "completed", result: "<summary>old summary</summary>" })
+      yield* turn("aaaaaaaa", 2, { at: 20, status: "failed", output: "new line\nmore" })
+      yield* db.insertSession(session("dddddddd"), "r", undefined, "/w", "do it")
+      yield* db.insertSession(session("eeeeeeee"), "r")
+      yield* db.updateSession("eeeeeeee", { turnState: "open", turnPromptedAt: 5 })
+      yield* db.insertSession(session("ffffffff"), "r")
+      yield* turn("ffffffff", 3, { at: 7, status: "interrupted", output: "fallback\nrest" })
+      yield* db.insertSession(session("11111111"), "r")
+      // A result's summary, even empty, wins over the output's first line.
+      yield* turn("11111111", 4, { at: 8, status: "lost", output: "hidden", result: "<summary></summary>" })
 
-        yield* db.insertSession(session("dddddddd"), "r", undefined, "/w", "do it")
-        yield* db.insertSession(session("eeeeeeee"), "r")
-        yield* db.updateSession("eeeeeeee", { turnState: "open", turnPromptedAt: 5 })
-        yield* db.insertSession(session("ffffffff"), "r")
-        yield* db.insertSession(session("11111111"), "r")
-        yield* sql`INSERT INTO message (session_id, input, output, status, metadata, started_at, ended_at)
-        VALUES ('ffffffff', '', 'fallback\nrest', 'interrupted', 'not-json', 3, 7)`
-        yield* sql`INSERT INTO message (session_id, input, output, status, metadata, started_at, ended_at)
-        VALUES ('11111111', '', 'nope\nrest', 'lost', '{"summary":1}', 4, 8)`
-
-        const briefs = yield* db.sessionBriefs(["aaaaaaaa", "dddddddd", "eeeeeeee", "ffffffff", "11111111", "00000000"])
-        assert.deepStrictEqual(briefs.get("aaaaaaaa"), {
-          task: "from parent",
-          latest: { status: "failed", summary: "new line", endedAt: 20 },
-        })
-        assert.deepStrictEqual(briefs.get("dddddddd"), { task: "do it", latest: null })
-        assert.deepStrictEqual(briefs.get("eeeeeeee"), {
-          task: null,
-          latest: { status: "working", summary: "", endedAt: null },
-        })
-        assert.deepStrictEqual(briefs.get("ffffffff"), {
-          task: null,
-          latest: { status: "interrupted", summary: "fallback", endedAt: 7 },
-        })
-        assert.deepStrictEqual(briefs.get("11111111"), {
-          task: null,
-          latest: { status: "lost", summary: "nope", endedAt: 8 },
-        })
-        assert.isUndefined(briefs.get("00000000"))
-        assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
-
-        // A string summary, even empty, wins over the output's first line.
-        yield* sql`UPDATE message SET metadata = '{"summary":""}', output = 'hidden' WHERE session_id = '11111111'`
-        assert.strictEqual((yield* db.sessionBriefs(["11111111"])).get("11111111")?.latest?.summary, "")
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      const briefs = yield* db.sessionBriefs(["aaaaaaaa", "dddddddd", "eeeeeeee", "ffffffff", "11111111", "00000000"])
+      assert.deepStrictEqual(briefs.get("aaaaaaaa"), {
+        task: "from parent",
+        latest: { status: "failed", summary: "new line", endedAt: 20 },
+      })
+      assert.deepStrictEqual(briefs.get("dddddddd"), { task: "do it", latest: null })
+      assert.deepStrictEqual(briefs.get("eeeeeeee"), {
+        task: null,
+        latest: { status: "working", summary: "", endedAt: null },
+      })
+      assert.deepStrictEqual(briefs.get("ffffffff"), {
+        task: null,
+        latest: { status: "interrupted", summary: "fallback", endedAt: 7 },
+      })
+      assert.deepStrictEqual(briefs.get("11111111"), {
+        task: null,
+        latest: { status: "lost", summary: "", endedAt: 8 },
+      })
+      assert.isUndefined(briefs.get("00000000"))
+      assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
+    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
-
   it.effect("a result with no coordinator is dropped; a claim takes a pending row once", () =>
     fresh(
       Effect.gen(function* () {
@@ -561,6 +568,7 @@ describe("Db", () => {
         yield* db.insertSession(session("aaaaaaaa", { turnState: "open" }), "r")
         const dropped = yield* db.finishTurn(
           "aaaaaaaa",
+          { status: "completed" },
           { turnState: "completed", status: "idle" },
           {
             sessionId: "aaaaaaaa",
@@ -627,7 +635,7 @@ describe("Db", () => {
               get(target, prop, receiver) {
                 if (prop !== "unsafe") return Reflect.get(target, prop, receiver)
                 return (statement: string, params?: ReadonlyArray<unknown>) =>
-                  statement.includes("message_session")
+                  statement.includes("event_no_update")
                     ? how === "interrupt"
                       ? Effect.interrupt
                       : Effect.fail(new Error("injected schema failure"))
@@ -687,14 +695,14 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("an incomplete v1 is rejected and left byte-identical", () =>
+  it.effect("an incomplete v2 is rejected and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const dir = yield* tempDirectory("vibest-schema-partial-")
       const pragma = [`PRAGMA application_id = ${APPLICATION_ID}`, `PRAGMA user_version = ${SCHEMA_VERSION}`]
       const tables = [
         "CREATE TABLE project (id INTEGER PRIMARY KEY) STRICT",
-        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT) STRICT",
+        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT, machine TEXT, directory TEXT) STRICT",
         "CREATE TABLE inbox (id INTEGER PRIMARY KEY) STRICT",
       ]
       const cases = [
@@ -706,8 +714,9 @@ describe("Db", () => {
             ...tables,
             "CREATE INDEX session_project ON session (project_id)",
             "CREATE INDEX session_parent ON session (parent_session_id)",
+            "CREATE INDEX session_live ON session (machine, directory)",
           ],
-          "missing inbox_pending",
+          "missing inbox_status",
         ],
       ] as const
       for (const [name, statements, expected] of cases) {
@@ -725,6 +734,25 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("a version 1 vibest database is refused, naming its path and the release's migration script", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
+      yield* writeSql(file, [
+        `PRAGMA application_id = ${APPLICATION_ID}`,
+        "PRAGMA user_version = 1",
+        "CREATE TABLE project (id INTEGER)",
+      ])
+      const before = yield* fs.readFile(file)
+      const pretty = yield* refusal(file)
+      assert.include(pretty, `${file} is from an older vibest`)
+      assert.include(pretty, "migration script given with this release")
+      assert.include(pretty, "move it aside to start empty")
+      assert.notInclude(pretty, "scripts/migrate")
+      assert.deepStrictEqual(yield* fs.readFile(file), before)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -739,7 +767,7 @@ describe("Db", () => {
       assert.match(pretty, /SchemaMismatch/)
       assert.match(pretty, /application_id 0x0, v1/)
       assert.notMatch(pretty, /0x76696265/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
       assert.deepStrictEqual(yield* fs.readFile(file), before)
       assert.isFalse(yield* fs.exists(`${file}-wal`))
       assert.isFalse(yield* fs.exists(`${file}-shm`))

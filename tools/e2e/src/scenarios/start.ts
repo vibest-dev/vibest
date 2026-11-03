@@ -8,7 +8,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, fail, row, Skip, until, type World } from "../world.ts"
+import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string; harness: string; routing?: { trace: Array<{ hook: string }> } }
 
@@ -177,7 +177,7 @@ const move = (harness: "claude" | "pi"): Check => ({
           conversation =
             row<{ c: string | null }>(
               w,
-              "SELECT s.harness_session_id AS c FROM session s JOIN project p ON p.main_session_id = s.id",
+              `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.entry_session_id = s.id`,
             )?.c ?? undefined
           if (conversation === undefined) return false
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))

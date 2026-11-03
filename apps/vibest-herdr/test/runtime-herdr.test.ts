@@ -19,8 +19,6 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { rewrite } from "../src/legacy-terminal-ids.ts"
-
 const herdrOnPath = childProcess.spawnSync("herdr", ["--version"], { stdio: "ignore" }).status === 0
 const piOnPath = childProcess.spawnSync("pi", ["--version"], { stdio: "ignore" }).status === 0
 
@@ -241,20 +239,6 @@ describe("terminal ids", () => {
     })
     assert.isUndefined(TerminalRuntime.decodeTarget("{}"))
     assert.isUndefined(TerminalRuntime.decodeTarget(undefined))
-  })
-
-  it("the pre-port migration keeps the agent name those builds gave the row: `s-<id>` rides in the id", () => {
-    assert.strictEqual(
-      rewrite('{"type":"herdr","session":"work","pane":"w1:p2"}', "ab12"),
-      '{"kind":"herdr","machine":"local","id":"work/w1:p2/s-ab12"}',
-    )
-    // A row without a pane is core's "no terminal"; anything else is left alone.
-    assert.strictEqual(
-      rewrite('{"type":"herdr","session":"work"}', "ab12"),
-      '{"kind":"herdr","machine":"local","id":""}',
-    )
-    assert.isUndefined(rewrite('{"kind":"herdr","machine":"local","id":"work/w1:p2/s-ab12"}', "ab12"))
-    assert.isUndefined(rewrite("not json", "ab12"))
   })
 })
 

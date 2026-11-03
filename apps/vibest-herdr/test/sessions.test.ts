@@ -37,6 +37,7 @@ import {
   makeRepository,
   sh,
   testLayer,
+  TURNS,
   type TestOptions,
   type TestServices,
   until,
@@ -127,14 +128,12 @@ const pick = (w: { readonly status: string; readonly turnState: string } | undef
 const countRows = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM message WHERE session_id = ${sessionId}`.pipe(
-      Effect.orDie,
-    )
+    const [rounds] = yield* sql<{
+      n: number
+    }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
     const [results] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM inbox WHERE sender_id = ${sessionId} AND result_message_id IS NOT NULL`.pipe(
-      Effect.orDie,
-    )
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId} AND kind = 'result'`.pipe(Effect.orDie)
     return { rounds: rounds!.n, results: results!.n }
   })
 const sqlNotices = (sessionId: string) =>
@@ -142,7 +141,7 @@ const sqlNotices = (sessionId: string) =>
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{
       message: string
-    }>`SELECT m.content AS message FROM inbox m WHERE m.sender_type = 'system' AND m.sender_id = ${sessionId} ORDER BY m.id`.pipe(
+    }>`SELECT m.content AS message FROM inbox m WHERE m.kind = 'notice' AND m.sender_session_id = ${sessionId} ORDER BY m.id`.pipe(
       Effect.orDie,
     )
     return rows.map((r) => r.message)
@@ -214,7 +213,7 @@ describe.concurrent("Sessions", () => {
       )
       // The final message verbatim, nothing parsed out of it.
       assert.include(row!.message, "<result>\n\nDone it.\nstatus: failed\n\n## Remember\nuse bun\n</result>")
-      assert.deepInclude(row!.details, { status: "completed", summary: "Done it.", remember: "use bun" })
+      assert.deepInclude(row!.details, { status: "completed", summary: "Done it." })
     }),
     { hooked: ["pi"] },
   )
@@ -257,7 +256,7 @@ describe.concurrent("Sessions", () => {
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
-      const main = (yield* sql<{ id: string }>`SELECT main_session_id AS id FROM project`)[0]!.id
+      const main = (yield* sql<{ id: string }>`SELECT entry_session_id AS id FROM project`)[0]!.id
       const results = () =>
         sql<{
           recipient: string
@@ -266,8 +265,8 @@ describe.concurrent("Sessions", () => {
           output: string | null
           inbox: number | null
         }>`SELECT i.recipient_session_id AS recipient,
-            i.sender_id AS sender, m.input, m.output, m.inbox_id AS inbox
-          FROM inbox i JOIN message m ON m.id = i.result_message_id ORDER BY i.id`.pipe(Effect.orDie)
+            i.sender_session_id AS sender, m.input, m.output, m.inbox_id AS inbox
+          FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id ORDER BY i.id`.pipe(Effect.orDie)
 
       yield* sessions.userPrompt(main, "hello")
       // vibest opened the task's round before handing it over: the pane's echo, or anything typed now, is not a round.
@@ -276,7 +275,7 @@ describe.concurrent("Sessions", () => {
       const working = yield* sql<{
         input: string
         inbox: number | null
-      }>`SELECT input, inbox_id AS inbox FROM message WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(
         working.map((row) => [row.input, row.inbox !== null]),
         [["do it", true]],
@@ -291,7 +290,7 @@ describe.concurrent("Sessions", () => {
         input: string
         inbox: number | null
         status: string
-      }>`SELECT input, inbox_id AS inbox, status FROM message
+      }>`SELECT input, inbox_id AS inbox, status FROM ${sql.literal(TURNS)} m
         WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(open, [{ input, inbox: null, status: "working" }])
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: typed" })
@@ -307,7 +306,7 @@ describe.concurrent("Sessions", () => {
         ],
       )
       assert.include(rows[1]!.output, "summary: typed")
-      assert.deepStrictEqual(yield* sql`SELECT id FROM inbox WHERE sender_type = 'system'`.pipe(Effect.orDie), [])
+      assert.deepStrictEqual(yield* sql`SELECT id FROM inbox WHERE kind = 'notice'`.pipe(Effect.orDie), [])
     }),
     { hooked: ["pi"] },
   )
@@ -401,7 +400,9 @@ describe.concurrent("Sessions", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.env.VBT_TOKEN, "s3cret")
-      const stored = yield* sql<{ metadata: string }>`SELECT metadata FROM session`.pipe(Effect.orDie)
+      const stored = yield* sql<{
+        metadata: string
+      }>`SELECT data AS metadata FROM event UNION ALL SELECT name || directory FROM session`.pipe(Effect.orDie)
       assert.isFalse(
         stored.some((r) => r.metadata.includes("s3cret")),
         "no session row holds the value",
@@ -532,7 +533,7 @@ describe.concurrent("Sessions", () => {
       const [round] = yield* sql<{
         input: string
         inbox: number
-      }>`SELECT input, inbox_id AS inbox FROM message WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
       const sent = yield* sql<{
         id: number
       }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
@@ -555,7 +556,7 @@ describe.concurrent("Sessions", () => {
       const results = () =>
         sql<{
           input: string
-        }>`SELECT m.input FROM inbox i JOIN message m ON m.id = i.result_message_id WHERE i.sender_id = ${id} ORDER BY i.id`.pipe(
+        }>`SELECT m.input FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id WHERE i.sender_session_id = ${id} ORDER BY i.id`.pipe(
           Effect.orDie,
         )
       assert.deepStrictEqual(
@@ -597,7 +598,9 @@ describe.concurrent("Sessions", () => {
       const typing = yield* Effect.forkChild(sessions.userPrompt(id, "during launch"))
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       assert.deepStrictEqual(
-        yield* sql<{ input: string }>`SELECT input FROM message WHERE session_id = ${id}`.pipe(Effect.orDie),
+        yield* sql<{ input: string }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id}`.pipe(
+          Effect.orDie,
+        ),
         [],
       )
       yield* held.release()
@@ -606,7 +609,7 @@ describe.concurrent("Sessions", () => {
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const [round] = yield* sql<{
         input: string
-      }>`SELECT input FROM message WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
       assert.strictEqual(round!.input, "do it")
     }),
   )
@@ -629,7 +632,7 @@ describe.concurrent("Sessions", () => {
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       const during = yield* sql<{
         input: string
-      }>`SELECT input FROM message WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(
         during.map((row) => row.input),
         [""],
@@ -640,14 +643,14 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           input: string
-        }>`SELECT input FROM message WHERE session_id = ${id} AND input = 'typed during resume'`,
+        }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND input = 'typed during resume'`,
         [],
       )
       const [round] = yield* until(
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM message WHERE session_id = ${id} AND status = 'working'`.pipe(
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
           Effect.orDie,
         ),
         (rows) => rows[0]?.input === "queued text",
@@ -670,7 +673,9 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           input: string
-        }>`SELECT input FROM message WHERE session_id = ${id} AND input = 'echo of the paste'`.pipe(Effect.orDie),
+        }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND input = 'echo of the paste'`.pipe(
+          Effect.orDie,
+        ),
         [],
       )
       yield* held.release()
@@ -678,7 +683,9 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           input: string
-        }>`SELECT input FROM message WHERE session_id = ${id} AND input = 'echo of the paste'`.pipe(Effect.orDie),
+        }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND input = 'echo of the paste'`.pipe(
+          Effect.orDie,
+        ),
         [],
       )
     }),
@@ -697,9 +704,9 @@ describe.concurrent("Sessions", () => {
       const typing = yield* Effect.forkChild(sessions.userPrompt(id, "step in"))
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       assert.deepStrictEqual(
-        yield* sql<{ input: string }>`SELECT input FROM message WHERE session_id = ${id} AND input = 'step in'`.pipe(
-          Effect.orDie,
-        ),
+        yield* sql<{
+          input: string
+        }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND input = 'step in'`.pipe(Effect.orDie),
         [],
       )
       yield* held.release()
@@ -709,7 +716,9 @@ describe.concurrent("Sessions", () => {
         yield* sql<{
           input: string
           status: string
-        }>`SELECT input, status FROM message WHERE session_id = ${id} AND status = 'working'`.pipe(Effect.orDie),
+        }>`SELECT input, status FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
+          Effect.orDie,
+        ),
         [{ input: "step in", status: "working" }],
       )
     }),
@@ -740,7 +749,9 @@ describe.concurrent("Sessions", () => {
       yield* Fiber.join(typing)
       const [round] = yield* sql<{
         startedAt: number
-      }>`SELECT started_at AS startedAt FROM message WHERE session_id = ${id} AND input = 'typed'`.pipe(Effect.orDie)
+      }>`SELECT started_at AS startedAt FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND input = 'typed'`.pipe(
+        Effect.orDie,
+      )
       assert.strictEqual(round!.startedAt, at)
     }),
     { hooked: ["pi"] },
@@ -780,7 +791,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT delivery_status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
           Effect.orDie,
         ),
         [{ status: "delivered" }],
@@ -807,7 +818,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT delivery_status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
           Effect.orDie,
         ),
         [{ status: "delivered" }],
@@ -837,7 +848,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT delivery_status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
           Effect.orDie,
         ),
         [{ status: "failed" }],
@@ -875,7 +886,7 @@ describe.concurrent("Sessions", () => {
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM message WHERE session_id = ${id} AND status = 'working'`.pipe(
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
           Effect.orDie,
         ),
         (rows) => rows[0]?.input === "fix the tests" && rows[0].inbox !== null,
@@ -883,7 +894,7 @@ describe.concurrent("Sessions", () => {
       const [sent] = yield* sql<{
         id: number
         status: string
-      }>`SELECT id, delivery_status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'fix the tests'`.pipe(
+      }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'fix the tests'`.pipe(
         Effect.orDie,
       )
       assert.strictEqual(round[0]!.inbox, sent!.id)
@@ -906,7 +917,7 @@ describe.concurrent("Sessions", () => {
         sql<{
           id: number
           status: string
-        }>`SELECT id, delivery_status AS status FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type = 'user' AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${receiverId} AND sender_type = 'user') ORDER BY id`.pipe(
+        }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${receiverId} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${receiverId} AND kind IN ('task', 'send')) ORDER BY id`.pipe(
           Effect.orDie,
         )
 
@@ -1157,7 +1168,9 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       const tasks = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ${id} AND sender_type = 'user'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send')`.pipe(
+        Effect.orDie,
+      )
       assert.strictEqual(tasks[0]!.n, 1)
 
       yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
@@ -1216,8 +1229,8 @@ describe.concurrent("Sessions", () => {
       assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
       const rounds = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND sender_type = 'user' ORDER BY id LIMIT 1) AS task
-        FROM message m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
+        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       const open = yield* rounds()
       assert.strictEqual(open.length, 1)
       assert.strictEqual(open[0]!.status, "working")
@@ -1252,7 +1265,7 @@ describe.concurrent("Sessions", () => {
       assert.notInclude(result!.message, "stale")
       const linked = yield* sql<{
         inbox: number | null
-      }>`SELECT m.inbox_id AS inbox FROM inbox i JOIN message m ON m.id = i.result_message_id WHERE i.sender_id = ${id}`.pipe(
+      }>`SELECT m.inbox_id AS inbox FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id WHERE i.sender_session_id = ${id}`.pipe(
         Effect.orDie,
       )
       assert.strictEqual(linked[0]!.inbox, open[0]!.inbox)
@@ -1468,8 +1481,8 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
       const rounds = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND sender_type = 'user' ORDER BY id LIMIT 1) AS task
-        FROM message m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
+        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       const open = yield* rounds()
       assert.deepStrictEqual(
         open.map((row) => [row.status, row.inbox === row.task]),
@@ -1572,7 +1585,7 @@ describe.concurrent("Sessions", () => {
       assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_id = ${id} AND result_message_id IS NOT NULL`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`.pipe(Effect.orDie)
       assert.strictEqual(results[0]!.n, 1)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
@@ -1695,7 +1708,7 @@ describe.concurrent("Sessions", () => {
       assert.notInclude(message, "no harness left")
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_id = ${id} AND result_message_id IS NOT NULL`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`.pipe(Effect.orDie)
       assert.strictEqual(results[0]!.n, 1)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
@@ -1792,7 +1805,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const roundId = (yield* sql<{ id: number }>`SELECT id FROM message WHERE session_id = ${id}`.pipe(
+      const roundId = (yield* sql<{ id: number }>`SELECT id FROM ${sql.literal(TURNS)} m WHERE session_id = ${id}`.pipe(
         Effect.orDie,
       ))[0]!.id
       yield* Ref.set(herdr.skipPromptUpdates, 2)
@@ -1811,8 +1824,8 @@ describe.concurrent("Sessions", () => {
         inbox: number | null
         task: number
       }>`SELECT m.id, m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND sender_type = 'user' ORDER BY id LIMIT 1) AS task
-        FROM message m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
+        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
         rounds.map((round) => [round.id, round.status, round.inbox === round.task]),
         [[roundId, "working", true]],
@@ -2288,7 +2301,7 @@ describe.concurrent("Sessions", () => {
       assert.include((yield* db.latestInbox(id, "result"))!.message, "placing the next pane failed")
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_id = ${id} AND result_message_id IS NOT NULL`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`.pipe(Effect.orDie)
       assert.strictEqual(results[0]!.n, 1)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
@@ -2451,7 +2464,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         (yield* (yield* SqlClient.SqlClient)<{
           status: string
-        }>`SELECT delivery_status AS status FROM inbox WHERE recipient_session_id = ${id} AND sender_type = 'user' AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${id} AND sender_type = 'user')`.pipe(
+        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send'))`.pipe(
           Effect.orDie,
         )).map((r) => r.status),
         ["failed"],
@@ -3215,19 +3228,21 @@ describe.concurrent("Sessions", () => {
       const cross = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(otherRepo)), peer: id }))
       assert.include(cross.message, "belongs to another project")
       // The owner moved to another machine: its worktree is not this start's runtime place any more.
-      const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE session SET runtime = json_set(runtime, '$.machine', 'other') WHERE id = ${id}`
+      const address = (yield* db.getSession(id))!.address
+      yield* db.updateSession(id, { address: { ...address, machine: "other" } })
       const otherSession = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
       assert.include(otherSession.message, "ineligible")
-      yield* sql`UPDATE session SET runtime = json_set(runtime, '$.machine', 'local') WHERE id = ${id}`
-      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
-      const archived = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
-      assert.include(archived.message, "it was archived")
-      yield* db.updateSession(id, { metadata: row.metadata })
-      yield* fs.remove(yield* sessionWorktree(id), { recursive: true })
+      yield* db.updateSession(id, { address })
+      const worktree = yield* sessionWorktree(id)
+      yield* fs.rename(worktree, `${worktree}.away`)
       const gone = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
       assert.include(gone.message, "ineligible")
       assert.include(gone.message, "gone")
+      yield* fs.rename(`${worktree}.away`, worktree)
+      // An archive is final: its `ended_at` stays.
+      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
+      const archived = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
+      assert.include(archived.message, "it was archived")
       assert.strictEqual(yield* created(), before)
       assert.isUndefined(yield* db.getSession("ffffffff"))
     }),
@@ -3537,7 +3552,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const rows = yield* sql<{
         kind: string
         status: string
-      }>`SELECT CASE WHEN m.result_message_id IS NOT NULL THEN 'result' WHEN m.sender_type = 'system' THEN 'notice' WHEN m.sender_type = 'session' THEN 'report' ELSE 'send' END AS kind, m.delivery_status AS status FROM inbox m WHERE m.sender_id = ${w.id} ORDER BY m.id`.pipe(
+      }>`SELECT CASE WHEN m.kind = 'result' THEN 'result' WHEN m.kind = 'notice' THEN 'notice' WHEN m.kind IN ('report', 'result') THEN 'report' ELSE 'send' END AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
         Effect.orDie,
       )
       assert.deepStrictEqual(
@@ -3872,6 +3887,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* looked
       yield* w.db.finishTurn(
         w.id,
+        { status: "completed" },
         { turnState: "completed", status: "idle" },
         { sessionId: w.id, kind: "result", message: "second", details },
       )

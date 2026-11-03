@@ -18,6 +18,7 @@ import {
   FakeRuntime,
   FakeProcesses,
   makeRepository,
+  processEnds,
   tempDirectory,
   testLayer,
   type TestOptions,
@@ -96,7 +97,7 @@ describe.concurrent("vibest rm: process proof", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
-      const { id, pane, sessions, db, worktree, rules } = yield* idleSession
+      const { id, sessions, db, worktree, rules } = yield* idleSession
       const out = yield* sessions.remove(id)
       assert.deepInclude(out, {
         processes: "exited",
@@ -109,7 +110,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepStrictEqual(yield* fake.probed, [])
       const row = (yield* db.getSession(id))!
       assert.isNotNull(row.exitedAt)
-      assert.deepStrictEqual(row.metadata.stop, [{ pane, pids: [], exited: true }])
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
       // A 4-hex name under the repository's directory, not the session id.
       assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/)
       assert.isFalse(yield* fs.exists(worktree))
@@ -118,16 +119,12 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a terminal whose close was already recorded: the fresh close replaces the record, and no PID is ever asked about",
+    "an archive ends its process once, and no PID is ever asked about",
     Effect.gen(function* () {
       const fake = yield* FakeProcesses
-      const { id, pane, sessions, db } = yield* idleSession
-      const w = (yield* db.getSession(id))!
-      yield* db.updateSession(id, {
-        metadata: { ...w.metadata, stop: [{ pane, pids: [195806, 195807], exited: true }] },
-      })
+      const { id, sessions } = yield* idleSession
       assert.deepInclude(yield* sessions.remove(id), { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.deepStrictEqual((yield* db.getSession(id))!.metadata.stop, [{ pane, pids: [], exited: true }])
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
       assert.deepStrictEqual(yield* fake.probed, [])
     }),
   )
@@ -146,7 +143,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.strictEqual((yield* Fiber.join(removing))._tag, "RuntimeUnreachable")
       const row = (yield* db.getSession(id))!
       assert.isNull(row.exitedAt)
-      assert.deepStrictEqual(row.metadata.stop, [{ pane, pids: [], exited: false }])
+      assert.deepStrictEqual(yield* processEnds(id), [])
       assert.isTrue(row.metadata.archived)
       assert.isTrue(row.metadata.removed)
       assert.isTrue(yield* fs.exists(worktree))
@@ -168,7 +165,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* held.release("failed")
       assert.deepInclude(yield* Fiber.join(removing), { processes: "unknown", pane: "kept", worktree: "kept" })
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
-      assert.isUndefined((yield* a.db.getSession(a.id))!.metadata.stop)
+      assert.deepStrictEqual(yield* processEnds(a.id), [])
 
       // Closed by hand before vibest rm: the runtime has no such terminal, so it is already gone by the close contract.
       const b = yield* idleSession

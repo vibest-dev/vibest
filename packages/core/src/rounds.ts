@@ -13,7 +13,9 @@ import {
   type NewInboxRow,
   type SessionPatch,
   type SessionRow,
+  type TurnEnd,
   type TurnState,
+  failureOf,
 } from "./db.ts"
 import { Harnesses, type HarnessAdapter } from "./harness.ts"
 import { nextBatch } from "./inbox.ts"
@@ -25,7 +27,13 @@ import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
   readonly db: {
-    readonly finishTurn: (id: string, patch: SessionPatch, row: NewInboxRow) => Effect.Effect<InboxRow>
+    readonly finishTurn: (
+      id: string,
+      end: TurnEnd,
+      patch: SessionPatch,
+      row: NewInboxRow,
+      at?: number,
+    ) => Effect.Effect<InboxRow>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
@@ -35,7 +43,6 @@ export const sessionRounds = (deps: {
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly latestRoundAt: (sessionId: string) => Effect.Effect<number | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
-    readonly coverRound: (sessionId: string, at: number) => Effect.Effect<void>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
@@ -75,6 +82,8 @@ export const sessionRounds = (deps: {
     end: Extract<TurnState, "completed" | "failed" | "lost">,
     text: string,
     error: string | undefined,
+    /** A result file's time: the turn ends no earlier, so the same file is not taken again. */
+    at?: number,
   ) {
     const report = parseReport(text)
     const status: ResultStatus = end === "completed" && !error ? "completed" : "failed"
@@ -109,8 +118,10 @@ export const sessionRounds = (deps: {
       ],
       ["result", body],
     )
+    const failure = failureOf(error)
     const row = yield* db.finishTurn(
       session.id,
+      { status: end, output: text, ...(failure === undefined ? {} : { failure }) },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
       {
         sessionId: session.id,
@@ -118,6 +129,7 @@ export const sessionRounds = (deps: {
         message,
         details: { ...info, summary, remember: report.remember, error },
       },
+      at,
     )
     yield* inbox.announce(row)
   })
@@ -222,8 +234,7 @@ export const sessionRounds = (deps: {
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error)
-    yield* db.coverRound(session.id, found.mtimeMs)
+    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.mtimeMs)
     return "delivered" as const
   })
 

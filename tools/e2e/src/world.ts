@@ -183,7 +183,10 @@ export class World {
     if (!fs.existsSync(file)) return []
     const db = new Database(file, { readonly: true })
     try {
-      const rows = db.query("SELECT id, runtime FROM session").all() as Array<{ id: string; runtime: string | null }>
+      const rows = db.query(`SELECT id, runtime FROM ${SESSIONS} s`).all() as Array<{
+        id: string
+        runtime: string | null
+      }>
       return rows.flatMap((r) => {
         const terminal = (JSON.parse(r.runtime ?? "{}") as { id?: string }).id ?? ""
         const session = terminal.split("/")[0] ?? ""
@@ -278,6 +281,30 @@ export const alive = (pid: number) => {
     return false
   }
 }
+
+/**
+ * Each session with its current process, from vibest.db's events (docs/design/schema.md): `harness`, `provider`,
+ * `runtime` (the JSON `{kind, machine, id}` of its terminal), `harness_session_id` (its conversation), `pid`,
+ * `version` (the integration's), and `exited_at` (when that process ended). Use as `FROM ${SESSIONS} s`.
+ */
+export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,
+    json_extract(p.data, '$.harness') AS harness, json_extract(p.data, '$.provider') AS provider,
+    CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', json_extract(p.data, '$.runtime'),
+      'machine', json_extract(p.data, '$.machine'), 'id', json_extract(p.data, '$.terminal')) END AS runtime,
+    coalesce((SELECT json_extract(e.data, '$.conversation') FROM event e WHERE e.process_id = p.id
+      AND e.type IN ('process.ready', 'process.conversation') AND json_extract(e.data, '$.conversation') IS NOT NULL
+      ORDER BY e.id DESC LIMIT 1), json_extract(p.data, '$.resume')) AS harness_session_id,
+    coalesce((SELECT json_extract(e.data, '$.pid') FROM event e WHERE e.process_id = p.id AND e.type = 'process.ready'
+      AND json_extract(e.data, '$.pid') IS NOT NULL ORDER BY e.id DESC LIMIT 1), json_extract(p.data, '$.pid')) AS pid,
+    (SELECT json_extract(e.data, '$.integration.version') FROM event e WHERE e.process_id = p.id
+      AND e.type = 'process.ready' AND json_extract(e.data, '$.integration') IS NOT NULL
+      ORDER BY e.id DESC LIMIT 1) AS version,
+    (SELECT e.at FROM event e WHERE e.process_id = p.id AND e.type = 'process.end') AS exited_at
+  FROM session s LEFT JOIN event p ON p.id = (SELECT max(id) FROM event WHERE session_id = s.id AND type = 'process.start'))`
+
+/** Each turn: `session_id`, `status` (`working` while it is open). Use as `FROM ${TURNS} t`. */
+export const TURNS = `(SELECT t.id, t.session_id, coalesce(json_extract(te.data, '$.status'), 'working') AS status
+  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
 /** One row of vibest.db, read while vibestd runs. */
 export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
@@ -387,14 +414,20 @@ export const knownSessions = async (
   await w.ok(["ls"])
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
   try {
-    const project = db
-      .query<{ id: number }, [string]>("INSERT INTO project (directory) VALUES (?) RETURNING id")
-      .get(key)!.id
-    for (const [id, agent] of Object.entries(sessions))
+    const project = db.query<{ id: number }, [string]>("INSERT INTO project (key) VALUES (?) RETURNING id").get(key)!.id
+    for (const [id, agent] of Object.entries(sessions)) {
+      const at = Date.now()
       db.run(
-        "INSERT INTO session (id, project_id, agent_type, harness, directory, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        [id, project, agent, harness, directory, Date.now()],
+        "INSERT INTO session (id, project_id, role, name, machine, directory, created_at) VALUES (?, ?, ?, '', 'local', ?, ?)",
+        [id, project, agent, directory, at],
       )
+      // Its harness is its first process's: chosen, no terminal yet.
+      db.run("INSERT INTO event (at, session_id, type, data) VALUES (?, ?, 'process.start', ?)", [
+        at,
+        id,
+        JSON.stringify({ harness, runtime: "", machine: "local", terminal: "" }),
+      ])
+    }
     return project
   } finally {
     db.close()

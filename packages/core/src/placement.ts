@@ -5,7 +5,7 @@ import { NoSuchSession, NotReady } from "@vibest/schema/session"
 import { Cause, Clock, Data, Effect, Exit, type FileSystem, Option, Path, type PlatformError, type Scope } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { CoordinatorRow, SessionRow } from "./db.ts"
+import type { CoordinatorRow, EndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { writeAtomic } from "./paths.ts"
@@ -29,28 +29,12 @@ export const sessionPlacement = (deps: {
     readonly coordinatorOf: (projectId: number) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: number }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly projectKey: (id: number) => Effect.Effect<string | undefined>
-    readonly closeTurn: (
-      id: string,
-      end: "failed",
-      patch: { readonly status: "unknown"; readonly exitedAt: number; readonly lastActive: number },
-    ) => Effect.Effect<void>
+    readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly earlierSharer: (id: string) => Effect.Effect<string | undefined>
-    readonly updateSession: (
-      id: string,
-      patch: {
-        readonly address?: Terminal
-        readonly status?: "unknown"
-        readonly startedAt?: number | null
-        readonly exitedAt?: number | null
-        readonly lastActive?: number
-      },
-    ) => Effect.Effect<void>
-    readonly patchLive: (
-      id: string,
-      patch: { readonly pid?: number | null; readonly ready?: number | null },
-    ) => Effect.Effect<void>
+    readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
+    readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
   }
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
@@ -165,23 +149,35 @@ export const sessionPlacement = (deps: {
       readonly split?: boolean | undefined
       /** `vibest run --env`: given only to the first terminal, never stored (a later terminal starts without it). */
       readonly env?: Readonly<Record<string, string>> | undefined
+      /** A launch ends the process itself (`closeTurn`), once its worktree is undone. */
+      readonly endedByCaller?: boolean
     },
   ) {
     // Beside the pane a caller names (--peer), else beside the project's main agent when it runs in this runtime.
     const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
-    // A harness that ran before (a resume, a move's next terminal) left its pid and ready report: only the new one's count.
-    yield* db.patchLive(session.id, { pid: null, ready: null })
-    const terminal = yield* h.open(machine, {
-      project: input.project,
-      cwd: input.cwd,
-      argv: input.argv,
-      env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
-      label: `${session.id} ${session.name}`.slice(0, 60),
-      ...(near !== undefined ? { near } : {}),
-      ...(input.split === true ? { split: true } : {}),
-    })
+    const choice = {
+      harnessId: session.harnessId,
+      provider: session.provider,
+      model: session.model,
+      harnessSessionId: session.harnessSessionId,
+    }
+    // Its `process.start` before the terminal exists (no terminal yet): what the harness reports while it starts
+    // (ready, its pid) belongs to it. One that never opens ends as launch_failed.
+    yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
+    const terminal = yield* h
+      .open(machine, {
+        project: input.project,
+        cwd: input.cwd,
+        argv: input.argv,
+        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
+        label: `${session.id} ${session.name}`.slice(0, 60),
+        ...(near !== undefined ? { near } : {}),
+        ...(input.split === true ? { split: true } : {}),
+      })
+      .pipe(Effect.onError(() => (input.endedByCaller ? Effect.void : db.endProcess(session.id, "launch_failed"))))
     const at = yield* Clock.currentTimeMillis
-    yield* db.updateSession(session.id, { address: terminal, startedAt: at, exitedAt: null })
+    // The same process, now in its terminal (`process.start` with it; what it reported while starting carries over).
+    yield* db.updateSession(session.id, { ...choice, address: terminal, startedAt: at, exitedAt: null })
     return terminal
   })
 
@@ -283,6 +279,7 @@ export const sessionPlacement = (deps: {
         key,
         argv,
         env,
+        endedByCaller: true,
         ...(near !== undefined ? { near } : {}),
         ...(peer !== undefined ? { split: true } : {}),
       }),
@@ -306,7 +303,12 @@ export const sessionPlacement = (deps: {
         Effect.gen(function* () {
           const e = Cause.squash(cause)
           const t = yield* Clock.currentTimeMillis
-          yield* db.closeTurn(session.id, "failed", { status: "unknown", exitedAt: t, lastActive: t })
+          yield* db.closeTurn(session.id, "failed", {
+            status: "unknown",
+            exitedAt: t,
+            lastActive: t,
+            end: "launch_failed",
+          })
           yield* deps.notice(
             session,
             `${session.id} failed to start ${session.harnessId}: ${e instanceof Error ? e.message : String(e)}`,

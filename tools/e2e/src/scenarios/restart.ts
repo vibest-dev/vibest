@@ -12,7 +12,20 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, alive, binary, expect, harnesses, herdr, Skip, transcript, until, type World } from "../world.ts"
+import {
+  agentModel,
+  alive,
+  binary,
+  expect,
+  harnesses,
+  herdr,
+  SESSIONS,
+  Skip,
+  transcript,
+  TURNS,
+  until,
+  type World,
+} from "../world.ts"
 
 type Message = { role: string; content: unknown }
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
@@ -185,9 +198,7 @@ const checks: ReadonlyArray<Check> = [
           try {
             return db
               .query<Row, [string]>(
-                `SELECT s.id, s.harness_session_id, json_extract(s.metadata, '$.pid') AS pid,
-                   json_extract(s.metadata, '$.integration.version') AS version
-                 FROM session s WHERE ${where}`,
+                `SELECT s.id, s.harness_session_id, s.pid, s.version FROM ${SESSIONS} s WHERE ${where}`,
               )
               .get(arg)
           } finally {
@@ -195,10 +206,7 @@ const checks: ReadonlyArray<Check> = [
           }
         }
         const main = () =>
-          read(
-            `s.agent_type = 'main' AND s.ended_at IS NULL AND json_extract(s.metadata, '$.projectDirectory') LIKE ?`,
-            `%/${path.basename(repo)}`,
-          )
+          read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
         const subRow = (id: string) => read("s.id = ?", id)
         // herdr's own list: a subagent's harness carries the name s-<id> that `open` gave it, and `run` again after a restart.
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
@@ -422,9 +430,7 @@ const checks: ReadonlyArray<Check> = [
           try {
             return db
               .query<Row, [string]>(
-                `SELECT s.id, s.harness_session_id, json_extract(s.metadata, '$.pid') AS pid,
-                   json_extract(s.metadata, '$.integration.version') AS version
-                 FROM session s WHERE s.id = ?`,
+                `SELECT s.id, s.harness_session_id, s.pid, s.version FROM ${SESSIONS} s WHERE s.id = ?`,
               )
               .get(id)
           } finally {
@@ -528,9 +534,8 @@ const checks: ReadonlyArray<Check> = [
             return (
               db
                 .query<Main, [string]>(
-                  `SELECT id, harness_session_id AS conversation, runtime, json_extract(metadata, '$.pid') AS pid,
-                     json_extract(metadata, '$.integration.version') AS version
-                   FROM session WHERE agent_type = 'main' AND ended_at IS NULL AND json_extract(metadata, '$.projectDirectory') = ?`,
+                  `SELECT id, harness_session_id AS conversation, runtime, pid, version
+                   FROM ${SESSIONS} s WHERE agent_type = 'main' AND ended_at IS NULL AND directory = ?`,
                 )
                 .get(repo) ?? undefined
             )
@@ -730,8 +735,7 @@ export default Plugin.define({
           try {
             return db
               .query<Moved, [string]>(
-                `SELECT harness, json_extract(metadata, '$.provider') AS provider, json_extract(metadata, '$.pid') AS pid,
-                   harness_session_id AS conversation FROM session WHERE id = ?`,
+                `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
               )
               .get(id)!
           } finally {
@@ -741,7 +745,9 @@ export default Plugin.define({
         const status = () => {
           const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
           try {
-            return db.query<{ status: string }, [string]>("SELECT status FROM message WHERE session_id = ?").all(id)
+            return db
+              .query<{ status: string }, [string]>(`SELECT status FROM ${TURNS} t WHERE session_id = ? ORDER BY id`)
+              .all(id)
           } finally {
             db.close()
           }
