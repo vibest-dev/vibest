@@ -21,7 +21,7 @@ The daily experience, which every part of this document serves:
 6. When a job needs a fixed flow (plan → implement → review until both sides agree → pull request), the main
    Agent runs it with a skill, driving several subagents, with you able to step in at every point.
 
-Only this shape is supported: one main Agent and its subagents, one level deep (D13).
+This shape is the default orchestration mode. The plan makes it one of several: other modes become configurations of the same engine (planned, §1, D13).
 
 - It is not a coding agent: it does not own conversations, tools, or models.
 - **The agent runtime is a port** (D14): panes, processes, starting an agent, typing into it, reading its screen,
@@ -48,7 +48,7 @@ Reference implementations:
 | D1  | The runtime (herdr first) runs panes and processes. What happens inside a CLI agent reaches vibest first through harness integrations (hooks, plugins, extensions); the runtime's state detection and screen reading are the fallback. Per-CLI differences live only in harness adapters.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | D3  | The execution unit is the **Run**: one or more subagents working on one input. The core defines no orchestration patterns and no roles. Every Run is controlled by the main Agent (or the user) that started it. A flow over several subagents is a skill the main Agent follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing subagent is done only when the tests pass"); they never start or steer Runs.                                                                                                                                                                                                                  |
-| D4  | `vibest` runs inside a Project directory and opens that Project's main Agent; there is always exactly one, with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the main Agent starts through the same path as every Agent, placed in the current terminal. `vibest run` starts subagents, and only the main Agent (or the user) can run it: subagents never start Agents, so there is no nesting. Every result, and every exchange the user has directly with a subagent, returns to the main Agent.                                                                                                                                                           |
+| D4  | `vibest` runs inside a Project directory and opens that Project's main Agent; there is always exactly one, with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the main Agent starts through the same path as every Agent, placed in the current terminal. `vibest run` starts subagents, and only the main Agent (or the user) can run it: subagents never start Agents, so there is no nesting. Every result, and every exchange the user has directly with a subagent, returns to the main Agent. Status: this describes today and the default mode; D13 and §1.1 plan an optional entry session, nested leads and routing as data.                         |
 | D5  | Plugins follow OpenCode V2 exactly, Effect only (no Promise edition).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -57,24 +57,101 @@ Reference implementations:
 | D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest never refreshes or rotates a CLI's token, and an expired or unreadable token skips that poll so the limits stay as last known (or unknown). Any vibest plugin may report a Subscription's limits. |
 | D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest report` is for explicit or structured results; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| D13 | Only the main-Agent-and-subagents shape is supported, one level deep. Deeper shapes (subagents starting Agents, agent-to-agent messages) are decided case by case later. To keep that possible, the limits live in the default policy plugin, not in the data model: Messages have a sender and a receiver, an Agent records who started it, a Run holds several Agents.                                                                                                                                                                                                                                                                                                                                               |
+| D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one main Agent and its subagents) is the configuration of the default plugin (§1.1). Status: decided; today the code still has the coordinator and its subagents as two cases, and the planned parts of §1 replace them.                                                                                                                                                                                                                                                                                    |
 | D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `runtime-api.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                                                  |
 
-## 1. Architectures vibest must host
+## 1. A multi-CLI agent engine
+
+vibest is an engine that runs many CLI agents (Claude Code, Cursor, Pi, …) side by side, in terminals you can
+watch and step into. How those agents work together is an **orchestration mode**, and a mode is configuration:
+agent definitions plus plugins, never a branch in the core. The daily experience above (one main Agent handing
+work to subagents) is the default mode, `coordinator`, which a default plugin provides (§1.1).
 
 The survey groups orchestrators by the unit above a single agent. All of them need only "start an agent, prompt
 it, see it go idle, read its result, message it"; they differ in that upper unit and in who decides the next
-step. vibest is type B, the product a person uses every day; the other types are covered only as far as the
-main Agent can run them with a skill (§4).
+step. vibest gives every type the same engine:
 
-| Type                      | Examples                                                                                | Unit above the agent | In vibest                                                                     |
-| ------------------------- | --------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------- |
-| A. Direct launch          | Paseo, hcom, DMux, Autonomous Harness                                                   | none                 | the user runs `vibest run` from a terminal: a Run with one Agent              |
-| B. Main Agent with a team | CAO, OpenRig, Shogun, oh-my-claudecode, ClawTeam, Squad, Paradev MCP, WSP               | a team               | **the product**: the main Agent runs subagents (one level)                    |
-| C. Work-item driven       | Gas Town, Cyrus, Machinist, Emdash, Orchestrator.inc, Kandev, Cezar                     | issue or card        | out of scope                                                                  |
-| D. Workflow / pipeline    | CAO workflows, Prowl, herdr-orch, obra, Fusion, Raven, Cotal Lang, pi-dynamic-workflows | workflow run         | a skill the main Agent follows (`pipeline`); no workflow engine               |
-| E. Message mesh           | hcom, Agmsg, Cotal, Block Buzz, herdr-msg, Concord                                      | channel              | out of scope (D13)                                                            |
-| F. Racing / best-of-N     | Orca, Uzi, Pragma, Claudexor                                                            | attempt group        | a skill, added when needed: one Run with N Agents, compared by the main Agent |
+| Type                      | Examples                                                                                | Unit above the agent | In vibest                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| A. Direct launch          | Paseo, hcom, DMux, Autonomous Harness                                                   | none                 | the user runs `vibest run` without an entry session; results come to the user (§1.1)      |
+| B. Main Agent with a team | CAO, OpenRig, Shogun, oh-my-claudecode, ClawTeam, Squad, Paradev MCP, WSP               | a team               | **the default mode** (`coordinator`), nested leads included                               |
+| C. Work-item driven       | Gas Town, Cyrus, Machinist, Emdash, Orchestrator.inc, Kandev, Cezar                     | issue or card        | out of scope: work-item intake is a plugin or an outside client                           |
+| D. Workflow / pipeline    | CAO workflows, Prowl, herdr-orch, obra, Fusion, Raven, Cotal Lang, pi-dynamic-workflows | workflow run         | a skill, or an `agent.result` plugin that hands one stage's output to the next; no engine |
+| E. Message mesh           | hcom, Agmsg, Cotal, Block Buzz, herdr-msg, Concord                                      | channel              | peers: sessions that `send` to each other; reply routing keeps results from looping       |
+| F. Racing / best-of-N     | Orca, Uzi, Pragma, Claudexor                                                            | attempt group        | fan-out: one parent spawns N sessions and compares; gathering is a skill or a plugin      |
+
+**What the engine knows.** Status: the coordinator mode runs today with a fixed main Agent and one level of
+subagents. Everything else in this list is planned; each item says what runs today.
+
+- **One kind of session**, described by an **agent definition** (planned): `{ name, rules, tools (inspect | full),
+  skills, can { spawn, message (report-only | children | project) }, entry? }`, registered by plugins with
+  `context.agent.define`. What a caller may do comes from its definition, not from the database: Spawn needs
+  `can.spawn`; Send's recipient must be inside `can.message`; Interrupt, Remove and Peek need the user or an
+  ancestor of the target (along `parent_session_id`); Report is a message to the caller's reply target; the
+  guard reads `tools`. Today the coordinator and its subagents are two cases in the server and the guard.
+- **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
+  sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
+  natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
+  read with `vibest inbox`. Today only the main agent polls or subscribes; subagents are typed into, and a row with
+  no session to go to is dropped.
+- **Reply routing is data** (planned), in one function, `replyTo(turn)`, evaluated when a turn ends:
+  1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
+     each once.
+  2. Otherwise the session's `report_to`, written at spawn and never changed.
+  3. Otherwise, when a `task` or `send` row from the user opened the turn: the user (a row, not dropped).
+  4. A turn woken by a result or a notice, or opened by text the user typed into its terminal, goes to the
+     session's `report_to` when it has one, and produces no result row when it has none. So a main agent (no
+     `report_to`) behaves as today, peers the user started (no `report_to`) cannot answer results with results,
+     and a nested lead (`report_to` its main agent) still hands its gathered answer up.
+
+  A recipient that has ended falls back to the project's entry session (while it runs and is not the session
+  itself), then to the user. Last, the `agent.result` hook (`{ sessionId, turnId, status, output, recipients }`)
+  may rewrite the recipients: forward, merge, or clear them. Notices go through `agent.notice` (`{ about, kind:
+  blocked | not_started | undelivered | archived, text, recipients }`); by default to `report_to`, then the
+  entry session, then the user. Today a result goes to the parent, else to the project's main agent.
+
+- **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
+  and where a new terminal opens (beside its spawner), never routing. Today the parent also decides routing: a
+  result goes to the parent, else to the main agent.
+- **An optional entry session** (planned rename of `project.main_session_id` to `entry_session_id`): the session a
+  bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
+  project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
+- **Harnesses registered by plugins** (planned): `context.harness.register(adapter)`, scoped like
+  `context.runtime`. Each harness is its own package (adapter and integration files), loaded by default as a
+  builtin plugin. A harness the database names but no plugin registers is unavailable, never a decode failure.
+  Today the three adapters are built into core.
+- **One neutral integration event contract** (planned): every integration sends the same events over vibestd's
+  HTTP socket, `POST /events` with `ready`, `conversation`, `turn.start` (origin typed or inbox, and the inbox
+  row ids the turn consumed), `turn.end` (outcome completed, failed or interrupted; text; failure `{ kind: limited
+  | auth | other, message }`) and `blocked`; `POST /guard` with a neutral `ToolCall { kind, name, command?,
+  paths }`. vibestd parses no harness's own payload; a CLI with only shell hooks (Cursor) decodes in its own
+  process through `vibest integration event <hook>`. Today each harness reaches vibestd its own way (Claude over
+  HTTP, Pi and Cursor over RPC `TurnEnd` and `Prompt`) and the adapter decodes the raw event in vibestd.
+
+### 1.1 Orchestration
+
+The coordinator mode is the configuration of the default plugin `@vibest/plugin-coordinator` (planned as its own
+package; today the same behaviour is built into core and the builtin skills): a `main` definition (spawn,
+message children, inspect tools, entry), a `worker` definition, the `delegate` and `pipeline` skills,
+archive-on-completion, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
+when the user runs `vibest run` in a project that has one.
+
+Every other mode is configuration of the same engine (planned):
+
+| Mode                              | Configuration                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordinator and subagents (today) | the default plugin. A subagent's `report_to` is the session that spawned it; a run the user starts reports to the entry session. The main agent's turns are typed or woken by results, so by rule 4 they produce no result: as today                                                                       |
+| Peers                             | two `vibest run --agent peer` (`message: project`, no `report_to`: only when the project has no entry session or the run overrides it, since the default plugin sets `report_to` to the entry). A runs `vibest send B`; B's turn answers A (rule 1); A's turn woken by that result answers no one (rule 4) |
+| Pipeline                          | `vibest run --report-to <B>`; or an `agent.result` plugin that queues A's output as a `task` for the next stage (or spawns it) and clears the original recipients                                                                                                                                          |
+| Fan-out and gather                | a parent spawns N sessions and every result comes back to it (the default). Waiting for all N is a skill or a plugin; the engine does not gather                                                                                                                                                           |
+| Reviewer loop                     | the implementer's `report_to` is the reviewer; the reviewer sends changes with `send`, and the implementer's result goes back to it by rule 1. A skill or a plugin counts the rounds                                                                                                                       |
+| A person with a few agents        | no entry session; the user runs `vibest run` directly. Results and notices are rows for the user, read with `vibest inbox` and the unread count in `ls`                                                                                                                                                    |
+| Nested coordinator                | a `lead` definition (spawn, message children). main spawns a lead, the lead spawns workers; workers answer the lead, the lead answers main (its `report_to`). Management rights follow ancestry                                                                                                            |
+
+**Left to plugins and skills**, never the engine: gathering several results, loop and round limits, conditional
+routing, teams and shared task lists, and handoff between agents. The engine only guarantees that a turn woken by a
+result or a notice produces a result only for a session with a `report_to`, so sessions without one (peers the user
+started, a main agent) cannot answer results with results (rule 4), and that every row has one recipient.
 
 ## 2. Layers
 
@@ -318,7 +395,7 @@ main Agent's integration delivers it as new input     ← back in the main conve
 - **Workers.** Only the main Agent runs `vibest run "…" --agent <definition>` (without `--agent`, the
   default subagent definition from configuration). Every Agent's pane gets `VIBEST_AGENT_ID` at `tab.create`;
   the server takes the caller's role from that Agent's stored row (§13) and refuses `run` from any other Agent,
-  so subagents never nest. Run from a plain terminal,
+  so subagents never nest. (Today; §1.1 plans nesting, for example a lead that spawns workers.) Run from a plain terminal,
   the parent is still the main Agent, so every result lands in the main conversation. A subagent may only
   `report`.
 - **Several Agents in one Run.** `vibest run "…" --agent <definition> --in <run>` adds an Agent to a Run
