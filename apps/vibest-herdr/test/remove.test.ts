@@ -490,8 +490,8 @@ describe.concurrent("Processes", () => {
         const asked: Array<number> = []
         const platform = {
           liveness: (pid: number) => (asked.push(pid), "alive" as const),
-          terminateGroup: () => {
-            throw new Error("this test must not signal a process group")
+          terminate: () => {
+            throw new Error("this test must not signal a process")
           },
           pid: self,
           uid: undefined,
@@ -525,8 +525,8 @@ describe.concurrent("Processes", () => {
             Effect.provide(
               Processes.layer({
                 liveness: Platform.liveness,
-                terminateGroup: () => {
-                  throw new Error("this test must not signal a process group")
+                terminate: () => {
+                  throw new Error("this test must not signal a process")
                 },
                 pid: 1,
                 uid: undefined,

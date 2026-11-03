@@ -205,6 +205,42 @@ const run = Command.make(
   ),
 )
 
+/**
+ * One main agent per project: `start` runs when no other terminal runs the project's main agent, or once the user
+ * answered y and vibestd stopped that one's harness (its terminal and shell stay; `start` then resumes the same
+ * conversation here, or a new one for another harness). A no, no answer within two minutes, EOF, a non-interactive
+ * terminal, or a stop that did not finish starts nothing and changes nothing (vibestd's `Project.CoordinatorSession`
+ * refuses a second one too).
+ */
+export const soleMainAgent = <A, E, R>(
+  client: Pick<VibestClient, "Project.RunningCoordinator" | "Project.StopCoordinator">,
+  terminal: string,
+  start: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const running = yield* client["Project.RunningCoordinator"]({ terminal })
+    if (running) {
+      const where = `the main agent (${running.harness}) runs in ${running.place}`
+      const question = `The main agent (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
+      if (!((yield* interactive) && (yield* askYesNo(question))))
+        return yield* new LaunchFailed({
+          message: `not starting: ${where}, and a project has one main agent. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+        })
+      const stopped = yield* client["Project.StopCoordinator"]({ runtime: running.runtime, address: running.address })
+      if (stopped.result === "moved")
+        return yield* new LaunchFailed({ message: "not starting: the main agent moved meanwhile; run vibest again" })
+      if (stopped.result === "unsupported")
+        return yield* new LaunchFailed({
+          message: `not starting: ${where} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
+        })
+      if (stopped.result === "running")
+        return yield* new LaunchFailed({
+          message: `not starting: ${where} and did not exit; nothing changed. Exit it there first`,
+        })
+    }
+    return yield* start
+  })
+
 /** Replaces this process (from #platform). */
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
@@ -315,31 +351,22 @@ const startMain =
         // Only the start that execs asks vibestd for the session, so `--new` replaces it once.
         const session = withVibest(claim, (client) =>
           Effect.gen(function* () {
-            const running = yield* client["Project.RunningCoordinator"]({ terminal })
-            if (running) {
-              yield* Console.error(`the main agent (${running.harness}) is still running in ${running.place}`)
-              if ((yield* interactive) && (yield* askYesNo("Stop it before starting it here? [y/N]: "))) {
-                const stopped = yield* client["Project.StopCoordinator"]({
-                  runtime: running.runtime,
-                  address: running.address,
-                })
-                if (stopped.result === "running" || stopped.result === "moved") {
-                  const why = stopped.result === "moved" ? "the main agent moved" : "the main agent did not stop"
-                  yield* Console.error(`not starting: ${why}; run vibest again`)
-                  return yield* new LaunchFailed({ message: why })
-                }
-              }
-            }
-            return yield* client["Project.CoordinatorSession"]({
-              harness: chosen.harness,
-              fresh: o.fresh,
+            return yield* soleMainAgent(
+              client,
               terminal,
-              machine,
-              runtime: chosen.runtime,
-              provider: chosen.provider,
-              model: chosen.model,
-              routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
-            })
+              client["Project.CoordinatorSession"]({
+                harness: chosen.harness,
+                fresh: o.fresh,
+                terminal,
+                machine,
+                runtime: chosen.runtime,
+                provider: chosen.provider,
+                model: chosen.model,
+                routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
+                // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
+                pid: process.pid,
+              }),
+            )
           }),
         )
         const main = yield* Launch.coordinatorCommand({

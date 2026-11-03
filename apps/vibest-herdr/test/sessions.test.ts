@@ -403,6 +403,14 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.getSession(id))!.status, "blocked")
       const row = yield* db.latestInbox(id, "notice")
       assert.strictEqual(row!.kind, "notice")
+      const since = new Date(yield* Clock.currentTimeMillis)
+      const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
+      assert.include(
+        row!.message,
+        `${id} (pi) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
+      )
+      assert.notInclude(row!.message, "Switch to its terminal")
+      assert.lengthOf(yield* sqlNotices(id), 1)
       assert.strictEqual((yield* herdr.callsTo("send")).length, promptSends)
     }),
   )
@@ -3347,7 +3355,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
   test(
-    "a completed result typed into the coordinator archives the session, with the outcome as a notice after it; vibest result still works",
+    "a completed result typed into the coordinator archives the session; a clean archive sends no notice (nothing to do); vibest result still works",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
@@ -3355,12 +3363,9 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.isTrue((yield* w.db.getSession(w.id))!.metadata.archive)
       yield* finishTurn(w, "status: completed\nsummary: found it")
       yield* until(archived(w.db, w.id), (a) => a)
-      const notice = yield* until(latestNotice(w.id), (m) => m.includes("archived"))
-      assert.strictEqual(
-        notice,
-        `${w.id} archived (vibest run --archive-on-completion): terminal closed, worktree removed at ${yield* sessionWorktree(w.id)}, branch (none) kept.`,
-      )
-      assert.isFalse(yield* fs.exists(yield* sessionWorktree(w.id)))
+      yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
+      yield* until(w.db.getSession(w.id), (r) => r!.exitedAt !== null)
+      yield* settle
       const rows = yield* sql<{
         kind: string
         status: string
@@ -3369,26 +3374,34 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       )
       assert.deepStrictEqual(
         rows.map((r) => r.kind),
-        ["result", "notice"],
+        ["result"],
       )
       assert.strictEqual(rows[0]!.status, "delivered")
-      assert.deepStrictEqual((yield* w.db.latestInbox(w.id, "notice"))!.details, {})
       assert.include((yield* w.db.latestInbox(w.id, "result"))!.message, "found it")
       assert.isNotNull((yield* w.db.getSession(w.id))!.exitedAt)
     }),
   )
 
   test(
-    "a Pi coordinator: archived once the extension acked the result (its next pull), and the outcome is its next batch",
+    "a Pi coordinator: archived once the extension acked the result (its next pull), and a clean archive sends it no batch",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository, "pi")
       yield* finishTurn(w, "status: completed")
       assert.isFalse(yield* archived(w.db, w.id))
-      const batches = yield* inbox.stream(w.projectId).pipe(Stream.take(2), Stream.runCollect)
+      const batches: Array<string> = []
+      const pulling = yield* Effect.forkChild(
+        inbox.stream(w.projectId).pipe(
+          Stream.take(2),
+          Stream.runForEach((b) => Effect.sync(() => batches.push(b))),
+        ),
+      )
+      yield* until(archived(w.db, w.id), (a) => a)
+      yield* settle
+      yield* Fiber.interrupt(pulling)
+      assert.lengthOf(batches, 1)
       assert.include(batches[0]!, "<agent-result")
-      assert.include(batches[1]!, `${w.id} archived (vibest run --archive-on-completion)`)
-      assert.isTrue(yield* archived(w.db, w.id))
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
   )
 
@@ -3522,16 +3535,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a message queued when the result is delivered: not archived, a notice says why, and the message is delivered",
+    "a message queued when the result is delivered: not archived, no notice (nothing to do), and the message is delivered",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
       yield* w.sessions.send(w.id, "one more thing")
       yield* finishTurn(w, "status: completed")
-      yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
-      assert.strictEqual(
-        yield* latestNotice(w.id),
-        `${w.id} not archived (vibest run --archive-on-completion): it has work again (a message was sent to it or it started a new turn); its next completed result archives it`,
-      )
+      yield* settle
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archived(w.db, w.id))
       yield* w.sessions.check(w.id)
       yield* until(w.db.inboxWithStatus(w.id, "delivered"), (rows) => rows.length === 1)
@@ -3549,8 +3559,8 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* w.sessions.send(w.id, "one more thing")
       yield* held.release()
       yield* Fiber.join(finishing)
-      yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
-      assert.include(yield* latestNotice(w.id), "it has work again")
+      yield* settle
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archived(w.db, w.id))
       assert.lengthOf(yield* w.db.inboxWithStatus(w.id, "failed"), 0)
       // Send's own delivery, waiting for the lock, hands it over: no check needed.
@@ -3572,8 +3582,9 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, status: "working" }))
       yield* get.release()
       yield* Fiber.join(finishing)
-      // Never interrupted: unlike vibest archive, the automatic one leaves current work alone.
-      yield* until(latestNotice(w.id), (m) => m.includes("it has work again"))
+      // Never interrupted: unlike vibest archive, the automatic one leaves current work alone, and says nothing.
+      yield* settle
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       // Never interrupted: no keys were sent to it (the texts recorded are its own prompt and the coordinator's batch).
       assert.deepStrictEqual(
         (yield* w.herdr.callsTo("send")).filter((call) => call.keys !== undefined),
@@ -3618,9 +3629,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         `${w.id} was archived; run a new session`,
       )
       yield* held.release()
-      yield* until(latestNotice(w.id), (m) => m.includes("archived ("))
+      yield* until(w.db.getSession(w.id), (r) => r!.exitedAt !== null)
+      yield* settle
       assert.deepStrictEqual(yield* w.db.inboxWithStatus(w.id, "failed"), [])
-      assert.notInclude((yield* sqlNotices(w.id)).join("\n"), "was not delivered")
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
   )
 
@@ -3664,8 +3676,8 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.strictEqual(busy._tag, "SessionBusy")
       assert.include(busy.message, "already being removed")
       yield* held.release()
-      yield* until(latestNotice(w.id), (m) => m.includes("archived ("))
-      assert.include(yield* latestNotice(w.id), "worktree removed")
+      const fs = yield* FileSystem.FileSystem
+      yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
     }),
   )
 
@@ -3715,7 +3727,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     })
 
   test(
-    "a newer completed result delivered while the first one's archive waits for the lock: archived once, one notice",
+    "a newer completed result delivered while the first one's archive waits for the lock: archived once, no notice",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository)
@@ -3727,15 +3739,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* looked
       yield* first.release
       // The first decision is the waiting archive's: it archives on the newer result instead of skipping.
-      assert.include(
-        yield* until(latestNotice(w.id), (m) => m.includes("archived")),
-        `${w.id} archived (vibest run --archive-on-completion)`,
-      )
-      assert.isTrue(yield* archived(w.db, w.id))
+      yield* until(archived(w.db, w.id), (a) => a)
       yield* bothDone(w)
-      const notices = yield* sqlNotices(w.id)
-      assert.lengthOf(notices, 1)
-      assert.include(notices[0], `${w.id} archived (vibest run --archive-on-completion)`)
+      assert.lengthOf(yield* w.herdr.callsTo("close"), 1)
+      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
     gated,
     true,
@@ -3766,12 +3773,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
           yield* looked
         }
         yield* Deferred.succeed(read.release, undefined)
-        yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
         if (failure === undefined) {
           yield* until(archived(w.db, w.id), (a) => a)
           yield* bothDone(w)
-          assert.lengthOf(yield* sqlNotices(w.id), 2)
-          assert.include(yield* latestNotice(w.id), `${w.id} archived (vibest run --archive-on-completion)`)
+          assert.deepStrictEqual(yield* sqlNotices(w.id), [])
           continue
         }
         sessionRead = undefined
@@ -3801,7 +3806,6 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
         yield* looked
         yield* first.release
-        yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
         yield* bothDone(w)
         assert.isFalse(yield* archived(w.db, w.id), newer)
         assert.isUndefined((yield* w.db.getSession(w.id))!.metadata.removed, newer)

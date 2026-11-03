@@ -932,11 +932,14 @@ export class Sessions extends Context.Service<
           return
         }
         if (s === "blocked") {
-          if (!(yield* Ref.getAndSet(r.blockedNotified, true)))
+          if (!(yield* Ref.getAndSet(r.blockedNotified, true))) {
+            const since = new Date(yield* Clock.currentTimeMillis)
+            const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
             yield* notice(
               session,
-              `${id} is waiting for a confirmation in its terminal. Switch to its terminal to answer.`,
+              `${id} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
             )
+          }
           return
         }
         yield* Ref.set(r.blockedNotified, false)
@@ -1277,18 +1280,16 @@ export class Sessions extends Context.Service<
                 if (session.metadata.archived || session.metadata.removed) return
                 const skip = (why: string) =>
                   notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
-                const sentAnother = () =>
-                  skip(
-                    "it has work again (a message was sent to it or it started a new turn); its next completed result archives it",
-                  )
                 // The newest result decides: a newer completed one already delivered archives it now; one not delivered yet takes its own turn once it is.
                 const latest = yield* db.latestInbox(id, "result")
+                // It has work again (a message was sent to it or it started a new turn): its next completed result archives it.
+                // Nothing for the coordinator to do, so no notice (each notice is a coordinator turn).
                 if (
                   session.turnState !== "completed" ||
                   latest?.status !== "delivered" ||
                   latest.details.status !== "completed"
                 )
-                  return yield* sentAnother()
+                  return
                 const h = yield* live(session)
                 const terminal = session.address
                 const seen = yield* agentState(h, terminal)
@@ -1303,7 +1304,8 @@ export class Sessions extends Context.Service<
                     `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
                   )
                 const out = yield* removeLocked(id, { unlessPending: true })
-                if (!out) return yield* sentAnother()
+                // It has work again (removeLocked refused): no notice, as above.
+                if (!out) return
                 const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
                 const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
                 // The owner was archived while this session shared its worktree: nobody else removes it now.
@@ -1312,10 +1314,12 @@ export class Sessions extends Context.Service<
                   owner && (yield* db.getSession(owner))?.metadata.archived
                     ? ` ${owner} is archived too: run vibest archive ${owner} to remove the shared worktree.`
                     : ""
-                yield* notice(
-                  session,
-                  `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}${leftover}`,
-                )
+                // A clean archive gives the coordinator nothing to do: only something kept or left over is worth a notice (a coordinator turn).
+                if (kept || again || leftover)
+                  yield* notice(
+                    session,
+                    `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}${leftover}`,
+                  )
               }).pipe(
                 Effect.catchCause((cause) =>
                   Cause.hasInterruptsOnly(cause)

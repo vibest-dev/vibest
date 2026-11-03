@@ -8,9 +8,9 @@ import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 
 import { Db, type SessionRow } from "./db.ts"
 import { Layout, resolveWorktree } from "./paths.ts"
-import { Processes } from "./processes.ts"
+import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
-import { alive, type Runtime, type Terminal } from "./runtimes.ts"
+import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
@@ -21,39 +21,63 @@ type ProcessState = RemoveOutcome["processes"]
 export const CWD_POLL = Duration.millis(500)
 export const CWD_WAIT = Duration.seconds(10)
 
+/** How long a stopped main agent's harness has to exit after SIGTERM. */
+export const HARNESS_EXIT_WAIT = Duration.seconds(10)
+
 /**
- * Stop the agent a coordinator's terminal runs, without closing it (the RPC `Project.StopCoordinator`): the harness's
- * interrupt key, then until it is no longer working. `moved`: the row was no longer the one asked about. `running`: it
- * did not settle. The write transaction the old signal needed is gone with the signal: `stillThere` is asked again
- * after the wait.
+ * End a main agent's harness so that it can start in another terminal (the RPC `Project.StopCoordinator`): SIGTERM to
+ * that one PID, never its process group or its terminal, so the terminal and its shell stay. `pid` is what its own
+ * `vibest` reported before it exec'd the harness. The row first leaves its place (`detach`), so the harness's exit drops
+ * nothing; a harness still there after `wait` is not stopped, and the row goes back (`reattach`). Signalled only while
+ * the runtime sees an agent in that terminal; an exited PID means it is already gone. `moved`: the row was no longer at
+ * that place. `unsupported` (with why): nothing vibest can signal from here (another machine, no PID recorded, or no agent
+ * seen there while the PID is alive, so it may be another program now).
+ *
+ * ponytail: local machine only (a PID names a process on vibestd's machine); a remote machine needs a runtime operation.
+ * A PID reused by another program while the runtime still sees an agent there would get the signal.
  */
 export const stopAgent = (
   h: Runtime,
   terminal: Terminal,
   input: {
-    readonly interruptKey: string
-    readonly stillThere: Effect.Effect<boolean>
+    readonly pid: number | undefined
+    readonly detach: Effect.Effect<boolean>
+    readonly reattach: Effect.Effect<void>
     readonly wait: Duration.Duration
   },
 ) =>
   Effect.gen(function* () {
-    if (!(yield* input.stillThere)) return "moved" as const
-    yield* h.send(terminal, { keys: [input.interruptKey] }).pipe(Effect.ignore)
-    // No `state` member: the terminal's own program decides (§5's `process` fallback).
-    const settled: Effect.Effect<boolean> =
-      h.state === undefined
-        ? alive(h, terminal).pipe(Effect.map((running) => !running))
-        : h.state(terminal).pipe(
-            Effect.option,
-            Effect.map(Option.map((state) => state !== "working" && state !== "blocked")),
-            Effect.map((idle) => Option.getOrElse(idle, () => false)),
-          )
-    const stopped = yield* settled.pipe(
-      Effect.repeat({ until: (idle) => idle, schedule: Schedule.spaced("500 millis") }),
-      Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
+    const processes = yield* Processes
+    const pid = input.pid
+    const unsupported = (reason: string) => ({ result: "unsupported" as const, reason })
+    if (terminal.machine !== "local")
+      return unsupported("it runs on another machine, and vibest stops a main agent only on its own machine")
+    if (pid === undefined || !validPid(pid))
+      return unsupported("it was started by an older vibest, which recorded no process to stop")
+    const detached = Effect.map(input.detach, (ok) => ({ result: ok ? ("stopped" as const) : ("moved" as const) }))
+    if ((yield* processes.liveness(pid)) === "exited") return yield* detached
+    const seen = yield* agentState(h, terminal).pipe(Effect.orElseSucceed(() => "unknown" as const))
+    if (seen === "absent" || seen === "unknown")
+      return unsupported("vibest does not see its harness in that terminal, so its process may be another program now")
+    // From detach to the answer, uninterruptible (at most `wait`): an interrupt in between (the CLI's Ctrl-C ends its
+    // request) would leave the row detached while the harness still runs, and another terminal could start a second one.
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        if ((yield* detached).result === "moved") return { result: "moved" as const }
+        const exited =
+          (yield* processes.terminate(pid)) === "sent" &&
+          (yield* processes
+            .liveness(pid)
+            .pipe(
+              Effect.repeat({ until: (l) => l === "exited", schedule: Schedule.spaced("200 millis") }),
+              Effect.as(true),
+              Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
+            ))
+        if (exited) return { result: "stopped" as const }
+        yield* input.reattach
+        return { result: "running" as const }
+      }),
     )
-    if (!(yield* input.stillThere)) return "moved" as const
-    return stopped ? ("stopped" as const) : ("running" as const)
   })
 
 export interface ReleaseInput {

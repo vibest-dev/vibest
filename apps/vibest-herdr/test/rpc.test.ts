@@ -633,6 +633,35 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "one main agent per project: a start in another terminal while it runs is refused and changes nothing; once it exited the start goes ahead",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const first = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      yield* herdr.seedAgent("test/p1")
+      const running = yield* c["Project.RunningCoordinator"]({ terminal: "test/p2" })
+      assert.strictEqual(running?.harness, "claude")
+      const refused = yield* Effect.exit(
+        c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p2" }),
+      )
+      assert.strictEqual(failureTag(refused), "Forbidden")
+      assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
+      const project = yield* db.projectId(yield* repositoryKey(repo))
+      const row = (yield* db.coordinatorOf(project))!
+      assert.strictEqual(row.address?.id, "test/p1")
+      assert.strictEqual(row.harnessId, "claude")
+      // Its own terminal may start it again; another one may once it exited.
+      yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      yield* herdr.updateAgent("test/p1", (a) => ({ ...a, alive: false }))
+      const moved = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p2" })
+      assert.strictEqual(moved.sessionId, first.sessionId)
+      assert.strictEqual((yield* db.coordinatorOf(project))!.address?.id, "test/p2")
+    }),
+  )
+
+  test(
     "vibest refused before exec (binary, plugin, provider, harness) leaves the running main agent's conversation alone",
     Effect.gen(function* () {
       const repo = yield* makeRepository

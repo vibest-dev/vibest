@@ -497,6 +497,8 @@ export class VibestRpcs extends RpcGroup.make(
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           routing: Schema.optional(Routing),
+          /** The caller's own PID: it execs the harness, so this is the harness's (what StopCoordinator signals). */
+          pid: Schema.optional(Schema.Number),
         },
         success: Schema.Struct({ sessionId: Schema.String, harnessSessionId: Schema.NullOr(Schema.String) }),
         error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
@@ -550,12 +552,20 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
     }),
   ),
-  /** Stop the agent at address (opaque terminal JSON) in `runtime`. Never closes the terminal. moved when the row is no longer there. */
+  /**
+   * `vibest` moving the main agent to its own terminal: SIGTERM to the harness at address (opaque terminal JSON) in
+   * `runtime`, its recorded PID only, then until it exited; its terminal and shell stay. stopped: gone, and what waits for
+   * it is kept for the next launch. running: not stopped, nothing changed. moved: the row is no longer there.
+   * unsupported: nothing signalled or changed, because vibest cannot stop it from here; reason says why.
+   */
   scoped(
     admitted(
       Rpc.make("Project.StopCoordinator", {
         payload: { runtime: Schema.String, address: Schema.String },
-        success: Schema.Struct({ result: Schema.Literals(["stopped", "running", "moved"]) }),
+        success: Schema.Struct({
+          result: Schema.Literals(["stopped", "running", "moved", "unsupported"]),
+          reason: Schema.optional(Schema.String),
+        }),
         error: Schema.Union([Forbidden, NotInRepository, RuntimeUnreachable, NoRuntime, InvalidCaller]),
       }),
     ),

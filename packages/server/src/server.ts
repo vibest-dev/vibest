@@ -1,13 +1,13 @@
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessOptions, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
-import { stopAgent } from "@vibest/core/remove"
+import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { envelope } from "@vibest/core/results"
 import {
   agentState,
@@ -18,7 +18,6 @@ import {
   type Runtime,
   type Terminal,
 } from "@vibest/core/runtimes"
-import { STOP_WAIT } from "@vibest/core/sessions"
 import { NoSuchSession, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
@@ -45,7 +44,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Semaphore, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
@@ -353,6 +352,29 @@ export const handlers = VibestRpcs.toLayer(
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
+    /** One project's main-agent changes at a time: the running check and the launch (CoordinatorSession), and the stop. */
+    const projectLocked = keyedLock()
+
+    /**
+     * The project's main agent alive (idle or busy) in a terminal other than `terminal`, or null. Fails open: null when
+     * the runtime cannot be reached or cannot tell.
+     */
+    const runningCoordinator = (key: Parameters<Db["Service"]["projectId"]>[0], terminal: string) =>
+      Effect.gen(function* () {
+        const coord = yield* db.coordinatorOf(yield* db.projectId(key))
+        if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
+        if (coord.address.id === terminal) return null
+        const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+        if (Option.isNone(h)) return null
+        const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+        if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        return {
+          harness: coord.harnessId,
+          place: placeOf(coord.runtime, coord.address),
+          runtime: coord.runtime,
+          address: encodeAddress(coord.address),
+        }
+      })
     /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
@@ -663,7 +685,7 @@ export const handlers = VibestRpcs.toLayer(
           return { ...decision, harness: decision.harness, runtime: rt.kind }
         }),
 
-      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing }) =>
+      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.CoordinatorSession")
           const projectDirectory =
@@ -677,59 +699,63 @@ export const handlers = VibestRpcs.toLayer(
               method: "Project.CoordinatorSession",
               message: "Project.CoordinatorSession needs the runtime the main agent runs in",
             })
-          const saved = yield* db.coordinatorLaunch(
+          // One main agent per project: every start goes through here, so a second one is refused here. The check and the
+          // launch hold the project's lock, as a stop does, so two starts at once cannot both pass.
+          return yield* projectLocked(
             key,
-            harness,
-            fresh,
-            { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } },
-            {
-              provider,
-              model,
-              routing,
-              ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
-            },
+            Effect.gen(function* () {
+              const running = yield* runningCoordinator(key, terminal)
+              if (running)
+                return yield* new Forbidden({
+                  method: "Project.CoordinatorSession",
+                  message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+                })
+              const saved = yield* db.coordinatorLaunch(
+                key,
+                harness,
+                fresh,
+                { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } },
+                {
+                  provider,
+                  model,
+                  routing,
+                  pid,
+                  ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
+                },
+              )
+              yield* inbox.reconcile(yield* db.projectId(key))
+              return saved
+            }),
           )
-          yield* inbox.reconcile(yield* db.projectId(key))
-          return saved
         }),
 
       "Project.RunningCoordinator": ({ terminal }) =>
-        Effect.gen(function* () {
-          const { key } = yield* scope("Project.RunningCoordinator")
-          const coord = yield* db.coordinatorOf(yield* db.projectId(key))
-          if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
-          if (coord.address.id === terminal) return null
-          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-          if (Option.isNone(h)) return null
-          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
-          if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
-          return {
-            harness: coord.harnessId,
-            place: placeOf(coord.runtime, coord.address),
-            runtime: coord.runtime,
-            address: encodeAddress(coord.address),
-          }
-        }),
+        scope("Project.RunningCoordinator").pipe(Effect.flatMap(({ key }) => runningCoordinator(key, terminal))),
 
       "Project.StopCoordinator": ({ runtime, address }) =>
         Effect.gen(function* () {
           const { key } = yield* scope("Project.StopCoordinator")
-          const projectId = yield* db.projectId(key)
-          const coord = yield* db.coordinatorOf(projectId)
-          const place = coord?.address
-          if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
-            return { result: "moved" as const }
-          const h = yield* runtimes
-            .route(runtime)
-            .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })))
-          const result = yield* stopAgent(h, place, {
-            interruptKey: (yield* Harnesses).get(coord.harnessId).interruptKey,
-            stillThere: db
-              .coordinatorOf(projectId)
-              .pipe(Effect.map((current) => sameCoordinator(current, runtime, address))),
-            wait: STOP_WAIT,
-          })
-          return { result }
+          return yield* projectLocked(
+            key,
+            Effect.gen(function* () {
+              const projectId = yield* db.projectId(key)
+              const coord = yield* db.coordinatorOf(projectId)
+              const place = coord?.address
+              if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
+                return { result: "moved" as const }
+              const h = yield* runtimes
+                .route(runtime)
+                .pipe(
+                  Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })),
+                )
+              return yield* stopAgent(h, place, {
+                pid: coord.pid,
+                detach: db.detachCoordinator(projectId, runtime, place),
+                reattach: db.reattachCoordinator(projectId, runtime, place),
+                wait: HARNESS_EXIT_WAIT,
+              })
+            }),
+          )
         }),
 
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
@@ -799,3 +825,27 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+/**
+ * Runs bodies one at a time per key. One vibestd serves every request, so an in-process lock is enough (not sqlite: a
+ * locked section waits on the runtime for up to 10 s, and a lock row would outlive a crash). A key's entry lives only
+ * while a body holds or waits for it, so the map does not grow with keys; `size` is for tests.
+ */
+export const keyedLock = () => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+  const run = <A, E, R>(key: string, body: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      let entry = locks.get(key)
+      if (entry === undefined) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
+      const held = entry
+      held.users++
+      return held.lock.withPermit(body).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--held.users === 0) locks.delete(key)
+          }),
+        ),
+      )
+    })
+  return Object.assign(run, { size: () => locks.size })
+}

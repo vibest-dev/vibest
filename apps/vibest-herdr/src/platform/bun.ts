@@ -135,13 +135,13 @@ export const plugins: PluginLoader["Service"] = {
 /** Signal 0 to a PID the caller validated (a positive integer): it tests for the process, it does not signal it. */
 export const liveness = (pid: number): Liveness => livenessOf(() => process.kill(pid, 0))
 
-/** SIGTERM to a positive foreground group. Never 0 or negative: that would signal this process's group, or every process. */
-const terminateGroup = (group: number) => {
-  if (!validPid(group)) return
-  process.kill(-group, "SIGTERM")
+/** SIGTERM to one positive PID. Never 0 or negative: that would signal this process's group, or every process. */
+const terminate = (pid: number) => {
+  if (!validPid(pid)) return
+  process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform = { liveness, terminateGroup, pid: process.pid, uid: process.getuid?.() }
+const processes: ProcessPlatform = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
 
 /** `security -w` prints the password and a newline. Empty, non-zero, or a timeout is unreadable — never logged. */
 const securityPassword = (service: string) =>
