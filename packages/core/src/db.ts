@@ -33,14 +33,25 @@ const addressJson = (runtime: { readonly kind: string; readonly machine: string;
 const runtimeMatching = (type: string, encodedAddress: string) =>
   encodeRuntime(type, JSON.parse(encodedAddress) as RuntimeAddress)
 
+/** What a running agent reports and a restart needs; on every session row, the main agent's too. */
+const Live = {
+  /** The integration (harness plugin) version and protocol the agent last sent (vibest-plugin-version, vibest-protocol). */
+  integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
+  /** The harness's own process, as its integration reported it when ready: the pid a restart sends SIGTERM to. */
+  pid: Schema.optional(Schema.Number),
+  /** vibestd is restarting the harness (`vibest update`): set before the signal, cleared once the new one is ready. */
+  restarting: Schema.optional(Schema.Struct({ interrupted: Schema.Boolean, at: Schema.Number })),
+  /** When the harness's integration reported it takes input (one request at its start); removed when a restart or move ends the harness. */
+  ready: Schema.optional(Schema.Number),
+}
+
 const Metadata = Schema.Struct({
   /**
    * A main agent's leased inbox rows (Inbox.poll), by row id: when each lease ends. An entry goes when its row is
    * acked, released, or its lease ended.
    */
   leases: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
-  /** The harness integration's version the session's requests last carried (its plugin). */
-  integrationVersion: Schema.optional(Schema.String),
+  ...Live,
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   routing: Schema.optional(Routing),
   /** `vibest run --peer`: the session whose worktree this one shares. It never removes that worktree. */
@@ -150,8 +161,9 @@ export const CoordinatorRow = Schema.Struct({
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   routing: Schema.optional(Routing),
-  /** The harness's PID: the `vibest` that exec'd it reported its own (Project.CoordinatorSession). Absent on older rows. */
-  pid: Schema.optional(Schema.Number),
+  /** `vibest --env`: the harness's extra environment, as a subagent's `metadata.env`. */
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  ...Live,
 })
 export type CoordinatorRow = typeof CoordinatorRow.Type
 
@@ -501,12 +513,17 @@ const make = Effect.gen(function* () {
         decodeCoordinators(
           rows.map((row) => {
             const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-            const { provider, model, routing, projectDirectory, pid } = JSON.parse(row.metadata) as {
+            const { provider, model, routing, projectDirectory, env, integration, pid, restarting } = JSON.parse(
+              row.metadata,
+            ) as {
               provider?: string | null
               model?: string | null
               routing?: unknown
               projectDirectory?: unknown
+              env?: unknown
+              integration?: unknown
               pid?: unknown
+              restarting?: unknown
             }
             return {
               id: row.id,
@@ -521,7 +538,10 @@ const make = Effect.gen(function* () {
               provider: provider ?? null,
               model: model ?? null,
               ...(routing === undefined ? {} : { routing }),
-              ...(typeof pid === "number" ? { pid } : {}),
+              ...(env === undefined ? {} : { env }),
+              ...(integration === undefined ? {} : { integration }),
+              ...(pid === undefined ? {} : { pid }),
+              ...(restarting === undefined ? {} : { restarting }),
             }
           }),
         ),
@@ -875,6 +895,8 @@ const make = Effect.gen(function* () {
         /** The project directory. Stored beside the key; never written into `directory`. */
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
+        /** `vibest --env`, replacing the one recorded (absent: kept). */
+        readonly env?: Readonly<Record<string, string>> | undefined
       } = {},
     ) =>
       Effect.gen(function* () {
@@ -912,7 +934,11 @@ const make = Effect.gen(function* () {
               moving: null,
               ...(start.routing ? { routing: start.routing } : {}),
               ...(start.projectDirectory ? { projectDirectory: start.projectDirectory } : {}),
+              ...(start.env !== undefined ? { env: start.env } : {}),
             })
+            // json_patch merges objects: the env is replaced whole, so cleared first.
+            if (start.env !== undefined)
+              yield* sql`UPDATE session SET metadata = json_remove(metadata, '$.env') WHERE id = (SELECT main_session_id FROM project WHERE id = ${project})`
             const [saved] = yield* sql<{ id: string; harnessSession: string | null }>`UPDATE session SET
                 harness_session_id = CASE WHEN ${fresh ? 1 : 0} OR harness != ${harness} THEN NULL ELSE harness_session_id END,
                 harness = ${harness}, runtime = ${runtime}, metadata = json_patch(metadata, ${metadata})
@@ -923,14 +949,6 @@ const make = Effect.gen(function* () {
         )
       }).pipe(Effect.orDie),
 
-    /** The integration version the session's requests carry, written only when it changed; true when it did. */
-    noteIntegrationVersion: (id: string, version: string) =>
-      sql<{ id: string }>`UPDATE session SET metadata = json_set(metadata, '$.integrationVersion', ${version})
-        WHERE id = ${id} AND json_extract(metadata, '$.integrationVersion') IS NOT ${version} RETURNING id`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
-
     /** The harness's own conversation id (latest wins: a /clear changes it), written only when it changed; true when it did. */
     noteHarnessSession: (id: string, harnessSessionId: string) =>
       sql<{ id: string }>`UPDATE session SET harness_session_id = ${harnessSessionId}
@@ -938,6 +956,48 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
+
+    /** The integration version and protocol session `id` (main agent or not) sent; true when they changed. */
+    noteIntegration: (id: string, integration: { readonly version: string; readonly protocol: number }) =>
+      sql<{
+        id: string
+      }>`UPDATE session SET metadata = json_set(metadata, '$.integration', json(${JSON.stringify(integration)}))
+        WHERE id = ${id} AND json_extract(metadata, '$.integration') IS NOT ${JSON.stringify(integration)} RETURNING id`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
+    /**
+     * Set (or, with null, remove) the keys a restart keeps in session `id`'s metadata (main agent or not): the harness pid,
+     * the restarting mark, the main agent's env. One merge patch, so the row's other keys stay.
+     */
+    patchLive: (
+      id: string,
+      patch: {
+        readonly pid?: number | null
+        readonly restarting?: { readonly interrupted: boolean; readonly at: number } | null
+        readonly env?: Readonly<Record<string, string>> | null
+        readonly ready?: number | null
+      },
+    ) =>
+      // Each key is replaced whole (a merge patch alone would merge an old env into the new one).
+      sql`UPDATE session SET metadata = json_patch(json_patch(metadata, ${JSON.stringify(
+        Object.fromEntries(Object.keys(patch).map((key) => [key, null])),
+      )}), ${JSON.stringify(patch)}) WHERE id = ${id}`.pipe(Effect.asVoid, Effect.orDie),
+
+    /** When session `id`'s integration last reported ready (main agent or not); undefined when it has not since its start. */
+    readyAt: (id: string) =>
+      sql<{ at: number | null }>`SELECT json_extract(metadata, '$.ready') AS at FROM session WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.at ?? undefined),
+        Effect.orDie,
+      ),
+
+    /** A vibestd that starts finds no restart running: a mark left by one that stopped mid-restart is cleared. */
+    clearRestarting: sql`UPDATE session SET metadata = json_remove(metadata, '$.restarting')
+      WHERE json_extract(metadata, '$.restarting') IS NOT NULL RETURNING id`.pipe(
+      Effect.map((rows) => rows.map((r) => (r as { id: string }).id)),
+      Effect.orDie,
+    ),
 
     /** The last report wins. Another harness, or an id that is not a main agent, changes nothing. */
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>

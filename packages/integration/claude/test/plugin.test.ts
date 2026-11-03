@@ -93,6 +93,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       },
     },
     ui: { invalidate: () => void (state.redraws += 1), status: (t: string | undefined) => void statuses.push(t) },
+    // A command's parent is Claude Code itself.
+    process: { run: async () => ({ exitCode: 0, stdout: "4242\n", stderr: "" }) },
     clock: {
       every: (ms: number, fn: () => void) => {
         every.push({ ms, fn })
@@ -166,7 +168,10 @@ describe("Claude plugin requests", () => {
   it("every request goes to $VIBEST_HOME/vibest-http.sock with the session's headers and the current conversation", async () => {
     const h = host()
     await h.start()
-    const [poll] = h.requests
+    // First that the harness takes input (rpc.ts Session.Ready), then the main agent's first poll.
+    const [ready, poll] = h.requests
+    assert.strictEqual(ready!.url, "http://vibestd/session/ready")
+    assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
@@ -205,14 +210,14 @@ describe("Claude plugin requests", () => {
     await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/prompt"])
-    assert.deepStrictEqual(h.requests[0]!.body, {
+    assert.deepStrictEqual(h.paths(), ["/session/ready", "/hooks/claude/turn-end", "/hooks/claude/prompt"])
+    assert.deepStrictEqual(h.requests[1]!.body, {
       hook_event_name: "TurnComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
     })
-    assert.deepStrictEqual(h.requests[1]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
+    assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
   })
 
   it("the main agent's turn end is not reported", async () => {

@@ -235,14 +235,14 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           Effect.gen(function* () {
             const cwd = fs.realpathSync(os.tmpdir())
             const env = { HERDR_SOCKET_PATH: socketPath }
-            // An interactive shell: `open` types `exec <argv>`, so a program that ends closes its pane; a shell stays.
+            // `open` types argv into the pane's interactive shell (no exec): once it ends, that shell stays.
             const opened = yield* runtime
               .open(
                 { id: "local" },
                 {
                   project: cwd,
                   cwd,
-                  argv: ["/bin/sh"],
+                  argv: ["printf", "VBT_%s\\n", "TYPED"],
                   env: {},
                   label: "vibest test",
                 },
@@ -251,7 +251,8 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             const seen = TerminalRuntime.parseTerminal(opened)
             assert.isDefined(seen)
             assert.strictEqual(seen!.session, name)
-            // The typed shell runs: what `send` types into it shows in `read`.
+            yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_TYPED"), "the typed argv ran")
+            // The shell is back: what `send` types into it shows in `read`.
             yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED", keys: ["enter"] })
             const text = yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_OPENED"), "pane text")
             assert.include(text, "VBT_OPENED")
@@ -361,7 +362,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
   )
 
   it.live(
-    "a program that ends is an exited event with no close; a closed pane is one too; a pane without an agent takes pane.send_text as send",
+    "a program that ends leaves its pane at the shell, where run types the next one; a closed pane is an exited event; a pane without an agent takes pane.send_text as send",
     () =>
       withSession(({ socketPath }) =>
         withRuntime((runtime) => {
@@ -372,30 +373,28 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               Stream.runForEach((event) => Ref.update(log, (events) => [...events, event])),
               Effect.forkScoped,
             )
-            // `open` types `exec printf x`: the program ends on its own, herdr closes the pane, no close was called.
+            // `open` types `sleep 1`: the program ends on its own and the pane stays at its shell; nothing closed it.
             const ended = yield* runtime
               .open(
                 { id: "local" },
                 {
                   project: os.tmpdir(),
                   cwd: os.tmpdir(),
-                  argv: ["printf", "x"],
+                  argv: ["sleep", "1"],
                   env: {},
                   label: "events",
                 },
               )
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
-            yield* waitFor(
-              Ref.get(log),
-              (events) => events.some((event) => event.type === "exited" && event.terminal.id === ended.id),
-              "exited event",
+            yield* waitFor(runtime.process(ended), (p) => !p.running, "the shell again")
+            // `run` waits for that idle shell and types the next program into it.
+            yield* runtime.run!(ended, ["printf", "VBT_%s\\n", "AGAIN"])
+            yield* waitFor(runtime.read(ended, 20), (value) => value.includes("VBT_AGAIN"), "run typed the next one")
+            assert.isFalse(
+              (yield* Ref.get(log)).some((event) => event.type === "exited" && event.terminal.id === ended.id),
+              "a program that ends is not the terminal's exit",
             )
-            // The pane went with its program: `process` names no such terminal any more.
-            yield* waitFor(
-              runtime.process(ended).pipe(Effect.flip, Effect.option),
-              (found) => Option.isSome(found) && found.value.code === "not_found",
-              "pane gone",
-            )
+            yield* runtime.close(ended)
             // A shell pane, driven by `send` (no agent in it, so the runtime types into the pane), closed by `close`.
             const opened = yield* runtime
               .open(

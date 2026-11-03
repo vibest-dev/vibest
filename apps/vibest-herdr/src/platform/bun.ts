@@ -96,6 +96,13 @@ export const sqlite = (filename: string) =>
     }),
   )
 
+/** Read-only: an existing database at `filename` is this vibest's schema (a missing one is fine). Writes nothing. */
+export const checkDatabase = (filename: string) =>
+  Effect.gen(function* () {
+    if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
+    yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
+  }).pipe(Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))))
+
 export const runMain = BunRuntime.runMain
 
 let mapped = false
@@ -258,6 +265,7 @@ export const daemon: Omit<Host, "runtime"> = {
   processes,
   keychain,
   lock,
+  checkDatabase,
 }
 
 /** argv that runs this vibest again: the binary itself when compiled (`bun build --compile`), else `bun <script>`. */

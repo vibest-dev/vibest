@@ -94,6 +94,12 @@ export interface Runtime {
   readonly state?: (terminal: Terminal) => Effect.Effect<AgentState, RuntimeError>
   /** The harness conversation id the runtime's own agent record names, when it has one. [the harness's reports only] */
   readonly session?: (terminal: Terminal) => Effect.Effect<string | null, RuntimeError>
+  /**
+   * Run `argv` in an existing terminal once it is back at an idle shell (its program ended): the counterpart of `open` for
+   * a terminal that already exists. Fails when the terminal is gone or its shell does not come back. [no restart in
+   * place: `vibest update` and a usage-limit move leave such a terminal's agent for the user to restart]
+   */
+  readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
   /** Pushed changes, every machine. [poll `process`] */
   readonly events?: Stream.Stream<RuntimeEvent>
   /** One-off command on a machine. [run it in a hidden terminal: `open`, wait for exit, `read`] */

@@ -87,7 +87,7 @@ export const PingResult = Schema.Struct({
   ...DaemonIdentity.fields,
   /**
    * Additive features this vibestd has, by name (they do not bump PROTOCOL). A client uses one only when its flag is
-   * true; absent means none. `http`: the HTTP API on vibest-http.sock.
+   * true; absent means none. `http`: the HTTP API on vibest-http.sock. `handoff`: Daemon.Handoff (vibest update).
    */
   capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
@@ -439,6 +439,8 @@ export class VibestRpcs extends RpcGroup.make(
           routing: Schema.optional(Routing),
           /** The caller's own PID: it execs the harness, so this is the harness's (what StopCoordinator signals). */
           pid: Schema.optional(Schema.Number),
+          /** `vibest --env`: kept on the main session, so its start after a restart runs the harness with it again. */
+          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           sessionId: Schema.String,
@@ -575,6 +577,80 @@ export class VibestRpcs extends RpcGroup.make(
       payload: { instance: Schema.String },
       success: Schema.Struct({ instance: Schema.String }),
       error: Schema.Union([Forbidden, WrongInstance, DaemonBusy, DaemonStopping]),
+    }),
+  ),
+  /**
+   * The user's command line only (`vibest update`, `handoff` capability): hand this vibestd (`instance`) over to `command`.
+   * vibestd checks that `command` can open its database, drains as Daemon.Stop does, starts `command daemon --foreground
+   * --import`, then closes its sockets and releases its lock for it. A failure before that leaves it serving.
+   */
+  scoped(
+    Rpc.make("Daemon.Handoff", {
+      payload: { instance: Schema.String, command: Schema.Array(Schema.String) },
+      success: Schema.Struct({ instance: Schema.String }),
+      error: Schema.Union([Forbidden, WrongInstance, DaemonBusy, DaemonStopping, LaunchFailed]),
+    }),
+  ),
+  /**
+   * The main agent's start after a restart (`vibest integration start <id>`, typed into its own shell at the project's
+   * root): its row, from which the command builds the harness command it execs. Ready again only once that harness says so.
+   */
+  scoped(
+    Rpc.make("Session.Start", {
+      payload: { id: Schema.String },
+      success: Schema.Struct({
+        harness: Schema.Literals(HARNESS_IDS),
+        harnessSessionId: Schema.NullOr(Schema.String),
+        provider: Schema.NullOr(Schema.String),
+        model: Schema.NullOr(Schema.String),
+        projectId: Schema.Number,
+        runtime: Schema.optional(Schema.String),
+        env: Schema.Record(Schema.String, Schema.String),
+      }),
+      error: Schema.Union([Forbidden, NoSuchSession]),
+    }),
+  ),
+  /**
+   * The harness's integration, once at its start: the harness takes input now, and `pid` is the harness's own process (a
+   * restart signals it). vibestd waits for this before it hands the harness its first turn, or a restarted one its next.
+   */
+  scoped(
+    Rpc.make("Session.Ready", {
+      payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
+      error: Schema.Union([Forbidden, NoSuchSession]),
+    }),
+  ),
+  /**
+   * The user's command line only (`vibest update`): the live agents whose integration is not this vibestd's (VERSION and
+   * PROTOCOL), main agents included; `working` when they are in a turn.
+   */
+  scoped(
+    Rpc.make("Agents.Outdated", {
+      success: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          agent: Schema.String,
+          harness: Schema.Literals(HARNESS_IDS),
+          integration: Schema.NullOr(Schema.String),
+          working: Schema.Boolean,
+          /** Why it cannot be restarted in place (null: it can). */
+          blocked: Schema.NullOr(Schema.String),
+        }),
+      ),
+      error: Forbidden,
+    }),
+  ),
+  /**
+   * The user's command line only (`vibest update`): restart these agents in place, in vibestd, once process `after` (that
+   * `vibest update`, which may run inside one of them) has exited; returns at once. Subagents first, at most 4 at a time,
+   * then main agents: SIGTERM to the harness alone, then the runtime runs it again in its terminal on the same conversation. A
+   * subagent's interrupted turn gets a continue turn; a main agent that was working gets a continue notice in its inbox.
+   * Outcomes go to vibestd.log, and a main agent's notice names them.
+   */
+  scoped(
+    Rpc.make("Agents.Restart", {
+      payload: { ids: Schema.Array(Schema.String), after: Schema.optional(Schema.Number) },
+      error: Forbidden,
     }),
   ),
 ) {}

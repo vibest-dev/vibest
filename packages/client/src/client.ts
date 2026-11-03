@@ -71,6 +71,8 @@ export type Claim =
       readonly repositoryRoot?: string
       /** The harness's own conversation id, when the caller knows it (Pi's session id). */
       readonly harnessSessionId?: string
+      /** A harness integration's own version (vibest-plugin-version); the vibest CLI sends none. */
+      readonly pluginVersion?: string
     }
 
 export const protocolHeaders = () => ({ [PROTOCOL_HEADER]: String(PROTOCOL) })
@@ -104,6 +106,7 @@ export const claimHeaders = (claim: Claim) =>
           sessionId: claim.sessionId,
           repositoryRoot: claim.repositoryRoot,
           harnessSessionId: claim.harnessSessionId,
+          pluginVersion: claim.pluginVersion,
         }),
       )
 
@@ -168,44 +171,56 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         client: { version: VERSION, command: self },
       })
 
+/**
+ * Start `command daemon --foreground` (plus `args`) detached, its output appended to ~/.vibest/vibestd.log; does not wait.
+ * `vibest daemon --import` is the new vibestd of a handoff, started by the old one.
+ */
+export const spawnDaemon = (command: ReadonlyArray<string>, args: ReadonlyArray<string> = []) =>
+  Effect.gen(function* () {
+    const layout = yield* Layout
+    const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const log = path.join(layout.home, "vibestd.log")
+    yield* Effect.gen(function* () {
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(
+          "sh",
+          [
+            "-c",
+            `mkdir -p "$1" && shift && exec "$@" >>"${log}" 2>&1`,
+            "sh",
+            layout.home,
+            ...command,
+            "daemon",
+            "--foreground",
+            ...args,
+          ],
+          {
+            detached: true,
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+          },
+        ),
+      )
+      yield* handle.unref
+    }).pipe(
+      Effect.scoped,
+      Effect.mapError((e) => new DaemonUnavailable({ socket: layout.socket, message: e.message })),
+    )
+  })
+
 /** Start `vibest daemon --foreground` detached (output appended to ~/.vibest/vibestd.log) and wait for its socket. */
 export const startDaemon = Effect.gen(function* () {
   const layout = yield* Layout
   const path = yield* Path.Path
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const self = yield* VibestCommand
   const fs = yield* FileSystem.FileSystem
   const log = path.join(layout.home, "vibestd.log")
   const logAt = yield* fs.stat(log).pipe(
     Effect.map((info) => Number(info.size)),
     Effect.orElseSucceed(() => 0),
   )
-  yield* Effect.gen(function* () {
-    const handle = yield* spawner.spawn(
-      ChildProcess.make(
-        "sh",
-        [
-          "-c",
-          `mkdir -p "$1" && shift && exec "$@" >>"${log}" 2>&1`,
-          "sh",
-          layout.home,
-          ...self,
-          "daemon",
-          "--foreground",
-        ],
-        {
-          detached: true,
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-        },
-      ),
-    )
-    yield* handle.unref
-  }).pipe(
-    Effect.scoped,
-    Effect.mapError((e) => new DaemonUnavailable({ socket: layout.socket, message: e.message })),
-  )
+  yield* spawnDaemon(yield* VibestCommand)
   if (yield* awaitDaemon(layout.socket)) return
   const bytes = yield* fs.readFile(log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
   const text = Array.from(bytes.subarray(logAt), (b) => String.fromCharCode(b)).join("")

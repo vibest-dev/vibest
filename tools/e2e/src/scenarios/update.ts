@@ -1,5 +1,5 @@
 // `vibest update` updates vibest the way it was installed: install.sh runs again from the release into the same
-// directories, npm reinstalls @vibest/cli, and a build has nothing to update. A local server stands in for the GitHub release
+// directories, npm reinstalls @vibest/cli, and a build has nothing to install (the steps after it still run). A local server stands in for the GitHub release
 // and the npm registry, offering a newer version; the installers it hands out only record how they were run.
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -10,7 +10,8 @@ import { binary, expect, method } from "../world.ts"
 const checks: ReadonlyArray<Check> = [
   {
     id: "U1",
-    title: "update installs the newer version the way vibest was installed (install.sh or npm); a build is refused",
+    title:
+      "update installs the newer version the way vibest was installed (install.sh or npm); a build installs nothing",
     run: async (w) => {
       // A running vibestd would be offered for replacement, which needs a terminal: this check is about the install.
       await w.stopDaemon()
@@ -43,8 +44,8 @@ const checks: ReadonlyArray<Check> = [
         const ran = await fs.readFile(log, "utf8").catch(() => "")
         if (method === "build") {
           expect(
-            r.code === 1 && /was not installed by npm or install\.sh/.test(r.stderr),
-            `exit ${r.code}: ${r.stderr}`,
+            r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout),
+            `exit ${r.code}: ${r.stdout}${r.stderr}`,
           )
           expect(ran === "", `an installer ran: ${ran}`)
           return

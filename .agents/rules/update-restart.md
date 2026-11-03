@@ -5,5 +5,18 @@
 3. Then it asks once to restart every agent still on the old integration. Yes restarts them in place (see [runtime-boundary.md](runtime-boundary.md) 4) with the same vibest session and harness conversation; an interrupted turn gets `continue`.
 4. There is no separate restart command. Mismatch messages name `vibest update` ([protocol-versioning.md](protocol-versioning.md) 3).
 5. An installed version directory is not deleted while a running session uses it.
+6. A restart in place: mark the session restarting in its row, SIGTERM to the harness pid only (never its process group; the integration reports the pid with its ready report), then the runtime's optional `run` starts the harness again in the same terminal once its shell is idle. A subagent gets its harness argv on its conversation; a main agent gets `vibest integration start <id>`, which builds the harness command from its row. The mark is cleared when the integration reports ready. The harness is the terminal's foreground program, as for a first start: no wrapper loop.
+7. Core checks only that `run` exists. An agent whose runtime has no `run`, whose harness never reported its pid, or whose harness has no integration that reports its pid and readiness (Cursor) is not restarted; the update names it and says to restart it by hand. A harness with no integration is never listed as outdated.
+8. A usage-limit move takes the same path: only the limited harness ends and the next harness runs in the same terminal.
+9. A main agent moved from another terminal (`vibest` there, answered y) ends the same way: SIGTERM to the pid it last reported, its terminal and shell kept, then it starts in the new terminal. While a restart is between its harnesses, that start is refused and nothing is signalled.
 
-Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project scratch).
+Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project scratch). 1 to 9 are built on `feat/update-restart-agents-v3` (runtime-herdr implements `run`; core in `packages/core/src/restart.ts`).
+
+Known limits:
+
+- A pane with no shell, a remote herdr, another vibest earlier on PATH, and typing in the terminal while `run` types.
+- A usage-limit move whose runtime has no `run` or whose harness reported no pid still closes the pane and opens another.
+- `run`'s idle check counts `sh` as a shell, so in a main agent's pane typing can start between the harness exit and `exec $SHELL` (the tty keeps the text).
+- On the first update from a version before this branch, subagents on the old integration have reported no pid and are listed as "restart it yourself".
+- The handoff's database backup is kept per version and never pruned.
+- A subagent result the interrupted turn wrote between `turnPromptedAt` and the restart is overwritten by the continue turn.

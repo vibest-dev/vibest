@@ -1,10 +1,11 @@
+import { spawnDaemon } from "@vibest/client/client"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessOptions, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
-import { Layout } from "@vibest/core/paths"
+import { Layout, shellQuote } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
@@ -23,14 +24,18 @@ import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/c
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
 import {
+  AGENT_HEADER,
   CALLER_HEADER,
+  CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
+  PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
   REPOSITORY_HEADER,
+  RUNTIME_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import {
@@ -50,13 +55,14 @@ import {
   type CallerShape,
   type SessionInfo,
 } from "@vibest/protocol/rpc"
-import { HARNESS_IDS, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
+import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
 
@@ -150,7 +156,8 @@ const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> 
 /**
  * Who may call each method (SPEC §7). `open`: protocol only, no caller. `session`: a non-coordinator session only.
  * `agent`: a coordinator's or the command line's. `coordinator`: a coordinator only. `owner`: a coordinator of the
- * session's project, or the command line. The table must list every method.
+ * session's project, or the command line. `self`: a subagent's own terminal for its own id, or the command line at the
+ * project's root for its main agent (its start after a restart). The table must list every method.
  */
 const ACCESS = {
   Ping: "open",
@@ -182,9 +189,14 @@ const ACCESS = {
   Peek: "owner",
   Remove: "owner",
   "Daemon.Stop": "cli",
+  "Daemon.Handoff": "cli",
+  "Session.Start": "self",
+  "Session.Ready": "self",
+  "Agents.Outdated": "cli",
+  "Agents.Restart": "cli",
 } as const satisfies Record<
   RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
-  "open" | "session" | "agent" | "coordinator" | "owner" | "cli"
+  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
 >
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
@@ -193,7 +205,7 @@ type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyo
 const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
 /** Ping's `capabilities`: the additive features this vibestd has (rpc.ts PingResult). */
-export const CAPABILITIES = { http: true } as const
+export const CAPABILITIES = { http: true, handoff: true } as const
 
 /** This vibestd's identity for Ping, set by Daemon.run; empty on a server a test runs without one. */
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
@@ -291,21 +303,47 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
 
-export const ProtocolGateLive = Layer.succeed(
-  ProtocolGate,
-  ProtocolGate.of((effect, { headers, rpc }) => {
-    const protocol = header(headers, PROTOCOL_HEADER)
-    if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
-      const sent = protocol._tag === "None" ? null : protocol.value
-      return Effect.fail(
-        new ProtocolRejected({
-          method: rpc._tag,
-          protocol: sent,
-          mismatch: protocolMismatch(sent === null ? undefined : Number(sent), PROTOCOL, VERSION),
+/**
+ * The integration version and protocol a session's request carries (`vibest-plugin-version`, `vibest-protocol`), recorded
+ * on its row whether or not the protocol matches: `vibest update` restarts the agents whose integration is not its own.
+ * Requests without a plugin version (the vibest CLI an agent runs) record nothing.
+ */
+export const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const sessionId = read(SESSION_HEADER)
+    const version = read(PLUGIN_VERSION_HEADER)
+    if (!sessionId || !version) return
+    const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
+    if (yield* db.noteIntegration(sessionId, { version, protocol: Number.isFinite(protocol) ? protocol : 0 }))
+      yield* Effect.logInfo(`session ${sessionId} runs integration ${version} (protocol ${protocol})`).pipe(
+        Effect.annotateLogs({
+          agent: read(AGENT_HEADER) ?? "",
+          harness: read(HARNESS_HEADER) ?? "",
+          cwd: decodeURIComponent(read(CWD_HEADER) ?? ""),
+          runtime: read(RUNTIME_HEADER) ?? "",
         }),
       )
-    }
-    return effect
+  })
+
+export const ProtocolGateLive = Layer.effect(
+  ProtocolGate,
+  Effect.gen(function* () {
+    const db = yield* Db
+    return ProtocolGate.of((effect, { headers, rpc }) =>
+      Effect.gen(function* () {
+        yield* noteIntegration(db, (name) => Option.getOrUndefined(header(headers, name)))
+        const protocol = header(headers, PROTOCOL_HEADER)
+        if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
+          const sent = protocol._tag === "None" ? null : protocol.value
+          return yield* new ProtocolRejected({
+            method: rpc._tag,
+            protocol: sent,
+            mismatch: protocolMismatch(sent === null ? undefined : Number(sent), PROTOCOL, VERSION),
+          })
+        }
+        return yield* effect
+      }),
+    )
   }),
 )
 
@@ -334,6 +372,7 @@ export const handlers = VibestRpcs.toLayer(
     const identity = yield* Identity
     const shutdown = yield* Shutdown
     const drain = yield* Drain
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
     /** A coordinator's or the command line's request; a session's is refused. */
     const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -411,10 +450,13 @@ export const handlers = VibestRpcs.toLayer(
         const coord = yield* db.coordinatorOf(yield* db.projectId(key))
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
         if (coord.address.id === terminal) return null
-        const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-        if (Option.isNone(h)) return null
-        const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
-        if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        // A restart (`vibest update`) is between its harnesses there: running, though the runtime sees none right now.
+        if (coord.restarting === undefined) {
+          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+          if (Option.isNone(h)) return null
+          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+          if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        }
         return {
           harness: coord.harnessId,
           place: placeOf(coord.runtime, coord.address),
@@ -424,6 +466,71 @@ export const handlers = VibestRpcs.toLayer(
       })
     /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
+
+    /**
+     * Stop admitting changes, let the admitted ones and the daemon's own operations finish, then run `before` (a handoff
+     * starts the new vibestd here) and accept once nothing is running and no claimed delivery is unsettled. Agents keep
+     * running; pending Messages stay in sqlite for the next vibestd. A refused or cut-off stop, or a failing `before`,
+     * opens again; an accepted one never does.
+     */
+    const stopOnce = <E, R>(instance: string, method: string, before: Effect.Effect<void, E, R>) =>
+      Effect.gen(function* () {
+        if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
+        let last: Array<{ id: string; reason: string }> = []
+        const blockers = Effect.gen(function* () {
+          last = (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" }))
+          if (last.length > 0) return last
+          last = [{ id: "inbox", reason: "checking unsettled delivery" }]
+          last = (yield* db.sendingInbox).map((row) => ({
+            id: `inbox ${row.id}`,
+            reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
+          }))
+          return last
+        })
+        return yield* Effect.gen(function* () {
+          const idle = yield* blockers.pipe(
+            Effect.repeat({ until: (pending) => pending.length === 0, schedule: Schedule.spaced("20 millis") }),
+            Effect.timeoutOption(DRAIN_TIMEOUT),
+          )
+          if (Option.isNone(idle)) return yield* new DaemonBusy({ blockers: last })
+          yield* before
+          yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              if (!(yield* drain.accept))
+                return yield* new DaemonBusy({
+                  blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })),
+                })
+              yield* Deferred.succeed(shutdown, undefined)
+            }),
+          )
+          return { instance }
+        }).pipe(Effect.ensuring(drain.reopen))
+      })
+
+    /** The user's command line only. */
+    const cliOnly = (method: MethodOf<"cli">) =>
+      Effect.flatMap(Caller, (c) =>
+        c._tag === "Cli"
+          ? Effect.void
+          : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
+      )
+
+    /**
+     * Session `id` itself (`self`): its own harness's integration, or the user's command line at the root of the project
+     * whose main agent `id` is (its start after a restart). The main agent's row, or undefined for its own integration.
+     */
+    const self = (method: MethodOf<"self">, id: string) =>
+      Effect.gen(function* () {
+        const c = yield* Caller
+        if ((c._tag === "Session" || c._tag === "Coordinator") && c.sessionId === id) return undefined
+        if (c._tag === "Cli") {
+          const located = yield* atProject(c.repositoryRoot).pipe(Effect.option)
+          const projectId = Option.isNone(located) ? undefined : yield* db.projectByKey(located.value.key)
+          const main = projectId === undefined ? undefined : yield* db.coordinatorOf(projectId)
+          if (main?.id === id) return main
+        }
+        return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
+      })
 
     return VibestRpcs.of({
       Ping: () =>
@@ -706,7 +813,18 @@ export const handlers = VibestRpcs.toLayer(
           return { ...decision, harness: decision.harness, runtime: rt.kind }
         }),
 
-      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
+      "Project.CoordinatorSession": ({
+        harness,
+        fresh,
+        terminal,
+        machine,
+        runtime,
+        provider,
+        model,
+        routing,
+        pid,
+        env,
+      }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.CoordinatorSession")
           const projectDirectory =
@@ -740,6 +858,7 @@ export const handlers = VibestRpcs.toLayer(
                   model,
                   routing,
                   pid,
+                  env: env ?? {},
                   ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
                 },
               )
@@ -761,6 +880,12 @@ export const handlers = VibestRpcs.toLayer(
               const place = coord?.address
               if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
                 return { result: "moved" as const }
+              // ponytail: refused, not waited for; the restart's next harness starts there in seconds.
+              if (coord.restarting !== undefined)
+                return {
+                  result: "unsupported" as const,
+                  reason: "vibest update is restarting it there; run vibest again once it is ready",
+                }
               const h = yield* runtimes
                 .route(runtime)
                 .pipe(
@@ -775,6 +900,37 @@ export const handlers = VibestRpcs.toLayer(
             }),
           )
         }),
+
+      "Session.Start": ({ id }) =>
+        Effect.gen(function* () {
+          const main = yield* self("Session.Start", id)
+          if (main === undefined)
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} is not a main agent; only a main agent starts this way`,
+            })
+          yield* db.patchLive(id, { ready: null })
+          return {
+            harness: main.harnessId,
+            harnessSessionId: main.harnessSessionId,
+            provider: main.provider,
+            model: main.model,
+            projectId: main.projectId,
+            ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
+            env: main.env ?? {},
+          }
+        }),
+
+      "Session.Ready": ({ id, pid }) =>
+        Effect.gen(function* () {
+          yield* self("Session.Ready", id)
+          yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
+        }),
+
+      "Agents.Outdated": () => cliOnly("Agents.Outdated").pipe(Effect.andThen(sessions.outdated)),
+
+      "Agents.Restart": ({ ids, after }) =>
+        cliOnly("Agents.Restart").pipe(Effect.andThen(sessions.restartLater(ids, after))),
 
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
         db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
@@ -798,35 +954,44 @@ export const handlers = VibestRpcs.toLayer(
             })
           if (instance !== identity.instance)
             return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
-          if (!(yield* drain.begin)) return yield* new DaemonStopping({ method: "Daemon.Stop" })
-          let last: Array<{ id: string; reason: string }> = []
-          const blockers = Effect.gen(function* () {
-            last = (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" }))
-            if (last.length > 0) return last
-            last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-            last = (yield* db.sendingInbox).map((row) => ({
-              id: `inbox ${row.id}`,
-              reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
-            }))
-            return last
-          })
-          return yield* Effect.gen(function* () {
-            const idle = yield* blockers.pipe(
-              Effect.repeat({ until: (pending) => pending.length === 0, schedule: Schedule.spaced("20 millis") }),
-              Effect.timeoutOption(DRAIN_TIMEOUT),
+          return yield* stopOnce(instance, "Daemon.Stop", Effect.void)
+        }),
+
+      // A handoff (vibest update): Stop's drain, with the new vibestd started in between, waiting for this one's lock.
+      "Daemon.Handoff": ({ instance, command }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Daemon.Handoff")
+          if (instance !== identity.instance)
+            return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
+          const quoted = command.map(shellQuote).join(" ")
+          // The new vibest must be able to open this database before anything stops; it only reads it.
+          const checked = yield* spawner
+            .spawn(ChildProcess.make(command[0]!, [...command.slice(1), "daemon", "import-check"], { stdin: "ignore" }))
+            .pipe(
+              Effect.flatMap((handle) =>
+                Effect.all(
+                  [Stream.mkString(Stream.decodeText(handle.stderr)), handle.exitCode, Stream.runDrain(handle.stdout)],
+                  { concurrency: "unbounded" },
+                ),
+              ),
+              Effect.map(([output, code]) => (code === 0 ? undefined : output.trim() || `exit ${code}`)),
+              Effect.scoped,
+              Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.succeed("no answer in 15s") }),
+              Effect.catch((e) => Effect.succeed(e.message)),
             )
-            if (Option.isNone(idle)) return yield* new DaemonBusy({ blockers: last })
-            yield* Effect.uninterruptible(
-              Effect.gen(function* () {
-                if (!(yield* drain.accept))
-                  return yield* new DaemonBusy({
-                    blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })),
-                  })
-                yield* Deferred.succeed(shutdown, undefined)
-              }),
-            )
-            return { instance }
-          }).pipe(Effect.ensuring(drain.reopen))
+          if (checked !== undefined)
+            return yield* new LaunchFailed({
+              message: `${quoted} cannot take over this vibestd (${checked}); it keeps running`,
+            })
+          return yield* stopOnce(
+            instance,
+            "Daemon.Handoff",
+            spawnDaemon(command, ["--import"]).pipe(
+              Effect.mapError(
+                (e) => new LaunchFailed({ message: `${quoted} did not start: ${e.message}; vibestd keeps running` }),
+              ),
+            ),
+          )
         }),
     })
   }),

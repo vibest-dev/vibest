@@ -54,6 +54,10 @@ export const sessionPlacement = (deps: {
         readonly lastActive?: number
       },
     ) => Effect.Effect<void>
+    readonly patchLive: (
+      id: string,
+      patch: { readonly pid?: number | null; readonly ready?: number | null },
+    ) => Effect.Effect<void>
   }
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
@@ -169,6 +173,8 @@ export const sessionPlacement = (deps: {
   ) {
     // Beside the pane a caller names (--peer), else beside the project's main agent when it runs in this runtime.
     const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
+    // A harness that ran before (a resume, a move's next terminal) left its pid and ready report: only the new one's count.
+    yield* db.patchLive(session.id, { pid: null, ready: null })
     const terminal = yield* h.open(machine, {
       project: input.project,
       cwd: input.cwd,

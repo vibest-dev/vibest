@@ -77,7 +77,7 @@ describe("vibest.sock", () => {
       const ping = yield* raw.Ping()
       assert.strictEqual(ping.protocol, PROTOCOL)
       assert.strictEqual(ping.version, VERSION)
-      assert.deepStrictEqual(ping.capabilities, { http: true })
+      assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true })
       const rejected = yield* Effect.exit(raw.List({}))
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
       // Says what happened and what to run: a caller without the header predates it, so it is told to restart.
@@ -216,6 +216,15 @@ describe("vibest.sock", () => {
       for (const call of calls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected")
       yield* bare.ResultReady({ sessionId: id }, { headers: protocolHeaders() })
       assert.strictEqual(failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }))), "ProtocolRejected")
+      // An integration's call names its version, which is recorded even when its protocol is refused.
+      yield* bare.ResultReady({ sessionId: id }, { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) })
+      assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.2.3", protocol: PROTOCOL })
+      const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "1.0.0" }), "vibest-protocol": "1" }
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(bare.ResultReady({ sessionId: id }, { headers: old }))),
+        "ProtocolRejected",
+      )
+      assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.0.0", protocol: 1 })
 
       assert.strictEqual(
         failureTag(
@@ -379,6 +388,12 @@ describe("vibest.sock", () => {
         ["Remove", c.Remove({ id })],
         ["Report", c.Report({ message: "x" })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
+        ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
+        // Another session's start or report: a session speaks only for itself.
+        ["Session.Start", c["Session.Start"]({ id: "other000" })],
+        ["Session.Ready", c["Session.Ready"]({ id: "other000" })],
+        ["Agents.Outdated", c["Agents.Outdated"]()],
+        ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
       ]
       const bare = yield* client
       for (const [method, call] of protectedCalls(bare))
@@ -386,6 +401,12 @@ describe("vibest.sock", () => {
       const w = yield* asSession(yield* client, id)
       for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
+
+      // A main agent's integration reports its own harness ready; a subagent's its own.
+      yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
+      yield* w["Session.Ready"]({ id, pid: 4242 })
+      assert.isDefined(yield* db.readyAt(id))
+      assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
 
       // Another project's coordinator can read a session, not manage it, and does not list it.
       const b = yield* asCoordinator(yield* makeRepository, "p2")

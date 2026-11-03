@@ -45,7 +45,7 @@ export const limitMoveBox = (): {
 } => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
 
 export const sessionMove = (deps: {
-  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource">
+  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "patchLive">
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
@@ -107,6 +107,8 @@ export const sessionMove = (deps: {
     readonly readFileString: (path: string) => Effect.Effect<string, unknown, MovePlatform>
   }
   readonly uuid: Effect.Effect<string>
+  /** SIGTERM to the harness pid alone (never its group: that is the terminal's shell). */
+  readonly terminate: (pid: number) => Effect.Effect<"sent" | "gone" | "denied">
   readonly platform: Context.Context<MovePlatform>
 }) => {
   const { db, plugins, subscriptions, harness, harnesses } = deps
@@ -133,6 +135,20 @@ export const sessionMove = (deps: {
     let owns = ownsTerminal
     // Set once this move closed the session's own terminal: a later give-up marks the row exited, for nothing is left.
     let gone = false
+    // In place: the runtime runs the next harness in the session's own terminal once only the harness there ended (no
+    // terminal closes). `running` is the harness in that terminal: the limited one, one this move started, or none.
+    const inPlace = current !== undefined && h.run !== undefined && session.metadata.pid !== undefined
+    let running: "old" | "mine" | "none" = "old"
+    const endRunning = Effect.gen(function* () {
+      if (running === "none") return "sent" as const
+      const pid = ((yield* db.getSession(row.id)) ?? row).metadata.pid
+      // Its pid and ready report go with the signal: ready again only once the next harness reports it.
+      yield* db.patchLive(row.id, { pid: null, ready: null })
+      const sent = pid === undefined ? "gone" : yield* deps.terminate(pid)
+      if (sent === "denied") yield* db.patchLive(row.id, { pid: pid ?? null })
+      else running = "none"
+      return sent
+    })
     // The limit that started this move is a real try: kept on the session row, it survives a vibestd restart.
     // A login the row never named is stored without its key; the plugin's Attempt carries it as undefined.
     const at = yield* Clock.currentTimeMillis
@@ -170,6 +186,16 @@ export const sessionMove = (deps: {
     const giveUp = (why: string) =>
       Effect.gen(function* () {
         const fresh = (yield* db.getSession(row.id)) ?? row
+        // In place the terminal stays: a harness this move started ends; the limited one, never ended, keeps running.
+        if (inPlace) {
+          if (running === "mine") yield* endRunning
+          yield* deps.finish(fresh, "failed", "", why)
+          if (running === "none") {
+            const t = yield* Clock.currentTimeMillis
+            yield* db.updateSession(fresh.id, { status: "unknown", exitedAt: t, lastActive: t })
+          }
+          return false
+        }
         if (!(owns && terminal)) {
           yield* deps.finish(fresh, "failed", "", why)
           return false
@@ -266,8 +292,20 @@ export const sessionMove = (deps: {
         skip(next.harness, "unavailable")
         continue
       }
-      // Close the old agent before the next starts: a failed close keeps the old row, and no second agent ever runs.
-      if (terminal !== undefined) {
+      // End the old agent before the next starts: a refused signal or a failed close keeps the old row, and no second
+      // agent ever runs. In place only its harness ends; otherwise its terminal closes.
+      if (inPlace) {
+        if ((yield* endRunning) === "denied") {
+          yield* deps.fs.remove(deps.resultFile(row.id), { force: true })
+          yield* deps.finish(
+            row,
+            "failed",
+            "",
+            `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`,
+          )
+          return false
+        }
+      } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {
           yield* deps.fs.remove(deps.resultFile(row.id), { force: true })
@@ -292,9 +330,10 @@ export const sessionMove = (deps: {
         model: next.model ?? null,
         harnessSessionId,
       }
-      const placed = yield* deps
-        .open(h, machine, nextRow, { project: root, cwd, key, argv: yield* deps.launchArgv(nextRow, false, key) })
-        .pipe(Effect.exit)
+      const argv = yield* deps.launchArgv(nextRow, false, key)
+      const placed = inPlace
+        ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
+        : yield* deps.open(h, machine, nextRow, { project: root, cwd, key, argv }).pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         // The one error type has a `code`, and that is all core may decide on: `open`'s `failed` is the start dying
         // inside the terminal (its own limit, a crash) — skip to the next harness. Any other code is a placement
@@ -308,7 +347,7 @@ export const sessionMove = (deps: {
             "",
             `${row.id} stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
           )
-          if (gone) {
+          if (gone || inPlace) {
             const t = yield* Clock.currentTimeMillis
             yield* db.updateSession(row.id, { status: "unknown", exitedAt: t, lastActive: t })
           }
@@ -318,7 +357,8 @@ export const sessionMove = (deps: {
         continue
       }
       terminal = placed.value
-      owns = true
+      if (inPlace) running = "mine"
+      else owns = true
       yield* db.updateSession(row.id, {
         harnessId: next.harness,
         provider: next.provider ?? null,

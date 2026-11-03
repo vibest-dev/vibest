@@ -85,6 +85,11 @@ function nativeHost($: EngineInterface) {
     every: (ms: number, fn: () => void) => $.clock.every(ms, fn),
     after: (ms: number, fn: () => void) => $.clock.after(ms, fn),
     status: (text: string | undefined) => $.ui.status(text),
+    // A command this process runs has it as its parent: Claude Code's own pid, which a restart signals.
+    pid: async () => {
+      const pid = Number((await $.process.run(["sh", "-c", 'echo "$PPID"'])).stdout.trim())
+      return Number.isInteger(pid) && pid > 1 ? pid : undefined
+    },
   }
 }
 
@@ -256,6 +261,11 @@ export function register(on: On, _options?: unknown) {
 
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
+    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready).
+    if (await identity(host).catch(() => undefined)) {
+      const pid = await host.pid().catch(() => undefined)
+      void report(host, "/session/ready", pid === undefined ? {} : { pid })
+    }
     if (timer === undefined && (await identity(host))?.agent === "coordinator") {
       timer = host.every(POLL_MS, () => void tick(host))
       void tick(host)

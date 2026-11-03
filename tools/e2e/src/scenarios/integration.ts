@@ -113,7 +113,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I1",
     title:
-      "the plugins ship with vibest: one directory per harness; `integration` has only the hooks' guard, prompt and stop, nothing to install",
+      "the plugins ship with vibest: one directory per harness; `integration` has only the hooks' guard, prompt and stop and a main agent's restart start, nothing to install",
     run: async (w) => {
       realBefore ??= stamp()
       await realBefore
@@ -134,7 +134,7 @@ const checks: ReadonlyArray<Check> = [
       const help = await w.ok(["integration", "--help"])
       const subcommands = [...help.matchAll(/^ {2}(\w+) {2,}/gm)].map((m) => m[1])
       expect(
-        JSON.stringify(subcommands) === JSON.stringify(["guard", "prompt", "stop"]),
+        JSON.stringify(subcommands) === JSON.stringify(["guard", "prompt", "stop", "start"]),
         `subcommands: ${subcommands.join(", ")}`,
       )
     },

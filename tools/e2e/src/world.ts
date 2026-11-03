@@ -325,6 +325,51 @@ export const agentModel = (): ReadonlyArray<string> => {
   ]
 }
 
+/** One call to a herdr session's socket API: newline-delimited JSON, one response per connection (effect-herdr-sdk). */
+export const herdr = (socket: string, method: string, params: object) =>
+  new Promise<Record<string, unknown>>((resolve, reject) => {
+    const id = crypto.randomUUID()
+    let buffer = ""
+    Bun.connect({
+      unix: socket,
+      socket: {
+        open: (s) => void s.write(`${JSON.stringify({ id, method, params })}\n`),
+        data: (s, chunk) => {
+          buffer += Buffer.from(chunk).toString("utf8")
+          for (const line of buffer.split("\n").slice(0, -1)) {
+            const m = JSON.parse(line) as { id?: string; result?: Record<string, unknown>; error?: unknown }
+            if (m.id !== id) continue
+            s.end()
+            if (m.error) reject(new Error(`herdr ${method}: ${JSON.stringify(m.error)}`))
+            else resolve(m.result ?? {})
+          }
+          buffer = buffer.slice(buffer.lastIndexOf("\n") + 1)
+        },
+        error: (_s, e) => reject(e),
+      },
+    }).catch(reject)
+  })
+
+/** Every entry of the Claude conversations kept for `cwd` (the user's ~/.claude: CLAUDE_CONFIG_DIR is unset). */
+export const transcript = async (w: World, cwd: string) => {
+  const dir = path.join(w.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
+  const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
+  const entries: Array<{ type?: string; raw: string; text: string }> = []
+  for (const f of files)
+    for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
+      const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
+      const content = e.message?.content
+      const text =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content.map((c: { text?: string }) => c.text ?? "").join("")
+            : ""
+      entries.push({ type: e.type, raw, text })
+    }
+  return entries
+}
+
 export const onPath = (bin: string) => Bun.which(bin) !== null
 
 /**

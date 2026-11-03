@@ -13,6 +13,7 @@ import { claimHeaders, type ClientServices, connect, SocketConnector, withVibest
 import * as Guard from "@vibest/core/guard"
 import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { appendReportLine, writeTerminalStatus } from "@vibest/core/results"
+import { VERSION } from "@vibest/protocol/rpc"
 import {
   Cause,
   Clock,
@@ -58,9 +59,14 @@ const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
   return { text, error: message?.stopReason === "error" ? message.errorMessage || "error" : "" }
 }
 
-/** This Pi session's headers: its vibest session, its environment, and Pi's own session id. */
+/** This Pi session's headers: its vibest session, its environment, Pi's own session id, and this extension's version (`vibest update` restarts old ones). */
 const piHeaders = (sessionId: string, ctx: ExtensionContext) =>
-  claimHeaders({ _tag: "session", sessionId, harnessSessionId: ctx.sessionManager.getSessionId() })
+  claimHeaders({
+    _tag: "session",
+    sessionId,
+    harnessSessionId: ctx.sessionManager.getSessionId(),
+    pluginVersion: VERSION,
+  })
 
 /** What an agent's layer needs; they share one type, so picking one is a plain conditional. */
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
@@ -194,7 +200,12 @@ const coordinator: Role = Layer.effectDiscard(
     )
     const subscribe = (ctx: ExtensionContext) =>
       withVibest(
-        { _tag: "session", sessionId: sessionId.value, harnessSessionId: ctx.sessionManager.getSessionId() },
+        {
+          _tag: "session",
+          sessionId: sessionId.value,
+          harnessSessionId: ctx.sessionManager.getSessionId(),
+          pluginVersion: VERSION,
+        },
         (client) =>
           client["Inbox.Subscribe"](undefined).pipe(
             Stream.runForEach((content) =>
@@ -234,6 +245,26 @@ const coordinator: Role = Layer.effectDiscard(
 )
 
 /**
+ * Once the TUI session starts, tell vibestd this harness takes input and its pid (Session.Ready): it waits for that before
+ * a turn, and a restart signals that pid.
+ */
+const ready = (sessionId: string): Role =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const pi = yield* Pi
+      yield* pi.handle("session_start", (_e, ctx) =>
+        ctx.mode !== "tui"
+          ? Effect.void
+          : withVibest(
+              { _tag: "session", sessionId, pluginVersion: VERSION },
+              (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
+              { start: false },
+            ).pipe(Effect.timeout("2 seconds"), Effect.ignore),
+      )
+    }),
+  )
+
+/**
  * The agent from the environment: VIBEST_AGENT alone decides the tool rules, as in the hook script; the coordinator also
  * takes its inbox rows, another agent with VIBEST_SESSION_ID writes its turn's result. No VIBEST_AGENT: nothing at all.
  */
@@ -241,9 +272,10 @@ export const extension = Layer.unwrap(
   Effect.gen(function* () {
     const agent = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
     if (!agent) return Layer.empty
-    const guard: Role = Layer.effectDiscard(guarded(Guard.rulesOf(agent)))
-    if (agent === Guard.COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
+    const guarding: Role = Layer.effectDiscard(guarded(Guard.rulesOf(agent)))
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+    const guard = sessionId ? Layer.merge(guarding, ready(sessionId)) : guarding
+    if (agent === Guard.COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
     return sessionId ? session(sessionId).pipe(Layer.provideMerge(guard)) : guard
   }),
 )

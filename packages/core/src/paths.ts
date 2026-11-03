@@ -131,8 +131,11 @@ export const interactive = Effect.gen(function* () {
   return (yield* stdio.stdinIsTerminal) && (yield* stdio.stdoutIsTerminal)
 })
 
-/** Print `question` (no newline) and read a line: y / yes is a yes; anything else, EOF or no answer within `timeout` is a no. */
-export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes") =>
+/**
+ * Print `question` (no newline) and read a line: y / yes is a yes; anything else, EOF or no answer within `timeout` is a no.
+ * `defaultYes` (a `[Y/n]` question): an empty line is a yes too.
+ */
+export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes", defaultYes = false) =>
   Effect.gen(function* () {
     const stdio = yield* Stdio.Stdio
     yield* Stream.run(Stream.make(question), stdio.stdout()).pipe(Effect.ignore)
@@ -142,5 +145,7 @@ export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes"
       Effect.timeoutOption(timeout),
       Effect.orElseSucceed(() => Option.none()),
     )
-    return /^\s*y(es)?\s*$/i.test(Option.getOrElse(Option.flatten(answer), () => ""))
+    const line = Option.flatten(answer)
+    if (defaultYes && Option.isSome(line) && line.value.trim() === "") return true
+    return /^\s*y(es)?\s*$/i.test(Option.getOrElse(line, () => ""))
   })

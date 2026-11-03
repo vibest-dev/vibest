@@ -111,6 +111,8 @@ const TICK = Schedule.spaced("500 millis")
 /** How long `open` waits for a fresh pane's shell to draw (generous: a loaded machine draws slowly), and how often `agent_pane_busy` is retried. */
 const OUTPUT_TIMEOUT = Duration.seconds(30)
 const BUSY_RETRIES = 40
+/** Process names of an interactive shell waiting at its prompt. */
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
 
 /** herdr drops a token or title longer than this. */
 const TOKEN = 80
@@ -316,6 +318,46 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return undefined
       })
 
+    /** herdr's agent.start: it types the harness into the pane's shell once that shell is idle, and names it `name`. */
+    const startAgent = (h: HerdrShape, name: string, kind: string, paneId: string, args: ReadonlyArray<string>) =>
+      h
+        .call("agent.start", {
+          name,
+          kind,
+          pane_id: paneId,
+          args: [...args],
+          timeout_ms: Duration.toMillis(Duration.seconds(120)),
+        })
+        .pipe(
+          // After its harness exits, herdr keeps the name on that same pane until it sees the agent gone (`run`).
+          Effect.retry({
+            while: (error) =>
+              error._tag === "HerdrError" &&
+              error.code === "agent_name_taken" &&
+              error.message.includes(`pane_id=${paneId} `),
+            times: BUSY_RETRIES,
+            schedule: TICK,
+          }),
+          failWith,
+        )
+        .pipe(
+          Effect.retry({ while: (error) => error.code === "busy", times: BUSY_RETRIES, schedule: TICK }),
+          // herdr sees an agent through its own integration for that harness; without it a start never settles.
+          Effect.mapError((error) =>
+            error.code === "failed"
+              ? new RuntimeApi.RuntimeError({
+                  code: error.code,
+                  message: `${error.message} (if herdr never saw ${kind} start, check \`herdr integration status\`)`,
+                })
+              : error,
+          ),
+        )
+
+    const typeLine = (h: HerdrShape, paneId: string, argv: ReadonlyArray<string>) =>
+      failWith(h.call("pane.send_text", { pane_id: paneId, text: argv.map(shellQuote).join(" ") })).pipe(
+        Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
+      )
+
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
         // The session: beside `near`, else the caller's location, else the ambient socket, else the default session.
@@ -380,26 +422,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           Effect.gen(function* () {
             if (kind !== undefined) {
               // A fresh pane's shell may still be starting.
-              yield* failWith(
-                h.call("agent.start", {
-                  name,
-                  kind,
-                  pane_id: paneId,
-                  args: input.argv.slice(1),
-                  timeout_ms: Duration.toMillis(Duration.seconds(120)),
-                }),
-              ).pipe(
-                Effect.retry({ while: (error) => error.code === "busy", times: BUSY_RETRIES, schedule: TICK }),
-                // herdr sees an agent through its own integration for that harness; without it a start never settles.
-                Effect.mapError((error) =>
-                  error.code === "failed"
-                    ? new RuntimeApi.RuntimeError({
-                        code: error.code,
-                        message: `${error.message} (if herdr never saw ${kind} start, check \`herdr integration status\`)`,
-                      })
-                    : error,
-                ),
-              )
+              yield* startAgent(h, name, kind, paneId, input.argv.slice(1))
             } else {
               yield* failWith(
                 h.call("pane.wait_for_output", {
@@ -409,10 +432,8 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                   timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
                 }),
               )
-              yield* failWith(
-                h.call("pane.send_text", { pane_id: paneId, text: `exec ${input.argv.map(shellQuote).join(" ")}` }),
-              )
-              yield* failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))
+              // Not exec'd: the terminal stays at its shell after the program ends, so `run` can start one there again.
+              yield* typeLine(h, paneId, input.argv)
             }
           }),
           (error) => undo().pipe(Effect.andThen(Effect.fail(error))),
@@ -462,6 +483,39 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           if (keys !== undefined && keys.length > 0)
             yield* failWith(h.call("pane.send_keys", { pane_id: place.paneId, keys: [...keys] }))
         }
+      })
+
+    /**
+     * A harness in a named terminal goes through agent.start again, which waits for an idle shell and names it as `open`
+     * did; any other command is typed once only the pane's shell is in its foreground.
+     */
+    const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+      Effect.gen(function* () {
+        const place = yield* at(terminal, "run")
+        const h = yield* client(place.session)
+        if ((yield* paneOf(h, place.paneId)) === undefined)
+          return yield* new RuntimeApi.RuntimeError({ code: "not_found", message: `pane ${place.paneId} is gone` })
+        const kind = argv.length > 0 ? agentKindOf(argv[0]!) : undefined
+        if (kind !== undefined && place.name !== undefined)
+          return yield* startAgent(h, place.name, kind, place.paneId, argv.slice(1))
+        // Only a shell in the foreground: the pane's own, or one a wrapper left there (`sh -c '"$@"; exec $SHELL'`).
+        const atShell = failWith(h.call("pane.process_info", { pane_id: place.paneId })).pipe(
+          Effect.map((r) => {
+            if (r.type !== "pane_process_info") return false
+            const fg = r.process_info.foreground_processes ?? []
+            return fg.length > 0 && fg.every((p) => SHELLS.has(p.name.replace(/^-/, "").replace(/^.*\//, "")))
+          }),
+        )
+        const idle = yield* atShell.pipe(
+          Effect.repeat({ until: (ok) => ok, schedule: TICK }),
+          Effect.timeoutOrElse({ duration: OUTPUT_TIMEOUT, orElse: () => Effect.succeed(false) }),
+        )
+        if (!idle)
+          return yield* new RuntimeApi.RuntimeError({
+            code: "busy",
+            message: `pane ${place.paneId} did not come back to its shell within ${Duration.format(OUTPUT_TIMEOUT)}`,
+          })
+        yield* typeLine(h, place.paneId, argv)
       })
 
     const read: Runtime["read"] = (terminal, lines) =>
@@ -632,6 +686,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       read,
       process,
       close,
+      run,
       state,
       session,
       events: Stream.fromPubSub(events),

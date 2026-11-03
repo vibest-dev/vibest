@@ -172,9 +172,36 @@ describe("vibestd's HTTP API", () => {
         assert.strictEqual(yield* conversation(id), "c2")
         // The plugin version lives in the session's row (no per-session state in vibestd's memory).
         yield* call("/inbox/ack", { sessionId: id, pluginVersion: "1.2.3" }, JSON.stringify({ ids: [] }))
-        assert.isFalse(yield* db.noteIntegrationVersion(id, "1.2.3"))
-        assert.isTrue(yield* db.noteIntegrationVersion(id, "1.2.4"))
+        assert.isFalse(yield* db.noteIntegration(id, { version: "1.2.3", protocol: PROTOCOL }))
+        assert.isTrue(yield* db.noteIntegration(id, { version: "1.2.4", protocol: PROTOCOL }))
       }
+    }),
+  )
+
+  test(
+    "the integration version and protocol are recorded per session, also on a protocol mismatch",
+    Effect.gen(function* () {
+      const { call, db, main, worker, projectId } = yield* project
+      const integration = (id: string) =>
+        id === main
+          ? Effect.map(db.coordinatorOf(projectId), (m) => m?.integration)
+          : Effect.map(db.getSession(id), (s) => s?.metadata.integration)
+      for (const id of [main, worker]) {
+        assert.isUndefined(yield* integration(id))
+        yield* call("/inbox/ack", { sessionId: id, pluginVersion: "1.0.0" }, JSON.stringify({ ids: [] }))
+        assert.deepStrictEqual(yield* integration(id), { version: "1.0.0", protocol: PROTOCOL })
+        // Refused for its protocol, still recorded: vibest update finds it on the old integration.
+        const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "0.9.0" }), "vibest-protocol": "1" }
+        const handle = yield* Http.make
+        assert.strictEqual(
+          (yield* handle({ path: "/inbox/poll", headers: Headers.fromInput(old), body: "{}" })).status,
+          409,
+        )
+        assert.deepStrictEqual(yield* integration(id), { version: "0.9.0", protocol: 1 })
+      }
+      // A subagent's other metadata survives a later row write.
+      yield* db.updateSession(worker, { lastActive: 1 })
+      assert.deepStrictEqual(yield* integration(worker), { version: "0.9.0", protocol: 1 })
     }),
   )
 

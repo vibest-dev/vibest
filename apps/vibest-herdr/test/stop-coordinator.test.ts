@@ -199,6 +199,34 @@ describe("Project.StopCoordinator", () => {
   )
 
   test(
+    "y after a restart in place: SIGTERM to the pid the restarted harness reported ready with, its terminal kept",
+    Effect.gen(function* () {
+      const s = yield* launched
+      // `vibest update` ran the harness again in the same terminal; its integration reported the new pid (Session.Ready).
+      yield* s.processes.set(7777, "alive")
+      yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
+      assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
+      assert.deepStrictEqual(yield* s.processes.signaled, [7777])
+      assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
+    }),
+  )
+
+  test(
+    "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
+    Effect.gen(function* () {
+      const s = yield* launched
+      yield* s.db.patchLive(s.started.sessionId, { restarting: { interrupted: false, at: 1 } })
+      yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
+      const refused = yield* Effect.exit(s.startAt("test/p2"))
+      assert.isTrue(Exit.isFailure(refused))
+      assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
+      assert.deepInclude(yield* s.stop, { result: "unsupported" })
+      assert.deepStrictEqual(yield* s.processes.signaled, [])
+      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
+    }),
+  )
+
+  test(
     "a harness that ignores SIGTERM: running after about 10 s, the row back at its terminal, nothing dropped, and the start elsewhere still refused",
     Effect.gen(function* () {
       const s = yield* launched

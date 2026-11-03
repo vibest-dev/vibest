@@ -22,11 +22,8 @@ import { Layout } from "@vibest/core/paths"
 import { promptOf, recordPrompt, recordTurnEnd } from "@vibest/core/results"
 import { Sessions } from "@vibest/core/sessions"
 import {
-  AGENT_HEADER,
-  CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
-  PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
   ACK_ROUTE,
   parseHookRoute,
@@ -34,16 +31,17 @@ import {
   PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
-  RUNTIME_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { isHarnessId } from "@vibest/schema/session"
-import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
+import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+
+import { noteIntegration } from "./server.ts"
 
 export type Request = {
   readonly path: string
@@ -58,6 +56,7 @@ const ok = (body?: unknown): Reply => (body === undefined ? { status: 204 } : { 
 const AckBody = Schema.fromJsonString(
   Schema.Struct({ ids: Schema.Array(Schema.Number), release: Schema.optional(Schema.Array(Schema.Number)) }),
 )
+const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
@@ -72,6 +71,8 @@ export const make = Effect.gen(function* () {
   /** The calling session, checked: its row, else the reply that refuses the request. */
   const identify = (headers: Headers.Headers) =>
     Effect.gen(function* () {
+      // Before the protocol check: an agent left on an old integration is recorded as such.
+      yield* noteIntegration(db, (name) => header(headers, name))
       const protocol = header(headers, PROTOCOL_HEADER)
       if (protocol !== String(PROTOCOL)) {
         const mismatch = protocolMismatch(protocol === undefined ? undefined : Number(protocol), PROTOCOL, VERSION)
@@ -91,17 +92,6 @@ export const make = Effect.gen(function* () {
       const conversation = header(headers, HARNESS_SESSION_HEADER)
       if (conversation && (yield* db.noteHarnessSession(row.id, conversation)))
         yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
-      const version = header(headers, PLUGIN_VERSION_HEADER)
-      if (version && (yield* db.noteIntegrationVersion(row.id, version))) {
-        yield* Effect.logInfo(`session ${row.id} runs integration ${version}`).pipe(
-          Effect.annotateLogs({
-            agent: header(headers, AGENT_HEADER) ?? "",
-            harness: header(headers, HARNESS_HEADER) ?? "",
-            cwd: decodeURIComponent(header(headers, CWD_HEADER) ?? ""),
-            runtime: header(headers, RUNTIME_HEADER) ?? "",
-          }),
-        )
-      }
       return row
     })
 
@@ -129,6 +119,15 @@ export const make = Effect.gen(function* () {
           true,
           Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
         )
+      }
+      // The integration, once at the harness's start: it takes input now (rpc.ts Session.Ready).
+      if (request.path === "/session/ready") {
+        // `pid`: the harness's own process, which a restart signals.
+        const pid = Option.getOrUndefined(
+          yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
+        )?.pid
+        yield* db.patchLive(who.id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
+        return ok()
       }
       const hook = parseHookRoute(request.path)
       if (!hook || !isHarnessId(hook.harness)) return failure(404, `no route ${request.path}`)

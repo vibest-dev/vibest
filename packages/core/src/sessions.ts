@@ -70,8 +70,10 @@ import {
 } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
 import { describeSpawn, errorMessage, Plugins, type Routing } from "./plugins.ts"
+import { Processes } from "./processes.ts"
 import { listProjectRepositories, projectRoot, workspaceGit } from "./project-create.ts"
 import * as Remove from "./remove.ts"
+import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { readReportLines } from "./results.ts"
 import { sessionRounds } from "./rounds.ts"
 import {
@@ -239,6 +241,15 @@ export class Sessions extends Context.Service<
     readonly republish: Effect.Effect<number>
     /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
     readonly inMemory: Effect.Effect<{ readonly tracked: number; readonly locks: number }>
+    /** The live agents (main agents too) whose recorded integration is not this vibestd's (`vibest update`). */
+    readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
+    /** Restart these agents in place: subagents first, at most RESTART_CONCURRENCY at a time, then main agents. */
+    readonly restart: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Restarted>>
+    /**
+     * `restart` in vibestd's own scope, once process `after` (the `vibest update` that asked, which may run inside one of
+     * these agents) has exited or AFTER_WAIT passed. Returns at once.
+     */
+    readonly restartLater: (ids: ReadonlyArray<string>, after: number | undefined) => Effect.Effect<void>
   }
 >()("vibest/Sessions") {
   /** `maxSessions`: non-stopped sessions on this machine; undefined = no limit. */
@@ -257,8 +268,12 @@ export class Sessions extends Context.Service<
       const vibest = yield* VibestCommand
       const plugins = yield* Plugins
       const removal = yield* Remove.make
+      const processes = yield* Processes
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
+      // A vibestd that stopped mid-restart left its marks: no restart runs in this one yet.
+      for (const id of yield* db.clearRestarting)
+        yield* Effect.logWarning(`session ${id}: a restart mark left over was cleared`)
 
       const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
       const allocating = yield* Semaphore.make(1)
@@ -369,25 +384,33 @@ export class Sessions extends Context.Service<
       /** The runtime a row's `runtime.kind` routes to; `NoRuntime` when no loaded plugin registered it. */
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
-      /** Ready for input (§5): the runtime's `state` says idle, working or blocked; while it is `unknown` or `absent` (a
-       * harness still starting, or showing a startup dialog such as Claude's folder trust) the harness's startup step
-       * answers what it can (SPEC §8.2 step 5). A runtime without `state` is ready when `open` returned. */
+      /** Ready for input (§5). A harness whose integration reports it (`ready: "integration"`) is ready once that report
+       * is on its row (a restart or move removes the previous one); any other once the runtime's `state` says idle,
+       * working or blocked. While neither (a harness still starting, or showing a startup dialog such as Claude's folder
+       * trust) the harness's startup step answers what it can (SPEC §8.2 step 5). A runtime without `state` and a harness
+       * without a report are ready when `open` returned. */
       const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
       const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessAdapter, id: string) =>
         Effect.gen(function* () {
-          if (h.state === undefined) return "unknown" as AgentState
+          const reports = adapter.ready === "integration"
+          if (h.state === undefined && !reports) return "unknown" as AgentState
           const step = adapter.startup ? yield* adapter.startup : undefined
           const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
-          return yield* agentState(h, terminal).pipe(
-            Effect.flatMap((seen) => {
-              if (settled(seen) || step === undefined) return Effect.succeed(seen)
+          const look = Effect.gen(function* () {
+            const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
+            const ready = reports ? (yield* db.readyAt(id)) !== undefined : settled(seen)
+            return { seen, ready }
+          })
+          return yield* look.pipe(
+            Effect.flatMap((now) => {
+              if (now.ready || settled(now.seen) || step === undefined) return Effect.succeed(now)
               // The runtime cannot tell yet (a startup dialog): answer it with the harness's own step.
               return step({
                 screen,
                 sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
-              }).pipe(Effect.as(seen))
+              }).pipe(Effect.as(now))
             }),
-            Effect.repeat({ until: settled, schedule: TICK }),
+            Effect.repeat({ until: (now) => now.ready, schedule: TICK }),
             Effect.timeoutOrElse({
               duration: READY_TIMEOUT,
               // What the terminal showed goes to vibestd.log only; the failure says why, never the screen.
@@ -404,7 +427,10 @@ export class Sessions extends Context.Service<
                   ),
                 ),
             }),
-            Effect.map((seen) => stateOf(seen) ?? "unknown"),
+            // Reported ready while the runtime cannot tell yet: idle, it takes input.
+            Effect.map((now): AgentState =>
+              reports && !settled(now.seen) ? "idle" : (stateOf(now.seen) ?? "unknown"),
+            ),
           )
         })
 
@@ -685,6 +711,7 @@ export class Sessions extends Context.Service<
         rulesFile: layout.rulesFile,
         fs: { remove: (p, o) => fs.remove(p, o), readFileString: (p) => fs.readFileString(p) },
         uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+        terminate: processes.terminate,
         platform,
       })
       limit.move.rerun = move.rerun
@@ -936,6 +963,8 @@ export class Sessions extends Context.Service<
         const open = session.turnState === "open"
         // An exited session is resumed by the next message (SPEC §8.4), not by a check. An archived one is vibest archive's alone.
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
+        // vibestd is restarting its harness: no result, exit or queue is decided until the new one is ready (restartAgent).
+        if (session.metadata.restarting) return
         // A delivery cut off by vibestd stopping (no delivery runs while the lock is held): it may or may not have arrived.
         const cutOff = yield* db.inboxWithStatus(id, "sending")
         if (cutOff.length > 0)
@@ -1077,7 +1106,9 @@ export class Sessions extends Context.Service<
         if (
           session.turnState === "open" ||
           session.status === "blocked" ||
-          (session.startedAt === null && session.exitedAt === null)
+          (session.startedAt === null && session.exitedAt === null) ||
+          // Its harness is being restarted in its own terminal: never resumed in another one; delivered once it is back.
+          session.metadata.restarting
         )
           return
         const h = yield* live(session)
@@ -1486,6 +1517,25 @@ export class Sessions extends Context.Service<
 
       const resultReady = (id: string) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid)
 
+      // ---- restart in place (`vibest update`): restart.ts ----
+      const { outdated, restart, restartLater } = sessionRestart({
+        db,
+        runtimes,
+        harnesses,
+        processes,
+        inbox,
+        layout,
+        fs,
+        scope,
+        locked: (id) => locked(id),
+        launchArgv: (session, resume, key) => launchArgv(session, resume, key).pipe(Effect.provideContext(platform)),
+        worktreeOf,
+        withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
+        awaitReady,
+        prompt: (h, session, terminal, text) =>
+          prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
+      })
+
       return Sessions.of({
         spawn,
         send,
@@ -1501,6 +1551,9 @@ export class Sessions extends Context.Service<
         inMemory: SynchronizedRef.get(tracked).pipe(
           Effect.map((map) => ({ tracked: HashMap.size(map), locks: locks.size() })),
         ),
+        outdated,
+        restart,
+        restartLater,
       })
     })
 
