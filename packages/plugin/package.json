@@ -1,6 +1,6 @@
 {
   "name": "@vibest/plugin",
-  "version": "0.0.1-beta.14",
+  "version": "0.0.1-beta.15",
   "description": "Authoring API for vibest plugins. vibestd provides this module (and effect) to plugins at runtime.",
   "license": "MIT",
   "repository": {
