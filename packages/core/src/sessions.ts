@@ -218,7 +218,12 @@ export class Sessions extends Context.Service<
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
     readonly republish: Effect.Effect<number>
     /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
-    readonly inMemory: Effect.Effect<{ readonly tracked: number; readonly locks: number }>
+    readonly inMemory: Effect.Effect<{
+      readonly tracked: number
+      readonly locks: number
+      readonly turnEnds: number
+      readonly turnStarts: number
+    }>
     /** The live agents (main agents too) whose recorded integration is not this vibestd's (`vibest update`). */
     readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
     /** Restart these agents in place: subagents first, at most RESTART_CONCURRENCY at a time, then main agents. */
@@ -283,6 +288,7 @@ export class Sessions extends Context.Service<
               .filter((row) => !row.metadata.archived && !row.metadata.removed)
               .map((row) => row.id),
           )
+          yield* turnEnds.sweep((id) => live.has(id) || locks.busy(id))
           let next = map
           for (const [id, r] of map) {
             if (live.has(id) || locks.busy(id)) continue
@@ -1401,7 +1407,12 @@ export class Sessions extends Context.Service<
         scope,
       )
 
-      const resultReady = (id: string) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid)
+      // A settlement: a turn that ended during a drain (`vibest update`, `vibest daemon restart`) is still written.
+      const resultReady = (id: string) =>
+        Effect.forkIn(
+          locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
+          scope,
+        ).pipe(Effect.asVoid)
       const turnEnded = (id: string, end: TurnEnded) =>
         turnEnds.ended(id, end).pipe(
           // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
@@ -1447,9 +1458,11 @@ export class Sessions extends Context.Service<
             yield* userPrompt(id, text, now)
           }),
         republish: republish().pipe(Effect.provideContext(platform)),
-        inMemory: SynchronizedRef.get(tracked).pipe(
-          Effect.map((map) => ({ tracked: HashMap.size(map), locks: locks.size() })),
-        ),
+        inMemory: Effect.gen(function* () {
+          const map = yield* SynchronizedRef.get(tracked)
+          const { ends, starts } = yield* turnEnds.size
+          return { tracked: HashMap.size(map), locks: locks.size(), turnEnds: ends, turnStarts: starts }
+        }),
         outdated,
         restart,
         restartLater,

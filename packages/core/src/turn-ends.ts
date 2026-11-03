@@ -65,6 +65,11 @@ const make = Effect.sync(() => {
         ends.set(id, end)
       }),
     latest: (id: string) => Effect.sync(() => ends.get(id)),
+    /** The end `end` was written as session `id`'s result: drop it, unless a newer one replaced it meanwhile. */
+    written: (id: string, end: TurnEnded) =>
+      Effect.sync(() => {
+        if (ends.get(id) === end) ends.delete(id)
+      }),
     /** A turn end reported at or after `at` is dropped (a restart's or a move's old harness); `0`: any. */
     drop: (id: string, since = 0) =>
       Effect.sync(() => {
@@ -76,6 +81,13 @@ const make = Effect.sync(() => {
       }),
     /** Whether a turn started at or after `at`. */
     startedSince: (id: string, at: number) => Effect.sync(() => (starts.get(id) ?? -1) >= at),
+    /** Forget every session `keep` rejects (the sweep: no longer live). */
+    sweep: (keep: (id: string) => boolean) =>
+      Effect.sync(() => {
+        for (const id of ends.keys()) if (!keep(id)) ends.delete(id)
+        for (const id of starts.keys()) if (!keep(id)) starts.delete(id)
+      }),
+    size: Effect.sync(() => ({ ends: ends.size, starts: starts.size })),
     /** Forget session `id` (archived). */
     forget: (id: string) =>
       Effect.sync(() => {

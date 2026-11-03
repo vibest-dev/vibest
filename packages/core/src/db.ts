@@ -1500,7 +1500,6 @@ const make = Effect.gen(function* () {
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       sql.withTransaction(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
 
-    /** Latest time on any turn. Undefined: no turn yet. A turn end that is not newer was already delivered. */
     /**
      * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
      * or an inbox row was delivered into it. False with no open turn.
@@ -1516,6 +1515,7 @@ const make = Effect.gen(function* () {
         return row?.taken === 1
       }).pipe(Effect.orDie),
 
+    /** Latest time on any turn. Undefined: no turn yet. A turn end that is not newer was already delivered. */
     latestRoundAt: (sessionId: string) =>
       sql<{ at: number | null }>`SELECT max(at) AS at FROM event WHERE session_id = ${sessionId}
         AND type IN ('turn.start', 'turn.end')`.pipe(

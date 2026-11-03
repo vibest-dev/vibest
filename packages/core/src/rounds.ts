@@ -49,7 +49,10 @@ export const sessionRounds = (deps: {
   }
   readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
   /** The turn ends the integrations reported (turn-ends.ts). */
-  readonly turnEnds: { readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined> }
+  readonly turnEnds: {
+    readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
+    readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
+  }
   readonly harnesses: {
     readonly all: ReadonlyArray<HarnessAdapter>
     readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
@@ -241,6 +244,7 @@ export const sessionRounds = (deps: {
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
     yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at)
+    yield* turnEnds.written(session.id, found)
     return "delivered" as const
   })
 

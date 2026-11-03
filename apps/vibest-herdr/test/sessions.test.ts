@@ -2,6 +2,7 @@
 // `it.effect` runs on TestClock: time stands still unless a test moves it, so polls and timeouts only fire on purpose.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
 import { claude } from "@vibest/core/harnesses/claude"
 import { Inbox } from "@vibest/core/inbox"
@@ -196,6 +197,21 @@ describe.concurrent("Sessions", () => {
       ])
       assert.include(yield* fs.readFileString(layout.rulesFile(id)), `You are agent ${id}`)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, "do it")
+    }),
+  )
+
+  test(
+    "a turn end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
+    Effect.gen(function* () {
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const drain = yield* Drain
+      assert.isTrue(yield* drain.begin)
+      yield* writeResult(id, "pi", { text: "done while draining" })
+      yield* sessions.resultReady(id)
+      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
+      assert.strictEqual(w.turnState, "completed")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "done while draining")
+      yield* drain.reopen
     }),
   )
 
@@ -440,13 +456,13 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
       assert.strictEqual(yield* db.liveStatuses, 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       // Concurrent checks, as the poll and a runtime event run them: none leaves a lock behind.
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
-      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
       assert.strictEqual(yield* db.liveStatuses, 0)
       // The next poll drops the flags of the session that is no longer live.
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
@@ -460,6 +476,8 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
       assert.include((yield* db.latestInbox(id, "result"))!.message, "done again")
+      // The written turn end is not kept (its text is in the result row now).
+      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0 })
       // A live session between turns keeps its flags, across polls too; archived, the next poll drops them, though it
       // no longer checks the row (archive set exitedAt).
       yield* TestClock.adjust("10 seconds")
@@ -468,6 +486,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.remove(id)
       assert.strictEqual(yield* db.liveStatuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0, turnStarts: 0 })
       // Results reached the coordinator through the project's lock, which is gone too.
       assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),

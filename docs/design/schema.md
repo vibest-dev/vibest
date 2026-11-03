@@ -188,8 +188,10 @@ migration takes it out of a v1 result. `Db.finishTurn` takes the whole `turn.end
   open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
 - When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
   reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
-- The turn starts and turn ends the integrations reported (TurnEnds), until a check writes the end as `turn.end`
-  and its result row. Lost with the process: an end not yet written is lost, and reconciliation ends the turn lost.
+- The turn starts and turn ends the integrations reported (TurnEnds): an end until a check writes it as `turn.end`
+  and its result row (that check is a settlement, so it still runs while vibestd drains), a start until the poll's
+  sweep finds the session no longer live. Lost with the process: an end not yet written is lost, and reconciliation
+  ends the turn lost.
   After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
