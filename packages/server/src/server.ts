@@ -743,7 +743,6 @@ export const handlers = VibestRpcs.toLayer(
                   ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
                 },
               )
-              yield* inbox.reconcile(yield* db.projectId(key))
               return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
