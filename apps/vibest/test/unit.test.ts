@@ -19,10 +19,14 @@ import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
-import { projectKey } from "@vibest/core/project-create"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
 import { entryRules } from "@vibest/core/rules"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
+import { COORDINATOR } from "@vibest/plugin-coordinator"
+import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import * as Launch from "@vibest/vibest/launch"
+import { projectKey } from "@vibest/vibest/project-create"
 import {
   copyIncluded,
   git,
@@ -31,11 +35,7 @@ import {
   normalizeRemote,
   repositoryDirectoryName,
   repositoryKey,
-} from "@vibest/core/worktree"
-import { COORDINATOR } from "@vibest/plugin-coordinator"
-import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import * as Launch from "@vibest/vibest/launch"
+} from "@vibest/vibest/worktree"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"

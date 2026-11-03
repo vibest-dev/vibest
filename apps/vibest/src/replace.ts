@@ -7,8 +7,6 @@ import {
   startDaemon,
   stopByHand,
 } from "@vibest/client/client"
-import { askYesNo, interactive, Layout, VibestCommand, shellQuote } from "@vibest/core/paths"
-import { NoSuchSession } from "@vibest/core/sessions"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import {
   DaemonBusy,
@@ -19,6 +17,9 @@ import {
   ProtocolRejected,
   WrongInstance,
 } from "@vibest/protocol/rpc"
+import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
+import { NoSuchSession } from "@vibest/schema/session"
+import { askYesNo, interactive } from "@vibest/schema/terminal"
 // Replacing the running vibestd with the vibest the user invoked (issue #80), for `vibest daemon restart` and `vibest update`.
 // Only on a terminal, after a yes, and only when vibestd drains its own operations while agents keep running (Daemon.Stop, the same call on every protocol
 // since it was added, so it is sent in the running vibestd's protocol). vibest never signals vibestd and

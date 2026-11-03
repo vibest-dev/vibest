@@ -62,3 +62,15 @@ export const PluginInfo = Schema.Struct({
   lastError: Schema.optional(Schema.String),
 })
 export type PluginInfo = typeof PluginInfo.Type
+
+/** "claude / claude-haiku-5-5 (chosen by plugin route)" */
+export const describeSpawn = (s: {
+  harness: string
+  provider?: string | undefined
+  model?: string | undefined
+  decidedBy: Readonly<Record<string, string>>
+}) => {
+  const plugins = [...new Set(Object.values(s.decidedBy))]
+  const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
+  return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
+}

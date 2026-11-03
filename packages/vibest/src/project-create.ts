@@ -1,10 +1,11 @@
+import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
+import type { ProjectRepository, RepositoryGit } from "@vibest/core/workspace"
 // `vibest project create <directory> --from <repository>…` (architecture D7, §3 Project and Workspace; plan phase 7):
 // copy each git repository into one new directory as a folder named after it, and one detached worktree per repository
 // for a writing subagent's isolated Workspace.
 import { Config, Crypto, Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
-import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
 import {
   addWorktree,
   copyIncluded,
@@ -13,7 +14,6 @@ import {
   mainCheckout,
   repositoryDirectoryName,
   repositoryKey,
-  type GitState,
 } from "./worktree.ts"
 
 export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
@@ -167,13 +167,7 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
   return { directory: real, folders } satisfies CreatedProject
 })
 
-/** A direct child of a multi-repository project: its own git checkout. */
-export interface ProjectRepository {
-  readonly name: string
-  readonly path: string
-  /** Current branch; empty when HEAD is detached. */
-  readonly branch: string
-}
+export type { ProjectRepository, RepositoryGit }
 
 /** True when `dir` is a git checkout whose toplevel is `dir` itself (a linked worktree counts; a subdirectory of one does not). */
 const ownGitCheckout = (dir: string) =>
@@ -340,10 +334,6 @@ export const discardIsolatedWorktrees = Effect.fn("discardIsolatedWorktrees")(fu
   )
   yield* removeWorktrees(entries, workspace)
 })
-
-export interface RepositoryGit extends GitState {
-  readonly name: string
-}
 
 /** Git state of each repository in a multi-repository workspace; undefined when `workspace` is not one. */
 export const workspaceGit = Effect.fn("workspaceGit")(function* (workspace: string) {

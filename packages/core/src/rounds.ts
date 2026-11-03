@@ -19,11 +19,10 @@ import {
 } from "./db.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
-import { workspaceGit } from "./project-create.ts"
 import { envelope, isUsageLimitError, outcome, parseReport, type ResultStatus } from "./results.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 import type { TurnEnded } from "./turn-ends.ts"
-import { gitState } from "./worktree.ts"
+import type { WorkspaceShape } from "./workspace.ts"
 
 export const sessionRounds = (deps: {
   readonly db: {
@@ -53,6 +52,7 @@ export const sessionRounds = (deps: {
     readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
     readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
   }
+  readonly workspace: WorkspaceShape
   /** Hand session `id` what is queued for it, in the background (a recipient of a result: not the entry session). */
   readonly wake: (id: string) => Effect.Effect<void>
   /** Whether the session's integration takes its rows itself (`/inbox/poll`): then nothing is typed in. */
@@ -99,8 +99,8 @@ export const sessionRounds = (deps: {
     const summary =
       status === "failed" ? outcome(session.name, error) : (report.summary ?? outcome(session.name, error))
     const worktree = yield* deps.worktreeOf(session)
-    const repos = yield* workspaceGit(worktree)
-    const g = repos ? undefined : yield* gitState(worktree)
+    const repos = yield* deps.workspace.repositoryStates(worktree)
+    const g = repos ? undefined : yield* deps.workspace.state(worktree)
     const info = {
       id: session.id,
       // A session reports as the agent it runs.

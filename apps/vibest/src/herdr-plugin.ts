@@ -3,10 +3,10 @@
 import readline from "node:readline"
 
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
-import { VibestCommand } from "@vibest/core/paths"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+import { VibestCommand } from "@vibest/schema/layout"
 import { RuntimeAddress } from "@vibest/schema/session"
 import { Config, Console, Effect, Option, Schema } from "effect"
 import { Herdr } from "effect-herdr-sdk"

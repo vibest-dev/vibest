@@ -62,7 +62,6 @@ import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeR
 import { sessionPlacement } from "./placement.ts"
 import { describeSpawn, errorMessage, Plugins, type Routing } from "./plugins.ts"
 import { Processes } from "./processes.ts"
-import { listProjectRepositories, projectRoot, workspaceGit } from "./project-create.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Restarting } from "./restarting.ts"
@@ -85,7 +84,7 @@ import {
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
-import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
+import { type GitState, Workspace } from "./workspace.ts"
 /**
  * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
  * it. Opaque to agents and integrations: they pass it on, and only the runtime plugin reads it.
@@ -151,7 +150,7 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project key of `root` (`projectRoot(root).key`), computed once by the caller: the row, the scratch directory and the rules all use it. */
+  /** The project key of `root` (`Workspace.project(root).key`), computed once by the caller: the row, the scratch directory and the rules all use it. */
   readonly key: string
   readonly name: string
   readonly prompt: string
@@ -262,6 +261,7 @@ export class Sessions extends Context.Service<
       const harness = yield* Harness
       const harnesses = yield* Harnesses
       const agents = yield* Effect.serviceOption(Agents)
+      const workspace = yield* Workspace
       const inbox = yield* Inbox
       const drain = yield* Drain
       const layout = yield* Layout
@@ -662,6 +662,7 @@ export class Sessions extends Context.Service<
         db,
         inbox,
         turnEnds,
+        workspace,
         polls,
         lock: locks.withLock,
         worktreeOf,
@@ -713,6 +714,7 @@ export class Sessions extends Context.Service<
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
         db,
         runtimes,
+        workspace,
         agentRules: (agent) => {
           const definition = Option.isSome(agents) ? agents.value.of(agent) : undefined
           return { spawn: definition?.can.spawn ?? false, rules: definition?.rules }
@@ -803,8 +805,8 @@ export class Sessions extends Context.Service<
             return yield* refuse(`ineligible: its worktree ${worktree} is gone`)
           // A multi-repository workspace is not itself a checkout; the project id above is what it belongs to.
           if (
-            !(yield* listProjectRepositories(worktree).pipe(Effect.mapError((e) => refuse(e.message)))) &&
-            !Option.contains(yield* mainCheckout(worktree).pipe(Effect.option), input.root)
+            !(yield* workspace.repositories(worktree).pipe(Effect.mapError((e) => refuse(e.message)))) &&
+            !Option.contains(yield* workspace.mainCheckout(worktree).pipe(Effect.option), input.root)
           )
             return yield* refuse(`ineligible: its worktree is not in ${input.root}`)
           return worktree
@@ -872,9 +874,9 @@ export class Sessions extends Context.Service<
         const admit = (shared: string | undefined) =>
           Effect.gen(function* () {
             const refuse = (message: string) => new AllocationFailed({ message })
-            const folders = yield* listProjectRepositories(root).pipe(
-              Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
-            )
+            const folders = yield* workspace
+              .repositories(root)
+              .pipe(Effect.mapError((e) => refuse(`${root}: ${e.message}`)))
             const key = input.key
             const base = {
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
@@ -885,16 +887,16 @@ export class Sessions extends Context.Service<
               // `<worktrees>/<project>/<leaf>/<repository>` for a multi-repository project; otherwise the repository's own name.
               const repository = folders
                 ? path.basename(root)
-                : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
+                : yield* workspace.name(root).pipe(Effect.mapError((e) => refuse(e.message)))
               if (!safeRepositoryDirectory(repository))
                 return yield* refuse(
                   `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
                 )
               const parentPath = path.join(layout.worktrees, repository)
               if (
-                yield* allocationParentBlocked(parentPath).pipe(
-                  Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)),
-                )
+                yield* workspace
+                  .parentBlocked(parentPath)
+                  .pipe(Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)))
               )
                 return yield* refuse(
                   `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
@@ -1537,7 +1539,7 @@ export class Sessions extends Context.Service<
             } satisfies SessionView)
           : Effect.gen(function* () {
               const worktree = yield* worktreeOf(session)
-              const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
+              const repos = yield* workspace.repositoryStates(worktree).pipe(Effect.orDie)
               if (repos) {
                 const unsaved = repos.find((r) => !r.saved)
                 const git: GitState = {
@@ -1546,12 +1548,12 @@ export class Sessions extends Context.Service<
                   saved: repos.every((r) => r.saved),
                   why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
                 }
-                const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
+                const repositoryRoot = (yield* workspace.project(worktree).pipe(Effect.orDie)).root
                 return { ...session, worktree, repositoryRoot, git } satisfies SessionView
               }
-              const g = yield* gitState(worktree).pipe(Effect.orDie)
+              const g = yield* workspace.state(worktree).pipe(Effect.orDie)
               const repositoryRoot = g
-                ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+                ? yield* workspace.mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
                 : undefined
               return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
             })

@@ -1,14 +1,9 @@
-import { NotInRepository } from "@vibest/schema/session"
+import { CopyFailed, GitError, type GitState, NotInRepository } from "@vibest/core/workspace"
 // git side of a session's worktree (SPEC §8.2, §8.7). git is the authority; nothing here is cached.
-import { Config, Crypto, Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect"
+import { Config, Crypto, Effect, FileSystem, Option, Path, PlatformError, Stream } from "effect"
 import { Hex } from "effect/encoding"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-export { NotInRepository } from "@vibest/schema/session"
-
-export class GitError extends Schema.TaggedError<GitError>()("GitError", {
-  args: Schema.Array(Schema.String),
-  message: Schema.String,
-}) {}
+export { CopyFailed, GitError, type GitState, NotInRepository }
 
 /** Raw stdout of `git <args>` run in `cwd`, `input` on its stdin; an exit code not in `ok` is a GitError carrying stderr. */
 const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
@@ -128,12 +123,6 @@ export const addWorktree = Effect.fn("addWorktree")(function* (root: string, pat
   yield* git(root, "worktree", "add", "--detach", path)
 })
 
-export class CopyFailed extends Schema.TaggedError<CopyFailed>()("CopyFailed", {
-  source: Schema.String,
-  destination: Schema.String,
-  message: Schema.String,
-}) {}
-
 const nul = (out: string) => out.split("\0").filter(Boolean)
 
 /** Those of `paths` (relative to `cwd`) git ignores in `cwd`, by every rule it has there. */
@@ -236,14 +225,6 @@ export const copyIncluded = Effect.fn("copyIncluded")(function* (root: string, w
   }
   return copied
 })
-
-export interface GitState {
-  readonly branch: string
-  readonly pushed: boolean
-  /** Removing the worktree would lose nothing. */
-  readonly saved: boolean
-  readonly why: string
-}
 
 /** undefined when the path is missing or not a directory. */
 export const gitState = Effect.fn("gitState")(function* (worktree: string) {

@@ -11,21 +11,22 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import { Harness, Harnesses, type HarnessId, preflight } from "@vibest/core/harness"
-import { listAllModels } from "@vibest/core/models"
-import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
-import { describeSpawn } from "@vibest/core/plugins"
-import { createProject, projectRoot } from "@vibest/core/project-create"
-import { jsonObject } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
 // VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
 // Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
 import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
+import { jsonObject } from "@vibest/schema/json"
+import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
+import { describeSpawn } from "@vibest/schema/plugin"
+import { type HarnessId, LaunchFailed } from "@vibest/schema/session"
+import { askYesNo, interactive, writeAtomic } from "@vibest/schema/terminal"
 import * as Daemon from "@vibest/server/daemon"
+import * as LocalHarnesses from "@vibest/vibest/harnesses"
 import * as Launch from "@vibest/vibest/launch"
 import { asData, ProjectKind } from "@vibest/vibest/project"
+import { createProject, projectRoot } from "@vibest/vibest/project-create"
 import {
   Cause,
   Config,
@@ -50,7 +51,6 @@ import { RpcClient } from "effect/rpc"
 import { herdrCommands } from "./herdr-plugin.ts"
 import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
 export { compareVersions }
-import { LaunchFailed } from "@vibest/core/sessions"
 import { HARNESS_HEADER, HOOK_ROUTE, PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
 
@@ -423,7 +423,7 @@ const startMain =
           model: chosen.model ?? null,
           passEnv: CALLER_ENV,
           session,
-        }).pipe(Effect.provide(Harness.layer))
+        }).pipe(LocalHarnesses.local)
         return yield* Effect.sync(() => exec(main.file, main.args, { ...env, ...main.env }))
       }
       // Elsewhere: a terminal in the parent workspace whose shell runs this command again. Inside herdr that terminal is
@@ -603,14 +603,11 @@ const report = Command.make("report", { message: text("message") }, (o) =>
   ),
 )
 
-/** The harnesses this binary knows without vibestd (its built-ins); plugin harnesses are vibestd's. */
-const builtinIds = Effect.gen(function* () {
-  return (yield* Harnesses).all().map((a) => a.id)
-})
+const builtinIds = LocalHarnesses.builtinIds
 
 const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
-  listAllModels(harnesses, Option.getOrNull(provider)).pipe(Effect.flatMap(json))
+  LocalHarnesses.models(harnesses, Option.getOrNull(provider)).pipe(Effect.flatMap(json))
 
 const models = Command.make(
   "models",
@@ -639,30 +636,7 @@ const harness = Command.make("harness").pipe(
   Command.withDescription("The harnesses vibest runs; local, does not need vibestd"),
   Command.withSubcommands([
     Command.make("list", {}, () =>
-      Effect.flatMap(builtinIds, (ids) =>
-        Effect.forEach(
-          ids,
-          (h) =>
-            Effect.gen(function* () {
-              const host = yield* Harness
-              const summary = { harness: h, binary: (yield* Harnesses).get(h).binary }
-              if (!(yield* host.available(h)))
-                return { ...summary, available: false, defaultModel: null, error: `${summary.binary} is not on PATH` }
-              return yield* host.models(h, null).pipe(
-                Effect.map((models) => ({
-                  ...summary,
-                  available: true,
-                  defaultModel: models.find((m) => m.default)?.model ?? null,
-                  error: null,
-                })),
-                Effect.catchTag("HarnessUnavailable", (e) =>
-                  Effect.succeed({ ...summary, available: true, defaultModel: null, error: e.message }),
-                ),
-              )
-            }),
-          { concurrency: "unbounded" },
-        ),
-      ).pipe(Effect.flatMap(json), Effect.provide(Harness.layer)),
+      Effect.flatMap(builtinIds, LocalHarnesses.summaries).pipe(Effect.flatMap(json)),
     ).pipe(
       Command.withAlias("ls"),
       Command.withDescription(
@@ -848,7 +822,7 @@ const integrationStart = (exec: Exec) =>
           agent: got.agent,
           skills: got.skills,
         }),
-      }).pipe(Effect.provide(Harness.layer))
+      }).pipe(LocalHarnesses.local)
       return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
@@ -877,17 +851,18 @@ const doctor = Command.make("doctor", {}, () =>
     const harnesses = yield* Effect.forEach(
       ids,
       (h) =>
-        preflight(h, null, null).pipe(
-          Effect.map((models): Finding => ({
-            mark: "ok",
-            text: `${h.padEnd(width)}  ${models.length} models, default ${models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
-          })),
-          Effect.catchTag("HarnessUnavailable", (e) =>
-            Effect.succeed<Finding>({ mark: "problem", text: `${h.padEnd(width)}  ${e.message}` }),
+        LocalHarnesses.check(h).pipe(
+          Effect.map((c): Finding =>
+            c.ok
+              ? {
+                  mark: "ok",
+                  text: `${h.padEnd(width)}  ${c.models.length} models, default ${c.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
+                }
+              : { mark: "problem", text: `${h.padEnd(width)}  ${c.message}` },
           ),
         ),
       { concurrency: "unbounded" },
-    ).pipe(Effect.provide(Harness.layer))
+    )
     sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
     const installs = yield* extraVibests
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })

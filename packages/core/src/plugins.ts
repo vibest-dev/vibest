@@ -38,17 +38,7 @@ const RECHECK = Duration.seconds(1)
 
 type HookName = keyof VibestPlugin.Hooks
 
-/** "claude / claude-haiku-5-5 (chosen by plugin route)" */
-export const describeSpawn = (s: {
-  harness: string
-  provider?: string | undefined
-  model?: string | undefined
-  decidedBy: Readonly<Record<string, string>>
-}) => {
-  const plugins = [...new Set(Object.values(s.decidedBy))]
-  const by = plugins.length === 0 ? "" : ` (chosen by plugin ${plugins.join(", ")})`
-  return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
-}
+export { describeSpawn } from "@vibest/schema/plugin"
 
 /** Before any Agent starts, the main agent included: the event minus what the host itself reads. */
 export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">

@@ -2,8 +2,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { repositoryDirectoryName, repositoryKey } from "@vibest/vibest/worktree"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 
 import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, writeResult } from "./fakes.ts"

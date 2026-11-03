@@ -9,17 +9,11 @@ import type { CoordinatorRow, EndReason, SessionPatch, SessionRow } from "./db.t
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { writeAtomic } from "./paths.ts"
-import {
-  createIsolatedWorktrees,
-  discardIsolatedWorktrees,
-  listProjectRepositories,
-  projectRoot,
-} from "./project-create.ts"
 import { isUsageLimitError } from "./results.ts"
 import { projectText, sessionRules } from "./rules.ts"
 import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
-import { addWorktree, copyIncluded, git, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
+import type { WorkspaceShape } from "./workspace.ts"
 
 /** The harness dying on its own usage limit inside `open` (§3): the launch hands over to the limit move, as a failed start did. */
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
@@ -39,6 +33,7 @@ export const sessionPlacement = (deps: {
   }
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
+  readonly workspace: WorkspaceShape
   /** What the session's agent definition puts in its rules. */
   readonly agentRules: (agent: string) => { readonly spawn: boolean; readonly rules?: string | undefined }
   readonly layout: {
@@ -89,12 +84,10 @@ export const sessionPlacement = (deps: {
   /** The usage-limit move (move.ts), wired in after placement exists. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, runtimes, layout, fs, vibest } = deps
+  const { db, runtimes, layout, fs, vibest, workspace } = deps
   /** Project name on the workspace: the directory's own name, not the key. */
   const projectName = (root: string) =>
-    repositoryDirectoryName(root).pipe(
-      Effect.catch(() => Effect.flatMap(Path.Path, (p) => Effect.succeed(p.basename(root)))),
-    )
+    workspace.name(root).pipe(Effect.catch(() => Effect.flatMap(Path.Path, (p) => Effect.succeed(p.basename(root)))))
 
   const liveCount = (projectId: number) =>
     db
@@ -210,7 +203,7 @@ export const sessionPlacement = (deps: {
     splitFrom?: string,
     env?: Readonly<Record<string, string>>,
   ) {
-    const folders = yield* listProjectRepositories(root)
+    const folders = yield* workspace.repositories(root)
     // The row's own project key: the scratch directory and the rules go to the project the session belongs to.
     const key = yield* db.projectKey(session.projectId)
     if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
@@ -266,16 +259,11 @@ export const sessionPlacement = (deps: {
           Effect.ignore,
         ),
       )
-      if (folders) {
-        // One detached worktree per repository: a plain directory, not one linked worktree of the first.
-        yield* undoOnFailure(createIsolatedWorktrees(folders, worktree), () => discardIsolatedWorktrees(worktree))
-      } else {
-        // Detached, made by vibest: a linked worktree of the main checkout would group away from the project's terminals.
-        // Undone with git without force (it deletes ignored files, refuses on anything else); a refusal leaves it for `vibest archive`.
-        yield* undoOnFailure(addWorktree(root, worktree), () => git(root, "worktree", "remove", worktree))
-      }
+      // Detached, made by vibest: a linked worktree of the main checkout would group away from the project's terminals.
+      // Undone without force (it deletes ignored files, refuses on anything else); a refusal leaves it for `vibest archive`.
+      yield* undoOnFailure(workspace.allocate(root, worktree), () => workspace.discard(root, worktree))
     }
-    if (!folders) yield* copyIncluded(root, worktree)
+    if (!folders) yield* workspace.copyIncluded(root, worktree)
     const argv = yield* deps.launchArgv(session, false, key)
     const terminal = yield* openOrMove(
       openTerminal(h, machine, session, {
@@ -346,7 +334,7 @@ export const sessionPlacement = (deps: {
         h.value,
         session,
         session.address,
-        stored ?? (yield* projectRoot(yield* deps.worktreeOf(session))).root,
+        stored ?? (yield* workspace.project(yield* deps.worktreeOf(session))).root,
       )
       shown = true
     }
@@ -375,8 +363,8 @@ export const sessionPlacement = (deps: {
       const key = yield* db.projectKey(session.projectId)
       if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
       const stored = yield* storedDirectory(session.projectId)
-      if (yield* listProjectRepositories(cwd)) return { root: stored ?? (yield* projectRoot(cwd)).root, cwd, key }
-      return { root: stored ?? (yield* mainCheckout(cwd)), cwd, key }
+      if (yield* workspace.repositories(cwd)) return { root: stored ?? (yield* workspace.project(cwd)).root, cwd, key }
+      return { root: stored ?? (yield* workspace.mainCheckout(cwd)), cwd, key }
     })
 
   const resume = Effect.fn("Sessions.resume")(function* (h: Runtime, session: SessionRow) {
@@ -416,7 +404,7 @@ export const sessionPlacement = (deps: {
         const h = yield* runtimes.route(session.runtime).pipe(Effect.option)
         if (Option.isNone(h)) return 0
         const stored = yield* storedDirectory(session.projectId)
-        const root = stored ?? (yield* projectRoot(yield* deps.worktreeOf(session))).root
+        const root = stored ?? (yield* workspace.project(yield* deps.worktreeOf(session))).root
         yield* show(h.value, session, session.address, root)
         return 1
       }).pipe(Effect.orElseSucceed(() => 0)),

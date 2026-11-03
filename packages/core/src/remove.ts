@@ -9,10 +9,9 @@ import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 import { Db, type SessionRow } from "./db.ts"
 import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
-import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { TurnEnds } from "./turn-ends.ts"
-import { git, gitState, mainCheckout } from "./worktree.ts"
+import { Workspace } from "./workspace.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
 type ProcessState = RemoveOutcome["processes"]
@@ -96,6 +95,7 @@ export const make = Effect.gen(function* () {
   const layout = yield* Layout
   const turnEnds = yield* TurnEnds
   const processes = yield* Processes
+  const workspace = yield* Workspace
 
   /**
    * Close the session's terminal (the runtime's close sees its processes off), then remove its worktree only when
@@ -207,23 +207,12 @@ export const make = Effect.gen(function* () {
       }
       /** The directory stays because another live session works in it. */
       let shared = false
-      const g = exists ? yield* gitState(worktree) : undefined
-      const multiGit = exists ? yield* workspaceGit(worktree).pipe(Effect.orDie) : undefined
+      const g = exists ? yield* workspace.state(worktree) : undefined
+      const multiGit = exists ? yield* workspace.repositoryStates(worktree).pipe(Effect.orDie) : undefined
       const root = exists
-        ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+        ? yield* workspace.mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
         : undefined
-      /** A linked worktree of `repoRoot` (porcelain; the main checkout's own line does not count). */
-      const linked = (repoRoot: string, path: string) =>
-        Effect.gen(function* () {
-          const at = yield* fs.realPath(path).pipe(Effect.orElseSucceed(() => path))
-          const lines = (yield* git(repoRoot, "worktree", "list", "--porcelain").pipe(
-            Effect.orElseSucceed(() => ""),
-          )).split("\n")
-          return lines
-            .filter((line) => line.startsWith("worktree "))
-            .slice(1)
-            .includes(`worktree ${at}`)
-        })
+      const linked = workspace.isLinked
       /** Why the worktree stays, checked in this order and only as far as needed; undefined once git removed it. */
       const keepWorktree = Effect.gen(function* () {
         if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
@@ -242,14 +231,14 @@ export const make = Effect.gen(function* () {
         /** Removed: undefined. A live sharer stops the whole removal; any other keep stays on this worktree. */
         const removeLinked = (repoRoot: string, path: string) =>
           Effect.gen(function* () {
-            const state = yield* gitState(path)
+            const state = yield* workspace.state(path)
             if (!state?.saved) return { stop: false, reason: `worktree kept: ${state?.why ?? "git cannot read it"}` }
             const again = sharing(yield* liveSharers)
             if (again) {
               shared = true
               return { stop: true, reason: again }
             }
-            const refused = yield* git(repoRoot, "worktree", "remove", path).pipe(
+            const refused = yield* workspace.removeLinked(repoRoot, path).pipe(
               Effect.as(undefined),
               Effect.catchTag("GitError", (e) => Effect.succeed(e.message)),
             )
@@ -259,13 +248,15 @@ export const make = Effect.gen(function* () {
         // `confirmExited` above — no process of this user with its cwd there — is the check that covers this now.)
         // A multi-repository workspace is not itself a worktree: the same removal per repository, then the directory if empty.
         const isLinked = root !== undefined && (yield* linked(root, worktree))
-        const children = isLinked ? undefined : yield* listProjectRepositories(worktree).pipe(Effect.orDie)
+        const children = isLinked ? undefined : yield* workspace.repositories(worktree).pipe(Effect.orDie)
         if (!isLinked && !children) return `${worktree} is not a worktree of its repository; left alone`
         if (processState !== "exited") return `worktree kept: ${confirmed.why}`
         if (children) {
           const notes: string[] = []
           for (const child of children) {
-            const repoRoot = yield* mainCheckout(child.path).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+            const repoRoot = yield* workspace
+              .mainCheckout(child.path)
+              .pipe(Effect.option, Effect.map(Option.getOrUndefined))
             if (repoRoot === undefined || !(yield* linked(repoRoot, child.path))) {
               notes.push(`${child.name}: ${child.path} is not a worktree of its repository; left alone`)
               continue

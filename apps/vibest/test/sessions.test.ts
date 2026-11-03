@@ -9,9 +9,10 @@ import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import * as GitWorkspace from "@vibest/vibest/workspace"
+import { repositoryKey } from "@vibest/vibest/worktree"
 import {
   Cause,
   Clock,
@@ -21,6 +22,7 @@ import {
   Fiber,
   FileSystem,
   HashMap,
+  Layer,
   Path,
   PlatformError,
   PubSub,
@@ -2542,7 +2544,9 @@ describe.concurrent("Sessions", () => {
               )
             : fs.copyFile(from, to).pipe(Effect.tap(() => Effect.sync(() => copied.push(to)))),
       })
+      // The workspace copies the included files: it gets the same faulty FileSystem.
       const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provide(Layer.fresh(GitWorkspace.layer)),
         Effect.provideService(FileSystem.FileSystem, faulty),
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))

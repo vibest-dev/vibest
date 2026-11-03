@@ -1,4 +1,5 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness } from "@vibest/core/harness"
@@ -14,6 +15,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { TurnEnds } from "@vibest/core/turn-ends"
 import { VERSION } from "@vibest/protocol/rpc"
 import { Project } from "@vibest/vibest/project"
+import * as GitWorkspace from "@vibest/vibest/workspace"
 // vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
 // database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
@@ -109,10 +111,13 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Inbox.layer),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(Harness.layer),
+    Layer.provideMerge(GitWorkspace.layer),
     Layer.provideMerge(Db.layer.pipe(Layer.provide(host.sqlite(layout.database)))),
     // One registry per daemon (a Service, never a global), provided after every layer that reads it — a provideMerge
     // satisfies only requirements outstanding before it (runtime-port §2): two hosts in one process each get their own.
     Layer.provideMerge(Runtimes.layer),
+    // The agent definitions plugins give: vibestd's alone (the command line reads none).
+    Layer.provideMerge(Agents.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(TurnEnds.layer),

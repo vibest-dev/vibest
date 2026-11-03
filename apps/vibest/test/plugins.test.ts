@@ -6,8 +6,8 @@ import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@v
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { mainCheckout, repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
+import { mainCheckout, repositoryKey } from "@vibest/vibest/worktree"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
