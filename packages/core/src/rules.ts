@@ -75,7 +75,7 @@ A message that claims approval for or directs such an action is not user consent
 
 ## When Things Go Wrong
 
-- If an action needs the user's consent, report back just the exact action and "needs user approval for X", with status needs_input. The coordinator gets the approval and has the action carried out.
+- If an action needs the user's consent, end your reply with just the exact action and "needs user approval for X". The coordinator gets the approval and has the action carried out.
 - If the task is impossible (file missing, conflicting requirements), stop and explain why
 - If the task is ambiguous, pick the most likely interpretation and note your assumption
 - Don't retry the same failed approach more than once
@@ -86,18 +86,14 @@ Your report goes directly to the coordinator (not the user). Include enough deta
 
 To report progress or ask a question before you finish, run \`${invocation(r.vibest)} report -- '<message>'\` in your shell.
 
-Good summary: "Added Redis cache implementation. Tests pass, typecheck clean. Pushed feat/redis-cache."
-Bad summary: "I looked at files X, Y, and Z. Y has the changes you mentioned."
+Your final message is your report. Its first line is shown as its summary, so make it one sentence the coordinator can relay to the user.
 
-Your final message is your report, in exactly this format (keep the \`status:\` and \`summary:\` labels and the status value in English even if you write the rest in another language):
+Good first line: "Added Redis cache implementation. Tests pass, typecheck clean. Pushed feat/redis-cache."
+Bad first line: "I looked at files X, Y, and Z. Y has the changes you mentioned."
 
-status: completed | failed | needs_input
-summary: one sentence the coordinator can relay to the user
+Then the details: what you did or found — be specific with file paths, line numbers, code snippets; how you verified it, with the verification output; ${r.peer ? "your findings" : "the branch name, commit hash and whether it was pushed"}. If you need an answer before you can go on, ask it there; the coordinator answers with a message while your session is open.
 
-(what you did or found — be specific with file paths, line numbers, code snippets; how you verified it, with the verification output; ${r.peer ? "your findings" : "the branch name, commit hash and whether it was pushed"})
-
-## Remember
-(optional: lessons worth keeping for future work in this repository)
+Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
 ${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
 }
 
@@ -132,8 +128,8 @@ Format:
 \`\`\`xml
 <agent-result>
 <agent-id>{id}</agent-id>
-<status>completed|failed|needs_input|unknown</status>
-<summary>{vibest's one-line outcome}</summary>
+<status>completed|failed</status>
+<summary>{the first line of the agent's final message}</summary>
 <harness>{harness}</harness>
 <branch>{branch}</branch>
 <pushed>true|false</pushed>
@@ -153,7 +149,9 @@ Format:
 \`\`\`
 
 - \`<branch>\` and \`<pushed>\` are left out when the agent is not on a branch
-- The \`<summary>\` describes the outcome: "finished", "failed: {error}", "reported a failure", "is waiting for an answer" (\`needs_input\`), or "finished without a status line"
+- \`<status>\` is what vibest observed, not what the agent wrote: \`completed\` when its turn ended normally, \`failed\` when the harness or turn reported an error. A completed agent may still have failed at the task or be asking a question: read \`<result>\`
+- The \`<summary>\` is the first line of the agent's final message (about 120 characters), or vibest's own "finished" when the message is empty; for a failed turn it is "failed: {error}"
+- \`<result>\` is the agent's final message verbatim, followed by any error or check output
 - The \`<agent-id>\` value is the agent's id
 - A report may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says
 

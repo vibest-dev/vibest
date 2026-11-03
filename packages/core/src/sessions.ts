@@ -1259,12 +1259,6 @@ export class Sessions extends Context.Service<
           const id = row.sessionId
           const owner = yield* db.getSession(id)
           if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
-          // A reply with no status line may be done or may be a question: say why it stays, so it is not left open unseen.
-          if (row.details.status === "unknown")
-            return yield* notice(
-              owner,
-              `${id} not archived (vibest run --archive-on-completion): its reply had no status line; vibest archive ${id} once it is done`,
-            )
           if (row.details.status !== "completed") return
           const r = yield* track(id)
           // Each delivered result takes its turn under the lock, so one delivered while another archive holds it still gets its own look.

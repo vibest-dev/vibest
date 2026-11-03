@@ -5,7 +5,7 @@
 3. The Claude plugin reaches vibestd only with `$.http.fetch` over the Unix socket; it does not run the `vibest` CLI. `$.env.get` takes literal names.
 4. A delivered message shows as one line in the harness UI; its full text goes with it as `prompt.submit` context. Nothing is injected into the system prompt.
    - Line: `<Type> Agent "<title>" <status> (<session id>)`, for example `General Agent "Fix guard scratch rule" completed (349f65b2)`.
-   - Statuses: completed, failed, needs input, was interrupted, ended without a status, sent a message.
+   - Statuses: completed, failed, was interrupted, sent a message. completed and failed are what the harness reported for the turn (a normal end or an error), never parsed from the agent's text.
    - A notice: `Notice: <first line>`. About 120 characters; a batch ends with ` · +N more`.
 5. No recovery commands for the user to type (no `/vibest-reattach`). Delivery recovers by itself through leases and polling.
 6. Per-harness differences (launch arguments, resume, `canResume`) live in the harness adapter (`packages/core/src/harness.ts`, `packages/core/src/harnesses/`). Core never branches on a harness id; it reads adapter fields.

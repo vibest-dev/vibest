@@ -39,7 +39,7 @@ const vibestReport = (vibest: ReadonlyArray<string>) =>
   [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
 
 /**
- * The plugin's turn.complete report (`TurnComplete`) as a result: `answer` as it is (its status line is the report);
+ * The plugin's turn.complete report (`TurnComplete`) as a result: `answer` as it is;
  * `aborted` marked so (readResult: a result only while vibest's round is open, so `vibest interrupt`'s own Esc is none);
  * `refusal` and `error` failed. turn.complete carries no API error kind, so `error` names no cause (no usage-limit move).
  */

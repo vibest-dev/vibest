@@ -113,14 +113,14 @@ describe("envelope", () => {
         "agent-result",
         [
           ["agent-id", "a1b2c3d4"],
-          ["summary", outcome('fix "x" <y>', "completed", undefined)],
+          ["summary", outcome('fix "x" <y>', undefined)],
           ["branch", ""],
         ],
         ["result", "a <b> & c"],
       ),
       '<agent-result>\n<agent-id>a1b2c3d4</agent-id>\n<summary>Agent "fix "x" &lt;y&gt;" finished</summary>\n<result>\na <b> & c\n</result>\n</agent-result>',
     )
-    assert.strictEqual(outcome("t", "completed", "rate_limit"), 'Agent "t" failed: rate_limit')
+    assert.strictEqual(outcome("t", "rate_limit"), 'Agent "t" failed: rate_limit')
     assert.isTrue(isUsageLimitError("rate_limit"))
     assert.isTrue(isUsageLimitError("rate_limit: hit the 5 hour limit"))
     assert.isTrue(isUsageLimitError("You've hit your usage limit"))
@@ -130,8 +130,8 @@ describe("envelope", () => {
     assert.isFalse(isUsageLimitError("server_error: too many requests"))
     assert.isFalse(isUsageLimitError("aborted"))
     assert.isFalse(isUsageLimitError(undefined))
-    assert.strictEqual(outcome("t", "needs_input", undefined), 'Agent "t" is waiting for an answer')
-    assert.strictEqual(outcome("t", "unknown", undefined), 'Agent "t" finished without a status line')
+    assert.strictEqual(outcome("t", undefined), 'Agent "t" finished')
+    assert.strictEqual(outcome("t", "boom"), 'Agent "t" failed: boom')
   })
 })
 
@@ -1681,19 +1681,15 @@ describe("pure", () => {
     }),
   )
 
-  it("report fields anywhere, markdown emphasis, full-width colon, Remember section", () => {
-    const r = parseReport(
-      "did things\n\n**Status**： Completed\n_summary_: fixed it\n\n## Remember\nuse bun\n\n## Other\nx",
-    )
-    assert.deepStrictEqual(r, { status: "completed", summary: "fixed it", remember: "use bun" })
-    assert.deepStrictEqual(parseReport("nothing here"), { status: "unknown", summary: undefined, remember: undefined })
-    // Cursor's afterAgentResponse joins the turn's messages without a line break.
-    assert.strictEqual(
-      parseReport("创建 `hello.txt`，建分支并提交。status: completed\nsummary: DONE").status,
-      "completed",
-    )
-    assert.strictEqual(parseReport("Done.Status: failed").status, "failed")
-    assert.strictEqual(parseReport("the status: field is described below").status, "unknown")
+  it("summary is the first non-empty line cut to about 120 characters; the Remember section is still picked up", () => {
+    const r = parseReport("\n  \nFixed it. Tests pass.\nmore\n\n## Remember\nuse bun\n\n## Other\nx")
+    assert.deepStrictEqual(r, { summary: "Fixed it. Tests pass.", remember: "use bun" })
+    assert.deepStrictEqual(parseReport(""), { summary: undefined, remember: undefined })
+    const long = parseReport("x".repeat(200)).summary!
+    assert.strictEqual(long.length, 120)
+    assert.isTrue(long.endsWith("…"))
+    // A status line is no longer parsed: it is just the first line.
+    assert.strictEqual(parseReport("status: needs_input\nwhich one?").summary, "status: needs_input")
   })
 
   it("claude startup menus: Down until the accept option is under ❯, then Enter, once", () => {
