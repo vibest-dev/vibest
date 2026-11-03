@@ -144,6 +144,8 @@ const checks: ReadonlyArray<Check> = [
           ],
           { cwd: dir, env: w.env(env), stdout: "ignore", stderr: Bun.file(path.join(w.root, "rex-server.log")) },
         )
+        // Every rex terminal of this run is on that server (the check reads its session list below).
+        w.ownRuntimes.add("rex")
         await until(
           "the isolated Rex server",
           async () =>

@@ -74,6 +74,8 @@ export class World {
   private readonly started: Array<ReturnType<typeof Bun.spawn>> = []
   /** The herdr session this run uses (`vibest … --session`), never the user's; stopped at the end. */
   readonly herdrSession: string
+  /** Runtime kinds whose every terminal is on a server this run started and owns (S16's isolated Rex server). */
+  readonly ownRuntimes = new Set<string>()
 
   private constructor(readonly root: string) {
     this.vibestHome = path.join(root, "vibest")
@@ -176,7 +178,8 @@ export class World {
 
   /**
    * Terminals vibest recorded outside this world's herdr sessions (its own and the ones a check names after it,
-   * `<session>-…`): a check that opened a pane in a session it does not own, the user's included.
+   * `<session>-…`): a check that opened a pane in a session it does not own, the user's included. A runtime in
+   * `ownRuntimes` is on a server of this run's own, so its terminals are never foreign.
    */
   foreignTerminals(): ReadonlyArray<string> {
     const file = path.join(this.vibestHome, "vibest.db")
@@ -185,7 +188,9 @@ export class World {
     try {
       const rows = db.query("SELECT id, runtime FROM session").all() as Array<{ id: string; runtime: string | null }>
       return rows.flatMap((r) => {
-        const terminal = (JSON.parse(r.runtime ?? "{}") as { id?: string }).id ?? ""
+        const runtime = JSON.parse(r.runtime ?? "{}") as { kind?: string; id?: string }
+        if (runtime.kind !== undefined && this.ownRuntimes.has(runtime.kind)) return []
+        const terminal = runtime.id ?? ""
         const session = terminal.split("/")[0] ?? ""
         return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
           ? []
