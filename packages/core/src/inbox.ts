@@ -368,8 +368,7 @@ export class Inbox extends Context.Service<
             const ended = [...(leases.get(projectId) ?? [])]
               .filter(([, until]) => now === undefined || until <= now)
               .map(([id]) => id)
-            forget(projectId, ended)
-            return db.releaseLeased(projectId, ended)
+            return Effect.tap(db.releaseLeased(projectId, ended), () => Effect.sync(() => forget(projectId, ended)))
           }),
           true,
         )

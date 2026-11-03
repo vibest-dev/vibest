@@ -228,8 +228,8 @@ export const sessionRestart = (deps: {
         }),
       )
     }).pipe(
-      // Ended part way (vibestd stopping): the mark must not keep the session from its checks.
-      Effect.onInterrupt(() => deps.restarting.clear(id)),
+      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks.
+      Effect.ensuring(deps.restarting.clear(id)),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
