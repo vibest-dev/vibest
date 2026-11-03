@@ -13,9 +13,11 @@ import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import {
+  Cause,
   Clock,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   FileSystem,
   HashMap,
@@ -392,6 +394,64 @@ describe.concurrent("Sessions", () => {
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
       assert.notInclude(row!.message, "pane tail")
+    }),
+  )
+
+  test(
+    "a session's in-memory flags, lock and live status go once it ends; resumed, its next turn ends as any turn does; archived, they go again with no check of its own",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.strictEqual(yield* db.liveStatuses, 1)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      // Concurrent checks, as the poll and a runtime event run them: none leaves a lock behind.
+      yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
+      assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
+      assert.deepStrictEqual(yield* sessions.inMemory, { tracked: 1, locks: 0 })
+      assert.strictEqual(yield* db.liveStatuses, 0)
+      // The next poll drops the flags of the session that is no longer live.
+      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      // Nothing of the dropped flags is missed: the next message resumes it and its turn is collected.
+      yield* sessions.send(id, "next")
+      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { turnState: "open", exitedAt: null })
+      yield* writeResult(id, "pi", { text: "done again" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "done again")
+      // A live session between turns keeps its flags, across polls too; archived, the next poll drops them, though it
+      // no longer checks the row (archive set exitedAt).
+      yield* TestClock.adjust("10 seconds")
+      assert.strictEqual((yield* sessions.inMemory).tracked, 1)
+      assert.deepInclude(yield* db.getSession(id), { status: "idle" })
+      yield* sessions.remove(id)
+      assert.strictEqual(yield* db.liveStatuses, 0)
+      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      // Results reached the coordinator through the project's lock, which is gone too.
+      assert.strictEqual(yield* (yield* Inbox).locks, 0)
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "two concurrent removes: one removes, the other is refused as already being removed",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      // Exited, so a poll may sweep its flags while the removes start: the refusal must hold anyway.
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      const [a, b] = yield* Effect.all(
+        [Effect.exit(sessions.remove(id)), Effect.exit(sessions.remove(id)), TestClock.adjust("5 seconds")],
+        { concurrency: "unbounded" },
+      )
+      const refused = [a, b].filter(Exit.isFailure)
+      assert.lengthOf(refused, 1)
+      assert.include(Cause.pretty(refused[0]!.cause), `${id} is already being removed`)
+      assert.isTrue((yield* db.getSession(id))!.metadata.archived)
     }),
   )
 
@@ -3407,6 +3467,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.lengthOf(batches, 1)
       assert.include(batches[0]!, "<agent-result")
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
+      // Each pull claimed its batch under the project's lock; none is left once the claims are done.
+      assert.strictEqual(yield* inbox.locks, 0)
+      // The auto-archive left no flags either, once the poll ran.
+      yield* untilVirtual((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
     }),
   )
 

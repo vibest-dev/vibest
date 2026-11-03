@@ -12,16 +12,13 @@ import {
   Effect,
   Exit,
   FileSystem,
-  HashMap,
   Layer,
   Option,
   Path,
   PubSub,
   Queue,
   Schedule,
-  Semaphore,
   Stream,
-  SynchronizedRef,
 } from "effect"
 
 import {
@@ -44,6 +41,7 @@ import {
 } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { Harnesses } from "./harness.ts"
+import { keyedLock } from "./keyed-lock.ts"
 import { Layout } from "./paths.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
@@ -113,6 +111,8 @@ export class Inbox extends Context.Service<
     ) => Effect.Effect<InboxReply>
     /** Retire this process's claim when the coordinator row no longer matches the attachment. Does not clear the marker. */
     readonly reconcile: (projectId: number) => Effect.Effect<void>
+    /** Project locks held or waited on (vibestd-state.md 3): tests check it shrinks back. */
+    readonly locks: Effect.Effect<number>
   }
 >()("vibest/Inbox") {
   static readonly layer = Layer.effect(
@@ -156,21 +156,11 @@ export class Inbox extends Context.Service<
         )
       const registry = createRegistry()
 
-      const locks = yield* SynchronizedRef.make(HashMap.empty<number, Semaphore.Semaphore>())
-      const lock = (projectId: number) =>
-        SynchronizedRef.modifyEffect(locks, (map) =>
-          Option.match(HashMap.get(map, projectId), {
-            onSome: (s) => Effect.succeed([s, map] as const),
-            onNone: () => Semaphore.make(1).pipe(Effect.map((s) => [s, HashMap.set(map, projectId, s)] as const)),
-          }),
-        )
+      // Dropped once released with nobody waiting (vibestd-state.md 3).
+      const locks = keyedLock<number>()
 
       const withLock = <A, E, R>(projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
-        drain.work(
-          `inbox project ${projectId}`,
-          lock(projectId).pipe(Effect.flatMap((s) => s.withPermit(body))),
-          settlement,
-        )
+        drain.work(`inbox project ${projectId}`, locks.withLock(projectId)(body), settlement)
 
       const removeClaimFile = (file: string) =>
         fs.remove(file).pipe(
@@ -253,47 +243,48 @@ export class Inbox extends Context.Service<
       const deliver = (projectId: number) =>
         drain.work(
           `deliver project ${projectId}`,
-          lock(projectId).pipe(
-            Effect.flatMap((s) =>
-              s.withPermit(
-                Effect.gen(function* () {
-                  // Before any early return: a busy, missing, or unreachable coordinator still retires a stale claim.
-                  yield* reconcileLocked(projectId)
-                  const coord = yield* db.coordinatorOf(projectId)
-                  if (!coord?.address || coord.address.id === "" || !coord.runtime)
-                    return yield* db.dropWaiting(projectId, "absent")
-                  const address = encodeAddress(coord.address)
-                  const guard = { projectId, runtime: coord.runtime, address }
-                  const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-                  if (Option.isNone(h)) return
-                  const presence = yield* coordinatorIdle(h.value, coord.address)
-                  if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-                  if (presence !== "idle") return
-                  const fence = yield* db.readCoordinatorFence(projectId)
-                  // Recheck under this lock, after the runtime was awaited, so attach cannot overlap an entered paste.
-                  if (fence && inboxOf(fence.harnessId) === "bridge" && fence.bridgeSet) return
-                  const batch = nextBatch(yield* db.coordinatorPending(projectId))
-                  if (batch.length === 0) return
-                  // Its harness takes its rows itself (`stream`); they wait until it does.
-                  if (inboxOf(coord.harnessId) === "subscribe") return
-                  const claimed = yield* db.claim(
-                    batch.map((r) => r.id),
-                    guard,
+          locks
+            .withLock(projectId)(
+              Effect.gen(function* () {
+                // Before any early return: a busy, missing, or unreachable coordinator still retires a stale claim.
+                yield* reconcileLocked(projectId)
+                const coord = yield* db.coordinatorOf(projectId)
+                if (!coord?.address || coord.address.id === "" || !coord.runtime)
+                  return yield* db.dropWaiting(projectId, "absent")
+                const address = encodeAddress(coord.address)
+                const guard = { projectId, runtime: coord.runtime, address }
+                const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+                if (Option.isNone(h)) return
+                const presence = yield* coordinatorIdle(h.value, coord.address)
+                if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
+                if (presence !== "idle") return
+                const fence = yield* db.readCoordinatorFence(projectId)
+                // Recheck under this lock, after the runtime was awaited, so attach cannot overlap an entered paste.
+                if (fence && inboxOf(fence.harnessId) === "bridge" && fence.bridgeSet) return
+                const batch = nextBatch(yield* db.coordinatorPending(projectId))
+                if (batch.length === 0) return
+                // Its harness takes its rows itself (`stream`); they wait until it does.
+                if (inboxOf(coord.harnessId) === "subscribe") return
+                const claimed = yield* db.claim(
+                  batch.map((r) => r.id),
+                  guard,
+                )
+                if (claimed.length === 0) return
+                const body = text(batch.filter((r) => claimed.includes(r.id)))
+                yield* h.value
+                  .send(coord.address, { text: body })
+                  .pipe(
+                    Effect.onExit((exit) =>
+                      Exit.isSuccess(exit) ? markDelivered(claimed) : db.setInboxStatus(claimed, "failed", "sending"),
+                    ),
                   )
-                  if (claimed.length === 0) return
-                  const body = text(batch.filter((r) => claimed.includes(r.id)))
-                  yield* h.value
-                    .send(coord.address, { text: body })
-                    .pipe(
-                      Effect.onExit((exit) =>
-                        Exit.isSuccess(exit) ? markDelivered(claimed) : db.setInboxStatus(claimed, "failed", "sending"),
-                      ),
-                    )
-                }),
+              }),
+            )
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`),
               ),
             ),
-            Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
-          ),
         )
 
       const announce = (row: InboxRow) =>
@@ -385,36 +376,32 @@ export class Inbox extends Context.Service<
             const claimOne = () =>
               drain.work(
                 `Pi claim project ${projectId}`,
-                lock(projectId).pipe(
-                  Effect.flatMap((s) =>
-                    s.withPermit(
-                      Effect.uninterruptible(
-                        Effect.gen(function* () {
-                          if (!origin) return undefined
-                          const current = yield* db.coordinatorOf(projectId)
-                          if (
-                            !current ||
-                            inboxOf(current.harnessId) !== "subscribe" ||
-                            current.harnessId !== origin.harnessId ||
-                            !current.address ||
-                            !current.runtime
-                          )
-                            return undefined
-                          if (current.runtime !== origin.runtime || encodeAddress(current.address) !== origin.address)
-                            return undefined
-                          const pending = yield* db.coordinatorPending(projectId)
-                          if (pending.length === 0) return undefined
-                          const batch = nextBatch(pending)
-                          const claimed = yield* db.claim(
-                            batch.map((r) => r.id),
-                            origin,
-                          )
-                          if (claimed.length === 0) return undefined
-                          unconfirmed = claimed.slice()
-                          return text(batch.filter((r) => claimed.includes(r.id)))
-                        }),
-                      ),
-                    ),
+                locks.withLock(projectId)(
+                  Effect.uninterruptible(
+                    Effect.gen(function* () {
+                      if (!origin) return undefined
+                      const current = yield* db.coordinatorOf(projectId)
+                      if (
+                        !current ||
+                        inboxOf(current.harnessId) !== "subscribe" ||
+                        current.harnessId !== origin.harnessId ||
+                        !current.address ||
+                        !current.runtime
+                      )
+                        return undefined
+                      if (current.runtime !== origin.runtime || encodeAddress(current.address) !== origin.address)
+                        return undefined
+                      const pending = yield* db.coordinatorPending(projectId)
+                      if (pending.length === 0) return undefined
+                      const batch = nextBatch(pending)
+                      const claimed = yield* db.claim(
+                        batch.map((r) => r.id),
+                        origin,
+                      )
+                      if (claimed.length === 0) return undefined
+                      unconfirmed = claimed.slice()
+                      return text(batch.filter((r) => claimed.includes(r.id)))
+                    }),
                   ),
                 ),
               )
@@ -710,6 +697,7 @@ export class Inbox extends Context.Service<
         ack: (input) => settle(input, "ack"),
         release: (input) => settle(input, input.retry ? "release-retry" : "release-fail"),
         reconcile: (projectId) => withLock(projectId, reconcileLocked(projectId)),
+        locks: Effect.sync(() => locks.size()),
       })
     }),
   )

@@ -2,6 +2,7 @@ import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type Sessi
 import { Drain } from "@vibest/core/drain"
 import { harnessOptions, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
+import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
@@ -44,7 +45,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Semaphore, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import type { RpcGroup } from "effect/rpc"
@@ -353,7 +354,7 @@ export const handlers = VibestRpcs.toLayer(
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
     /** One project's main-agent changes at a time: the running check and the launch (CoordinatorSession), and the stop. */
-    const projectLocked = keyedLock()
+    const projectLocked = keyedLock<string>()
 
     /**
      * The project's main agent alive (idle or busy) in a terminal other than `terminal`, or null. Fails open: null when
@@ -701,8 +702,7 @@ export const handlers = VibestRpcs.toLayer(
             })
           // One main agent per project: every start goes through here, so a second one is refused here. The check and the
           // launch hold the project's lock, as a stop does, so two starts at once cannot both pass.
-          return yield* projectLocked(
-            key,
+          return yield* projectLocked.withLock(key)(
             Effect.gen(function* () {
               const running = yield* runningCoordinator(key, terminal)
               if (running)
@@ -735,8 +735,7 @@ export const handlers = VibestRpcs.toLayer(
       "Project.StopCoordinator": ({ runtime, address }) =>
         Effect.gen(function* () {
           const { key } = yield* scope("Project.StopCoordinator")
-          return yield* projectLocked(
-            key,
+          return yield* projectLocked.withLock(key)(
             Effect.gen(function* () {
               const projectId = yield* db.projectId(key)
               const coord = yield* db.coordinatorOf(projectId)
@@ -825,27 +824,3 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
-
-/**
- * Runs bodies one at a time per key. One vibestd serves every request, so an in-process lock is enough (not sqlite: a
- * locked section waits on the runtime for up to 10 s, and a lock row would outlive a crash). A key's entry lives only
- * while a body holds or waits for it, so the map does not grow with keys; `size` is for tests.
- */
-export const keyedLock = () => {
-  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
-  const run = <A, E, R>(key: string, body: Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      let entry = locks.get(key)
-      if (entry === undefined) locks.set(key, (entry = { lock: Semaphore.makeUnsafe(1), users: 0 }))
-      const held = entry
-      held.users++
-      return held.lock.withPermit(body).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            if (--held.users === 0) locks.delete(key)
-          }),
-        ),
-      )
-    })
-  return Object.assign(run, { size: () => locks.size })
-}
