@@ -82,7 +82,10 @@ describe("vibest.sock", () => {
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
       // Says what happened and what to run: a caller without the header predates it, so it is told to restart.
       const said = String(Exit.isFailure(rejected) && Cause.pretty(rejected.cause))
-      assert.include(said, `vibest was updated to ${VERSION}; run ${MISMATCH_ACTION} to restart this agent on it`)
+      assert.include(
+        said,
+        `this agent runs an older vibest (protocol none), vibestd runs ${VERSION} (protocol ${PROTOCOL}); run ${MISMATCH_ACTION} to restart this agent on it`,
+      )
       const newer = yield* Effect.exit(raw.List({}, { headers: { "vibest-protocol": String(PROTOCOL + 1) } }))
       assert.include(
         String(Exit.isFailure(newer) && Cause.pretty(newer.cause)),

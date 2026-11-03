@@ -14,7 +14,7 @@ import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
-import { askYesNo, interactive, Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
@@ -144,6 +144,11 @@ const daemon = (host: Daemon.Host) =>
         userOnly("daemon restart").pipe(
           // A no on the terminal is the user's answer, not a failure; anything else that leaves vibestd as it was fails.
           Effect.andThen(Effect.flatMap(VibestCommand, (command) => replaceDaemon({ version: VERSION, command }))),
+          // The agents still on another integration than this vibestd's, asked about once, as `vibest update` does.
+          Effect.andThen(restartAgents(VERSION, false, "vibest daemon restart")),
+          Effect.flatMap((failed) =>
+            failed === undefined ? Effect.void : Effect.fail(new UpdateError({ message: failed })),
+          ),
           Effect.catchIf(
             (e) => e._tag === "ReplaceFailed" && e.outcome === "declined",
             () => Console.log(`${LEFT.declined}.`),
@@ -151,7 +156,7 @@ const daemon = (host: Daemon.Host) =>
         ),
       ).pipe(
         Command.withDescription(
-          "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart",
+          "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart. Then offers to restart the agents on another integration in place, with their conversations",
         ),
       ),
       // Internal: whether this vibest can open the running vibestd's database (Daemon.Handoff runs it first).
@@ -908,6 +913,8 @@ const doctor = Command.make("doctor", {}, () =>
       { concurrency: "unbounded" },
     ).pipe(Effect.provide(Harness.layer))
     sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
+    const installs = yield* extraVibests
+    if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
     const usable = HARNESS_IDS.filter((_, i) => harnesses[i]!.mark === "ok")
 
     // vibestd: the background service. Runtimes and plugins are loaded there, so doctor starts it when it is not running.
@@ -1045,6 +1052,71 @@ export const installMethod = (self: ReadonlyArray<string>, harnesses: string | u
   const m = self.length === 1 ? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) : null
   return m ? ({ kind: "curl", share: m[1]! } as const) : undefined
 }
+
+/**
+ * Which package manager owns the vibest at `real` (a real path, links resolved): bun's global directory, or an npm
+ * prefix (`<prefix>/lib/node_modules/@vibest/…`: npm under fnm, mise, nvm, Homebrew). Undefined: neither, as far as
+ * the path shows.
+ */
+export const ownerOf = (real: string) => {
+  if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
+  const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
+  return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
+}
+
+/**
+ * The command that upgrades the npm-installed vibest whose binary is at `real`, with the package manager that owns it
+ * (not the first npm on PATH). bun is also given the platform package: it may skip an optional dependency.
+ * ponytail: an npm prefix's own npm is taken to be `<prefix>/bin/npm`, as fnm, mise, nvm and Homebrew lay it out.
+ */
+export const upgradeCommand = (real: string, platform = `${process.platform}-${process.arch}`) => {
+  const owner = ownerOf(real)
+  return owner?.kind === "bun"
+    ? ["bun", "add", "-g", "@vibest/cli@beta", `@vibest/cli-${platform}@beta`]
+    : owner?.kind === "npm"
+      ? [`${owner.prefix}/bin/npm`, "install", "-g", "--prefix", owner.prefix, "@vibest/cli@beta"]
+      : ["npm", "install", "-g", "@vibest/cli@beta"]
+}
+
+/** The command that removes the vibest on PATH at `link` (real path `real`). */
+export const removeCommand = (link: string, real: string) => {
+  const owner = ownerOf(real)
+  return owner?.kind === "bun"
+    ? "bun remove -g @vibest/cli"
+    : owner?.kind === "npm"
+      ? `${shellQuote(`${owner.prefix}/bin/npm`)} uninstall -g --prefix ${shellQuote(owner.prefix)} @vibest/cli`
+      : `rm ${shellQuote(link)}`
+}
+
+/**
+ * More than one `vibest` on PATH (one per real file, in PATH order): each with the version it reports, the first as the
+ * one that runs, the others with how to remove them. Empty when there is one or none.
+ */
+const extraVibests = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const dirs = (Option.getOrUndefined(yield* Config.option(Config.String("PATH"))) ?? "").split(":").filter(Boolean)
+  const found: Array<{ readonly link: string; readonly real: string }> = []
+  for (const dir of dirs) {
+    const link = `${dir}/vibest`
+    const real = yield* fs.realPath(link).pipe(Effect.option)
+    if (Option.isSome(real) && !found.some((f) => f.real === real.value)) found.push({ link, real: real.value })
+  }
+  if (found.length < 2) return []
+  return yield* Effect.forEach(
+    found,
+    (v, i) =>
+      Effect.map(versionOf([v.link]), (version): Finding =>
+        i === 0
+          ? { mark: "note", text: `${v.link} ${version} runs as vibest; ${found.length - 1} more on PATH` }
+          : {
+              mark: "problem",
+              text: `${v.link} ${version} is also on PATH, behind the first`,
+              fix: removeCommand(v.link, v.real),
+            },
+      ),
+    { concurrency: "unbounded" },
+  )
+})
 
 /** The latest version: the `beta` tag on the npm registry (npm_config_registry), or the release's `version` file. */
 const latestVersion = (
@@ -1229,7 +1301,7 @@ const handoffDaemon = (old: Ping, target: { readonly version: string; readonly c
  * them in place once this process has exited: this `vibest update` may run inside one of them (the main agent's shell),
  * and ending that harness would end it too. Returns why the step failed, if it did.
  */
-const restartAgents = (version: string, yes: boolean) =>
+const restartAgents = (version: string, yes: boolean, command: "vibest update" | "vibest daemon restart") =>
   Effect.gen(function* () {
     const cwd = (yield* Path.Path).resolve(".")
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
@@ -1242,17 +1314,18 @@ const restartAgents = (version: string, yes: boolean) =>
     const blocked = outdated.filter((a) => a.blocked !== null)
     const restartable = outdated.filter((a) => a.blocked === null)
     const refused = "their calls to vibestd will be refused with a message that names vibest update"
+    const lead = command === "vibest update" ? `vibest ${version} installed.` : `vibestd ${version} runs now.`
     const list = `${outdated.length} agent${outdated.length === 1 ? "" : "s"} still run${outdated.length === 1 ? "s" : ""} the old integration (${ids}${busy})`
     for (const a of blocked) yield* Console.log(`${a.id} cannot be restarted in place: ${a.blocked}.`)
     if (restartable.length === 0) return
     if (!yes) {
       if (!(yield* interactive))
         return yield* Console.log(
-          `vibest ${version} installed. ${list}. Not restarted without a terminal (vibest update --yes restarts them); ${refused} until then.`,
+          `${lead} ${list}. Not restarted without a terminal (${command === "vibest update" ? "vibest update --yes" : "vibest daemon restart in a terminal"} restarts them); ${refused} until then.`,
         )
       if (
         !(yield* askYesNo(
-          `vibest ${version} installed. ${list}. Restart them now and continue? [Y/n]: `,
+          `${lead} ${list}. Restart ${restartable.length === 1 ? "it" : `these ${restartable.length} agents`} in place and continue ${restartable.length === 1 ? "its conversation" : "their conversations"}? [Y/n]: `,
           "2 minutes",
           true,
         ))
@@ -1261,7 +1334,7 @@ const restartAgents = (version: string, yes: boolean) =>
     }
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after: process.pid }))
     yield* Console.log(
-      `vibest update has finished. vibestd restarts ${restartable.map((a) => a.id).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `${command} has finished. vibestd restarts ${restartable.map((a) => a.id).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })
 
@@ -1302,10 +1375,9 @@ const update = Command.make(
         if (compareVersions(VERSION, latest) >= 0) yield* Console.log(`vibest is already up to date (v${VERSION}).`)
         else {
           yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
-          // ponytail: Bun keeps its global packages under ~/.bun; any other launcher is taken for npm.
-          const pm = self[0]!.includes("/.bun/")
-            ? ["bun", "add", "-g", "@vibest/cli@beta"]
-            : ["npm", "install", "-g", "@vibest/cli@beta"]
+          // The package manager that owns this binary, from its real path.
+          const fs = yield* FileSystem.FileSystem
+          const pm = upgradeCommand(yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)))
           // install.sh of the release, read whole before it runs (a cut-off download must not run half a script), into this install.
           const installer =
             method.kind === "npm"
@@ -1324,6 +1396,11 @@ const update = Command.make(
           }
         }
       }
+      // More than one vibest on PATH: which one runs, and how to remove the others.
+      for (const f of yield* extraVibests)
+        yield* Console.log(
+          `${f.mark === "problem" ? "warning: " : ""}${f.text}${f.fix ? `; remove it with: ${f.fix}` : ""}`,
+        )
       // 2. vibestd, from its Ping: keep, hand off or restart; the plan and its reason first.
       const running = Option.getOrUndefined(yield* readPing(layout.socket))
       const plan = daemonPlan(running, target)
@@ -1338,7 +1415,7 @@ const update = Command.make(
             : undefined
       if (failed !== undefined) return yield* new UpdateError({ message: `vibest ${target.version}: ${failed}` })
       // 3. The agents still on the old integration, asked about once.
-      const agents = yield* restartAgents(target.version, yes)
+      const agents = yield* restartAgents(target.version, yes, "vibest update")
       if (agents !== undefined) return yield* new UpdateError({ message: agents })
     }),
 ).pipe(

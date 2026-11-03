@@ -22,6 +22,7 @@ it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the argume
     )
     await fs.mkdir(cli, { recursive: true })
     await fs.copyFile(launcher, path.join(cli, "vibest.cjs"))
+    await fs.writeFile(path.join(cli, "..", "package.json"), JSON.stringify({ version: "0.0.0-test" }))
     // pnpm's bin shims export NODE_PATH (its hoisted store, which links the workspace's real platform package): drop it.
     const run = () =>
       childProcess.spawnSync("node", [path.join(cli, "vibest.cjs"), "a b", "--x"], {
@@ -33,6 +34,10 @@ it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the argume
     const missing = run()
     assert.strictEqual(missing.status, 1)
     assert.include(missing.stderr, `vibest: no binary for ${process.platform}-${process.arch}`)
+    assert.include(
+      missing.stderr,
+      `install it with: npm install -g @vibest/cli-${process.platform}-${process.arch}@0.0.0-test`,
+    )
 
     await fs.mkdir(path.dirname(binary), { recursive: true })
     await fs.writeFile(binary, `#!/bin/sh\nprintf '%s|' "$@"\nexit 7\n`, { mode: 0o755 })
