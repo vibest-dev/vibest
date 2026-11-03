@@ -1321,7 +1321,7 @@ const restartAgents = (version: string, yes: boolean, command: "vibest update" |
     if (!yes) {
       if (!(yield* interactive))
         return yield* Console.log(
-          `${lead} ${list}. Not restarted without a terminal (vibest update --yes restarts them); ${refused} until then.`,
+          `${lead} ${list}. Not restarted without a terminal (${command === "vibest update" ? "vibest update --yes" : "vibest daemon restart in a terminal"} restarts them); ${refused} until then.`,
         )
       if (
         !(yield* askYesNo(
