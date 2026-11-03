@@ -340,7 +340,7 @@ describe("plugins: spawn hook", () => {
           ["current", "active"],
         ],
       )
-      const supported = "agent.start.before, agent.fail, agent.idle"
+      const supported = "agent.start.before, agent.fail"
       assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
       assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
       assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
@@ -493,33 +493,6 @@ describe("plugins: loading", () => {
         ["harness-choice", "y", "x"],
       )
       assert.strictEqual((yield* second.start(event)).model, "from-x")
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
-  it.live("package check is the builtin rule and stays off until configured", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* home
-      const config = (entries: ReadonlyArray<unknown>) =>
-        fs.writeFileString(path.join(dir, "vibest.json"), JSON.stringify({ plugins: entries }))
-      const builtin = [["harness-choice", "active", "builtin:harness-choice"]]
-      yield* config([])
-      assert.deepStrictEqual(
-        (yield* (yield* loaded(dir)).list).map((p) => [p.id, p.status, p.source]),
-        builtin,
-      )
-      yield* config([{ package: "check", options: { command: "pnpm test", attempts: 3 } }])
-      const configured = yield* loaded(dir)
-      assert.deepStrictEqual(
-        (yield* configured.list).map((p) => [p.id, p.status, p.source]),
-        [...builtin, ["check", "active", "builtin:check"]],
-      )
-      yield* config([{ package: "check", options: { command: "pnpm test", attempts: 3 } }, "-check"])
-      assert.deepStrictEqual(
-        (yield* (yield* loaded(dir)).list).map((p) => [p.id, p.status, p.source]),
-        builtin,
-      )
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

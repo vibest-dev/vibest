@@ -11,7 +11,7 @@ export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefus
   }
 }
 
-/** An `agent.fail` or `agent.idle` callback crashed or timed out: that operation fails with this. */
+/** An `agent.fail` callback crashed or timed out: that operation fails with this. */
 export class HookFailed extends Schema.TaggedError<HookFailed>()("HookFailed", { message: Schema.String }) {}
 
 /** A top-level event field a callback changed. */
@@ -27,7 +27,7 @@ export const Change = Schema.Struct({
 /** One callback's run, in plugin order (plugins.md §5). */
 export const TraceEntry = Schema.Struct({
   plugin: Schema.String,
-  /** The hook it ran for: `agent.start.before`, `agent.fail`, `agent.idle`. */
+  /** The hook it ran for: `agent.start.before`, `agent.fail`. */
   hook: Schema.String,
   outcome: Schema.Literals(["ok", "refused", "crashed", "timeout"]),
   ms: Schema.Number,

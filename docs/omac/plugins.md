@@ -7,17 +7,17 @@ First use case: A plugin intercepts session spawn to select harness and model ba
 
 ## 0. Decided Choices
 
-| Decision                                  | Content                                                                                                                                                                       |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| API                                       | Follow OpenCode V2 Effect edition: `Plugin.define({ id, effect })`, `ctx.<domain>.hook(...)`; Effect-only, no Promise edition                                                 |
-| Package                                   | `@omac/plugin` (repo package `packages/plugin`), mapped at runtime by omacd, normally imported by plugins                                                                     |
-| Config                                    | Single location: `plugins` field in `~/.omac/omac.json` (JSONC) + directory `~/.omac/plugins/` (`OMAC_HOME` relocates both); format aligned with OpenCode                     |
-| Project-level plugins                     | None for now, deferred for future consideration                                                                                                                               |
-| npm plugins                               | Aligned with OpenCode: config specifies `pkg@ver` for automatic installation; implemented with omacd acting as bun (`BUN_BE_BUN=1 omac add`), adding no dependencies          |
-| Hot reload and activation wait            | Required once npm is supported (async installation), aligned with OpenCode's supervisor; spawn activation wait has a cap                                                      |
-| Multiple plugins modifying the same value | One event mutated in place by every callback in plugin order (no per-callback copy); later execution overrides; host records source via per-callback diffs                    |
-| Composition mode                          | Sequential for every hook; the builtin default harness choice runs first                                                                                                      |
-| Rejection                                 | Only `agent.start.before` may refuse (`AgentRefused`): a defect or a timeout there is also a refusal. On `agent.fail` / `agent.idle` a defect or timeout fails that operation |
+| Decision                                  | Content                                                                                                                                                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API                                       | Follow OpenCode V2 Effect edition: `Plugin.define({ id, effect })`, `ctx.<domain>.hook(...)`; Effect-only, no Promise edition                                        |
+| Package                                   | `@omac/plugin` (repo package `packages/plugin`), mapped at runtime by omacd, normally imported by plugins                                                            |
+| Config                                    | Single location: `plugins` field in `~/.omac/omac.json` (JSONC) + directory `~/.omac/plugins/` (`OMAC_HOME` relocates both); format aligned with OpenCode            |
+| Project-level plugins                     | None for now, deferred for future consideration                                                                                                                      |
+| npm plugins                               | Aligned with OpenCode: config specifies `pkg@ver` for automatic installation; implemented with omacd acting as bun (`BUN_BE_BUN=1 omac add`), adding no dependencies |
+| Hot reload and activation wait            | Required once npm is supported (async installation), aligned with OpenCode's supervisor; spawn activation wait has a cap                                             |
+| Multiple plugins modifying the same value | One event mutated in place by every callback in plugin order (no per-callback copy); later execution overrides; host records source via per-callback diffs           |
+| Composition mode                          | Sequential for every hook; the builtin default harness choice runs first                                                                                             |
+| Rejection                                 | Only `agent.start.before` may refuse (`AgentRefused`): a defect or a timeout there is also a refusal. On `agent.fail` a defect or timeout fails that operation       |
 
 ## 1. OpenCode V2 Reference (Source Code Studied)
 
@@ -70,12 +70,11 @@ export namespace Plugin {
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
-  readonly "agent.idle": { readonly event: AgentIdle; readonly error: never }
 }
 
 export interface Context {
   readonly options: Readonly<Record<string, unknown>>        // options from config entry
-  readonly agent: { readonly hook: <S extends "start.before" | "fail" | "idle">(short: S, callback: ...) => Effect.Effect<void, never, Scope.Scope> }
+  readonly agent: { readonly hook: <S extends "start.before" | "fail">(short: S, callback: ...) => Effect.Effect<void, never, Scope.Scope> }
   readonly subscription: { readonly report: (input: SubscriptionReport) => Effect.Effect<void> }  // unregistered when scope closes; an unknown name fails setup
 }
 
@@ -103,15 +102,6 @@ export interface AgentFail {                                  // a started sessi
   move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined  // mutable: where the session restarts
 }
 
-export interface AgentIdle {                                  // the subagent's round would otherwise go to its parent
-  readonly sessionId: string
-  readonly answer: string
-  readonly checkAttempts: number                            // finished check attempts
-  readonly ran: { readonly ok: boolean; readonly tail: string } | undefined
-  prompt: string | undefined                                  // mutable: set to keep it working on that text
-  command: string | undefined                                 // mutable: a check command the host runs outside the lock
-  output: string | undefined                                  // mutable: a failure tail, not a decision
-}
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 ```
 
@@ -213,11 +203,11 @@ Setup can use `Effect.acquireRelease` for resources (tied to plugin scope, relea
 ## 5. Execution Rules (omac's Own)
 
 - Trigger point: In `Sessions.spawn` (`packages/cli/src/sessions.ts`), resolve `repositoryRoot` to repo root first (moving `topLevel` before validation), run hooks immediately after, then run `checkProvider` / `available` / `integration` and row insertion. CLI `omac run` passes through `Server.Spawn` → `Sessions.spawn` (the former MCP `assign` / `handoff` did too; removed in #13), the sole trigger point. herdr session is resolved in `Server.Spawn` prior to hooks, which does not affect "rejection prevents pane launch".
-- Every hook is `sequential`: callbacks run serially in the caller's fiber in §4 order (the builtin default harness choice first), before the session is admitted or its pane started (`agent.start.before`), before the round ends on a limit (`agent.fail`), or before an idle round goes to its parent (`agent.idle`). A usage-limit move runs `agent.start.before` once more for every candidate it is about to start, with the move's harness/provider/model and the session's earlier tries prefilled: a refusal there skips that candidate, and what the chain decides is what starts.
-- Three hooks are registered: `agent.start.before`, `agent.fail`, `agent.idle`. `ctx.agent.hook` with any other name (including the earlier `session.start.before`, `session.spawn` and `worker.spawn`, which have no alias) fails the plugin's setup with `unsupported hook "<name>"; supported: agent.start.before, agent.fail, agent.idle`, so a stale plain-JS plugin shows as `failed` in `omac plugins` instead of running.
+- Every hook is `sequential`: callbacks run serially in the caller's fiber in §4 order (the builtin default harness choice first), before the session is admitted or its pane started (`agent.start.before`), or before the round ends on a limit (`agent.fail`). A usage-limit move runs `agent.start.before` once more for every candidate it is about to start, with the move's harness/provider/model and the session's earlier tries prefilled: a refusal there skips that candidate, and what the chain decides is what starts.
+- Two hooks are registered: `agent.start.before`, `agent.fail`. `ctx.agent.hook` with any other name (including the earlier `session.start.before`, `session.spawn` and `worker.spawn`, which have no alias) fails the plugin's setup with `unsupported hook "<name>"; supported: agent.start.before, agent.fail`, so a stale plain-JS plugin shows as `failed` in `omac plugins` instead of running.
 - Every callback mutates the one event in place: no per-callback copy, so a later plugin sees (and may overwrite) what an earlier one wrote, and a failed or timed-out callback's writes stand unless a later callback overwrites them. Host diffs top-level fields generically (no field whitelist), recording trace `{ plugin, hook, ms, outcome: "ok" | "refused" | "crashed" | "timeout", changes }`. Readonly fields enforced at compile time via TS `readonly`.
 - 5s callback timeout: Callback forked into plugin's own scope with timeout on `Fiber.join`, returning on time even with uninterruptible regions; abandoned fiber finishes on its own, cleaned up by plugin scope (§2). Timeout is Layer parameter (like `options.maxSessions`), default 5s, tests inject shorter values; not user-configurable for now.
-- On `agent.start.before`, a callback failure or timeout is a refusal, never a skip: nothing is inserted, no pane starts. On `agent.fail` and `agent.idle` a failure or timeout fails that operation — an `agent.fail` crash ends the round failed with the plugin error (no move), an `agent.idle` crash delivers the round failed with the plugin error. Nothing is skipped silently.
+- On `agent.start.before`, a callback failure or timeout is a refusal, never a skip: nothing is inserted, no pane starts. On `agent.fail` a failure or timeout fails that operation: the round ends failed with the plugin error (no move). Nothing is skipped silently.
 - `AgentRefused` (only meaningful on `agent.start.before`): Stops immediately, no row inserted, no pane started. Host maps it to wire error `AgentRefused { plugin, reason }` (host injects `plugin`), added to `Spawn.error` in `rpc.ts`; `omac run` reports `AgentRefused: …` on stderr and exits 1. Elsewhere an `AgentRefused` counts as a crash.
 - Normal validation after merging; invalid values yield `HarnessUnavailable` with plugin id that wrote it. If no source provides a harness, returns tagged `NoHarnessChosen` with actionable message: "pass harness, or install a routing plugin", also added to `Spawn.error`.
 - New hooks are added to the `Hooks` map in `@omac/plugin` with their event and error types; every hook composes the same way (sequential, one event mutated in place).
@@ -311,13 +301,13 @@ Reference systems provide five primary extension mechanisms (Oct 2026 survey of 
 
 omac's tradeoff: **Expose minimally first** (following herdr's philosophy). Interception opens only critical points, while other needs callback via `omac` CLI; open further points only with concrete demand, each in a separate PR.
 
-| Mechanism         | omac Extension Points                                                                                                                                                                                                            | Status                                                                                                  |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| ① Intercept       | `agent.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `agent.idle` (keep a round working); `session.result` (quality gate: send back for rework, auto-open PR) | `agent.start.before`, `agent.fail`, `agent.idle` implemented; `session.result` proposed, not registered |
-| ② Contribute      | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets                                                                                                                              | Not open for now; first candidate is harness adapter                                                    |
-| ③ Edit State      | Model catalog / defaults, rule templates                                                                                                                                                                                         | Not open for now                                                                                        |
-| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset                                                                                                                      | No SDK provided for now, CLI is sufficient                                                              |
-| ⑤ Observe         | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook                                                                                                                               | Proposed, not registered; pending demand                                                                |
+| Mechanism         | omac Extension Points                                                                                                                                                                       | Status                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| ① Intercept       | `agent.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `session.result` (quality gate: send back for rework, auto-open PR) | `agent.start.before`, `agent.fail` implemented; `session.result` proposed, not registered |
+| ② Contribute      | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets                                                                                         | Not open for now; first candidate is harness adapter                                      |
+| ③ Edit State      | Model catalog / defaults, rule templates                                                                                                                                                    | Not open for now                                                                          |
+| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset                                                                                 | No SDK provided for now, CLI is sufficient                                                |
+| ⑤ Observe         | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook                                                                                          | Proposed, not registered; pending demand                                                  |
 
 Constraints:
 

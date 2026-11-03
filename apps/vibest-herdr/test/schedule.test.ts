@@ -52,14 +52,6 @@ const failed = {
   attempts: [],
   harnesses,
 }
-const idle = {
-  sessionId: "aaaaaaaa",
-  agentType: "general",
-  directory: "/w",
-  answer: "done",
-  checkAttempts: 0,
-  ran: undefined,
-}
 
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>
   Plugins.make(plugins).pipe(
@@ -269,7 +261,7 @@ describe("plugin host", () => {
     ),
   )
 
-  it.effect("a timeout in agent.idle fails the operation", () => {
+  it.effect("a timeout in agent.fail fails the operation", () => {
     let entered = false
     return run(
       [
@@ -278,13 +270,13 @@ describe("plugin host", () => {
           Plugin.define({
             id: "hang",
             effect: (ctx) =>
-              ctx.agent.hook("idle", () => Effect.sync(() => (entered = true)).pipe(Effect.andThen(Effect.never))),
+              ctx.agent.hook("fail", () => Effect.sync(() => (entered = true)).pipe(Effect.andThen(Effect.never))),
           }),
         ),
       ],
       (p) =>
         Effect.gen(function* () {
-          const asking = yield* Effect.forkChild(p.idle(idle))
+          const asking = yield* Effect.forkChild(p.fail(failed))
           yield* Effect.gen(function* () {
             while (!entered) yield* TestClock.withLive(Effect.sleep("10 millis"))
           })

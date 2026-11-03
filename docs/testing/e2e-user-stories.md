@@ -6,7 +6,7 @@ Each story is run for real: herdr, CLI agents, models, under the isolation of [e
 **Status** says what can be checked now:
 
 - **now**: today's code (omac semantics: coordinator, session, `run <harness>`, `--peer`, `--archive-on-completion`).
-- **after refactor**: needs the vibest domain (Run, `--agent`, `--in`, `once`/`kept`, `vibest check`, DynamicWorkflow).
+- **after refactor**: needs the vibest domain (Run, `--agent`, `--in`, `once`/`kept`, DynamicWorkflow).
   Until then, the story is the acceptance test for that refactor.
 
 ## Fixture
@@ -96,13 +96,11 @@ Status: now (three `run`s); after refactor as one Run with N Agents and one grou
 
 _As a developer, I want an agent to keep fixing until the tests pass, at most N tries._
 
-| Step                                                                                                                    | Expect                                                                                           |
-| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| now: tell the main Agent "fix login; after each result run `pnpm test` in its worktree and send failures back, 3 tries" | each failing run's output goes back as the next prompt; stops at green or after 3                |
-| after refactor: `vibest check "fix the login bug" --agent coder` with `{ command: "pnpm test", attempts: 3 }`           | one acceptance entry per attempt; Run ends `completed` on green, `failed` after the last attempt |
-| kill the daemon between attempts, restart                                                                               | the loop resumes at the right attempt; no attempt is run twice                                   |
+| Step                                                                                                                    | Expect                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| now: tell the main Agent "fix login; after each result run `pnpm test` in its worktree and send failures back, 3 tries" | each failing run's output goes back as the next prompt; stops at green or after 3 |
 
-Status: now as coordinator behaviour; the program is after refactor.
+Status: now as coordinator behaviour.
 
 ### S8. DynamicWorkflow (type D, program)
 

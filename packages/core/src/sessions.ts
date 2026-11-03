@@ -24,7 +24,6 @@ import {
   Duration,
   Effect,
   Exit,
-  Fiber,
   FileSystem,
   HashMap,
   Layer,
@@ -145,12 +144,6 @@ interface Tracked {
   /** True while core is sending the prompt text. The hook that fires then is the paste's echo, not a typed round. */
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
-  /** Check command in flight for one result mtime. The attempt count lives on the session row. */
-  readonly checking: Ref.Ref<
-    { readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined
-  >
-  /** A continuation paste is in flight. Its wait does not hold the session lock, so a second check must not paste too. */
-  readonly pasting: Ref.Ref<boolean>
 }
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
@@ -159,10 +152,6 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
-  checking: Ref.make<{ readonly mtime: number; readonly fiber: Fiber.Fiber<void>; readonly token: number } | undefined>(
-    undefined,
-  ),
-  pasting: Ref.make(false),
 })
 
 export interface SpawnInput {
@@ -310,11 +299,7 @@ export class Sessions extends Context.Service<
           let next = map
           for (const [id, r] of map) {
             if (live.has(id) || locks.busy(id)) continue
-            const inFlight =
-              (yield* Ref.get(r.stopping)) ||
-              (yield* Ref.get(r.prompting)) ||
-              (yield* Ref.get(r.pasting)) ||
-              (yield* Ref.get(r.checking)) !== undefined
+            const inFlight = (yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting))
             if (!inFlight) next = HashMap.remove(next, id)
           }
           return next
@@ -525,23 +510,20 @@ export class Sessions extends Context.Service<
           return yield* settleAfterInterrupt(h, terminal)
         })
 
-      type Collected = "none" | "pending" | "delivered"
+      type Collected = "none" | "delivered"
       // Assigned once `collectResult` exists. `prompt` runs only after `Sessions.make` finishes.
       let collectResult: (
         h: Runtime,
         session: SessionRow,
-        mode?: "deliver" | "stop",
-        liveState?: AgentState | undefined,
-        parked?: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem> },
       ) => Effect.Effect<
         Collected,
-        RuntimeError | NoSuchSession | PlatformError.PlatformError | SessionBusy,
+        RuntimeError | NoSuchSession | PlatformError.PlatformError,
         ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
       > = () => Effect.die("collectResult")
 
       /** Whether a turn-start report line of the round prompted at `at` exists: the pickup proof §5 compares, durable
        * in the report file. No start line is older than its round's stamp (the HTTP hook writes its line with the stamp
-       * it hands `userPrompt`, the CLI hook sends `Prompt` first; a continuation is stamped before its paste). */
+       * it hands `userPrompt`, the CLI hook sends `Prompt` first). */
       const reportStartedSince = (id: string, at: number) =>
         readReportLines(layout.reportFile(id)).pipe(
           Effect.map((lines) => lines.some((line) => line.turn === "start" && line.ts >= at)),
@@ -636,24 +618,14 @@ export class Sessions extends Context.Service<
         harnesses,
         track,
         lock: locks.withLock,
-        locked,
-        scope,
-        plugins,
-        paneTail,
-        busy,
-        interruptAgent,
-        confirmTimeout: CONFIRM_TIMEOUT,
-        stopWait: STOP_WAIT,
         worktreeOf,
-        notice,
         undelivered,
         logged,
         prompt,
         limitMove: limit.move,
-        pickedUp: pickupNow,
       })
       collectResult = rounds.collectResult
-      const { finish, deliverQueued, userPrompt, nextCheck } = rounds
+      const { finish, deliverQueued, userPrompt } = rounds
 
       // ---- spawn ----
 
@@ -954,10 +926,7 @@ export class Sessions extends Context.Service<
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
 
-      const check = Effect.fn("Sessions.check")(function* (
-        id: string,
-        parked: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem> },
-      ) {
+      const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
         if (!session) return
         const open = session.turnState === "open"
@@ -984,7 +953,7 @@ export class Sessions extends Context.Service<
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
-        if ((yield* collectResult(h, session, "deliver", state, parked)) !== "none") return
+        if ((yield* collectResult(h, session)) !== "none") return
         if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
           if (session.startedAt === null) {
             // vibestd died mid-spawn (SPEC §5.5 spawn).
@@ -1051,34 +1020,8 @@ export class Sessions extends Context.Service<
         )
       })
 
-      const checkLocked = (id: string) => {
-        const parked: { paste?: Effect.Effect<void, unknown, FileSystem.FileSystem>; leave?: Effect.Effect<void> } = {}
-        return Effect.gen(function* () {
-          // A paste is counted from inside the lock until it ends, so a planned Stop never cuts it off (it would paste twice).
-          yield* locked(id)(
-            check(id, parked).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  if (parked.paste) parked.leave = drain.track(`paste ${id}`)
-                }),
-              ),
-            ),
-          )
-          // The pickup wait lives in `paste` and must not hold the lock `check` just released.
-          if (parked.paste) yield* parked.paste
-        }).pipe(
-          Effect.ensuring(
-            Effect.gen(function* () {
-              if (parked.leave) yield* parked.leave
-              if (!parked.paste) return
-              yield* Ref.set((yield* track(id)).pasting, false)
-            }),
-          ),
-          logged(`check ${id}`),
-          Effect.provideContext(platform),
-        )
-      }
-      nextCheck.run = checkLocked
+      const checkLocked = (id: string) =>
+        locked(id)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform))
 
       // ---- send / interrupt / remove ----
 
@@ -1179,9 +1122,8 @@ export class Sessions extends Context.Service<
                 const session = yield* getRow(id)
                 const h = yield* live(session)
                 const terminal = session.address
-                // A result that is already in is delivered; a check still running is killed, not waited out. A
-                // failing idle hook is delivered failed by collectResult itself, so no branch is needed for it.
-                const collected = yield* collectResult(h, session, "stop")
+                // A result that is already in is delivered.
+                const collected = yield* collectResult(h, session)
                 if (collected === "delivered")
                   return { message: `${id} had already finished its turn; its result is delivered` }
                 const seen = yield* agentState(h, terminal)
@@ -1194,12 +1136,7 @@ export class Sessions extends Context.Service<
                     id,
                     message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
                   })
-                // The next round starts its attempt count at zero, same as `finish`.
-                const { check: _check, ...metadata } = session.metadata
-                yield* db.closeTurn(id, "interrupted", {
-                  lastActive: yield* Clock.currentTimeMillis,
-                  ...(session.metadata.check ? { metadata } : {}),
-                })
+                yield* db.closeTurn(id, "interrupted", { lastActive: yield* Clock.currentTimeMillis })
                 return { message: `${id} interrupted; its terminal, worktree and session are kept` }
               }),
             ).pipe(Effect.catchTags({ RuntimeError: unreachable(known), PlatformError: Effect.die })),
@@ -1269,9 +1206,6 @@ export class Sessions extends Context.Service<
             }
             session = yield* getRow(id)
           }
-          // The check's cwd is this worktree. Kill it before release, or a live process keeps the worktree.
-          const running = yield* Ref.get((yield* track(id)).checking)
-          if (running) yield* Fiber.interrupt(running.fiber)
           // A row that already exited named a terminal a previous remove closed: nothing of ours is left to close.
           const out = yield* removal.release({
             h,
