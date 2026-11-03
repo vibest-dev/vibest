@@ -9,6 +9,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
+import { Restarting } from "@vibest/core/restarting"
 import { repositoryKey } from "@vibest/core/worktree"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
@@ -215,7 +216,7 @@ describe("Project.StopCoordinator", () => {
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
       const s = yield* launched
-      yield* s.db.patchLive(s.started.sessionId, { restarting: { interrupted: false, at: 1 } })
+      yield* (yield* Restarting).mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))

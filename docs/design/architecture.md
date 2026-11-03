@@ -324,7 +324,7 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
 - **Into the main Agent** natively where the CLI allows it, as its harness adapter's `inbox` says: `poll`, the
   Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
-  sqlite; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
+  vibestd's memory; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
   session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
   `agent.prompt`. No main Agent pane: Messages are `dropped`.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state

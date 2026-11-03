@@ -4,6 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
+import { Restarting } from "@vibest/core/restarting"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
@@ -91,7 +92,7 @@ describe("restart in place", () => {
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* ran.reached
       assert.deepStrictEqual(yield* processes.signaled, [pid])
-      assert.isDefined((yield* db.getSession(id))!.metadata.restarting)
+      assert.isTrue((yield* Restarting).has(id))
       // The harness is gone and it wrote an aborted turn end: neither is recorded while vibestd restarts it.
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
       yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
@@ -114,7 +115,7 @@ describe("restart in place", () => {
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted turn continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
       const row = (yield* db.getSession(id))!
-      assert.isUndefined(row.metadata.restarting)
+      assert.isFalse((yield* Restarting).has(id))
       assert.notStrictEqual(row.metadata.pid, pid)
       assert.strictEqual(row.turnState, "open")
       assert.include(

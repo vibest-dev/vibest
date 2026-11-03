@@ -39,18 +39,11 @@ const Live = {
   integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
   /** The harness's own process, as its integration reported it when ready: the pid a restart sends SIGTERM to. */
   pid: Schema.optional(Schema.Number),
-  /** vibestd is restarting the harness (`vibest update`): set before the signal, cleared once the new one is ready. */
-  restarting: Schema.optional(Schema.Struct({ interrupted: Schema.Boolean, at: Schema.Number })),
   /** When the harness's integration reported it takes input (one request at its start); removed when a restart or move ends the harness. */
   ready: Schema.optional(Schema.Number),
 }
 
 const Metadata = Schema.Struct({
-  /**
-   * A main agent's leased inbox rows (Inbox.poll), by row id: when each lease ends. An entry goes when its row is
-   * acked, released, or its lease ended.
-   */
-  leases: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
   ...Live,
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   routing: Schema.optional(Routing),
@@ -492,9 +485,7 @@ const make = Effect.gen(function* () {
         decodeCoordinators(
           rows.map((row) => {
             const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-            const { provider, model, routing, projectDirectory, env, integration, pid, restarting } = JSON.parse(
-              row.metadata,
-            ) as {
+            const { provider, model, routing, projectDirectory, env, integration, pid } = JSON.parse(row.metadata) as {
               provider?: string | null
               model?: string | null
               routing?: unknown
@@ -502,7 +493,6 @@ const make = Effect.gen(function* () {
               env?: unknown
               integration?: unknown
               pid?: unknown
-              restarting?: unknown
             }
             return {
               id: row.id,
@@ -520,7 +510,6 @@ const make = Effect.gen(function* () {
               ...(env === undefined ? {} : { env }),
               ...(integration === undefined ? {} : { integration }),
               ...(pid === undefined ? {} : { pid }),
-              ...(restarting === undefined ? {} : { restarting }),
             }
           }),
         ),
@@ -539,13 +528,6 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => (rows as ReadonlyArray<InboxSql>).map(toInbox)),
         Effect.flatMap(decodeInbox),
       )
-  /** Removes these rows' entries from the project's main agent `metadata.leases`. */
-  const forgetLeases = (projectId: number, ids: ReadonlyArray<number>) =>
-    sql`UPDATE session SET metadata = json_patch(metadata, json_object('leases', json(${JSON.stringify(
-      Object.fromEntries(ids.map((id) => [id, null])),
-    )})))
-      WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})
-        AND json_extract(metadata, '$.leases') IS NOT NULL`
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(`m.id IN (${ids.map(() => "?").join(", ")})`, ids)
   const userSend = `m.sender_type = 'user' AND m.id != coalesce(json_extract(s.metadata, '$.task'), -1)`
   const findSend = (sessionId: string, status: InboxStatus) =>
@@ -948,13 +930,12 @@ const make = Effect.gen(function* () {
 
     /**
      * Set (or, with null, remove) the keys a restart keeps in session `id`'s metadata (main agent or not): the harness pid,
-     * the restarting mark, the main agent's env. One merge patch, so the row's other keys stay.
+     * its ready report, the main agent's env. One merge patch, so the row's other keys stay.
      */
     patchLive: (
       id: string,
       patch: {
         readonly pid?: number | null
-        readonly restarting?: { readonly interrupted: boolean; readonly at: number } | null
         readonly env?: Readonly<Record<string, string>> | null
         readonly ready?: number | null
       },
@@ -970,13 +951,6 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.at ?? undefined),
         Effect.orDie,
       ),
-
-    /** A vibestd that starts finds no restart running: a mark left by one that stopped mid-restart is cleared. */
-    clearRestarting: sql`UPDATE session SET metadata = json_remove(metadata, '$.restarting')
-      WHERE json_extract(metadata, '$.restarting') IS NOT NULL RETURNING id`.pipe(
-      Effect.map((rows) => rows.map((r) => (r as { id: string }).id)),
-      Effect.orDie,
-    ),
 
     /** The last report wins. Another harness, or an id that is not a main agent, changes nothing. */
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
@@ -1102,47 +1076,30 @@ const make = Effect.gen(function* () {
         [projectId],
       ).pipe(Effect.orDie),
 
-    /** Leases rows handed to the project's main agent until `until` (`metadata.leases`, one entry per row). */
-    leaseRows: (projectId: number, ids: ReadonlyArray<number>, until: number) =>
-      ids.length === 0
-        ? Effect.void
-        : sql`UPDATE session SET metadata = json_patch(metadata, json_object('leases', json(${JSON.stringify(
-            Object.fromEntries(ids.map((id) => [id, until])),
-          )})))
-            WHERE id = (SELECT main_session_id FROM project WHERE id = ${projectId})`.pipe(Effect.asVoid, Effect.orDie),
-
     /**
-     * Ends the leases of the project's main agent that ran out by `now` (every one when `now` is undefined): their rows
-     * still `sending` go back to pending, and their entries go. Returns the rows put back.
+     * The project's main agent gave up rows `ids` without settling them (Inbox.poll: their lease ended): those still
+     * `sending` go back to pending. Returns the rows put back.
      */
-    endLeases: (projectId: number, now: number | undefined) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const main = sql`(SELECT main_session_id FROM project WHERE id = ${projectId})`
-            const leases = yield* sql<{ id: string; until: number }>`SELECT l.key AS id, l.value AS until
-              FROM session s, json_each(s.metadata, '$.leases') l WHERE s.id = ${main}`
-            const ended = leases.filter((l) => now === undefined || l.until <= now).map((l) => Number(l.id))
-            if (ended.length === 0) return [] as ReadonlyArray<number>
-            yield* forgetLeases(projectId, ended)
-            const back = yield* sql<{ id: number }>`UPDATE inbox SET delivery_status = 'pending'
-              WHERE ${sql.in("id", ended)} AND delivery_status = 'delivering' AND recipient_session_id = ${main}
-              RETURNING id`
-            return back.map((r) => r.id)
-          }),
-        )
-        .pipe(Effect.orDie),
+    releaseLeased: (projectId: number, ids: ReadonlyArray<number>) =>
+      ids.length === 0
+        ? Effect.succeed([] as ReadonlyArray<number>)
+        : sql<{ id: number }>`UPDATE inbox SET delivery_status = 'pending'
+            WHERE ${sql.in("id", ids)} AND delivery_status = 'delivering'
+              AND recipient_session_id = (SELECT main_session_id FROM project WHERE id = ${projectId})
+            RETURNING id`.pipe(
+            Effect.map((rows) => rows.map((r) => r.id)),
+            Effect.orDie,
+          ),
 
     /**
      * The main agent took `ids` (delivered) and gave back `release` (pending again): only its own rows, `sending` or
-     * `pending`. Their leases go. Returns the rows now delivered.
+     * `pending`. Returns the rows now delivered.
      */
     settleLeased: (projectId: number, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const main = sql`(SELECT main_session_id FROM project WHERE id = ${projectId})`
-            yield* forgetLeases(projectId, [...ids, ...release])
             if (release.length > 0)
               yield* sql`UPDATE inbox SET delivery_status = 'pending'
                 WHERE ${sql.in("id", release)} AND delivery_status = 'delivering' AND recipient_session_id = ${main}`
@@ -1160,7 +1117,7 @@ const make = Effect.gen(function* () {
      * After a restart: a claimed main-agent-bound row whose delivery was cut off may or may not have arrived, so it
      * failed; one bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`) is back to
      * pending, because that integration acks by row id and skips a row it already showed. Subagent-bound
-     * `delivering` rows stay for `check`. (Their leases went when the database opened: Db.layer.)
+     * `delivering` rows stay for `check`. (Leases are memory only: none outlives the vibestd that granted it.)
      */
     recoverSending: (pollHarnesses: ReadonlyArray<string>) =>
       sql`UPDATE inbox SET delivery_status = CASE WHEN EXISTS (SELECT 1 FROM session s
@@ -1267,12 +1224,13 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
       // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-      // No lease outlives the vibestd that granted it (Inbox.poll).
+      // Leases and the restarting mark are memory only now: drop the keys an older vibestd left in metadata. It is also
+      // the open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
       Effect.andThen(
         SqlClient.SqlClient.pipe(
           Effect.flatMap(
-            (sql) => sql`UPDATE session SET metadata = json_remove(metadata, '$.leases')
-              WHERE json_extract(metadata, '$.leases') IS NOT NULL`,
+            (sql) => sql`UPDATE session SET metadata = json_remove(metadata, '$.leases', '$.restarting')
+              WHERE json_extract(metadata, '$.leases') IS NOT NULL OR json_extract(metadata, '$.restarting') IS NOT NULL`,
           ),
         ),
       ),

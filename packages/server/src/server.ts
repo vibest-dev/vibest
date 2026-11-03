@@ -10,6 +10,7 @@ import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
+import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
 import {
   agentState,
@@ -378,6 +379,7 @@ export const handlers = VibestRpcs.toLayer(
     const sessions = yield* Sessions
     const inbox = yield* Inbox
     const db = yield* Db
+    const restarting = yield* Restarting
     const runtimes = yield* Runtimes
     const project = yield* Project
     const layout = yield* Layout
@@ -484,7 +486,7 @@ export const handlers = VibestRpcs.toLayer(
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
         if (coord.address.id === terminal) return null
         // A restart (`vibest update`) is between its harnesses there: running, though the runtime sees none right now.
-        if (coord.restarting === undefined) {
+        if (!restarting.has(coord.id)) {
           const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
           if (Option.isNone(h)) return null
           const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
@@ -915,7 +917,7 @@ export const handlers = VibestRpcs.toLayer(
               if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
                 return { result: "moved" as const }
               // ponytail: refused, not waited for; the restart's next harness starts there in seconds.
-              if (coord.restarting !== undefined)
+              if (restarting.has(coord.id))
                 return {
                   result: "unsupported" as const,
                   reason: "vibest update is restarting it there; run vibest again once it is ready",
