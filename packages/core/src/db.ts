@@ -43,6 +43,11 @@ const Live = {
   restarting: Schema.optional(Schema.Struct({ interrupted: Schema.Boolean, at: Schema.Number })),
   /** When the harness's integration reported it takes input (one request at its start); removed when a restart or move ends the harness. */
   ready: Schema.optional(Schema.Number),
+  /**
+   * Its integration loads the plugin vibestd syncs (`Layout.harnessPlugin`) and reloads it in place (update-restart.md
+   * 1), as its last ready report said: `vibest update` does not restart it.
+   */
+  reloads: Schema.optional(Schema.Boolean),
 }
 
 const Metadata = Schema.Struct({
@@ -513,18 +518,18 @@ const make = Effect.gen(function* () {
         decodeCoordinators(
           rows.map((row) => {
             const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-            const { provider, model, routing, projectDirectory, env, integration, pid, restarting } = JSON.parse(
-              row.metadata,
-            ) as {
-              provider?: string | null
-              model?: string | null
-              routing?: unknown
-              projectDirectory?: unknown
-              env?: unknown
-              integration?: unknown
-              pid?: unknown
-              restarting?: unknown
-            }
+            const { provider, model, routing, projectDirectory, env, integration, pid, restarting, reloads } =
+              JSON.parse(row.metadata) as {
+                reloads?: unknown
+                provider?: string | null
+                model?: string | null
+                routing?: unknown
+                projectDirectory?: unknown
+                env?: unknown
+                integration?: unknown
+                pid?: unknown
+                restarting?: unknown
+              }
             return {
               id: row.id,
               projectId: row.projectId,
@@ -542,6 +547,7 @@ const make = Effect.gen(function* () {
               ...(integration === undefined ? {} : { integration }),
               ...(pid === undefined ? {} : { pid }),
               ...(restarting === undefined ? {} : { restarting }),
+              ...(reloads === true ? { reloads } : {}),
             }
           }),
         ),
@@ -978,6 +984,7 @@ const make = Effect.gen(function* () {
         readonly restarting?: { readonly interrupted: boolean; readonly at: number } | null
         readonly env?: Readonly<Record<string, string>> | null
         readonly ready?: number | null
+        readonly reloads?: true | null
       },
     ) =>
       // Each key is replaced whole (a merge patch alone would merge an old env into the new one).

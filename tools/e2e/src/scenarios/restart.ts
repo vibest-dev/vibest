@@ -5,7 +5,10 @@
 // same terminal's shell (a main agent through `vibest integration start <id>`), and a main agent that was working gets
 // the continue notice in its inbox. U2: a Pi main agent and Pi subagents on a fake OpenAI-compatible model served here,
 // the update run by the person. U4: a real Claude main agent (agentModel) that runs the update itself. U5: a usage-limit
-// move takes the same path. vibestd, herdr and the harnesses are the real ones. ZDOTDIR is empty, so a pane's shell does
+// move takes the same path. U7: a Claude main agent on a fake Anthropic model runs the update itself and is not
+// restarted: vibestd syncs the plugin directory it loads, and Claude reloads the module after that turn. U4's old Claude
+// plugin is patched to look like one from before reloads (its ready report names no directory), so it is restarted.
+// vibestd, herdr and the harnesses are the real ones. ZDOTDIR is empty, so a pane's shell does
 // not put another vibest first on PATH.
 import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
@@ -77,6 +80,111 @@ const fakeModel = () => {
   }
 }
 
+/**
+ * A fake Anthropic Messages API for a Claude main agent: `steps` answers each of the main agent's requests (those that
+ * offer tools) from what came since its last answer, a Bash call or a text; anything else gets "ok". `seen` holds each main request's
+ * messages as text. Streams when asked, as Claude Code asks.
+ */
+const fakeAnthropic = (
+  steps: (last: string, toolResult: string | undefined) => { readonly bash: string; readonly id: string } | string,
+) => {
+  const seen: Array<ReadonlyArray<string>> = []
+  let n = 0
+  const sse = (events: ReadonlyArray<readonly [string, object]>) =>
+    events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify({ type: e, ...d })}\n\n`).join("")
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const url = new URL(req.url)
+      if (req.method !== "POST" || !url.pathname.endsWith("/messages")) return Response.json({ input_tokens: 1 })
+      const body = (await req.json()) as {
+        stream?: boolean
+        tools?: Array<unknown>
+        messages?: Array<{ role: string; content: unknown }>
+      }
+      const messages = body.messages ?? []
+      // What came since the model's last answer: Claude Code may send its reminders as messages of their own.
+      const since = messages.slice(messages.findLastIndex((m) => m.role === "assistant") + 1)
+      const blocks = since.flatMap((m) =>
+        Array.isArray(m.content) ? (m.content as Array<{ type?: string; tool_use_id?: string }>) : [],
+      )
+      const result = blocks.find((b) => b.type === "tool_result")?.tool_use_id
+      let content: Array<object> = [{ type: "text", text: "ok" }]
+      let stop = "end_turn"
+      if ((body.tools?.length ?? 0) > 0) {
+        seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
+        const step = steps(since.map(text).join("\n"), result)
+        if (typeof step === "string") content = [{ type: "text", text: step }]
+        else {
+          content = [{ type: "tool_use", id: step.id, name: "Bash", input: { command: step.bash, description: "run" } }]
+          stop = "tool_use"
+        }
+      }
+      const id = `msg_${++n}`
+      const usage = { input_tokens: 1, output_tokens: 1 }
+      const message = {
+        id,
+        type: "message",
+        role: "assistant",
+        model: "claude-fake",
+        content,
+        stop_reason: stop,
+        usage,
+      }
+      if (!body.stream) return Response.json(message)
+      const events: Array<readonly [string, object]> = [
+        ["message_start", { message: { ...message, content: [], stop_reason: null } }],
+      ]
+      content.forEach((c, index) => {
+        const block = c as { type: string; text?: string; id?: string; name?: string; input?: object }
+        if (block.type === "text") {
+          events.push(["content_block_start", { index, content_block: { type: "text", text: "" } }])
+          events.push(["content_block_delta", { index, delta: { type: "text_delta", text: block.text } }])
+        } else {
+          events.push([
+            "content_block_start",
+            { index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } },
+          ])
+          events.push([
+            "content_block_delta",
+            { index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } },
+          ])
+        }
+        events.push(["content_block_stop", { index }])
+      })
+      events.push(["message_delta", { delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 1 } }])
+      events.push(["message_stop", {}])
+      return new Response(sse(events), { headers: { "content-type": "text/event-stream" } })
+    },
+  })
+  return { seen, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
+}
+
+/**
+ * A Claude config directory of its own for a fake model: the API key approved, onboarding done, `repo` trusted, and
+ * auto mode off (its first-run questions would stop the pane). Its env for vibestd and the main agent.
+ */
+const claudeConfig = async (w: World, name: string, repo: string, url: string) => {
+  const dir = path.join(w.root, `claude-${name}`)
+  await fs.mkdir(dir, { recursive: true })
+  const key = "sk-ant-e2e-fake-0123456789abcdefghijklmnop"
+  await fs.writeFile(
+    path.join(dir, ".claude.json"),
+    JSON.stringify({
+      hasCompletedOnboarding: true,
+      customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
+      projects: { [repo]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } },
+    }),
+  )
+  await fs.writeFile(
+    path.join(dir, "settings.json"),
+    JSON.stringify({ disableAutoMode: "disable", permissions: { defaultMode: "default", disableAutoMode: "disable" } }),
+  )
+  return { CLAUDE_CONFIG_DIR: dir, ANTHROPIC_BASE_URL: url, ANTHROPIC_API_KEY: key }
+}
+
 /** A git repository of its own under the world's root (a project of its own), as its real path. */
 const project = async (w: World, name: string) => {
   const repo = path.join(w.root, name)
@@ -96,7 +204,7 @@ const project = async (w: World, name: string) => {
  * `vibest` wrapper (first on PATH in `env`) that `point` repoints, as an install does. ZDOTDIR is empty, so a pane's
  * shell does not put the user's own vibest first.
  */
-const oldInstall = async (w: World, name: string) => {
+const oldInstall = async (w: World, name: string, options: { readonly beforeReloads?: boolean } = {}) => {
   const old = path.join(w.root, `${name}-old`)
   await fs.mkdir(path.join(old, "bin"), { recursive: true })
   await fs.copyFile(binary, path.join(old, "bin", "vibest"))
@@ -118,6 +226,13 @@ const oldInstall = async (w: World, name: string) => {
     /pluginVersion: "[^"]+"/,
     `pluginVersion: "${OLD}"`,
   )
+  // A Claude plugin from before reloads: its ready report does not say where it was loaded from, so vibestd restarts it.
+  if (options.beforeReloads)
+    await patch(
+      path.join(old, "harnesses", "claude", "hooks", "register.mjs"),
+      /plugin: host\.root\(\)/,
+      "plugin: undefined",
+    )
   const bin = path.join(w.root, `${name}-bin`)
   await fs.mkdir(bin, { recursive: true })
   const wrapper = path.join(bin, "vibest")
@@ -506,7 +621,7 @@ const checks: ReadonlyArray<Check> = [
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
       try {
         const repo = await project(w, "claude-update")
-        const install = await oldInstall(w, "cupdate")
+        const install = await oldInstall(w, "cupdate", { beforeReloads: true })
         // vibestd and the herdr server it starts run without CLAUDE_CONFIG_DIR: the main agent is a real Claude on the
         // user's login, on the E2E model (agentModel).
         const env = { ...install.env, CLAUDE_CONFIG_DIR: undefined }
@@ -632,6 +747,192 @@ const checks: ReadonlyArray<Check> = [
         expect(updates(entries) === 1, `vibest update ran ${updates(entries)} times in the main agent's conversation`)
         expect(main()?.pid !== null && alive(main()!.pid!), "the restarted main agent is not running")
       } finally {
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "U7",
+    title:
+      "vibest update run by a Claude main agent on a fake model: no restart; its turn runs on across the handoff and the plugin sync (a tool in flight), the module reloads only after that turn on the same conversation and pid, and a result that arrives around the reload is shown once",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude", "pi"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const session = `${w.herdrSession}-u7`
+      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      const pi = fakeModel()
+      const repo = await project(w, "u7")
+      const agentDir = path.join(w.root, "pi-u7")
+      await fs.mkdir(agentDir, { recursive: true })
+      await fs.writeFile(
+        path.join(agentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            fake: {
+              baseUrl: pi.url,
+              apiKey: "fake",
+              api: "openai-completions",
+              models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
+            },
+          },
+        }),
+      )
+      await fs.writeFile(
+        path.join(agentDir, "settings.json"),
+        JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
+      )
+      type Main = {
+        id: string
+        conversation: string | null
+        runtime: string
+        pid: number | null
+        version: string | null
+      }
+      const main = () => {
+        const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+        try {
+          return (
+            db
+              .query<Main, [string]>(
+                `SELECT id, harness_session_id AS conversation, runtime, json_extract(metadata, '$.pid') AS pid,
+                   json_extract(metadata, '$.integration.version') AS version
+                 FROM session WHERE agent_type = 'main' AND ended_at IS NULL AND json_extract(metadata, '$.projectDirectory') = ?`,
+              )
+              .get(repo) ?? undefined
+          )
+        } finally {
+          db.close()
+        }
+      }
+      const inbox = (recipient: string) => {
+        const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+        try {
+          return db
+            .query<{ status: string; sender: string | null }, [string]>(
+              "SELECT delivery_status AS status, sender_id AS sender FROM inbox WHERE recipient_session_id = ?",
+            )
+            .all(recipient)
+        } finally {
+          db.close()
+        }
+      }
+      // The main agent's one turn: the update, a Pi subagent, a tool still running while the result arrives, its end.
+      const ran: Record<string, string> = {}
+      let versionAtSleepResult: string | null | undefined
+      let inboxAtTurnEnd: ReadonlyArray<{ status: string }> = []
+      const claude = fakeAnthropic((last, result) => {
+        if (result === "toolu_update") {
+          ran.update = last
+          return {
+            id: "toolu_run",
+            bash: `vibest run pi --session ${session} --env PI_CODING_AGENT_DIR=${agentDir} '${ask("u7")}'`,
+          }
+        }
+        if (result === "toolu_run") {
+          ran.run = last
+          return { id: "toolu_sleep", bash: "sleep 15" }
+        }
+        if (result === "toolu_sleep") {
+          ran.sleep = last
+          // The turn has not ended yet: the module must not have reloaded.
+          versionAtSleepResult = main()?.version
+          inboxAtTurnEnd = main() === undefined ? [] : inbox(main()!.id)
+          return "turn-done"
+        }
+        if (result === undefined && last.includes("u7-go") && ran.update === undefined)
+          return { id: "toolu_update", bash: "vibest update --yes" }
+        return "ok"
+      })
+      try {
+        const install = await oldInstall(w, "u7")
+        const env = { ...install.env, ...(await claudeConfig(w, "u7", repo, claude.url)) }
+        const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
+          const r = await w.run(repo, [install.wrapper, ...args], { env, timeoutMs })
+          expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
+          return r.stdout
+        }
+        const pane = () => ((JSON.parse(main()?.runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
+        const screen = async () => {
+          const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true }).catch(
+            () => ({}) as Record<string, unknown>,
+          )
+          return String((r.read as { text?: string } | undefined)?.text ?? "")
+        }
+        const why = async (e: Error) => {
+          const log = (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
+          return new Error(
+            `${e.message}; row ${JSON.stringify(main())}; steps ${JSON.stringify(Object.keys(ran))}; screen:\n${await screen()}\n${log}`,
+          )
+        }
+
+        await w.stopDaemon()
+        await vibest(["daemon"])
+        await vibest(["--harness", "claude", "--session", session, "--headless"])
+        await until("the main agent's row", () => pane() !== "", 60_000)
+        await until(
+          "the main agent polls on the old integration",
+          () => main()?.version === OLD && main()?.conversation != null && main()?.pid != null,
+          120_000,
+        ).catch(async (e: Error) => {
+          throw await why(e)
+        })
+        const before = main()!
+
+        // The install: `vibest` on PATH is now the build. The main agent runs the rest of the update itself.
+        await install.point(binary)
+        await herdr(socket, "pane.send_text", { pane_id: pane(), text: "u7-go" })
+        await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+        await until("the main agent's turn ends", () => ran.sleep !== undefined, 240_000).catch(async (e: Error) => {
+          throw await why(e)
+        })
+        expect(
+          ran.update!.includes("load") && ran.update!.includes("in place") && ran.update!.includes(before.id),
+          `vibest update did not say the main agent reloads by itself: ${ran.update}`,
+        )
+        expect(versionAtSleepResult === OLD, `the module reloaded during the turn: ${versionAtSleepResult}`)
+        await until("the main agent reloads the new module", () => main()?.version !== OLD, 120_000).catch(
+          async (e: Error) => {
+            throw await why(e)
+          },
+        )
+        const after = main()!
+        expect(after.version !== null, `no integration version: ${JSON.stringify(after)}`)
+        expect(after.id === before.id, `the main agent's session changed: ${before.id} -> ${after.id}`)
+        expect(
+          after.pid === before.pid && alive(before.pid!),
+          `the main agent was restarted: ${before.pid} -> ${after.pid}`,
+        )
+        expect(
+          after.conversation === before.conversation,
+          `the conversation changed: ${before.conversation} -> ${after.conversation}`,
+        )
+        // The subagent's result reaches the main agent once, whether it came before or after the reload.
+        const sub = /\\?"id\\?":\\?"([0-9a-f]{8})/.exec(ran.run!)?.[1]
+        expect(sub !== undefined, `vibest run printed no session id: ${ran.run}`)
+        const shown = () => claude.seen.at(-1)!.filter((m) => m.startsWith("user: ") && m.includes(`(${sub})`)).length
+        await until("the subagent's result in the main agent's conversation", () => shown() > 0, 120_000).catch(
+          async (e: Error) => {
+            throw await why(e)
+          },
+        )
+        await until("its row delivered", () => inbox(before.id).some((r) => r.status === "delivered"), 30_000)
+        await Bun.sleep(5_000)
+        expect(shown() === 1, `the result was shown ${shown()} times: ${JSON.stringify(claude.seen.at(-1))}`)
+        const rows = inbox(before.id)
+        expect(rows.length === 1 && rows[0]!.status === "delivered", `the main agent's inbox: ${JSON.stringify(rows)}`)
+        // The result arrived while the old module still ran the turn: it took it, the new one must not show it again.
+        expect(
+          inboxAtTurnEnd.length === 1 && inboxAtTurnEnd[0]!.status !== "pending",
+          `the result was not taken before the reload (the subagent was slow?): ${JSON.stringify(inboxAtTurnEnd)}`,
+        )
+        const all = claude.seen.flat().join("\n")
+        expect(!all.includes("continue the interrupted work"), "a continue notice reached the main agent")
+        expect(
+          claude.seen.some((m) => m.some((x) => x.startsWith("assistant: ") && x.includes("turn-done"))),
+          "the turn's last answer is not in the conversation",
+        )
+      } finally {
+        claude.stop()
+        pi.stop()
         await dropHerdrSession(w, session)
       }
     },

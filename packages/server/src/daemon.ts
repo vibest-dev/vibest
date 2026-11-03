@@ -186,6 +186,9 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }
+    // Before any agent starts or reports: each harness's plugin directory now holds this vibest's plugin, and a Claude
+    // Code running from it loads the new hooks module by itself (update-restart.md 1).
+    yield* Effect.flatMap(Harness.make(), (harness) => harness.sync)
     const shutdown = yield* Deferred.make<void>()
     yield* Layer.build(
       services(host, layout).pipe(

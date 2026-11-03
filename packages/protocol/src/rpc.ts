@@ -622,7 +622,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   /**
    * The user's command line only (`vibest update`): the live agents whose integration is not this vibestd's (VERSION and
-   * PROTOCOL), main agents included; `working` when they are in a turn.
+   * PROTOCOL), main agents included; `working` when they are in a turn, `reloads` when they take the new one in place.
    */
   scoped(
     Rpc.make("Agents.Outdated", {
@@ -635,6 +635,8 @@ export class VibestRpcs extends RpcGroup.make(
           working: Schema.Boolean,
           /** Why it cannot be restarted in place (null: it can). */
           blocked: Schema.NullOr(Schema.String),
+          /** It reloads the new integration in place by itself: no restart (absent from an older vibestd). */
+          reloads: Schema.optional(Schema.Boolean),
         }),
       ),
       error: Forbidden,

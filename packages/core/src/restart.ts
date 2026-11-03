@@ -30,6 +30,8 @@ export interface Outdated {
   readonly integration: string | null
   readonly working: boolean
   readonly blocked: string | null
+  /** It loads the plugin vibestd syncs and reloads it in place: it takes the new integration without a restart. */
+  readonly reloads: boolean
 }
 export interface Restarted {
   readonly id: string
@@ -382,6 +384,7 @@ export const sessionRestart = (deps: {
         blocked:
           blockedOf(harnesses.get(main.harnessId), yield* routed(main.runtime), main.pid, main.harnessSessionId) ??
           null,
+        reloads: main.reloads === true,
       })
     }
     const subs: Array<Outdated> = []
@@ -395,6 +398,7 @@ export const sessionRestart = (deps: {
         blocked:
           blockedOf(harnesses.get(row.harnessId), yield* routed(row.runtime), row.metadata.pid, row.harnessSessionId) ??
           null,
+        reloads: row.metadata.reloads === true,
       })
     return [...subs, ...mains]
   })

@@ -34,6 +34,8 @@ beforeAll(async () => {
 
 afterAll(() => fs.rmSync(built, { recursive: true, force: true }))
 
+const clone = (v: unknown) => JSON.parse(JSON.stringify(v)) as unknown
+
 const settle = async () => {
   for (let i = 0; i < 200; i++) await Promise.resolve()
 }
@@ -50,8 +52,14 @@ const COORDINATOR = {
 }
 const WORKER = { ...COORDINATOR, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
 
-const host = (env: Record<string, string> = COORDINATOR) => {
-  const hooks: Record<string, Function> = {}
+const ownSubmit = { kind: "plugin", name: "vibest" }
+type Entered = { text: string; origin?: object; context?: string[] }
+
+/** Claude Code's `$.state` for one process: what a reload keeps. */
+type Store = { value: unknown; version: number }
+
+const host = (env: Record<string, string> = COORDINATOR, store: Store = { value: undefined, version: 0 }) => {
+  let hooks: Record<string, Function> = {}
   const catches: Record<string, Function> = {}
   const on = (event: string, a: unknown, b?: unknown) => {
     hooks[event] = (b ?? a) as Function
@@ -59,6 +67,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
   }
   const requests: Request[] = []
   const submitted: string[] = []
+  const entered: Entered[] = []
+  let stateless = false
   const statuses: Array<string | undefined> = []
   const every: Array<{ ms: number; fn: () => void }> = []
   const after: Array<{ ms: number; fn: () => void; cancelled: boolean }> = []
@@ -66,7 +76,8 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     conversation: "c1",
     redraws: 0,
     answer: (_r: Request): Answer => ({ status: 200, body: { ids: [], line: "", text: "" } }),
-    submit: async (_text: string): Promise<{ text: string; drop?: undefined } | { drop: string }> => ({ text: "x" }),
+    /** What Claude Code does with a prompt that reached the bottom of the hooks: it enters, or is dropped. */
+    submit: async (e: Entered): Promise<Entered | { drop: string }> => e,
   }
   const $ = {
     env: { get: async (name: string) => env[name] },
@@ -87,18 +98,43 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       },
     },
     prompt: {
-      submit: (input: { text: string }) => {
+      // As Claude Code: this plugin's own submit, made inside one of its hooks, runs its prompt.submit hook.
+      submit: async (input: { text: string }) => {
         submitted.push(input.text)
-        return state.submit(input.text)
+        const result = (await hooks["prompt.submit"]!($, { text: input.text, origin: ownSubmit }, (e: Entered) =>
+          state.submit(e),
+        )) as Entered | { drop: string }
+        if (!("drop" in result)) entered.push(result)
+        return result
       },
     },
     ui: { invalidate: () => void (state.redraws += 1), status: (t: string | undefined) => void statuses.push(t) },
     // A command's parent is Claude Code itself.
     process: { run: async () => ({ exitCode: 0, stdout: "4242\n", stderr: "" }) },
+    // Claude Code 2.1.316 and 2.1.317: `get(ref)`, `set(ref, value, { ifVersion })`, compare-and-set.
+    state: {
+      get: async (ref: { plugin: string; key: string }) => {
+        if (stateless) throw new Error("$.state is not a function")
+        assert.deepStrictEqual(ref, { plugin: "vibest", key: "inbox" })
+        return store.value === undefined
+          ? { version: store.version }
+          : { value: clone(store.value), version: store.version }
+      },
+      set: async (ref: { plugin: string; key: string }, value: unknown, options: { ifVersion?: number }) => {
+        if (stateless) throw new Error("$.state is not a function")
+        assert.deepStrictEqual(ref, { plugin: "vibest", key: "inbox" })
+        if (options.ifVersion !== undefined && options.ifVersion !== store.version)
+          return { isSet: false, version: store.version }
+        store.value = clone(value)
+        store.version += 1
+        return { isSet: true, version: store.version }
+      },
+    },
     clock: {
       every: (ms: number, fn: () => void) => {
-        every.push({ ms, fn })
-        return { cancel: () => undefined }
+        const t = { ms, fn }
+        every.push(t)
+        return { cancel: () => void every.splice(every.indexOf(t), 1) }
       },
       after: (ms: number, fn: () => void) => {
         const t = { ms, fn, cancelled: false }
@@ -110,10 +146,17 @@ const host = (env: Record<string, string> = COORDINATOR) => {
   plugin.register(on)
   const pass = async (e: object) => e
   return {
-    hooks,
+    get hooks() {
+      return hooks
+    },
+    store,
+    /** A Claude Code without `$.state`. */
+    noState: () => void (stateless = true),
     catches,
     requests,
     submitted,
+    /** The prompts that entered, with the context the hook attached. */
+    entered,
     statuses,
     every,
     state,
@@ -135,6 +178,16 @@ const host = (env: Record<string, string> = COORDINATOR) => {
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
     turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
     preTool: (event: object) => hooks["tool.call"]!($, event, pass),
+    /**
+     * Claude Code loads the module again (a synced plugin directory): new hooks, the same `$.state`; the old load's
+     * clock keeps running until it stops itself. Then the new load's session.start.
+     */
+    reload: async () => {
+      hooks = {}
+      plugin.register(on)
+      await hooks["session.start"]!($, { cwd: "/work" }, pass)
+      await settle()
+    },
     /** Fire every pending clock.after of `ms`. */
     fire: async (ms: number) => {
       for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
@@ -147,7 +200,6 @@ const host = (env: Record<string, string> = COORDINATOR) => {
 }
 
 const batch = (ids: number[], line: string, text: string) => ({ status: 200, body: { ids, line, text } })
-const ownSubmit = { kind: "plugin", name: "vibest" }
 
 describe("Claude plugin artifact", () => {
   it("ships a manifest, a hooks.json naming one module, and an import-free bundle with its version inlined", () => {
@@ -171,7 +223,11 @@ describe("Claude plugin requests", () => {
     // First that the harness takes input (rpc.ts Session.Ready), then the main agent's first poll.
     const [ready, poll] = h.requests
     assert.strictEqual(ready!.url, "http://vibestd/session/ready")
-    assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
+    assert.deepStrictEqual(
+      ready!.body,
+      { pid: 4242, plugin: "/p" },
+      "with Claude Code's own pid, which a restart signals, and the directory it loaded this module from",
+    )
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
@@ -206,7 +262,7 @@ describe("Claude plugin requests", () => {
     const h = host(WORKER)
     await h.start()
     assert.deepStrictEqual(h.every, [])
-    await h.turnComplete({ reason: "answer", answer: "done" })
+    await h.turnComplete({ reason: "answer", answer: "done", turnId: "t1" })
     await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
@@ -214,6 +270,7 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual(h.requests[1]!.body, {
       hook_event_name: "TurnComplete",
       session_id: "c1",
+      turn_id: "t1",
       reason: "answer",
       last_assistant_message: "done",
     })
@@ -243,7 +300,9 @@ describe("Claude plugin requests", () => {
 })
 
 describe("Claude plugin inbox", () => {
-  it("a poll only queues; each draw submits one batch's line; its own submit gets the full text as context; acked on the next poll", async () => {
+  const acks = (h: ReturnType<typeof host>) => h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
+
+  it("a poll only queues; each draw submits one batch's line with its full text as context, acked as soon as it entered", async () => {
     const h = host()
     const polls = [batch([1], 'General Agent "A" completed (w1)', "full A"), batch([2], "Notice: x", "full B")]
     h.state.answer = (r) =>
@@ -253,18 +312,18 @@ describe("Claude plugin inbox", () => {
     assert.deepStrictEqual(h.submitted, [], "the poll does not submit")
     assert.strictEqual(h.state.redraws, 2)
     assert.strictEqual(await h.draw(), "drawn", "draws nothing of its own")
-    assert.deepStrictEqual(h.submitted, ['General Agent "A" completed (w1)'])
-    const own = await h.prompt('General Agent "A" completed (w1)', ownSubmit)
-    assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
+    assert.deepStrictEqual(
+      h.entered.map((e) => [e.text, e.context]),
+      [['General Agent "A" completed (w1)', ["full A"]]],
+    )
+    assert.deepStrictEqual(acks(h), [{ ids: [1], release: [] }], "acked at once, not on the next poll")
     await h.draw()
-    assert.deepStrictEqual(h.submitted.at(-1), "Notice: x")
+    assert.deepStrictEqual(h.entered.at(-1)?.context, ["full B"])
+    assert.deepStrictEqual(acks(h).at(-1), { ids: [2], release: [] })
     // The person's own prompt with the same text gets nothing.
     assert.notProperty(await h.prompt("Notice: x", { kind: "composer" }), "context")
-    assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
-    await h.tick()
-    const ack = h.requests.find((r) => r.url.endsWith("/ack"))
-    assert.deepStrictEqual(ack?.body, { ids: [1, 2], release: [] })
-    assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
+    await h.draw()
+    assert.lengthOf(h.submitted, 2, "nothing left to submit")
   })
 
   it("a line that already ends with the full text (a one-line notice) gets no context", async () => {
@@ -274,13 +333,14 @@ describe("Claude plugin inbox", () => {
     await h.start()
     await h.tick()
     await h.draw()
-    assert.notProperty(await h.prompt("Notice: w1 exited.", ownSubmit), "context")
     await h.draw()
-    const multi = await h.prompt("Notice: w2 exited.", ownSubmit)
-    assert.deepStrictEqual((multi as { context: string[] }).context, ["w2 exited.\nmore"])
+    assert.deepStrictEqual(
+      h.entered.map((e) => e.context),
+      [undefined, ["w2 exited.\nmore"]],
+    )
   })
 
-  it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {
+  it("a dropped submit stays at the front of the queue and is not acked; two batches with one line keep their texts in order", async () => {
     const h = host()
     const polls = [batch([1], "same", "first"), batch([2], "same", "second")]
     h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
@@ -288,16 +348,22 @@ describe("Claude plugin inbox", () => {
     await h.tick()
     h.state.submit = async () => ({ drop: "busy" })
     await h.draw()
-    h.state.submit = async () => ({ text: "x" })
+    assert.deepStrictEqual(acks(h), [])
+    h.state.submit = async (e) => e
     await h.draw()
     await h.draw()
     assert.deepStrictEqual(h.submitted, ["same", "same", "same"])
-    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["first"])
-    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["second"])
-    assert.notProperty(await h.prompt("same", ownSubmit), "context")
+    assert.deepStrictEqual(
+      h.entered.map((e) => e.context),
+      [["first"], ["second"]],
+    )
+    assert.deepStrictEqual(acks(h), [
+      { ids: [1], release: [] },
+      { ids: [2], release: [] },
+    ])
   })
 
-  it("a batch handed out again after its lease ran out is shown once; once submitted it is acked again", async () => {
+  it("a batch handed out again after its lease ran out is shown once and acked again", async () => {
     const h = host()
     h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([5], "L", "T") : { status: 200, body: {} })
     await h.start()
@@ -306,10 +372,10 @@ describe("Claude plugin inbox", () => {
     await h.draw()
     await h.draw()
     assert.deepStrictEqual(h.submitted, ["L"])
+    // Handed out again: acked on the poll after.
     await h.tick()
     await h.tick()
-    const acks = h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
-    assert.deepStrictEqual(acks, [
+    assert.deepStrictEqual(acks(h), [
       { ids: [5], release: [] },
       { ids: [5], release: [] },
     ])
@@ -325,8 +391,7 @@ describe("Claude plugin inbox", () => {
     await h.draw()
     assert.deepStrictEqual(h.submitted, ["L"], "the mixed batch is not shown")
     await h.tick()
-    const ack = h.requests.filter((r) => r.url.endsWith("/ack")).at(-1)
-    assert.deepStrictEqual(ack?.body, { ids: [5], release: [6] })
+    assert.deepStrictEqual(acks(h).at(-1), { ids: [5], release: [6] })
     await h.draw()
     assert.deepStrictEqual(h.submitted, ["L", "N"])
   })
@@ -343,6 +408,103 @@ describe("Claude plugin inbox", () => {
     down = false
     await h.tick()
     assert.deepStrictEqual(h.statuses.at(-1), undefined)
+  })
+})
+
+describe("Claude plugin reload", () => {
+  it("a reload keeps the queue: a batch polled before it is shown once, by the new load", async () => {
+    const h = host()
+    const polls = [batch([1], "L1", "T1")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.tick()
+    await h.reload()
+    await h.draw()
+    await h.draw()
+    assert.deepStrictEqual(
+      h.entered.map((e) => [e.text, e.context]),
+      [["L1", ["T1"]]],
+    )
+  })
+
+  it("a batch handed out again after a reload (its lease ran out) is not shown twice", async () => {
+    const h = host()
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([3], "L", "T") : { status: 500, body: { error: "down" } })
+    await h.start()
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L"])
+    // The ack was not taken, then Claude Code loaded the module again.
+    await h.reload()
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L"], "shown once")
+    const acked = h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
+    assert.isTrue(
+      acked.length >= 2 && acked.every((b) => JSON.stringify(b) === JSON.stringify({ ids: [3], release: [] })),
+    )
+  })
+
+  it("only the newest load polls: the old one's clock stops at its next tick", async () => {
+    const h = host()
+    h.state.answer = () => batch([], "", "")
+    await h.start()
+    await h.reload()
+    assert.lengthOf(h.every, 2, "both clocks run for now")
+    const before = h.paths().filter((p) => p === "/inbox/poll").length
+    await h.tick()
+    assert.lengthOf(h.every, 1, "the old load stopped its clock")
+    assert.strictEqual(h.paths().filter((p) => p === "/inbox/poll").length, before + 1, "one poll per tick")
+  })
+
+  it("a turn end vibestd did not take is kept across a reload and sent by the new load, with its turn id", async () => {
+    const store: Store = { value: undefined, version: 0 }
+    const h = host(WORKER, store)
+    let down = true
+    h.state.answer = (r) =>
+      down && r.url.endsWith("/turn-end") ? { status: 503, body: { error: "stopping" } } : { status: 204 }
+    await h.start()
+    await h.turnComplete({ reason: "answer", answer: "done", turnId: "t1" })
+    await settle()
+    down = false
+    // The old load's retry dies with it; the new load's session.start sends what was kept.
+    await h.reload()
+    const ends = h.requests.filter((r) => r.url.endsWith("/turn-end"))
+    assert.lengthOf(ends, 2)
+    assert.deepStrictEqual(ends[1]!.body, ends[0]!.body)
+    assert.strictEqual((ends[1]!.body as { turn_id: string }).turn_id, "t1")
+    assert.deepStrictEqual((store.value as { reports: unknown[] } | undefined)?.reports, [], "sent: no longer kept")
+  })
+
+  it("/clear starts an empty $.state for the new conversation: the same load claims it and goes on delivering", async () => {
+    const h = host()
+    const polls = [batch([1], "L1", "T1")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.draw()
+    h.store.value = undefined
+    h.store.version = 0
+    polls.push(batch([2], "L2", "T2"))
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(
+      h.entered.map((e) => e.context),
+      [["T1"], ["T2"]],
+    )
+  })
+
+  it("works without $.state (kept in memory)", async () => {
+    const h = host()
+    const polls = [batch([1], "L", "T")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    h.noState()
+    await h.start()
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(
+      h.entered.map((e) => e.context),
+      [["T"]],
+    )
   })
 })
 

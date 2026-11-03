@@ -8,16 +8,29 @@
  *   answer, aborted, refusal or error; Stop fires for no Esc) and carries no API error kind.
  * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
  *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
- *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
- *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll. A
- *   batch that mixes rows already taken with new ones (handed out again after a lease ran out or vibestd restarted):
- *   the taken ones are acked and the new ones given back, so they come alone and no text is shown twice.
+ *   attaches the batch's full text as context to that line and, once the line entered, acks the batch at once. (A
+ *   submit from outside a hook's call stack, as a clock callback is, would skip this module's own prompt.submit hook as
+ *   re-entry.) A batch that mixes rows already taken with new ones (handed out again after a lease ran out or vibestd
+ *   restarted): the taken ones are acked and the new ones given back, so they come alone and no text is shown twice.
+ *
+ * Reload-safe (.agents/rules/update-restart.md 10): vibestd rewrites this file in place when it starts on a new
+ * version, and Claude Code loads the new module when the running turn ends or at the next turn start, never mid-tool.
+ * - What must outlive a reload is in the session's `$.state` (`Saved`; it survives a reload, and each Claude process
+ *   has its own): the inbox's queue, the rows taken and not yet acked, and the reports vibestd did not take.
+ * - Only the newest load polls: session.start writes its generation, and an older load still alive after a reload (one
+ *   of its hooks still running) stops at its next tick. Every write is compare-and-set, so an old load never undoes one.
+ * - What must finish is awaited inside a hook: the turn end, the prompt report and the ack. Fire-and-forget work dies
+ *   with an old load (its request is sent, its `.then` never runs); a report not taken is kept and sent again.
+ * - A later version keeps every native call this one makes (`nativeHost`): after a reload, an old load's calls are
+ *   checked against the new module's.
  *
  * /clear fires session.end with the old conversation and no new session.start; the clock keeps running and
  * `$.session.id()` answers the new conversation, so nothing stops on session.end and every request sends the current id.
+ * `$.state` starts empty for the new conversation: the next tick claims it again (rows it held wait out their lease).
  *
  * Types: `import type` from `claude-code`. The declarations are a local ignored cache, not a vendored file.
- * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts).
+ * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts). `$.state` is
+ * not in the pin; `Stateful` declares what this module uses of it (Claude Code 2.1.316 and 2.1.317 take it so).
  * The AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
  */
 import { ACK_ROUTE, hookRoute, isPolled, POLL_ROUTE, type Polled, sessionHeaders } from "@vibest/protocol/protocol"
@@ -36,8 +49,9 @@ export const GUARD_BACKOFF_MS = [100, 300, 900] as const
 export const REPORT_BACKOFF_MS = [1000, 2000, 4000, 8000, 15_000, 30_000] as const
 export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
-/** At most this many lines keep their full text waiting for the prompt.submit hook. */
-export const FULL_MAX = 100
+/** At most this many reports wait to be sent again, and this many row ids are remembered as taken. */
+export const REPORTS_MAX = 50
+export const SEEN_MAX = 1000
 
 type Reply = { readonly status: number; readonly body: unknown }
 type Env =
@@ -48,6 +62,38 @@ type Env =
   | "VIBEST_RUNTIME"
   | "VIBEST_HOME"
   | "HOME"
+
+/** A report vibestd did not take yet. */
+type Pending = { readonly n: string; readonly path: string; readonly body: unknown }
+
+/**
+ * What a reload must not lose, under `$.state` `{ plugin: "vibest", key: "inbox" }`. `queue`: batches polled, not yet
+ * submitted. `inflight`: submitted, not yet seen entering. `seen`: ids taken, so a batch handed out again after its
+ * lease ran out is not shown twice. `unacked`: shown, not yet acked. `release`: new rows of a mixed batch, given back
+ * on the next ack. `reports`: reports to send again.
+ */
+export type Saved = {
+  readonly generation: string
+  readonly queue: ReadonlyArray<Polled>
+  readonly inflight: ReadonlyArray<Polled>
+  readonly seen: ReadonlyArray<number>
+  readonly unacked: ReadonlyArray<number>
+  readonly release: ReadonlyArray<number>
+  readonly reports: ReadonlyArray<Pending>
+}
+const EMPTY: Saved = { generation: "", queue: [], inflight: [], seen: [], unacked: [], release: [], reports: [] }
+
+/** What this module uses of `$.state`, which the pinned declarations do not have: per Claude process, kept across reloads. */
+type Stateful = {
+  readonly state: {
+    get: (ref: { plugin: "vibest"; key: "inbox" }) => Promise<{ value?: unknown; version: number }>
+    set: (
+      ref: { plugin: "vibest"; key: "inbox" },
+      value: Saved,
+      options: { ifVersion: number },
+    ) => Promise<{ isSet: boolean; version: number }>
+  }
+}
 
 /**
  * Every native call this module makes, bound to one hook's `$`. Claude Code statically checks a hooks module: `$` may
@@ -78,6 +124,8 @@ function nativeHost($: EngineInterface) {
     conversation: () => $.session.id(),
     cwd: () => $.session.cwd(),
     plugin: () => $.plugin.name,
+    /** The directory this module was loaded from: vibestd tells by it whether it reloads (its own synced copy). */
+    root: () => $.plugin.root,
     fetch: (socketPath: string, path: string, headers: Record<string, string>, body: string) =>
       $.http.fetch(`http://vibestd${path}`, { method: "POST", socketPath, headers, body }),
     submit: (text: string) => $.prompt.submit({ text }),
@@ -90,6 +138,10 @@ function nativeHost($: EngineInterface) {
       const pid = Number((await $.process.run(["sh", "-c", 'echo "$PPID"'])).stdout.trim())
       return Number.isInteger(pid) && pid > 1 ? pid : undefined
     },
+    // `plugin` and `key` must be literals at each call (Claude Code's static check).
+    load: () => ($ as unknown as Stateful).state.get({ plugin: "vibest", key: "inbox" }),
+    save: (value: Saved, ifVersion: number) =>
+      ($ as unknown as Stateful).state.set({ plugin: "vibest", key: "inbox" }, value, { ifVersion }),
   }
 }
 
@@ -134,22 +186,56 @@ const errorOf = (body: unknown) =>
     ? (body as { error: string }).error
     : undefined
 
+/** A saved record as read back, any field missing (another version's) filled in. */
+const savedOf = (value: unknown): Saved =>
+  typeof value === "object" && value !== null ? { ...EMPTY, ...(value as Partial<Saved>) } : EMPTY
+
+const sameBatch = (a: Polled, b: Polled) => a.line === b.line && a.ids.join() === b.ids.join()
+
 // A top-level function declaration: Claude Code's loader accepts `register` in no other shape.
 export function register(on: On, _options?: unknown) {
-  // The main agent's inbox, this module only. `queue`: batches polled, not yet submitted. `seen`: ids taken (queued or
-  // submitted), so a batch handed out again after its lease ran out is not shown twice. `full`: per line, the full
-  // texts waiting for the prompt.submit hook, oldest first. `unacked`: submitted, acked on the next poll. `release`: new
-  // rows of a mixed batch, given back on the next ack.
-  const queue: Array<Polled> = []
-  const seen = new Set<number>()
-  const full = new Map<string, Array<string>>()
-  let unacked: Array<number> = []
-  let release: Array<number> = []
+  // This load's own: which load it is, and what it does right now. The rest is `saved`, mirrored in `$.state`.
+  const generation = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  let saved: Saved = EMPTY
+  let version = 0
   let polling = false
   let draining = false
+  let flushing = false
   let failures = 0
   let mismatched = false
   let timer: { cancel: () => void } | undefined
+
+  /** Read `$.state` into `saved`; false when a newer load polls now. Without `$.state`, `saved` is kept in memory only. */
+  const load = async (host: Host) => {
+    const r = await host.load().catch(() => undefined)
+    if (r === undefined) return true
+    saved = savedOf(r.value)
+    version = r.version
+    return saved.generation === "" || saved.generation === generation
+  }
+
+  /**
+   * Apply `change` to the saved record, compare-and-set: on a miss it reads again and applies it to what stands, so an
+   * old load still finishing a hook never undoes a newer one's write. A refused write is kept in memory only.
+   */
+  const update = async (host: Host, change: (s: Saved) => Saved) => {
+    for (let n = 0; n < 5; n++) {
+      const next = change(saved)
+      try {
+        const r = await host.save(next, version)
+        if (r.isSet) {
+          saved = next
+          version = r.version
+          return true
+        }
+        await load(host)
+      } catch {
+        saved = next
+        return true
+      }
+    }
+    return false
+  }
 
   /** The session's identity from its environment, or undefined outside VIBEST. */
   const identity = async (host: Host) => {
@@ -191,33 +277,72 @@ export function register(on: On, _options?: unknown) {
     return reply
   }
 
-  /** Report `body` to `path`; when vibestd does not take it, again after each REPORT_BACKOFF_MS pause. Never throws. */
-  const report = async (host: Host, path: string, body: unknown) => {
-    const attempt = async (n: number): Promise<void> => {
-      let retry = true
-      try {
-        const r = await post(host, path, body, REPORT_TRY_MS)
-        retry = r.status >= 500
-      } catch {
-        // Nothing answered: try again.
-      }
-      const pause = REPORT_BACKOFF_MS[n]
-      if (retry && pause !== undefined) host.after(pause, () => void attempt(n + 1))
+  /** vibestd took it: any answer but none, ≥500 or another protocol (a reload to the new module sends it again). */
+  const send = async (host: Host, path: string, body: unknown) => {
+    try {
+      const r = await post(host, path, body, REPORT_TRY_MS)
+      return r.status < 500 && r.status !== 409
+    } catch {
+      return false
     }
-    await attempt(0)
+  }
+
+  /** Send each saved report again, oldest first, until one is not taken. */
+  const flush = async (host: Host) => {
+    if (flushing) return
+    flushing = true
+    try {
+      for (const pending of saved.reports) {
+        if (!(await send(host, pending.path, pending.body))) return
+        await update(host, (s) => ({ ...s, reports: s.reports.filter((r) => r.n !== pending.n) }))
+      }
+    } finally {
+      flushing = false
+    }
+  }
+
+  /** Again after each REPORT_BACKOFF_MS pause while reports wait; a newer load's session.start flushes them too. */
+  const retry = (host: Host, n: number) => {
+    const pause = REPORT_BACKOFF_MS[n]
+    if (pause !== undefined)
+      host.after(pause, () => void flush(host).then(() => (saved.reports.length > 0 ? retry(host, n + 1) : undefined)))
+  }
+
+  /** Report `body` to `path`; one vibestd does not take is kept in `$.state` and sent again. Never throws. */
+  const report = async (host: Host, path: string, body: unknown) => {
+    if (await send(host, path, body)) return
+    const n = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    await update(host, (s) => ({ ...s, reports: [...s.reports, { n, path, body }].slice(-REPORTS_MAX) }))
+    retry(host, 0)
+  }
+
+  /** Ack what was shown and give back what was released; the ids leave the record once vibestd took them. */
+  const ack = async (host: Host) => {
+    const ids = saved.unacked
+    const release = saved.release
+    if (ids.length === 0 && release.length === 0) return
+    const r = await post(host, ACK_ROUTE, { ids, release }, REPORT_TRY_MS)
+    if (r.status === 200)
+      await update(host, (s) => ({
+        ...s,
+        unacked: s.unacked.filter((id) => !ids.includes(id)),
+        release: s.release.filter((id) => !release.includes(id)),
+      }))
   }
 
   const tick = async (host: Host) => {
     if (polling) return
     polling = true
     try {
-      if (unacked.length > 0 || release.length > 0) {
-        const r = await post(host, ACK_ROUTE, { ids: unacked, release }, REPORT_TRY_MS)
-        if (r.status === 200) {
-          unacked = []
-          release = []
-        }
+      // A newer load polls now: this one stops.
+      if (!(await load(host))) {
+        timer?.cancel()
+        return
       }
+      // `$.state` starts empty for the conversation /clear begins (the clock and this load go on): claim it again.
+      if (saved.generation === "") await update(host, (s) => ({ ...s, generation }))
+      if (saved.reports.length > 0) await flush(host)
+      await ack(host)
       const r = await post(host, POLL_ROUTE, {}, REPORT_TRY_MS)
       if (r.status === 409) return
       if (r.status !== 200 || !isPolled(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
@@ -225,18 +350,22 @@ export function register(on: On, _options?: unknown) {
       failures = 0
       const batch = r.body
       if (batch.ids.length === 0) return
-      // Taken before (still queued here, or submitted and its ack lost): acked once submitted.
-      const queued = (id: number) => queue.some((b) => b.ids.includes(id))
-      for (const id of batch.ids) if (seen.has(id) && !queued(id) && !unacked.includes(id)) unacked.push(id)
-      const fresh = batch.ids.filter((id) => !seen.has(id))
-      if (fresh.length === 0) return
-      if (fresh.length < batch.ids.length) {
-        release.push(...fresh)
-        return
-      }
-      for (const id of batch.ids) seen.add(id)
-      queue.push(batch)
-      host.redraw()
+      let queued = false
+      await update(host, (s) => {
+        // Taken before (still queued here, being submitted, or shown and its ack lost): acked once shown.
+        const waiting = (id: number) => [...s.queue, ...s.inflight].some((b) => b.ids.includes(id))
+        const again = batch.ids.filter((id) => s.seen.includes(id) && !waiting(id) && !s.unacked.includes(id))
+        const fresh = batch.ids.filter((id) => !s.seen.includes(id))
+        queued = fresh.length > 0 && fresh.length === batch.ids.length
+        return {
+          ...s,
+          unacked: [...s.unacked, ...again],
+          release: fresh.length > 0 && !queued ? [...s.release, ...fresh] : s.release,
+          seen: queued ? [...s.seen, ...batch.ids].slice(-SEEN_MAX) : s.seen,
+          queue: queued ? [...s.queue, batch] : s.queue,
+        }
+      })
+      if (queued) host.redraw()
     } catch {
       failures += 1
       if (failures === POLL_FAILURES_SHOWN) host.status("VIBEST: vibestd does not answer; still trying")
@@ -245,56 +374,40 @@ export function register(on: On, _options?: unknown) {
     }
   }
 
-  /** Keep `text` for the prompt.submit hook under `line`; the oldest lines go past FULL_MAX. */
-  const keep = (line: string, text: string) => {
-    const list = full.get(line)
-    if (list) list.push(text)
-    else full.set(line, [text])
-    while (full.size > FULL_MAX) full.delete(full.keys().next().value!)
-  }
-  const forget = (line: string, text: string) => {
-    const list = full.get(line)
-    const at = list?.lastIndexOf(text) ?? -1
-    if (list && at >= 0) list.splice(at, 1)
-    if (list?.length === 0) full.delete(line)
-  }
-
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
-    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready).
-    if (await identity(host).catch(() => undefined)) {
-      const pid = await host.pid().catch(() => undefined)
-      void report(host, "/session/ready", pid === undefined ? {} : { pid })
-    }
-    if (timer === undefined && (await identity(host))?.agent === "coordinator") {
+    const who = await identity(host).catch(() => undefined)
+    if (!who) return next(e)
+    // A reload runs this again: the record survives it, and this load polls from now on.
+    await load(host)
+    await update(host, (s) => ({ ...s, generation }))
+    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready). `plugin`:
+    // where this module was loaded from, so vibestd knows whether it reloads when vibestd syncs its copy.
+    const pid = await host.pid().catch(() => undefined)
+    void report(host, "/session/ready", { ...(pid === undefined ? {} : { pid }), plugin: host.root() })
+    if (saved.reports.length > 0) void flush(host)
+    if (timer === undefined && who.agent === "coordinator") {
       timer = host.every(POLL_MS, () => void tick(host))
       void tick(host)
     }
     return next(e)
   })
 
-  // One batch per draw, submitted from inside this hook so this module's own prompt.submit hook sees it. Draws nothing.
+  // One batch per draw, submitted from inside this hook so this module's own prompt.submit hook sees it. Draws nothing,
+  // and writes no `$.state` (refused while drawing): the prompt.submit hook moves the batch on.
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
-    const batch = queue[0]
+    const batch = saved.queue[0]
     if (batch !== undefined && !draining) {
       const host = nativeHost($)
       draining = true
-      queue.shift()
-      keep(batch.line, batch.text)
       // Started here, inside the hook; its answer is handled when it comes, without holding the draw.
       host.submit(batch.line).then(
-        (r) => {
+        () => {
           draining = false
-          if (r.drop !== undefined) {
-            forget(batch.line, batch.text)
-            queue.unshift(batch)
-          } else unacked.push(...batch.ids)
-          if (queue.length > 0) host.redraw()
+          if (saved.queue.length > 0) host.redraw()
         },
         () => {
           draining = false
-          forget(batch.line, batch.text)
-          queue.unshift(batch)
           host.redraw()
         },
       )
@@ -302,16 +415,18 @@ export function register(on: On, _options?: unknown) {
     return next(e)
   })
 
-  // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
-  // (agentId set) is not the session's; the main agent's has no result (its conversation id goes with every poll).
+  // Awaited, so it finishes even when a reload lands now. A failed report still returns next(e): never block or
+  // continue a stopped turn. A subagent's turn (agentId set) is not the session's; the main agent's has no result (its
+  // conversation id goes with every poll). `turn_id`: vibestd records a turn end once, however often it arrives.
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
       if (who && who.agent !== "coordinator")
-        void report(host, hookRoute("claude", "turn-end"), {
+        await report(host, hookRoute("claude", "turn-end"), {
           hook_event_name: "TurnComplete",
           session_id: await host.conversation().catch(() => ""),
+          turn_id: event.turnId,
           reason: event.reason,
           last_assistant_message: event.answer,
           ...(event.reason === "refusal" ? { refusal: event.refusal } : {}),
@@ -320,17 +435,35 @@ export function register(on: On, _options?: unknown) {
     return next(event)
   })
 
-  // This module's own submit (a polled batch's line): its full text goes with it as context. Anything else is reported;
-  // vibestd keeps only what the person submitted (origin composer or bridge), and never the main agent's.
+  // This module's own submit (a polled batch's line): its full text goes with it as context, and once it entered it is
+  // acked at once. Anything else is reported; vibestd keeps only what the person submitted (origin composer or bridge),
+  // and never the main agent's.
   on("prompt.submit", async ($, event, next) => {
     const host = nativeHost($)
     if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
-      const list = full.get(event.text)
-      const text = list?.shift()
-      if (list?.length === 0) full.delete(event.text)
+      const batch = saved.queue.find((b) => b.line === event.text)
+      if (batch === undefined) return next(event)
+      // Out of the queue before it enters, so a load that comes now does not submit it again.
+      await update(host, (s) => ({
+        ...s,
+        queue: s.queue.filter((b) => !sameBatch(b, batch)),
+        inflight: [...s.inflight, batch],
+      }))
       // A one-line notice is its own full text: the prompt already holds it, so it is not sent a second time.
-      if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
-      return next({ ...event, context: [...(event.context ?? []), text] })
+      const entered = await next(
+        batch.text === undefined || event.text.trimEnd().endsWith(batch.text.trim())
+          ? event
+          : { ...event, context: [...(event.context ?? []), batch.text] },
+      )
+      await update(host, (s) => ({
+        ...s,
+        inflight: s.inflight.filter((b) => !sameBatch(b, batch)),
+        ...(entered.drop === undefined
+          ? { unacked: [...s.unacked, ...batch.ids] }
+          : { queue: [batch, ...s.queue.filter((b) => !sameBatch(b, batch))] }),
+      }))
+      if (entered.drop === undefined) await ack(host).catch(() => undefined)
+      return entered
     }
     const who = await identity(host).catch(() => undefined)
     if (who && who.agent !== "coordinator")

@@ -71,6 +71,8 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
 /**
  * A harness plugin's turn end, wherever it arrives (`vibest integration stop`, or vibestd's HTTP hook): the adapter's
  * `turnEnd` reads it, and a result writes the session's result file and its turn-end report line. True when it did.
+ * A turn end that names its turn (`turn_id`, the Claude plugin's) is recorded once: the plugin sends one again when it
+ * cannot tell whether vibestd took it.
  */
 export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId: string, raw: string) =>
   Effect.gen(function* () {
@@ -82,6 +84,14 @@ export const recordTurnEnd = (adapter: HarnessAdapter, agent: string, sessionId:
     const file = layout.resultFile(sessionId)
     // The session id comes from the caller. Keep the file as one name inside the results directory.
     if (path.basename(file) !== `${sessionId}.json` || path.dirname(file) !== layout.results) return false
+    const turn = outcome.result.turn_id
+    if (
+      typeof turn === "string" &&
+      (yield* readReportLines(layout.reportFile(sessionId))).some(
+        (line) => line.turn === "end" && line.payload.turn_id === turn,
+      )
+    )
+      return false
     yield* writeAtomic(
       file,
       JSON.stringify({ harness: adapter.id, ts: Math.floor(Date.now() / 1000), payload: outcome.result }),

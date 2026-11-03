@@ -711,6 +711,7 @@ describe("vibest.sock", () => {
         }).pipe(
           Effect.provide(
             Layer.succeed(Harness, {
+              sync: Effect.void,
               available: () => Effect.succeed(available),
               plugin: (id) =>
                 plugin

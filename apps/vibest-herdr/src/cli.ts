@@ -1306,8 +1306,16 @@ const restartAgents = (version: string, yes: boolean, command: "vibest update" |
     const cwd = (yield* Path.Path).resolve(".")
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
       withVibest({ _tag: "cli", repositoryRoot: cwd }, f, { start: false })
-    const outdated = yield* ask((client) => client["Agents.Outdated"]())
-    if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
+    const listed = yield* ask((client) => client["Agents.Outdated"]())
+    if (listed.length === 0) return yield* Console.log("No agent runs an old integration.")
+    // These load the plugin vibestd just synced and take it in place when their turn ends: no restart, nothing to ask.
+    const reloading = listed.filter((a) => a.reloads === true).map((a) => a.id)
+    if (reloading.length > 0)
+      yield* Console.log(
+        `${reloading.join(", ")} ${reloading.length === 1 ? "loads" : "load"} the new integration in place when ${reloading.length === 1 ? "its" : "their"} turn ends; no restart.`,
+      )
+    const outdated = listed.filter((a) => a.reloads !== true)
+    if (outdated.length === 0) return
     const working = outdated.filter((a) => a.working).map((a) => a.id)
     const ids = outdated.map((a) => a.id).join(", ")
     const busy = working.length === 0 ? "" : `; ${working.join(", ")} ${working.length === 1 ? "is" : "are"} working`

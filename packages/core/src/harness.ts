@@ -1,9 +1,9 @@
 import type { HarnessOption } from "@vibest/plugin"
-import { VibestCommand } from "@vibest/schema/layout"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
 // HarnessAdapter: everything that differs between pi / claude / cursor (SPEC §10); each adapter lives in harnesses/ and
 // reaches the code through the `Harnesses` service.
-import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Random, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import type { Model, ModelLister } from "./models.ts"
@@ -166,12 +166,20 @@ export class Harness extends Context.Service<
     /** The harness binary is on PATH. */
     readonly available: (id: HarnessId) => Effect.Effect<boolean>
     /**
-     * vibest's plugin for `id`, which vibest loads into each session it starts (`--plugin-dir`, `pi -e`): a directory of
-     * VIBEST_HARNESSES (the npm package's bin/vibest.cjs sets it), else of `harnesses/` beside the compiled binary's
-     * directory (`<root>/bin/vibest` and `<root>/harnesses`), so the binary alone runs without Node. Nothing is installed
-     * into the harness's own config.
+     * vibest's plugin for `id`, which vibest loads into each session it starts (`--plugin-dir`, `pi -e`):
+     * `${VIBEST_HOME}/harnesses/<id>` (`Layout.harnessPlugin`), the same path whatever the install, which `sync` keeps
+     * equal to this vibest's bundled plugin. Fails when this vibest has no bundled plugin for `id`. Nothing is
+     * installed into the harness's own config.
      */
     readonly plugin: (id: HarnessId) => Effect.Effect<string, HarnessUnavailable>
+    /**
+     * vibestd, when it starts: write each bundled plugin (a directory of VIBEST_HARNESSES, which the npm package's
+     * bin/vibest.cjs sets, else of `harnesses/` beside the compiled binary's directory) into `plugin(id)`, file by
+     * file, each a temp file renamed over its target, the hooks module and the extension last; files an earlier sync
+     * wrote and this one does not ship are removed, others (Claude Code's own `.claude-plugin/types`, `tsconfig.json`)
+     * stay. A running harness that watches the directory (Claude Code) loads the new module by itself.
+     */
+    readonly sync: Effect.Effect<void>
     /** `listModels`, successes cached for MODELS_TTL: the harness runs and its auth works. */
     readonly models: (id: HarnessId, provider: string | null) => Effect.Effect<ReadonlyArray<Model>, HarnessUnavailable>
   }
@@ -182,6 +190,7 @@ export class Harness extends Context.Service<
       const path = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const harnesses = yield* Harnesses
+      const layout = yield* Layout
       const self = yield* VibestCommand
       // A compiled binary runs as itself alone; from source (`bun main.ts`) there is no layout to look beside.
       // Run bare (a pane vibestd opened runs the binary, not the npm launcher): `harnesses/` beside it (install.sh), else in
@@ -202,23 +211,40 @@ export class Harness extends Context.Service<
       const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
       const { listModels } = yield* Effect.promise(() => import("./models.ts"))
       const cache = new Map<string, { readonly at: number; readonly models: ReadonlyArray<Model> }>()
+      /** This vibest's own plugin for `id`, as it was installed. */
+      const bundled = (id: HarnessId) =>
+        Effect.gen(function* () {
+          const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
+          if (!plugins)
+            return yield* unavailable(
+              "VIBEST_HARNESSES is not set, and vibest runs from source; set it to a built harnesses/ directory",
+            )
+          const dir = path.join(plugins, id)
+          if (!(yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))))
+            return yield* unavailable(`vibest's ${id} plugin is missing: ${dir}`)
+          return dir
+        })
       return Harness.of({
         available: (id) =>
           Effect.findFirst(searchPath, (dir) =>
             fs.exists(path.join(dir, harnesses.get(id).binary)).pipe(Effect.orElseSucceed(() => false)),
           ).pipe(Effect.map((found) => found._tag === "Some")),
-        plugin: (id) =>
-          Effect.gen(function* () {
-            const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
-            if (!plugins)
-              return yield* unavailable(
-                "VIBEST_HARNESSES is not set, and vibest runs from source; set it to a built harnesses/ directory",
-              )
-            const dir = path.join(plugins, id)
-            if (!(yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))))
-              return yield* unavailable(`vibest's ${id} plugin is missing: ${dir}`)
-            return dir
-          }),
+        plugin: (id) => Effect.as(bundled(id), layout.harnessPlugin(id)),
+        sync: Effect.forEach(
+          harnesses.all,
+          ({ id }) =>
+            bundled(id).pipe(
+              Effect.flatMap((from) => syncPlugin(from, layout.harnessPlugin(id))),
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+              Effect.catch((e) =>
+                Effect.logWarning(
+                  `vibest's ${id} plugin was not synced into ${layout.harnessPlugin(id)}: ${e.message}`,
+                ),
+              ),
+            ),
+          { discard: true },
+        ),
         models: (id, provider) =>
           Effect.gen(function* () {
             const key = `${id}/${provider ?? ""}`
@@ -236,6 +262,47 @@ export class Harness extends Context.Service<
 
   static readonly layer = Layer.effect(Harness, Harness.make())
 }
+
+/** The list of files the last sync wrote, inside the synced directory. */
+export const SYNCED = ".vibest-files"
+
+/** Written last: the file a harness loads (Claude Code reloads on its rename), after everything it reads. */
+const loadedLast = (file: string) => /(^|\/)(register\.mjs|extension\.m?js)$/.test(file)
+
+/**
+ * Make `to` hold `from`'s files (`Harness.sync`): a file whose bytes differ is written to a temp file and renamed over
+ * it, keeping the source's mode; the module a harness loads goes last. Files of the previous sync's list that `from` no
+ * longer has are removed; files no sync wrote stay.
+ */
+export const syncPlugin = Effect.fn("syncPlugin")(function* (from: string, to: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const files: Array<string> = []
+  for (const entry of [...(yield* fs.readDirectory(from, { recursive: true }))].sort()) {
+    if ((yield* fs.stat(path.join(from, entry))).type === "File") files.push(entry)
+  }
+  const ordered = [...files.filter((f) => !loadedLast(f)), ...files.filter(loadedLast)]
+  for (const file of ordered) {
+    const source = path.join(from, file)
+    const target = path.join(to, file)
+    const bytes = yield* fs.readFile(source)
+    const now = yield* fs.readFile(target).pipe(Effect.option)
+    if (Option.isSome(now) && now.value.length === bytes.length && now.value.every((b, i) => b === bytes[i])) continue
+    yield* fs.makeDirectory(path.dirname(target), { recursive: true })
+    const tmp = `${target}.${yield* Random.nextIntBetween(0, 2 ** 31)}.tmp`
+    yield* fs.writeFile(tmp, bytes, { mode: (yield* fs.stat(source)).mode & 0o777 })
+    yield* fs.rename(tmp, target)
+  }
+  const list = path.join(to, SYNCED)
+  const before = yield* fs.readFileString(list).pipe(
+    Effect.map((text) => text.split("\n").filter((f) => f !== "")),
+    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  )
+  for (const gone of before.filter((f) => !files.includes(f) && !f.split("/").includes("..")))
+    yield* fs.remove(path.join(to, gone), { force: true })
+  yield* fs.writeFileString(`${list}.tmp`, files.map((f) => `${f}\n`).join(""))
+  yield* fs.rename(`${list}.tmp`, list)
+})
 
 /**
  * Everything that keeps `id` from running a session with `provider` / `model`, in order: provider accepted, binary

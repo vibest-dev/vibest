@@ -375,6 +375,7 @@ export interface TestOptions extends FakeRuntimeOptions {
 
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
+    sync: Effect.void,
     available: () => Effect.succeed(true),
     plugin: (id) =>
       (options.hooked ?? HARNESS_IDS).includes(id)

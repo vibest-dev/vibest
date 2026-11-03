@@ -574,6 +574,7 @@ describe("multi-repository isolated workspace", () => {
       }).pipe(
         Effect.provide(
           Layer.succeed(Harness, {
+            sync: Effect.void,
             available: () => Effect.succeed(true),
             plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
             models: () => Effect.succeed([]),

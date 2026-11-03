@@ -388,6 +388,59 @@ describe("vibestd's HTTP API", () => {
     }),
   )
 
+  test(
+    "a turn end that names its turn is recorded once, however often the plugin sends it",
+    Effect.gen(function* () {
+      const { call, worker } = yield* project
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const end = (turn: string, text: string) =>
+        call(
+          "/hooks/claude/turn-end",
+          { sessionId: worker },
+          JSON.stringify({
+            hook_event_name: "TurnComplete",
+            turn_id: turn,
+            reason: "answer",
+            last_assistant_message: text,
+          }),
+        )
+      assert.strictEqual((yield* end("t1", "first")).status, 204)
+      const written = yield* fs.readFileString(layout.resultFile(worker))
+      // Sent again (its answer was lost, or a reload sent what it kept): taken, nothing written.
+      assert.strictEqual((yield* end("t1", "first")).status, 204)
+      assert.strictEqual(yield* fs.readFileString(layout.resultFile(worker)), written)
+      const ends = () =>
+        fs
+          .readFileString(layout.reportFile(worker))
+          .pipe(Effect.map((t) => t.split("\n").filter((l) => l.includes('"turn":"end"')).length))
+      assert.strictEqual(yield* ends(), 1)
+      assert.strictEqual((yield* end("t2", "second")).status, 204)
+      assert.include(yield* fs.readFileString(layout.resultFile(worker)), "second")
+      assert.strictEqual(yield* ends(), 2)
+    }),
+  )
+
+  test(
+    "the ready report: an integration loaded from the plugin directory vibestd syncs reloads, any other does not",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      const layout = yield* Layout
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(layout.harnessPlugin("claude"), { recursive: true })
+      const ready = (body: object) => call("/session/ready", { sessionId: worker }, JSON.stringify(body))
+      assert.strictEqual((yield* ready({ pid: 4242, plugin: layout.harnessPlugin("claude") })).status, 204)
+      assert.isTrue((yield* db.getSession(worker))!.metadata.reloads)
+      assert.strictEqual((yield* db.getSession(worker))!.metadata.pid, 4242)
+      // An install's own directory (an agent started before the sync), or a module that does not say.
+      yield* ready({ pid: 4242, plugin: "/somewhere/harnesses/claude" })
+      assert.isUndefined((yield* db.getSession(worker))!.metadata.reloads)
+      yield* ready({ plugin: layout.harnessPlugin("claude") })
+      yield* ready({ pid: 4242 })
+      assert.isUndefined((yield* db.getSession(worker))!.metadata.reloads)
+    }),
+  )
+
   it.effect("served on a unix socket", () =>
     Effect.gen(function* () {
       const { main, projectId } = yield* project

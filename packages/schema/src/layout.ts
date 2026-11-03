@@ -30,6 +30,11 @@ export class Layout extends Context.Service<
     readonly legacyWorktree: (id: string) => string
     /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
+    /**
+     * `harnesses/<id>`: vibest's plugin for a harness as every agent loads it (`--plugin-dir`, `pi -e`), one path for
+     * every install. vibestd copies its own bundled plugin here when it starts (`Harness.sync`).
+     */
+    readonly harnessPlugin: (id: string) => string
     readonly project: (key: string) => string
     readonly scratch: (key: string) => string
   }
@@ -55,6 +60,7 @@ export class Layout extends Context.Service<
         coordinatorRules: (key) => path.join(home, "coordinator", `${key}.md`),
         legacyWorktree: (id) => path.join(home, "worktrees", id),
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
+        harnessPlugin: (id) => path.join(home, "harnesses", id),
         project: (key) => path.join(home, "projects", key),
         scratch: (key) => path.join(home, "projects", key, "scratch"),
       })

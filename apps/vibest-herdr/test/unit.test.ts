@@ -13,6 +13,7 @@ import {
   hasNewline,
   type LaunchInput,
   preflight,
+  syncPlugin,
 } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { claudeMenuKey, claudeModels } from "@vibest/core/harnesses/claude"
@@ -1068,6 +1069,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         yield* Effect.flip(harness.models("pi", null))
         yield* listAllModels(["claude", "cursor"], null)
       }).pipe(
+        Effect.provide(Layer.effect(Layout, Layout.make("/vh"))),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(
           ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: "/home/someone" }), { asPrimary: true }),
@@ -1085,6 +1087,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           Effect.flip,
           Effect.provide(
             Layer.succeed(Harness, {
+              sync: Effect.void,
               available: () => Effect.succeed(true),
               plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
               models: () => Effect.fail(new HarnessUnavailable({ harness: "cursor", message: cause })),
@@ -1102,20 +1105,23 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
   )
 
   it.effect(
-    "vibest's plugin for a harness is VIBEST_HARNESSES/<harness>, else harnesses/ beside the binary's directory, and must be there",
+    "vibest's plugin for a harness loads from VIBEST_HOME/harnesses/<harness>; it is bundled in VIBEST_HARNESSES/<harness>, else harnesses/ beside the binary's directory, and must be there",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const dir = yield* tempDirectory("vibest-harnesses-")
+        const home = yield* tempDirectory("vibest-home-")
         yield* fs.makeDirectory(path.join(dir, "pi"))
-        const plugin = (env: Record<string, string>, id: HarnessId, self: ReadonlyArray<string> = ["vibest"]) =>
+        const harness = (env: Record<string, string>, self: ReadonlyArray<string> = ["vibest"]) =>
           Harness.make().pipe(
-            Effect.flatMap((h) => h.plugin(id)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
             Effect.provideService(VibestCommand, self),
+            Effect.provide(Layer.effect(Layout, Layout.make(home))),
           )
-        assert.strictEqual(yield* plugin({ VIBEST_HARNESSES: dir }, "pi"), path.join(dir, "pi"))
+        const plugin = (env: Record<string, string>, id: HarnessId, self?: ReadonlyArray<string>) =>
+          Effect.flatMap(harness(env, self), (h) => h.plugin(id))
+        assert.strictEqual(yield* plugin({ VIBEST_HARNESSES: dir }, "pi"), path.join(home, "harnesses", "pi"))
         assert.include(
           (yield* Effect.flip(plugin({ VIBEST_HARNESSES: dir }, "claude"))).message,
           `vibest's claude plugin is missing: ${path.join(dir, "claude")}`,
@@ -1124,13 +1130,59 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         // The compiled binary alone, laid out as <root>/bin/vibest beside <root>/harnesses: no VIBEST_HARNESSES needed.
         const root = yield* tempDirectory("vibest-root-")
         yield* fs.makeDirectory(path.join(root, "harnesses", "pi"), { recursive: true })
+        yield* fs.writeFileString(path.join(root, "harnesses", "pi", "extension.mjs"), "beside")
+        yield* fs.writeFileString(path.join(dir, "pi", "extension.mjs"), "env")
         assert.strictEqual(
           yield* plugin({}, "pi", [path.join(root, "bin", "vibest")]),
-          path.join(root, "harnesses", "pi"),
+          path.join(home, "harnesses", "pi"),
         )
-        assert.strictEqual(
-          yield* plugin({ VIBEST_HARNESSES: dir }, "pi", [path.join(root, "bin", "vibest")]),
-          path.join(dir, "pi"),
+        // The bundle it syncs: VIBEST_HARNESSES first.
+        yield* Effect.flatMap(harness({ VIBEST_HARNESSES: dir }, [path.join(root, "bin", "vibest")]), (h) => h.sync)
+        assert.strictEqual(yield* fs.readFileString(path.join(home, "harnesses", "pi", "extension.mjs")), "env")
+      }),
+  )
+
+  it.effect(
+    "syncing a plugin: changed files are replaced, files the last sync wrote and this one does not ship are removed, Claude Code's own files stay, modes are kept",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const from = yield* tempDirectory("vibest-bundle-")
+        const to = path.join(yield* tempDirectory("vibest-synced-"), "claude")
+        const write = (file: string, text: string, mode = 0o644) =>
+          fs
+            .makeDirectory(path.dirname(path.join(from, file)), { recursive: true })
+            .pipe(Effect.andThen(fs.writeFile(path.join(from, file), new TextEncoder().encode(text), { mode })))
+        const read = (file: string) => fs.readFileString(path.join(to, file)).pipe(Effect.option)
+        yield* write("hooks/register.mjs", "v1")
+        yield* write("skills/old/SKILL.md", "old")
+        yield* write("hooks/hook.sh", "#!/bin/sh", 0o755)
+        yield* syncPlugin(from, to)
+        assert.deepStrictEqual(yield* read("hooks/register.mjs"), Option.some("v1"))
+        assert.strictEqual((yield* fs.stat(path.join(to, "hooks/hook.sh"))).mode & 0o777, 0o755)
+        // Claude Code writes its type root into the directory it loads.
+        yield* fs.makeDirectory(path.join(to, ".claude-plugin/types"), { recursive: true })
+        yield* fs.writeFileString(path.join(to, ".claude-plugin/types/index.d.ts"), "types")
+        yield* fs.writeFileString(path.join(to, "tsconfig.json"), "{}")
+        yield* fs.remove(path.join(from, "skills"), { recursive: true })
+        yield* write("hooks/register.mjs", "v2")
+        yield* write("skills/new/SKILL.md", "new")
+        const before = (yield* fs.stat(path.join(to, "hooks/hook.sh"))).mtime
+        yield* syncPlugin(from, to)
+        assert.deepStrictEqual(yield* read("hooks/register.mjs"), Option.some("v2"))
+        assert.deepStrictEqual(yield* read("skills/new/SKILL.md"), Option.some("new"))
+        assert.isTrue(Option.isNone(yield* read("skills/old/SKILL.md")), "no longer shipped: removed")
+        assert.deepStrictEqual(yield* read(".claude-plugin/types/index.d.ts"), Option.some("types"))
+        assert.deepStrictEqual(yield* read("tsconfig.json"), Option.some("{}"))
+        assert.deepStrictEqual(
+          (yield* fs.stat(path.join(to, "hooks/hook.sh"))).mtime,
+          before,
+          "unchanged: not rewritten",
+        )
+        assert.deepStrictEqual(
+          (yield* fs.readDirectory(path.join(to, "hooks"))).filter((f) => f.endsWith(".tmp")),
+          [],
         )
       }),
   )
@@ -1269,6 +1321,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         assert.strictEqual((yield* Effect.flip(mainCheckout(home)))._tag, "NotInRepository")
 
         const harness = Layer.succeed(Harness, {
+          sync: Effect.void,
           available: () => Effect.succeed(true),
           // Every Coordinator needs vibest's plugin (the pre-tool guard); only pi's is missing here.
           plugin: (id) =>
