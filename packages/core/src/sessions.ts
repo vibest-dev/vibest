@@ -54,6 +54,7 @@ import {
   type HarnessId,
   preflight,
   type HarnessAdapter,
+  subagentPolls,
 } from "./harness.ts"
 import { Inbox, LEASE, nextBatch, text as inboxText } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
@@ -403,7 +404,7 @@ export class Sessions extends Context.Service<
       /** The runtime a row's `runtime.kind` routes to; `NoRuntime` when no loaded plugin registered it. */
       const live = (session: SessionRow) => runtimes.route(session.runtime)
       /** Its integration takes its rows itself (`poll`, then `consumed`): vibest types nothing into it. */
-      const polls = (session: SessionRow) => harnesses.find(session.harnessId)?.delivery === "poll"
+      const polls = (session: SessionRow) => subagentPolls(harnesses.find(session.harnessId))
 
       /** Ready for input (§5). A harness whose integration reports it (`ready: "integration"`) is ready once that report
        * is on its row (a restart or move removes the previous one); any other once the runtime's `state` says idle,
@@ -548,10 +549,12 @@ export class Sessions extends Context.Service<
        */
       const settleAfterInterrupt = (h: Runtime, session: SessionRow, terminal: Terminal) =>
         (harnesses.get(session.harnessId).reportsState
-          ? Effect.map(
-              turnEnds.latest(session.id),
-              (end) => session.turnState !== "open" || (end !== undefined && end.at > session.turnPromptedAt),
-            )
+          ? Effect.gen(function* () {
+              // Re-read each tick: the turn end that settles it lands on the row while this waits.
+              const now = (yield* db.getSession(session.id)) ?? session
+              const end = yield* turnEnds.latest(session.id)
+              return now.turnState !== "open" || (end !== undefined && end.at > now.turnPromptedAt)
+            })
           : agentState(h, terminal).pipe(
               Effect.map((seen) => {
                 const state = stateOf(seen)
@@ -955,7 +958,7 @@ export class Sessions extends Context.Service<
               input.parentSessionId,
               input.reportTo,
               // A polling integration takes its task itself; any other gets it typed in at launch.
-              adapter.delivery === "poll",
+              subagentPolls(adapter),
             )
             if (!inserted) {
               // The directory this spawn reserved goes again (still empty: nothing was started in it).

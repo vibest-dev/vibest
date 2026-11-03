@@ -120,6 +120,9 @@ export interface HarnessAdapter {
    * HTTP `/inbox/poll` and `/inbox/ack`).
    */
   readonly delivery: "type" | "poll"
+  /** A subagent's rows when they differ from `delivery` (Claude: its plugin's submit does not reach the harness after an
+   * Esc in the pane, so a subagent's tasks and sends are typed). Absent: as `delivery`. */
+  readonly subagentDelivery?: "type" | "poll"
   /**
    * The integration reports what the harness does: `ready` when it takes input, `turn.start` when it works, `blocked`
    * when it waits on the person. vibest then reads only liveness from the runtime (and idle, for a turn that ended

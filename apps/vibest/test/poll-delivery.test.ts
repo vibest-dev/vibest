@@ -1,4 +1,4 @@
-// A subagent whose harness integration takes its rows itself (Claude, Pi: `delivery: "poll"`): nothing is typed into
+// A subagent whose harness integration takes its rows itself (Pi: `delivery: "poll"`; a Claude subagent has them typed): nothing is typed into
 // its terminal. Its integration polls `/inbox/poll`; the poll opens the round; the turn start that names the rows is the
 // proof they were taken; a lease that runs out with none taken gives them back. Its turns are what its integration
 // reports: the runtime's idle is no turn end, and an interrupt waits for the interrupted turn end.
@@ -20,7 +20,7 @@ import { FakeRuntime, makeRepository, testLayer, type TestServices, until, write
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ integrationPolls: false }))), 30_000)
 
-/** A Claude subagent started and up, its integration (this test) not yet asking for anything. */
+/** A Pi subagent started and up, its integration (this test) not yet asking for anything. */
 const started = Effect.gen(function* () {
   const db = yield* Db
   const sessions = yield* Sessions
@@ -36,7 +36,7 @@ const started = Effect.gen(function* () {
     key,
     name: "t",
     prompt: "do it",
-    harness: "claude",
+    harness: "pi",
   })
   yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)
   yield* sessions.check(id)
@@ -44,9 +44,7 @@ const started = Effect.gen(function* () {
   const call = (path: string, body: unknown) =>
     handle({
       path,
-      headers: Headers.fromInput(
-        sessionHeaders({ sessionId: id, projectId: String(main.projectId), harness: "claude" }),
-      ),
+      headers: Headers.fromInput(sessionHeaders({ sessionId: id, projectId: String(main.projectId), harness: "pi" })),
       body: JSON.stringify(body),
     })
   return { db, sessions, id, call }
@@ -128,7 +126,7 @@ test(
       yield* sessions.check(id)
     }
     assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-    yield* writeResult(id, "claude", { text: "done" })
+    yield* writeResult(id, "pi", { text: "done" })
     yield* sessions.check(id)
     assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
   }),

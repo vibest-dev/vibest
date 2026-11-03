@@ -18,6 +18,10 @@ export type StartupPane = HarnessApi.StartupPane
 export type Startup = HarnessApi.Startup
 
 /** `[flag, value]`, or nothing when there is no value. */
+/** A subagent on `adapter` takes its rows itself (`poll`) rather than having them typed. */
+export const subagentPolls = (adapter: HarnessAdapter | undefined) =>
+  (adapter?.subagentDelivery ?? adapter?.delivery) === "poll"
+
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 /** checkProvider for a harness that only runs Anthropic's models. */
 export const anthropicOnly = (harness: string) => (provider: string | null) =>

@@ -111,6 +111,7 @@ export const claude: HarnessAdapter = {
   interruptKey: "esc",
   startup: claudeStartup,
   delivery: "poll",
+  subagentDelivery: "type",
   reportsState: true,
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [

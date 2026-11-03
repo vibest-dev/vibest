@@ -22,7 +22,7 @@ import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import * as Guard from "@vibest/core/guard"
-import { Harnesses } from "@vibest/core/harness"
+import { Harnesses, subagentPolls } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
@@ -127,10 +127,11 @@ export const make = Effect.gen(function* () {
       const who = yield* identify(request.headers)
       if ("status" in who) return who
       if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (harnesses.find(who.harness)?.delivery !== "poll")
-          return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         // The main agent takes its project's results and notices (Inbox); any other session its own tasks and sends.
         const main = who.entry
+        const adapter = harnesses.find(who.harness)
+        if (main ? adapter?.delivery !== "poll" : !subagentPolls(adapter))
+          return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         if (request.path === POLL_ROUTE) return ok(yield* main ? inbox.poll(who.projectId) : sessions.poll(who.id))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")

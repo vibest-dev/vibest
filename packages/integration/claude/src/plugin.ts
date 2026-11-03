@@ -7,8 +7,8 @@
  *   VIBEST_SESSION_ID set), as the neutral integration events (`/events`: ready, turn.end, turn.start) and the neutral
  *   tool call (`/guard`). turn.complete fires for every main-loop turn end (reason answer, aborted, refusal or error;
  *   Stop fires for no Esc) and carries no API error kind: an error whose answer reads as a usage limit is `limited`.
- * - The session's inbox: a poll every POLL_MS only queues what vibestd hands out (the main agent's results and notices,
- *   a subagent's tasks and sends). The AbovePrompt render hook submits one queued batch per draw as its one line (a
+ * - The session's inbox: a poll every POLL_MS only queues what vibestd hands out (the main agent's results and notices;
+ *   a subagent's poll is refused, which stops it: vibestd types a Claude subagent's rows). The AbovePrompt render hook submits one queued batch per draw as its one line (a
  *   subagent's line is its rows' full text); this module's own prompt.submit hook reports the turn start with the
  *   batch's row ids and attaches the full text as context to a line that does not already hold it. (A submit from outside a hook's call stack, as a clock
  *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll. A
@@ -264,6 +264,11 @@ export function register(on: On, _options?: unknown) {
       }
       const r = await post(host, POLL_ROUTE, {}, REPORT_TRY_MS)
       if (r.status === 409) return
+      // This session does not poll (a subagent: vibestd types its rows in).
+      if (r.status === 403) {
+        timer?.cancel()
+        return
+      }
       if (r.status !== 200 || !isPolled(r.body)) throw new Error(errorOf(r.body) ?? `poll answered ${r.status}`)
       if (failures >= POLL_FAILURES_SHOWN) host.status(undefined)
       failures = 0
