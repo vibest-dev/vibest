@@ -19,10 +19,20 @@ import {
   type Runtime,
   type Terminal,
 } from "@vibest/core/runtimes"
-import { NoSuchSession, type SessionView, Sessions } from "@vibest/core/sessions"
+import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
-import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, REPOSITORY_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
+import {
+  CALLER_HEADER,
+  HARNESS_HEADER,
+  HARNESS_SESSION_HEADER,
+  PROJECT_HEADER,
+  PROTOCOL,
+  PROTOCOL_HEADER,
+  protocolMismatch,
+  REPOSITORY_HEADER,
+  SESSION_HEADER,
+} from "@vibest/protocol/protocol"
 import {
   Admission,
   Caller,
@@ -157,10 +167,6 @@ const ACCESS = {
   List: "agent",
   Get: "agent",
   "Inbox.Subscribe": "coordinator",
-  "Inbox.Attach": "coordinator",
-  "Inbox.Pull": "coordinator",
-  "Inbox.Ack": "coordinator",
-  "Inbox.Release": "coordinator",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
   "Project.RunningCoordinator": "agent",
@@ -186,6 +192,9 @@ type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyo
 /** Default session name: the prompt's first line, shortened. */
 const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
+/** Ping's `capabilities`: the additive features this vibestd has (rpc.ts PingResult). */
+export const CAPABILITIES = { http: true } as const
+
 /** This vibestd's identity for Ping, set by Daemon.run; empty on a server a test runs without one. */
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
@@ -197,14 +206,14 @@ export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/Daemo
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
-/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains, except Inbox.Ack/Release settling a delivery already made. Only at the RPC entry. */
+/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains. Only at the RPC entry. */
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
     const drain = yield* Drain
     return Admission.of((effect, { rpc }) =>
       Effect.acquireUseRelease(
-        drain.admit(rpc._tag, rpc._tag === "Inbox.Ack" || rpc._tag === "Inbox.Release"),
+        drain.admit(rpc._tag),
         (leave) => (leave ? effect : Effect.fail(new DaemonStopping({ method: rpc._tag }))),
         (leave) => leave ?? Effect.void,
       ),
@@ -213,6 +222,30 @@ export const AdmissionLive = Layer.effect(
 )
 
 const header = (headers: Headers.Headers, name: string) => Headers.get(headers, name)
+
+/**
+ * The harness's conversation id from a session's request, latest wins (a /clear changes it); only from the session's own
+ * harness, so an old process of another harness under this id changes nothing.
+ */
+const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
+  Effect.gen(function* () {
+    const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
+    if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
+    if (yield* db.noteHarnessSession(row.id, conversation))
+      yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
+  })
+
+/**
+ * An open method's session headers (a hook's ResultReady or Prompt, no caller check): the conversation id is kept when
+ * they name this session and its project.
+ */
+const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
+  Effect.gen(function* () {
+    if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
+    const row = yield* db.sessionIdentity(sessionId)
+    if (row && Option.getOrUndefined(header(headers, PROJECT_HEADER)) === String(row.projectId))
+      yield* noteConversation(db, headers, row)
+  })
 
 /** Missing, mixed, or malformed caller headers. Never becomes cli. */
 const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
@@ -236,6 +269,14 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
         return yield* bad(`${method} has an empty repository`)
       const row = yield* db.sessionIdentity(sessionId.value)
       if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
+      // A session's environment names its project (VIBEST_PROJECT_ID); one that names another is not this session.
+      // One that names none is refused, as over HTTP.
+      const project = header(headers, PROJECT_HEADER)
+      if (project._tag === "None")
+        return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
+      if (project.value !== String(row.projectId))
+        return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
+      yield* noteConversation(db, headers, row)
       if (row.agent === "coordinator") {
         return {
           _tag: "Coordinator",
@@ -255,8 +296,13 @@ export const ProtocolGateLive = Layer.succeed(
   ProtocolGate.of((effect, { headers, rpc }) => {
     const protocol = header(headers, PROTOCOL_HEADER)
     if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
+      const sent = protocol._tag === "None" ? null : protocol.value
       return Effect.fail(
-        new ProtocolRejected({ method: rpc._tag, protocol: protocol._tag === "None" ? null : protocol.value }),
+        new ProtocolRejected({
+          method: rpc._tag,
+          protocol: sent,
+          mismatch: protocolMismatch(sent === null ? undefined : Number(sent), PROTOCOL, VERSION),
+        }),
       )
     }
     return effect
@@ -379,19 +425,6 @@ export const handlers = VibestRpcs.toLayer(
     /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
-    const coordinator = (method: MethodOf<"coordinator">) =>
-      Effect.gen(function* () {
-        const c = yield* Caller
-        if (c._tag !== "Coordinator") return yield* new Forbidden({ method, message: `${method} is the coordinator's` })
-        return c
-      })
-
-    const inboxCall = (method: MethodOf<"coordinator">, terminal: string, claudeSessionId: string) =>
-      Effect.gen(function* () {
-        const c = yield* coordinator(method)
-        return { projectId: c.projectId, terminal, claudeSessionId }
-      })
-
     return VibestRpcs.of({
       Ping: () =>
         machinesListing(runtimes, []).pipe(
@@ -404,7 +437,13 @@ export const handlers = VibestRpcs.toLayer(
               })),
             ),
           ),
-          Effect.map((rows) => ({ protocol: PROTOCOL, version: VERSION, runtimes: rows, ...identity })),
+          Effect.map((rows) => ({
+            protocol: PROTOCOL,
+            version: VERSION,
+            runtimes: rows,
+            ...identity,
+            capabilities: CAPABILITIES,
+          })),
         ),
 
       Spawn: (input) =>
@@ -625,30 +664,11 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      "Inbox.Attach": ({ claudeSessionId, replace, terminal }) =>
-        Effect.gen(function* () {
-          const call = yield* inboxCall("Inbox.Attach", terminal, claudeSessionId)
-          return yield* inbox.attach({ ...call, replace })
-        }),
-      "Inbox.Pull": ({ generation, claudeSessionId, terminal }) =>
-        Effect.gen(function* () {
-          const call = yield* inboxCall("Inbox.Pull", terminal, claudeSessionId)
-          return yield* inbox.pull({ ...call, generation })
-        }),
-      "Inbox.Ack": ({ generation, claudeSessionId, token, terminal }) =>
-        Effect.gen(function* () {
-          const call = yield* inboxCall("Inbox.Ack", terminal, claudeSessionId)
-          return yield* inbox.ack({ ...call, generation, token })
-        }),
-      "Inbox.Release": ({ generation, claudeSessionId, token, retry, terminal }) =>
-        Effect.gen(function* () {
-          const call = yield* inboxCall("Inbox.Release", terminal, claudeSessionId)
-          return yield* inbox.release({ ...call, generation, token, retry })
-        }),
+      ResultReady: ({ sessionId }, { headers }) =>
+        Effect.andThen(noteOpen(db, headers, sessionId), sessions.resultReady(sessionId)),
 
-      ResultReady: ({ sessionId }) => sessions.resultReady(sessionId),
-
-      Prompt: ({ sessionId, text }) => sessions.userPrompt(sessionId, text),
+      Prompt: ({ sessionId, text }, { headers }) =>
+        Effect.andThen(noteOpen(db, headers, sessionId), sessions.userPrompt(sessionId, text)),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
@@ -723,8 +743,7 @@ export const handlers = VibestRpcs.toLayer(
                   ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
                 },
               )
-              yield* inbox.reconcile(yield* db.projectId(key))
-              return saved
+              return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
         }),
@@ -758,10 +777,7 @@ export const handlers = VibestRpcs.toLayer(
         }),
 
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
-        db.reportCoordinatorSession(sessionId, harness, harnessSessionId).pipe(
-          Effect.andThen(db.projectOfSession(sessionId)),
-          Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : inbox.reconcile(projectId))),
-        ),
+        db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
       "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
       "Project.List": (input) => scope("Project.List").pipe(Effect.flatMap((s) => project.list(s, input))),
       "Project.Read": (input) => scope("Project.Read").pipe(Effect.flatMap((s) => project.read(s, input))),

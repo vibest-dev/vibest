@@ -38,8 +38,6 @@ export interface CoordinatorInput {
   readonly model: string | null
   /** The repository's Coordinator session to reopen, as the harness reported it after a turn; null: the harness starts a new one. */
   readonly sessionId: string | null
-  /** A new conversation under this id, chosen by vibest so vibestd knows it before the first turn ends (the bridge inbox attaches at once). */
-  readonly newSessionId?: string
   /** vibest's plugin for this harness (`Harness.plugin`). */
   readonly pluginDir: string
   /** vibest's variables for the coordinator's shell (VIBEST_AGENT, HERDR_PANE_ID …). */
@@ -70,10 +68,11 @@ export interface HarnessAdapter {
   /** Field of the hook payload holding the last reply. */
   readonly resultField: "text" | "last_assistant_message"
   /**
-   * A Coordinator's inbox rows: typed into its pane (`prompt`), taken over vibest.sock by its integration (`subscribe`),
-   * or pulled by its integration's bridge while one is attached and typed in otherwise (`bridge`).
+   * A Coordinator's inbox rows: typed into its pane (`prompt`), streamed to its integration over vibest.sock
+   * (`subscribe`: the Pi extension), or polled by its integration over vibestd's HTTP socket (`poll`: the Claude
+   * plugin; rows it took are leased, and a vibestd restart puts them back to pending).
    */
-  readonly inbox: "prompt" | "subscribe" | "bridge"
+  readonly inbox: "prompt" | "subscribe" | "poll"
   /** Error message when this harness cannot use `provider`, else undefined. */
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
@@ -87,21 +86,26 @@ export interface HarnessAdapter {
   /** The pre-tool hook's answer in the harness's format; `reason` refuses the call. Absent: the harness guards in process (Pi). */
   readonly guardAnswer?: (reason: string | undefined) => unknown
   /**
-   * A turn end the harness's own plugin hands to `vibest integration stop`: a session's result payload, or the
-   * coordinator's conversation id; undefined ignores it. Absent: the harness reports turn ends another way.
+   * A turn end the harness's own plugin hands to vibest (`vibest integration stop`, or vibestd's HTTP hook): a
+   * session's result payload; undefined ignores it. Absent: the harness reports turn ends another way.
    */
   readonly turnEnd?: (
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
-  ) => { readonly result: Readonly<Record<string, unknown>> } | { readonly harnessSessionId: string } | undefined
+  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
   /**
-   * A prompt the harness plugin hands to `vibest integration prompt`. Undefined ignores it: the main agent,
+   * A prompt the harness plugin hands to vibest (`vibest integration prompt`, or vibestd's HTTP hook). Undefined ignores it: the main agent,
    * a nested agent, or text that is not the user typing.
    */
   readonly userPrompt?: (
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
   ) => { readonly text: string } | undefined
+  /**
+   * The harness's own conversation id in an event its plugin hands to vibest, sent as vibest-harness-session-id.
+   * Absent: the events carry none (the plugin sends it another way).
+   */
+  readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
   /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
   readonly canResume?: (
     root: string,

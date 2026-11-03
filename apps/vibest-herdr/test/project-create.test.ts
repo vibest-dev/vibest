@@ -1,6 +1,6 @@
 // `vibest project create` and multi-repository worktrees: real git, temporary directories only.
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, sessionHeaders } from "@vibest/client/client"
+import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
@@ -15,6 +15,7 @@ import {
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { git, repositoryKey } from "@vibest/core/worktree"
+import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
@@ -570,7 +571,6 @@ describe("multi-repository isolated workspace", () => {
           fresh: false,
           terminal: "home:p1",
         }),
-        record: () => Effect.die("pi gets no conversation id chosen up front"),
       }).pipe(
         Effect.provide(
           Layer.succeed(Harness, {
@@ -600,12 +600,18 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repository(root, "app")
       yield* repository(root, "sdk")
       const raw = yield* connect(layout.socket)
-      const { sessionId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
         harness: "pi",
         fresh: false,
         terminal: "coord",
       })
-      const { id } = yield* authed(raw, sessionHeaders(sessionId, app)).Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* authed(
+        raw,
+        sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
+      ).Spawn({
+        harness: "pi",
+        prompt: "do it",
+      })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(yield* db.projectKey(row.projectId), yield* plainDirectoryKey(root))

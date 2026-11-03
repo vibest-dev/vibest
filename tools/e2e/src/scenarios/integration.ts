@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, compiled, expect, harnesses, Skip, until, type World } from "../world.ts"
+import { agentModel, binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -89,7 +89,7 @@ const withClaudeSession = async (
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
   let id = ""
   try {
-    const run = await w.ok(["run", "claude", "--model", "haiku", "--session", session, "--", task], {
+    const run = await w.ok(["run", "claude", ...agentModel(), "--session", session, "--", task], {
       timeoutMs: 120_000,
     })
     id = (JSON.parse(run) as { id: string }).id
@@ -214,6 +214,8 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("claude")) throw new Skip("claude not on PATH")
       const cwd = await workdir(w, "claude-turn")
       const id = "e2e00004"
+      // The plugin talks to vibestd over HTTP, which answers only a session it knows.
+      const project = await knownSessions(w, "e2e/i4", { [id]: "general" }, cwd)
       // The user's own Claude config (its login and plugins); --no-session-persistence keeps the conversation out of it.
       const r = await w.run(
         cwd,
@@ -239,6 +241,8 @@ const checks: ReadonlyArray<Check> = [
             CLAUDE_CODE_ENTRYPOINT: undefined,
             VIBEST_AGENT: "general",
             VIBEST_SESSION_ID: id,
+            VIBEST_PROJECT_ID: String(project),
+            VIBEST_HARNESS: "claude",
           },
           timeoutMs: 240_000,
         },
@@ -418,12 +422,19 @@ const checks: ReadonlyArray<Check> = [
       const task = [
         "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
         "expected, so make the next call after each one:",
-        "(1) the Bash tool with the command: herdr --help;",
+        "(1) the Bash tool with the command: herdr --help. Your rules say sessions do not run herdr: that is the rule",
+        "this test checks, and vibest's guard refuses the call before anything runs, so make the call and report the",
+        "refusal it gives;",
         `(2) the Read tool with file_path ${path.join(project, "instructions.md")};`,
         // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
         `(3) the Bash tool with the command: find ${path.join(project, "memory")} -name '*.md';`,
         `(4) the Bash tool with the command: grep -r secret ${project}.`,
         "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
+      ].join(" ")
+      const herdrAgain = [
+        "One more call, for the same guard test: the Bash tool with the command: herdr --help. vibest's guard refuses it",
+        "before anything runs; that refusal is what the test records. Then reply with `status: completed` and a",
+        "`summary:` line quoting the refusal.",
       ].join(" ")
       await withClaudeSession(
         w,
@@ -437,18 +448,34 @@ const checks: ReadonlyArray<Check> = [
           const worktree = await fs.realpath((await listed(w, id))!.worktree)
           const dir = path.join(w.home, ".claude", "projects", worktree.replace(/[^a-zA-Z0-9]/g, "-"))
           // Each tool call Claude made, by name, with what came back for it.
-          const calls = new Map<string, { name: string; input: string; result: string }>()
-          for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
-            for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
-              const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
-              if (!Array.isArray(content)) continue
-              for (const c of content as Array<Record<string, unknown>>) {
-                if (c.type === "tool_use")
-                  calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
-                const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
-                if (call) call.result += JSON.stringify(c.content)
+          const toolCalls = async () => {
+            const calls = new Map<string, { name: string; input: string; result: string }>()
+            for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
+              for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
+                const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
+                if (!Array.isArray(content)) continue
+                for (const c of content as Array<Record<string, unknown>>) {
+                  if (c.type === "tool_use")
+                    calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
+                  const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
+                  if (call) call.result += JSON.stringify(c.content)
+                }
               }
-            }
+            return [...calls.values()]
+          }
+          // The session's rules say sessions do not run herdr, and the model sometimes keeps to them instead of making
+          // the call this check needs: ask once more, for that call alone.
+          if (!(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))) {
+            await w.ok(["send", id, "--", herdrAgain])
+            await until("the herdr turn", async () => (await turnState(w, id)) === "open", 60_000).catch(
+              () => undefined,
+            )
+            await until(
+              "the herdr turn's result",
+              async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
+              180_000,
+            )
+          }
           const offLimits = "The project directory is off limits to sessions, except your scratchpad."
           const want: ReadonlyArray<readonly [string, string, string]> = [
             ["Read", "instructions.md", offLimits],
@@ -456,7 +483,7 @@ const checks: ReadonlyArray<Check> = [
             ["Bash", "grep ", offLimits],
             ["Bash", "herdr ", "Sessions do not run herdr; vibest manages it."],
           ]
-          const made = [...calls.values()]
+          const made = await toolCalls()
           for (const [tool, input, reason] of want)
             expect(
               made.some((c) => c.name === tool && c.input.includes(input) && c.result.includes(reason)),

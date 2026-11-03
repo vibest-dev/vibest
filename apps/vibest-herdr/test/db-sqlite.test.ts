@@ -100,11 +100,7 @@ describe("SQLite", () => {
       const file = `${yield* tempDirectory("vibest-sqlite-interrupt-")}/vibest.db`
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const db = yield* Db
-        const starters = [
-          ["withTransaction", () => sql.withTransaction(Effect.never)],
-          ["withCoordinatorWrite", () => db.withCoordinatorWrite(Effect.never)],
-        ] as const
+        const starters = [["withTransaction", () => sql.withTransaction(Effect.never)]] as const
         for (const [label, start] of starters) {
           for (let offset = 0; offset <= 30; offset++) {
             const gate = yield* Deferred.make<void>()
@@ -133,6 +129,42 @@ describe("SQLite", () => {
           }
         }
       }).pipe(Effect.provide(database(file)))
+    }).pipe(Effect.provide(Platform.services)),
+  )
+})
+
+describe("a vibestd restart", () => {
+  it.effect("rows cut off in delivery to a polling main agent go back to pending; any other main agent's failed", () =>
+    Effect.gen(function* () {
+      const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
+      const ids = yield* Effect.gen(function* () {
+        const db = yield* Db
+        const place = (id: string) => ({ runtime: "fake", address: { machine: "local", id } })
+        const ids: Array<number> = []
+        for (const [key, harness] of [
+          ["a", "claude"],
+          ["b", "pi"],
+        ] as const) {
+          const { sessionId } = yield* db.coordinatorLaunch(key, harness, false, place(key))
+          const row = yield* db.insertInbox({ sessionId, kind: "notice", message: key, details: {} })
+          assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
+          ids.push(row.id)
+        }
+        return ids
+      }).pipe(Effect.provide(database(file)))
+      const statuses = yield* Effect.gen(function* () {
+        // Inbox.layer runs this at start with the harnesses whose adapter polls.
+        yield* (yield* Db).recoverSending(["claude"])
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{ id: number; deliveryStatus: string }>`SELECT id, delivery_status FROM inbox ORDER BY id`
+      }).pipe(Effect.provide(database(file)))
+      assert.deepStrictEqual(
+        statuses.map((r) => [r.id, r.deliveryStatus]),
+        [
+          [ids[0], "pending"],
+          [ids[1], "failed"],
+        ],
+      )
     }).pipe(Effect.provide(Platform.services)),
   )
 })

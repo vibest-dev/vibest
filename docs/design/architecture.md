@@ -248,10 +248,11 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `sending`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Into the main Agent** natively where the CLI allows it: the Claude plugin's inbox module (attach, pull, ack,
-  release with a generation and a claim token; claim file 0600, at most 4 MiB; `/vibest-reattach` is the only
-  replace) and the Pi extension's subscription stream. Otherwise typed through herdr `agent.prompt`. No main
-  Agent pane: Messages are `dropped`.
+- **Into the main Agent** natively where the CLI allows it, as its harness adapter's `inbox` says: `poll`, the
+  Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
+  sqlite; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
+  session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
+  `agent.prompt`. No main Agent pane: Messages are `dropped`.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever
@@ -700,7 +701,12 @@ Plugins add subcommands through the `command` catalog.
 **Protocol** (omac `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`, copied): effect/rpc over the unix socket,
 one JSON-RPC 2.0 object per line, transport-agnostic so a WebSocket or HTTP transport can be added for another
 host. Every method but `Ping` needs the `vibest-protocol` header; each command Pings once first and stops with
-`IncompatibleDaemon` on a mismatch; the package version is informational. Scoped methods need caller headers
+`IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC
+and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
+Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. A mismatch is
+answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
+`protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on
+the new version; an older caller is told vibest was updated, a newer one that vibestd is older. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers
 (`user` with a Project directory, or `agent` with `VIBEST_AGENT_ID`); the role comes from the stored row, and
 missing or mixed headers are `InvalidCaller`, never the user. The ACCESS table lists every method, checked at
 compile time: open (integration notifications), subagent (`Report`), main Agent or user (`Run`, `Send`,
@@ -729,11 +735,10 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
-  vibest.jsonc  vibest.db  vibest.sock  vibestd.pid  vibestd.log
+  vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
   results/<agent>.json       written by integrations
   rules/<agent>.md           written by the daemon
-  inbox-claims/              claim files of the Claude inbox
   projects/<project>/        knowledge (instructions.md, memory/, docs/) and scratch/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```

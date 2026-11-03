@@ -176,7 +176,7 @@ describe("Project.StopCoordinator", () => {
       yield* untilVirtual(s.pending, (rows) => rows.length === 1)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
       const moved = yield* s.startAt("test/p2")
-      assert.deepStrictEqual(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
+      assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
       const row = (yield* s.db.coordinatorOf(s.projectId))!
       assert.strictEqual(row.address?.id, "test/p2")
       assert.strictEqual(row.pid, 5151)
@@ -190,7 +190,7 @@ describe("Project.StopCoordinator", () => {
     Effect.gen(function* () {
       const s = yield* launched
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
-      assert.deepStrictEqual(yield* s.startAt("test/p2", "claude"), {
+      assert.deepInclude(yield* s.startAt("test/p2", "claude"), {
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })

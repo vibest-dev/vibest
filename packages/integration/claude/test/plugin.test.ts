@@ -1,26 +1,27 @@
 // The Claude plugin as it ships: built by scripts/build.ts into a temp dir, its module found through
-// hooks/hooks.json and imported from there. Only the native host beneath it is fake (no Claude, vibest, or files).
+// hooks/hooks.json and imported from there. Only the native host beneath it is fake (no Claude, no vibestd).
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
-type RunResult = { exitCode: number; stdout: string; stderr: string }
-type CommandRunResult = { text?: string }
+
 type Plugin = {
-  register: (
-    on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void },
-    options?: unknown,
-  ) => void
+  register: (on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void }) => void
   POLL_MS: number
-  RUN_TIMEOUT_MS: number
-  BRIDGE_TIMEOUT_MS: number
-  GUARD_FAILURE: string
+  POLL_FAILURES_SHOWN: number
+  GUARD_BACKOFF_MS: ReadonlyArray<number>
+  UNREACHABLE: string
 }
 
 let plugin: Plugin
 let built: string
+const version = (
+  JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")) as {
+    version: string
+  }
+).version
 
 beforeAll(async () => {
   built = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-claude-plugin-"))
@@ -37,166 +38,117 @@ const settle = async () => {
   for (let i = 0; i < 200; i++) await Promise.resolve()
 }
 
-const gate = <T>() => {
-  let resolve: (value: T) => void = () => undefined
-  let reject: (error: unknown) => void = () => undefined
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
+type Request = { url: string; socketPath: string; headers: Record<string, string>; body: unknown }
+type Answer = { status: number; body?: unknown } | Error
+
+const COORDINATOR = {
+  VIBEST_AGENT: "coordinator",
+  VIBEST_SESSION_ID: "main0001",
+  VIBEST_PROJECT_ID: "7",
+  VIBEST_HOME: "/vh",
+  VIBEST_RUNTIME: '{"runtime":"herdr"}',
 }
-
-const json = (value: unknown, exitCode = 0): RunResult => ({ exitCode, stdout: JSON.stringify(value), stderr: "" })
-
-const COORDINATOR = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "vibest-1" }
+const WORKER = { ...COORDINATOR, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
 
 const host = (env: Record<string, string> = COORDINATOR) => {
-  const hooks: {
-    start?: Function
-    end?: Function
-    command?: { matcher: { command: string }; hook: Function }
-    turnComplete?: Function
-    prompt?: Function
-    preTool?: Function
-  } = {}
+  const hooks: Record<string, Function> = {}
   const catches: Record<string, Function> = {}
   const on = (event: string, a: unknown, b?: unknown) => {
-    if (event === "session.start") hooks.start = a as Function
-    else if (event === "session.end") hooks.end = a as Function
-    else if (event === "command.run") hooks.command = { matcher: a as { command: string }, hook: b as Function }
-    else if (event === "turn.complete") hooks.turnComplete = a as Function
-    else if (event === "prompt.submit") hooks.prompt = a as Function
-    else if (event === "tool.call") hooks.preTool = a as Function
-    else throw new Error(`unexpected hook ${event}`)
+    hooks[event] = (b ?? a) as Function
     return { catch: (handler: Function) => void (catches[event] = handler) }
   }
-  const runs: string[][] = []
-  const inits: unknown[] = []
-  const registered: string[] = []
-  const specs: unknown[] = []
-  const statuses: Array<string | undefined> = []
+  const requests: Request[] = []
   const submitted: string[] = []
-  const reads: string[] = []
-  const timers: Array<{ ms: number; fn: () => void; cancelled: boolean }> = []
-  const files: Record<string, string> = { "/claims/g1-t1": "message one", "/claims/g2-t2": "message two" }
+  const statuses: Array<string | undefined> = []
+  const every: Array<{ ms: number; fn: () => void }> = []
+  const after: Array<{ ms: number; fn: () => void; cancelled: boolean }> = []
   const state = {
-    session: "s1",
-    cwd: "/work",
-    sessionId: undefined as undefined | (() => Promise<string>),
-    idReads: 0,
-    replies: {
-      attach: async (argv: string[]): Promise<RunResult> =>
-        json({ generation: argv.includes("--replace") ? "g2" : "g1" }),
-      pull: async (argv: string[]): Promise<RunResult> =>
-        argv[3] === "g2" ? json({ token: "t2", file: "/claims/g2-t2" }) : json({ token: "t1", file: "/claims/g1-t1" }),
-      ack: async (_argv: string[]): Promise<RunResult> => json({ acked: true }),
-      release: async (_argv: string[]): Promise<RunResult> => json({ released: true }),
-    } as Record<string, (argv: string[]) => Promise<RunResult>>,
-    submit: async (_text: string): Promise<{ text: string; drop?: undefined } | { drop: string }> => ({
-      text: "entered",
-    }),
+    conversation: "c1",
+    redraws: 0,
+    answer: (_r: Request): Answer => ({ status: 200, body: { ids: [], line: "", text: "" } }),
+    submit: async (_text: string): Promise<{ text: string; drop?: undefined } | { drop: string }> => ({ text: "x" }),
   }
-  const $: {
-    env: { get: (name: string) => Promise<string | undefined> }
-    session: { id: () => Promise<string>; cwd: () => Promise<string> }
-    process: { run: (argv: readonly string[], init?: { stdin?: string; timeoutMs?: number }) => Promise<RunResult> }
-    fs: { read: (file: string) => Promise<string> }
-    prompt: { submit: (input: { text: string }) => Promise<{ text: string; drop?: undefined } | { drop: string }> }
-    command: {
-      register: (spec: { name: string; description: string; immediate?: true }) => Promise<{ command: string }>
-    }
-    clock: { every: (ms: number, fn: () => void) => { cancel: () => void } }
-    ui: { status: (text: string | undefined) => void; toast: (text: string) => void }
-  } = {
-    env: { get: async (name) => env[name] },
-    session: {
-      id: () => {
-        state.idReads += 1
-        return state.sessionId ? state.sessionId() : Promise.resolve(state.session)
-      },
-      cwd: () => Promise.resolve(state.cwd),
-    },
-    process: {
-      run: (argv, init) => {
-        runs.push([...argv])
-        inits.push(init)
-        return state.replies[argv[2]!]!([...argv])
-      },
-    },
-    fs: {
-      read: async (file) => {
-        reads.push(file)
-        const body = files[file]
-        if (body === undefined) throw new Error("missing")
-        return body
+  const $ = {
+    env: { get: async (name: string) => env[name] },
+    session: { id: async () => state.conversation, cwd: async () => "/work" },
+    plugin: { name: "vibest", root: "/p" },
+    http: {
+      fetch: async (url: string, init: { socketPath: string; headers: Record<string, string>; body: string }) => {
+        const request = { url, socketPath: init.socketPath, headers: init.headers, body: JSON.parse(init.body) }
+        requests.push(request)
+        const a = state.answer(request)
+        if (a instanceof Error) throw a
+        return {
+          status: a.status,
+          ok: a.status < 300,
+          headers: {},
+          text: a.body === undefined ? "" : JSON.stringify(a.body),
+        }
       },
     },
     prompt: {
-      submit: (input) => {
+      submit: (input: { text: string }) => {
         submitted.push(input.text)
         return state.submit(input.text)
       },
     },
-    command: { register: async (spec) => (registered.push(spec.name), specs.push(spec), { command: spec.name }) },
+    ui: { invalidate: () => void (state.redraws += 1), status: (t: string | undefined) => void statuses.push(t) },
     clock: {
-      every: (ms, fn) => {
+      every: (ms: number, fn: () => void) => {
+        every.push({ ms, fn })
+        return { cancel: () => undefined }
+      },
+      after: (ms: number, fn: () => void) => {
         const t = { ms, fn, cancelled: false }
-        timers.push(t)
+        after.push(t)
         return { cancel: () => void (t.cancelled = true) }
       },
     },
-    ui: { status: (text) => void statuses.push(text), toast: (text) => void statuses.push(text) },
   }
   plugin.register(on)
+  const pass = async (e: object) => e
   return {
-    $,
-    runs,
-    inits,
-    registered,
-    specs,
-    statuses,
-    submitted,
-    reads,
-    timers,
-    state,
+    hooks,
     catches,
-    live: () => timers.filter((t) => !t.cancelled),
+    requests,
+    submitted,
+    statuses,
+    every,
+    state,
+    paths: () => requests.map((r) => r.url.replace("http://vibestd", "")),
     start: async () => {
-      const r = await hooks.start!(
-        $,
-        { cwd: "/work", surface: "terminal", isInteractive: true },
-        async (e: { cwd: string }) => ({ cwd: e.cwd }),
-      )
+      await hooks["session.start"]!($, { cwd: "/work" }, pass)
       await settle()
-      return r
     },
-    end: async (reason: string) =>
-      hooks.end!($, { reason, sessionId: state.session }, async (e: { sessionId: string }) => ({
-        sessionId: e.sessionId,
-      })),
-    command: async (name: string): Promise<CommandRunResult | undefined> => {
-      if (!hooks.command || hooks.command.matcher.command !== name) return undefined
-      const r = await hooks.command.hook($, { command: name, args: "" }, async () => ({}))
-      await settle()
-      return r
-    },
-    /** Starts a command run without awaiting it, for runs held at a native call. */
-    begin: (name: string): Promise<CommandRunResult> =>
-      hooks.command!.hook($, { command: name, args: "" }, async () => ({})),
-    turnComplete: (event: object, next: Function = async (e: object) => e) => hooks.turnComplete!($, event, next),
-    prompt: (event: object, next: Function = async (e: object) => e) => hooks.prompt!($, event, next),
-    preTool: (event: object, next: Function = async (e: object) => e) => hooks.preTool!($, event, next),
-    /** One period of every live clock.every. */
     tick: async () => {
-      for (const t of timers) if (!t.cancelled) t.fn()
+      for (const t of every) t.fn()
+      await settle()
+    },
+    draw: async () => {
+      const r = await hooks["ui.render"]!($, { component: "AbovePrompt" }, async () => "drawn")
+      await settle()
+      return r
+    },
+    /** What the prompt.submit hook passes on for `text` from `origin`. */
+    prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
+    turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
+    preTool: (event: object) => hooks["tool.call"]!($, event, pass),
+    /** Fire every pending clock.after of `ms`. */
+    fire: async (ms: number) => {
+      for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
+        t.cancelled = true
+        t.fn()
+      }
       await settle()
     },
   }
 }
 
+const batch = (ids: number[], line: string, text: string) => ({ status: 200, body: { ids, line, text } })
+const ownSubmit = { kind: "plugin", name: "vibest" }
+
 describe("Claude plugin artifact", () => {
-  it("ships a manifest, a hooks.json naming one module, and an import-free bundle", () => {
+  it("ships a manifest, a hooks.json naming one module, and an import-free bundle with its version inlined", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(built, ".claude-plugin/plugin.json"), "utf8")) as {
       name: string
     }
@@ -204,693 +156,227 @@ describe("Claude plugin artifact", () => {
     const hooks = JSON.parse(fs.readFileSync(path.join(built, "hooks/hooks.json"), "utf8")) as { modules: string[] }
     assert.deepStrictEqual(hooks.modules, ["./register.mjs"])
     const source = fs.readFileSync(path.join(built, "hooks/register.mjs"), "utf8")
-    assert.notMatch(
-      source,
-      /^\s*import\s|\bfrom\s*["']|\brequire\(|\bimport\(|process\.execPath|VIBEST_COMMAND|\bBun\./m,
-    )
-    assert.include(source, 'env.get("VIBEST_AGENT")')
-    assert.strictEqual(typeof plugin.register, "function")
+    assert.notMatch(source, /^\s*import\s|\bfrom\s*["']|\brequire\(|\bimport\(|process\.execPath|\bBun\./m)
+    assert.notInclude(source, "VIBEST_PLUGIN_VERSION")
+    assert.include(source, JSON.stringify(version))
   })
 })
 
-describe("Claude plugin roles", () => {
-  for (const [label, env] of [
-    ["a worker", { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }],
-    ["a coordinator variable without a session id", { VIBEST_AGENT: "coordinator" }],
-    ["a non-VIBEST session", {}],
-  ] as const) {
-    it(`does nothing for ${label}`, async () => {
-      const h = host(env as Record<string, string>)
-      assert.deepStrictEqual(await h.start(), { cwd: "/work" })
-      await h.tick()
-      assert.deepStrictEqual([h.runs, h.registered, h.timers.length, h.statuses], [[], [], 0, []])
-      const reply = await h.command("vibest-reattach")
-      assert.match(reply!.text!, /Not an VIBEST coordinator/)
-      assert.deepStrictEqual(h.runs, [])
+describe("Claude plugin requests", () => {
+  it("every request goes to $VIBEST_HOME/vibest-http.sock with the session's headers and the current conversation", async () => {
+    const h = host()
+    await h.start()
+    const [poll] = h.requests
+    assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
+    assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
+    assert.deepInclude(poll!.headers, {
+      "vibest-protocol": "4",
+      "vibest-caller": "session",
+      "vibest-session-id": "main0001",
+      "vibest-project-id": "7",
+      "vibest-harness-session-id": "c1",
+      "vibest-agent": "coordinator",
+      "vibest-harness": "claude",
+      "vibest-cwd": "%2Fwork",
+      "vibest-runtime": '{"runtime":"herdr"}',
+      "vibest-plugin-version": version,
     })
-  }
-
-  it("registers /vibest-reattach and one bounded poll on coordinator start, then passes session.start on", async () => {
-    const h = host()
-    assert.deepStrictEqual(await h.start(), { cwd: "/work" })
-    assert.deepStrictEqual(h.registered, ["vibest-reattach"])
-    assert.deepInclude(h.specs[0] as object, { name: "vibest-reattach", immediate: true }, "runs mid-turn")
-    assert.deepStrictEqual(
-      h.timers.map((t) => t.ms),
-      [plugin.POLL_MS],
-    )
-    assert.deepStrictEqual(h.runs, [], "startup does not block on attach")
-    await h.start()
-    assert.deepStrictEqual(
-      [h.registered.length, h.timers.length],
-      [1, 1],
-      "a second session.start does not register again",
-    )
-  })
-})
-
-describe("Claude plugin delivery", () => {
-  it("attaches without replace, pulls, reads the claim file, submits it and acks, with exact bare argv", async () => {
-    const h = host()
-    await h.start()
+    // After /clear: the same clock, the new conversation.
+    h.state.conversation = "c2"
     await h.tick()
-    assert.deepStrictEqual(h.runs, [["vibest", "inbox", "attach", "s1"]])
-    assert.deepStrictEqual(h.statuses, [undefined, "VIBEST inbox attached"])
-    await h.tick()
-    assert.deepStrictEqual(h.runs.slice(1), [
-      ["vibest", "inbox", "pull", "g1", "s1"],
-      ["vibest", "inbox", "ack", "g1", "s1", "t1"],
-    ])
-    assert.deepStrictEqual(
-      h.inits,
-      h.runs.map(() => ({ timeoutMs: plugin.RUN_TIMEOUT_MS })),
-      "no shell, cwd, env, or stdin",
-    )
-    assert.deepStrictEqual(h.reads, ["/claims/g1-t1"])
-    assert.deepStrictEqual(h.submitted, ["message one"])
+    assert.strictEqual(h.requests.at(-1)!.headers["vibest-harness-session-id"], "c2")
+    assert.isUndefined(h.hooks["session.end"], "nothing stops on session.end (/clear raises it too)")
   })
 
-  for (const [why, reply, text] of [
-    ["stale-receiver", json({ error: "stale-receiver" }), /another receiver.*\/vibest-reattach/],
-    [
-      "not-reported with a generation",
-      json({ error: "not-reported", generation: "g1" }),
-      /not recorded this Claude session.*\/vibest-reattach/,
-    ],
-    ["not-reported with a nonzero exit", json({ error: "not-reported" }, 1), /exit 1.*inbox command/],
-    ["an unsupported vibest", { exitCode: 1, stdout: "", stderr: "unknown subcommand" }, /exit 1.*inbox command/],
-  ] as const) {
-    it(`stops with an actionable status when attach answers ${why}`, async () => {
-      const h = host()
-      h.state.replies.attach = async () => reply
-      await h.start()
-      await h.tick()
-      await h.tick()
-      assert.deepStrictEqual(h.runs, [["vibest", "inbox", "attach", "s1"]])
-      assert.match(h.statuses.at(-1)!, text)
-      assert.deepStrictEqual(h.live(), [], "polling stops")
-      assert.deepStrictEqual(h.submitted, [])
-    })
-  }
-
-  it("attaches again while attach answers not-reported, and delivers once VIBEST has recorded the session", async () => {
-    const h = host()
-    let reported = false
-    h.state.replies.attach = async () => (reported ? json({ generation: "g1" }) : json({ error: "not-reported" }))
-    await h.start()
-    await h.tick()
-    await h.tick()
-    assert.deepStrictEqual(h.runs, [
-      ["vibest", "inbox", "attach", "s1"],
-      ["vibest", "inbox", "attach", "s1"],
-    ])
-    assert.match(h.statuses.at(-1)!, /waiting for VIBEST to record this Claude session/)
-    assert.strictEqual(h.live().length, 1, "polling continues")
-    // The first turn.complete reported this session.
-    reported = true
-    await h.tick()
-    assert.strictEqual(h.statuses.at(-1), "VIBEST inbox attached")
-    await h.tick()
-    assert.deepStrictEqual(h.runs.slice(-2), [
-      ["vibest", "inbox", "pull", "g1", "s1"],
-      ["vibest", "inbox", "ack", "g1", "s1", "t1"],
-    ])
-    assert.deepStrictEqual(h.submitted, ["message one"])
-    assert.isFalse(
-      h.runs.some((r) => r.includes("--replace")),
-      "never replaces on its own",
-    )
-  })
-
-  it("a not-reported answer that arrives after session.end does not attach again", async () => {
-    const h = host()
-    const attach = gate<RunResult>()
-    h.state.replies.attach = () => attach.promise
-    await h.start()
-    await h.tick()
-    await h.end("clear")
-    attach.resolve(json({ error: "not-reported" }))
-    await settle()
-    for (const t of h.timers) t.fn()
-    await settle()
-    assert.deepStrictEqual(h.runs, [["vibest", "inbox", "attach", "s1"]])
-    assert.match(h.statuses.at(-1)!, /session changed.*\/vibest-reattach/)
-    assert.deepStrictEqual(h.live(), [])
-  })
-
-  it("stops with a status when attach gets no reply (process.run rejects)", async () => {
-    const h = host()
-    h.state.replies.attach = async () => {
-      throw new Error("timed out")
-    }
-    await h.start()
-    await h.tick()
-    assert.match(h.statuses.at(-1)!, /refused \(no reply\)/)
-    assert.deepStrictEqual(h.live(), [])
-  })
-
-  it("never overlaps ticks while an vibest call is outstanding", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const pull = gate<RunResult>()
-    h.state.replies.pull = () => pull.promise
-    await h.tick()
-    await h.tick()
-    await h.tick()
-    assert.deepStrictEqual(h.runs.filter((r) => r[2] === "pull").length, 1)
-    pull.resolve(json({ empty: true }))
-    await settle()
-    await h.tick()
-    assert.deepStrictEqual(h.runs.filter((r) => r[2] === "pull").length, 2)
-  })
-
-  it("releases with --retry when the prompt is definitely dropped", async () => {
-    const h = host()
-    h.state.submit = async () => ({ drop: "blocked by a hook" })
-    await h.start()
-    await h.tick()
-    await h.tick()
-    assert.deepStrictEqual(h.runs.at(-1), ["vibest", "inbox", "release", "g1", "s1", "t1", "--retry"])
-  })
-
-  it("releases without --retry when submission is ambiguous, and never submits that token again", async () => {
-    const h = host()
-    h.state.submit = async () => {
-      throw new Error("host went away")
-    }
-    await h.start()
-    await h.tick()
-    await h.tick()
-    assert.deepStrictEqual(h.runs.at(-1), ["vibest", "inbox", "release", "g1", "s1", "t1"])
-    assert.deepStrictEqual(h.submitted, ["message one"])
-  })
-
-  it("a lost ack retries only the ack, never the pull or the prompt", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    h.state.replies.ack = async () => ({ exitCode: 1, stdout: "", stderr: "daemon unreachable" })
-    await h.tick()
-    h.state.replies.ack = async () => json({ acked: true, already: true })
-    await h.tick()
-    assert.deepStrictEqual(
-      h.runs.slice(1).map((r) => r[2]),
-      ["pull", "ack", "ack"],
-    )
-    assert.deepStrictEqual(h.submitted, ["message one"])
-    h.state.replies.pull = async () => json({ empty: true })
-    await h.tick()
-    assert.deepStrictEqual(h.runs.at(-1)!.slice(2, 4), ["pull", "g1"], "after settling it pulls again")
-  })
-
-  it("a lost release retries only the release, with the same op", async () => {
-    const h = host()
-    h.state.submit = async () => ({ drop: "no" })
-    await h.start()
-    await h.tick()
-    h.state.replies.release = async () => {
-      throw new Error("timed out")
-    }
-    await h.tick()
-    h.state.replies.release = async () => json({ released: true })
-    await h.tick()
-    assert.deepStrictEqual(
-      h.runs.slice(1).map((r) => r.slice(2).join(" ")),
-      ["pull g1 s1", "release g1 s1 t1 --retry", "release g1 s1 t1 --retry"],
-    )
-    assert.deepStrictEqual(h.submitted, ["message one"])
-  })
-
-  it("reads session.id on each tick: a changed session stops before submitting", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const pull = gate<RunResult>()
-    h.state.replies.pull = () => pull.promise
-    await h.tick()
-    h.state.session = "s2"
-    await h.end("clear")
-    pull.resolve(json({ token: "t1", file: "/claims/g1-t1" }))
-    await settle()
-    await h.tick()
-    assert.deepStrictEqual(h.submitted, [])
-    assert.deepStrictEqual(h.reads, [])
-    assert.match(h.statuses.at(-1)!, /session changed.*\/vibest-reattach/)
-    assert.deepStrictEqual(h.live(), [])
-  })
-
-  it("session.end during an in-flight submit stops old delivery: no settlement under the ended session", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const submit = gate<{ text: string }>()
-    h.state.submit = () => submit.promise
-    await h.tick()
-    assert.deepStrictEqual(h.submitted, ["message one"])
-    await h.end("clear")
-    submit.resolve({ text: "entered" })
-    await settle()
-    assert.deepStrictEqual(
-      h.runs.map((r) => r[2]),
-      ["attach", "pull"],
-    )
-  })
-})
-
-describe("Claude plugin /vibest-reattach", () => {
-  it("attaches with --replace for the current session and continues under the fresh generation", async () => {
-    const h = host()
-    h.state.replies.attach = async (argv) =>
-      argv.includes("--replace") ? json({ generation: "g2" }) : json({ error: "stale-receiver" })
-    await h.start()
-    await h.tick()
-    assert.deepStrictEqual(h.live(), [])
-    h.state.session = "s2"
-    const reply = await h.command("vibest-reattach")
-    assert.match(reply!.text!, /reattached/)
-    assert.deepStrictEqual(h.runs.at(-1), ["vibest", "inbox", "attach", "s2", "--replace"])
-    assert.strictEqual(h.live().length, 1, "polling resumes")
-    await h.tick()
-    assert.deepStrictEqual(h.runs.slice(-2), [
-      ["vibest", "inbox", "pull", "g2", "s2"],
-      ["vibest", "inbox", "ack", "g2", "s2", "t2"],
-    ])
-    assert.deepStrictEqual(h.submitted, ["message two"])
-  })
-
-  it("a refused reattach changes nothing and says why", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    h.state.replies.attach = async () => json({ error: "stale-receiver" })
-    const reply = await h.command("vibest-reattach")
-    assert.match(reply!.text!, /not reattached \(stale-receiver\)/)
-    await h.tick()
-    assert.deepStrictEqual(h.runs.at(-1)!.slice(2, 4), ["ack", "g1"])
-  })
-
-  it("fences an old-generation submit that finishes after reattach: it may land once, but never settles", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const submit = gate<{ text: string }>()
-    h.state.submit = () => submit.promise
-    await h.tick()
-    assert.deepStrictEqual(h.submitted, ["message one"])
-    await h.command("vibest-reattach")
-    submit.resolve({ text: "entered" })
-    await settle()
-    assert.isFalse(
-      h.runs.some((r) => r[2] === "ack" && r[3] === "g1"),
-      "the old generation's callback does not ack",
-    )
-    h.state.submit = async () => ({ text: "entered" })
-    await h.tick()
-    assert.deepStrictEqual(
-      h.runs.slice(-2).map((r) => r.slice(2, 4)),
-      [
-        ["pull", "g2"],
-        ["ack", "g2"],
-      ],
-    )
-  })
-
-  it("an old-generation pull that returns after reattach is not consumed", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const pull = gate<RunResult>()
-    h.state.replies.pull = () => pull.promise
-    await h.tick()
-    h.state.replies.pull = async (argv) =>
-      argv[3] === "g2" ? json({ token: "t2", file: "/claims/g2-t2" }) : json({ empty: true })
-    await h.command("vibest-reattach")
-    pull.resolve(json({ token: "t1", file: "/claims/g1-t1" }))
-    await settle()
-    assert.deepStrictEqual(h.reads, [])
-    await h.tick()
-    assert.deepStrictEqual(h.submitted, ["message two"])
-    assert.deepStrictEqual(
-      h.runs.filter((r) => r[2] === "ack").map((r) => r[3]),
-      ["g2"],
-    )
-  })
-
-  it("polls the new generation while an old step is still unresolved; the old step cannot clear the new busy mark", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const oldSubmit = gate<{ text: string }>()
-    h.state.submit = () => oldSubmit.promise
-    await h.tick()
-    await h.command("vibest-reattach")
-    h.state.submit = async () => ({ text: "entered" })
-    await h.tick()
-    const g2 = () => h.runs.filter((r) => r[3] === "g2").map((r) => r[2])
-    assert.deepStrictEqual(g2(), ["pull", "ack"], "progress while the old submit is still pending")
-    const newPull = gate<RunResult>()
-    h.state.replies.pull = () => newPull.promise
-    await h.tick()
-    const reads = h.state.idReads
-    oldSubmit.resolve({ text: "entered" })
-    await settle()
-    await h.tick()
-    assert.strictEqual(h.state.idReads, reads, "the new step still owns the host: no second step started")
-    assert.deepStrictEqual(g2(), ["pull", "ack", "pull"])
-    assert.isFalse(
-      h.runs.some((r) => r[3] === "g1" && r[2] !== "pull"),
-      "the old generation never settles",
-    )
-    newPull.resolve(json({ empty: true }))
-    await settle()
-    await h.tick()
-    assert.deepStrictEqual(g2(), ["pull", "ack", "pull", "pull"])
-  })
-
-  it("runs one reattach at a time", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const replace = gate<RunResult>()
-    h.state.replies.attach = () => replace.promise
-    const first = h.begin("vibest-reattach")
-    await settle()
-    const second = await h.begin("vibest-reattach")
-    assert.match(second.text!, /already running/)
-    replace.resolve(json({ generation: "g2" }))
-    assert.match((await first).text!, /reattached/)
-    assert.strictEqual(h.runs.filter((r) => r.includes("--replace")).length, 1)
-  })
-
-  it("a reattach answer that arrives after session.end is not used for the new session", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const replace = gate<RunResult>()
-    h.state.replies.attach = () => replace.promise
-    const pending = h.begin("vibest-reattach")
-    await settle()
-    h.state.session = "s2"
-    await h.end("clear")
-    replace.resolve(json({ generation: "g2" }))
-    assert.match((await pending).text!, /session changed while reattaching/)
-    for (const t of h.timers) t.fn()
-    await settle()
-    assert.isFalse(
-      h.runs.some((r) => r[3] === "g2"),
-      "no delivery under the stale answer",
-    )
-    assert.notInclude(h.statuses.at(-1)!, "attached")
-    h.state.replies.attach = async () => json({ generation: "g3" })
-    h.state.replies.pull = async () => json({ empty: true })
-    assert.match((await h.command("vibest-reattach"))!.text!, /reattached/)
-    await h.tick()
-    assert.deepStrictEqual(h.runs.at(-1), ["vibest", "inbox", "pull", "g3", "s2"])
-  })
-
-  for (const [label, reply] of [
-    ["exits non-zero", async (): Promise<RunResult> => ({ exitCode: 1, stdout: "", stderr: "connection reset" })],
-    [
-      "times out",
-      async (): Promise<RunResult> => {
-        throw new Error("timed out")
-      },
-    ],
-    ["prints no JSON", async (): Promise<RunResult> => ({ exitCode: 0, stdout: "garbage", stderr: "" })],
-  ] as const) {
-    it(`a replacement that may have committed but ${label} is reported as unknown and never replayed`, async () => {
-      const h = host()
-      await h.start()
-      await h.tick()
-      h.state.replies.attach = reply
-      // The daemon committed the replacement: the old generation is retired.
-      h.state.replies.pull = async (argv) =>
-        argv[3] === "g1" ? json({ error: "stale-receiver" }) : json({ empty: true })
-      const before = h.statuses.length
-      const answer = (await h.command("vibest-reattach"))!.text!
-      assert.match(answer, /may have replaced this receiver/)
-      assert.notMatch(answer, /unchanged/)
-      assert.notInclude(
-        h.statuses.slice(before),
-        "VIBEST inbox attached",
-        "never shown attached without a confirmed generation",
-      )
-      await h.tick()
-      await h.tick()
-      assert.strictEqual(h.runs.filter((r) => r.includes("--replace")).length, 1, "not replayed")
-      assert.match(h.statuses.at(-1)!, /another receiver/)
-      assert.deepStrictEqual(h.live(), [])
-      h.state.replies.attach = async () => json({ generation: "g3" })
-      assert.match((await h.command("vibest-reattach"))!.text!, /reattached/)
-    })
-  }
-})
-
-describe("Claude plugin session lifetime", () => {
-  it("a session.id read held across session.end cannot revive the ended session", async () => {
-    const h = host()
-    await h.start()
-    await h.tick()
-    const read = gate<string>()
-    h.state.sessionId = () => read.promise
-    await h.tick()
-    await h.end("clear")
-    read.resolve("s1")
-    await settle()
-    h.state.sessionId = undefined
-    for (const t of h.timers) t.fn()
-    await settle()
-    assert.deepStrictEqual(h.runs, [["vibest", "inbox", "attach", "s1"]], "no pull under the ended lifetime")
-    assert.match(h.statuses.at(-1)!, /session changed.*\/vibest-reattach/)
-    assert.deepStrictEqual(h.live(), [], "session.end stops polling")
-  })
-})
-
-describe("Claude plugin native listeners", () => {
-  const worker = { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }
-  const below = { additionalContext: ["kept"] }
-  const bash = { tool: "Bash", tool_use_id: "tu1", command: "ls", timeout: 5, description: "list" }
-  const end = { answer: "done", turnId: "t1", durationMs: 5, isAborted: false }
-  const stdin = (h: ReturnType<typeof host>, i = 0) => JSON.parse((h.inits[i] as { stdin: string }).stdin)
-
-  const pass = (): RunResult => ({ exitCode: 0, stdout: "\n", stderr: "" })
-  const denyBody = (reason: string) =>
-    json({
-      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
-    })
-
-  it("turn.complete reports every main-loop turn end with its reason, the Claude session and the answer, then returns next unchanged", async () => {
-    for (const reason of ["answer", "aborted", "error"] as const) {
-      const h = host(worker)
-      h.state.replies.stop = async () => pass()
-      const event = { ...end, reason, isAborted: reason === "aborted" }
-      const before = JSON.stringify(event)
-      assert.deepStrictEqual(await h.turnComplete(event, async (e: object) => ({ echoed: e })), { echoed: event })
-      assert.strictEqual(JSON.stringify(event), before)
-      assert.deepStrictEqual(h.runs, [["vibest", "integration", "stop", "--harness", "claude"]])
-      assert.deepStrictEqual(stdin(h), {
-        hook_event_name: "TurnComplete",
-        session_id: "s1",
-        reason,
-        last_assistant_message: "done",
-      })
-      assert.deepStrictEqual(h.inits[0], {
-        stdin: (h.inits[0] as { stdin: string }).stdin,
-        timeoutMs: plugin.BRIDGE_TIMEOUT_MS,
-      })
-    }
-    const refused = host(worker)
-    refused.state.replies.stop = async () => pass()
-    const refusal = { category: "cyber", explanation: "not that" }
-    await refused.turnComplete({ ...end, answer: "", reason: "refusal", refusal })
-    assert.deepStrictEqual(stdin(refused), {
-      hook_event_name: "TurnComplete",
-      session_id: "s1",
-      reason: "refusal",
-      last_assistant_message: "",
-      refusal,
-    })
-  })
-
-  it("turn.complete of a subagent's loop reports nothing; the coordinator's reports its Claude session", async () => {
-    const h = host(worker)
-    h.state.replies.stop = async () => pass()
-    assert.strictEqual(await h.turnComplete({ ...end, reason: "aborted", agentId: "sub" }, async () => below), below)
-    assert.deepStrictEqual(h.runs, [])
-    const coordinator = host()
-    coordinator.state.replies.stop = async () => pass()
-    await coordinator.turnComplete({ ...end, reason: "answer" })
-    assert.strictEqual(stdin(coordinator).session_id, "s1")
-  })
-
-  it("prompt.submit reports the prompt with its origin (the adapter keeps the person's), and skips the coordinator and outside VIBEST", async () => {
-    const h = host(worker)
-    h.state.replies.prompt = async () => pass()
-    const event = { text: "look here", wait: false, origin: { kind: "composer" } }
-    const before = JSON.stringify(event)
-    assert.deepStrictEqual(await h.prompt(event, async (e: object) => ({ echoed: e })), { echoed: event })
-    assert.strictEqual(JSON.stringify(event), before)
-    await h.prompt({ ...event, origin: { kind: "task-notification" } })
-    await h.prompt({ ...event, origin: { kind: "plugin", name: "x" } })
-    assert.deepStrictEqual(h.runs, [
-      ["vibest", "integration", "prompt", "--harness", "claude"],
-      ["vibest", "integration", "prompt", "--harness", "claude"],
-      ["vibest", "integration", "prompt", "--harness", "claude"],
-    ])
-    assert.deepStrictEqual(
-      [0, 1, 2].map((i) => stdin(h, i)),
-      [
-        { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" },
-        { hook_event_name: "PromptSubmit", text: "look here", origin: "task-notification" },
-        { hook_event_name: "PromptSubmit", text: "look here", origin: "plugin" },
-      ],
-    )
-    assert.strictEqual((h.inits[0] as { timeoutMs: number }).timeoutMs, plugin.BRIDGE_TIMEOUT_MS)
-    for (const env of [COORDINATOR, {}, { VIBEST_AGENT: "session" }]) {
-      const quiet = host(env)
-      quiet.state.replies.prompt = async () => pass()
-      assert.deepStrictEqual(await quiet.prompt(event, async () => below), below)
-      assert.deepStrictEqual(quiet.runs, [])
-    }
-  })
-
-  it("a failed prompt bridge still returns next and does not block the prompt", async () => {
-    const h = host(worker)
-    h.state.replies.prompt = async () => Promise.reject(new Error("timed out"))
-    assert.strictEqual(
-      await h.prompt({ text: "look here", wait: false, origin: { kind: "composer" } }, async () => below),
-      below,
-    )
-  })
-
-  it("does not call the stop bridge outside VIBEST, or without a session id", async () => {
-    for (const env of [
-      {},
-      { VIBEST_AGENT: "session" },
-      { VIBEST_SESSION_ID: "w1" },
-      { VIBEST_AGENT: "", VIBEST_SESSION_ID: "w1" },
-    ]) {
-      const h = host(env)
-      assert.deepStrictEqual(await h.turnComplete({ ...end, reason: "answer" }, async () => below), below)
-      assert.deepStrictEqual(h.runs, [])
-    }
-  })
-
-  it("a failed stop bridge still returns next and does not block the turn", async () => {
-    const h = host(worker)
-    h.state.replies.stop = async () => Promise.reject(new Error("timed out"))
-    assert.strictEqual(await h.turnComplete({ ...end, reason: "answer" }, async () => below), below)
-  })
-
-  it("tool.call maps the call to guard stdin (reserved keys left out), keeps the event, and returns next on an empty pass", async () => {
-    const h = host(worker)
-    h.state.replies.guard = async () => pass()
-    const event = { ...bash, agentId: "sub", consent: "The user pressed 1" }
-    const before = JSON.stringify(event)
-    let seen: object | undefined
-    const result = await h.preTool(event, async (e: object) => {
-      seen = e
-      return below
-    })
-    assert.strictEqual(result, below)
-    assert.strictEqual(seen, event)
-    assert.strictEqual(JSON.stringify(event), before)
-    assert.deepStrictEqual(h.runs, [["vibest", "integration", "guard", "--harness", "claude"]])
-    assert.deepStrictEqual(h.inits, [
-      {
-        stdin: JSON.stringify({
-          tool_name: "Bash",
-          tool_input: { command: "ls", timeout: 5, description: "list" },
-          cwd: "/work",
-        }),
-        timeoutMs: plugin.BRIDGE_TIMEOUT_MS,
-      },
-    ])
-  })
-
-  it("a valid denial returns deny and does not call next", async () => {
-    const h = host(worker)
-    h.state.replies.guard = async () => denyBody("off limits")
-    let called = false
-    const result = await h.preTool(bash, async () => {
-      called = true
-      return below
-    })
-    assert.isFalse(called)
-    assert.deepStrictEqual(result, { deny: "off limits" })
-  })
-
-  it("nonzero, rejected, malformed and unexpected guard replies deny with the generic reason", async () => {
-    const cases: Array<(argv: string[]) => Promise<RunResult>> = [
-      async () => ({ exitCode: 2, stdout: "", stderr: "no" }),
-      async () => Promise.reject(new Error("timed out")),
-      async () => ({ exitCode: 0, stdout: "not json", stderr: "" }),
-      async () => json({ permission: "allow" }),
-      async () =>
-        json({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "allow",
-            permissionDecisionReason: "no",
-          },
-        }),
-      async () =>
-        json({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: "x",
-          },
-          extra: true,
-        }),
-    ]
-    for (const reply of cases) {
-      const h = host(worker)
-      h.state.replies.guard = reply
-      let called = false
-      const result = await h.preTool(bash, async () => {
-        called = true
-        return below
-      })
-      assert.isFalse(called)
-      assert.deepStrictEqual(result, { deny: plugin.GUARD_FAILURE })
-    }
-  })
-
-  it("outside VIBEST, tool.call returns next and does not call vibest", async () => {
+  it("does nothing outside VIBEST: no poll, no report, tool calls pass", async () => {
     const h = host({})
-    const result = await h.preTool(bash, async () => below)
-    assert.strictEqual(result, below)
-    assert.deepStrictEqual(h.runs, [])
+    await h.start()
+    await h.turnComplete({ reason: "answer", answer: "x" })
+    await h.prompt("hi", { kind: "composer" })
+    assert.deepStrictEqual(await h.preTool({ tool: "Bash", command: "ls" }), { tool: "Bash", command: "ls" })
+    assert.deepStrictEqual([h.requests, h.every], [[], []])
   })
 
-  it("once VIBEST is known, a failed tool.call registration denies instead of passing", async () => {
-    const inside = host(worker)
-    let called = false
-    const fresh = Object.assign(
-      async () => {
-        called = true
-        return below
-      },
-      { called: false, error: { kind: "throw" } },
-    )
-    assert.deepStrictEqual(await inside.catches["tool.call"]!(inside.$, bash, fresh), {
-      deny: plugin.GUARD_FAILURE,
+  it("a worker reports its turn end and the person's prompt, and polls nothing", async () => {
+    const h = host(WORKER)
+    await h.start()
+    assert.deepStrictEqual(h.every, [])
+    await h.turnComplete({ reason: "answer", answer: "done" })
+    await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
+    await h.prompt("next", { kind: "composer" })
+    await settle()
+    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/prompt"])
+    assert.deepStrictEqual(h.requests[0]!.body, {
+      hook_event_name: "TurnComplete",
+      session_id: "c1",
+      reason: "answer",
+      last_assistant_message: "done",
     })
-    assert.isFalse(called)
+    assert.deepStrictEqual(h.requests[1]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
+  })
 
-    const replayed = Object.assign(async () => below, { called: true, error: { kind: "timeout" } })
-    assert.strictEqual(await inside.catches["tool.call"]!(inside.$, bash, replayed), below)
+  it("the main agent's turn end is not reported", async () => {
+    const h = host()
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
+    await h.turnComplete({ reason: "answer", answer: "x" })
+    await settle()
+    assert.deepStrictEqual(h.paths(), [])
+  })
 
-    const outside = host({})
-    assert.strictEqual(
-      await outside.catches["tool.call"]!(
-        outside.$,
-        bash,
-        Object.assign(async () => below, { called: false }),
-      ),
-      undefined,
-    )
+  it("a report vibestd did not take is tried again later", async () => {
+    const h = host(WORKER)
+    let down = true
+    h.state.answer = () => (down ? new Error("ECONNREFUSED") : { status: 204 })
+    await h.turnComplete({ reason: "answer", answer: "done" })
+    await settle()
+    down = false
+    await h.fire(1000)
+    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/turn-end"])
+    await h.fire(2000)
+    assert.lengthOf(h.requests, 2, "taken: no more tries")
+  })
+})
+
+describe("Claude plugin inbox", () => {
+  it("a poll only queues; each draw submits one batch's line; its own submit gets the full text as context; acked on the next poll", async () => {
+    const h = host()
+    const polls = [batch([1], 'General Agent "A" completed (w1)', "full A"), batch([2], "Notice: x", "full B")]
+    h.state.answer = (r) =>
+      r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: { acked: [] } }
+    await h.start()
+    await h.tick()
+    assert.deepStrictEqual(h.submitted, [], "the poll does not submit")
+    assert.strictEqual(h.state.redraws, 2)
+    assert.strictEqual(await h.draw(), "drawn", "draws nothing of its own")
+    assert.deepStrictEqual(h.submitted, ['General Agent "A" completed (w1)'])
+    const own = await h.prompt('General Agent "A" completed (w1)', ownSubmit)
+    assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
+    await h.draw()
+    assert.deepStrictEqual(h.submitted.at(-1), "Notice: x")
+    // The person's own prompt with the same text gets nothing.
+    assert.notProperty(await h.prompt("Notice: x", { kind: "composer" }), "context")
+    assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
+    await h.tick()
+    const ack = h.requests.find((r) => r.url.endsWith("/ack"))
+    assert.deepStrictEqual(ack?.body, { ids: [1, 2], release: [] })
+    assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
+  })
+
+  it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {
+    const h = host()
+    const polls = [batch([1], "same", "first"), batch([2], "same", "second")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.tick()
+    h.state.submit = async () => ({ drop: "busy" })
+    await h.draw()
+    h.state.submit = async () => ({ text: "x" })
+    await h.draw()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["same", "same", "same"])
+    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["first"])
+    assert.deepStrictEqual(((await h.prompt("same", ownSubmit)) as { context: string[] }).context, ["second"])
+    assert.notProperty(await h.prompt("same", ownSubmit), "context")
+  })
+
+  it("a batch handed out again after its lease ran out is shown once; once submitted it is acked again", async () => {
+    const h = host()
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([5], "L", "T") : { status: 200, body: {} })
+    await h.start()
+    await h.tick()
+    assert.strictEqual(h.state.redraws, 1)
+    await h.draw()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L"])
+    await h.tick()
+    await h.tick()
+    const acks = h.requests.filter((r) => r.url.endsWith("/ack")).map((r) => r.body)
+    assert.deepStrictEqual(acks, [
+      { ids: [5], release: [] },
+      { ids: [5], release: [] },
+    ])
+  })
+
+  it("a batch mixing a row already shown with a new one: the old one is acked, the new one given back, nothing shown twice", async () => {
+    const h = host()
+    const polls = [batch([5], "L", "T"), batch([5, 6], "M", "T + U"), batch([6], "N", "U")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.draw()
+    await h.tick()
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L"], "the mixed batch is not shown")
+    await h.tick()
+    const ack = h.requests.filter((r) => r.url.endsWith("/ack")).at(-1)
+    assert.deepStrictEqual(ack?.body, { ids: [5], release: [6] })
+    await h.draw()
+    assert.deepStrictEqual(h.submitted, ["L", "N"])
+  })
+
+  it("says so once vibestd stops answering, and clears it when it answers again", async () => {
+    const h = host()
+    let down = true
+    h.state.answer = () => (down ? new Error("ENOENT") : batch([], "", ""))
+    await h.start()
+    for (let i = 1; i < plugin.POLL_FAILURES_SHOWN; i++) await h.tick()
+    assert.lengthOf(h.statuses, 1)
+    assert.match(h.statuses[0]!, /vibestd does not answer/)
+    await h.tick()
+    down = false
+    await h.tick()
+    assert.deepStrictEqual(h.statuses.at(-1), undefined)
+  })
+})
+
+describe("Claude plugin protocol mismatch", () => {
+  const mismatch = {
+    error: "vibest was updated to 9.9.9; run vibest update to restart this agent on it",
+    protocol: 99,
+    version: "9.9.9",
+    message: "vibest was updated to 9.9.9; run vibest update to restart this agent on it",
+    action: "vibest update",
+  }
+
+  it("a 409 puts vibestd's message and action on the status line, polls on quietly, and clears once it goes through", async () => {
+    const h = host()
+    let refused = true
+    h.state.answer = () => (refused ? { status: 409, body: mismatch } : batch([], "", ""))
+    await h.start()
+    for (let i = 0; i < plugin.POLL_FAILURES_SHOWN + 1; i++) await h.tick()
+    assert.isTrue(h.statuses.every((t) => t === `VIBEST: ${mismatch.error}`))
+    refused = false
+    await h.tick()
+    assert.deepStrictEqual(h.statuses.at(-1), undefined)
+  })
+
+  it("the guard still refuses, with the mismatch and the command as its reason", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => ({ status: 409, body: mismatch })
+    const answer = await h.preTool({ tool: "Read" })
+    assert.include(answer.deny, mismatch.error)
+    assert.lengthOf(h.requests, 1)
+  })
+})
+
+describe("Claude plugin guard", () => {
+  it("vibestd's answer: a deny refuses, nothing lets the call through, a 4xx refuses with its reason", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => ({ status: 200, body: { deny: "no" } })
+    assert.deepStrictEqual(await h.preTool({ tool: "Write", file_path: "/x", tool_use_id: "t" }), { deny: "no" })
+    assert.deepStrictEqual(h.requests[0]!.body, { tool_name: "Write", tool_input: { file_path: "/x" }, cwd: "/work" })
+    h.state.answer = () => ({ status: 200, body: {} })
+    assert.deepStrictEqual(await h.preTool({ tool: "Read" }), { tool: "Read" })
+    h.state.answer = () => ({ status: 403, body: { error: "session w1 is not in project 7" } })
+    assert.match((await h.preTool({ tool: "Read" })).deny, /not in project 7/)
+  })
+
+  it("nothing answering: tried again after 100, 300 and 900 ms, then refused", async () => {
+    const h = host(WORKER)
+    h.state.answer = () => new Error("ECONNREFUSED")
+    const answer = h.preTool({ tool: "Read" })
+    await settle()
+    for (const ms of plugin.GUARD_BACKOFF_MS) await h.fire(ms)
+    assert.deepStrictEqual(await answer, { deny: plugin.UNREACHABLE })
+    assert.lengthOf(h.requests, 4)
   })
 })

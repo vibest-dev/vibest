@@ -1,4 +1,5 @@
-// Claude Code: vibest's plugin @vibest/claude (turn end, pre-tool guard and the coordinator's inbox bridge), loaded with
+// Claude Code: vibest's plugin @vibest/claude (turn end, user prompt, pre-tool guard and the coordinator's inbox, all over
+// vibestd's HTTP socket), loaded with
 // `--plugin-dir` into each Claude vibest starts; its startup menus answered in the pane; models from its stream-json
 // control requests.
 import { Config, Effect, FileSystem, Path, Ref, Schema } from "effect"
@@ -133,7 +134,7 @@ export const claude: HarnessAdapter = {
   interruptKey: "esc",
   startup: claudeStartup,
   resultField: "last_assistant_message",
-  inbox: "bridge",
+  inbox: "poll",
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
@@ -150,7 +151,6 @@ export const claude: HarnessAdapter = {
   ],
   coordinatorArgs: (i) => [
     ...opt("--resume", i.sessionId),
-    ...opt("--session-id", i.newSessionId ?? null),
     "--append-system-prompt-file",
     i.rulesFile,
     // No MCP servers, only the inspection tools; they run without a permission prompt, the pre-tool hook refuses what it names.
@@ -181,16 +181,6 @@ export const claude: HarnessAdapter = {
     ),
     answer: claudeModels,
   },
-  guardAnswer: (reason) =>
-    reason
-      ? {
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: reason,
-          },
-        }
-      : undefined,
   // The plugin's prompt.submit: only what the person submitted, at the terminal (composer) or through Remote Control
   // (bridge); a task notification, a scheduled trigger, a peer or a plugin's prompt is not the person.
   userPrompt: (event, coordinator) => {
@@ -198,14 +188,9 @@ export const claude: HarnessAdapter = {
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  // The plugin's main-loop turn.complete, whatever its reason.
-  turnEnd: (event, coordinator) => {
-    if (event.hook_event_name !== "TurnComplete") return undefined
-    if (!coordinator) return { result: turnComplete(event) }
-    return typeof event.session_id === "string" && event.session_id !== ""
-      ? { harnessSessionId: event.session_id }
-      : undefined
-  },
+  // The plugin's main-loop turn.complete, whatever its reason. The main agent's turn ends are no result.
+  turnEnd: (event, coordinator) =>
+    coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
   // `--resume` of a session Claude never wrote fails (an id vibest chose up front before it took reported ones).
   canResume: (root, sessionId) =>
     Effect.flatMap(transcript(root, sessionId), (file) =>

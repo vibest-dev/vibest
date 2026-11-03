@@ -87,7 +87,9 @@ const session = (env: Record<string, string>) =>
     const emit = (event: string, e: unknown = {}, ctx: unknown = {}) =>
       Effect.promise(async () => {
         const results = []
-        for (const h of handlers.get(event) ?? []) results.push(await h(e, ctx))
+        // Pi always hands a session manager; a test's context names only what it is about.
+        const full = { sessionManager: { getSessionId: () => "pi-session" }, ...(ctx as object) }
+        for (const h of handlers.get(event) ?? []) results.push(await h(e, full))
         return results
       })
     const config = ConfigProvider.layer(
@@ -160,6 +162,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
+          VIBEST_PROJECT_ID: String(coord.projectId),
           VIBEST_COMMAND: '["/nonexistent-vibest-fixture"]',
         })
         yield* s.emit(
@@ -230,6 +233,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
+          VIBEST_PROJECT_ID: String(coord.projectId),
           VIBEST_COMMAND: '["vibest"]',
         })
         yield* s.emit(
@@ -382,6 +386,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
+        VIBEST_PROJECT_ID: String(coord.projectId),
         VIBEST_COMMAND: '["/usr/bin/bun","/src/main.ts"]',
       })
       assert.deepStrictEqual(
@@ -535,6 +540,7 @@ describe("pi-vibest", () => {
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
+        VIBEST_PROJECT_ID: String(coord.projectId),
         VIBEST_COMMAND: '["vibest"]',
       })
       assert.isFalse(coordinator.handlers.has("input"))

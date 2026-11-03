@@ -927,7 +927,7 @@ describe("HarnessAdapter", () => {
       last_assistant_message: "done",
     }
     assert.deepStrictEqual(turnEnd(answer, false), { result: answer })
-    assert.deepStrictEqual(turnEnd(answer, true), { harnessSessionId: "c1" })
+    assert.isUndefined(turnEnd(answer, true))
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
     assert.deepStrictEqual(turnEnd(aborted, false), {
       result: {
@@ -937,7 +937,7 @@ describe("HarnessAdapter", () => {
         error_details: "the turn was stopped in its terminal (Esc) before it ended",
       },
     })
-    assert.deepStrictEqual(turnEnd(aborted, true), { harnessSessionId: "c1" })
+    assert.isUndefined(turnEnd(aborted, true))
     const error = { ...answer, reason: "error", last_assistant_message: "" }
     assert.deepStrictEqual(turnEnd(error, false), {
       result: { ...error, error: "error", error_details: "the turn ended on an API error" },
@@ -1031,10 +1031,6 @@ describe("HarnessAdapter", () => {
     assert.deepStrictEqual(ADAPTERS.claude.coordinatorArgs!({ ...input, sessionId: "s" }).slice(0, 2), [
       "--resume",
       "s",
-    ])
-    assert.deepStrictEqual(ADAPTERS.claude.coordinatorArgs!({ ...input, newSessionId: "n" }).slice(0, 2), [
-      "--session-id",
-      "n",
     ])
     for (const id of ["pi", "claude"] as const)
       assert.notInclude(ADAPTERS[id].coordinatorArgs!(input).join(" "), "session")
@@ -1186,6 +1182,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       yield* sh(repo, "clone", "-q", repo, clone)
       yield* sh(clone, "remote", "set-url", "origin", "https://github.com/A/b.git")
       assert.strictEqual(yield* repositoryKey(clone), "github.com/a/b")
+      // VIBEST_PROJECT_KEY overrides it (VIBEST_PROJECT_ID is the numeric project id, not this).
+      const overridden = yield* repositoryKey(repo).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { VIBEST_PROJECT_KEY: "my/key" } }))),
+      )
+      assert.strictEqual(overridden, "my/key")
     }),
   )
 
@@ -1277,13 +1278,16 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           models: () => Effect.succeed([]),
         })
         const claudeDir = yield* tempDirectory("vibest-claude-")
-        const recorded: Array<[string, string]> = []
-        const record = (sessionId: string, id: string) => Effect.sync(() => void recorded.push([sessionId, id]))
         const run = (
           h: "claude" | "pi" | "cursor",
           harnessSessionId: string | null = null,
           sessionId = "",
-          session = Effect.succeed({ sessionId, harnessSessionId }),
+          session: Effect.Effect<{
+            sessionId: string
+            harnessSessionId: string | null
+            projectId?: number
+            runtime?: string
+          }> = Effect.succeed({ sessionId, harnessSessionId }),
         ) =>
           Launch.coordinatorCommand({
             harness: h,
@@ -1292,7 +1296,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
             model: null,
             passEnv: CALLER_ENV,
             session,
-            record,
           }).pipe(
             Effect.provide(harness),
             Effect.provide(
@@ -1313,6 +1316,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         // What its shell's `vibest` needs, passed on explicitly for harnesses that filter their shell's environment.
         assert.deepStrictEqual(claude.env, {
           VIBEST_AGENT: "coordinator",
+          VIBEST_HARNESS: "claude",
           VIBEST_HOME: home,
           VIBEST_COMMAND: '["/bin/vibest"]',
           VIBEST_SESSION_ID: "",
@@ -1332,12 +1336,25 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         // The coordinator's session id is in the shell's variables too.
         const launched = yield* run("claude", null, "abcd1234")
         assert.strictEqual(launched.env.VIBEST_SESSION_ID, "abcd1234")
-        assert.strictEqual(launched.env.VIBEST_SESSION_ID, "abcd1234")
-        // `--resume` only once Claude has written the session; otherwise a new one under an id recorded before Claude starts.
+        // The project id and the runtime, when vibestd says them.
+        const placed = yield* run(
+          "claude",
+          null,
+          "abcd1234",
+          Effect.succeed({
+            sessionId: "abcd1234",
+            harnessSessionId: null,
+            projectId: 7,
+            runtime: '{"runtime":"herdr"}',
+          }),
+        )
+        assert.strictEqual(placed.env.VIBEST_PROJECT_ID, "7")
+        assert.strictEqual(placed.env.VIBEST_RUNTIME, '{"runtime":"herdr"}')
+        // `--resume` only once Claude has written the session; otherwise a new conversation, its id Claude's to choose
+        // (the plugin reports it on every request).
         const unwritten = yield* run("claude", "s1", "abcd1234")
-        assert.deepStrictEqual(recorded.at(-1)?.[0], "abcd1234")
-        assert.notStrictEqual(recorded.at(-1)?.[1], "s1")
-        assert.deepStrictEqual(unwritten.args.slice(0, 2), ["--session-id", recorded.at(-1)![1]])
+        assert.notInclude(unwritten.args, "--resume")
+        assert.notInclude(unwritten.args, "--session-id")
         const transcript = path.join(claudeDir, "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"), "s1.jsonl")
         yield* fs.makeDirectory(path.dirname(transcript), { recursive: true })
         yield* fs.writeFileString(transcript, "{}\n")

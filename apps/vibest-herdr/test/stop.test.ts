@@ -3,14 +3,15 @@ import net from "node:net"
 // Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, protocolHeaders, sessionHeaders } from "@vibest/client/client"
+import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
-import { CALLER_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
 import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
@@ -90,13 +91,13 @@ const receiver = (repo: string, harness: "pi" | "claude") =>
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
-    const { sessionId } = yield* authed(raw, cliHeaders(repo))["Project.CoordinatorSession"]({
+    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.CoordinatorSession"]({
       harness,
       fresh: true,
       terminal: "wC:p1",
     })
     if (harness === "claude") yield* db.reportCoordinatorSession(sessionId, "claude", "claude-session")
-    const c = authed(raw, sessionHeaders(sessionId, repo))
+    const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ harness: "pi", prompt: "work" })
     yield* until(db.getSession(worker), (w) => w?.turnState === "open")
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
@@ -130,18 +131,6 @@ describe("Daemon.Stop", () => {
             user["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/late" }),
           ),
         ),
-        "DaemonStopping",
-      )
-      const inboxPayload = {
-        claudeSessionId: "s",
-        terminal: "test/p",
-        machine: { id: "local" },
-        generation: "g",
-        token: "t",
-      }
-      assert.strictEqual(tagOf(yield* Effect.exit(user["Inbox.Ack"](inboxPayload))), "DaemonStopping")
-      assert.strictEqual(
-        tagOf(yield* Effect.exit(user["Inbox.Release"]({ ...inboxPayload, retry: false }))),
         "DaemonStopping",
       )
       assert.strictEqual(
@@ -299,7 +288,7 @@ describe("Daemon.Stop", () => {
     "a Pi batch on the wire blocks until its ACK; the drained close fails nothing",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, sessionId, worker } = yield* receiver(repo, "pi")
+      const { db, sessionId, worker, projectId } = yield* receiver(repo, "pi")
       const layout = yield* Layout
       const socket = yield* Effect.acquireRelease(
         Effect.promise(
@@ -319,6 +308,7 @@ describe("Daemon.Stop", () => {
         [PROTOCOL_HEADER, String(PROTOCOL)],
         [CALLER_HEADER, "session"],
         [SESSION_HEADER, sessionId],
+        [PROJECT_HEADER, String(projectId)],
       ]
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
       yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
@@ -334,33 +324,23 @@ describe("Daemon.Stop", () => {
     }),
   )
 
-  for (const op of ["ack", "release"] as const)
-    test(
-      `a Claude ${op} settles a claim already made while the Stop drains`,
-      Effect.gen(function* () {
-        const repo = yield* makeRepository
-        const { db, c, worker, projectId } = yield* receiver(repo, "claude")
-        const inbox = yield* Inbox
-        const call = { projectId, terminal: "wC:p1", claudeSessionId: "claude-session" }
-        const generation = (yield* inbox.attach({ ...call, replace: false })).generation!
-        yield* inbox.enqueue({ sessionId: worker, kind: "report", message: op, details: {} })
-        const token = (yield* until(inbox.pull({ ...call, generation }), (r) => r.token !== undefined)).token!
-        const stopping = yield* Effect.forkScoped(stop(repo))
-        yield* draining
-        const payload = {
-          generation,
-          token,
-          claudeSessionId: "claude-session",
-          terminal: "wC:p1",
-          machine: { id: "local" },
-        }
-        const result =
-          op === "ack" ? yield* c["Inbox.Ack"](payload) : yield* c["Inbox.Release"]({ ...payload, retry: true })
-        assert.isUndefined(result.error)
-        assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, op === "ack" ? "delivered" : "pending")
-        assert.strictEqual(yield* settled(stopping), "accepted")
-      }),
-    )
+  test(
+    "a Claude ack settles a batch already leased while the Stop drains",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { db, worker, projectId } = yield* receiver(repo, "claude")
+      const inbox = yield* Inbox
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "ack", details: {} })
+      const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
+      const stopping = yield* Effect.forkScoped(stop(repo))
+      yield* draining
+      // A poll while draining hands out nothing new.
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
+      assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
+      assert.strictEqual(yield* settled(stopping), "accepted")
+    }),
+  )
 
   test(
     "a client that stops waiting for its Stop cancels it: the drain ends and changes are admitted again, its operation untouched",

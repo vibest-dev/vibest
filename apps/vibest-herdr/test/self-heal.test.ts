@@ -3,20 +3,11 @@ import path from "node:path"
 
 // What `vibest` fixes for the user on an interactive terminal: a vibestd to replace (`vibest daemon restart`, `vibest update`). A temporary HOME and VIBEST_HOME throughout, never the user's.
 import { assert, layer } from "@effect/vitest"
-import {
-  awaitDaemon,
-  cliHeaders,
-  connect,
-  probe,
-  protocolHeaders,
-  readPing,
-  sessionHeaders,
-  startDaemon,
-} from "@vibest/client/client"
+import { awaitDaemon, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { PROTOCOL } from "@vibest/protocol/protocol"
+import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { readDaemonInfo } from "@vibest/server/daemon"
@@ -301,7 +292,10 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             raw["Daemon.Stop"]({ instance }, { headers })
           assert.strictEqual(yield* tag(stop(old.instance!, {})), "ProtocolRejected")
           assert.strictEqual(yield* tag(stop(old.instance!, protocolHeaders())), "InvalidCaller")
-          assert.strictEqual(yield* tag(stop(old.instance!, sessionHeaders("nosuch00"))), "NoSuchSession")
+          assert.strictEqual(
+            yield* tag(stop(old.instance!, sessionHeaders({ sessionId: "nosuch00" }))),
+            "NoSuchSession",
+          )
           assert.strictEqual(yield* tag(stop("another", cliHeaders(layout.home))), "WrongInstance")
           assert.strictEqual((yield* pingOf(layout.socket)).instance, old.instance)
 

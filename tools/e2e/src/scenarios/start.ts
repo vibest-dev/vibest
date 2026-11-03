@@ -8,7 +8,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, fail, Skip, until, type World } from "../world.ts"
+import { expect, fail, row, Skip, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string; harness: string; routing?: { trace: Array<{ hook: string }> } }
 
@@ -173,8 +173,13 @@ const move = (harness: "claude" | "pi"): Check => ({
         "A's conversation written",
         async () => {
           if (harness === "pi") return await piWrote(w.repository)
-          // Claude starts with the conversation id vibest chose (--session-id).
-          conversation = await harnessFlag(socket, a, "claude", "--session-id")
+          // The plugin reports Claude's own conversation id; vibestd keeps it in the main session's row.
+          conversation =
+            row<{ c: string | null }>(
+              w,
+              "SELECT s.harness_session_id AS c FROM session s JOIN project p ON p.main_session_id = s.id",
+            )?.c ?? undefined
+          if (conversation === undefined) return false
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))
             if (await Bun.file(path.join(projects, dir, `${conversation}.jsonl`)).exists()) return true
           return false

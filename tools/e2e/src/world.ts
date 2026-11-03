@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite"
 // One world per run: the user's own HOME (the harnesses' logins live in its keychain), a temp VIBEST_HOME, temp config
 // directories for each harness (Pi, Claude, Cursor read them from env), a scratch repository with a local bare origin, and
 // the vibest under test first on PATH. vibest writes nothing outside the temp root. Every process this run starts is stopped.
@@ -149,16 +150,50 @@ export class World {
       p.exited,
     ])
     const result = { code, stdout, stderr }
-    this.log.push({ argv, cwd, result })
+    this.log.push({ argv: argv.map(redact), cwd, result })
     return result
   }
 
-  /** `vibest …` from the repository (or `cwd`). */
+  /**
+   * `args` with this world's herdr session for the commands that open panes (`run`, and bare `vibest` starting the main
+   * agent) when they name none: vibest's default is the session `vibest`, the user's own.
+   */
+  withSession(args: ReadonlyArray<string>): ReadonlyArray<string> {
+    if (args.includes("--session")) return args
+    if (args[0] === "run") return ["run", "--session", this.herdrSession, ...args.slice(1)]
+    if (args.length === 0 || (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help"))
+      return ["--session", this.herdrSession, ...args]
+    return args
+  }
+
+  /** `vibest …` from the repository (or `cwd`), in this world's herdr session unless `args` name one. */
   vibest(
     args: ReadonlyArray<string>,
     options: { cwd?: string; env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
   ) {
-    return this.run(options.cwd ?? this.repository, [binary, ...args], options)
+    return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
+  }
+
+  /**
+   * Terminals vibest recorded outside this world's herdr sessions (its own and the ones a check names after it,
+   * `<session>-…`): a check that opened a pane in a session it does not own, the user's included.
+   */
+  foreignTerminals(): ReadonlyArray<string> {
+    const file = path.join(this.vibestHome, "vibest.db")
+    if (!fs.existsSync(file)) return []
+    const db = new Database(file, { readonly: true })
+    try {
+      const rows = db.query("SELECT id, runtime FROM session").all() as Array<{ id: string; runtime: string | null }>
+      return rows.flatMap((r) => {
+        const terminal = (JSON.parse(r.runtime ?? "{}") as { id?: string }).id ?? ""
+        const session = terminal.split("/")[0] ?? ""
+        return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
+          ? []
+          : [`${r.id} at ${terminal}`]
+      })
+    } finally {
+      db.close()
+    }
   }
 
   /**
@@ -170,7 +205,7 @@ export class World {
     answers: string,
     options: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number } = {},
   ) {
-    const pty = ["python3", "-I", path.join(import.meta.dirname, "terminal.py"), binary, ...args]
+    const pty = ["python3", "-I", path.join(import.meta.dirname, "terminal.py"), binary, ...this.withSession(args)]
     return this.run(options.cwd ?? this.repository, pty, { ...options, stdin: answers })
   }
 
@@ -244,10 +279,77 @@ export const alive = (pid: number) => {
   }
 }
 
+/** One row of vibest.db, read while vibestd runs. */
+export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
+  const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+  try {
+    return (db.query(sql).get(...args) ?? undefined) as A | undefined
+  } finally {
+    db.close()
+  }
+}
+
 export const until = async (what: string, ok: () => Promise<boolean> | boolean, timeoutMs = 10_000) => {
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)
 }
 
 /** Is `bin` on the world's PATH? */
+/** VIBEST_E2E_ENV: KEY=VALUE pairs, one per line, for the agents a real-model check starts. */
+const agentEnv = (process.env.VIBEST_E2E_ENV ?? "")
+  .split("\n")
+  .map((l) => l.trim())
+  .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+
+/** `text` with every VIBEST_E2E_ENV value replaced: they are never printed or kept as evidence. */
+export const redact = (text: string) =>
+  agentEnv.reduce((t, pair) => {
+    const value = pair.slice(pair.indexOf("=") + 1)
+    return value === "" ? t : t.split(value).join("<redacted>")
+  }, text)
+
+/**
+ * The model of the agents a real-model check has vibest start, as vibest's own options (`vibest run` and the main
+ * agent's `vibest` take the same `--provider`, `--model` and `--env`). VIBEST_E2E_PROVIDER and VIBEST_E2E_MODEL choose
+ * it, VIBEST_E2E_ENV adds environment (another Anthropic-compatible endpoint for Claude, say); unset, Claude Haiku as
+ * before. The one place to change it. The World's own environment drops every VIBEST_* variable, so these reach no
+ * agent except as these options.
+ */
+export const agentModel = (): ReadonlyArray<string> => {
+  const provider = process.env.VIBEST_E2E_PROVIDER
+  return [
+    ...(provider ? ["--provider", provider] : []),
+    "--model",
+    process.env.VIBEST_E2E_MODEL || "haiku",
+    ...agentEnv.flatMap((pair) => ["--env", pair]),
+  ]
+}
+
 export const onPath = (bin: string) => Bun.which(bin) !== null
+
+/**
+ * Sessions vibestd knows, without starting a harness: rows in a project of their own (`key`), for an integration that
+ * calls vibestd over HTTP, which answers only a known session. Starts vibestd first; returns the project id.
+ */
+export const knownSessions = async (
+  w: World,
+  key: string,
+  sessions: Record<string, string>,
+  directory = w.repository,
+) => {
+  await w.ok(["ls"])
+  const db = new Database(path.join(w.vibestHome, "vibest.db"))
+  try {
+    const project = db
+      .query<{ id: number }, [string]>("INSERT INTO project (directory) VALUES (?) RETURNING id")
+      .get(key)!.id
+    for (const [id, agent] of Object.entries(sessions))
+      db.run(
+        "INSERT INTO session (id, project_id, agent_type, harness, directory, created_at) VALUES (?, ?, ?, 'claude', ?, ?)",
+        [id, project, agent, directory, Date.now()],
+      )
+    return project
+  } finally {
+    db.close()
+  }
+}

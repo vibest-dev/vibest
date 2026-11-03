@@ -422,14 +422,13 @@ export const GENERAL = "general"
 export const rulesOf = (agent: string): Rules => (agent === COORDINATOR ? coordinator : session)
 
 /**
- * `vibest integration guard`: the rules of the agent in VIBEST_AGENT applied to one pre-tool hook input (`raw`, as the
- * harness sent it): the reason to refuse the call, if any; the harness adapter words the answer. Any failure (no agent,
- * input vibest cannot read) makes the hook refuse.
+ * The rules of `agent` (VIBEST_AGENT for `vibest integration guard`, the session's own for vibestd's HTTP guard) applied
+ * to one pre-tool hook input (`raw`, as the harness sent it): the reason to refuse the call, if any; the harness adapter
+ * words the answer. Any failure (input vibest cannot read) makes the hook refuse.
  */
-export const hook = (raw: string) =>
+export const check = (agent: string, raw: string) =>
   Effect.gen(function* () {
-    // No VIBEST_AGENT fails: the hook refuses.
-    const rules = rulesOf(yield* Config.String("VIBEST_AGENT"))
+    const rules = rulesOf(agent)
     const input = yield* decodePreToolUse(raw)
     const path = yield* Path.Path
     // The base: the call's cwd, else the only workspace root; absolute, or vibest cannot tell where paths lead.

@@ -170,7 +170,7 @@ Status: now.
 _I work across several repositories. Each keeps its own Project knowledge and worktrees, the same repository is one
 Project wherever I stand in it, and I can run agents in two repositories at once without them mixing._
 
-Today a Project is one repository, keyed by `VIBEST_PROJECT_ID`, else its normalized `origin` URL, else a hash of the
+Today a Project is one repository, keyed by `VIBEST_PROJECT_KEY`, else its normalized `origin` URL, else a hash of the
 main checkout's real path. Composing several repositories into one Project directory is milestone M7.
 
 Fixture, beside `shop`:
@@ -189,7 +189,7 @@ Fixture, beside `shop`:
 | in `notes`: write, then `project info` twice                                                                   | works without an `origin`; the same Project both times                                                                               |
 | move `notes` to `notes-moved`; `project list docs`                                                             | a new, empty Project (the key is the path)                                                                                           |
 | `vibest project read docs a.md` in `shop-copy`                                                                 | `A-<nonce>`: clones of one `origin` share a Project (current design)                                                                 |
-| `VIBEST_PROJECT_ID=team` in `shop` and in `admin`: write in one, read in the other                             | one shared Project                                                                                                                   |
+| `VIBEST_PROJECT_KEY=team` in `shop` and in `admin`: write in one, read in the other                            | one shared Project                                                                                                                   |
 | `vibest run cursor -- "<task>; reply DONE-<nonce1>"` in `shop` and `… DONE-<nonce2>` in `admin`, back to back  | two rows in `vibest ls`, each with its own repository; each worktree is a checkout of its own `origin` (`git remote get-url origin`) |
 | wait for both                                                                                                  | `vibest result <id>` holds the right nonce for each; neither result reached the other's repository                                   |
 | the `shop` worktree                                                                                            | does not contain `vendor/sdk` (a nested repository is never copied)                                                                  |

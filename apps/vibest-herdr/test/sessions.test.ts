@@ -177,6 +177,13 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
       // The project's own scratch directory, the one place under projects the session's guard allows.
       assert.strictEqual(placed.env.VIBEST_SCRATCH, layout.scratch(yield* repositoryKey(repo)))
+      // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
+      // field (no terminal yet: the one it gets is opened after the env is fixed).
+      const identity = (yield* (yield* Db).sessionIdentity(id))!
+      assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
+      const runtime = JSON.parse(placed.env.VIBEST_RUNTIME!) as Record<string, unknown>
+      assert.deepStrictEqual(Object.keys(runtime).sort(), ["machine", "runtime"])
+      assert.strictEqual(runtime.machine, "local")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       const start = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(start.env.VIBEST_SESSION_ID, id)
@@ -3384,7 +3391,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   /** A working `--archive-on-completion` session, and the coordinator as herdr runs it: `claude` takes rows with agent.prompt, `pi` pulls them. */
   const archiveSession = (
     repo: string,
-    coordinator: "claude" | "pi" = "claude",
+    coordinator: "cursor" | "pi" = "cursor",
     input: { readonly peer?: string } = {},
   ) =>
     Effect.gen(function* () {
@@ -3475,7 +3482,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a Claude coordinator on the inbox bridge: archived once it acked the claim holding the result",
+    "a Claude coordinator polling its inbox: archived once it acked the batch holding the result",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const db = yield* Db
@@ -3488,17 +3495,15 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* db.reportCoordinatorSession(coord.sessionId, "claude", "claude-1")
       yield* herdr.seedAgent("test/coord")
       const projectId = yield* db.projectId(yield* repositoryKey(repo))
-      const call = { projectId, terminal: "test/coord", claudeSessionId: "claude-1" }
-      const generation = (yield* inbox.attach({ ...call, replace: false })).generation!
       const sessions = yield* Sessions
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       yield* finishTurn({ id, sessions, herdr }, "status: completed")
-      const claim = yield* until(inbox.pull({ ...call, generation }), (r) => r.token !== undefined)
+      const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
       yield* settle
       assert.isFalse(yield* archived(db, id))
-      assert.deepStrictEqual(yield* inbox.ack({ ...call, generation, token: claim.token! }), { acked: true })
+      assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
       yield* until(archived(db, id), (a) => a)
     }),
   )
@@ -3895,7 +3900,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const a = yield* archiveSession(repo, "claude", { peer: owner.id })
+      const a = yield* archiveSession(repo, "cursor", { peer: owner.id })
       yield* finishTurn(a, "status: completed")
       const first = yield* until(latestNotice(a.id), (m) => m.includes("archived ("))
       assert.include(first, `worktree kept at ${yield* sessionWorktree(owner.id)}`)
@@ -3903,7 +3908,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.notInclude(first, "is archived too")
 
       // The owner archived while the next borrower is live: the directory stays for it.
-      const b = yield* archiveSession(repo, "claude", { peer: owner.id })
+      const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
       assert.include((yield* owner.sessions.remove(owner.id))!.reasons.join("\n"), `session ${b.id} still shares it`)
       yield* finishTurn(b, "status: completed")
       const second = yield* until(latestNotice(b.id), (m) => m.includes("archived ("))
@@ -3936,7 +3941,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const b = yield* archiveSession(repo, "claude", { peer: owner.id })
+      const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
       yield* owner.sessions.remove(owner.id, { keepWorktree: true })
       const worktree = yield* sessionWorktree(owner.id)
       const out = (yield* b.sessions.remove(b.id))!
@@ -3950,10 +3955,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      // A coordinator that takes its rows by terminal text, so the result is delivered without a bridge.
+      // A coordinator that takes its rows by terminal text, so the result is delivered without its integration.
       const db = yield* Db
       const sessions = yield* Sessions
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "claude", false, {
+      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "cursor", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
