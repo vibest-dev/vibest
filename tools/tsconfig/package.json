@@ -1,6 +1,6 @@
 {
   "name": "@vibest/tsconfig",
-  "version": "0.0.1-beta.14",
+  "version": "0.0.1-beta.15",
   "private": true,
   "description": "The TypeScript compiler options every vibest package extends: `\"extends\": \"@vibest/tsconfig/base.json\"`.",
   "license": "MIT",
