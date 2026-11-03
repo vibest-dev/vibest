@@ -220,8 +220,6 @@ foreign keys, and only then puts it in place with `user_version` 2. The script m
   then moved aside as `<dir>.v1-backup-<time>`.
 - Dropped: stop records, the runtime's last status, a result's parsed details (derived again from its text), and
   every other `metadata` key.
-- Files: `results/` and `reports/` are not read. A collected result is already a v1 `message.output`; a result file
-  vibestd had not collected when it stopped is not taken over. The directories can be deleted.
 
 From version 3 on, upgrades run step by step on `user_version`.
 
