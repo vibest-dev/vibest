@@ -32,14 +32,16 @@ const served = Server.layer.pipe(
   Layer.provideMerge(testLayer()),
 )
 
-// Each `vibest` is a fresh Bun process (~0.3 s, several seconds on a loaded machine); a test runs up to ten.
+// Each `vibest` is a fresh Bun process (~0.3 s, several seconds on a loaded machine); a test runs up to twenty.
+// The tests run one at a time: run together they share the CPU, so each one's time is the whole file's, and on a
+// two-core CI runner the CLI processes fighting for it cost twice the CPU (23 s for this file, against 12 s in turn).
 const TIMEOUT = 30_000
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)), TIMEOUT)
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
-describe.concurrent("vibest CLI", () => {
+describe("vibest CLI", () => {
   test(
     "run --archive-on-completion asks Spawn to archive on a completed result; the unreleased --archive is a usage error that spawns nothing",
     Effect.gen(function* () {
@@ -391,7 +393,7 @@ describe.concurrent("vibest CLI", () => {
   )
 })
 
-describe.concurrent("vibest CLI without vibestd", () => {
+describe("vibest CLI without vibestd", () => {
   it.effect(
     "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user",
     () =>

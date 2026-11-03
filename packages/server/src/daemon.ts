@@ -159,8 +159,9 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     )
     if (!held) return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
     // No other vibestd that takes the lock is starting or serving, so whatever answers took none: an older vibestd, or
-    // another program. Its socket stays.
-    const inUse = (yield* probe(layout.socket))
+    // another program. Its socket stays. One Ping can outlast its 1 s timeout on a loaded machine: three before "does
+    // not answer".
+    const inUse = (yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })))
       ? "answers Ping (an vibestd that takes no start lock, from an older vibest)"
       : (yield* accepts(layout.socket))
         ? "accepts connections but does not answer Ping"

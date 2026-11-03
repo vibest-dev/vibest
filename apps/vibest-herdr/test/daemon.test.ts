@@ -1,10 +1,11 @@
 import childProcess from "node:child_process"
 import net from "node:net"
+import util from "node:util"
 
 // vibestd's start lock (flock on vibestd.pid): one vibestd per VIBEST_HOME, and a socket that something else answers on is never
 // unlinked. Real vibestd processes on temporary VIBEST_HOMEs, in real time; never the user's.
 import { assert, describe, it } from "@effect/vitest"
-import { awaitDaemon, probe } from "@vibest/client/client"
+import { probe } from "@vibest/client/client"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { type Host, readDaemonInfo, run } from "@vibest/server/daemon"
@@ -14,6 +15,8 @@ import { SocketServer } from "effect/socket/SocketServer"
 import * as Platform from "#platform"
 
 import { pingOf, runVibest, tempDirectory } from "./fakes.ts"
+
+const execFile = util.promisify(childProcess.execFile)
 
 /**
  * `vibest daemon --foreground` on its own VIBEST_HOME, with nothing of this test run's environment but a PATH that has
@@ -29,6 +32,8 @@ const listen = (socket: string, answer: boolean) =>
       () =>
         new Promise<net.Server>((resolve) => {
           const server = net.createServer((sock) => {
+            // A client that gave up (its Ping timed out) has closed: the late reply's EPIPE is not this test's failure.
+            sock.on("error", () => {})
             let buf = ""
             sock.on("data", (chunk) => {
               buf += chunk.toString()
@@ -90,7 +95,7 @@ describe.concurrent("vibestd.pid lock", () => {
         yield* Effect.sleep("1500 millis")
         assert.isFalse(yield* probe(layout.socket))
         yield* Scope.close(old, Exit.void)
-        assert.isTrue(yield* awaitDaemon(layout.socket))
+        yield* pingOf(layout.socket)
         assert.isUndefined(start.pollUnsafe())
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
@@ -120,7 +125,6 @@ describe.concurrent("vibestd.pid lock", () => {
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const starts = yield* Effect.forEach([1, 2, 3, 4], () => Effect.forkScoped(daemon(layout.home)))
-        assert.isTrue(yield* awaitDaemon(layout.socket))
         const ping = yield* pingOf(layout.socket)
         // The 10s bound is how long the three that must exit may take. The one that keeps serving is not a wait.
         const running = [...starts]
@@ -152,7 +156,6 @@ describe.concurrent("vibestd.pid lock", () => {
         const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const first = yield* Effect.forkScoped(daemon(layout.home))
-        assert.isTrue(yield* awaitDaemon(layout.socket))
         const old = yield* pingOf(layout.socket)
         process.kill(old.pid!, "SIGKILL")
         // Its runVibest dies on the signal; only the exit matters.
@@ -163,7 +166,6 @@ describe.concurrent("vibestd.pid lock", () => {
         const info = Option.getOrThrow(yield* readDaemonInfo(layout.daemonInfo))
         yield* fs.writeFileString(layout.daemonInfo, JSON.stringify({ ...info, pid: process.pid }))
         yield* Effect.forkScoped(daemon(layout.home))
-        assert.isTrue(yield* awaitDaemon(layout.socket))
         const next = yield* pingOf(layout.socket)
         assert.notStrictEqual(next.instance, old.instance)
         assert.notStrictEqual(next.pid, process.pid)
@@ -183,7 +185,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.isFalse(yield* probe(layout.socket))
         yield* fs.remove(layout.database, { recursive: true })
         yield* Effect.forkScoped(daemon(layout.home))
-        assert.isTrue(yield* awaitDaemon(layout.socket))
+        yield* pingOf(layout.socket)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
@@ -215,12 +217,12 @@ describe.concurrent("vibestd.pid lock", () => {
           ),
           Effect.forkScoped,
         )
-        assert.isTrue(yield* awaitDaemon(layout.socket))
+        yield* pingOf(layout.socket)
         const stopping = yield* Effect.forkScoped(Fiber.interrupt(old))
         yield* Effect.sleep("200 millis")
         const successor = yield* Effect.forkScoped(daemon(layout.home))
         yield* Fiber.join(stopping)
-        assert.isTrue(yield* awaitDaemon(layout.socket))
+        yield* pingOf(layout.socket)
         yield* Effect.sleep("500 millis")
         const ping = yield* pingOf(layout.socket)
         assert.notStrictEqual(ping.pid, process.pid)
@@ -239,25 +241,27 @@ describe.concurrent("vibestd.pid lock", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
+        // Async: a sync spawn blocks this worker's event loop for a whole Bun start, and the concurrent tests' servers
+        // here (the fake vibestd that answers Ping) then answer too late.
         const contender = (file: string) =>
-          childProcess
-            .execFileSync(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
+          Effect.promise(() =>
+            execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
               encoding: "utf8",
               timeout: 10_000,
-            })
-            .trim()
+            }),
+          ).pipe(Effect.map(({ stdout }) => stdout.trim()))
         yield* Effect.gen(function* () {
           const write = yield* Platform.daemon.lock(layout.daemonInfo)
           yield* write!('{"pid":1}')
           assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), '{"pid":1}')
           for (let i = 0; i < 3; i++) {
             Bun.gc(true)
-            assert.strictEqual(contender(layout.daemonInfo), "BUSY")
+            assert.strictEqual(yield* contender(layout.daemonInfo), "BUSY")
             yield* Effect.sleep("300 millis")
           }
         }).pipe(Effect.scoped)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
-        assert.strictEqual(contender(layout.daemonInfo), "ACQUIRED")
+        assert.strictEqual(yield* contender(layout.daemonInfo), "ACQUIRED")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )

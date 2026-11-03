@@ -609,6 +609,8 @@ describe("plugins: supervisor", () => {
         )
         // Built without moving virtual time: the first activation runs in the background.
         const plugins = yield* supervise(dir)
+        // a's import is real I/O: until it is set up, moving virtual time would spend the 10s before a is active.
+        yield* waitLive(() => count("setup:stuck-a") > 0, "a's setup")
         const s = yield* advancing(plugins.start(event))
         assert.deepStrictEqual(
           s.trace.map((t) => [t.plugin, t.outcome, t.error]),
