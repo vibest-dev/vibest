@@ -19,15 +19,7 @@ import { isUsageLimitError } from "./results.ts"
 import { projectText, sessionRules } from "./rules.ts"
 import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
-import {
-  addWorktree,
-  allocationParentBlocked,
-  copyIncluded,
-  entryTaken,
-  git,
-  mainCheckout,
-  repositoryDirectoryName,
-} from "./worktree.ts"
+import { addWorktree, copyIncluded, git, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
 /** The harness dying on its own usage limit inside `open` (§3): the launch hands over to the limit move, as a failed start did. */
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
@@ -44,6 +36,7 @@ export const sessionPlacement = (deps: {
     ) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
+    readonly earlierSharer: (id: string) => Effect.Effect<string | undefined>
     readonly updateSession: (
       id: string,
       patch: {
@@ -74,8 +67,9 @@ export const sessionPlacement = (deps: {
     ) => Effect.Effect<void, PlatformError.PlatformError>
     readonly remove: (
       path: string,
-      options?: { readonly force?: boolean },
+      options?: { readonly force?: boolean; readonly recursive?: boolean },
     ) => Effect.Effect<void, PlatformError.PlatformError>
+    readonly readDirectory: (path: string) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError>
   }
   readonly path: { readonly dirname: (path: string) => string }
   readonly vibest: ReadonlyArray<string>
@@ -109,7 +103,7 @@ export const sessionPlacement = (deps: {
   /** The usage-limit move (move.ts), wired in after placement exists. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, runtimes, layout, fs, path, vibest } = deps
+  const { db, runtimes, layout, fs, vibest } = deps
   /** Project name on the workspace: the directory's own name, not the key. */
   const projectName = (root: string) =>
     repositoryDirectoryName(root).pipe(
@@ -226,7 +220,7 @@ export const sessionPlacement = (deps: {
     yield* fs.makeDirectory(scratch, { recursive: true })
     const rules = sessionRules({
       id: session.id,
-      peer: session.metadata.peer,
+      peer: splitFrom,
       scratch,
       vibest,
       ...(yield* projectText(layout.project(key))),
@@ -263,15 +257,14 @@ export const sessionPlacement = (deps: {
     // The worktree comes first: the terminal's cwd is in it, the harness argv names it, and the `.worktreeinclude` files are in place before the harness starts.
     const worktree = yield* deps.worktreeOf(session)
     if (peer === undefined) {
-      const parent = path.dirname(worktree)
-      if (yield* allocationParentBlocked(parent))
-        return yield* Effect.fail(
-          new Error(`refusing to allocate inside ${parent}: it is an existing worktree or not a directory`),
-        )
-      // exists follows links, so a dangling symlink would look free. A link entry is taken either way.
-      if (yield* entryTaken(worktree))
-        return yield* Effect.fail(new Error(`refusing to create ${session.id}: ${worktree} already exists`))
-      yield* fs.makeDirectory(parent, { recursive: true })
+      // Spawn reserved the name by creating the directory, empty. A failed start removes it again, unless git left
+      // something in it (a refused undo leaves it for `vibest archive`).
+      yield* undoOnFailure(Effect.void, () =>
+        fs.readDirectory(worktree).pipe(
+          Effect.flatMap((left) => (left.length === 0 ? fs.remove(worktree, { recursive: true }) : Effect.void)),
+          Effect.ignore,
+        ),
+      )
       if (folders) {
         // One detached worktree per repository: a plain directory, not one linked worktree of the first.
         yield* undoOnFailure(createIsolatedWorktrees(folders, worktree), () => discardIsolatedWorktrees(worktree))
@@ -386,7 +379,8 @@ export const sessionPlacement = (deps: {
       layout.rulesFile(session.id),
       sessionRules({
         id: session.id,
-        peer: session.metadata.peer,
+        // It joined another live session's directory with --peer: that one was there first. The owner keeps its own rules.
+        peer: yield* db.earlierSharer(session.id),
         scratch: layout.scratch(key),
         vibest,
         ...(yield* projectText(layout.project(key))),

@@ -20,17 +20,7 @@ import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
-import {
-  allocationLeafTaken,
-  caseFoldedWorktrees,
-  Layout,
-  VibestCommand,
-  resolveWorktree,
-  safeRepositoryDirectory,
-  sameWorktreeBucket,
-  shellQuote,
-  worktreePath,
-} from "@vibest/core/paths"
+import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "@vibest/core/results"
 import { coordinatorRules } from "@vibest/core/rules"
 import {
@@ -1211,44 +1201,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.isFalse(safeRepositoryDirectory(".."))
       assert.isFalse(safeRepositoryDirectory("a/b"))
       assert.isFalse(safeRepositoryDirectory(""))
-      const rows = [
-        { id: "11111111", metadata: { worktreeRepository: "MyRepo", worktreeName: "abcd" } },
-        { id: "22222222", metadata: { peer: "11111111" } },
-      ]
-      assert.isTrue(allocationLeafTaken(rows, "MyRepo", "abcd"))
-      assert.strictEqual(allocationLeafTaken(rows, "myrepo", "abcd"), sameWorktreeBucket("MyRepo", "myrepo"))
-      assert.isFalse(allocationLeafTaken(rows, "MyRepo", "abcd", "11111111"))
-      assert.isFalse(allocationLeafTaken(rows, "Other", "abcd"))
-      assert.isFalse(allocationLeafTaken(rows, "MyRepo", "abce"))
-      const layout = {
-        legacyWorktree: (id: string) => `/wt/${id}`,
-        allocationWorktree: (repository: string, name: string) => `/wt/${repository}/${name}`,
-      }
-      const owner = { id: "abcd1234", metadata: {} }
-      assert.strictEqual(worktreePath(layout, owner), "/wt/abcd1234")
-      assert.strictEqual(
-        worktreePath(layout, { id: "abcd1234", metadata: { worktreeRepository: "MyRepo", worktreeName: "ab12" } }),
-        "/wt/MyRepo/ab12",
-      )
-      assert.isUndefined(
-        worktreePath(layout, { id: "abcd1234", metadata: { worktreeRepository: "../x", worktreeName: "ab12" } }),
-      )
-      assert.isUndefined(
-        worktreePath(layout, { id: "abcd1234", metadata: { worktreeRepository: "a/b", worktreeName: "ab12" } }),
-      )
-      assert.isUndefined(
-        worktreePath(layout, { id: "abcd1234", metadata: { worktreeRepository: "MyRepo", worktreeName: "abcd1234" } }),
-      )
-      assert.isUndefined(worktreePath(layout, { id: "abcd1234", metadata: { worktreeName: "ab12" } }))
-      assert.isUndefined(worktreePath(layout, { id: "../abcd12", metadata: {} }))
-      const missing = yield* resolveWorktree(layout, { id: "bbbbbbbb", metadata: { peer: "cccccccc" } }, () =>
-        Effect.succeed(undefined),
-      )
-      assert.strictEqual(missing._tag, "Unresolved")
-      const reused = yield* resolveWorktree(layout, { id: "bbbbbbbb", metadata: { peer: "abcd1234" } }, () =>
-        Effect.succeed(owner),
-      )
-      assert.deepStrictEqual(reused, { _tag: "Resolved", path: "/wt/abcd1234", ownerId: "abcd1234" })
     }),
   )
 

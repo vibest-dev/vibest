@@ -46,25 +46,12 @@ const Live = {
 const Metadata = Schema.Struct({
   ...Live,
   routing: Schema.optional(Routing),
-  /** `vibest run --peer`: the session whose worktree this one shares. It never removes that worktree. */
-  peer: Schema.optional(Schema.String),
   /** `vibest run --archive-on-completion`: archived once a completed result reached the coordinator. */
   archive: Schema.optional(Schema.Boolean),
-  /** Only on rows from before `vibest run --access` was removed: read means it owns no worktree (remove.ts). */
-  access: Schema.optional(Schema.Literals(["read", "write"])),
-  /**
-   * Owner only, with `worktreeName`, written before create: `worktrees/<worktreeRepository>/<worktreeName>`.
-   * Both absent: `worktrees/<id>`. The repository name is not the repository key.
-   */
-  worktreeRepository: Schema.optional(Schema.String),
-  /** Four lowercase hex. Chosen once; not a truncation of `id`. */
-  worktreeName: Schema.optional(Schema.String),
   /** `vibest archive` (alias `rm`) ran: never resumed again, even when its worktree was kept. */
   archived: Schema.optional(Schema.Boolean),
   /** Same tombstone as `archived`. Older rows have only this; `vibest archive` still writes it. */
   removed: Schema.optional(Schema.Boolean),
-  /** Archived with `--keep-worktree`: its last borrower's archive leaves the directory alone too. */
-  keptWorktree: Schema.optional(Schema.Boolean),
   /**
    * What `vibest rm` closed (SPEC §8.6a), one record per pane, each written before its close: the pane, the PIDs the runtime
    * reported in it (its shell and foreground processes, never argv or env), and `exited` once signal 0 found every one
@@ -665,7 +652,7 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** Where the session works: its worktree (a peer's is its owner's). */
+    /** Where the session works: its worktree, or the one `vibest run --peer` shares. */
     sessionDirectory: (id: string) =>
       sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
         Effect.map((rows) => rows[0]?.directory),
@@ -673,7 +660,35 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Insert a subagent of project `key`, working in `cwd` (a `--peer` borrows its owner's), with its
+     * The other sessions still live (not archived) that work in session `id`'s directory: while there is one, that
+     * directory stays. ponytail: every session is on machine `local` today, so the machine is not compared; the v2
+     * schema's `session.machine` adds it.
+     */
+    liveSharers: (id: string) =>
+      sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
+        WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
+          AND json_extract(o.metadata, '$.archived') IS NOT 1 AND json_extract(o.metadata, '$.removed') IS NOT 1
+        ORDER BY o.id`.pipe(
+        Effect.map((rows) => rows.map((r) => r.id)),
+        Effect.orDie,
+      ),
+
+    /**
+     * The earliest created live session that shares `id`'s directory and was created before it: the one whose worktree
+     * `id` joined with `--peer` (undefined for the session that owns it).
+     */
+    earlierSharer: (id: string) =>
+      sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
+        WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
+          AND json_extract(o.metadata, '$.archived') IS NOT 1 AND json_extract(o.metadata, '$.removed') IS NOT 1
+          AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
+        ORDER BY o.created_at, o.rowid LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.id),
+        Effect.orDie,
+      ),
+
+    /**
+     * Insert a subagent of project `key`, working in `cwd` (a `--peer` records the directory it shares), with its
      * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
      * already running (one transaction).
      */
@@ -695,10 +710,6 @@ const make = Effect.gen(function* () {
               if (n >= max) return false
             }
             const project = yield* projectId(key)
-            const owner =
-              row.metadata.peer === undefined
-                ? undefined
-                : (yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${row.metadata.peer}`)[0]
             const stopped = row.metadata.archived || row.metadata.removed
             yield* sql`INSERT INTO session ${sql.insert({
               id: row.id,
@@ -706,7 +717,7 @@ const make = Effect.gen(function* () {
               ...(parentSessionId === undefined ? {} : { parentSessionId }),
               agentType: row.agent,
               harness: row.harnessId,
-              directory: owner?.directory ?? cwd,
+              directory: cwd,
               runtime: encodeRuntime(row.runtime, row.address),
               harnessSessionId: row.harnessSessionId,
               metadata: JSON.stringify(toMetadata(row)),

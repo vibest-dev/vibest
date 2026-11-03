@@ -26,8 +26,6 @@ export class Layout extends Context.Service<
     readonly rulesFile: (id: string) => string
     /** The Coordinator's rules for one repository, rewritten on every `vibest`. */
     readonly coordinatorRules: (key: string) => string
-    /** `worktrees/<id>`, when the owner has no recorded allocation. */
-    readonly legacyWorktree: (id: string) => string
     /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (key: string) => string
@@ -53,7 +51,6 @@ export class Layout extends Context.Service<
         reportFile: (id) => path.join(home, "reports", `${id}.jsonl`),
         rulesFile: (id) => path.join(home, "rules", `${id}.md`),
         coordinatorRules: (key) => path.join(home, "coordinator", `${key}.md`),
-        legacyWorktree: (id) => path.join(home, "worktrees", id),
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (key) => path.join(home, "projects", key),
         scratch: (key) => path.join(home, "projects", key, "scratch"),

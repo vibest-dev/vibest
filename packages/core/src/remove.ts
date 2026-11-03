@@ -7,7 +7,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 
 import { Db, type SessionRow } from "./db.ts"
-import { Layout, resolveWorktree } from "./paths.ts"
+import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
@@ -108,12 +108,10 @@ export const make = Effect.gen(function* () {
       const id = session.id
       const fs = yield* FileSystem.FileSystem
       const reasons = [...input.reasons]
-      // A row from before `vibest run --access` was removed may be a read session: it worked in the project directory and owns no worktree.
-      const read = session.metadata.access === "read"
-      const located = read ? undefined : yield* resolveWorktree(layout, session, (ownerId) => db.getSession(ownerId))
-      // No safe directory: do not join a second path, and do not close a terminal by a guessed checkout.
-      if (located !== undefined && located._tag === "Unresolved") {
-        reasons.push(located.message)
+      const directory = yield* db.sessionDirectory(id)
+      // No directory recorded: do not guess one, and do not close a terminal by a guessed checkout.
+      if (!directory) {
+        reasons.push(`${id} records no directory; nothing was deleted`)
         return {
           id,
           processes: "unknown" as const,
@@ -125,7 +123,7 @@ export const make = Effect.gen(function* () {
           reasons,
         }
       }
-      const worktree = located?.path ?? ""
+      const worktree = directory
       const exists = worktree !== "" && (yield* fs.exists(worktree))
       const real = exists ? yield* fs.realPath(worktree) : worktree
 
@@ -224,6 +222,8 @@ export const make = Effect.gen(function* () {
         const t = yield* Clock.currentTimeMillis
         yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t })
       }
+      /** The directory stays because another live session works in it. */
+      let shared = false
       const g = exists ? yield* gitState(worktree) : undefined
       const multiGit = exists ? yield* workspaceGit(worktree).pipe(Effect.orDie) : undefined
       const root = exists
@@ -244,31 +244,28 @@ export const make = Effect.gen(function* () {
       /** Why the worktree stays, checked in this order and only as far as needed; undefined once git removed it. */
       const keepWorktree = Effect.gen(function* () {
         if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
-        if (session.metadata.peer)
-          return `worktree kept: it is ${session.metadata.peer}'s (vibest run --peer); vibest archive ${session.metadata.peer} removes it`
-        const liveBorrowers = db
-          .listSessions({ stopped: true })
-          .pipe(
-            Effect.map((rows) =>
-              rows.filter(
-                (s) => s.metadata.peer === id && !s.metadata.archived && !s.metadata.removed && s.exitedAt === null,
-              ),
-            ),
-          )
-        const sharing = (live: ReadonlyArray<{ readonly id: string }>) =>
-          live.length > 0
-            ? `worktree kept: session ${live.map((s) => s.id).join(", ")} still shares it (vibest run --peer)`
-            : undefined
-        const early = sharing(yield* liveBorrowers)
-        if (early) return early
-        // Re-read git and borrowers immediately before `worktree remove`. Undefined: removed.
-        /** Removed: undefined. A borrower stops the whole removal; any other keep stays on this worktree. */
+        // Only a directory vibest made: one under its worktrees root.
+        if (!worktree.startsWith(layout.worktrees + "/"))
+          return `${worktree} is not under ${layout.worktrees}; left alone`
+        const sharing = (live: ReadonlyArray<string>) =>
+          live.length > 0 ? `worktree kept: session ${live.join(", ")} still works in it` : undefined
+        const liveSharers = db.liveSharers(id)
+        const early = sharing(yield* liveSharers)
+        if (early) {
+          shared = true
+          return early
+        }
+        // Re-read git and sharers immediately before `worktree remove`. Undefined: removed.
+        /** Removed: undefined. A live sharer stops the whole removal; any other keep stays on this worktree. */
         const removeLinked = (repoRoot: string, path: string) =>
           Effect.gen(function* () {
             const state = yield* gitState(path)
             if (!state?.saved) return { stop: false, reason: `worktree kept: ${state?.why ?? "git cannot read it"}` }
-            const again = sharing(yield* liveBorrowers)
-            if (again) return { stop: true, reason: again }
+            const again = sharing(yield* liveSharers)
+            if (again) {
+              shared = true
+              return { stop: true, reason: again }
+            }
             const refused = yield* git(repoRoot, "worktree", "remove", path).pipe(
               Effect.as(undefined),
               Effect.catchTag("GitError", (e) => Effect.succeed(e.message)),
@@ -304,16 +301,15 @@ export const make = Effect.gen(function* () {
         return (yield* removeLinked(root, worktree))?.reason
       })
       let tree: "removed" | "kept" | "gone" = "gone"
-      if (read) {
-        // No worktree path: the terminal was closed above, and git worktree remove is not run.
-      } else if (!exists) reasons.push(`${worktree} was already gone`)
+      if (!exists) reasons.push(`${worktree} was already gone`)
       else {
         const kept = yield* keepWorktree
         tree = kept === undefined ? "removed" : "kept"
         if (kept !== undefined) reasons.push(kept)
       }
-      // Processes that may still be running may still read its rules or write its result. A borrower's files are its own even though the shared worktree stays.
-      if ((tree !== "kept" || session.metadata.peer) && processState === "exited") {
+      // Processes that may still be running may still read its rules or write its result. Its files are its own even
+      // though a directory another session works in stays.
+      if ((tree !== "kept" || shared) && processState === "exited") {
         yield* fs.remove(layout.resultFile(id), { force: true })
         yield* fs.remove(layout.rulesFile(id), { force: true })
       }

@@ -200,7 +200,7 @@ const run = Command.make(
     ),
     peer: Flag.String("peer").pipe(
       Flag.withDescription(
-        "A session id: run in its worktree, in a pane split from its pane, instead of a new worktree (archiving this session never removes that worktree)",
+        "A session id: run in its directory, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
       ),
       Flag.optional,
     ),

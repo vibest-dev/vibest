@@ -5,7 +5,7 @@ import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { claude } from "@vibest/core/harnesses/claude"
 import { Inbox } from "@vibest/core/inbox"
-import { Layout, worktreePath } from "@vibest/core/paths"
+import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -91,14 +91,11 @@ const idleSession = (repo: string) =>
     return w
   })
 
-/** The directory the row records: its owner's group, or the flat path when the owner has none. */
+/** The directory the row records. */
 const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const layout = yield* Layout
-    const row = (yield* (yield* Db).getSession(id))!
-    const owner = row.metadata.peer === undefined ? row : (yield* (yield* Db).getSession(row.metadata.peer))!
-    const located = worktreePath(layout, owner)
-    if (located === undefined) return yield* Effect.die(`no worktree for ${id}`)
+    const located = yield* (yield* Db).sessionDirectory(id)
+    if (!located) return yield* Effect.die(`no worktree for ${id}`)
     return located
   })
 
@@ -3095,9 +3092,10 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "run --peer shares the worktree; a borrower never removes it, and archiving the owner keeps it while a borrower is live",
+    "run --peer shares the worktree; archiving keeps it while another live session works in it, and the last one removes it",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -3117,15 +3115,10 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(pane.split(":")[0], peerPane.split(":")[0])
       const got = yield* peer.sessions.get(id)
       assert.deepInclude(got, { worktree })
-      assert.deepInclude(got.metadata, { peer: peer.id })
-      assert.isUndefined((yield* peer.db.getSession(id))!.metadata.worktreeName)
-      const ownerRow = (yield* peer.db.getSession(peer.id))!
-      assert.match(ownerRow.metadata.worktreeName!, /^[0-9a-f]{4}$/)
-      assert.notStrictEqual(ownerRow.metadata.worktreeName, peer.id)
-      assert.strictEqual(
-        worktree,
-        layout.allocationWorktree(ownerRow.metadata.worktreeRepository!, ownerRow.metadata.worktreeName!),
-      )
+      // Nothing links the two: the new row records the same directory, a 4-hex name, not the session id.
+      assert.notProperty(got.metadata, "peer")
+      assert.strictEqual(yield* sessionWorktree(id), worktree)
+      assert.match(path.basename(worktree), /^[0-9a-f]{4}$/)
       const rules = yield* fs.readFileString(layout.rulesFile(id))
       assert.include(rules, "others may be making changes in this worktree too")
       assert.notInclude(rules, peer.id)
@@ -3133,15 +3126,13 @@ describe.concurrent("Sessions", () => {
 
       // A peer's peer shares the same worktree, split from the pane of the session it named.
       const third = yield* peer.sessions.spawn({ ...(yield* spawnInput(repo)), peer: id })
-      assert.strictEqual((yield* peer.db.getSession(third.id))!.metadata.peer, peer.id)
-      assert.isUndefined((yield* peer.db.getSession(third.id))!.metadata.worktreeName)
-      assert.isUndefined((yield* peer.db.getSession(third.id))!.metadata.worktreeRepository)
+      assert.strictEqual(yield* sessionWorktree(third.id), worktree)
       yield* until(peer.db.getSession(third.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       assert.strictEqual((yield* peer.sessions.get(third.id)).worktree, worktree)
       assert.strictEqual((yield* herdr.callsTo("open"))[2]!.near, pane)
       assert.lengthOf(yield* herdr.callsTo("open"), 3)
 
-      // The owner is still live. Archiving it must not delete the directory a borrower is using.
+      // Archiving the first must not delete the directory the others still work in.
       const ownerFirst = (yield* peer.sessions.remove(peer.id))!
       assert.deepInclude(ownerFirst, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
       assert.include(ownerFirst.reasons.join("\n"), id)
@@ -3153,7 +3144,7 @@ describe.concurrent("Sessions", () => {
       yield* peer.sessions.check(id)
       const borrower = (yield* peer.sessions.remove(id))!
       assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
-      assert.include(borrower.reasons.join("\n"), `it is ${peer.id}'s (vibest run --peer)`)
+      assert.include(borrower.reasons.join("\n"), `session ${third.id} still works in it`)
       assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
       assert.isFalse(yield* fs.exists(layout.resultFile(id)))
       assert.isTrue(yield* fs.exists(worktree))
@@ -3162,17 +3153,46 @@ describe.concurrent("Sessions", () => {
       const ownerSecond = (yield* peer.sessions.remove(peer.id))!
       assert.deepInclude(ownerSecond, { worktree: "kept", path: worktree })
       assert.include(ownerSecond.reasons.join("\n"), third.id)
-      assert.notInclude(ownerSecond.reasons.join("\n"), `session ${id} still shares`)
+      assert.notInclude(ownerSecond.reasons.join("\n"), id)
       assert.isTrue(yield* fs.exists(worktree))
 
       yield* writeResult(third.id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(third.id)
       yield* peer.sessions.check(third.id)
-      const lastBorrower = (yield* peer.sessions.remove(third.id))!
-      assert.deepInclude(lastBorrower, { worktree: "kept", path: worktree })
-      // The last borrower of an archived owner frees the directory: nobody else would.
-      assert.include(lastBorrower.reasons.join("\n"), `${peer.id}'s shared worktree removed`)
+      // The last live session in the directory removes it, whichever made it.
+      const last = (yield* peer.sessions.remove(third.id))!
+      assert.deepInclude(last, { worktree: "removed", path: worktree })
       assert.isFalse(yield* fs.exists(worktree))
+    }),
+  )
+
+  test(
+    "a resume keeps the owner's git rules beside a --peer; only the --peer gets the peer rules",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const owner = yield* idleSession(repo)
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* herdr.endTurn(id)
+      yield* owner.sessions.check(id)
+      // Both terminals gone: the next message resumes each in a new one, with its rules written again.
+      for (const session of [owner.id, id]) {
+        yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))
+        yield* owner.sessions.check(session)
+      }
+      yield* untilVirtual(owner.sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      for (const session of [owner.id, id]) {
+        yield* owner.sessions.send(session, `again ${session}`)
+        yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
+      }
+      assert.include(yield* fs.readFileString(layout.rulesFile(owner.id)), "git switch -c <branch>")
+      const peerRules = yield* fs.readFileString(layout.rulesFile(id))
+      assert.include(peerRules, "others may be making changes in this worktree too")
+      assert.notInclude(peerRules, "git switch -c <branch>")
     }),
   )
 
@@ -3241,10 +3261,15 @@ describe.concurrent("Sessions", () => {
     },
   )
 
+  /** The other sessions that record `ownerId`'s directory. */
   const peerRows = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db
-      return (yield* db.listSessions({ stopped: true })).filter((s) => s.metadata.peer === ownerId)
+      const shared = yield* db.sessionDirectory(ownerId)
+      return yield* Effect.filter(
+        (yield* db.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
+        (s) => db.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
+      )
     })
 
   /** Park admission after the peer check and before insert. Caller resets `peerAdmitPause`. */
@@ -3343,7 +3368,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "run --peer of a borrower takes the owner's lock, so owner archive cannot delete the shared tree",
+    "run --peer of an exited session takes the directory's lock, so another archive cannot delete the shared tree",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -3422,7 +3447,7 @@ describe.concurrent("Sessions", () => {
       assert.isTrue(yield* fs.exists(worktree))
       // One open attempt: this launch's own, which the runtime refused.
       assert.strictEqual((yield* herdr.callsTo("open")).length, created + 1)
-      assert.strictEqual((yield* owner.db.getSession(id))!.metadata.peer, owner.id)
+      assert.strictEqual(yield* owner.db.sessionDirectory(id), yield* owner.db.sessionDirectory(owner.id))
     }),
   )
 })
@@ -3967,27 +3992,25 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "run --peer: a borrower keeps the shared worktree; one whose owner is already archived names the owner to archive",
+    "run --peer: an archive keeps a directory another live session works in; the last one out removes it",
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
+      const worktree = yield* sessionWorktree(owner.id)
       const a = yield* archiveSession(repo, "cursor", { peer: owner.id })
       yield* finishTurn(a, "status: completed")
       const first = yield* until(latestNotice(a.id), (m) => m.includes("archived ("))
-      assert.include(first, `worktree kept at ${yield* sessionWorktree(owner.id)}`)
-      assert.include(first, `it is ${owner.id}'s (vibest run --peer)`)
-      assert.notInclude(first, "is archived too")
+      assert.include(first, `worktree kept at ${worktree}`)
+      assert.include(first, `session ${owner.id} still works in it`)
 
-      // The owner archived while the next borrower is live: the directory stays for it.
+      // The first session archived while another is live: the directory stays for it, and goes with the last one.
       const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
-      assert.include((yield* owner.sessions.remove(owner.id))!.reasons.join("\n"), `session ${b.id} still shares it`)
+      assert.include((yield* owner.sessions.remove(owner.id))!.reasons.join("\n"), `session ${b.id} still works in it`)
       yield* finishTurn(b, "status: completed")
-      const second = yield* until(latestNotice(b.id), (m) => m.includes("archived ("))
-      assert.include(
-        second,
-        `${owner.id} is archived too: run vibest archive ${owner.id} to remove the shared worktree.`,
-      )
-      assert.deepInclude((yield* owner.sessions.remove(owner.id))!, { worktree: "removed" })
+      // The row is marked archived before its directory goes: wait for the directory.
+      yield* until(fs.exists(worktree), (exists) => !exists)
+      assert.isTrue(yield* archived(b.db, b.id))
     }),
   )
 
@@ -4001,23 +4024,26 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* finishTurn(owner, "status: completed")
       const notice = yield* until(latestNotice(owner.id), (m) => m.includes("archived ("))
-      assert.include(notice, `session ${id} still shares it (vibest run --peer)`)
+      assert.include(notice, `worktree kept: session ${id} still works in it`)
       assert.isTrue(yield* fs.exists(yield* sessionWorktree(owner.id)))
     }),
   )
 
   test(
-    "run --peer: an owner archived with --keep-worktree keeps it after its last borrower is archived",
+    "run --peer: --keep-worktree keeps the directory at that archive only; the last session's archive removes it",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
       const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
-      yield* owner.sessions.remove(owner.id, { keepWorktree: true })
       const worktree = yield* sessionWorktree(owner.id)
+      assert.include(
+        (yield* owner.sessions.remove(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
+        "--keep-worktree",
+      )
       const out = (yield* b.sessions.remove(b.id))!
-      assert.notInclude(out.reasons.join("\n"), "shared worktree")
-      assert.isTrue(yield* fs.exists(worktree))
+      assert.strictEqual(out.worktree, "removed")
+      assert.isFalse(yield* fs.exists(worktree))
     }),
   )
 

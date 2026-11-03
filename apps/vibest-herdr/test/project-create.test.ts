@@ -452,7 +452,6 @@ describe("multi-repository isolated workspace", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const db = yield* Db
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const parent = yield* tempDirectory("vibest-multi-")
@@ -476,8 +475,8 @@ describe("multi-repository isolated workspace", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       const row = (yield* db.getSession(id))!
-      assert.strictEqual(row.metadata.worktreeRepository, "combo")
-      const workspace = layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!)
+      const workspace = (yield* db.sessionDirectory(row.id))!
+      assert.strictEqual(path.basename(path.dirname(workspace)), "combo")
       const appWt = path.join(workspace, "app")
       const sdkWt = path.join(workspace, "sdk")
       assert.strictEqual(yield* sh(appWt, "branch", "--show-current"), "")
@@ -541,8 +540,8 @@ describe("multi-repository isolated workspace", () => {
       const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       const row = (yield* db.getSession(id))!
-      const workspace = layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!)
-      assert.strictEqual(row.metadata.worktreeRepository, "combo")
+      const workspace = (yield* db.sessionDirectory(row.id))!
+      assert.strictEqual(path.basename(path.dirname(workspace)), "combo")
       assert.strictEqual(yield* sh(path.join(workspace, "app"), "rev-parse", "--is-inside-work-tree"), "true")
       assert.strictEqual(yield* sh(path.join(workspace, "sdk"), "branch", "--show-current"), "")
     }),
@@ -615,7 +614,7 @@ describe("multi-repository isolated workspace", () => {
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(yield* db.projectKey(row.projectId), yield* plainDirectoryKey(root))
-      const workspace = layout.allocationWorktree(row.metadata.worktreeRepository!, row.metadata.worktreeName!)
+      const workspace = (yield* db.sessionDirectory(row.id))!
       assert.isTrue(yield* fs.exists(path.join(workspace, "app")))
       assert.isTrue(yield* fs.exists(path.join(workspace, "sdk")))
     }),

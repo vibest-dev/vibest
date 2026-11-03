@@ -3,7 +3,7 @@
 // lsof, real git.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { Layout, worktreePath } from "@vibest/core/paths"
+import { Layout } from "@vibest/core/paths"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
 import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
@@ -49,7 +49,7 @@ const workingSession = Effect.gen(function* () {
   yield* sessions.check(id)
   const pane = (yield* herdr.agent(id))!.terminal
   const row = (yield* db.getSession(id))!
-  const worktree = worktreePath(layout, row)
+  const worktree = yield* db.sessionDirectory(row.id)
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
   return { id, pane, sessions, db, herdr, worktree, rules: layout.rulesFile(id) }
 })
@@ -110,9 +110,8 @@ describe.concurrent("vibest rm: process proof", () => {
       const row = (yield* db.getSession(id))!
       assert.isNotNull(row.exitedAt)
       assert.deepStrictEqual(row.metadata.stop, [{ pane, pids: [], exited: true }])
-      assert.match(row.metadata.worktreeName ?? "", /^[0-9a-f]{4}$/)
-      assert.notStrictEqual(row.metadata.worktreeName, id)
-      assert.ok(row.metadata.worktreeRepository)
+      // A 4-hex name under the repository's directory, not the session id.
+      assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/)
       assert.isFalse(yield* fs.exists(worktree))
       assert.isFalse(yield* fs.exists(rules))
     }),

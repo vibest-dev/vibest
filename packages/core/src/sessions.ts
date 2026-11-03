@@ -33,7 +33,6 @@ import {
   Predicate,
   Ref,
   Schedule,
-  Semaphore,
   Stream,
   SynchronizedRef,
 } from "effect"
@@ -57,16 +56,7 @@ import {
 import { Inbox } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
-import {
-  ALLOCATION_LEAF,
-  ALLOCATION_NAME_ATTEMPTS,
-  allocationLeafTaken,
-  Layout,
-  VibestCommand,
-  resolveWorktree,
-  safeRepositoryDirectory,
-  worktreePath,
-} from "./paths.ts"
+import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeRepositoryDirectory } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
 import { describeSpawn, errorMessage, Plugins, type Routing } from "./plugins.ts"
 import { Processes } from "./processes.ts"
@@ -93,14 +83,7 @@ import {
   type AgentSeen,
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
-import {
-  allocationParentBlocked,
-  entryTaken,
-  gitState,
-  type GitState,
-  mainCheckout,
-  repositoryDirectoryName,
-} from "./worktree.ts"
+import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 /**
  * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
  * it. Opaque to agents and integrations: they pass it on, and only the runtime plugin reads it.
@@ -121,6 +104,9 @@ export {
 } from "@vibest/schema/session"
 
 /** Test barrier after `--peer` validation and before insert, while the owner's session lock is held. Production leaves this void. */
+/** The lock key of a session directory, beside the session-id keys (8 hex, never a path). */
+const directoryLock = (directory: string) => `directory:${directory}`
+
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
 /** Test seam: try these 4-hex leaves in order instead of random draws. Unset in production. */
 export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined } = { leaves: undefined }
@@ -264,7 +250,6 @@ export class Sessions extends Context.Service<
       const scope = yield* Effect.scope
 
       const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
-      const allocating = yield* Semaphore.make(1)
       const track = (id: string) =>
         SynchronizedRef.modifyEffect(tracked, (map) =>
           Option.match(HashMap.get(map, id), {
@@ -327,13 +312,18 @@ export class Sessions extends Context.Service<
       const notice = (session: SessionRow, message: string) =>
         inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
 
-      /** The owner's recorded directory. A peer loads its owner's row; a missing or unsafe one fails, with no second candidate. */
+      /** The directory the session works in, as its row records it (a `--peer` session records the one it shares). */
       const worktreeOf = (session: SessionRow) =>
-        resolveWorktree(layout, session, (id) => db.getSession(id)).pipe(
-          Effect.flatMap((located) =>
-            located._tag === "Resolved"
-              ? Effect.succeed(located.path)
-              : Effect.fail(new NoSuchSession({ id: session.id, message: located.message })),
+        db.sessionDirectory(session.id).pipe(
+          Effect.flatMap((directory) =>
+            directory
+              ? Effect.succeed(directory)
+              : Effect.fail(
+                  new NoSuchSession({
+                    id: session.id,
+                    message: `${session.id} records no directory; nothing was deleted`,
+                  }),
+                ),
           ),
         )
 
@@ -716,8 +706,8 @@ export class Sessions extends Context.Service<
         })
 
       /**
-       * The session whose worktree `vibest run --peer` shares: same project, not archived, same runtime,
-       * worktree on disk in this repository. A peer's peer resolves to the worktree's owner.
+       * The directory `vibest run --peer` shares: the named session's, when it is in the same project, not archived, in
+       * the same runtime, and its directory is still on disk in this repository. Nothing links the two afterwards.
        */
       const peerOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
         Effect.gen(function* () {
@@ -740,7 +730,7 @@ export class Sessions extends Context.Service<
             !Option.contains(yield* mainCheckout(worktree).pipe(Effect.option), input.root)
           )
             return yield* refuse(`ineligible: its worktree is not in ${input.root}`)
-          return p.metadata.peer ?? p.id
+          return worktree
         })
 
       const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
@@ -801,8 +791,9 @@ export class Sessions extends Context.Service<
           Effect.map((id) => id!),
         )
         const now = yield* Clock.currentTimeMillis
-        const admit = (peer: string | undefined) => {
-          const reserve = Effect.gen(function* () {
+        /** `shared`: the directory of the session `--peer` named, which this one works in too. */
+        const admit = (shared: string | undefined) =>
+          Effect.gen(function* () {
             const refuse = (message: string) => new AllocationFailed({ message })
             const folders = yield* listProjectRepositories(root).pipe(
               Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
@@ -812,8 +803,8 @@ export class Sessions extends Context.Service<
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
               ...(input.archive ? { archive: true } : {}),
             }
-            let allocation: { readonly worktreeRepository: string; readonly worktreeName: string } | undefined
-            if (peer === undefined) {
+            let cwd = shared
+            if (cwd === undefined) {
               // `<worktrees>/<project>/<leaf>/<repository>` for a multi-repository project; otherwise the repository's own name.
               const repository = folders
                 ? path.basename(root)
@@ -831,23 +822,27 @@ export class Sessions extends Context.Service<
                 return yield* refuse(
                   `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
                 )
+              yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
               const scripted = allocationNameSource.leaves
               const attempts =
                 scripted === undefined ? ALLOCATION_NAME_ATTEMPTS : Math.min(scripted.length, ALLOCATION_NAME_ATTEMPTS)
-              let leaf: string | undefined
-              for (let i = 0; i < attempts; i++) {
+              for (let i = 0; i < attempts && cwd === undefined; i++) {
                 const candidate = scripted?.[i] ?? Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
                 if (!ALLOCATION_LEAF.test(candidate)) continue
-                const rows = yield* db.listSessions({ stopped: true })
                 const where = layout.allocationWorktree(repository, candidate)
-                if (allocationLeafTaken(rows, repository, candidate, id)) continue
-                if (yield* entryTaken(where).pipe(Effect.mapError((e) => refuse(`${where}: ${e.message}`)))) continue
-                leaf = candidate
-                break
+                // The name is reserved by creating its directory: an atomic mkdir, which fails when anything is there.
+                const made = yield* fs.makeDirectory(where).pipe(
+                  Effect.as(true),
+                  Effect.catchTag("PlatformError", (e) =>
+                    e.reason._tag === "AlreadyExists"
+                      ? Effect.succeed(false)
+                      : Effect.fail(refuse(`${where}: ${e.message}`)),
+                  ),
+                )
+                if (made) cwd = where
               }
-              if (leaf === undefined)
+              if (cwd === undefined)
                 return yield* refuse(`no unused 4-hex worktree name under ${repository} after ${attempts} attempts`)
-              allocation = { worktreeRepository: repository, worktreeName: leaf }
             }
             const draft: Omit<SessionRow, "projectId"> = {
               id,
@@ -864,45 +859,37 @@ export class Sessions extends Context.Service<
               exitedAt: null,
               turnState: "none",
               turnPromptedAt: 0,
-              metadata: { ...base, ...(peer !== undefined ? { peer } : allocation!) },
+              metadata: base,
               createdAt: now,
               lastActive: now,
             }
-            // A peer works in its owner's directory; Db copies it from the owner row.
-            const cwd = worktreePath(layout, draft) ?? ""
-
-            if (
-              !(yield* db.insertSession(draft, key, options.maxSessions, cwd, decision.prompt, input.parentSessionId))
+            const inserted = yield* db.insertSession(
+              draft,
+              key,
+              options.maxSessions,
+              cwd,
+              decision.prompt,
+              input.parentSessionId,
             )
+            if (!inserted) {
+              // The directory this spawn reserved goes again (still empty: nothing was started in it).
+              if (shared === undefined) yield* fs.remove(cwd, { recursive: true }).pipe(Effect.ignore)
               return yield* new LimitReached({ limit: options.maxSessions! })
+            }
             return (yield* db.getSession(id))!
           })
-          return peer === undefined ? allocating.withPermit(reserve) : reserve
-        }
-        // Archive of the owner holds this same semaphore across its sharing check and git worktree remove. Lock only that owner: also locking the named peer can cycle with another admission.
+        // `--peer`: under the directory's lock, which an archive holds while it decides whether that directory goes,
+        // so no archive (of the named session or of any other session in it) removes what this one is about to share.
         const row =
           input.peer === undefined
             ? yield* admit(undefined)
-            : yield* Effect.gen(function* () {
-                const named = yield* db.getSession(input.peer!)
-                if (!named) {
-                  yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
-                  return yield* Effect.die("peerOf returned for a missing session")
-                }
-                const ownerId = named.metadata.peer ?? named.id
-                return yield* locked(ownerId)(
-                  Effect.gen(function* () {
-                    const peer = yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
-                    if (peer !== ownerId)
-                      return yield* new NoSuchSession({
-                        id: input.peer!,
-                        message: `--peer ${input.peer}: ineligible: its worktree owner changed`,
-                      })
-                    yield* peerAdmitPause.wait
-                    return yield* admit(peer)
-                  }),
-                )
-              })
+            : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.peer)) ?? ""))(
+                Effect.gen(function* () {
+                  const shared = yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
+                  yield* peerAdmitPause.wait
+                  return yield* admit(shared)
+                }),
+              )
         // The launch holds the lock before spawn returns, so no check sees the row as an abandoned `starting` one.
         const held = yield* Deferred.make<void>()
         yield* Effect.uninterruptible(
@@ -1205,13 +1192,16 @@ export class Sessions extends Context.Service<
             session = yield* getRow(id)
           }
           // A row that already exited named a terminal a previous remove closed: nothing of ours is left to close.
-          const out = yield* removal.release({
-            h,
-            session,
-            terminal: session.exitedAt === null ? terminal : undefined,
-            keepWorktree: options.keepWorktree,
-            reasons,
-          })
+          // Under the directory's lock: a `--peer` spawn into it waits, then sees it gone or is seen as its sharer.
+          const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+            removal.release({
+              h,
+              session,
+              terminal: session.exitedAt === null ? terminal : undefined,
+              keepWorktree: options.keepWorktree,
+              reasons,
+            }),
+          )
           // The project workspace's live count no longer includes the archived session.
           yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
           return out
@@ -1223,40 +1213,7 @@ export class Sessions extends Context.Service<
           const { r, already } = yield* stop(id)
           if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
           const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(Ref.set(r.stopping, false))))!
-          const row = yield* getRow(id)
-          if (options.keepWorktree && !row.metadata.keptWorktree)
-            yield* db.updateSession(id, { metadata: { ...row.metadata, keptWorktree: true } })
-          // An owner archived first kept the shared worktree for this borrower (vibest run --peer); nobody shares it now.
-          const owner = row.metadata.peer
-          const ownerRow = owner === undefined ? undefined : yield* db.getSession(owner)
-          if (
-            owner === undefined ||
-            options.keepWorktree ||
-            !ownerRow?.metadata.archived ||
-            ownerRow.metadata.keptWorktree
-          )
-            return out
-          const later = (why: string) => ({
-            ...out,
-            reasons: [
-              ...out.reasons,
-              `${owner}'s shared worktree kept: ${why}; run vibest archive ${owner} to remove it`,
-            ],
-          })
-          if (out.processes !== "exited") return later(`${id}'s processes are not confirmed gone`)
-          const { r: o, already: ownerStopping } = yield* stop(owner)
-          if (ownerStopping) return out
-          return yield* locked(owner)(removeLocked(owner, {})).pipe(
-            Effect.ensuring(Ref.set(o.stopping, false)),
-            Effect.map((freed) => {
-              if (!freed) return out
-              const why = freed.reasons.length > 0 ? ` (${freed.reasons.join("; ")})` : ""
-              return { ...out, reasons: [...out.reasons, `${owner}'s shared worktree ${freed.worktree}${why}`] }
-            }),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(later(errorMessage(cause))),
-            ),
-          )
+          return out
         }).pipe(
           Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
           Effect.provideContext(platform),
@@ -1316,17 +1273,11 @@ export class Sessions extends Context.Service<
                 if (!out) return
                 const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
                 const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
-                // The owner was archived while this session shared its worktree: nobody else removes it now.
-                const owner = session.metadata.peer
-                const leftover =
-                  owner && (yield* db.getSession(owner))?.metadata.archived
-                    ? ` ${owner} is archived too: run vibest archive ${owner} to remove the shared worktree.`
-                    : ""
                 // A clean archive gives the coordinator nothing to do: only something kept or left over is worth a notice (a coordinator turn).
-                if (kept || again || leftover)
+                if (kept || again)
                   yield* notice(
                     session,
-                    `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}${leftover}`,
+                    `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
                   )
               }).pipe(
                 Effect.catchCause((cause) =>
