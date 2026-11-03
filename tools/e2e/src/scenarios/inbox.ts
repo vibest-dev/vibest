@@ -273,9 +273,9 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
         )
       },
       90_000,
-    ).catch((e: Error) => {
+    ).catch(async (e: Error) => {
       const tail = entries.slice(-8).map((x) => `${x.type}: ${x.raw.slice(0, 300)}`)
-      throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}`)
+      throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}\nits screen:\n${await screen()}`)
     })
     return entries
   }
@@ -291,9 +291,10 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
     return shown(`General Agent "${title}" completed (${sub})`, marker)
   }
+  const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
   const typeIn = async (text: string) => {
     await herdr(socket, "pane.send_text", { pane_id: pane(), text })
-    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+    await enter()
   }
   /** The main agent's Claude process in its pane. */
   const claude = async () => {
@@ -315,7 +316,9 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     start,
     result,
     typeIn,
+    enter,
     claude,
+    screen,
     close: () => dropHerdrSession(w, session),
   }
 }
@@ -433,15 +436,42 @@ const checks: ReadonlyArray<Check> = [
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
 
-        // Mid-turn: the main agent is busy in a turn of its own when the result comes; it still arrives.
-        await c.typeIn("Run the shell command `sleep 40` with the Bash tool, then reply with one word: slept")
+        // Mid-turn: the main agent is busy in a turn of its own when the result comes; it still arrives. Claude refuses a
+        // standalone `sleep`, so the turn waits in a Bash call for a file this check creates once the result is in.
+        const go = path.join(w.root, "cmmid-go")
+        const wait = `until [ -e ${go} ]; do sleep 1; done`
+        await c.typeIn(
+          `Run this exact command with the Bash tool in the foreground, not in the background, and wait for it: ${wait} Then reply with one word: waited`,
+        )
+        let typed = Date.now()
         await until(
           "the main agent's own turn running",
-          async () => (await transcript(w, c!.repo)).some((e) => e.type === "assistant" && e.raw.includes("sleep 40")),
+          async () => {
+            const entries = await transcript(w, c!.repo)
+            if (entries.some((e) => e.type === "assistant" && e.raw.includes(go))) return true
+            // The enter typed right behind the text is sometimes swallowed and the text stays in the input box: again.
+            if (!entries.some((e) => e.type === "user" && e.text.includes(wait)) && Date.now() - typed > 5_000) {
+              await c!.enter()
+              typed = Date.now()
+            }
+            return false
+          },
           60_000,
-        )
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; its screen:\n${await c!.screen()}`)
+        })
+        const results = () =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_session_id = ?",
+            c!.main,
+            a,
+          )?.n ?? 0
         const before = c.delivered(a)
+        const queued = results()
         await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
+        await until("the cmmid result queued while the main agent's turn runs", () => results() > queued, 180_000)
+        await fs.writeFile(go, "")
         await c.result(a, "Answer probe alpha", "cmmid", before)
 
         // curl --unix-socket, as the plugin: with the plugin stopped, a curl poll takes the row and leases it; nobody
