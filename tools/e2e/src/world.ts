@@ -373,14 +373,16 @@ export const transcript = async (w: World, cwd: string) => {
 export const onPath = (bin: string) => Bun.which(bin) !== null
 
 /**
- * Sessions vibestd knows, without starting a harness: rows in a project of their own (`key`), for an integration that
- * calls vibestd over HTTP, which answers only a known session. Starts vibestd first; returns the project id.
+ * Sessions vibestd knows, without starting a harness: rows in a project of their own (`key`) running `harness`, for an
+ * integration that sends its turn events to vibestd, which records them only for a known session. Starts vibestd first;
+ * returns the project id.
  */
 export const knownSessions = async (
   w: World,
   key: string,
   sessions: Record<string, string>,
   directory = w.repository,
+  harness = "claude",
 ) => {
   await w.ok(["ls"])
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
@@ -390,8 +392,8 @@ export const knownSessions = async (
       .get(key)!.id
     for (const [id, agent] of Object.entries(sessions))
       db.run(
-        "INSERT INTO session (id, project_id, agent_type, harness, directory, created_at) VALUES (?, ?, ?, 'claude', ?, ?)",
-        [id, project, agent, directory, Date.now()],
+        "INSERT INTO session (id, project_id, agent_type, harness, directory, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, project, agent, harness, directory, Date.now()],
       )
     return project
   } finally {

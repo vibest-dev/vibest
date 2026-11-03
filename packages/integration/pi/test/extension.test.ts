@@ -450,10 +450,32 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Session: guard on tool calls (its scratchpad is the one project directory it may use); the settled turn's reply lands in the result file",
+    "Session: guard on tool calls (its scratchpad is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
     Effect.gen(function* () {
       const layout = yield* Layout
       const fs = yield* FileSystem.FileSystem
+      yield* (yield* Db).insertSession(
+        {
+          id: "abcd1234",
+          agent: "general",
+          name: "n",
+          harnessId: "pi",
+          provider: null,
+          model: null,
+          harnessSessionId: null,
+          runtime: "herdr",
+          address: { machine: "local", id: "test/p0" },
+          status: "idle",
+          startedAt: 1,
+          exitedAt: null,
+          turnState: "none",
+          turnPromptedAt: 0,
+          metadata: {},
+          createdAt: 1,
+          lastActive: 1,
+        },
+        "r",
+      )
       const scratch = `${layout.projects}/k/scratch/pane:test/w1:p7`
       const s = yield* session({
         VIBEST_AGENT: "general",

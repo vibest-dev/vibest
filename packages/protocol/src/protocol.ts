@@ -4,7 +4,7 @@
  * misunderstood; old versions are not served. An additive feature does not bump it: it gets a flag in Ping's
  * `capabilities`, and a client uses it only when the flag is there.
  */
-export const PROTOCOL = 4
+export const PROTOCOL = 5
 
 /**
  * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents

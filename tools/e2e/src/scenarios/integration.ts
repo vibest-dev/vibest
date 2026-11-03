@@ -175,6 +175,8 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       const cwd = await workdir(w, "pi-turn")
       const id = "e2e00003"
+      // The extension sends its turn end to vibestd, which writes the result file for a session it knows.
+      const project = await knownSessions(w, "e2e/i3", { [id]: "general" }, cwd, "pi")
       // The user's own Pi config (its login and extensions); --no-session keeps the conversation out of it.
       const r = await w.run(
         cwd,
@@ -195,6 +197,8 @@ const checks: ReadonlyArray<Check> = [
             PI_CODING_AGENT_DIR: undefined,
             VIBEST_AGENT: "general",
             VIBEST_SESSION_ID: id,
+            VIBEST_PROJECT_ID: String(project),
+            VIBEST_HARNESS: "pi",
             VIBEST_COMMAND: JSON.stringify([binary]),
           },
           timeoutMs: 240_000,
@@ -301,6 +305,8 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const id = "e2e00005"
+      // `vibest integration stop` sends the turn end to vibestd, which writes the result file for a session it knows.
+      const project = await knownSessions(w, "e2e/i5", { [id]: "general" }, cwd, "cursor")
       const r = await w.run(
         cwd,
         [
@@ -316,7 +322,16 @@ const checks: ReadonlyArray<Check> = [
           path.join(harnesses, "cursor"),
           PROMPT,
         ],
-        { env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, PATH: `${bin}:${w.env().PATH}` }, timeoutMs: 300_000 },
+        {
+          env: {
+            VIBEST_AGENT: "general",
+            VIBEST_SESSION_ID: id,
+            VIBEST_PROJECT_ID: String(project),
+            VIBEST_HARNESS: "cursor",
+            PATH: `${bin}:${w.env().PATH}`,
+          },
+          timeoutMs: 300_000,
+        },
       )
       const log = await fs.readFile(calls, "utf8").catch(() => "")
       expect(

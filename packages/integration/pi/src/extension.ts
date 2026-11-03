@@ -2,32 +2,26 @@ import path from "node:path"
 import url from "node:url"
 
 // vibest's Pi extension. VIBEST_AGENT=coordinator makes it the coordinator (inbox rows delivered in process instead of typed
-// into the pane), any other agent with VIBEST_SESSION_ID a session (turn-end result file); otherwise it is inert. Either way
-// tool calls go through that agent's rules in vibest's guard.ts, in process. Both run vibest itself as `vibest` commands in Pi's bash tool.
+// into the pane), any other agent with VIBEST_SESSION_ID a session (its turn starts and ends sent to vibestd); otherwise it
+// is inert. Either way tool calls go through that agent's rules in vibest's guard.ts, in process. Both run vibest itself as `vibest` commands in Pi's bash tool.
 import type { AgentEndEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChildProcessSpawner"
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { claimHeaders, type ClientServices, connect, SocketConnector, withVibest } from "@vibest/client/client"
-import * as Guard from "@vibest/core/guard"
-import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
-import { appendReportLine, writeTerminalStatus } from "@vibest/core/results"
-import { VERSION } from "@vibest/protocol/rpc"
 import {
-  Cause,
-  Clock,
-  Config,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Ref,
-  Schedule,
-  Schema,
-  Stream,
-} from "effect"
+  claimHeaders,
+  type ClientServices,
+  connect,
+  hookCall,
+  SocketConnector,
+  withVibest,
+} from "@vibest/client/client"
+import * as Guard from "@vibest/core/guard"
+import { Layout, VibestCommand } from "@vibest/core/paths"
+import { writeTerminalStatus } from "@vibest/core/results"
+import { VERSION } from "@vibest/protocol/rpc"
+import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
@@ -82,48 +76,25 @@ const session = (sessionId: string): Role =>
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
       // `input` is the submitted prompt. `extension` is sendUserMessage, which is vibest's own text, not the user.
+      // vibestd writes the turn-start line and records the round (the Pi adapter's `userPrompt` reads this event).
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
-          // `Prompt` first: vibestd stamps the round at receipt, and the start line must not be older than that stamp.
           const headers = yield* piHeaders(sessionId, ctx)
-          yield* connect(layout.socket).pipe(
-            Effect.flatMap((client) => client.Prompt({ sessionId, text: e.text }, { headers })),
-            Effect.scoped,
-            Effect.timeout("500 millis"),
-            Effect.ignore,
-          )
-          yield* appendReportLine(layout.reportFile(sessionId), {
-            turn: "start",
-            ts: yield* Clock.currentTimeMillis,
-            prompt: e.text,
-          })
+          const event = encodeJson({ type: "input", text: e.text, source: e.source })
+          yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
           yield* writeTerminalStatus("working")
         }),
       )
+      // vibestd writes the result file and the turn-end line (the Pi adapter's `turnEnd` reads this event).
       yield* pi.handle("agent_settled", (e, ctx) =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
-          const ts = Math.floor((yield* Clock.currentTimeMillis) / 1000)
-          const payload = { text, error: error || (e.aborted ? "aborted" : ""), aborted: e.aborted }
-          yield* writeAtomic(layout.resultFile(sessionId), encodeJson({ harness: "pi", ts, payload }))
-          // The report line and the state are the durable channel (runtime-port.md §5); vibestd also finds the result file
-          // on its next check, and the call only makes that immediate.
-          yield* appendReportLine(layout.reportFile(sessionId), {
-            turn: "end",
-            ts: yield* Clock.currentTimeMillis,
-            harness: "pi",
-            payload,
-          })
           yield* writeTerminalStatus("idle")
           const headers = yield* piHeaders(sessionId, ctx)
-          yield* connect(layout.socket).pipe(
-            Effect.flatMap((client) => client.ResultReady({ sessionId }, { headers })),
-            Effect.scoped,
-            Effect.timeout("500 millis"),
-            Effect.ignore,
-          )
+          const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
+          yield* hookCall(layout.socket, headers, (client) => client.TurnEnd({ sessionId, harness: "pi", event }))
         }),
       )
     }),

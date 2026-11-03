@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+import { PROTOCOL } from "@vibest/protocol/protocol"
 
 type Plugin = {
   register: (on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void }) => void
@@ -175,7 +176,7 @@ describe("Claude plugin requests", () => {
     assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
     assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
     assert.deepInclude(poll!.headers, {
-      "vibest-protocol": "4",
+      "vibest-protocol": String(PROTOCOL),
       "vibest-caller": "session",
       "vibest-session-id": "main0001",
       "vibest-project-id": "7",

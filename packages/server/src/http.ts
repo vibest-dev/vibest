@@ -6,7 +6,7 @@
 //   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
 //   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
 //                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line, ResultReady
+//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line (TurnEnd)
 //   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt)
 //   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
 //
@@ -19,7 +19,6 @@ import * as Guard from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
-import { promptOf, recordPrompt, recordTurnEnd } from "@vibest/core/results"
 import { Sessions } from "@vibest/core/sessions"
 import {
   HARNESS_HEADER,
@@ -42,6 +41,7 @@ import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
+import * as Hooks from "./hooks.ts"
 import { noteIntegration } from "./server.ts"
 
 export type Request = {
@@ -144,26 +144,19 @@ export const make = Effect.gen(function* () {
         return yield* admitted(
           "hook turn-end",
           false,
-          Effect.gen(function* () {
-            if (yield* recordTurnEnd(adapter, who.agent, who.id, request.body)) yield* sessions.resultReady(who.id)
-            return ok()
-          }).pipe(Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`)))),
+          Hooks.turnEnd(sessions, adapter, who, request.body).pipe(
+            Effect.as(ok()),
+            Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`))),
+          ),
         )
       if (hook.hook === "prompt")
         return yield* admitted(
           "hook prompt",
           false,
-          Effect.gen(function* () {
-            const text = promptOf(adapter, who.agent, request.body)
-            if (text === undefined) return ok()
-            // One stamp, taken now: the start line is written at once, and `userPrompt` (which may wait for the
-            // session's lock, held through a send's whole confirm) stamps the round with the same time, so the line
-            // is never older than it and the pending send sees its pickup proof while it still waits.
-            const at = yield* Clock.currentTimeMillis
-            yield* recordPrompt(who.id, text, at)
-            yield* sessions.userPrompt(who.id, text, at)
-            return ok()
-          }).pipe(Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`)))),
+          Hooks.prompt(sessions, adapter, who, request.body).pipe(
+            Effect.as(ok()),
+            Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`))),
+          ),
         )
       // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
       const key = yield* db.projectKey(who.projectId)

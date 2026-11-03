@@ -1,25 +1,30 @@
-// `vibest integration stop` / `prompt`: the Claude plugin's turn.complete and prompt.submit bridges. Isolated HOME, fake socket, no live daemon.
+// `vibest integration stop` / `prompt`: a harness plugin's turn-end and prompt bridges, which only send the event to vibestd.
+// Isolated HOME, fake socket, no live daemon.
 import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
+import { HOOK_TIMEOUT } from "@vibest/client/client"
 import { claude } from "@vibest/core/harnesses/claude"
 import { cursor } from "@vibest/core/harnesses/cursor"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { integrationPrompt, integrationStop, RESULT_READY_TIMEOUT } from "../src/cli.ts"
+import { integrationPrompt, integrationStop } from "../src/cli.ts"
 import { runVibest, tempDirectory } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop(claude, raw).pipe(
     Effect.provideServiceEffect(Layout, Layout.make(home)),
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+    TestClock.withLive,
   )
 
-const listen = (sock: string, lines: string[]) => {
+/** `answer` false: the request is read and the connection dropped (`"drop"`) or left unanswered (`"hang"`). */
+const listen = (sock: string, lines: string[], answer: (n: number) => true | "drop" | "hang" = () => true) => {
   const server = net.createServer((socket) => {
     let buf = ""
     socket.on("data", (chunk) => {
@@ -28,6 +33,9 @@ const listen = (sock: string, lines: string[]) => {
       if (nl < 0) return
       const line = buf.slice(0, nl)
       lines.push(line)
+      const how = answer(lines.length)
+      if (how === "drop") return socket.destroy()
+      if (how === "hang") return
       let id: unknown
       try {
         id = (JSON.parse(line) as { id?: unknown }).id
@@ -72,10 +80,11 @@ const promptAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationPrompt(claude, raw).pipe(
     Effect.provideServiceEffect(Layout, Layout.make(home)),
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+    TestClock.withLive,
   )
 
 layer(Platform.services)("claude integration stop", (it) => {
-  it.effect("a worker writes the envelope, then notifies with the session's headers", () =>
+  it.effect("a worker sends its event verbatim as TurnEnd with the session's headers and writes no file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -85,16 +94,13 @@ layer(Platform.services)("claude integration stop", (it) => {
       const started = Date.now()
       yield* stopAt(home, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event))
       assert.isBelow(Date.now() - started, 2_000)
-      const file = path.join(home, "results", "w1.json")
-      const envelope = JSON.parse(yield* fs.readFileString(file)) as { harness: string; ts: number; payload: unknown }
-      assert.strictEqual(envelope.harness, "claude")
-      assert.deepStrictEqual(envelope.payload, event)
-      assert.isTrue(Number.isInteger(envelope.ts) && Math.abs(envelope.ts - Math.floor(Date.now() / 1000)) < 5)
+      assert.isFalse(yield* fs.exists(path.join(home, "results")))
+      assert.isFalse(yield* fs.exists(path.join(home, "reports")))
       const [request] = rpc(lines)
       assert.deepStrictEqual(request, {
         jsonrpc: "2.0",
-        method: "ResultReady",
-        params: { sessionId: "w1" },
+        method: "TurnEnd",
+        params: { sessionId: "w1", harness: "claude", event: JSON.stringify(event) },
         id: request?.id,
         headers: request?.headers,
         traceId: (request as { traceId?: unknown }).traceId,
@@ -110,7 +116,7 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("keeps the worker file when vibestd is down and does not start a daemon", () =>
+  it.effect("a down vibestd: nothing is written and no daemon is started", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -118,10 +124,35 @@ layer(Platform.services)("claude integration stop", (it) => {
       const started = Date.now()
       yield* stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event))
       assert.isBelow(Date.now() - started, 2_000)
-      assert.isTrue(yield* fs.exists(path.join(home, "results", "w1.json")))
+      assert.isFalse(yield* fs.exists(path.join(home, "results")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.log")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.pid")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
+    }),
+  )
+
+  it.effect("a dropped connection is tried once more; an unanswered request is not sent again", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+      const dropped = yield* tempDirectory("d-")
+      const seen: string[] = []
+      yield* listen(path.join(dropped, "vibest.sock"), seen, (n) => (n === 1 ? "drop" : true))
+      yield* stopAt(dropped, worker, JSON.stringify(event))
+      assert.deepStrictEqual(
+        rpc(seen).map((r) => r.method),
+        ["TurnEnd", "TurnEnd"],
+      )
+      const hung = yield* tempDirectory("h-")
+      const once: string[] = []
+      yield* listen(path.join(hung, "vibest.sock"), once, () => "hang")
+      const started = Date.now()
+      yield* stopAt(hung, worker, JSON.stringify(event))
+      assert.isAtLeast(Date.now() - started, Duration.toMillis(HOOK_TIMEOUT) - 100)
+      assert.deepStrictEqual(
+        rpc(once).map((r) => r.method),
+        ["TurnEnd"],
+      )
     }),
   )
 
@@ -168,60 +199,54 @@ layer(Platform.services)("claude integration stop", (it) => {
           [coordinator, JSON.stringify({ hook_event_name: "TurnComplete" })],
           [coordinator, JSON.stringify({ hook_event_name: "TurnComplete", session_id: "" })],
           [coordinator, "not json"],
-          [{ ...worker, VIBEST_SESSION_ID: "../evil" }, JSON.stringify(event)],
         ] as const) {
           yield* stopAt(home, env, raw)
         }
         assert.deepStrictEqual(lines, [])
         assert.isFalse(yield* fs.exists(path.join(home, "results")))
         assert.isFalse(yield* fs.exists(path.join(home, "evil.json")))
-        assert.strictEqual(Duration.toMillis(RESULT_READY_TIMEOUT), 500)
+        assert.strictEqual(Duration.toMillis(HOOK_TIMEOUT), 2_000)
       }),
   )
 
-  it.effect(
-    "the CLI entrypoint writes then notifies, and a down daemon still leaves the file without starting vibestd",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const home = yield* tempDirectory("s-")
-        const lines: string[] = []
-        yield* listen(path.join(home, "vibest.sock"), lines)
-        const env = { HOME: home, VIBEST_HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-        const ran = yield* runVibest(home, env, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
-        assert.strictEqual(ran.code, 0, ran.stderr)
-        assert.strictEqual(ran.stdout, "")
-        const envelope = JSON.parse(yield* fs.readFileString(path.join(home, "results", "w1.json"))) as {
-          harness: string
-          payload: unknown
-        }
-        assert.deepStrictEqual([envelope.harness, envelope.payload], ["claude", event])
-        assert.strictEqual(rpc(lines)[0]?.method, "ResultReady")
+  it.effect("the CLI entrypoint sends TurnEnd, and a down daemon is not started", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("s-")
+      const lines: string[] = []
+      yield* listen(path.join(home, "vibest.sock"), lines)
+      const env = { HOME: home, VIBEST_HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+      const ran = yield* runVibest(home, env, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
+      assert.strictEqual(ran.code, 0, ran.stderr)
+      assert.strictEqual(ran.stdout, "")
+      assert.deepStrictEqual(
+        rpc(lines).map((r) => [r.method, r.params]),
+        [["TurnEnd", { sessionId: "w1", harness: "claude", event: JSON.stringify(event) }]],
+      )
 
-        const quiet = yield* tempDirectory("q-")
-        const started = Date.now()
-        const down = yield* runVibest(
-          quiet,
-          { HOME: quiet, VIBEST_HOME: quiet, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" },
-          ["integration", "stop", "--harness", "claude"],
-          JSON.stringify(event),
-        )
-        assert.isBelow(Date.now() - started, 4_000, down.stderr)
-        assert.strictEqual(down.code, 0, down.stderr)
-        assert.isTrue(yield* fs.exists(path.join(quiet, "results", "w1.json")))
-        assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.log")))
-        assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.pid")))
+      const quiet = yield* tempDirectory("q-")
+      const started = Date.now()
+      const down = yield* runVibest(
+        quiet,
+        { HOME: quiet, VIBEST_HOME: quiet, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" },
+        ["integration", "stop", "--harness", "claude"],
+        JSON.stringify(event),
+      )
+      assert.isBelow(Date.now() - started, 4_000, down.stderr)
+      assert.strictEqual(down.code, 0, down.stderr)
+      assert.isFalse(yield* fs.exists(path.join(quiet, "results")))
+      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.log")))
+      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.pid")))
 
-        const skipped = yield* runVibest(
-          quiet,
-          { HOME: quiet, VIBEST_HOME: quiet },
-          ["integration", "stop", "--harness", "claude"],
-          "not json",
-        )
-        assert.strictEqual(skipped.code, 0, skipped.stderr)
-        assert.deepStrictEqual(yield* fs.readDirectory(path.join(quiet, "results")), ["w1.json"])
-      }),
+      const skipped = yield* runVibest(
+        quiet,
+        { HOME: quiet, VIBEST_HOME: quiet },
+        ["integration", "stop", "--harness", "claude"],
+        "not json",
+      )
+      assert.strictEqual(skipped.code, 0, skipped.stderr)
+    }),
   )
 
   it.effect("a prompt the person submitted notifies Prompt; the coordinator and any other origin do not", () =>
@@ -234,7 +259,7 @@ layer(Platform.services)("claude integration stop", (it) => {
       yield* promptAt(home, worker, JSON.stringify(promptEvent))
       assert.deepStrictEqual(
         rpc(lines).map((r) => [r.method, r.params]),
-        [["Prompt", { sessionId: "w1", text: "look here" }]],
+        [["Prompt", { sessionId: "w1", harness: "claude", event: JSON.stringify(promptEvent) }]],
       )
       for (const [env, raw] of [
         [{ VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "w1" }, JSON.stringify(promptEvent)],
