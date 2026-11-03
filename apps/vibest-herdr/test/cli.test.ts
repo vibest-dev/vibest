@@ -4,7 +4,7 @@ import net from "node:net"
 // herdr. JSON on stdout, `Tag: message` on stderr with a nonzero exit, literal input, and the caller's role.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { Layout, worktreePath } from "@vibest/core/paths"
+import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
@@ -247,7 +247,7 @@ describe("vibest CLI", () => {
         yield* writeResult(id, "pi", { text: "status: completed" })
         yield* herdr.endTurn(id)
         yield* sessions.check(id)
-        const worktree = worktreePath(layout, (yield* db.getSession(id))!)
+        const worktree = yield* db.sessionDirectory(id)
         if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
 
         for (const r of [
