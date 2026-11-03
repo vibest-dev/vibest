@@ -8,6 +8,7 @@ import {
   type CoordinatorInput,
   Harness,
   type HarnessId,
+  Harnesses,
   HarnessUnavailable,
   HARNESS_IDS,
   hasNewline,
@@ -21,8 +22,9 @@ import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
-import { envelope, isUsageLimitError, outcome, parseReport, readResult } from "@vibest/core/results"
+import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
 import { coordinatorRules } from "@vibest/core/rules"
+import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import {
   copyIncluded,
   git,
@@ -34,13 +36,13 @@ import {
 } from "@vibest/core/worktree"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { encodeJson, makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
+import { makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
 
 const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
@@ -430,7 +432,10 @@ describe("Db", () => {
         )
         assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa"), [])
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "none")
+        assert.isFalse(yield* db.turnTaken("aaaaaaaa"), "no open turn")
         yield* db.updateSession("aaaaaaaa", { status: "working", turnState: "open", turnPromptedAt: 5 })
+        // The task delivered into the open turn is the stored proof it was taken up (after a vibestd restart too).
+        assert.isTrue(yield* db.turnTaken("aaaaaaaa"))
         assert.strictEqual(
           (yield* sql<{ status: string }>`SELECT status FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`)[0]
             ?.status,
@@ -1134,32 +1139,23 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       }),
   )
 
-  it.effect("result files: text field per harness; error marks failure; junk is ignored", () =>
+  it.effect("turn ends: text field per harness; error marks failure; a junk hook input is no turn end", () =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* tempDirectory("vibest-res-")
-      const read = (name: string, body?: string) =>
-        Effect.gen(function* () {
-          const file = path.join(dir, name)
-          if (body !== undefined) yield* fs.writeFileString(file, body)
-          return Option.getOrUndefined(yield* readResult(file))
-        })
-      assert.deepInclude(
-        yield* read("a.json", encodeJson({ harness: "claude", ts: 1, payload: { last_assistant_message: "hi" } })),
-        {
-          harness: "claude",
-          text: "hi",
-          error: undefined,
-        },
-      )
-      assert.deepInclude(
-        yield* read("b.json", encodeJson({ harness: "pi", ts: 1, payload: { text: "", error: "boom" } })),
-        { error: "boom" },
-      )
-      assert.isUndefined(yield* read("c.json", "{"))
-      assert.isUndefined(yield* read("d.json", encodeJson({ agent: "claude", payload: {} })))
-      assert.isUndefined(yield* read("missing.json"))
+      const harnesses = yield* Harnesses
+      assert.deepInclude(turnEndFrom(harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
+        harness: "claude",
+        at: 5,
+        text: "hi",
+        error: undefined,
+        interrupted: false,
+      })
+      assert.deepInclude(turnEndFrom(harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1), {
+        error: "boom: why",
+      })
+      assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: "--flag" }, 1), {
+        conversationId: undefined,
+      })
+      assert.isUndefined(turnEndOf(harnesses.get("claude"), "general", "{", 1))
     }),
   )
 

@@ -5,8 +5,7 @@ Status: vibestd runs version 2 (`user_version = 2`, in `packages/core/src/db.ts`
 columns of the engine (architecture.md §1). The `Db` service still answers its callers with the old session row
 shape, read from these tables and the memory listed below. Not built yet: rows for the user (nothing writes a null
 `recipient_session_id`), the `replyTo(turn)` routing below (a result or report still goes to
-`report_to_session_id` while it has not ended, else to the entry session), and results through vibestd instead of
-files (`results/`).
+`report_to_session_id` while it has not ended, else to the entry session).
 
 Four SQLite tables, one purpose each:
 
@@ -33,7 +32,7 @@ Four SQLite tables, one purpose each:
   session uses the same (machine, directory), then after the lsof and git checks.
 - Branch and pushed state are rendered into the result text when the result inbox row is created; no table holds
   them.
-- Results and reports reach the database through vibestd, never through files under `results/` and `reports/`.
+- Results and reports reach the database through vibestd, never through files: there is no `results/` or `reports/`.
 - Engine telemetry (lock waits, retries, hook timings) goes to logs and OpenTelemetry, not the event table.
 - Leases, the restarting mark, running work and per-session locks are memory only (see Memory).
 - Agent capabilities (spawn, message, tools) come from the agent definition in configuration, not from the
@@ -191,8 +190,11 @@ Not written yet: `turn.start` resumes (a move or restart keeps the open turn; se
   and a crash after it leaves an open `process.start` with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
-- When an open turn's text was last handed over (after a resume or a move to the next harness): a result file
-  older than it is not this turn's. Lost with the process; the turn's own start time stands then.
+- When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
+  reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
+- The turn starts and turn ends the integrations reported (TurnEnds), until a check writes the end as `turn.end`
+  and its result row. Lost with the process: an end not yet written is lost, and reconciliation ends the turn lost.
+  After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 
@@ -217,6 +219,8 @@ only then puts it in place. The script maps:
   a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`.
 - Dropped: stop records, the runtime's last status, a result's parsed details (derived again from its text), and
   every other `metadata` key.
+- Files: `results/` and `reports/` are not read. A collected result is already a v1 `message.output`; a result file
+  vibestd had not collected when it stopped is not taken over. The directories can be deleted.
 
 From version 3 on, upgrades run step by step on `user_version`.
 

@@ -8,7 +8,6 @@ import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
-import type { Layout } from "./paths.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
 import type { Restarting } from "./restarting.ts"
@@ -21,6 +20,7 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
+import type { TurnEnds } from "./turn-ends.ts"
 
 /** An agent `vibest update` finds on an old integration. `blocked`: why it cannot be restarted in place (null: it can). */
 export interface Outdated {
@@ -136,9 +136,8 @@ export const sessionRestart = (deps: {
   readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
+  readonly turnEnds: TurnEnds["Service"]
   readonly inbox: Inbox["Service"]
-  readonly layout: Layout["Service"]
-  readonly fs: FileSystem.FileSystem
   /** vibestd's own scope: `restartLater` runs there. */
   readonly scope: Scope.Scope
   /** The session's lock, as every session change takes it. */
@@ -167,7 +166,7 @@ export const sessionRestart = (deps: {
     text: string,
   ) => Effect.Effect<string | undefined, unknown>
 }) => {
-  const { db, runtimes, harnesses, processes, inbox, layout, fs } = deps
+  const { db, runtimes, harnesses, processes, inbox } = deps
 
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
@@ -265,14 +264,8 @@ export const sessionRestart = (deps: {
         argv: againArgv(session),
         liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
         locked: deps.locked(id),
-        // A turn end the old harness wrote while it stopped is not the round's result.
-        settle: (at) =>
-          Effect.gen(function* () {
-            const file = layout.resultFile(id)
-            const written = yield* fs.stat(file).pipe(Effect.option)
-            if (Option.isSome(written) && Option.getOrElse(written.value.mtime, () => new Date(0)).getTime() >= at)
-              yield* fs.remove(file, { force: true }).pipe(Effect.ignore)
-          }),
+        // A turn end the old harness reported while it stopped is not the round's result.
+        settle: (at) => deps.turnEnds.drop(id, at),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {

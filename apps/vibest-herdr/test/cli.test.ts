@@ -24,6 +24,7 @@ import {
   type TestServices,
   until,
   writeResult,
+  resultText,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -347,12 +348,12 @@ describe("vibest CLI", () => {
       const before = decodeJson((yield* run(["result", id])).stdout) as { result: { kind: string; message: string } }
       assert.strictEqual(before.result.kind, "result")
       assert.include(before.result.message, "kept finding")
-      assert.isTrue(yield* fs.exists(layout.resultFile(id)))
+      assert.notStrictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(layout.rulesFile(id)))
 
       const archived = yield* run(["archive", id])
       assert.strictEqual(archived.code, 0, archived.stderr)
-      assert.isFalse(yield* fs.exists(layout.resultFile(id)))
+      assert.strictEqual(yield* resultText(id), "")
       assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
 
       const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; result: object }

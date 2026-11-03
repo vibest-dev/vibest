@@ -11,6 +11,7 @@ import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
+import { TurnEnds } from "./turn-ends.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
@@ -93,6 +94,7 @@ export interface ReleaseInput {
 export const make = Effect.gen(function* () {
   const db = yield* Db
   const layout = yield* Layout
+  const turnEnds = yield* TurnEnds
   const processes = yield* Processes
 
   /**
@@ -288,10 +290,10 @@ export const make = Effect.gen(function* () {
         tree = kept === undefined ? "removed" : "kept"
         if (kept !== undefined) reasons.push(kept)
       }
-      // Processes that may still be running may still read its rules or write its result. Its files are its own even
+      // Processes that may still be running may still read its rules or report a turn end. Its files are its own even
       // though a directory another session works in stays.
       if ((tree !== "kept" || shared) && processState === "exited") {
-        yield* fs.remove(layout.resultFile(id), { force: true })
+        yield* turnEnds.forget(id)
         yield* fs.remove(layout.rulesFile(id), { force: true })
       }
       const branch = multiGit

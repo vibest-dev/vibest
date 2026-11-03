@@ -75,11 +75,11 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 
 - The harness integration (the plugin vibest loads into each CLI agent) writes only OSC 7501 status to its tty. It sends
   each turn start (the user's prompt) and turn end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
-  `TurnEnd` on vibest.sock (a timeout, one retry), or the HTTP hook routes (Claude). vibestd alone writes
-  `<VIBEST_HOME>/reports/<id>.jsonl` and `results/<id>.json` from them.
+  `TurnEnd` on vibest.sock (a timeout, one retry), or the HTTP hook routes (Claude). vibestd keeps them in memory
+  (no file) and checks the session: the turn end becomes its `turn.end` event and result row.
 - Core follows each Agent with `events` (else polling `process`) and `state` when present. When a turn ends (state
-  idle after working, or the process exited), core reads the report file's new lines (`readFile`) and delivers the
-  result.
+  idle after working, or the process exited), core takes the reported turn end and delivers the result. A turn end
+  vibestd had not written when it stopped is lost; reconciliation records that turn lost.
 - Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its turn
   ends loses the round, as today.
 
@@ -114,13 +114,13 @@ vibest machine remove <id>       # forgets it; stops nothing on the machine
   remote, else refused ("push first"). The Workspace is `git worktree add --detach <commit>` there, plus the
   `.worktreeinclude` files (size-capped). Work comes back by the Agent pushing its branch, as locally.
 - Offline (`status` not online, or `unreachable` errors): the machine's Agents show `offline`, not failed; their
-  rounds stay open; on `reset` or the next online check core re-reads `process`, `state` and pending report lines.
+  rounds stay open; on `reset` or the next online check core re-reads `process` and `state`, and takes any reported turn end.
 
 Out of scope now: Agents on a remote machine starting their own subagents, load balancing, password ssh.
 
 ## 8. Order of work
 
-1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations write report files and
+1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report turn events and
    OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. Gates and e2e unchanged.
 2. `vibest machine`, remote herdr, the machine flow above; proven on voyracloud (Linux) and macbook-pro-m1 (macOS).
 3. `runtime-rex` and `runtime-tern` (parallel), each passing the contract suite.

@@ -11,13 +11,13 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, Fiber, FileSystem, Layer, type Scope } from "effect"
+import { Clock, Effect, Fiber, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until } from "./fakes.ts"
+import { FakeRuntime, makeRepository, testLayer, type TestServices, until, resultText, startedSince } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -308,11 +308,9 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the prompt hook writes its start line at once, while the session's lock is held, with the round's stamp",
+    "the prompt hook notes its turn start at once, while the session's lock is held, with the round's stamp",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
-      const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       yield* until(db.getSession(worker), (s) => s?.turnState === "open")
@@ -329,11 +327,7 @@ describe("vibestd's HTTP API", () => {
           JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
         ),
       )
-      const start = yield* until(
-        fs.readFileString(layout.reportFile(worker)).pipe(Effect.orElseSucceed(() => "")),
-        (text) => text.includes('"turn":"start"'),
-      )
-      assert.include(start, `"ts":${stamp}`)
+      yield* until(startedSince(worker, stamp), (seen) => seen)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.strictEqual((yield* Fiber.join(hook)).status, 204)
@@ -341,10 +335,9 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "turn-end, prompt and guard hooks: the result file and report lines are vibestd's to write",
+    "turn-end, prompt and guard hooks: vibestd keeps the turn start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
-      const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const prompt = yield* call(
         "/hooks/claude/prompt",
@@ -352,7 +345,7 @@ describe("vibestd's HTTP API", () => {
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      assert.include(yield* fs.readFileString(layout.reportFile(worker)), '"prompt":"next step"')
+      assert.isTrue(yield* startedSince(worker, 0))
       const end = yield* call(
         "/hooks/claude/turn-end",
         { sessionId: worker },
@@ -363,14 +356,14 @@ describe("vibestd's HTTP API", () => {
         }),
       )
       assert.strictEqual(end.status, 204)
-      assert.include(yield* fs.readFileString(layout.resultFile(worker)), "Fixed the guard.")
+      assert.include(yield* resultText(worker), "Fixed the guard.")
       // The main agent's turn end is no result.
       yield* call(
         "/hooks/claude/turn-end",
         { sessionId: main },
         JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
       )
-      assert.isFalse(yield* fs.exists(layout.resultFile(main)))
+      assert.strictEqual(yield* resultText(main), "")
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
       const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
       const tool = (file: string) =>

@@ -1506,7 +1506,22 @@ const make = Effect.gen(function* () {
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       sql.withTransaction(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
 
-    /** Latest time on any turn. Undefined: no turn yet. A result file that is not newer was already delivered. */
+    /** Latest time on any turn. Undefined: no turn yet. A turn end that is not newer was already delivered. */
+    /**
+     * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
+     * or an inbox row was delivered into it. False with no open turn.
+     */
+    turnTaken: (id: string) =>
+      Effect.gen(function* () {
+        const turn = yield* openTurn(id)
+        if (turn === undefined) return false
+        const [row] = yield* sql<{ taken: number }>`SELECT (json_extract(t.data, '$.typed') IS NOT NULL OR EXISTS (
+            SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+              AND json_extract(e.data, '$.to') = 'delivered')) AS taken
+          FROM event t WHERE t.id = ${turn}`
+        return row?.taken === 1
+      }).pipe(Effect.orDie),
+
     latestRoundAt: (sessionId: string) =>
       sql<{ at: number | null }>`SELECT max(at) AS at FROM event WHERE session_id = ${sessionId}
         AND type IN ('turn.start', 'turn.end')`.pipe(
@@ -1589,7 +1604,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
-     * session row. `at`: no earlier than this (a result file's time), so that file is not taken again.
+     * session row. `at`: no earlier than this (the reported turn end's time), so that end is not taken again.
      */
     finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
       sql

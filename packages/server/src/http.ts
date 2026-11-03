@@ -6,7 +6,7 @@
 //   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
 //   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
 //                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line (TurnEnd); a
+//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: kept, then the result (TurnEnd); a
 //                                                       settlement, so still taken while stopping
 //   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt); a settlement
 //   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
@@ -145,19 +145,13 @@ export const make = Effect.gen(function* () {
         return yield* admitted(
           "hook turn-end",
           true,
-          Hooks.turnEnd(sessions, adapter, who, request.body).pipe(
-            Effect.as(ok()),
-            Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`))),
-          ),
+          Hooks.turnEnd(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       if (hook.hook === "prompt")
         return yield* admitted(
           "hook prompt",
           true,
-          Hooks.prompt(sessions, adapter, who, request.body).pipe(
-            Effect.as(ok()),
-            Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`))),
-          ),
+          Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
       const key = yield* db.projectKey(who.projectId)

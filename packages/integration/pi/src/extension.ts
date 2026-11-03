@@ -76,7 +76,7 @@ const session = (sessionId: string): Role =>
       yield* pi.handle("session_start", (_e, ctx) => Ref.set(root, ctx.mode === "tui"))
       yield* pi.handle("agent_end", (e) => Ref.set(reply, lastReply(e.messages)))
       // `input` is the submitted prompt. `extension` is sendUserMessage, which is vibest's own text, not the user.
-      // vibestd writes the turn-start line and records the round (the Pi adapter's `userPrompt` reads this event).
+      // vibestd notes the turn start and records the round (the Pi adapter's `userPrompt` reads this event).
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
@@ -86,7 +86,7 @@ const session = (sessionId: string): Role =>
           yield* writeTerminalStatus("working")
         }),
       )
-      // vibestd writes the result file and the turn-end line (the Pi adapter's `turnEnd` reads this event).
+      // vibestd keeps the turn end and writes the result (the Pi adapter's `turnEnd` reads this event).
       yield* pi.handle("agent_settled", (e, ctx) =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
