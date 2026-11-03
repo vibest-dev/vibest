@@ -159,7 +159,8 @@ describe("Db", () => {
       assert.isTrue(Exit.isFailure(exit))
       const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
       assert.match(pretty, /SchemaMismatch/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
+      assert.include(pretty, "move it aside to start empty")
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -443,7 +444,7 @@ describe("Db", () => {
         })
         yield* db.finishTurn(
           "aaaaaaaa",
-          { status: "completed", output: "the answer", failure: { kind: "other", message: "late" }, cause: "move" },
+          { status: "completed", output: "the answer", failure: { message: "late" } },
           { turnState: "completed" },
           { sessionId: "aaaaaaaa", kind: "result", message: "<summary>done</summary>", details: { summary: "done" } },
         )
@@ -460,8 +461,7 @@ describe("Db", () => {
         assert.deepStrictEqual(JSON.parse(end!.data), {
           status: "completed",
           output: "the answer",
-          failure: { kind: "other", message: "late" },
-          cause: "move",
+          failure: { message: "late" },
         })
         assert.isNotNull(turns[0]!.endedAt)
         assert.deepInclude((yield* db.latestInbox("aaaaaaaa", "result"))!.details, { summary: "done" })
@@ -734,6 +734,25 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("a version 1 vibest database is refused, naming its path and the release's migration script", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
+      yield* writeSql(file, [
+        `PRAGMA application_id = ${APPLICATION_ID}`,
+        "PRAGMA user_version = 1",
+        "CREATE TABLE project (id INTEGER)",
+      ])
+      const before = yield* fs.readFile(file)
+      const pretty = yield* refusal(file)
+      assert.include(pretty, `${file} is from an older vibest`)
+      assert.include(pretty, "migration script given with this release")
+      assert.include(pretty, "move it aside to start empty")
+      assert.notInclude(pretty, "scripts/migrate")
+      assert.deepStrictEqual(yield* fs.readFile(file), before)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -748,7 +767,7 @@ describe("Db", () => {
       assert.match(pretty, /SchemaMismatch/)
       assert.match(pretty, /application_id 0x0, v1/)
       assert.notMatch(pretty, /0x76696265/)
-      assert.match(pretty, /move ~\/\.vibest\/vibest\.db away/)
+      assert.include(pretty, `${file} is not this vibest's schema`)
       assert.deepStrictEqual(yield* fs.readFile(file), before)
       assert.isFalse(yield* fs.exists(`${file}-wal`))
       assert.isFalse(yield* fs.exists(`${file}-shm`))

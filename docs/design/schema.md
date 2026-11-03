@@ -83,7 +83,6 @@ CREATE TABLE inbox (                                  -- the delivery queue; sta
 CREATE INDEX inbox_status    ON inbox (status, recipient_session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
 CREATE INDEX inbox_recipient ON inbox (recipient_session_id, kind, id);
 CREATE INDEX inbox_result    ON inbox (result_event_id) WHERE result_event_id IS NOT NULL;
-CREATE INDEX inbox_user      ON inbox (sender_session_id, id) WHERE recipient_session_id IS NULL;
 
 CREATE TABLE event (                                  -- append-only
   id         INTEGER PRIMARY KEY,
@@ -125,7 +124,7 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived |
 
 - Delivery scans rows with `recipient_session_id IS NOT NULL`. A row for the user is marked delivered once
-  `vibest inbox` has shown it; `inbox_user` finds them per sending session.
+  `vibest inbox` has shown it.
 - The recipient of a result row is the routing decision of `replyTo(turn)` (architecture.md §1): (1) the sessions
   that sent the `task` and `send` rows the turn consumed; else (2) `report_to_session_id`; else (3) the user, when a
   row from the user opened the turn. (4) A turn woken by a `result` or `notice`, or opened by text typed in the pane,
@@ -141,11 +140,11 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | process.start        | -                   | harness (an open string), provider?, model?, routing? (the plugins' decision record), runtime, machine, terminal, resume? (the conversation id it resumes), pid? (a main agent's launch) |
 | process.ready        | process_id          | pid, conversation?, integration {version, protocol}; may repeat after a plugin reload; pidOnly: a pid report that is not a ready report                                                  |
 | process.conversation | process_id          | conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                         |
-| process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed; detail?                                                                                         |
-| turn.start           | process_id          | by: delivery or typed; typed? (the text typed into the pane); resumes? (turn id, after a harness change or restart)                                                                      |
-| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; output?, failure? {kind: limited, auth, other; message}, cause?: interrupt, limited, restart, move                            |
-| inbox.queued         | inbox_id            | kind (the queue time is `at`)                                                                                                                                                            |
-| inbox.status         | inbox_id, turn_id?  | from, to, reason? (recovered, lease_ended, absent); on to = delivered, turn_id is the turn that consumed it                                                                              |
+| process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed                                                                                                  |
+| turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                 |
+| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; output?, failure? {message} (the harness error)                                                                               |
+| inbox.queued         | inbox_id            | none (the queue time is `at`)                                                                                                                                                            |
+| inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                              |
 
 A turn's input is its typed text, or the inbox rows with an `inbox.status` event `to = delivered` and `turn_id` =
 that turn. A delivery opens the turn before the rows move to delivered, so they get its id. A `task` is handed over
@@ -158,9 +157,6 @@ opened ends `launch_failed`, and the session's current process is then the start
 
 `turn.end` `output` is the harness's answer text (not the rendered result, which is the result row's content); the
 migration takes it out of a v1 result. `Db.finishTurn` takes the whole `turn.end` data.
-
-Not written yet: `turn.start` resumes (a move or restart keeps the open turn; see Memory) and a `turn.end` `cause`
-(nothing passes one yet).
 
 ## Hot paths
 
@@ -175,7 +171,7 @@ Not written yet: `turn.start` resumes (a move or restart keeps the open turn; se
   harness and provider.
 - In-place restart after an update: live sessions (`session_live`), the latest live process, its latest
   `process.ready`, compare the integration. Order: restarting mark in memory, SIGTERM, then `turn.end`
-  (interrupted, cause restart) and `process.end` (restart), then the new `process.start`. A refused SIGTERM writes
+  (interrupted) and `process.end` (restart), then the new `process.start`. A refused SIGTERM writes
   nothing.
 - `ls`: sessions by project, the first `task` row, the latest turn and live process as above, and the unread rows
   for the user. `result`: the latest `turn.end` with its result row.
@@ -185,7 +181,7 @@ Not written yet: `turn.start` resumes (a move or restart keeps the open turn; se
 - Live status: from the integration's events (working between `turn.start` and `turn.end`, plus `blocked`), and
   from the runtime only for a harness with no integration.
 - Poll leases: on start, `recoverSending` moves `delivering` rows of polling sessions back to `pending` and the
-  others to `failed`, each with an `inbox.status` reason `recovered`; the plugin acks by row id and skips rows it
+  others to `failed`, each with an `inbox.status`; the plugin acks by row id and skips rows it
   showed. A session may see one message twice after a vibestd restart.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an open `process.start` with no harness in the pane, which reconciliation ends.
@@ -198,11 +194,12 @@ Not written yet: `turn.start` resumes (a move or restart keeps the open turn; se
 
 ## Moving from version 1
 
-vibestd never migrates by itself: on a version 1 file it refuses to start and prints the command of a one-time
-migration script, which the owner runs by hand after stopping vibestd:
-`bun apps/vibest-herdr/scripts/migrate-db-v2.ts ~/.vibest/vibest.db`. It copies the file to
-`vibest.db.v1-backup-<time>` first, builds version 2 from that copy into a new file, checks its foreign keys, and
-only then puts it in place. The script maps:
+vibestd never migrates by itself: on a version 1 file it refuses to start, names the file, and says it is from an
+older vibest and must be migrated with the migration script given with this release, or moved aside to start empty.
+The script is not part of the repository: it is one self-contained file (bun:sqlite and node built-ins only) handed
+out with the release, which the owner runs by hand after stopping vibestd: `bun migrate-db-v2.ts ~/.vibest/vibest.db`.
+It copies the file to `vibest.db.v1-backup-<time>` first, builds version 2 from that copy into a new file, checks its
+foreign keys, and only then puts it in place with `user_version` 2. The script maps:
 
 - `session.report_to_session_id` = `parent_session_id`; when that is null and the role is not `main`, the
   project's `main_session_id`.
@@ -214,7 +211,11 @@ only then puts it in place. The script maps:
 - Each `message` row becomes a `turn.start` (typed, when it had no inbox row and some input), the `inbox.status`
   delivered of the rows it consumed, and a `turn.end` unless it was still working.
 - Inbox `sender_type` becomes the kind: `user` is the session's `task` (its `metadata.task`) or a `send`, `session`
-  a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`.
+  a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`. A v1 result row's
+  content is empty; its text is the message's output (the rendered result), which becomes the row's content.
+- A turn end left in `results/<id>.json` that vibestd had not collected (newer than the open turn's start, or than
+  the last turn's end for a turn typed in the pane) becomes that turn's `turn.end`; `results/` and `reports/` are
+  then moved aside as `<dir>.v1-backup-<time>`.
 - Dropped: stop records, the runtime's last status, a result's parsed details (derived again from its text), and
   every other `metadata` key.
 
