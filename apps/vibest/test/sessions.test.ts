@@ -2390,10 +2390,11 @@ describe.concurrent("Sessions", () => {
     "a later send whose Enter is swallowed gets Enter again: the previous round's start is no pickup",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
-      // The integration reports the first round's start, as Claude's prompt hook does.
+      // A typed harness (a polling one, Pi or Claude, takes its rows itself and never gets Enter).
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository, "cursor")
+      // The integration reports the first round's start, as a prompt hook does.
       yield* sessions.userPrompt(id, "do it")
-      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* writeResult(id, "cursor", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       yield* TestClock.adjust("1 second")
@@ -2405,7 +2406,7 @@ describe.concurrent("Sessions", () => {
       })
       assert.deepStrictEqual(sends[sends.findIndex((c) => c.text === "next") + 1]!.keys, ["enter"])
     }),
-    { hooked: ["pi"] },
+    { hooked: ["cursor"] },
   )
 
   test(
