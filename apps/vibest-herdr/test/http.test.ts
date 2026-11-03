@@ -118,9 +118,19 @@ describe("vibestd's HTTP API", () => {
       assert.deepInclude(older.body, {
         protocol: PROTOCOL,
         version: VERSION,
-        message: `vibest was updated to ${VERSION}; run vibest update to restart this agent on it`,
+        message: `this agent runs an older vibest (protocol ${PROTOCOL - 1}), vibestd runs ${VERSION} (protocol ${PROTOCOL}); run vibest update to restart this agent on it`,
         action: MISMATCH_ACTION,
       })
+      // A caller that sends its own version is named by it.
+      const named = yield* raw({
+        ...own,
+        "vibest-protocol": String(PROTOCOL - 1),
+        "vibest-plugin-version": "0.0.1-old",
+      })
+      assert.include(
+        (named.body as { error: string }).error,
+        `this agent runs vibest 0.0.1-old (protocol ${PROTOCOL - 1}), vibestd runs ${VERSION}`,
+      )
       const newer = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL + 1) })
       assert.deepInclude(newer.body, {
         message: `vibestd is older (${VERSION}); run vibest update`,

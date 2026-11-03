@@ -24,6 +24,7 @@ import { Sessions } from "@vibest/core/sessions"
 import {
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
+  PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
   ACK_ROUTE,
   parseHookRoute,
@@ -75,7 +76,12 @@ export const make = Effect.gen(function* () {
       yield* noteIntegration(db, (name) => header(headers, name))
       const protocol = header(headers, PROTOCOL_HEADER)
       if (protocol !== String(PROTOCOL)) {
-        const mismatch = protocolMismatch(protocol === undefined ? undefined : Number(protocol), PROTOCOL, VERSION)
+        const mismatch = protocolMismatch(
+          protocol === undefined ? undefined : Number(protocol),
+          PROTOCOL,
+          VERSION,
+          header(headers, PLUGIN_VERSION_HEADER),
+        )
         return { status: 409, body: { error: mismatch.message, ...mismatch } } satisfies Reply
       }
       const sessionId = header(headers, SESSION_HEADER)

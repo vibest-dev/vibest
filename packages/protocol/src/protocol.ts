@@ -27,14 +27,20 @@ export type ProtocolMismatch = {
 /**
  * The mismatch between a caller speaking `caller` (undefined: it sent none, so it predates the header) and a vibestd
  * speaking `server` at package `version`. A caller below vibestd was left behind by an update; above it, vibestd is old.
+ * `callerVersion`: the caller's own version when it sent one (vibest-plugin-version), so the line names the old side.
  */
-export const protocolMismatch = (caller: number | undefined, server: number, version: string): ProtocolMismatch => ({
+export const protocolMismatch = (
+  caller: number | undefined,
+  server: number,
+  version: string,
+  callerVersion?: string,
+): ProtocolMismatch => ({
   protocol: server,
   version,
   message:
     caller !== undefined && caller > server
       ? `vibestd is older (${version}); run ${MISMATCH_ACTION}`
-      : `vibest was updated to ${version}; run ${MISMATCH_ACTION} to restart this agent on it`,
+      : `this agent runs ${callerVersion ? `vibest ${callerVersion}` : "an older vibest"} (protocol ${caller ?? "none"}), vibestd runs ${version} (protocol ${server}); run ${MISMATCH_ACTION} to restart this agent on it`,
   action: MISMATCH_ACTION,
 })
 

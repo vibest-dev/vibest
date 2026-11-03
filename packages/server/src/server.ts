@@ -338,7 +338,12 @@ export const ProtocolGateLive = Layer.effect(
           return yield* new ProtocolRejected({
             method: rpc._tag,
             protocol: sent,
-            mismatch: protocolMismatch(sent === null ? undefined : Number(sent), PROTOCOL, VERSION),
+            mismatch: protocolMismatch(
+              sent === null ? undefined : Number(sent),
+              PROTOCOL,
+              VERSION,
+              Option.getOrUndefined(header(headers, PLUGIN_VERSION_HEADER)),
+            ),
           })
         }
         return yield* effect

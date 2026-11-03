@@ -70,6 +70,15 @@ describe("@vibest/cursor", () => {
     assert.strictEqual(run("preToolUse", { ...agent, FAKE_EXIT: "1" }).code, 2)
   })
 
+  it("runs the vibest in VIBEST_COMMAND, not the one on PATH; an argv it cannot read safely falls back to PATH", () => {
+    const own = path.join(dir, "own vibest")
+    fs.writeFileSync(own, `#!/bin/sh\necho "own $* <$(cat)>" >> ${calls}\n`, { mode: 0o755 })
+    const viaSh = run("stop", { ...agent, VIBEST_COMMAND: JSON.stringify(["sh", own]) }, "{}")
+    assert.strictEqual(viaSh.calls, "own integration stop --harness cursor <{}>")
+    const escaped = run("stop", { ...agent, VIBEST_COMMAND: '["/x\\"y"]' }, "{}")
+    assert.strictEqual(escaped.calls, "integration stop --harness cursor <{}>")
+  })
+
   it("a vibest agent's turn end goes to `vibest integration stop`, and never fails the hook", () => {
     const r = run("afterAgentResponse", { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, '{"text":"done"}')
     assert.deepStrictEqual(r, { code: 0, stdout: "", calls: 'integration stop --harness cursor <{"text":"done"}>' })

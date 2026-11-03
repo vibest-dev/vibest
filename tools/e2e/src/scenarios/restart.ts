@@ -383,6 +383,118 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "U6",
+    title:
+      "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = fakeModel()
+      const session = `${w.herdrSession}-drestart`
+      try {
+        const repo = await project(w, "drestart")
+        const agentDir = path.join(w.root, "pi-drestart")
+        await fs.mkdir(agentDir, { recursive: true })
+        await fs.writeFile(
+          path.join(agentDir, "models.json"),
+          JSON.stringify({
+            providers: {
+              fake: {
+                baseUrl: model.url,
+                apiKey: "fake",
+                api: "openai-completions",
+                models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
+              },
+            },
+          }),
+        )
+        await fs.writeFile(
+          path.join(agentDir, "settings.json"),
+          JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
+        )
+        const { wrapper, point, env } = await oldInstall(w, "drestart")
+        const ok = async (args: ReadonlyArray<string>) => {
+          const r = await w.run(repo, [wrapper, ...args], { env, timeoutMs: 60_000 })
+          expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
+          return r.stdout
+        }
+        const row = (id: string) => {
+          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          try {
+            return db
+              .query<Row, [string]>(
+                `SELECT s.id, s.harness_session_id, json_extract(s.metadata, '$.pid') AS pid,
+                   json_extract(s.metadata, '$.integration.version') AS version
+                 FROM session s WHERE s.id = ?`,
+              )
+              .get(id)
+          } finally {
+            db.close()
+          }
+        }
+        const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+        const listed = async (id: string) =>
+          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.name === `s-${id}`)
+
+        // The old vibest starts vibestd and a Pi subagent, which reports the old integration after its first turn.
+        await w.stopDaemon()
+        await ok(["daemon"])
+        const id = (
+          JSON.parse(
+            await ok(["run", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("one")]),
+          ) as { id: string }
+        ).id
+        await until(
+          "the subagent reports the old integration and its conversation",
+          () => {
+            const r = row(id)
+            return r?.version === OLD && r.pid !== null && r.harness_session_id !== null
+          },
+          120_000,
+        )
+        const before = row(id)!
+        const pane = (await listed(id))?.pane_id
+        const daemonBefore = await w.daemonPid()
+
+        // `vibest` on PATH is now the build; `vibest daemon restart` from it, Yes to the replacement and to the restart.
+        await point(binary)
+        const pty = ["python3", "-I", path.join(import.meta.dirname, "..", "terminal.py"), wrapper, "daemon", "restart"]
+        const r = await w.run(repo, pty, { env, stdin: "y\ny\n", timeoutMs: 180_000 })
+        const out = r.stdout.replace(/\r/g, "")
+        expect(r.code === 0, `vibest daemon restart exited ${r.code}: ${out}${r.stderr}`)
+        expect(
+          /Restart it in place and continue its conversation\? \[Y\/n\]/.test(out) &&
+            out.includes("vibest daemon restart has finished") &&
+            out.includes(id),
+          `the subagent was not offered for a restart: ${out}`,
+        )
+        const daemonAfter = await w.daemonPid()
+        expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
+        await until(
+          "the subagent restarted on this integration",
+          () => {
+            const now = row(id)
+            return now?.pid != null && now.pid !== before.pid && now.version !== OLD && now.version !== null
+          },
+          120_000,
+        )
+        expect(!alive(before.pid!), `the subagent's old harness ${before.pid} still runs`)
+        expect(
+          row(id)?.harness_session_id === before.harness_session_id,
+          `the conversation changed: ${before.harness_session_id} -> ${row(id)?.harness_session_id}`,
+        )
+        await until(
+          "herdr lists the restarted subagent as s-<id>",
+          async () => (await listed(id))?.agent === "pi",
+          60_000,
+        )
+        expect((await listed(id))?.pane_id === pane, `the subagent's pane changed: ${pane}`)
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
     id: "U4",
     title:
       "vibest update run by a Claude main agent itself: the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice, and it goes on without running vibest update again",

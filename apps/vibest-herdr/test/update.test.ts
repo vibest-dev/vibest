@@ -12,7 +12,7 @@ import { Effect, FileSystem, Layer } from "effect"
 
 import * as Platform from "#platform"
 
-import { compareVersions, installMethod, isSemver } from "../src/cli.ts"
+import { compareVersions, installMethod, isSemver, removeCommand, upgradeCommand } from "../src/cli.ts"
 import { runVibest, tempDirectory } from "./fakes.ts"
 
 describe("vibest update", () => {
@@ -59,6 +59,46 @@ describe("vibest update", () => {
       ["/s/versions/1/bin/vibest", "x"],
     ])
       assert.isUndefined(installMethod(self, undefined), self.join(" "))
+  })
+
+  it("update and removal go to the package manager that owns the binary, from its real path", () => {
+    const bun = "/home/u/.bun/install/global/node_modules/@vibest/cli-darwin-arm64/bin/vibest"
+    const fnm =
+      "/home/u/.local/state/fnm_multishells/1/lib/node_modules/@vibest/cli/node_modules/@vibest/cli-darwin-arm64/bin/vibest"
+    assert.deepStrictEqual(upgradeCommand(bun, "darwin-arm64"), [
+      "bun",
+      "add",
+      "-g",
+      "@vibest/cli@beta",
+      "@vibest/cli-darwin-arm64@beta",
+    ])
+    assert.deepStrictEqual(upgradeCommand(fnm), [
+      "/home/u/.local/state/fnm_multishells/1/bin/npm",
+      "install",
+      "-g",
+      "--prefix",
+      "/home/u/.local/state/fnm_multishells/1",
+      "@vibest/cli@beta",
+    ])
+    // Neither, as far as the path shows (a local npm install): the npm on PATH.
+    assert.deepStrictEqual(upgradeCommand("/x/node_modules/@vibest/cli-linux-x64/bin/vibest"), [
+      "npm",
+      "install",
+      "-g",
+      "@vibest/cli@beta",
+    ])
+    assert.strictEqual(
+      removeCommand("/home/u/.bun/bin/vibest", "/home/u/.bun/install/global/node_modules/@vibest/cli/bin/vibest.cjs"),
+      "bun remove -g @vibest/cli",
+    )
+    assert.strictEqual(
+      removeCommand("/opt/homebrew/bin/vibest", "/opt/homebrew/lib/node_modules/@vibest/cli/bin/vibest.cjs"),
+      "/opt/homebrew/bin/npm uninstall -g --prefix /opt/homebrew @vibest/cli",
+    )
+    assert.strictEqual(
+      removeCommand("/home/u/.local/bin/vibest", "/home/u/.local/share/vibest/versions/1.0.0/bin/vibest"),
+      "rm /home/u/.local/bin/vibest",
+    )
   })
 
   it.effect(
@@ -257,6 +297,26 @@ describe("vibest update", () => {
           /^this vibest \(.*\) was not installed by npm or install\.sh; nothing to install\.\n/,
         )
         assert.include(source.stdout, "vibestd: restart. vibestd 0.0.0 cannot hand itself over")
+
+        // Two vibest on PATH: which one runs, and how to remove the other.
+        for (const [dir, v] of [
+          ["a", "1.0.0"],
+          ["b", "2.0.0"],
+        ] as const) {
+          yield* fs.makeDirectory(`${home}/${dir}`)
+          yield* fs.writeFileString(`${home}/${dir}/vibest`, `#!/bin/sh\necho "vibest v${v}"\n`)
+          yield* fs.chmod(`${home}/${dir}/vibest`, 0o755)
+        }
+        const two = yield* runVibest(
+          home,
+          { HOME: home, VIBEST_HOME: `${home}/vibest`, PATH: `${home}/a:${home}/b:/bin:/usr/bin` },
+          ["update"],
+        )
+        assert.include(two.stdout, `${home}/a/vibest 1.0.0 runs as vibest; 1 more on PATH\n`)
+        assert.include(
+          two.stdout,
+          `warning: ${home}/b/vibest 2.0.0 is also on PATH, behind the first; remove it with: rm ${home}/b/vibest\n`,
+        )
 
         // An agent may not update vibest.
         const agent = yield* runVibest(home, { HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" }, [

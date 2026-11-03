@@ -7,6 +7,27 @@ import pkg from "../package.json" with { type: "json" }
 /** The hook script: only a vibest agent (VIBEST_AGENT, set in the pane vibest starts) is checked or reported. */
 export const HOOK = `#!/bin/sh
 # @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`vibest integration prompt\` when the user submits, \`vibest integration stop\` at a turn end.
+# The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
+# cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
+vibest() {
+  case "\${VIBEST_COMMAND:-}" in
+    *'\\'*) ;;
+    '["'*'"]')
+      words=$(printf '%s' "$VIBEST_COMMAND" | sed -e 's/^\\["//' -e 's/"\\]$//' -e 's/","/\\
+/g')
+      ifs=$IFS
+      IFS='
+'
+      set -f
+      set -- $words "$@"
+      IFS=$ifs
+      set +f
+      "$@"
+      return
+      ;;
+  esac
+  command vibest "$@"
+}
 case "\${1:-}" in
   guard)
     # preToolUse runs fail-closed, where no answer refuses: outside vibest, allow (it grants no approval).

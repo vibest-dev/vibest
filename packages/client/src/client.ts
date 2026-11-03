@@ -55,7 +55,12 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
   override get message() {
     const got = this.daemonProtocol === null ? "no protocol" : `protocol ${this.daemonProtocol}`
     const self = `vibest ${this.client.version} (${this.client.command.map(shellQuote).join(" ")})`
-    const mismatch = protocolMismatch(PROTOCOL, this.daemonProtocol ?? 0, this.daemonVersion || "unknown")
+    const mismatch = protocolMismatch(
+      PROTOCOL,
+      this.daemonProtocol ?? 0,
+      this.daemonVersion || "unknown",
+      this.client.version,
+    )
     return `${mismatch.message}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}. A package-version difference alone does not require a restart.`
   }
 }

@@ -37,6 +37,7 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 | U1  | `vibest update` installs a newer version the way vibest was installed: install.sh again into the same directories, or npm; a build installs nothing       | script  | a local release and registry offer 999.0.0; the installer run is recorded                                |
 | U2  | `vibest update` hands vibestd over and restarts an old Pi main agent mid-turn in its own terminal                                                         | script  | same session, conversation and terminal; new harness pid; the turn gets `continue`; results still arrive |
 | U5  | a usage-limit move ends only the limited harness and runs the next one in the same pane                                                                   | script  | same pane and session; old pid gone; one round completes on the next login                               |
+| U6  | `vibest daemon restart` onto another vibest offers the agents on an old integration and restarts them in place                                            | script  | same pane and conversation; new harness pid; integration version updated                                 |
 | D9  | `vibest update` from the registry                                                                                                                         | agent   | needs a published newer beta; the agent checks the prompt, the confirmation and the replaced daemon      |
 
 ## Project store
