@@ -462,7 +462,9 @@ const checks: ReadonlyArray<Check> = [
         const out = r.stdout.replace(/\r/g, "")
         expect(r.code === 0, `vibest daemon restart exited ${r.code}: ${out}${r.stderr}`)
         expect(
-          /Restart it in place and continue its conversation\? \[Y\/n\]/.test(out) &&
+          /Restart (it|these \d+ agents) in place and continue (its conversation|their conversations)\? \[Y\/n\]/.test(
+            out,
+          ) &&
             out.includes("vibest daemon restart has finished") &&
             out.includes(id),
           `the subagent was not offered for a restart: ${out}`,
