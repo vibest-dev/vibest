@@ -48,10 +48,10 @@ export interface ContractOptions {
  * Run the contract: `status`, `open` (argv exactly, env, label), `send` (text and keys), `read`, `process`, `close`,
  * then `state`, `session`, `exec` and `present` when the runtime has them. `prepare` and `attach` are checked as
  * members only: `prepare` changes a machine's setup and `attach` opens the runtime's own interface, so the contract
- * never runs them. `events`, when present, is proven twice: by the `exited` event of a program that ends on its own —
- * no `close` anywhere near it — and by the `exited` event of the terminal the contract itself closes; `process` on
- * the closed terminal by `not_found` once it is gone, and on the ended program by `running: false` (its exit code
- * when the runtime knows one).
+ * never runs them. `events`, when present, is proven by the `exited` event of the terminal the contract itself closes;
+ * `process` on the closed terminal by `not_found` once it is gone, and on a program that ended on its own by
+ * `running: false` (its exit code when the runtime knows one). `run`, when present, runs a command in that terminal
+ * once its program ended.
  */
 export const runtimeContract = (
   runtime: Runtime.Runtime,
@@ -156,12 +156,12 @@ export const runtimeContract = (
     }
 
     // A program that exits on its own: `process` stops reporting it running (its exit code when the runtime knows
-    // one; `not_found` once the terminal went with it), and the runtime pushes an `exited` event — no `close` ran.
+    // one; `not_found` once the terminal went with it) — no `close` ran.
     const ended = yield* runtime.open(local, {
       project: options.cwd,
       cwd: options.cwd,
       argv: ["/bin/sh", "-c", "exit 3"],
-      env: {},
+      env: { VBT_CONTRACT: marker },
       label: `vibest contract ${marker} exit`,
     })
     const gone = yield* until(
@@ -183,14 +183,18 @@ export const runtimeContract = (
         gone.value.exitCode === 3,
         `reported exit code ${gone.value.exitCode} for a program that ran exit 3`,
       )
-    if (runtime.events !== undefined)
+    // The terminal is back at its shell: `run` starts the next program there.
+    if (runtime.run !== undefined && Exit.isSuccess(gone)) {
+      yield* runtime.run(ended, ["/bin/sh", "-c", ran("again")])
       yield* until(
-        "events",
-        Ref.get(seen),
-        (events) => events.some((event) => event.type === "exited" && event.terminal.id === ended.id),
-        `emitted no exited event for ${ended.id}, whose program ended on its own (close was never called)`,
+        "run",
+        runtime.read(ended, 40),
+        (out) => out.includes(`vbt-${marker}-again`),
+        "did not run the command in the terminal whose program ended",
         timeout,
       )
+    }
+    if (Exit.isSuccess(gone)) yield* runtime.close(ended)
 
     yield* runtime.close(terminal)
     if (runtime.events !== undefined)

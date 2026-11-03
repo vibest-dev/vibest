@@ -66,7 +66,15 @@ export interface Host {
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
+  /** Read-only: whether this vibest can open the database at `filename` (missing is fine); writes nothing. */
+  readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
 }
+
+/** How long the new vibestd of a handoff waits for the old one to release the lock. */
+export const HANDOFF_TIMEOUT = Duration.seconds(30)
+
+/** `vibest daemon import-check`: this vibest can take over the running vibestd's database (a handoff checks it first). */
+export const checkImport = (host: Host) => Effect.flatMap(Layout, (layout) => host.checkDatabase(layout.database))
 
 export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
   message: Schema.String,
@@ -104,8 +112,12 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provide(Drain.layer),
   )
 
-/** Run vibestd in this process until interrupted (SIGTERM / SIGINT through the runtime's runMain) or stopped by an accepted Daemon.Stop. */
-export const run = (host: Host) =>
+/**
+ * Run vibestd in this process until interrupted (SIGTERM / SIGINT through the runtime's runMain) or stopped by an accepted
+ * Daemon.Stop. `handoff`: started by the running vibestd (Daemon.Handoff), so it waits for that one to release the lock
+ * instead of leaving it running, and backs the database up before opening it.
+ */
+export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -127,6 +139,8 @@ export const run = (host: Host) =>
           write = writer
           return Effect.succeed(true)
         }
+        // A handoff's old vibestd still answers until it has drained and closed: wait for its lock, not its socket.
+        if (options.handoff) return Effect.succeed(undefined)
         return probe(layout.socket).pipe(Effect.map((up) => (up ? false : undefined)))
       }),
       Effect.repeat({
@@ -134,7 +148,7 @@ export const run = (host: Host) =>
         schedule: Schedule.jittered(Schedule.spaced("100 millis")),
       }),
       Effect.timeoutOrElse({
-        duration: DAEMON_START_TIMEOUT,
+        duration: options.handoff ? HANDOFF_TIMEOUT : DAEMON_START_TIMEOUT,
         orElse: () =>
           Effect.fail(
             new DaemonNotAnswering({
@@ -157,6 +171,14 @@ export const run = (host: Host) =>
       })
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
+    // The old vibestd closed the database with its lock: a copy of what it left, before this vibest opens (and migrates) it.
+    if (options.handoff) {
+      const backup = `${layout.database}.before-${VERSION}`
+      for (const suffix of ["", "-wal"])
+        if (yield* fs.exists(`${layout.database}${suffix}`))
+          yield* fs.copyFile(`${layout.database}${suffix}`, `${backup}${suffix}`)
+      yield* Effect.log(`vibestd took over from the previous one; its database is backed up at ${backup}`)
+    }
     const identity = {
       pid: host.processes.pid,
       instance: yield* Effect.flatMap(Crypto.Crypto, (c) => c.randomUUIDv4).pipe(Effect.orDie),

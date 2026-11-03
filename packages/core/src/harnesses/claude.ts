@@ -135,6 +135,7 @@ export const claude: HarnessAdapter = {
   startup: claudeStartup,
   resultField: "last_assistant_message",
   inbox: "poll",
+  ready: "integration",
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),

@@ -1,8 +1,9 @@
 // What vibest can tell about processes when it removes a session (SPEC §8.6a): whether a PID it recorded still exists, and
 // which of this user's processes have their working directory in the worktree. vibest never signals a process it found
 // or recorded (vibestd is replaced through Daemon.Stop, never a signal); herdr's pane.close does that for
-// the pane it closes. The only process that listing ends is its own lsof helper. `terminate` is SIGTERM to one main
-// agent's harness, the PID its own `vibest` reported before it exec'd the harness (Project.StopCoordinator).
+// the pane it closes. The only process that listing ends is its own lsof helper. `terminate` is SIGTERM to one
+// harness pid, never its group: the one a main agent's own `vibest` reported before it exec'd the harness
+// (Project.StopCoordinator), or the one an agent's integration reported (a restart, a usage-limit move).
 import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 

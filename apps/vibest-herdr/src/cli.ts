@@ -1,6 +1,7 @@
 import {
   type Claim,
   claimHeaders,
+  cliHeaders,
   connect,
   type VibestClient,
   probe,
@@ -36,6 +37,7 @@ import {
   Option,
   Path,
   type Runtime,
+  Schedule,
   Schema,
   Stdio,
   Stream,
@@ -46,11 +48,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
 
 import { herdrCommands } from "./herdr-plugin.ts"
-import { type ReplaceFailed, replaceDaemon, compareVersions } from "./replace.ts"
+import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
 export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
-import { Forbidden, VERSION } from "@vibest/protocol/rpc"
+import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
 
 /** A prompt, message or entry that is empty or only whitespace. */
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
@@ -121,12 +123,14 @@ const daemon = (host: Daemon.Host) =>
         Flag.withDescription("Run vibestd in this process"),
         Flag.withDefault(false),
       ),
+      // The new vibestd of a handoff, started by the old one (Daemon.Handoff): it waits for the old one's lock.
+      handoff: Flag.Boolean("import").pipe(Flag.withHidden, Flag.withDefault(false)),
     },
-    ({ foreground }) =>
+    ({ foreground, handoff }) =>
       userOnly("daemon").pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            if (foreground) return yield* Daemon.run(host)
+            if (foreground) return yield* Daemon.run(host, { handoff })
             const layout = yield* Layout
             if (!(yield* probe(layout.socket))) yield* startDaemon
             yield* Console.log(`vibestd is running on ${layout.socket}`)
@@ -149,6 +153,10 @@ const daemon = (host: Daemon.Host) =>
         Command.withDescription(
           "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart",
         ),
+      ),
+      // Internal: whether this vibest can open the running vibestd's database (Daemon.Handoff runs it first).
+      Command.make("import-check", {}, () =>
+        userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host))),
       ),
     ]),
   )
@@ -371,6 +379,7 @@ const startMain =
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
                 // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
+                env,
               }),
             )
           }),
@@ -830,12 +839,47 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   ),
 )
 
-const integration = Command.make("integration").pipe(
-  Command.withDescription(
-    "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard); not for direct use",
-  ),
-  Command.withSubcommands([guard, prompt, stop]),
-)
+/**
+ * The main agent's start after a restart (`vibest update`, a move): vibestd types it into the main agent's own shell once
+ * its harness has ended. It never starts vibestd and waits through a handoff (for a moment nothing answers).
+ */
+const integrationStart = (exec: Exec) =>
+  Command.make("start", { id }, (o) =>
+    Effect.gen(function* () {
+      const got = yield* Effect.flatMap(caller, (c) =>
+        withVibest(c.claim, (client) => client["Session.Start"]({ id: o.id }), { start: false }).pipe(
+          Effect.retry({
+            while: (e) => (e as { readonly _tag?: string })._tag === "DaemonUnavailable",
+            schedule: Schedule.spaced("500 millis"),
+            times: 60,
+          }),
+        ),
+      )
+      const { root } = yield* projectRoot((yield* Path.Path).resolve("."))
+      const main = yield* Launch.coordinatorCommand({
+        harness: got.harness,
+        root,
+        provider: got.provider,
+        model: got.model,
+        passEnv: CALLER_ENV,
+        session: Effect.succeed({
+          sessionId: o.id,
+          harnessSessionId: got.harnessSessionId,
+          projectId: got.projectId,
+          runtime: got.runtime,
+        }),
+      }).pipe(Effect.provide(Harness.layer))
+      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
+    }),
+  ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
+
+const integration = (exec: Exec) =>
+  Command.make("integration").pipe(
+    Command.withDescription(
+      "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
+    ),
+    Command.withSubcommands([guard, prompt, stop, integrationStart(exec)]),
+  )
 
 /** herdr's own integration line per harness: herdr knows an agent's status only through it. */
 /** One finding: ok, a problem with the command that fixes it, or a note. */
@@ -1112,70 +1156,195 @@ const replaceForUpdate = (target: { readonly version: string; readonly command: 
     ),
   )
 
-const update = Command.make("update", {}, () =>
+/**
+ * What `vibest update` does with the running vibestd, from its Ping (as herdr's restart policy): keep it when it already
+ * is this protocol, version and binary; hand it off when it can; otherwise replace it (Daemon.Stop, then a new start).
+ */
+export const daemonPlan = (
+  ping: Ping | undefined,
+  target: { readonly version: string; readonly command: ReadonlyArray<string> },
+) =>
+  ping === undefined
+    ? ({ action: "none", reason: "vibestd is not running; the next vibest command starts the new version" } as const)
+    : ping.protocol === PROTOCOL &&
+        ping.version === target.version &&
+        ping.command?.join("\0") === target.command.join("\0")
+      ? ({ action: "keep", reason: `vibestd ${ping.version} already runs this vibest` } as const)
+      : ping.capabilities?.handoff === true
+        ? ({
+            action: "handoff",
+            reason: `vibestd ${ping.version} hands itself over to ${target.version} (agents keep running)`,
+          } as const)
+        : ({
+            action: "restart",
+            reason: `vibestd ${ping.version} cannot hand itself over, so it is stopped and ${target.version} started`,
+          } as const)
+
+/** How long `vibest update` watches for the new vibestd after a handoff was accepted. */
+const HANDOFF_WATCH = Duration.seconds(45)
+
+/**
+ * The handoff (Daemon.Handoff): the old vibestd checks the new vibest, drains, starts it and lets it take over. The outcome
+ * is what Ping shows afterwards, said as herdr says it, with the command to run next. Undefined when the new one runs.
+ */
+const handoffDaemon = (old: Ping, target: { readonly version: string; readonly command: ReadonlyArray<string> }) =>
   Effect.gen(function* () {
-    yield* userOnly("update")
-    const self = yield* VibestCommand
-    const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
-    if (!method) {
-      return yield* new UpdateError({
-        message: `this vibest (${self.join(" ")}) was not installed by npm or install.sh, so it cannot update itself; install it with one of them`,
-      })
-    }
-    const releases = (yield* Config.String("VIBEST_DOWNLOAD_URL").pipe(Config.withDefault(RELEASES))).replace(
-      /\/+$/,
-      "",
-    )
-    const latest = yield* method.kind === "npm" ? npmLatest : latestVersion(`${releases}/version`, (r) => r.text)
     const layout = yield* Layout
-    const kept = (version: string, installedPkg: boolean, daemon: string) =>
-      `vibest ${version} is ${installedPkg ? "installed" : "current"}, but ${daemon}`
-    if (compareVersions(VERSION, latest) >= 0) {
-      yield* Console.log(`vibest is already up to date (v${VERSION}).`)
-      // The package is current; the running vibestd may not be. Replacing it is offered, never implied.
-      const running = Option.getOrUndefined(yield* readPing(layout.socket))
-      const failed =
-        running && (running.version !== VERSION || running.command?.join("\0") !== self.join("\0"))
-          ? yield* replaceForUpdate({ version: VERSION, command: self })
-          : undefined
-      if (failed !== undefined) return yield* new UpdateError({ message: kept(VERSION, false, failed) })
-      return
+    const reported = yield* versionOf(target.command)
+    if (reported !== target.version)
+      return `\`${target.command.join(" ")} --version\` reports ${reported}, not ${target.version}; the old vibestd still runs. Next: vibest update`
+    const reply = yield* RpcClient.withHeaders(
+      connect(layout.socket).pipe(
+        Effect.flatMap((c) => c["Daemon.Handoff"]({ instance: old.instance!, command: target.command })),
+      ),
+      cliHeaders((yield* Path.Path).resolve(".")),
+    ).pipe(Effect.scoped, Effect.exit)
+    if (Exit.isFailure(reply)) {
+      const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause)) as { readonly message?: string } | undefined
+      // Refused or lost: Ping says which.
+      const still = Option.getOrUndefined(yield* readPing(layout.socket))
+      if (still?.instance === old.instance)
+        return `the handoff did not happen (${e?.message ?? "no reply"}); the old vibestd ${old.version} still runs. Next: vibest update`
     }
-    yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
-    // ponytail: Bun keeps its global packages under ~/.bun; any other launcher is taken for npm.
-    const pm = self[0]!.includes("/.bun/")
-      ? ["bun", "add", "-g", "@vibest/cli@beta"]
-      : ["npm", "install", "-g", "@vibest/cli@beta"]
-    // install.sh of the release, read whole before it runs (a cut-off download must not run half a script), into this install.
-    const installer =
-      method.kind === "npm"
-        ? runInherit(pm)
-        : runInherit(
-            ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
-            {
-              VIBEST_INSTALL: method.share,
-              VIBEST_DOWNLOAD_URL: releases,
-            },
-          )
-    const pkg = yield* installer.pipe(
-      Effect.map(() => undefined),
-      Effect.catchTag("UpdateError", (e) => Effect.succeed(e)),
+    const now = yield* readPing(layout.socket).pipe(
+      Effect.repeat({
+        until: (p) => Option.isSome(p) && p.value.instance !== old.instance && p.value.version === target.version,
+        schedule: Schedule.spaced("200 millis"),
+      }),
+      Effect.timeoutOption(HANDOFF_WATCH),
+      Effect.map(Option.flatten),
     )
-    if (pkg) {
-      return yield* new UpdateError({ message: `${pkg.message}; vibestd not attempted` })
+    if (Option.isSome(now)) {
+      yield* Console.log(`vibestd ${now.value.version} (pid ${now.value.pid}) took over; agents kept running.`)
+      return undefined
     }
-    // The installer must have put the new vibest where this one runs from; anything else is reported, never guessed.
-    // replaceDaemon checks that `self --version` now reports `latest` before it stops anything.
-    // install.sh puts each version in a directory of its own: the new vibest is there, not at this one's path.
-    const command = method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self
-    const failed = (yield* probe(layout.socket)) ? yield* replaceForUpdate({ version: latest, command }) : undefined
-    yield* Console.log("Agents already open keep the old version until you restart them.")
-    if (failed !== undefined) return yield* new UpdateError({ message: kept(latest, true, failed) })
-  }),
+    const after = Option.getOrUndefined(yield* readPing(layout.socket))
+    if (after === undefined)
+      return `no vibestd answers on ${layout.socket}. Next: vibest daemon (see ${layout.home}/vibestd.log)`
+    return `vibestd ${after.version} (instance ${after.instance ?? "unknown"}) answers, not the new ${target.version}. Next: vibest update`
+  })
+
+/**
+ * The agents still on an old integration: asked once on a terminal (or `--yes`), then handed to vibestd, which restarts
+ * them in place once this process has exited: this `vibest update` may run inside one of them (the main agent's shell),
+ * and ending that harness would end it too. Returns why the step failed, if it did.
+ */
+const restartAgents = (version: string, yes: boolean) =>
+  Effect.gen(function* () {
+    const cwd = (yield* Path.Path).resolve(".")
+    const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
+      withVibest({ _tag: "cli", repositoryRoot: cwd }, f, { start: false })
+    const outdated = yield* ask((client) => client["Agents.Outdated"]())
+    if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
+    const working = outdated.filter((a) => a.working).map((a) => a.id)
+    const ids = outdated.map((a) => a.id).join(", ")
+    const busy = working.length === 0 ? "" : `; ${working.join(", ")} ${working.length === 1 ? "is" : "are"} working`
+    const blocked = outdated.filter((a) => a.blocked !== null)
+    const restartable = outdated.filter((a) => a.blocked === null)
+    const refused = "their calls to vibestd will be refused with a message that names vibest update"
+    const list = `${outdated.length} agent${outdated.length === 1 ? "" : "s"} still run${outdated.length === 1 ? "s" : ""} the old integration (${ids}${busy})`
+    for (const a of blocked) yield* Console.log(`${a.id} cannot be restarted in place: ${a.blocked}.`)
+    if (restartable.length === 0) return
+    if (!yes) {
+      if (!(yield* interactive))
+        return yield* Console.log(
+          `vibest ${version} installed. ${list}. Not restarted without a terminal (vibest update --yes restarts them); ${refused} until then.`,
+        )
+      if (
+        !(yield* askYesNo(
+          `vibest ${version} installed. ${list}. Restart them now and continue? [Y/n]: `,
+          "2 minutes",
+          true,
+        ))
+      )
+        return yield* Console.log(`They keep the old integration; ${refused}.`)
+    }
+    yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after: process.pid }))
+    yield* Console.log(
+      `vibest update has finished. vibestd restarts ${restartable.map((a) => a.id).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+    )
+  })
+
+const update = Command.make(
+  "update",
+  {
+    yes: Flag.Boolean("yes").pipe(
+      Flag.withDescription(
+        "Restart the agents still on the old integration without asking (a shell without a terminal, such as the main agent's)",
+      ),
+      Flag.withDefault(false),
+    ),
+  },
+  ({ yes }) =>
+    Effect.gen(function* () {
+      // The user, or the project's main agent from its own shell: its integration is the one an update replaces.
+      if (Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) !== Guard.COORDINATOR)
+        yield* userOnly("update")
+      const self = yield* VibestCommand
+      const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
+      const layout = yield* Layout
+      // 1. Install, the way this vibest was installed. One already current (or not installed by either) does only the
+      // steps after it, which also covers an upgrade made with npm or bun directly.
+      let target: { readonly version: string; readonly command: ReadonlyArray<string> } = {
+        version: VERSION,
+        command: self,
+      }
+      if (method === undefined)
+        yield* Console.log(
+          `this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`,
+        )
+      else {
+        const releases = (yield* Config.String("VIBEST_DOWNLOAD_URL").pipe(Config.withDefault(RELEASES))).replace(
+          /\/+$/,
+          "",
+        )
+        const latest = yield* method.kind === "npm" ? npmLatest : latestVersion(`${releases}/version`, (r) => r.text)
+        if (compareVersions(VERSION, latest) >= 0) yield* Console.log(`vibest is already up to date (v${VERSION}).`)
+        else {
+          yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
+          // ponytail: Bun keeps its global packages under ~/.bun; any other launcher is taken for npm.
+          const pm = self[0]!.includes("/.bun/")
+            ? ["bun", "add", "-g", "@vibest/cli@beta"]
+            : ["npm", "install", "-g", "@vibest/cli@beta"]
+          // install.sh of the release, read whole before it runs (a cut-off download must not run half a script), into this install.
+          const installer =
+            method.kind === "npm"
+              ? runInherit(pm)
+              : runInherit(
+                  ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
+                  { VIBEST_INSTALL: method.share, VIBEST_DOWNLOAD_URL: releases },
+                )
+          yield* installer.pipe(
+            Effect.mapError((e) => new UpdateError({ message: `${e.message}; vibestd not attempted` })),
+          )
+          // install.sh puts each version in a directory of its own: the new vibest is there, not at this one's path.
+          target = {
+            version: latest,
+            command: method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self,
+          }
+        }
+      }
+      // 2. vibestd, from its Ping: keep, hand off or restart; the plan and its reason first.
+      const running = Option.getOrUndefined(yield* readPing(layout.socket))
+      const plan = daemonPlan(running, target)
+      // Nothing runs: nothing to plan, and no agent to restart.
+      if (plan.action === "none") return
+      yield* Console.log(`vibestd: ${plan.action}. ${plan.reason}.`)
+      const failed =
+        plan.action === "handoff"
+          ? yield* handoffDaemon(running!, target)
+          : plan.action === "restart"
+            ? yield* replaceForUpdate(target)
+            : undefined
+      if (failed !== undefined) return yield* new UpdateError({ message: `vibest ${target.version}: ${failed}` })
+      // 3. The agents still on the old integration, asked about once.
+      const agents = yield* restartAgents(target.version, yes)
+      if (agents !== undefined) return yield* new UpdateError({ message: agents })
+    }),
 ).pipe(
   Command.withAlias("upgrade"),
   Command.withDescription(
-    "Update vibest the way it was installed (install.sh: the latest GitHub release; npm: @vibest/cli@beta with the package manager that installed it), with its harness plugins, and offer to replace a running vibestd (after a yes; agents keep running; refused if daemon operations do not drain). Sessions already running keep the plugins they started with until they restart",
+    "Update vibest the way it was installed (install.sh: the latest GitHub release; npm: @vibest/cli@beta with the package manager that installed it), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations",
   ),
 )
 
@@ -1200,7 +1369,7 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       project,
       plugins,
       subscriptions,
-      integration,
+      integration(exec),
       doctor,
       update,
       herdrCommands(userOnly),

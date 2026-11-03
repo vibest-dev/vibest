@@ -155,6 +155,8 @@ export class Inbox extends Context.Service<
             const coord = yield* db.coordinatorOf(projectId)
             if (!coord?.address || coord.address.id === "" || !coord.runtime)
               return yield* db.dropWaiting(projectId, "absent")
+            // vibestd is restarting its harness in place: the rows wait for the new one.
+            if (coord.restarting !== undefined) return
             const address = encodeAddress(coord.address)
             const guard = { projectId, runtime: coord.runtime, address }
             const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)

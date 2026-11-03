@@ -3,7 +3,8 @@
 #
 # Each version unpacks into its own directory, ~/.local/share/vibest/versions/<version>/ (bin/vibest, the harness
 # plugins, and herdr-plugin/ beside them; herdr-plugin is not linked), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
-# started from; the one before the newest is kept for them, older ones are removed. Nothing outside these paths is written.
+# started from; the one before the newest and any a running process still uses are kept, older ones are removed. Nothing
+# outside these paths is written.
 #   VIBEST_DOWNLOAD_URL  where the archives are (default: the latest GitHub release)
 #   VIBEST_INSTALL       instead of ~/.local/share/vibest
 #   VIBEST_BIN           instead of ~/.local/bin (remembered for later installs and `vibest update`)
@@ -35,12 +36,17 @@ mv -f "$bin/.vibest.new" "$bin/vibest"
 
 printf '%s\n' "$bin" > "$share/bin"
 
-# Keep this version and the one installed before it.
+# Keep this version, the one installed before it, and any a running process still uses: vibestd runs its bin/vibest, and
+# each agent loaded its harness plugin from there (a deleted --plugin-dir unloads Claude's hooks).
+# ponytail: processes of this machine only; agents on a remote machine are not seen.
 previous=$(cat "$share/current" 2>/dev/null || true)
 printf '%s\n' "$version" > "$share/current"
+running=$(ps -A -o args= 2>/dev/null || true)
 for old in "$share/versions"/*; do
   name=$(basename "$old")
-  [ "$name" = "$version" ] || [ "$name" = "$previous" ] || rm -rf "$old"
+  [ "$name" = "$version" ] || [ "$name" = "$previous" ] && continue
+  case "$running" in *"$old/"*) continue ;; esac
+  rm -rf "$old"
 done
 
 echo "vibest $version installed: $bin/vibest"

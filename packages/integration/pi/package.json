@@ -27,6 +27,7 @@
     "@effect/platform-node-shared": "catalog:",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:"
   },

@@ -1142,6 +1142,31 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a usage-limit move in place: only the limited harness ends, the next one runs in the same terminal, no pane closes",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const processes = yield* FakeProcesses
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const before = (yield* db.getSession(id))!
+      yield* writeResult(id, "pi", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      const moved = (yield* db.getSession(id))!
+      assert.strictEqual(moved.harnessId, "claude")
+      assert.strictEqual(moved.turnState, "open")
+      assert.deepStrictEqual(yield* processes.signaled, [before.metadata.pid!], "SIGTERM to the pi harness only")
+      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.lengthOf(yield* herdr.callsTo("open"), 1, "no other terminal")
+      const [run] = yield* herdr.callsTo("run")
+      assert.strictEqual(run!.terminal, before.address.id)
+      assert.strictEqual(harnessOf(run!.argv), "claude")
+      assert.deepStrictEqual(moved.address, before.address)
+      // The task reaches the next harness as a turn of the same round.
+      assert.include((yield* herdr.callsTo("send")).map((c) => c.text ?? "").join("\n"), "do it")
+    }),
+  )
+
+  test(
     "a turn-end rate limit moves the subagent to another harness and the task's round carries the result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -1204,6 +1229,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.strictEqual(linked[0]!.inbox, open[0]!.inbox)
     }),
+    { noRun: true },
   )
 
   test(
@@ -1301,6 +1327,7 @@ describe.concurrent("Sessions", () => {
       assert.isNull(row.exitedAt)
       assert.include((yield* db.latestInbox(id, "result"))!.message, "closing its terminal failed")
     }),
+    { noRun: true },
   )
 
   test(
@@ -1324,6 +1351,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.include((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
     }),
+    { noRun: true },
   )
 
   test(
@@ -1349,6 +1377,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude", "cursor", "claude"],
       )
     }),
+    { noRun: true },
   )
 
   const failSeen: Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }> = []
@@ -1378,6 +1407,7 @@ describe.concurrent("Sessions", () => {
       )
     }),
     {
+      noRun: true,
       unusable: ["claude"],
       plugins: [
         Plugin.define({
@@ -1443,6 +1473,7 @@ describe.concurrent("Sessions", () => {
       )
     }),
     {
+      noRun: true,
       plugins: [
         Plugin.define({
           id: "pick",
@@ -1580,6 +1611,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
     {
+      noRun: true,
       plugins: [
         Plugin.define({
           id: "once",
@@ -1640,6 +1672,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
     {
+      noRun: true,
       plugins: [
         Plugin.define({
           id: "close-fails",
@@ -1762,6 +1795,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
+    { noRun: true },
   )
 
   test(
@@ -1787,6 +1821,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude", "cursor", "claude"],
       )
     }),
+    { noRun: true },
   )
 
   test(
@@ -1931,6 +1966,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(args[args.indexOf("--model") + 1], "fake-strong")
     }),
     {
+      noRun: true,
       plugins: [
         Plugin.define({
           id: "cheap-second",
@@ -1988,6 +2024,7 @@ describe.concurrent("Sessions", () => {
       // Pi refuses --provider without --model: the login is recorded on the session, Pi starts on its default.
       assert.notInclude(args, "--provider")
     }),
+    { noRun: true },
   )
 
   test(
@@ -2078,6 +2115,7 @@ describe.concurrent("Sessions", () => {
       // Pi refuses --provider without --model: the login is recorded on the session, Pi starts on its default.
       assert.notInclude(args, "--provider")
     }),
+    { noRun: true },
   )
 
   test(
@@ -2130,6 +2168,7 @@ describe.concurrent("Sessions", () => {
       )
     }),
     {
+      noRun: true,
       plugins: [
         Plugin.define({
           id: "no-claude",
@@ -2225,6 +2264,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(results[0]!.n, 1)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
+    { noRun: true },
   )
 
   const lateResult = { on: false, text: "", id: "" }

@@ -71,6 +71,7 @@ export const pi: HarnessAdapter = {
   interruptKey: "esc",
   resultField: "text",
   inbox: "subscribe",
+  ready: "integration",
   checkProvider: () => undefined,
   launchArgs: (i) => [
     "--session-id",

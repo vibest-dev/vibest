@@ -214,7 +214,7 @@ describe("vibest update", () => {
         assert.strictEqual(current.code, 1, current.stdout)
         assert.strictEqual(
           current.stderr,
-          `vibestd not replaced: it still runs the vibest it was started with. replacing vibestd needs a yes on a terminal; nothing was stopped\nUpdateError: vibest ${VERSION} is current, but vibestd not replaced: it still runs the vibest it was started with\n`,
+          `vibestd not replaced: it still runs the vibest it was started with. replacing vibestd needs a yes on a terminal; nothing was stopped\nUpdateError: vibest ${VERSION}: vibestd not replaced: it still runs the vibest it was started with\n`,
         )
         latest = "999.0.0"
         const installedOnly = yield* run(["update"])
@@ -227,7 +227,7 @@ describe("vibest update", () => {
         )
         assert.match(
           installedOnly.stderr,
-          /\nUpdateError: vibest 999\.0\.0 is installed, but vibestd not replaced: it still runs the vibest it was started with\n$/,
+          /\nUpdateError: vibest 999\.0\.0: vibestd not replaced: it still runs the vibest it was started with\n$/,
         )
         assert.notInclude(methods, "Daemon.Stop")
 
@@ -245,17 +245,18 @@ describe("vibest update", () => {
         assert.notInclude(pmFails.stderr, "not replaced")
         assert.notInclude(pmFails.stdout, "old version")
 
-        // vibest from source was installed by neither npm nor install.sh: nothing is asked or installed.
+        // vibest from source was installed by neither npm nor install.sh: nothing is installed; vibestd and the agents
+        // are still looked at (an upgrade made by hand).
         const source = yield* runVibest(
           home,
           { HOME: home, VIBEST_HOME: `${home}/vibest`, PATH: `${home}/bin:/bin:/usr/bin` },
           ["update"],
         )
-        assert.strictEqual(source.code, 1)
         assert.match(
-          source.stderr,
-          /^UpdateError: this vibest \(.*\) was not installed by npm or install\.sh, so it cannot update itself/,
+          source.stdout,
+          /^this vibest \(.*\) was not installed by npm or install\.sh; nothing to install\.\n/,
         )
+        assert.include(source.stdout, "vibestd: restart. vibestd 0.0.0 cannot hand itself over")
 
         // An agent may not update vibest.
         const agent = yield* runVibest(home, { HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" }, [

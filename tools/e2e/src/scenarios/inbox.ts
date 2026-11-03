@@ -7,7 +7,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, expect, row, Skip, until, type World } from "../world.ts"
+import { agentModel, expect, herdr, row, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -117,31 +117,6 @@ const piDir = async (w: World, name: string, url: string) => {
   return dir
 }
 
-/** One call to a herdr session's socket API: newline-delimited JSON, one response per connection (effect-herdr-sdk). */
-const herdr = (socket: string, method: string, params: object) =>
-  new Promise<Record<string, unknown>>((resolve, reject) => {
-    const id = crypto.randomUUID()
-    let buffer = ""
-    Bun.connect({
-      unix: socket,
-      socket: {
-        open: (s) => void s.write(`${JSON.stringify({ id, method, params })}\n`),
-        data: (s, chunk) => {
-          buffer += Buffer.from(chunk).toString("utf8")
-          for (const line of buffer.split("\n").slice(0, -1)) {
-            const m = JSON.parse(line) as { id?: string; result?: Record<string, unknown>; error?: unknown }
-            if (m.id !== id) continue
-            s.end()
-            if (m.error) reject(new Error(`herdr ${method}: ${JSON.stringify(m.error)}`))
-            else resolve(m.result ?? {})
-          }
-          buffer = buffer.slice(buffer.lastIndexOf("\n") + 1)
-        },
-        error: (_s, e) => reject(e),
-      },
-    }).catch(reject)
-  })
-
 /** Stops and deletes a herdr session this check started, as World.close does for the run's own. */
 const dropHerdrSession = async (w: World, session: string) => {
   if (
@@ -153,26 +128,6 @@ const dropHerdrSession = async (w: World, session: string) => {
     await w.run(w.root, ["herdr", "session", "stop", session])
     await w.run(w.root, ["herdr", "session", "delete", session])
   }
-}
-
-/** Every entry of the Claude conversations kept for `cwd` (the user's ~/.claude: CLAUDE_CONFIG_DIR is unset). */
-const transcript = async (w: World, cwd: string) => {
-  const dir = path.join(w.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
-  const files = (await fs.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
-  const entries: Array<{ type?: string; raw: string; text: string }> = []
-  for (const f of files)
-    for (const raw of (await fs.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
-      const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
-      const content = e.message?.content
-      const text =
-        typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content.map((c: { text?: string }) => c.text ?? "").join("")
-            : ""
-      entries.push({ type: e.type, raw, text })
-    }
-  return entries
 }
 
 /**

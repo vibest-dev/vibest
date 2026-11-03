@@ -36,6 +36,8 @@ export interface FakeRuntimeOptions {
   readonly interruptIgnored?: boolean
   /** `events` carries state and exited changes; off (the default), it stays silent and tests drive each check. */
   readonly statusEvents?: boolean
+  /** No `run`: a usage-limit move closes the agent's terminal and opens the next one (a runtime without the member). */
+  readonly noRun?: boolean
 }
 
 /** What a test can read back: one entry per runtime call, in the API's own shapes. */
@@ -56,6 +58,7 @@ export interface RuntimeCalls {
   readonly state: { readonly terminal: string }
   readonly session: { readonly terminal: string }
   readonly close: { readonly terminal: string }
+  readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
 }
 
@@ -118,6 +121,8 @@ export class FakeRuntime extends Context.Service<
     }>
     /** Whether the runtime answers (default yes). No: every call fails `unreachable`, as for a session that is not running. */
     readonly reachable: Ref.Ref<boolean>
+    /** What the harness's integration does once a harness `open` started is up (testLayer: report it ready to vibestd). */
+    readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
     /** The next `n` texts are accepted without moving the agent, so confirm times out. */
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
@@ -132,6 +137,7 @@ export class FakeRuntime extends Context.Service<
       const panes = yield* Ref.make(HashMap.empty<string, { readonly workspaceId: string; readonly cwd: string }>())
       const holds = yield* Ref.make(HashMap.empty<HoldMethod, Hold>())
       const events = yield* PubSub.unbounded<RuntimeEvent>()
+      const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
       let counter = 0
       const next = () => Effect.sync(() => ++counter)
 
@@ -290,8 +296,25 @@ export class FakeRuntime extends Context.Service<
           return agent
         })
 
+      // The terminal's shell starts `argv` again: the agent recorded there is alive and idle, and its integration reports.
+      const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
+        call(
+          "run",
+          { terminal: terminal.id, argv: [...argv] },
+          terminal.id,
+          Effect.gen(function* () {
+            if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("run", "not_found")
+            const record = HashMap.get(yield* Ref.get(agents), terminal.id)
+            if (Option.isNone(record)) return
+            yield* updateAgent(terminal.id, (current) => ({ ...current, alive: true, status: "idle" }))
+            const session = record.value.vibestSession
+            if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
+          }),
+        )
+
       const runtime: Runtime = {
         kind: KIND,
+        ...(options.noRun ? {} : { run }),
         status: () => Effect.succeed({ status: "online" as const }),
         open: (machine, input) =>
           // `open`'s hold target is the vibest session id from the env: a terminal id does not exist yet.
@@ -354,6 +377,7 @@ export class FakeRuntime extends Context.Service<
                 return next
               })
               void machine
+              if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
               const terminal: Terminal = { machine: "local", id: paneId }
               return terminal
             }),
@@ -536,6 +560,7 @@ export class FakeRuntime extends Context.Service<
         reachable,
         skipPromptUpdates,
         events,
+        onStarted,
       })
     })
 

@@ -412,12 +412,16 @@ describe.concurrent("vibest CLI without vibestd", () => {
           ["daemon", "restart"],
           ["--harness", "pi"],
           // The guard lets these through: vibest refuses them to an agent before it reads or writes the user's setup.
+          // `update` is the user's and the main agent's.
           ["update"],
         ]
         const runs = [
           { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" },
           { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234" },
-        ].flatMap((env) => commands.map((args) => ({ env, args })))
+        ]
+          .flatMap((env) => commands.map((args) => ({ env, args })))
+          // The main agent may run vibest update from its own shell (its integration is the one an update replaces).
+          .filter(({ env, args }) => !(env.VIBEST_AGENT === "coordinator" && args[0] === "update"))
         yield* Effect.forEach(
           runs,
           ({ env, args }) =>

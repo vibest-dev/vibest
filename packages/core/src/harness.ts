@@ -73,6 +73,11 @@ export interface HarnessAdapter {
    * plugin; rows it took are leased, and a vibestd restart puts them back to pending).
    */
   readonly inbox: "prompt" | "subscribe" | "poll"
+  /**
+   * How vibestd knows a started harness takes input: its integration reports it with one request at its start
+   * (`integration`: Session.Ready, or the HTTP `/session/ready`), or the runtime's agent state (`runtime`).
+   */
+  readonly ready: "integration" | "runtime"
   /** Error message when this harness cannot use `provider`, else undefined. */
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>

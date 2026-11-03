@@ -1,4 +1,4 @@
-# Run argv on a pseudo-terminal and answer its questions: each time it prints a "[y/N]" prompt, type the next line of
+# Run argv on a pseudo-terminal and answer its questions: each time it prints a "[y/N]" or "[Y/n]" prompt, type the next line of
 # stdin. Typing ahead does not work: a program that sets up the terminal may flush what was typed before it asked.
 # Copies the output to stdout and exits with the child's status once the child exits.
 import os, pty, re, select, sys
@@ -22,7 +22,7 @@ while True:
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
         since += data
-        if answers and re.search(rb"\[y/N\]:?\s*$", since):
+        if answers and re.search(rb"\[(y/N|Y/n)\]:?\s*$", since):
             os.write(fd, (answers.pop(0) + "\n").encode())
             since = b""
         continue

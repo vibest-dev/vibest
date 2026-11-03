@@ -417,8 +417,21 @@ const over = (options: TestOptions) => {
       options.pluginTimeout ? { timeout: options.pluginTimeout } : {},
     ),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
+  // The fake harness's integration: it reports ready, with its harness's pid, once `open` or `run` started it (rpc.ts
+  // Session.Ready).
+  const integration = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const fake = yield* FakeRuntime
+      const db = yield* Db
+      let pid = 50_000
+      yield* Ref.set(fake.onStarted, (session) =>
+        Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(session, { ready: at, pid: ++pid }))),
+      )
+    }),
+  )
   return Layer.provideMerge(FakeRuntime.layer(options))(
     Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
+      Layer.provideMerge(integration),
       Layer.provideMerge(plugins),
       Layer.provideMerge(Inbox.layer),
       Layer.provideMerge(

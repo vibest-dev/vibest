@@ -20,6 +20,7 @@ export const cursor: HarnessAdapter = {
   interruptKey: "ctrl+c",
   resultField: "text",
   inbox: "prompt",
+  ready: "runtime",
   checkProvider: anthropicOnly("cursor"),
   launchArgs: (i) => [
     // One argument: `--resume [chatId]` takes an optional value, so a separate id starting with - would be read as a flag.
