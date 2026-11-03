@@ -4,10 +4,11 @@ import module from "node:module"
 // revision, coalesces bursts of saves, and never makes a spawn wait more than ACTIVATION_WAIT.
 import { assert, describe, it } from "@effect/vitest"
 import { Layout } from "@vibest/core/paths"
-import { type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin, type AgentStartBefore } from "@vibest/plugin"
+import { harnessChoice } from "@vibest/plugin-harness-choice"
 import { Context, type Crypto, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schedule, Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -384,11 +385,12 @@ const home = Effect.gen(function* () {
   return dir
 })
 
-/** The supervised layer on `dir`, built in its own scope so a test can close it. The builtin default harness choice
- *  is always loaded first; these tests watch user plugins, so `list` hides it. */
+/** The supervised layer on `dir`, built in its own scope so a test can close it. The default harness choice is loaded
+ *  first, as the product does; these tests watch user plugins, so `list` hides it. */
 const supervise = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, loader)),
+    Layer.provide(Layer.succeed(Builtins, [harnessChoice])),
     Layer.provide(Subscriptions.layer),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),

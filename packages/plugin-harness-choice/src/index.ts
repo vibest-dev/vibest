@@ -1,10 +1,11 @@
-// The builtin default harness choice (architecture.md §9), always loaded first, before user plugins: left alone, a
-// caller's usable harness preference stands; anything else is routed to the available harness with the most quota
-// left. User plugins run after it, so they see and may override what it chose.
+// The default harness choice (architecture.md §9), a plugin the product bundles and loads first, before user plugins:
+// left alone, a caller's usable harness preference stands; anything else is routed to the available harness with the
+// most quota left. User plugins run after it, so they see and may override what it chose. On a usage limit, its
+// agent.fail hook picks the next harness.
+import type { Candidate } from "@vibest/core/plugins"
+import { isLimited, stillLimited } from "@vibest/core/subscriptions/index"
 import { AgentRefused, Plugin, type HarnessOption, type SubscriptionSnapshot } from "@vibest/plugin"
 import { Effect } from "effect"
-
-import { isLimited, stillLimited } from "../subscriptions/index.ts"
 
 /** The fullest usage window of a login; -1 when it reported none. */
 const fullest = (row: SubscriptionSnapshot) => row.limits.reduce((max, l) => Math.max(max, l.percent), -1)
@@ -124,3 +125,11 @@ export const harnessChoicePlugin = Plugin.define({
       )
     }),
 })
+
+/** The candidate the product loads first, before the runtime plugins and the user's plugins. */
+export const harnessChoice: Candidate = {
+  source: "builtin:harness-choice",
+  revision: "harness-choice",
+  options: {},
+  plugin: harnessChoicePlugin,
+}

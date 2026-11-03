@@ -2,12 +2,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { mainCheckout, repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
+import { harnessChoice } from "@vibest/plugin-harness-choice"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -361,6 +362,7 @@ describe("plugins: spawn hook", () => {
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
         Plugins.make([
+          harnessChoice,
           {
             source: "hang",
             revision: "-",
@@ -405,6 +407,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 const loaded = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
+    Layer.provide(Layer.succeed(Builtins, [harnessChoice])),
     Layer.provide(Subscriptions.layer),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),

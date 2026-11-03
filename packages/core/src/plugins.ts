@@ -19,7 +19,6 @@ import {
   Stream,
 } from "effect"
 
-import { harnessChoicePlugin } from "./builtin/harness-choice.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -86,14 +85,8 @@ type Registered<N extends HookName> = {
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
 const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
-/** The builtin default harness choice, first in every list (architecture.md §9); user plugins run after it. */
-const builtin: Candidate = {
-  source: "builtin:harness-choice",
-  revision: "harness-choice",
-  options: {},
-  plugin: harnessChoicePlugin,
-}
-/** Builtin plugins of the host app (the runtime plugins, runtime-port.md §2), after the default choice. */
+/** Builtin plugins of the host app, before user plugins: the default harness choice first (architecture.md §9), then
+ * the runtime plugins (runtime-port.md §2). The core itself holds no choice policy. */
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
 })
@@ -512,10 +505,10 @@ export class Plugins extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {
-  /** Set up the builtin default and `candidates` in order, each in its own scope under the caller's. */
+  /** Set up `candidates` in order, each in its own scope under the caller's. */
   static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>
     makeHost(options).pipe(
-      Effect.tap((host) => host.activate([builtin, ...candidates])),
+      Effect.tap((host) => host.activate(candidates)),
       Effect.map((host) => host.service),
     )
 
@@ -553,7 +546,7 @@ export class Plugins extends Context.Service<
           rewatched = true
           read = yield* sources.read
         }
-        yield* host.activate([builtin, ...builtins, ...read.candidates])
+        yield* host.activate([...builtins, ...read.candidates])
         // ponytail: Bun 1.4's fs.watch on macOS sometimes drops other directories' events for a moment after a watch
         // closes (seen in 2–6% of tries); one more read RECHECK later catches those. Drop when Bun no longer does.
         if (rewatched)
