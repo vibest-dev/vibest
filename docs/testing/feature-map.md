@@ -119,7 +119,7 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S13 | herdr status push: a status change reaches vibestd without the poll                                               | runtime                                                         |
 | S14 | several repositories: separate Projects, one Project per repository wherever you stand in it, runs in two at once | agent (story S13 in [e2e-user-stories.md](e2e-user-stories.md)) |
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
-| S17 | Pi coordinator and Pi session on the fake model: the delivery matrix below                                        | inbox: `tools/e2e` S17                                          |
+| S17 | the delivery matrix below, each main agent and subagent on the fake model                                         | inbox: `tools/e2e` S17-<main>-<sub>                             |
 
 ### Delivery matrix
 
@@ -132,19 +132,17 @@ right agent:
 4. a subagent's `vibest report` reaches the main agent while it is idle, and while it is mid-turn;
 5. one delivery after `vibest daemon restart`.
 
-A cell names the `tools/e2e` check (fake model) that covers it, or says **agent**: real harnesses on a real model,
-proven with evidence by the agent step of `pnpm verify` (the inbox row and its status, the entry in the receiving
-agent's conversation, and that it is there once). Claude and Cursor cannot run on the fake model, so a cell with
-either of them is **agent** unless an existing check covers it.
+A cell names the `tools/e2e` check that covers it, or says **agent**: proven with evidence by the agent step of
+`pnpm verify` (the inbox row and its status, the entry in the receiving agent's conversation, and that it is there
+once). The checks run every agent on the fake model (`tools/e2e/src/fake-model.ts`): Pi through a `models.json`
+provider, Claude Code through `ANTHROPIC_BASE_URL` with a `CLAUDE_CONFIG_DIR` of the check's own, so no real model,
+login or user setting is used. Cursor cannot be pointed at it, so its cells are **agent**.
 
-| Main   | Subagent | 1     | 2                 | 3     | 4     | 5     |
-| ------ | -------- | ----- | ----------------- | ----- | ----- | ----- |
-| claude | claude   | agent | agent             | agent | agent | agent |
-| claude | pi       | S11   | S11 (check sends) | agent | agent | S15   |
-| claude | cursor   | agent | agent             | agent | agent | agent |
-| pi     | claude   | S12   | S12               | agent | agent | S12   |
-| pi     | pi       | S17   | S17               | S17   | S17   | S17   |
-| pi     | cursor   | agent | agent             | agent | agent | agent |
-
-S11's second result follows a `vibest send` the check runs, not the main agent: the main agent sending is **agent**
-there.
+| Main   | Subagent | 1                  | 2                  | 3                 | 4                 | 5                  |
+| ------ | -------- | ------------------ | ------------------ | ----------------- | ----------------- | ------------------ |
+| claude | claude   | S17-claude-claude  | S17-claude-claude  | S17-claude-claude | S17-claude-claude | S17-claude-claude  |
+| claude | pi       | S11, S17-claude-pi | S17-claude-pi      | S17-claude-pi     | S17-claude-pi     | S15, S17-claude-pi |
+| claude | cursor   | agent              | agent              | agent             | agent             | agent              |
+| pi     | claude   | S12, S17-pi-claude | S12, S17-pi-claude | S17-pi-claude     | S17-pi-claude     | S12, S17-pi-claude |
+| pi     | pi       | S17-pi-pi          | S17-pi-pi          | S17-pi-pi         | S17-pi-pi         | S17-pi-pi          |
+| pi     | cursor   | agent              | agent              | agent             | agent             | agent              |

@@ -1,95 +1,55 @@
-// The Claude main agent's inbox over HTTP (feature-map S11, S15) and the Pi main agent's (S12; S17 with a Pi
-// subagent, both on the fake model). Pi: every result reaches
-// the real Pi TUI coordinator as a turn of its own, the
-// later ones included. The main agent's model is a fake OpenAI-compatible endpoint served here (models.json in a
-// PI_CODING_AGENT_DIR of this check) that drives it as the delegate skill does: `vibest run`, then `vibest send` on
-// the result. vibestd, herdr, Pi and the subagent's harness are the real ones.
+// Delivery between a main agent and its subagents, every agent on the fake model (../fake-model.ts): Pi through a
+// models.json provider, Claude Code through ANTHROPIC_BASE_URL with a CLAUDE_CONFIG_DIR of the check's own, so no real
+// model, login or user setting is used. The Claude main agent's inbox over HTTP (feature-map S11, S15), the Pi main
+// agent's (S12), and the delivery matrix (S17-<main>-<subagent>). The fake model drives a main agent as the delegate
+// skill does: `vibest run`, then `vibest send` on the result. vibestd, herdr and the harnesses are the real ones.
 import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, expect, row, Skip, until, type World } from "../world.ts"
+import { claudeEnv, fakeServer, type Message, piDir } from "../fake-model.ts"
+import { expect, row, Skip, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
-type Message = { role: string; content: unknown }
+type Harness = "claude" | "pi"
 
-const text = (m: Message | undefined) =>
-  m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
 const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
-
-let calls = 0
-const chunk = (o: object) =>
-  `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-const done = (finish: string) =>
-  chunk({
-    choices: [{ index: 0, delta: {}, finish_reason: finish }],
-    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-  }) + "data: [DONE]\n\n"
-/** An OpenAI-compatible streamed answer: a text reply, or one `bash` tool call. */
-const reply = (content: string) =>
-  chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) + done("stop")
-const bash = (command: string) =>
-  chunk({
-    choices: [
-      {
-        index: 0,
-        delta: {
-          role: "assistant",
-          tool_calls: [
-            {
-              index: 0,
-              id: `call${++calls}`,
-              type: "function",
-              function: { name: "bash", arguments: JSON.stringify({ command }) },
-            },
-          ],
-        },
-        finish_reason: null,
-      },
-    ],
-  }) + done("tool_calls")
-
-/** A fake OpenAI-compatible model on 127.0.0.1: each request's messages answered by `answer`. */
-const fakeServer = (answer: (messages: Array<Message>) => string | Promise<string>) => {
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      return new Response(await answer(messages), { headers: { "content-type": "text/event-stream" } })
-    },
-  })
-  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
-}
+const AGENT_ID = /<agent-id>(\w+)<\/agent-id>/
+/** The messages of the turn a request continues: everything after the agent's last reply. */
+const turnOf = (messages: Array<Message>) => messages.slice(messages.findLastIndex((m) => m.role === "assistant") + 1)
+/** What reached the agent as input: user messages, and Claude's hook context (system messages in the conversation). */
+const said = (messages: Array<Message>) =>
+  messages.filter((m) => m.role === "user" || m.role === "system").map((m) => m.text)
+/** A main agent's request: a delivery is in its conversation (a subagent's never holds one). */
+const isMain = (messages: Array<Message>) => said(messages).some((t) => AGENT_ID.test(t))
 
 /**
- * The main agent's model, and a Pi subagent's. A turn answers the last message: a task with its two lines; the
- * first result with `vibest run <sub>`; that subagent's first result with `vibest send`; anything else with "ok".
- * `seen` holds the last message of every request.
+ * The model of S11, S12 and S15. A turn answers its new messages: a task with its two lines; "Run the shell command
+ * `…`" with that command; the first result with `vibest run <sub>`; that subagent's first result with `vibest send`;
+ * anything else with "ok". `seen` holds each turn request's new messages.
  */
 const fakeModel = (sub: string) => {
   const seen: Array<string> = []
   let sessionId = ""
-  const answer = (last: Message | undefined) => {
-    const body = text(last)
-    if (last?.role === "tool") {
+  const server = fakeServer((messages) => {
+    const turn = turnOf(messages)
+    const body = turn.map((m) => m.text).join("\n")
+    seen.push(body)
+    if (turn.some((m) => m.role === "tool")) {
       const id = /"id":\s*\\?"(\w+)\\?"/.exec(body)?.[1]
       if (id && !sessionId) sessionId = id
-      return reply("ok")
+      return { text: "ok" }
     }
+    const command = /Run the shell command `([^`]+)`/.exec(body)?.[1]
+    if (command) return { bash: command }
     if (body.includes("<agent-")) {
-      if (body.includes("done-zero")) return bash(`vibest run ${sub} -- '${ask("one")}'`)
-      if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
-      return reply("ok")
+      if (body.includes("done-zero")) return { bash: `vibest run ${sub} -- '${ask("one")}'` }
+      if (body.includes("done-one")) return { bash: `vibest send ${sessionId} -- '${ask("two")}'` }
+      return { text: "ok" }
     }
     const task = /done-(\w+)/.exec(body)
-    return task ? reply(`done-${task[1]}\nstatus: completed`) : reply("ok")
-  }
-  const server = fakeServer((messages) => {
-    seen.push(`${messages.at(-1)?.role}: ${text(messages.at(-1))}`)
-    return answer(messages.at(-1))
+    return { text: task ? `done-${task[1]}\nstatus: completed` : "ok" }
   })
   return { seen, sessionId: () => sessionId, ...server }
 }
@@ -106,27 +66,6 @@ const project = async (w: World, name: string) => {
     expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
   }
   return fs.realpath(repo)
-}
-
-/** A PI_CODING_AGENT_DIR whose only model is the fake one at `url`. */
-const piDir = async (w: World, name: string, url: string) => {
-  const dir = path.join(w.root, name)
-  await fs.mkdir(dir, { recursive: true })
-  await fs.writeFile(
-    path.join(dir, "models.json"),
-    JSON.stringify({
-      providers: {
-        fake: {
-          baseUrl: url,
-          apiKey: "fake",
-          api: "openai-completions",
-          models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-        },
-      },
-    }),
-  )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }))
-  return dir
 }
 
 /** One call to a herdr session's socket API: newline-delimited JSON, one response per connection (effect-herdr-sdk). */
@@ -167,9 +106,9 @@ const dropHerdrSession = async (w: World, session: string) => {
   }
 }
 
-/** Every entry of the Claude conversations kept for `cwd` (the user's ~/.claude: CLAUDE_CONFIG_DIR is unset). */
-const transcript = async (w: World, cwd: string) => {
-  const dir = path.join(w.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
+/** Every entry of the Claude conversations kept for `cwd` in CLAUDE_CONFIG_DIR `config`. */
+const transcript = async (config: string, cwd: string) => {
+  const dir = path.join(config, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
   const files = (await fs.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
   const entries: Array<{ type?: string; raw: string; text: string }> = []
   for (const f of files)
@@ -188,24 +127,33 @@ const transcript = async (w: World, cwd: string) => {
 }
 
 /**
- * A real Claude main agent (the user's login, on the E2E model: agentModel) in a herdr session of its own, for project
- * `name`, trusted and polling; its subagents are Pis on the fake `model`. `close` drops the session.
+ * A main agent on `harness` (Claude unless named) in a herdr session of its own, for project `name`, every agent of it on
+ * the fake `model`; a Claude one trusted and polling. `close` drops the session.
  */
-const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeModel>) => {
+const claudeMain = async (
+  w: World,
+  name: string,
+  model: { readonly url: string; readonly anthropic: string },
+  harness: Harness = "claude",
+) => {
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
-  const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
-  // Panes get the herdr server's environment, which gets vibestd's: both start here, vibestd without
-  // CLAUDE_CONFIG_DIR (the user's Claude login) and with an empty ZDOTDIR (the pane shell keeps this build first).
+  /** A Pi agent's `--env`: its models.json names only the fake model. */
+  const env = `PI_CODING_AGENT_DIR=${await piDir(w.root, `pi-${name}`, model.url)}`
+  // Panes get the herdr server's environment, which gets vibestd's: both start here, vibestd with Claude on the fake
+  // model (a CLAUDE_CONFIG_DIR of this check's, ANTHROPIC_BASE_URL) and an empty ZDOTDIR (the pane shell keeps this
+  // build first).
   const zdot = path.join(w.root, `zdotdir-${name}`)
   await fs.mkdir(zdot, { recursive: true })
+  const claudeFake = await claudeEnv(w.root, `claude-${name}`, model.anthropic)
+  const daemonEnv = { ...claudeFake, ZDOTDIR: zdot }
   await w.stopDaemon()
-  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
-  await w.ok(["--harness", "claude", ...agentModel(), "--session", session, "--headless"], {
+  await w.ok(["daemon"], { env: daemonEnv })
+  await w.ok(["--harness", harness, "--session", session, "--headless", ...(harness === "pi" ? ["--env", env] : [])], {
     cwd: repo,
     timeoutMs: 120_000,
-    env: { CLAUDE_CONFIG_DIR: undefined },
+    env: daemonEnv,
   })
   let main = ""
   await until(
@@ -228,25 +176,27 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
     return String((r.read as { text?: string } | undefined)?.text ?? "")
   }
-  // A new folder: Claude asks whether to trust it (vibest answers that menu for subagents, the person for the main
-  // agent). Hooks modules load only once it is trusted.
-  await until(
-    "Claude's trust question or its input box",
-    async () => /trust this folder|❯\s*$/m.test(await screen()),
-    60_000,
-  )
-  // As the Claude adapter answers it for a subagent: down until Yes is selected, then enter.
-  for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-    const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-    await Bun.sleep(1_000)
+  if (harness === "claude") {
+    // A new folder: Claude asks whether to trust it (vibest answers that menu for subagents, the person for the main
+    // agent). Hooks modules load only once it is trusted.
+    await until(
+      "Claude's trust question or its input box",
+      async () => /trust this folder|❯\s*$/m.test(await screen()),
+      60_000,
+    )
+    // As the Claude adapter answers it for a subagent: down until Yes is selected, then enter.
+    for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
+      const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
+      await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
+      await Bun.sleep(1_000)
+    }
+    // The plugin's first poll names its conversation: it is polling.
+    await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
+      const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
+      const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+      throw new Error(`${e.message}; its screen:\n${peek.stdout}${peek.stderr}\nvibestd.log:\n${log.slice(-3000)}`)
+    })
   }
-  // The plugin's first poll names its conversation: it is polling.
-  await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
-    const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
-    const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
-    throw new Error(`${e.message}; its screen:\n${peek.stdout}${peek.stderr}\nvibestd.log:\n${log.slice(-3000)}`)
-  })
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
@@ -260,7 +210,7 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
     await until(
       `the ${marker} line and its context in the main agent's conversation`,
       async () => {
-        entries = await transcript(w, repo)
+        entries = await transcript(claudeFake.CLAUDE_CONFIG_DIR, repo)
         return (
           entries.some((e) => e.type === "user" && e.text.includes(line)) &&
           // The plugin's own prompt.submit hook attached the full text: Claude keeps it as this attachment.
@@ -306,6 +256,10 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
   }
   return {
     repo,
+    env,
+    daemonEnv,
+    config: claudeFake.CLAUDE_CONFIG_DIR,
+    screen,
     main,
     projectId,
     conversation,
@@ -352,6 +306,155 @@ const curl = async (
   return { status: Number(r.stdout.slice(at + 1)), body: JSON.parse(r.stdout.slice(0, at) || "null") as unknown }
 }
 
+/**
+ * One cell row of the delivery matrix (docs/testing/feature-map.md): a `main` main agent and a `sub` subagent, both on
+ * the fake model, and the five deliveries, each arriving exactly once at the right agent. Each delivery is reported on
+ * its own line; the check fails if any did.
+ */
+const matrix = (main: Harness, sub: Harness): Check => ({
+  id: `S17-${main}-${sub}`,
+  title: `delivery matrix, ${main} main agent and ${sub} subagent on the fake model: a result, a second result after the main agent's \`vibest send\`, a send queued while the subagent is busy, a \`vibest report\` while the main agent is idle and mid-turn, and a result after \`vibest daemon restart\`, each arriving once at the right agent`,
+  run: async (w) => {
+    for (const bin of new Set([main, sub, "herdr"])) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+    // Every turn request of both agents, in order, with what reached that agent as input.
+    const requests: Array<{ main: boolean; said: Array<string> }> = []
+    /** The main agent's model is mid-turn (its answer held back) while this is set. */
+    let holding = false
+    let reportedMidTurn: boolean | undefined
+    const model = fakeServer(async (messages) => {
+      const toMain = isMain(messages)
+      const input = said(messages)
+      requests.push({ main: toMain, said: input })
+      const turn = turnOf(messages)
+      const body = turn.map((m) => m.text).join("\n")
+      const tool = turn.some((m) => m.role === "tool")
+      if (toMain) {
+        if (tool) return { text: "ok" }
+        // The first result: send the subagent its next task, as the delegate skill does.
+        if (body.includes("done-one")) return { bash: `vibest send ${AGENT_ID.exec(body)?.[1]} -- '${ask("two")}'` }
+        // This result keeps the main agent in a turn for 30 s: the report sent meanwhile arrives mid-turn.
+        if (body.includes("done-hold")) {
+          holding = true
+          await Bun.sleep(30_000)
+          holding = false
+        }
+        return { text: "ok" }
+      }
+      const task = input.findLast((u) => /done-\w+/.test(u)) ?? ""
+      const marker = /done-(\w+)/.exec(task)?.[1] ?? "none"
+      if (tool) return { text: `done-${marker}\nstatus: completed` }
+      if (task.includes("report-")) {
+        if (marker === "mid") reportedMidTurn = holding
+        return { bash: `vibest report -- 'rep-${marker}'` }
+      }
+      // A slow task keeps the subagent busy for 20 s.
+      if (task.includes("slow-")) await Bun.sleep(20_000)
+      return { text: `done-${marker}\nstatus: completed` }
+    })
+    const outcomes: Array<string> = []
+    let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+    try {
+      c = await claudeMain(w, `m${main}${sub}`, model, main)
+      const { repo, env } = c
+      const lastOf = (toMain: boolean) => requests.findLast((r) => r.main === toMain)?.said ?? []
+      /** How many of an agent's inputs hold `marker`, in its latest request (its whole conversation). */
+      const count = (toMain: boolean, marker: string) => lastOf(toMain).filter((u) => u.includes(marker)).length
+      const arrives = async (what: string, marker: string) => {
+        await until(what, () => count(true, marker) > 0, 180_000)
+        // Settle: a duplicate would arrive right after.
+        await Bun.sleep(5_000)
+        expect(count(true, marker) === 1, `${marker} reached the main agent ${count(true, marker)} times`)
+        expect(
+          requests.every((r) => r.main || !r.said.some((u) => u.includes(marker) && AGENT_ID.test(u))),
+          `${marker} reached the subagent`,
+        )
+      }
+      const step = async (n: number, name: string, body: () => Promise<void>) => {
+        try {
+          await body()
+          outcomes.push(`${n} pass`)
+        } catch (e) {
+          // Both agents' screens, as they are now: evidence for the failure, never an input to the check.
+          const screens = [
+            await c!.screen().catch((x: Error) => x.message),
+            (await w.vibest(["peek", id, "--lines", "25"], { cwd: repo })).stdout,
+          ]
+          outcomes.push(
+            `${n} fail: ${e instanceof Error ? e.message : String(e)}\nmain agent:\n${screens[0]}\nsubagent:\n${screens[1]}`,
+          )
+        }
+        console.log(`     ${main} x ${sub} delivery ${n} (${name}): ${outcomes.at(-1)}`)
+      }
+      const id = (
+        JSON.parse(
+          await w.ok(
+            ["run", sub, ...(sub === "pi" ? ["--env", env] : []), "--title", "Matrix probe", "--", ask("one")],
+            {
+              cwd: repo,
+              timeoutMs: 60_000,
+            },
+          ),
+        ) as { id: string }
+      ).id
+      const send = (message: string) => w.ok(["send", id, "--", message], { cwd: repo })
+      const inboxRow = (marker: string) =>
+        row<{ s: string }>(
+          w,
+          "SELECT delivery_status AS s FROM inbox WHERE recipient_session_id = ? AND content LIKE ?",
+          id,
+          `%${marker}%`,
+        )?.s
+
+      await step(1, "a subagent's result", () => arrives("the first result at the main agent", "done-one"))
+      await step(2, "a second result after the main agent's send", async () => {
+        await until("the main agent's vibest send queued", () => inboxRow("done-two") !== undefined, 60_000)
+        await arrives("the second result at the main agent", "done-two")
+        expect(count(false, "done-two") === 1, `the send reached the subagent ${count(false, "done-two")} times`)
+      })
+      await step(3, "a send queued while the subagent is busy", async () => {
+        await send(`slow-busy: ${ask("busy")}`)
+        await until("the subagent busy on its slow task", () => count(false, "slow-busy") > 0, 60_000)
+        await send(ask("queued"))
+        await Bun.sleep(3_000)
+        expect(count(false, "done-queued") === 0, "the queued send reached the subagent mid-turn")
+        const queued = inboxRow("done-queued")
+        expect(queued === "pending", `while the subagent is busy the queued send is ${queued}`)
+        await arrives("the busy task's result at the main agent", "done-busy")
+        await arrives("the queued send's result at the main agent", "done-queued")
+        const conversation = lastOf(false)
+        const at = (marker: string) => conversation.findIndex((u) => u.includes(marker))
+        expect(
+          count(false, "done-queued") === 1,
+          `the queued send reached the subagent ${count(false, "done-queued")} times`,
+        )
+        expect(at("done-queued") > at("slow-busy"), "the queued send came before the busy task")
+      })
+      await step(4, "a report while the main agent is idle and mid-turn", async () => {
+        await send(`report-idle: ${ask("idle")}`)
+        await arrives("the report at the idle main agent", "rep-idle")
+        await arrives("the reporting turn's result", "done-idle")
+        await send(ask("hold"))
+        await until("the main agent mid-turn", () => holding, 180_000)
+        await send(`report-mid: ${ask("mid")}`)
+        await arrives("the report sent while the main agent was mid-turn", "rep-mid")
+        expect(reportedMidTurn === true, "the subagent reported after the main agent's turn had ended")
+        await arrives("the mid-turn reporting turn's result", "done-mid")
+      })
+      await step(5, "a result after vibest daemon restart", async () => {
+        const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: repo, env: c!.daemonEnv, timeoutMs: 60_000 })
+        expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
+        await send(ask("after"))
+        await arrives("a result after vibestd restarted", "done-after")
+      })
+    } finally {
+      model.stop()
+      await c?.close()
+    }
+    const failed = outcomes.filter((o) => !o.endsWith("pass"))
+    expect(failed.length === 0, failed.join("\n"))
+  },
+})
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "S11",
@@ -359,7 +462,7 @@ const checks: ReadonlyArray<Check> = [
       "Claude main agent: a subagent's result arrives over HTTP as one line with its full text as prompt context, after /clear too, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      // The subagent is a Pi on a fake model (cheap, its answers fixed); the main agent is a real Claude.
+      // The main agent is a real Claude and its subagent a real Pi, both on the fake model.
       const model = fakeModel("pi")
       let c: Awaited<ReturnType<typeof claudeMain>> | undefined
       try {
@@ -387,7 +490,7 @@ const checks: ReadonlyArray<Check> = [
         expect(pid !== undefined, "no claude process in the main agent's pane")
         process.kill(pid!, "SIGTERM")
         await until("the main agent's Claude exited", async () => (await c!.claude()) === undefined, 30_000)
-        await c.typeIn(["vibest", ...agentModel()].join(" "))
+        await c.typeIn("vibest")
         await until("Claude again in the main agent's pane", async () => (await c!.claude()) !== undefined, 60_000)
         await round("cmthree")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
@@ -435,7 +538,8 @@ const checks: ReadonlyArray<Check> = [
         await c.typeIn("Run the shell command `sleep 40` with the Bash tool, then reply with one word: slept")
         await until(
           "the main agent's own turn running",
-          async () => (await transcript(w, c!.repo)).some((e) => e.type === "assistant" && e.raw.includes("sleep 40")),
+          async () =>
+            (await transcript(c!.config, c!.repo)).some((e) => e.type === "assistant" && e.raw.includes("sleep 40")),
           60_000,
         )
         const before = c.delivered(a)
@@ -488,7 +592,7 @@ const checks: ReadonlyArray<Check> = [
         // `vibest daemon restart` midway: the plugin polls the next vibestd, and the next result arrives.
         const restart = await w.tty(["daemon", "restart"], "y\n", {
           cwd: c.repo,
-          env: { CLAUDE_CONFIG_DIR: undefined },
+          env: c.daemonEnv,
           timeoutMs: 60_000,
         })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
@@ -509,22 +613,12 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = fakeModel("claude")
-      const session = `${w.herdrSession}-inbox`
+      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
       try {
-        // A project of its own, so its main agent is this check's (with the fake model), not another check's.
-        const repo = await project(w, "inbox")
-        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-inbox", model.url)}`
-        // The Claude subagent runs with the user's own Claude login (CLAUDE_CONFIG_DIR unset), as I4's does. Its pane
-        // gets the environment of the herdr server, which gets vibestd's, so this check starts both: vibestd anew (the one
-        // before it stops; agents keep running) and a herdr session of its own.
-        await w.stopDaemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
-          cwd: repo,
-          timeoutMs: 60_000,
-          env: { CLAUDE_CONFIG_DIR: undefined },
-        })
-        const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
-        await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
+        // A project of its own, so its main agent is this check's, not another check's. The Claude subagent's pane gets
+        // the environment of the herdr server, which gets vibestd's: claudeMain starts both, Claude on the fake model.
+        c = await claudeMain(w, "inbox", model, "pi")
+        const { repo, env } = c
         const reached = (what: string, marker: string) =>
           until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(
             (e: Error) => {
@@ -537,167 +631,17 @@ const checks: ReadonlyArray<Check> = [
         await reached("the main agent's turn on the Claude subagent's first result", "done-one")
         await reached("the main agent's turn on the Claude subagent's second result", "done-two")
         // `vibest daemon restart` ends the subscription on vibestd's side; the main agent subscribes to the next one.
-        const restart = await w.tty(["daemon", "restart"], "y\n", {
-          cwd: repo,
-          env: { CLAUDE_CONFIG_DIR: undefined },
-          timeoutMs: 60_000,
-        })
+        const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: repo, env: c.daemonEnv, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the main agent's turn on a result after vibestd restarted", "done-three")
       } finally {
         model.stop()
-        // As World.close does for the run's own session: only the one this check started.
-        await dropHerdrSession(w, session)
+        await c?.close()
       }
     },
   },
-  {
-    id: "S17",
-    title:
-      "Pi main agent, Pi subagent, both on the fake model: a result, a second result after the main agent's `vibest send`, a send queued while the subagent is busy, a `vibest report` while the main agent is idle and mid-turn, and a result after `vibest daemon restart`, each arriving once at the right agent",
-    run: async (w) => {
-      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      // Every request of both agents, in order. The main agent's carry `<agent-` deliveries; the subagent's never do.
-      const requests: Array<{ main: boolean; user: Array<string> }> = []
-      /** The main agent's model is mid-turn (its answer held back) while this is set. */
-      let holding = false
-      let reportedMidTurn: boolean | undefined
-      const users = (messages: Array<Message>) => messages.filter((m) => m.role === "user").map((m) => text(m))
-      const model = fakeServer(async (messages) => {
-        const user = users(messages)
-        const main = user.some((u) => u.includes("<agent-id>"))
-        requests.push({ main, user })
-        const last = messages.at(-1)
-        const body = text(last)
-        if (main) {
-          if (last?.role !== "user") return reply("ok")
-          // The first result: send the subagent its next task, as the delegate skill does.
-          const sub = /<agent-id>(\w+)<\/agent-id>/.exec(body)?.[1]
-          if (body.includes("done-one")) return bash(`vibest send ${sub} -- '${ask("two")}'`)
-          // This result keeps the main agent in a turn for 30 s: the report sent meanwhile arrives mid-turn.
-          if (body.includes("done-hold")) {
-            holding = true
-            await Bun.sleep(30_000)
-            holding = false
-          }
-          return reply("ok")
-        }
-        const task = [...user].reverse().find((u) => /done-\w+/.test(u)) ?? ""
-        const marker = /done-(\w+)/.exec(task)?.[1] ?? "none"
-        if (last?.role === "tool") return reply(`done-${marker}\nstatus: completed`)
-        if (task.includes("report-")) {
-          if (marker === "mid") reportedMidTurn = holding
-          return bash(`vibest report -- 'rep-${marker}'`)
-        }
-        // A slow task keeps the subagent busy for 20 s.
-        if (task.includes("slow-")) await Bun.sleep(20_000)
-        return reply(`done-${marker}\nstatus: completed`)
-      })
-      const session = `${w.herdrSession}-pipi`
-      const outcomes: Array<string> = []
-      try {
-        const repo = await project(w, "pipi")
-        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-pipi", model.url)}`
-        const zdot = path.join(w.root, "zdotdir-pipi")
-        await fs.mkdir(zdot, { recursive: true })
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
-          cwd: repo,
-          timeoutMs: 60_000,
-        })
-        const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
-        await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
-        const lastOf = (main: boolean) => requests.findLast((r) => r.main === main)?.user ?? []
-        /** How many of an agent's user messages hold `marker`, in its latest request (its whole conversation). */
-        const count = (main: boolean, marker: string) => lastOf(main).filter((u) => u.includes(marker)).length
-        const arrives = async (what: string, marker: string) => {
-          await until(what, () => count(true, marker) > 0, 180_000)
-          // Settle: a duplicate would arrive right after.
-          await Bun.sleep(5_000)
-          expect(count(true, marker) === 1, `${marker} reached the main agent ${count(true, marker)} times`)
-          expect(
-            requests.every((r) => r.main || !r.user.some((u) => u.includes("<agent-") && u.includes(marker))),
-            `${marker} reached the subagent`,
-          )
-        }
-        const step = async (n: number, name: string, body: () => Promise<void>) => {
-          try {
-            await body()
-            outcomes.push(`${n} pass`)
-          } catch (e) {
-            outcomes.push(`${n} fail: ${e instanceof Error ? e.message : String(e)}`)
-          }
-          console.log(`     S17 delivery ${n} (${name}): ${outcomes.at(-1)}`)
-        }
-        const sub = (
-          JSON.parse(await w.ok(["run", "pi", "--env", env, "--", ask("one")], { cwd: repo, timeoutMs: 60_000 })) as {
-            id: string
-          }
-        ).id
-        const send = (message: string) => w.ok(["send", sub, "--", message], { cwd: repo })
-        const inboxRow = (marker: string) =>
-          row<{ s: string }>(
-            w,
-            "SELECT delivery_status AS s FROM inbox WHERE recipient_session_id = ? AND content LIKE ?",
-            sub,
-            `%${marker}%`,
-          )?.s
-
-        await step(1, "a subagent's result", () => arrives("the first result at the main agent", "done-one"))
-        await step(2, "a second result after the main agent's send", async () => {
-          await until("the main agent's vibest send queued", () => inboxRow("done-two") !== undefined, 60_000)
-          await arrives("the second result at the main agent", "done-two")
-          expect(count(false, "done-two") === 1, `the send reached the subagent ${count(false, "done-two")} times`)
-        })
-        await step(3, "a send queued while the subagent is busy", async () => {
-          await send(`slow-busy: ${ask("busy")}`)
-          await until("the subagent busy on its slow task", () => count(false, "slow-busy") > 0, 60_000)
-          await send(ask("queued"))
-          await Bun.sleep(3_000)
-          expect(count(false, "done-queued") === 0, "the queued send reached the subagent mid-turn")
-          const queued = inboxRow("done-queued")
-          expect(queued === "pending", `while the subagent is busy the queued send is ${queued}`)
-          await arrives("the busy task's result at the main agent", "done-busy")
-          await arrives("the queued send's result at the main agent", "done-queued")
-          const conversation = lastOf(false)
-          const at = (marker: string) => conversation.findIndex((u) => u.includes(marker))
-          expect(
-            count(false, "done-queued") === 1,
-            `the queued send reached the subagent ${count(false, "done-queued")} times`,
-          )
-          expect(at("done-queued") > at("slow-busy"), "the queued send came before the busy task")
-        })
-        await step(4, "a report while the main agent is idle and mid-turn", async () => {
-          await send(`report-idle: ${ask("idle")}`)
-          await arrives("the report at the idle main agent", "rep-idle")
-          await arrives("the reporting turn's result", "done-idle")
-          await send(ask("hold"))
-          await until("the main agent mid-turn", () => holding, 180_000)
-          await send(`report-mid: ${ask("mid")}`)
-          await arrives("the report sent while the main agent was mid-turn", "rep-mid")
-          expect(reportedMidTurn === true, "the subagent reported after the main agent's turn had ended")
-          await arrives("the mid-turn reporting turn's result", "done-mid")
-        })
-        await step(5, "a result after vibest daemon restart", async () => {
-          const restart = await w.tty(["daemon", "restart"], "y\n", {
-            cwd: repo,
-            env: { ZDOTDIR: zdot },
-            timeoutMs: 60_000,
-          })
-          expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
-          await send(ask("after"))
-          await arrives("a result after vibestd restarted", "done-after")
-        })
-      } finally {
-        model.stop()
-        await dropHerdrSession(w, session)
-      }
-      const failed = outcomes.filter((o) => !o.endsWith("pass"))
-      expect(failed.length === 0, failed.join("\n"))
-    },
-  },
+  ...(["claude", "pi"] as const).flatMap((main) => (["claude", "pi"] as const).map((sub) => matrix(main, sub))),
 ]
 
 export default checks
