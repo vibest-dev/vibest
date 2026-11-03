@@ -113,9 +113,10 @@ subagents. Everything else in this list is planned; each item says what runs tod
   itself), then to the user. Last, the `agent.result` hook (`{ sessionId, turnId, status, output, recipients }`)
   may rewrite the recipients: forward, merge, or clear them. Notices go through `agent.notice` (`{ about, kind:
   blocked | not_started | undelivered | archived, text, recipients }`); by default to `report_to`, then the
-  entry session, then the user. Today `agent.result` runs (without `turnId`); `agent.notice` is not there yet, and
-  notices still go to `report_to`, else the entry session. A session without `report_to` (started before the project
-  had an entry session) counts the entry session as its `report_to`.
+  entry session, then the user; the hook may reword them or clear the recipients (nobody is told). `agent.result`
+  runs without `turnId`, and `agent.notice` names its session `sessionId`. Every recipient row is delivered at once:
+  the entry session's through Inbox, any other session's own queue right after the row is written. A session without
+  `report_to` (started before the project had an entry session) counts the entry session as its `report_to`.
 
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
   and where a new terminal opens (beside its spawner), never routing.

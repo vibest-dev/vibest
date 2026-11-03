@@ -872,7 +872,7 @@ const make = Effect.gen(function* () {
           content: row.message,
           status: "pending",
         })
-        return (yield* inboxIn([id]))[0]!
+        return yield* inboxIn([id])
       }
       if (row.kind === "result") {
         const recipients = to ?? (yield* replyTo(row.sessionId))
@@ -886,53 +886,49 @@ const make = Effect.gen(function* () {
           },
           at,
         )
-        const project = (yield* sql<{ project: number }>`SELECT project_id AS project FROM session
-          WHERE id = ${row.sessionId}`)[0]?.project
-        const [entry] =
-          project === undefined
-            ? []
-            : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-        const ids: Array<number> = []
-        for (const recipient of recipients.length === 0 ? [undefined] : recipients) {
-          const present =
-            recipient === null ||
-            (recipient !== undefined &&
-              (recipient !== entry?.id || placed(project!, (yield* anySession(recipient))?.current)))
-          ids.push(
-            yield* insertInboxSql({
-              recipient: recipient === undefined ? row.sessionId : recipient,
-              kind: "result",
-              sender: row.sessionId,
-              content: row.message,
-              resultEventId,
-              status: present ? "pending" : "dropped",
-            }),
-          )
-        }
-        return (yield* inboxIn(ids.slice(0, 1)))[0]!
+        return yield* insertTo(row, recipients, resultEventId)
       }
-      const [route] = yield* sql<{ recipient: string | null; entry: number | null; project: number }>`SELECT
-          CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
-          (p.entry_session_id IS NOT NULL) AS entry, p.id AS project
-        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
-        WHERE s.id = ${row.sessionId}`
-      const recipient = route?.recipient ?? null
-      const [entry] =
-        route === undefined
-          ? []
-          : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${route.project}`
-      const toEntry = recipient !== null && recipient === entry?.id
-      const present =
-        recipient !== null && (!toEntry || placed(route!.project, (yield* anySession(recipient))?.current))
-      const id = yield* insertInboxSql({
-        recipient: recipient ?? row.sessionId,
-        kind: row.kind,
-        sender: row.sessionId,
-        content: row.message,
-        status: present ? "pending" : "dropped",
-      })
-      return (yield* inboxIn([id]))[0]!
+      return yield* insertTo(row, to ?? (yield* noticeTo(row.sessionId)))
     })
+
+  /**
+   * One row of `row` per recipient (`null`: the user). A row to the project's entry session while it is not placed is
+   * dropped; none at all keeps one, dropped, as the sender's own (read with `vibest result`).
+   */
+  const insertTo = (row: NewInboxRow, recipients: ReadonlyArray<string | null>, resultEventId?: number) =>
+    Effect.gen(function* () {
+      const project = (yield* sql<{ project: number }>`SELECT project_id AS project FROM session
+        WHERE id = ${row.sessionId}`)[0]?.project
+      const [entry] =
+        project === undefined
+          ? []
+          : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
+      const ids: Array<number> = []
+      for (const recipient of recipients.length === 0 ? [undefined] : recipients) {
+        const present =
+          recipient === null ||
+          (recipient !== undefined &&
+            (recipient !== entry?.id || placed(project!, (yield* anySession(recipient))?.current)))
+        ids.push(
+          yield* insertInboxSql({
+            recipient: recipient === undefined ? row.sessionId : recipient,
+            kind: row.kind,
+            sender: row.sessionId,
+            content: row.message,
+            ...(resultEventId === undefined ? {} : { resultEventId }),
+            status: present ? "pending" : "dropped",
+          }),
+        )
+      }
+      return yield* inboxIn(ids)
+    })
+
+  /** Where a notice or report about `id` goes by default: its live report-to, else its project's entry session, else the user. */
+  const noticeTo = (id: string) =>
+    sql<{ recipient: string | null }>`SELECT
+        CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient
+      FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
+      WHERE s.id = ${id}`.pipe(Effect.map((rows) => [rows[0]?.recipient ?? null]))
 
   /**
    * Apply `patch` to session `id`: its columns, and an event for each change to its process or turn (schema.md:
@@ -1582,7 +1578,11 @@ const make = Effect.gen(function* () {
     clearCoordinator: (runtime: string, address: RuntimeAddress) =>
       sql.withTransaction(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
-    insertInbox: (row: NewInboxRow) => sql.withTransaction(insertInboxRow(row)).pipe(Effect.orDie),
+    /** `row`, one per recipient (`to`, else where it goes by default), every one inserted. */
+    insertInbox: (row: NewInboxRow, to?: ReadonlyArray<string | null>) =>
+      sql.withTransaction(insertInboxRow(row, undefined, undefined, to)).pipe(Effect.orDie),
+    /** Where a notice about `id` goes unless a plugin says otherwise: its live report-to, its entry session, the user. */
+    noticeTo: (id: string) => noticeTo(id).pipe(Effect.orDie),
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
     insertSend: (sessionId: string, message: string, from?: string) =>
@@ -1591,13 +1591,14 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const s = yield* findSession(sessionId)
             if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-            return yield* insertInboxRow(
+            const [sent] = yield* insertInboxRow(
               { sessionId, kind: "send", message, details: {} },
               undefined,
               undefined,
               undefined,
               from,
             )
+            return sent
           }),
         )
         .pipe(Effect.orDie),

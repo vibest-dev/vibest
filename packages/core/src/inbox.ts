@@ -82,7 +82,8 @@ export const line = (
 export class Inbox extends Context.Service<
   Inbox,
   {
-    readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
+    /** `row`, one per recipient (`to`, else its default), each announced. */
+    readonly enqueue: (row: NewInboxRow, to?: ReadonlyArray<string | null>) => Effect.Effect<ReadonlyArray<InboxRow>>
     /** For rows inserted inside another transaction (Db.finishTurn). */
     readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a project's coordinator its next batch now. */
@@ -371,7 +372,8 @@ export class Inbox extends Context.Service<
       )
 
       return Inbox.of({
-        enqueue: (row) => db.insertInbox(row).pipe(Effect.tap(announce)),
+        enqueue: (row, to) =>
+          db.insertInbox(row, to).pipe(Effect.tap((rows) => Effect.forEach(rows, announce, { discard: true }))),
         announce,
         deliver,
         delivered: Queue.take(delivered),

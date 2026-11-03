@@ -68,7 +68,7 @@ export const sessionPlacement = (deps: {
     resume: boolean,
     key: string,
   ) => Effect.Effect<ReadonlyArray<string>, HarnessUnavailable | NoSuchSession | PlatformError.PlatformError>
-  readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
+  readonly notice: (session: SessionRow, kind: "not_started", message: string) => Effect.Effect<unknown>
   readonly prompt: (
     h: Runtime,
     session: SessionRow,
@@ -316,6 +316,7 @@ export const sessionPlacement = (deps: {
           })
           yield* deps.notice(
             session,
+            "not_started",
             `${session.id} failed to start ${session.harnessId}: ${e instanceof Error ? e.message : String(e)}`,
           )
         }),

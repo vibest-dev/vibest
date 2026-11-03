@@ -1,3 +1,4 @@
+import type { AgentNotice } from "@vibest/plugin"
 import type { Polled } from "@vibest/protocol/protocol"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
@@ -337,8 +338,23 @@ export class Sessions extends Context.Service<
             ),
           )
 
-      const notice = (session: SessionRow, message: string) =>
-        inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
+      /** Tell whoever `agent.notice` names (by default its live report-to, its entry session, the user) about `session`. */
+      const notice = (session: SessionRow, kind: AgentNotice["kind"], message: string) =>
+        Effect.gen(function* () {
+          const told = yield* plugins.notice({
+            sessionId: session.id,
+            agentType: session.agent,
+            kind,
+            text: message,
+            recipients: [...(yield* db.noticeTo(session.id))],
+          })
+          if (told.recipients.length === 0) return
+          yield* inbox.enqueue(
+            { sessionId: session.id, kind: "notice", message: told.text, details: {} },
+            told.recipients,
+          )
+          for (const to of new Set(told.recipients)) if (to !== null && to !== session.id) yield* wake(to)
+        })
 
       /** The directory the session works in, as its row records it (a `--peer` session records the one it shares). */
       const worktreeOf = (session: SessionRow) =>
@@ -370,6 +386,7 @@ export class Sessions extends Context.Service<
             Effect.andThen(
               notice(
                 session,
+                "undelivered",
                 `A message to ${session.id} was not delivered: ${reason}\n\n${rows.map((r) => r.message).join("\n\n")}`,
               ),
             ),
@@ -664,6 +681,7 @@ export class Sessions extends Context.Service<
             ),
           ),
         limitMove: limit.move,
+        wake: (id) => wake(id),
       })
       collectResult = rounds.collectResult
       const { finish, deliverQueued, userPrompt } = rounds
@@ -689,7 +707,7 @@ export class Sessions extends Context.Service<
             ? `${rules}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
           const notStarted = yield* prompt(h, session, terminal, first)
-          if (notStarted) yield* notice(session, notStarted)
+          if (notStarted) yield* notice(session, "not_started", notStarted)
         })
 
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
@@ -982,6 +1000,7 @@ export class Sessions extends Context.Service<
           const what = reason === "permission" ? "a permission decision" : "an answer to its question"
           yield* notice(
             session,
+            "blocked",
             `${session.id} (${session.harnessId}) has been waiting for ${what} since ${hhmm}. Run vibest peek ${session.id} to see the request.`,
           )
         })
@@ -1139,7 +1158,7 @@ export class Sessions extends Context.Service<
         if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
           if (session.startedAt === null) {
             // vibestd died mid-spawn (SPEC §5.5 spawn).
-            yield* notice(session, `${id} never finished starting (vibestd restarted during spawn).`)
+            yield* notice(session, "not_started", `${id} never finished starting (vibestd restarted during spawn).`)
           } else if (open)
             yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
@@ -1178,6 +1197,7 @@ export class Sessions extends Context.Service<
           yield* db.updateSession(id, { turnState: "not_started", lastActive: now })
           yield* notice(
             session,
+            "not_started",
             `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`,
           )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
@@ -1289,6 +1309,18 @@ export class Sessions extends Context.Service<
             scope,
           )
         })
+
+      /** Deliver what is queued for subagent `id` now, in vibestd's scope; what fails waits for its next check. */
+      const wake = (id: string) =>
+        Effect.forkIn(
+          locked(id)(
+            Effect.gen(function* () {
+              const session = yield* db.getSession(id)
+              if (session && session.agent !== "main") yield* deliver(id)
+            }),
+          ).pipe(Effect.ignore, Effect.provideContext(platform)),
+          scope,
+        ).pipe(Effect.asVoid)
 
       const interrupt = (id: string) =>
         getRow(id).pipe(
@@ -1436,7 +1468,7 @@ export class Sessions extends Context.Service<
                 const session = yield* getRow(id)
                 if (session.metadata.archived || session.metadata.removed) return
                 const skip = (why: string) =>
-                  notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
+                  notice(session, "archived", `${id} not archived (vibest run --archive-on-completion): ${why}`)
                 // The newest result decides: a newer completed one already delivered archives it now; one not delivered yet takes its own turn once it is.
                 const latest = yield* db.latestInbox(id, "result")
                 // It has work again (a message was sent to it or it started a new turn): its next completed result archives it.
@@ -1469,6 +1501,7 @@ export class Sessions extends Context.Service<
                 if (kept || again)
                   yield* notice(
                     session,
+                    "archived",
                     `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
                   )
               }).pipe(
@@ -1479,6 +1512,7 @@ export class Sessions extends Context.Service<
                         Effect.flatMap((session) =>
                           notice(
                             session,
+                            "archived",
                             `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`,
                           ),
                         ),

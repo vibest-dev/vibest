@@ -34,7 +34,7 @@ export const sessionRounds = (deps: {
       row: NewInboxRow,
       at?: number,
       to?: ReadonlyArray<string | null>,
-    ) => Effect.Effect<InboxRow>
+    ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
@@ -53,6 +53,8 @@ export const sessionRounds = (deps: {
     readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
     readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
   }
+  /** Hand session `id` what is queued for it, in the background (a recipient of a result: not the entry session). */
+  readonly wake: (id: string) => Effect.Effect<void>
   /** Whether the session's integration takes its rows itself (`/inbox/poll`): then nothing is typed in. */
   readonly polls: (session: SessionRow) => boolean
   /** The session's lock alone, not counted by Drain (a typed prompt records its round). */
@@ -126,7 +128,7 @@ export const sessionRounds = (deps: {
     )
     const failure = failureOf(error)
     const to = yield* deps.route(session, end, text)
-    const row = yield* db.finishTurn(
+    const rows = yield* db.finishTurn(
       session.id,
       { status: end, output: text, ...(failure === undefined ? {} : { failure }) },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
@@ -139,7 +141,9 @@ export const sessionRounds = (deps: {
       at,
       to,
     )
-    yield* inbox.announce(row)
+    // Every recipient at once: the entry session's through Inbox, any other session's own queue now, not at its next check.
+    yield* Effect.forEach(rows, inbox.announce, { discard: true })
+    for (const recipient of new Set(to)) if (recipient !== null && recipient !== session.id) yield* deps.wake(recipient)
   })
 
   /**

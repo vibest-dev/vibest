@@ -168,11 +168,26 @@ export interface AgentResult {
   recipients: Array<string | null>
 }
 
+/**
+ * vibest tells someone about session `sessionId`: it waits on the person (`blocked`), a turn it was sent never started
+ * or it never started at all (`not_started`), a message to it was not delivered (`undelivered`), or its archive on
+ * completion did not go cleanly (`archived`). `recipients` is where it goes (its live report-to, else its project's
+ * entry session, else the user: `null`); a plugin may reword `text` or rewrite `recipients` (empty: nobody is told).
+ */
+export interface AgentNotice {
+  readonly sessionId: string
+  readonly agentType: string
+  readonly kind: "blocked" | "not_started" | "undelivered" | "archived"
+  text: string
+  recipients: Array<string | null>
+}
+
 /** Every hook: the event its callbacks get and the error they may fail with. */
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
   readonly "agent.result": { readonly event: AgentResult; readonly error: never }
+  readonly "agent.notice": { readonly event: AgentNotice; readonly error: never }
 }
 
 /** The hook names of one domain without its prefix: `start.before` for `agent.start.before`. */

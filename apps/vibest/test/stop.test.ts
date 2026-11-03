@@ -275,16 +275,16 @@ describe("Daemon.Stop", () => {
       const { db, worker, projectId } = yield* receiver(repo, "pi")
       // A second Inbox with no taker, to stop at the queue-to-consumer seam.
       const inbox = Context.get(yield* Layer.build(Layer.fresh(Inbox.layer)), Inbox)
-      const row = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
+      const [row] = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
       yield* inbox.ack(projectId, polled.ids)
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
-      assert.include(yield* (yield* Drain).pending, `completion inbox ${row.id}`)
+      assert.include(yield* (yield* Drain).pending, `completion inbox ${row!.id}`)
       assert.isFalse(yield* shutdownDone)
       const consequence = yield* inbox.delivered
-      assert.strictEqual(consequence.row.id, row.id)
+      assert.strictEqual(consequence.row.id, row!.id)
       yield* consequence.done
       assert.strictEqual(yield* settled(stopping), "accepted")
     }),

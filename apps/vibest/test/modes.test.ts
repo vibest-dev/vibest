@@ -35,10 +35,35 @@ const forwarding = Plugin.define({
     ),
 })
 
+/** Copies a result whose text says `copy to <id> <id>` to both sessions. */
+const copying = Plugin.define({
+  id: "copying",
+  effect: (context) =>
+    context.agent.hook("result", (event) =>
+      Effect.sync(() => {
+        const match = /copy to (\w{8}) (\w{8})/.exec(event.output)
+        if (match) event.recipients = [match[1]!, match[2]!]
+      }),
+    ),
+})
+
+/** Notices of a session waiting on the person go to the user, reworded; the rest as vibest routes them. */
+const noticePolicy = Plugin.define({
+  id: "notice-policy",
+  effect: (context) =>
+    context.agent.hook("notice", (event) =>
+      Effect.sync(() => {
+        if (event.kind !== "blocked") return
+        event.recipients = [null]
+        event.text = `[${event.agentType}] ${event.text}`
+      }),
+    ),
+})
+
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer({ plugins: [peers, forwarding] })),
+  Layer.provideMerge(testLayer({ plugins: [peers, forwarding, copying, noticePolicy] })),
 )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
@@ -61,10 +86,10 @@ const resultsOf = (about: string) =>
   })
 
 /** End `id`'s open turn with `text` (what its harness answered) and let vibestd collect it. */
-const answer = (id: string, text: string) =>
+const answer = (id: string, text: string, harness: "pi" | "cursor" = "pi") =>
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
-    yield* writeResult(id, "pi", { text })
+    yield* writeResult(id, harness, { text })
     yield* herdr.endTurn(id)
     yield* (yield* Sessions).check(id)
     yield* until((yield* Db).getSession(id), (s) => s?.turnState !== "open")
@@ -174,6 +199,62 @@ describe("orchestration modes", () => {
         (yield* resultsOf(source)).map((r) => r.recipient),
         [target],
       )
+    }),
+  )
+
+  test(
+    "a result to two sessions: every recipient row is delivered at once, each typed into its idle session without waiting for a check",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const user = authed(yield* client, cliHeaders(repo))
+      const herdr = yield* FakeRuntime
+      const { id: x } = yield* user.Spawn({ harness: "cursor", prompt: "collect one" })
+      const { id: y } = yield* user.Spawn({ harness: "cursor", prompt: "collect two" })
+      yield* opened(x)
+      yield* opened(y)
+      yield* answer(x, "ready", "cursor")
+      yield* answer(y, "ready", "cursor")
+      const { id: source } = yield* user.Spawn({ harness: "pi", prompt: "work" })
+      yield* opened(source)
+      yield* answer(source, `done; copy to ${x} ${y}`)
+      assert.deepStrictEqual(
+        (yield* resultsOf(source)).map((r) => r.recipient),
+        [x, y],
+      )
+      // No check of x or y: the turn end hands both their row.
+      yield* opened(x)
+      yield* opened(y)
+      const typed = (yield* herdr.callsTo("send")).filter((c) => c.text?.includes("done; copy to"))
+      assert.lengthOf(typed, 2)
+      assert.deepStrictEqual(
+        (yield* resultsOf(source)).map((r) => r.status),
+        ["delivered", "delivered"],
+      )
+    }),
+  )
+
+  test(
+    "agent.notice: a plugin sends a blocked session's notice to the user, reworded; other notices keep vibest's route",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const user = authed(yield* client, cliHeaders(repo))
+      const sessions = yield* Sessions
+      const { id: lead } = yield* user.Spawn({ harness: "pi", agent: "peer", prompt: "lead" })
+      yield* opened(lead)
+      yield* answer(lead, "ready")
+      const { id: worker } = yield* user.Spawn({ harness: "pi", prompt: "work", reportTo: lead })
+      yield* opened(worker)
+      yield* sessions.activity(worker, { blocked: "permission" })
+      // The user's inbox holds the lead's own result (no main agent) and the worker's notice.
+      const notice = (yield* until(user["Inbox.Read"]({}), (rows) => rows.some((r) => r.from === worker))).find(
+        (r) => r.from === worker,
+      )!
+      assert.match(notice.message, /^\[general\] .* has been waiting for a permission decision/)
+      // Nothing of it reached the lead.
+      const sql = yield* SqlClient.SqlClient
+      const toLead = yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE kind = 'notice'
+        AND recipient_session_id = ${lead}`
+      assert.strictEqual(toLead[0]!.n, 0)
     }),
   )
 })

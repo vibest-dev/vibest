@@ -85,7 +85,12 @@ type Registered<N extends HookName> = {
 }
 /** One list per hook, so a callback is stored and called as that hook's event. */
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
-const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [], "agent.result": [] })
+const emptyBuckets = (): HookBuckets => ({
+  "agent.start.before": [],
+  "agent.fail": [],
+  "agent.result": [],
+  "agent.notice": [],
+})
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 /** Builtin plugins of the host app, before user plugins: the default harness choice first (architecture.md §9), then
  * the runtime plugins (runtime-port.md §2). The core itself holds no choice policy. */
@@ -256,6 +261,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           "start.before": (callback) => remember("agent.start.before", callback),
           fail: (callback) => remember("agent.fail", callback),
           result: (callback) => remember("agent.result", callback),
+          notice: (callback) => remember("agent.notice", callback),
         }),
         // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
@@ -508,8 +514,22 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    // As with a result: a crashed or timed-out callback leaves the notice as the chain had it before it.
+    const notice = Effect.fn("Plugins.notice")(function* (input: VibestPlugin.AgentNotice) {
+      return yield* withHooks("agent.notice", (hooks, trace) =>
+        Effect.gen(function* () {
+          const event: VibestPlugin.AgentNotice = { ...input, recipients: [...input.recipients] }
+          yield* runHook(bucket(hooks, "agent.notice"), "agent.notice", event, trace)
+          return {
+            text: typeof event.text === "string" ? event.text : input.text,
+            recipients: event.recipients.filter((r) => r === null || typeof r === "string"),
+          }
+        }),
+      )
+    })
+
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, result, list }), activate, ready }
+    return { service: Plugins.of({ start, fail, result, notice, list }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
@@ -532,6 +552,10 @@ export class Plugins extends Context.Service<
     >
     /** A turn's result: every `agent.result` callback in plugin order, each free to rewrite `recipients`. */
     readonly result: (input: VibestPlugin.AgentResult) => Effect.Effect<ReadonlyArray<string | null>>
+    /** A notice about a session: every `agent.notice` callback in plugin order, each free to reword it or rewrite `recipients`. */
+    readonly notice: (
+      input: VibestPlugin.AgentNotice,
+    ) => Effect.Effect<{ readonly text: string; readonly recipients: ReadonlyArray<string | null> }>
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {

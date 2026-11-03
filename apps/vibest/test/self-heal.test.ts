@@ -271,7 +271,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             },
             "seeded-project",
           )
-          return yield* db.insertInbox({ sessionId: "b0050001", kind: "send", message: "queued", details: {} })
+          return (yield* db.insertInbox({ sessionId: "b0050001", kind: "send", message: "queued", details: {} }))[0]!
         }).pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))

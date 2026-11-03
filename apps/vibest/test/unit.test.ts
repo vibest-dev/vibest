@@ -571,7 +571,7 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         yield* db.insertSession(session("aaaaaaaa", { turnState: "open" }), "r")
-        const dropped = yield* db.finishTurn(
+        const [dropped] = yield* db.finishTurn(
           "aaaaaaaa",
           { status: "completed" },
           { turnState: "completed", status: "idle" },
@@ -582,10 +582,10 @@ describe("Db", () => {
             details: { status: "completed" },
           },
         )
-        assert.strictEqual(dropped.status, "dropped")
+        assert.strictEqual(dropped!.status, "dropped")
         assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))!.status, "dropped")
         yield* db.coordinatorLaunch("r", "pi", false, place)
-        const row = yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "report", message: "hi", details: {} })
+        const row = (yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "report", message: "hi", details: {} }))[0]!
         assert.strictEqual(row.status, "pending")
         const guard = {
           projectId: (yield* db.getSession("aaaaaaaa"))!.projectId,

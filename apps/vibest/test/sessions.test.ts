@@ -2326,7 +2326,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       const prompts = (yield* herdr.callsTo("send")).length
       // As vibestd leaves it when it stops between agent.prompt and recording the delivery.
-      const row = yield* db.insertInbox({ sessionId: id, kind: "send", message: "task", details: {} })
+      const row = (yield* db.insertInbox({ sessionId: id, kind: "send", message: "task", details: {} }))[0]!
       yield* db.setInboxStatus([row.id], "sending")
       yield* sessions.check(id)
       assert.lengthOf(yield* herdr.callsTo("send"), prompts)
