@@ -13,7 +13,20 @@ import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import {
+  Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  type Scope,
+  Stream,
+} from "effect"
 
 import * as Platform from "#platform"
 
@@ -24,6 +37,7 @@ import {
   FakeProcesses,
   makeRepository,
   testLayer,
+  type TestOptions,
   type TestServices,
   until,
   untilVirtual,
@@ -32,25 +46,29 @@ import {
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 
-const served = Layer.unwrap(
-  Effect.gen(function* () {
-    const shutdown = yield* Deferred.make<void>()
-    return Server.layer.pipe(
-      Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
-      Layer.provideMerge(
-        Layer.mergeAll(
-          Layer.succeed(Server.Identity, { instance: INSTANCE }),
-          Layer.succeed(Server.Shutdown, shutdown),
+const serve = (options: TestOptions = {}) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const shutdown = yield* Deferred.make<void>()
+      return Server.layer.pipe(
+        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+        Layer.provideMerge(
+          Layer.mergeAll(
+            Layer.succeed(Server.Identity, { instance: INSTANCE }),
+            Layer.succeed(Server.Shutdown, shutdown),
+          ),
         ),
-      ),
-      Layer.provideMerge(Project.layer),
-      Layer.provideMerge(testLayer()),
-    )
-  }),
-)
+        Layer.provideMerge(Project.layer),
+        Layer.provideMerge(testLayer(options)),
+      )
+    }),
+  )
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(served)))
+const test = <E>(
+  name: string,
+  program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>,
+  options?: TestOptions,
+) => it.effect(name, () => program.pipe(Effect.provide(serve(options))))
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const cli = (repo: string) => Effect.map(client, (c) => authed(c, cliHeaders(repo)))
@@ -195,6 +213,35 @@ describe("Daemon.Stop", () => {
       yield* until(db.getSession(id), (s) => s?.turnState === "open")
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
     }),
+  )
+
+  test(
+    "a spawn's turn start and end from its harness hook settle while draining: the launch confirms and the Stop is accepted",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const raw = yield* client
+      // The runtime never shows the turn working (a fast turn), so the hook's start line is the launch's only pickup proof.
+      const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
+      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
+      const stopping = yield* Effect.forkScoped(stop(repo))
+      yield* draining
+      // What the Pi extension sends for that turn's `input` and `agent_settled`.
+      const hook = (call: "Prompt" | "TurnEnd", event: object) =>
+        Effect.forkScoped(
+          Effect.exit(
+            raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
+          ),
+        )
+      const prompted = yield* hook("Prompt", { type: "input", text: "work", source: "interactive" })
+      const ended = yield* hook("TurnEnd", { type: "agent_settled", text: "done", error: "", aborted: false })
+      assert.strictEqual(yield* settled(stopping), "accepted")
+      assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
+      assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
+      assert.include(yield* (yield* FileSystem.FileSystem).readFileString(layout.resultFile(id)), "done")
+    }),
+    { promptsIgnored: true },
   )
 
   test(

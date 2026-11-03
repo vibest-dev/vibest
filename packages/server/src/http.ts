@@ -6,8 +6,9 @@
 //   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
 //   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
 //                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line (TurnEnd)
-//   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt)
+//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: result file, report line (TurnEnd); a
+//                                                       settlement, so still taken while stopping
+//   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt); a settlement
 //   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
 //
 // Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
@@ -143,7 +144,7 @@ export const make = Effect.gen(function* () {
       if (hook.hook === "turn-end")
         return yield* admitted(
           "hook turn-end",
-          false,
+          true,
           Hooks.turnEnd(sessions, adapter, who, request.body).pipe(
             Effect.as(ok()),
             Effect.catch((e) => Effect.succeed(failure(500, `the turn end was not recorded: ${e.message}`))),
@@ -152,7 +153,7 @@ export const make = Effect.gen(function* () {
       if (hook.hook === "prompt")
         return yield* admitted(
           "hook prompt",
-          false,
+          true,
           Hooks.prompt(sessions, adapter, who, request.body).pipe(
             Effect.as(ok()),
             Effect.catch((e) => Effect.succeed(failure(500, `the prompt was not recorded: ${e.message}`))),

@@ -220,14 +220,21 @@ export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/Daemo
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
-/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains. Only at the RPC entry. */
+/**
+ * A harness hook's turn start or end records what the agent already did: a settlement, still taken while a Stop drains.
+ * Refused, a spawn's first turn would never show its pickup proof (its launch then holds the drain open), and a turn
+ * end would lose its result.
+ */
+const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
+
+/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains, except settlements. Only at the RPC entry. */
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
     const drain = yield* Drain
     return Admission.of((effect, { rpc }) =>
       Effect.acquireUseRelease(
-        drain.admit(rpc._tag),
+        drain.admit(rpc._tag, SETTLEMENTS.has(rpc._tag)),
         (leave) => (leave ? effect : Effect.fail(new DaemonStopping({ method: rpc._tag }))),
         (leave) => leave ?? Effect.void,
       ),

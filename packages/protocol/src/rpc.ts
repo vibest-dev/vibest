@@ -183,7 +183,7 @@ export class ProtocolGate extends RpcMiddleware.Service<ProtocolGate>()("vibest/
   error: ProtocolRejected,
 }) {}
 
-/** Methods that change something, counted while they run. Refused with DaemonStopping while a Daemon.Stop drains and after it is accepted. */
+/** Methods that change something, counted while they run. Refused with DaemonStopping while a Daemon.Stop drains (except a hook's TurnEnd and Prompt, settlements) and after it is accepted. */
 export class Admission extends RpcMiddleware.Service<Admission>()("vibest/Admission", {
   error: DaemonStopping,
 }) {}
