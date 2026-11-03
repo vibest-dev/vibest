@@ -69,11 +69,7 @@ const statusOf = (row: InboxRow) => {
   if (row.kind !== "result") return "sent a message"
   const { error, status } = row.details
   if (error === "interrupted") return "was interrupted"
-  if (typeof error === "string" && error !== "") return "failed"
-  if (status === "completed") return "completed"
-  if (status === "failed") return "failed"
-  if (status === "needs_input") return "needs input"
-  return "ended without a status"
+  return status === "failed" || (typeof error === "string" && error !== "") ? "failed" : "completed"
 }
 
 /**

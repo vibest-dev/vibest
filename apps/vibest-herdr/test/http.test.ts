@@ -42,8 +42,8 @@ describe("the line a delivery shows", () => {
     )
     const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
     assert.strictEqual(
-      line([row({ sessionId: "95603b88", details: { status: "needs_input" } })], reviewer),
-      'Reviewer Agent "Review the guard fix" needs input (95603b88)',
+      line([row({ sessionId: "95603b88", details: { status: "failed" } })], reviewer),
+      'Reviewer Agent "Review the guard fix" failed (95603b88)',
     )
     assert.strictEqual(
       line([row({ kind: "report" })], who),
@@ -52,8 +52,7 @@ describe("the line a delivery shows", () => {
     const status = (details: Record<string, unknown>) => line([row({ details })], who).split('" ')[1]
     assert.strictEqual(status({ status: "failed" }), "failed (349f65b2)")
     assert.strictEqual(status({ status: "completed", error: "the turn ended on an API error" }), "failed (349f65b2)")
-    assert.strictEqual(status({ status: "unknown", error: "interrupted" }), "was interrupted (349f65b2)")
-    assert.strictEqual(status({ status: "unknown" }), "ended without a status (349f65b2)")
+    assert.strictEqual(status({ status: "failed", error: "interrupted" }), "was interrupted (349f65b2)")
     assert.strictEqual(line([row({ kind: "notice", message: "w1 exited.\nmore" })], who), "Notice: w1 exited.")
   })
 
@@ -290,11 +289,11 @@ describe("vibestd's HTTP API", () => {
         JSON.stringify({
           hook_event_name: "TurnComplete",
           reason: "answer",
-          last_assistant_message: "status: completed",
+          last_assistant_message: "Fixed the guard.",
         }),
       )
       assert.strictEqual(end.status, 204)
-      assert.include(yield* fs.readFileString(layout.resultFile(worker)), "status: completed")
+      assert.include(yield* fs.readFileString(layout.resultFile(worker)), "Fixed the guard.")
       // The main agent's turn end is no result.
       yield* call(
         "/hooks/claude/turn-end",
