@@ -389,6 +389,37 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "--env reaches the session's first terminal and is never stored; a later terminal starts without it",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sql = yield* SqlClient.SqlClient
+      const repo = yield* makeRepository
+      const sessions = yield* Sessions
+      const db = yield* Db
+      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), env: { VBT_TOKEN: "s3cret" } })
+      yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* sessions.check(id)
+      assert.strictEqual((yield* herdr.callsTo("open"))[0]!.env.VBT_TOKEN, "s3cret")
+      const stored = yield* sql<{ metadata: string }>`SELECT metadata FROM session`.pipe(Effect.orDie)
+      assert.isFalse(
+        stored.some((r) => r.metadata.includes("s3cret")),
+        "no session row holds the value",
+      )
+      // Its terminal gone, the next message resumes it in a new one: without the value.
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* sessions.send(id, "next")
+      yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
+      for (const open of (yield* herdr.callsTo("open")).slice(1)) assert.isUndefined(open.env.VBT_TOKEN)
+    }),
+  )
+
+  test(
     "Session process exits mid-turn: failed result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

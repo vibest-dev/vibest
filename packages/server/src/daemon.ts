@@ -71,6 +71,8 @@ export interface Host {
   readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
 }
 
+export { HANDOFF_ENV, type MainEnv } from "./server.ts"
+
 /** How long the new vibestd of a handoff waits for the old one to release the lock. */
 export const HANDOFF_TIMEOUT = Duration.seconds(30)
 
@@ -119,7 +121,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
  * Daemon.Stop. `handoff`: started by the running vibestd (Daemon.Handoff), so it waits for that one to release the lock
  * instead of leaving it running, and backs the database up before opening it.
  */
-export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
+export const run = (host: Host, options: { readonly handoff?: boolean; readonly mainEnv?: Server.MainEnv } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -191,7 +193,13 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     const shutdown = yield* Deferred.make<void>()
     yield* Layer.build(
       services(host, layout).pipe(
-        Layer.provide(Layer.merge(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown))),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(Server.Identity, identity),
+            Layer.succeed(Server.Shutdown, shutdown),
+            Layer.succeed(Server.MainEnv, options.mainEnv ?? new Map()),
+          ),
+        ),
       ),
     )
     // The socket files' permissions are the authentication (SPEC §13).

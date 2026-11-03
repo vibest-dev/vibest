@@ -131,7 +131,14 @@ const daemon = (host: Daemon.Host) =>
       userOnly("daemon").pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            if (foreground) return yield* Daemon.run(host, { handoff })
+            if (foreground) {
+              // The previous vibestd's in-memory main agent --env values: read once, then gone from this process's
+              // environment, so nothing this vibestd starts inherits them.
+              const raw = process.env[Daemon.HANDOFF_ENV]
+              delete process.env[Daemon.HANDOFF_ENV]
+              const mainEnv: Daemon.MainEnv | undefined = handoff && raw ? new Map(JSON.parse(raw)) : undefined
+              return yield* Daemon.run(host, { handoff, ...(mainEnv ? { mainEnv } : {}) })
+            }
             const layout = yield* Layout
             if (!(yield* probe(layout.socket))) yield* startDaemon
             yield* Console.log(`vibestd is running on ${layout.socket}`)
@@ -185,7 +192,12 @@ const run = Command.make(
       Flag.withDescription("Leave out for the harness default; see vibest models"),
       Flag.optional,
     ),
-    env: Flag.KeyValuePair("env").pipe(Flag.optional),
+    env: Flag.KeyValuePair("env").pipe(
+      Flag.withDescription(
+        "KEY=VALUE for the harness, never stored: a restart or a harness change in the same pane keeps it, a new pane (the old one closed) does not; pass it again then",
+      ),
+      Flag.optional,
+    ),
     peer: Flag.String("peer").pipe(
       Flag.withDescription(
         "A session id: run in its worktree, in a pane split from its pane, instead of a new worktree (archiving this session never removes that worktree)",
@@ -276,7 +288,12 @@ const mainFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
-  env: Flag.KeyValuePair("env").pipe(Flag.optional),
+  env: Flag.KeyValuePair("env").pipe(
+    Flag.withDescription(
+      "KEY=VALUE for the main agent's harness, never stored: vibestd keeps it in memory for a restart in place (vibest update); a vibestd stop or a new terminal loses it; run vibest --env again then",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -385,7 +402,8 @@ const startMain =
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
                 // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
-                env,
+                // Held in vibestd's memory only, for this harness's restart in place (vibest update).
+                ...(Object.keys(env).length > 0 ? { env } : {}),
               }),
             )
           }),

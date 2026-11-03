@@ -809,7 +809,6 @@ export class Sessions extends Context.Service<
             )
             const key = input.key
             const base = {
-              ...(input.env ? { env: input.env } : {}),
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
               ...(input.archive ? { archive: true } : {}),
             }
@@ -913,7 +912,7 @@ export class Sessions extends Context.Service<
               locks
                 .withLock(id)(
                   Deferred.succeed(held, undefined).pipe(
-                    Effect.andThen(launch(rt, machine, row, root, decision.prompt, input.peer)),
+                    Effect.andThen(launch(rt, machine, row, root, decision.prompt, input.peer, input.env)),
                   ),
                 )
                 .pipe(Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),

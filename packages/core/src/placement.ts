@@ -169,6 +169,8 @@ export const sessionPlacement = (deps: {
       readonly key: string
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
+      /** `vibest run --env`: given only to the first terminal, never stored (a later terminal starts without it). */
+      readonly env?: Readonly<Record<string, string>> | undefined
     },
   ) {
     // Beside the pane a caller names (--peer), else beside the project's main agent when it runs in this runtime.
@@ -179,7 +181,7 @@ export const sessionPlacement = (deps: {
       project: input.project,
       cwd: input.cwd,
       argv: input.argv,
-      env: { ...session.metadata.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
+      env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
       label: `${session.id} ${session.name}`.slice(0, 60),
       ...(near !== undefined ? { near } : {}),
       ...(input.split === true ? { split: true } : {}),
@@ -203,7 +205,7 @@ export const sessionPlacement = (deps: {
       return peer
     })
 
-  /** `splitFrom`: the session named by `--peer`, whose terminal the new one opens beside. */
+  /** `splitFrom`: the session named by `--peer`, whose terminal the new one opens beside. `env`: `vibest run --env`. */
   const launchRaw = Effect.fn("Sessions.launch")(function* (
     h: Runtime,
     machine: Machine,
@@ -211,6 +213,7 @@ export const sessionPlacement = (deps: {
     root: string,
     firstPrompt: string,
     splitFrom?: string,
+    env?: Readonly<Record<string, string>>,
   ) {
     const folders = yield* listProjectRepositories(root)
     // The row's own project key: the scratch directory and the rules go to the project the session belongs to.
@@ -286,6 +289,7 @@ export const sessionPlacement = (deps: {
         cwd: worktree,
         key,
         argv,
+        env,
         ...(near !== undefined ? { near } : {}),
         ...(peer !== undefined ? { split: true } : {}),
       }),
@@ -302,8 +306,9 @@ export const sessionPlacement = (deps: {
     root: string,
     firstPrompt: string,
     splitFrom?: string,
+    env?: Readonly<Record<string, string>>,
   ) =>
-    launchRaw(h, machine, session, root, firstPrompt, splitFrom).pipe(
+    launchRaw(h, machine, session, root, firstPrompt, splitFrom, env).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const e = Cause.squash(cause)
