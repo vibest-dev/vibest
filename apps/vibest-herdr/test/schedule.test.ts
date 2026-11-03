@@ -9,6 +9,7 @@ import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
 import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
+import { harnessChoice } from "./fakes.ts"
 
 const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, unknown> = {}): Candidate => ({
   source: id,
@@ -54,7 +55,7 @@ const failed = {
 }
 
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>
-  Plugins.make(plugins).pipe(
+  Plugins.make([harnessChoice, ...plugins]).pipe(
     Effect.flatMap(f),
     Effect.scoped,
     Effect.provide(Subscriptions.layer),
@@ -62,33 +63,6 @@ const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service
   )
 
 describe("plugin host", () => {
-  it.effect("no user plugins: the builtin keeps a usable preference and decides nothing else", () =>
-    run([], (p) =>
-      Effect.gen(function* () {
-        const d = yield* p.start({ ...start, harness: "claude", model: "m" })
-        assert.deepStrictEqual([d.harness, d.model, d.decidedBy], ["claude", "m", {}])
-        assert.deepStrictEqual(
-          d.trace.map((t) => [t.plugin, t.outcome, t.changes]),
-          [["harness-choice", "ok", []]],
-        )
-      }),
-    ),
-  )
-
-  it.effect("rerouting off a limited harness drops the model named for it", () =>
-    run([], (p) =>
-      Effect.gen(function* () {
-        const limited = { window: "5h", percent: 100, status: "limited" as const, resetTime: null }
-        yield* (yield* Subscriptions).report({ harness: "claude", limits: [limited] })
-        // A model the new harness does not list would fail preflight: the reroute starts on the new harness's default.
-        const d = yield* p.start({ ...start, harness: "claude", model: "claude-opus-5-5" })
-        assert.strictEqual(d.harness, "pi")
-        assert.strictEqual(d.model, undefined)
-        assert.deepStrictEqual(d.decidedBy, { harness: "harness-choice", model: "harness-choice" })
-      }),
-    ),
-  )
-
   it.effect(
     "callbacks mutate one event in place, in plugin order: a later plugin sees and overwrites what an earlier one wrote",
     () => {

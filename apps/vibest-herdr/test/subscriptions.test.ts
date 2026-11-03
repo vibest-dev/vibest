@@ -17,7 +17,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { makeRepository, runVibest, testLayer } from "./fakes.ts"
+import { harnessChoice, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const CURSOR_SECRET = "cursor-token-do-not-log"
@@ -382,7 +382,7 @@ describe("subscriptions", () => {
       })
       const listed = yield* Effect.gen(function* () {
         const subs = yield* Subscriptions
-        const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
+        const plugins = yield* Plugins.make([harnessChoice, { source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
           agentType: "general",

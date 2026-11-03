@@ -175,26 +175,26 @@ started, a main agent) cannot answer results with results (rule 4), and that eve
 **Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
 on `schema` and `protocol` only. Plugin types derive from the client API.
 
-| Package              | Role                                                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`             | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                             |
-| `protocol`           | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                        |
-| `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                          |
-| `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                             |
-| `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                      |
-| `plugin`             | Plugin authoring API (Effect only).                                                                                                                                                                 |
-| `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                             |
-| `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                              |
-| `plugin-harnesses`   | Builtin: one harness adapter module per CLI (launch side, and how its vibest plugin loads).                                                                                                         |
-| `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`. |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                           |
-| `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                          |
-| `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                        |
-| `plugin-scheduling`  | Builtin: the default harness choice and limit move (id `harness-choice`).                                                                                                                           |
-| `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
-| `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                           |
-| `plugin-skills`      | Builtin skills for the main Agent: delegate, pipeline. Replaceable and removable.                                                                                                                   |
-| `apps/vibest-herdr`  | Composition root of the Herdr TUI product.                                                                                                                                                          |
+| Package                 | Role                                                                                                                                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                             |
+| `protocol`              | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                        |
+| `core`                  | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                          |
+| `server`                | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                             |
+| `client`                | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                      |
+| `plugin`                | Plugin authoring API (Effect only).                                                                                                                                                                 |
+| `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                             |
+| `runtime-herdr`         | Runtime port on herdr.                                                                                                                                                                              |
+| `plugin-harnesses`      | Builtin: one harness adapter module per CLI (launch side, and how its vibest plugin loads).                                                                                                         |
+| `integration/claude`    | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`. |
+| `integration/pi`        | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                           |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                          |
+| `plugin-git`            | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                        |
+| `plugin-harness-choice` | Builtin plugin `@vibest/plugin-harness-choice` (id `harness-choice`): the default harness choice and limit move (§9). The product bundles it and loads it first.                                    |
+| `plugin-guard`          | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
+| `plugin-knowledge`      | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                           |
+| `plugin-skills`         | Builtin skills for the main Agent: delegate, pipeline. Replaceable and removable.                                                                                                                   |
+| `apps/vibest-herdr`     | Composition root of the Herdr TUI product.                                                                                                                                                          |
 
 Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary.md`).
 
@@ -535,7 +535,8 @@ crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin
 `agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the round is left
 failed with the plugin error, no move). Nothing is skipped silently.
 
-**The builtin default harness choice** (id `harness-choice`, always first, before user plugins): left alone, a
+**The default harness choice** (`@vibest/plugin-harness-choice`, id `harness-choice`; the product loads it first, before the
+runtime plugins and user plugins): left alone, a
 caller's usable harness preference stands (and a free login is picked when the provider is unset); anything
 else is routed to the available harness with the most quota left, and a start with no harness any plugin could
 run is refused naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it
@@ -676,8 +677,11 @@ continue a limited Agent in place).
 
 ## 9. Harness choice
 
-Which harness an Agent runs on is one decision, made by the `agent.start.before` chain (§7): the builtin default
-first, then every user plugin in order, each able to keep or overwrite what came before. vibestd validates the
+Which harness an Agent runs on is one decision, made by the `agent.start.before` chain (§7): the default choice
+first, then every user plugin in order, each able to keep or overwrite what came before. The default choice is a
+plugin, `packages/plugin-harness-choice` (`@vibest/plugin-harness-choice`): the product (`apps/vibest-herdr`) bundles
+it into the binary and passes it to the plugin host as its first builtin, before the runtime plugins (runtime-port.md
+§2), so the core holds no harness choice policy. It cannot be turned off yet. vibestd validates the
 final harness (it exists, its plugin directory is there, its model list reads, the model is offered) and
 refuses a start that never settled on one.
 
@@ -687,7 +691,7 @@ the launch was about to send, else the trailing delivered batch) — on the harn
 `event.move`. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
 harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
 `refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. The builtin default moves to
+started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice moves to
 the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
 round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
 `session.metadata.attempts`, so they survive moves and a vibestd restart; a preflight miss, or a start or prompt

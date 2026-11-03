@@ -2,7 +2,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -13,7 +13,15 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestOptions, type TestServices, until } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestOptions,
+  type TestServices,
+  until,
+  harnessChoice,
+} from "./fakes.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(repositoryKey(repo), (key) => ({
@@ -361,6 +369,7 @@ describe("plugins: spawn hook", () => {
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
         Plugins.make([
+          harnessChoice,
           {
             source: "hang",
             revision: "-",
@@ -405,6 +414,7 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 const loaded = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
+    Layer.provide(Layer.succeed(Builtins, [harnessChoice])),
     Layer.provide(Subscriptions.layer),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),

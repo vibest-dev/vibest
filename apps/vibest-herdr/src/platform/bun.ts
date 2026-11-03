@@ -13,6 +13,7 @@ import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, secur
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
 import * as VibestPlugin from "@vibest/plugin"
+import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
@@ -244,8 +245,10 @@ const configuredRuntime: ConfiguredRuntime = () =>
     }
   })
 
-/** The builtin runtime plugins (runtime-port.md §2), first after the default harness choice. */
+/** The builtin plugins, before user plugins: the default harness choice (architecture.md §9), then the runtime
+ * plugins (runtime-port.md §2). */
 const builtinPlugins: ReadonlyArray<Candidate> = [
+  { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
   {
     source: "builtin:runtime-choice",
