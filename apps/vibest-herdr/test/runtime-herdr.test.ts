@@ -207,6 +207,31 @@ describe("send to an agent herdr started", () => {
     }),
   )
 
+  it.effect("herdr marks it ready only when it is read (agent.get), so each try reads it before agent.prompt", () =>
+    Effect.gen(function* () {
+      // As herdr does for an agent whose harness hook reports its state: the pending launch becomes ready at the first
+      // agent.get after the settle delay, and agent.prompt alone never moves it.
+      let ready = false
+      let gets = 0
+      const { runtime, calls } = yield* scriptedRuntime((method) => {
+        if (method === "agent.get") {
+          if (++gets > 2) ready = true
+          return Effect.succeed({ agent: { name: "s-abcd1234", pane_id: "w1:p2", agent: "pi" } })
+        }
+        if (method === "agent.prompt" && !ready) return herdrError(method, "agent_not_ready")
+        return Effect.succeed({})
+      })
+      const sending = yield* Effect.forkChild(
+        runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234"), { text: "task" }),
+      )
+      yield* TestClock.adjust("40 seconds")
+      yield* Fiber.join(sending)
+      const methods = calls.map((c) => c.method)
+      assert.strictEqual(methods.filter((m) => m === "agent.prompt").length, 2)
+      assert.notInclude(methods, "pane.send_input")
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("an agent herdr never marks ready gets the text as one paste with Enter (pane.send_input)", () =>
     Effect.gen(function* () {
       const calls = yield* scriptedSend(Number.POSITIVE_INFINITY)
