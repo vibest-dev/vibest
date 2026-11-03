@@ -4,7 +4,6 @@ import type * as VibestPlugin from "@vibest/plugin"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
-import { checkPlugin } from "./check.ts"
 import { Layout } from "./paths.ts"
 
 /** What vibestd needs from the runtime to load plugins: `prepare` maps `effect` and `@vibest/plugin` to vibestd's own instances and keys each load's local imports. */
@@ -195,8 +194,6 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
         options,
         plugin: { error },
       })
-      // Builtin, and off until this entry configures it (architecture.md §4.3). Not an npm package.
-      if (target === "check") return { source: "builtin:check", revision: "check", options, plugin: checkPlugin }
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
       const file = yield* entry(target).pipe(Effect.orElseSucceed(() => undefined))
       // A directory plugin's entry may appear, or switch from index.* to server.*.

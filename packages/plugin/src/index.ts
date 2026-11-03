@@ -126,34 +126,10 @@ export interface AgentFail extends AgentContext {
   move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined
 }
 
-/**
- * A subagent's round is about to go idle. Set `prompt` to keep it working on that text instead.
- * `prompt` is the only decision. `output` is a failure tail and does not stop the chain.
- */
-export interface AgentIdle {
-  readonly sessionId: string
-  /** `main` for the project's main agent, otherwise the definition (`general`, …). */
-  readonly agentType: string
-  /** The directory the agent works in. */
-  readonly directory: string
-  /** The agent's last answer. */
-  readonly answer: string
-  /** Finished check attempts for this session, counted by the host. The plugin only compares it to its limit. */
-  readonly checkAttempts: number
-  /** Set once this result's command has finished. The plugin must not ask to run it again. */
-  readonly ran: { readonly ok: boolean; readonly tail: string } | undefined
-  /** Set when the host should run this command outside the lock. Not a decision. */
-  command: string | undefined
-  prompt: string | undefined
-  /** Tail of a failing check once the attempt budget is spent. Not a decision. */
-  output: string | undefined
-}
-
 /** Every hook: the event its callbacks get and the error they may fail with. */
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
-  readonly "agent.idle": { readonly event: AgentIdle; readonly error: never }
 }
 
 /** The hook names of one domain without its prefix: `start.before` for `agent.start.before`. */

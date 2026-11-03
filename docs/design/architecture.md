@@ -52,7 +52,7 @@ Reference implementations:
 | D5  | Plugins follow OpenCode V2 exactly, Effect only (no Promise edition).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| D8  | In scope now: delegation (main Agent and subagents); the `pipeline` skill (plan → implement → review → pull request); the `check` rule plugin; multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                      |
+| D8  | In scope now: delegation (main Agent and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                                               |
 | D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest never refreshes or rotates a CLI's token, and an expired or unreadable token skips that poll so the limits stay as last known (or unknown). Any vibest plugin may report a Subscription's limits. |
 | D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest report` is for explicit or structured results; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -117,7 +117,6 @@ on `schema` and `protocol` only. Plugin types derive from the client API.
 | `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
 | `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                           |
 | `plugin-skills`      | Builtin skills for the main Agent: delegate, pipeline. Replaceable and removable.                                                                                                                   |
-| `plugin-check`       | Builtin rule, off until configured: a writing subagent is done only when a check command passes (§4.3).                                                                                             |
 | `apps/vibest-herdr`  | Composition root of the Herdr TUI product.                                                                                                                                                          |
 
 Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary.md`).
@@ -165,8 +164,6 @@ AgentDefinition    Harness    Subscription    Machine
 - **Subscriptions in the Run context.** Every Run hook and scheduling hook receives the current Subscriptions
   (Claude's 5-hour and weekly windows, Cursor's usage, …). The core only gathers and hands them over; plugins
   decide which harness to use, when to wait, and when to switch.
-- **`acceptance`** records each acceptance check of the Run's work and whether it passed: `{ reviewer, outcome (pass \| fail), summary, time }` (a test
-  command, a reviewer's opinion). It explains why a Run ended the way it did.
 - **Conversations.** The main Agent has one active conversation per Project; `vibest --new` starts another and
   keeps the earlier ones (their CLI session ids) so they can be resumed. Knowledge belongs to the Project, so
   every conversation and every subagent sees the same instructions and memory.
@@ -214,7 +211,7 @@ is `kept`). An Agent is reused by its id; one that may be needed again should be
 
 **Idle:** vibest does not model the CLI agent's internal loop. herdr's `idle` is the status. A piece of work ends
 when its integration reports the end of its work (Claude `Stop`, Pi `agent_settled`, …) and its inbox is empty;
-that is when `agent.idle` runs and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
+that is when its result goes to its parent and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
 10 s makes the Message `lost` (a reason and the `vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log); only a harness without an integration treats
 herdr's idle as the end.
 
@@ -264,7 +261,7 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   resumes the CLI conversation with the adapter's resume arguments; without a known conversation id it fails.
 - **Restart.** Started Agents (`time.start` set, no `time.end`) with no herdr agent end with `outcome: failed`; open Messages are checked again by the
   rules above; orphan worktrees are logged, never deleted.
-- Decision points (`agent.idle`, `agent.fail`, `run.end`) are recorded before their hook runs;
+- Decision points (`agent.fail`, `run.end`) are recorded before their hook runs;
   after a restart an unfinished decision runs again, so plugin decisions must be idempotent.
 
 ### 3.3 Ending and cleanup
@@ -376,15 +373,7 @@ same commands.
 
 ### 4.3 Rules (hook plugins)
 
-A rule is an ordinary plugin on one hook (§7). The builtin `check` rule: on `agent.idle` of a writing subagent
-it runs the configured command in that Agent's Workspace; on failure it sets `event.prompt` to the output, so
-the same Agent continues instead of going idle; after the last attempt it lets the Agent go idle with the
-failure in its result. One acceptance entry per attempt. Configuration, per Project:
-
-```jsonc
-// ~/work/shop/vibest.jsonc
-{ "plugins": [{ "package": "check", "options": { "command": "pnpm test", "attempts": 3 } }] }
-```
+A rule is an ordinary plugin on one hook (§7), listed in the Project configuration.
 
 Rule state lives in `storage` and decisions are idempotent, because decision hooks run again after a restart.
 
@@ -437,29 +426,28 @@ matching client API interface and adds only plugin-specific members.
 
 **Context domains:**
 
-| Domain         | Client API (`Pick` of)                                 | `transform` / `reload` | `hook`                         |
-| -------------- | ------------------------------------------------------ | ---------------------- | ------------------------------ |
-| `project`      | get                                                    | —                      | —                              |
-| `workspace`    | list, create, release                                  | yes (types)            | —                              |
-| `definition`   | list, get                                              | yes                    | —                              |
-| `harness`      | list                                                   | yes                    | —                              |
-| `run`          | get, list, stop, record acceptance                     | —                      | `create`, `end`                |
-| `agent`        | —                                                      | —                      | `start.before`, `fail`, `idle` |
-| `subscription` | list (via `report`)                                    | —                      | —                              |
-| `machine`      | list                                                   | yes                    | —                              |
-| `command`      | list                                                   | yes                    | —                              |
-| `skill`        | list                                                   | yes                    | —                              |
-| `event`        | `subscribe({ types })` → `Stream`                      | —                      | —                              |
-| `rpc`          | `register(definition, handlers)`, `client(definition)` | —                      | —                              |
-| `storage`      | `get`, `set`, `remove`, `scan` (namespaced per plugin) | —                      | —                              |
+| Domain         | Client API (`Pick` of)                                 | `transform` / `reload` | `hook`                 |
+| -------------- | ------------------------------------------------------ | ---------------------- | ---------------------- |
+| `project`      | get                                                    | —                      | —                      |
+| `workspace`    | list, create, release                                  | yes (types)            | —                      |
+| `definition`   | list, get                                              | yes                    | —                      |
+| `harness`      | list                                                   | yes                    | —                      |
+| `run`          | get, list, stop                                        | —                      | `create`, `end`        |
+| `agent`        | —                                                      | —                      | `start.before`, `fail` |
+| `subscription` | list (via `report`)                                    | —                      | —                      |
+| `machine`      | list                                                   | yes                    | —                      |
+| `command`      | list                                                   | yes                    | —                      |
+| `skill`        | list                                                   | yes                    | —                      |
+| `event`        | `subscribe({ types })` → `Stream`                      | —                      | —                      |
+| `rpc`          | `register(definition, handlers)`, `client(definition)` | —                      | —                      |
+| `storage`      | `get`, `set`, `remove`, `scan` (namespaced per plugin) | —                      | —                      |
 
-**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail" | "idle", ...)`):
+**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 
 | Hook                 | Event (writable fields)                                                                                                      | Runs                                                                                     |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `agent.start.before` | `prompt`, `harness`, `provider`, `model`; read-only: project, agentType, parentSessionId, harnesses, subscriptions, attempts | before every Agent starts, the main Agent included                                       |
 | `agent.fail`         | `move` (`{ harness, provider?, model? }                                                                                      | undefined`); read-only: sessionId, reason, error, turn, harness, provider, attempts, ... | a started Agent's round failed (today a usage limit) |
-| `agent.idle`         | `prompt`, `command`, `output`; read-only: sessionId, agentType, directory, answer, checkAttempts, ran                        | the subagent's round would otherwise go to its parent                                    |
 
 Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. Callbacks run
 sequentially in plugin order and mutate the one event in place - no per-callback copy - so a later plugin sees
@@ -467,9 +455,8 @@ sequentially in plugin order and mutate the one event in place - no per-callback
 it last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
-`agent.fail` and `agent.idle` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation
-(an `agent.fail` crash leaves the round failed with the plugin error, no move; an `agent.idle` crash delivers
-the round failed with the plugin error). Nothing is skipped silently.
+`agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the round is left
+failed with the plugin error, no move). Nothing is skipped silently.
 
 **The builtin default harness choice** (id `harness-choice`, always first, before user plugins): left alone, a
 caller's usable harness preference stands (and a free login is picked when the provider is unset); anything
@@ -582,7 +569,7 @@ The cost: a harness started by hand does not load it, which is the intent. vibes
 | `agent.session`                | `SessionStart`           | to verify                    | `session_start`                 |
 | `agent.prompt`                 | `prompt.submit` (origin) | `beforeSubmitPrompt`         | `agent_start`                   |
 | `agent.tool`                   | `tool.call`              | `preToolUse`                 | `tool_call`, `tool_execution_*` |
-| `agent.idle` with last answer  | `turn.complete` (answer) | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
+| turn end with last answer      | `turn.complete` (answer) | `afterAgentResponse`, `stop` | `agent_end`, `agent_settled`    |
 | `agent.fail`                   | `turn.complete` (error)  | `stop` not completed         | `agent_end` with error          |
 | `agent.blocked`                | `Notification`           | to verify                    | —                               |
 | `agent.exit`                   | `SessionEnd`             | herdr                        | `session_shutdown`              |
@@ -795,24 +782,24 @@ The phases, their order, and when each is done are in `plan.md`.
 
 Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when implementing, not vocabulary.
 
-| vibest                                          | Pattern                                                                                                         | Source                                                                                                                                             |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain in core, implementation in plugins (D2)  | schema contracts with internal plugins implementing them                                                        | `packages/schema/src/goal.ts` with `packages/core/src/plugin/goal.ts`; `packages/schema/src/provider.ts` with `packages/core/src/plugin/provider/` |
-| Package layering (§2)                           | one-way runtime dependencies; client never imports core or server                                               | `AGENTS.md:2`, `packages/schema/AGENTS.md`                                                                                                         |
-| Result to parent (§3.1)                         | a subagent result wakes its parent                                                                              | `SessionIdleBackground` in `packages/plugin/src/effect/session.ts`                                                                                 |
-| Service graph and scopes (§5)                   | typed dependency graph over Layers, scope tags, replacement-based configuration                                 | `packages/util/src/effect/layer-node.ts`, `app-node.ts`, `packages/server/src/routes.ts:118-150`                                                   |
-| Per-Project graph (§5)                          | one compiled graph per key in a `LayerMap`, evicted on failure                                                  | `packages/core/src/instance.ts`, `location-service-map.ts`, `instance/service.ts`                                                                  |
-| Plugin API (§7)                                 | `Plugin.define`, `Registration`, `transform` / `reload`, `hook`, domains as `Pick`s of client APIs              | `packages/plugin/src/effect/plugin.ts`, `registration.ts`, `packages/plugin/AGENTS.md`                                                             |
-| Catalog state (§7)                              | synchronous editors replayed in registration order, batched change notification                                 | `packages/core/src/state.ts`, `packages/plugin/src/effect/provider.ts`                                                                             |
-| Hook dispatch (§7)                              | sequential, single mutable event, decision fields, no timeout (transform, refuse, decision)                     | `packages/core/src/plugin/hooks.ts`                                                                                                                |
-| `agent.idle`, `agent.fail`, `agent.prompt` (§7) | idle hook admitting input, retry decision, prompt rewrite                                                       | `experimental.idle`, `retry`, `prompt` in `packages/plugin/src/effect/session.ts`                                                                  |
-| Registry, supervisor, order (§7)                | `(id, revision)`, prefix reactivation, fallback, latch, builtin / user / configuration order                    | `packages/core/src/plugin.ts`, `plugin/supervisor.ts:152-162`, `plugin/internal.ts`                                                                |
-| AgentDefinition (§3)                            | definition with `mode`                                                                                          | `packages/schema/src/agent.ts`                                                                                                                     |
-| Subscription limits (§3)                        | per-window meter (V2: `{ percent, limited, resetsAt }`)                                                         | `packages/schema/src/usage-limits.ts`                                                                                                              |
-| IDs (§3)                                        | prefixed branded IDs with sortable bodies and `create()`                                                        | `packages/schema/src/identifier.ts`, `session-id.ts`                                                                                               |
-| Global and project configuration (§7)           | global directory, then project files found walking up from the working directory                                | `packages/core/src/config/discovery.ts`                                                                                                            |
-| Plugin entries (§7)                             | ordered `plugins` directives: name, path, `{ package, options }`, `-id` to remove; options on `context.options` | `packages/schema/src/config/plugin.ts`, `packages/core/src/config/plugin/source.ts`, `packages/plugin/src/effect/plugin.ts`                        |
-| Configuration through plugins (§7)              | configuration files projected into catalogs by builtin plugins                                                  | `packages/core/src/config/plugin/agent.ts`                                                                                                         |
+| vibest                                         | Pattern                                                                                                         | Source                                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain in core, implementation in plugins (D2) | schema contracts with internal plugins implementing them                                                        | `packages/schema/src/goal.ts` with `packages/core/src/plugin/goal.ts`; `packages/schema/src/provider.ts` with `packages/core/src/plugin/provider/` |
+| Package layering (§2)                          | one-way runtime dependencies; client never imports core or server                                               | `AGENTS.md:2`, `packages/schema/AGENTS.md`                                                                                                         |
+| Result to parent (§3.1)                        | a subagent result wakes its parent                                                                              | `SessionIdleBackground` in `packages/plugin/src/effect/session.ts`                                                                                 |
+| Service graph and scopes (§5)                  | typed dependency graph over Layers, scope tags, replacement-based configuration                                 | `packages/util/src/effect/layer-node.ts`, `app-node.ts`, `packages/server/src/routes.ts:118-150`                                                   |
+| Per-Project graph (§5)                         | one compiled graph per key in a `LayerMap`, evicted on failure                                                  | `packages/core/src/instance.ts`, `location-service-map.ts`, `instance/service.ts`                                                                  |
+| Plugin API (§7)                                | `Plugin.define`, `Registration`, `transform` / `reload`, `hook`, domains as `Pick`s of client APIs              | `packages/plugin/src/effect/plugin.ts`, `registration.ts`, `packages/plugin/AGENTS.md`                                                             |
+| Catalog state (§7)                             | synchronous editors replayed in registration order, batched change notification                                 | `packages/core/src/state.ts`, `packages/plugin/src/effect/provider.ts`                                                                             |
+| Hook dispatch (§7)                             | sequential, single mutable event, decision fields, no timeout (transform, refuse, decision)                     | `packages/core/src/plugin/hooks.ts`                                                                                                                |
+| `agent.fail`, `agent.prompt` (§7)              | retry decision, prompt rewrite                                                                                  | `retry`, `prompt` in `packages/plugin/src/effect/session.ts`                                                                                       |
+| Registry, supervisor, order (§7)               | `(id, revision)`, prefix reactivation, fallback, latch, builtin / user / configuration order                    | `packages/core/src/plugin.ts`, `plugin/supervisor.ts:152-162`, `plugin/internal.ts`                                                                |
+| AgentDefinition (§3)                           | definition with `mode`                                                                                          | `packages/schema/src/agent.ts`                                                                                                                     |
+| Subscription limits (§3)                       | per-window meter (V2: `{ percent, limited, resetsAt }`)                                                         | `packages/schema/src/usage-limits.ts`                                                                                                              |
+| IDs (§3)                                       | prefixed branded IDs with sortable bodies and `create()`                                                        | `packages/schema/src/identifier.ts`, `session-id.ts`                                                                                               |
+| Global and project configuration (§7)          | global directory, then project files found walking up from the working directory                                | `packages/core/src/config/discovery.ts`                                                                                                            |
+| Plugin entries (§7)                            | ordered `plugins` directives: name, path, `{ package, options }`, `-id` to remove; options on `context.options` | `packages/schema/src/config/plugin.ts`, `packages/core/src/config/plugin/source.ts`, `packages/plugin/src/effect/plugin.ts`                        |
+| Configuration through plugins (§7)             | configuration files projected into catalogs by builtin plugins                                                  | `packages/core/src/config/plugin/agent.ts`                                                                                                         |
 
 Where vibest differs: protocol, persistence, delivery, and daemon come from omac (§15), not from OpenCode;
 graphs are per Project, not per directory; decision points survive restarts; notify hooks have a timeout; no

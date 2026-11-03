@@ -8,4 +8,4 @@ vibestd is a long-running daemon, so it keeps little in memory.
 4. No caches of sessions, results or message text. No per-request history.
 5. No map that grows with sessions or rows, unless its entries go when the session ends.
 
-Status: decided. Main breaks it in two places: `packages/core/src/sessions.ts` keeps `tracked`, a map from session id to its lock and flags (`endedAt`, `sawWorking`, `checking`, …) that is never pruned (5); `packages/core/src/inbox.ts` keeps `locks`, one semaphore per project that is never removed (3). The models list cache in `packages/core/src/harness.ts` (per harness and provider, TTL) holds no sessions, results or text and is bounded.
+Status: decided. Main breaks it in two places: `packages/core/src/sessions.ts` keeps `tracked`, a map from session id to its lock and flags (`endedAt`, `sawWorking`, …) that is never pruned (5); `packages/core/src/inbox.ts` keeps `locks`, one semaphore per project that is never removed (3). The models list cache in `packages/core/src/harness.ts` (per harness and provider, TTL) holds no sessions, results or text and is bounded.

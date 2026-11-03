@@ -82,27 +82,6 @@ const Metadata = Schema.Struct({
     Schema.Array(Schema.Struct({ pane: Schema.String, pids: Schema.Array(Schema.Number), exited: Schema.Boolean })),
   ),
   /**
-   * The check rule, on the open round: how many commands have finished, the stored outcome of the current result
-   * (`mtime`), and one acceptance entry per finished command. `deliverFailed`: interrupt will deliver a failing
-   * check instead of pasting it, and it stays until that result is written. Cleared when the round ends.
-   */
-  check: Schema.optional(
-    Schema.Struct({
-      mtime: Schema.Number,
-      attempts: Schema.Number,
-      ran: Schema.optional(Schema.Struct({ ok: Schema.Boolean, tail: Schema.String })),
-      acceptance: Schema.Array(
-        Schema.Struct({
-          reviewer: Schema.Literal("check"),
-          outcome: Schema.Literals(["pass", "fail"]),
-          summary: Schema.String,
-          time: Schema.Number,
-        }),
-      ),
-      deliverFailed: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  /**
    * Real usage-limit tries for this session, oldest first: the (harness, provider) pairs that already hit a limit,
    * kept across moves and across a vibestd restart. Skips inside one move are not kept here.
    */

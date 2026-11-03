@@ -55,9 +55,6 @@ export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
 /** A started Agent's round failed; `agent.fail` decides whether it moves. */
 export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
 
-/** A subagent round that would otherwise go to its parent (`agent.idle`). */
-export type IdleInput = Omit<VibestPlugin.AgentIdle, "prompt" | "command" | "output">
-
 export interface SpawnDecision extends Routing {
   readonly prompt: string
   readonly harness: string | undefined
@@ -87,7 +84,7 @@ type Registered<N extends HookName> = {
 }
 /** One list per hook, so a callback is stored and called as that hook's event. */
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
-const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [], "agent.idle": [] })
+const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 /** The builtin default harness choice, first in every list (architecture.md §9); user plugins run after it. */
 const builtin: Candidate = {
@@ -255,7 +252,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         agent: bind("agent", {
           "start.before": (callback) => remember("agent.start.before", callback),
           fail: (callback) => remember("agent.fail", callback),
-          idle: (callback) => remember("agent.idle", callback),
         }),
         // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
@@ -417,7 +413,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     /** The refusal an `agent.start.before` chain ended with: a real refusal as it was, a crash or timeout in its words. */
     const refusal = (stopped: Stopped) => new AgentRefused({ plugin: stopped.plugin, reason: stopped.reason })
 
-    /** The failure an `agent.fail` or `agent.idle` chain ended with: that operation fails. */
+    /** The failure an `agent.fail` chain ended with: that operation fails. */
     const failure = (stopped: Stopped) => new HookFailed({ message: stopped.reason })
 
     /** Run `f` on the active hooks once a pending reload settles (waiting at most ACTIVATION_WAIT); a reload waits for it. */
@@ -491,19 +487,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
-    const agentIdle = Effect.fn("Plugins.idle")(function* (input: IdleInput) {
-      const initial: VibestPlugin.AgentIdle = { ...input, prompt: undefined, command: undefined, output: undefined }
-      return yield* withHooks("agent.idle", (hooks, trace) =>
-        Effect.gen(function* () {
-          const stopped = yield* runHook(bucket(hooks, "agent.idle"), "agent.idle", initial, trace)
-          if (stopped !== undefined) return yield* failure(stopped)
-          return initial
-        }),
-      )
-    })
-
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, idle: agentIdle, list }), activate, ready }
+    return { service: Plugins.of({ start, fail, list }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
@@ -524,8 +509,6 @@ export class Plugins extends Context.Service<
       { readonly move: VibestPlugin.AgentFail["move"]; readonly trace: ReadonlyArray<TraceEntry> },
       HookFailed
     >
-    /** The subagent's round would go to its parent. `prompt` set: send that instead and stay on the round. */
-    readonly idle: (input: IdleInput) => Effect.Effect<VibestPlugin.AgentIdle, HookFailed>
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {
