@@ -156,8 +156,11 @@ terminal). The start with the terminal follows it and copies what the process re
 `process.ready` and `process.conversation`); the one with no terminal is never ended. One whose terminal never
 opened ends `launch_failed`, and the session's current process is then the start before it, if any.
 
-Not written yet: `turn.start` resumes (a move or restart keeps the open turn; see Memory), `turn.end` cause and
-output.
+`turn.end` `output` is the harness's answer text (not the rendered result, which is the result row's content); the
+migration takes it out of a v1 result. `Db.finishTurn` takes the whole `turn.end` data.
+
+Not written yet: `turn.start` resumes (a move or restart keeps the open turn; see Memory) and a `turn.end` `cause`
+(nothing passes one yet).
 
 ## Hot paths
 

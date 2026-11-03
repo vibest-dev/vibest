@@ -376,12 +376,23 @@ const summaryIn = (content: string) => {
     : found[1]!.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&")
 }
 
-/** `turn.end` data (schema.md). */
-type TurnEnd = {
-  readonly status: string
+const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started"] as const
+
+/** `turn.end` data (schema.md), written once. */
+export type TurnEnd = {
+  readonly status: (typeof ROUND_STATUS)[number]
+  /** The harness's last answer text. */
   readonly output?: string
   readonly failure?: { readonly kind: "limited" | "auth" | "other"; readonly message: string }
+  /** Set only on an end vibest made itself. */
+  readonly cause?: "interrupt" | "limited" | "restart" | "move"
 }
+
+/** A harness error as `turn.end` failure: limited when it is a usage limit; none for an empty error. */
+export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
+  error === undefined || error === ""
+    ? undefined
+    : { kind: isUsageLimitError(error) ? "limited" : "other", message: error }
 
 /** What a result row says, from the `turn.end` it reports and its rendered text. */
 const resultDetails = (content: string, end: TurnEnd | undefined) => {
@@ -434,9 +445,10 @@ type BriefRow = {
   readonly resultContent: string | null
 }
 
-const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started"] as const
-const roundStatus = (status: unknown) =>
-  typeof status === "string" && (ROUND_STATUS as readonly string[]).includes(status) ? status : "completed"
+const roundStatus = (status: unknown): TurnEnd["status"] =>
+  typeof status === "string" && (ROUND_STATUS as readonly string[]).includes(status)
+    ? (status as TurnEnd["status"])
+    : "completed"
 
 /** Rows a session's own sends and tasks are: never main-agent-bound. */
 const TO_SESSION = `('task', 'send')`
@@ -760,7 +772,7 @@ const make = Effect.gen(function* () {
     })
 
   /** Close `id`'s open turn, or open and close one when none is open; returns the `turn.end` event. */
-  const endTurn = (id: string, status: string, error: string | undefined, at?: number) =>
+  const endTurn = (id: string, end: TurnEnd, at?: number) =>
     Effect.gen(function* () {
       const found = yield* anySession(id)
       const t = at ?? (yield* now)
@@ -781,10 +793,10 @@ const make = Effect.gen(function* () {
         turnId,
         at: t,
         data: {
-          status,
-          ...(error === undefined || error === ""
-            ? {}
-            : { failure: { kind: isUsageLimitError(error) ? "limited" : "other", message: error } }),
+          status: end.status,
+          ...(end.output === undefined ? {} : { output: end.output }),
+          ...(end.failure === undefined ? {} : { failure: end.failure }),
+          ...(end.cause === undefined ? {} : { cause: end.cause }),
         },
       })
     })
@@ -793,10 +805,10 @@ const make = Effect.gen(function* () {
    * A `send` goes to the subagent and always waits for it. The rest go to the sender's reply target
    * (`report_to_session_id` while it has not ended, else the project's entry session), `dropped` when it has no
    * place; with no entry session at all they are kept as the sender's own (dropped), so `vibest result` still reads
-   * them. A result row points at the `turn.end` it reports. `status` is the round's end when the caller is closing
-   * one; otherwise it comes from `details.status`.
+   * them. A result row points at the `turn.end` it reports: `end` when the caller is closing the turn, else one made
+   * from `details` (status, error).
    */
-  const insertInboxRow = (row: NewInboxRow, status?: string, at?: number) =>
+  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
         const id = yield* insertInboxSql({
@@ -825,8 +837,12 @@ const make = Effect.gen(function* () {
         row.kind === "result"
           ? yield* endTurn(
               row.sessionId,
-              status ?? roundStatus(row.details.status),
-              typeof row.details.error === "string" ? row.details.error : undefined,
+              end ?? {
+                status: roundStatus(row.details.status),
+                ...(typeof row.details.error === "string" && row.details.error !== ""
+                  ? { failure: failureOf(row.details.error)! }
+                  : {}),
+              },
               at,
             )
           : undefined
@@ -1572,19 +1588,15 @@ const make = Effect.gen(function* () {
         .pipe(Effect.orDie),
 
     /**
-     * Close the open turn (status, failure) and point the result at it, in one transaction with the session row.
-     * `at`: no earlier than this (a result file's time), so that file is not taken again.
+     * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
+     * session row. `at`: no earlier than this (a result file's time), so that file is not taken again.
      */
-    finishTurn: (id: string, patch: SessionPatch, row: NewInboxRow, at?: number) =>
+    finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const stamp = at === undefined ? undefined : Math.max(at, yield* now)
-            const inserted = yield* insertInboxRow(
-              row,
-              row.kind === "result" ? roundStatus(patch.turnState) : undefined,
-              stamp,
-            )
+            const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp)
             const { turnState: _, ...rest } = patch
             yield* updateSession(id, row.kind === "result" ? rest : patch)
             return inserted

@@ -107,7 +107,18 @@ const writeV1 = (file: string) => {
     started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
   message.run(1, "aaaaaaaa", 1, "do it", "done", "completed", '{"summary":"done"}', 10, 20)
   message.run(2, "aaaaaaaa", 2, "and more", null, "working", "{}", 25, null)
-  message.run(3, "bbbbbbbb", 3, "other task", "broke", "failed", '{"error":"boom"}', 21, 39)
+  // A delivered v1 output is the rendered result; v2 keeps the answer in it.
+  message.run(
+    3,
+    "bbbbbbbb",
+    3,
+    "other task",
+    "<agent-result>\n<status>failed</status>\n<result>\nbroke\n\nerror: boom\n</result>\n</agent-result>",
+    "failed",
+    '{"error":"boom"}',
+    21,
+    39,
+  )
   inbox.run(
     4,
     "m0000001",
@@ -212,6 +223,15 @@ describe("migrate-db-v2", () => {
           task: "other task",
           latest: { status: "failed", summary: "broke", endedAt: 39 },
         })
+        const ends = yield* sql<{ session: string; data: string }>`SELECT session_id AS session, data FROM event
+          WHERE type = 'turn.end' ORDER BY id`
+        assert.deepStrictEqual(
+          ends.map((e) => [e.session, JSON.parse(e.data)]),
+          [
+            ["aaaaaaaa", { status: "completed", output: "done" }],
+            ["bbbbbbbb", { status: "failed", output: "broke", failure: { kind: "other", message: "boom" } }],
+          ],
+        )
         // The replaced main conversation is an ended main session.
         assert.isNotNull((yield* db.getSession("m0000000"))?.exitedAt)
         assert.deepStrictEqual(

@@ -443,6 +443,7 @@ describe("Db", () => {
         })
         yield* db.finishTurn(
           "aaaaaaaa",
+          { status: "completed", output: "the answer", failure: { kind: "other", message: "late" }, cause: "move" },
           { turnState: "completed" },
           { sessionId: "aaaaaaaa", kind: "result", message: "<summary>done</summary>", details: { summary: "done" } },
         )
@@ -454,6 +455,14 @@ describe("Db", () => {
         }>`SELECT status, output, ended_at FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`
         assert.strictEqual(turns.length, 1)
         assert.deepInclude(turns[0], { status: "completed", output: "<summary>done</summary>" })
+        // The whole turn.end data, as finishTurn was given it.
+        const [end] = yield* sql<{ data: string }>`SELECT data FROM event WHERE type = 'turn.end'`
+        assert.deepStrictEqual(JSON.parse(end!.data), {
+          status: "completed",
+          output: "the answer",
+          failure: { kind: "other", message: "late" },
+          cause: "move",
+        })
         assert.isNotNull(turns[0]!.endedAt)
         assert.deepInclude((yield* db.latestInbox("aaaaaaaa", "result"))!.details, { summary: "done" })
         yield* db.closeTurn("aaaaaaaa", "interrupted", {})
@@ -482,6 +491,7 @@ describe("Db", () => {
           yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
           yield* db.finishTurn(
             "aaaaaaaa",
+            { status: "completed" },
             { turnState: "completed" },
             { sessionId: "aaaaaaaa", kind: "result", message: summary, details: { summary } },
           )
@@ -558,6 +568,7 @@ describe("Db", () => {
         yield* db.insertSession(session("aaaaaaaa", { turnState: "open" }), "r")
         const dropped = yield* db.finishTurn(
           "aaaaaaaa",
+          { status: "completed" },
           { turnState: "completed", status: "idle" },
           {
             sessionId: "aaaaaaaa",

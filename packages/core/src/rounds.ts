@@ -13,7 +13,9 @@ import {
   type NewInboxRow,
   type SessionPatch,
   type SessionRow,
+  type TurnEnd,
   type TurnState,
+  failureOf,
 } from "./db.ts"
 import { Harnesses, type HarnessAdapter } from "./harness.ts"
 import { nextBatch } from "./inbox.ts"
@@ -25,7 +27,13 @@ import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
   readonly db: {
-    readonly finishTurn: (id: string, patch: SessionPatch, row: NewInboxRow, at?: number) => Effect.Effect<InboxRow>
+    readonly finishTurn: (
+      id: string,
+      end: TurnEnd,
+      patch: SessionPatch,
+      row: NewInboxRow,
+      at?: number,
+    ) => Effect.Effect<InboxRow>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
@@ -110,8 +118,10 @@ export const sessionRounds = (deps: {
       ],
       ["result", body],
     )
+    const failure = failureOf(error)
     const row = yield* db.finishTurn(
       session.id,
+      { status: end, output: text, ...(failure === undefined ? {} : { failure }) },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
       {
         sessionId: session.id,

@@ -66,6 +66,19 @@ const json = (raw: string | null): Record<string, unknown> => {
     return {}
   }
 }
+
+/**
+ * The harness's answer in a v1 output: the body of its `<agent-result>`'s `<result>` without the `error:` line vibest
+ * added (results.ts envelope); a v1 output that is not an envelope is the answer itself. v2 `turn.end.output` is the answer.
+ */
+const answerOf = (output: string, error: string | undefined) => {
+  const body = /^<agent-result>\n[\s\S]*?<result>\n([\s\S]*)\n<\/result>\n<\/agent-result>$/.exec(output)?.[1]
+  if (body === undefined) return output
+  const suffix = error === undefined ? undefined : `error: ${error}`
+  if (suffix === undefined || !body.endsWith(suffix)) return body
+  return body.slice(0, -suffix.length).replace(/\n\n$/, "")
+}
+
 const str = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
 const num = (value: unknown) => (typeof value === "number" ? value : undefined)
 
@@ -235,7 +248,7 @@ const mapRows = (db: Database) => {
           turn,
           data: {
             status: TURN_END.has(m.status) ? m.status : "lost",
-            ...(m.output ? { output: m.output } : {}),
+            ...(m.output ? { output: answerOf(m.output, error) } : {}),
             ...(error === undefined
               ? {}
               : { failure: { kind: isUsageLimitError(error) ? "limited" : "other", message: error } }),

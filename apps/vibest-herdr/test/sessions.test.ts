@@ -3887,6 +3887,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* looked
       yield* w.db.finishTurn(
         w.id,
+        { status: "completed" },
         { turnState: "completed", status: "idle" },
         { sessionId: w.id, kind: "result", message: "second", details },
       )
