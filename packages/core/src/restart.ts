@@ -11,6 +11,7 @@ import type { Inbox } from "./inbox.ts"
 import type { Layout } from "./paths.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
+import type { Restarting } from "./restarting.ts"
 import {
   agentState,
   type AgentSeen,
@@ -134,6 +135,7 @@ export const sessionRestart = (deps: {
   readonly runtimes: Runtimes["Service"]
   readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
   readonly processes: Processes["Service"]
+  readonly restarting: Restarting["Service"]
   readonly inbox: Inbox["Service"]
   readonly layout: Layout["Service"]
   readonly fs: FileSystem.FileSystem
@@ -195,9 +197,13 @@ export const sessionRestart = (deps: {
       const signalled = yield* t.locked(
         Effect.gen(function* () {
           // The old harness's pid and ready report go with the signal: only the new harness's count.
-          yield* db.patchLive(id, { restarting: { interrupted: t.interrupted, at }, ready: null, pid: null })
+          yield* deps.restarting.mark(id)
+          yield* db.patchLive(id, { ready: null, pid: null })
           const sent = yield* processes.terminate(pid)
-          if (sent === "denied") yield* db.patchLive(id, { restarting: null, pid })
+          if (sent === "denied") {
+            yield* deps.restarting.clear(id)
+            yield* db.patchLive(id, { pid })
+          }
           return sent
         }),
       )
@@ -211,7 +217,7 @@ export const sessionRestart = (deps: {
       return yield* t.locked(
         Effect.gen(function* () {
           yield* t.settle(at)
-          yield* db.patchLive(id, { restarting: null })
+          yield* deps.restarting.clear(id)
           if (!back)
             return failed(
               Exit.isFailure(ran)
@@ -223,7 +229,7 @@ export const sessionRestart = (deps: {
       )
     }).pipe(
       // Ended part way (vibestd stopping): the mark must not keep the session from its checks.
-      Effect.onInterrupt(() => db.patchLive(id, { restarting: null })),
+      Effect.onInterrupt(() => deps.restarting.clear(id)),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }

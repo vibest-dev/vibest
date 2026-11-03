@@ -10,6 +10,7 @@ import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
+import { Restarting } from "@vibest/core/restarting"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -462,6 +463,7 @@ const over = (options: TestOptions) => {
       ),
       Layer.provideMerge(home),
       Layer.provideMerge(Drain.layer),
+      Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(
         options.readFile
           ? Layer.effect(FileSystem.FileSystem, Effect.map(FileSystem.FileSystem, options.readFile)).pipe(

@@ -8,6 +8,7 @@ import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { type ProcessPlatform, Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
+import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -110,6 +111,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
     // satisfies only requirements outstanding before it (runtime-port §2): two hosts in one process each get their own.
     Layer.provideMerge(Runtimes.layer),
     Layer.provide(Drain.layer),
+    Layer.provide(Restarting.layer),
   )
 
 /**

@@ -73,6 +73,7 @@ import { Processes } from "./processes.ts"
 import { listProjectRepositories, projectRoot, workspaceGit } from "./project-create.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
+import { Restarting } from "./restarting.ts"
 import { readReportLines } from "./results.ts"
 import { sessionRounds } from "./rounds.ts"
 import {
@@ -258,11 +259,9 @@ export class Sessions extends Context.Service<
       const plugins = yield* Plugins
       const removal = yield* Remove.make
       const processes = yield* Processes
+      const restarting = yield* Restarting
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
-      // A vibestd that stopped mid-restart left its marks: no restart runs in this one yet.
-      for (const id of yield* db.clearRestarting)
-        yield* Effect.logWarning(`session ${id}: a restart mark left over was cleared`)
 
       const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
       const allocating = yield* Semaphore.make(1)
@@ -933,7 +932,7 @@ export class Sessions extends Context.Service<
         // An exited session is resumed by the next message (SPEC §8.4), not by a check. An archived one is vibest archive's alone.
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
         // vibestd is restarting its harness: no result, exit or queue is decided until the new one is ready (restartAgent).
-        if (session.metadata.restarting) return
+        if (restarting.has(id)) return
         // A delivery cut off by vibestd stopping (no delivery runs while the lock is held): it may or may not have arrived.
         const cutOff = yield* db.inboxWithStatus(id, "sending")
         if (cutOff.length > 0)
@@ -1051,7 +1050,7 @@ export class Sessions extends Context.Service<
           session.status === "blocked" ||
           (session.startedAt === null && session.exitedAt === null) ||
           // Its harness is being restarted in its own terminal: never resumed in another one; delivered once it is back.
-          session.metadata.restarting
+          restarting.has(id)
         )
           return
         const h = yield* live(session)
@@ -1457,6 +1456,7 @@ export class Sessions extends Context.Service<
         runtimes,
         harnesses,
         processes,
+        restarting,
         inbox,
         layout,
         fs,
