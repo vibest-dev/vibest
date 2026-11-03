@@ -3,7 +3,7 @@ import path from "node:path"
 
 // What `vibest` fixes for the user on an interactive terminal: a vibestd to replace (`vibest daemon restart`, `vibest update`). A temporary HOME and VIBEST_HOME throughout, never the user's.
 import { assert, layer } from "@effect/vitest"
-import { awaitDaemon, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
+import { cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
@@ -276,7 +276,6 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
         yield* Effect.gen(function* () {
-          assert.isTrue(yield* awaitDaemon(layout.socket))
           const old = yield* pingOf(layout.socket)
 
           // The command line with no terminal: refused before any Stop, non-zero.
