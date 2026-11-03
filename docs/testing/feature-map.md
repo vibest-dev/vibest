@@ -119,3 +119,32 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S13 | herdr status push: a status change reaches vibestd without the poll                                               | runtime                                                         |
 | S14 | several repositories: separate Projects, one Project per repository wherever you stand in it, runs in two at once | agent (story S13 in [e2e-user-stories.md](e2e-user-stories.md)) |
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
+| S17 | Pi coordinator and Pi session on the fake model: the delivery matrix below                                        | inbox: `tools/e2e` S17                                          |
+
+### Delivery matrix
+
+Every main agent harness against every subagent harness, for five deliveries. Each must arrive exactly once at the
+right agent:
+
+1. a subagent's result reaches the main agent as a turn of its own;
+2. a second result from the same subagent, after a `vibest send` from the main agent;
+3. a `vibest send` to a busy subagent queues and is delivered once it is idle;
+4. a subagent's `vibest report` reaches the main agent while it is idle, and while it is mid-turn;
+5. one delivery after `vibest daemon restart`.
+
+A cell names the `tools/e2e` check (fake model) that covers it, or says **agent**: real harnesses on a real model,
+proven with evidence by the agent step of `pnpm verify` (the inbox row and its status, the entry in the receiving
+agent's conversation, and that it is there once). Claude and Cursor cannot run on the fake model, so a cell with
+either of them is **agent** unless an existing check covers it.
+
+| Main   | Subagent | 1     | 2                 | 3     | 4     | 5     |
+| ------ | -------- | ----- | ----------------- | ----- | ----- | ----- |
+| claude | claude   | agent | agent             | agent | agent | agent |
+| claude | pi       | S11   | S11 (check sends) | agent | agent | S15   |
+| claude | cursor   | agent | agent             | agent | agent | agent |
+| pi     | claude   | S12   | S12               | agent | agent | S12   |
+| pi     | pi       | S17   | S17               | S17   | S17   | S17   |
+| pi     | cursor   | agent | agent             | agent | agent | agent |
+
+S11's second result follows a `vibest send` the check runs, not the main agent: the main agent sending is **agent**
+there.
