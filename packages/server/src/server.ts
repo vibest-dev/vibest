@@ -797,7 +797,7 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      // The same code as the HTTP hook routes (hooks.ts). A failed write dies, so the caller retries once.
+      // The same code as the HTTP hook routes (hooks.ts). A failed write dies: the caller sees a failure, not a retry.
       TurnEnd: ({ sessionId, harness, event }, { headers }) =>
         hook(sessionId, harness, headers, (who) => Hooks.turnEnd(sessions, harnesses.get(harness), who, event)),
 

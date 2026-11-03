@@ -8,7 +8,7 @@ import { claude } from "@vibest/core/harnesses/claude"
 import { cursor } from "@vibest/core/harnesses/cursor"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { ConfigProvider, Duration, Effect, FileSystem, Path } from "effect"
+import { ConfigProvider, Duration, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -131,17 +131,29 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("a dropped connection is tried once more; an unanswered request is not sent again", () =>
+  it.effect("only a connection that could not be made is tried again: not a dropped one, not an unanswered one", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
       const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+      // No socket yet (ENOENT): the retry reaches a vibestd that starts listening within the retry delay.
+      const late = yield* tempDirectory("l-")
+      const retried: string[] = []
+      const sending = yield* Effect.forkChild(stopAt(late, worker, JSON.stringify(event)))
+      yield* TestClock.withLive(Effect.sleep("100 millis"))
+      yield* listen(path.join(late, "vibest.sock"), retried)
+      yield* Fiber.join(sending)
+      assert.deepStrictEqual(
+        rpc(retried).map((r) => r.method),
+        ["TurnEnd"],
+      )
+      // Read, then the connection dropped: vibestd may have handled it, so it is not sent again.
       const dropped = yield* tempDirectory("d-")
       const seen: string[] = []
       yield* listen(path.join(dropped, "vibest.sock"), seen, (n) => (n === 1 ? "drop" : true))
       yield* stopAt(dropped, worker, JSON.stringify(event))
       assert.deepStrictEqual(
         rpc(seen).map((r) => r.method),
-        ["TurnEnd", "TurnEnd"],
+        ["TurnEnd"],
       )
       const hung = yield* tempDirectory("h-")
       const once: string[] = []
