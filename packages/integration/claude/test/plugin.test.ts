@@ -267,6 +267,19 @@ describe("Claude plugin inbox", () => {
     assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
   })
 
+  it("a line that already ends with the full text (a one-line notice) gets no context", async () => {
+    const h = host()
+    const polls = [batch([1], "Notice: w1 exited.", "w1 exited."), batch([2], "Notice: w2 exited.", "w2 exited.\nmore")]
+    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
+    await h.start()
+    await h.tick()
+    await h.draw()
+    assert.notProperty(await h.prompt("Notice: w1 exited.", ownSubmit), "context")
+    await h.draw()
+    const multi = await h.prompt("Notice: w2 exited.", ownSubmit)
+    assert.deepStrictEqual((multi as { context: string[] }).context, ["w2 exited.\nmore"])
+  })
+
   it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {
     const h = host()
     const polls = [batch([1], "same", "first"), batch([2], "same", "second")]

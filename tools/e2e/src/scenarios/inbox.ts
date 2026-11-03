@@ -3,6 +3,7 @@
 // later ones included. The main agent's model is a fake OpenAI-compatible endpoint served here (models.json in a
 // PI_CODING_AGENT_DIR of this check) that drives it as the delegate skill does: `vibest run`, then `vibest send` on
 // the result. vibestd, herdr, Pi and the subagent's harness are the real ones.
+// S18: a Pi subagent on a model that holds its first turn past herdr's agent.start window keeps its terminal.
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -80,6 +81,64 @@ const fakeModel = (sub: string) => {
     },
   })
   return { seen, sessionId: () => sessionId, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+}
+
+/**
+ * A model that holds a task's turn open (S18): its stream starts and then waits for `release`, which answers the task's
+ * two lines. Anything else (the main agent's turn on the result) gets "ok".
+ */
+const heldModel = () => {
+  const held: Array<() => void> = []
+  let released = false
+  const chunk = (o: object) =>
+    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
+  const reply = (content: string) =>
+    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
+    chunk({
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }) +
+    "data: [DONE]\n\n"
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const last = text(messages.at(-1))
+      const headers = { "content-type": "text/event-stream" }
+      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
+      if (!task) return new Response(reply("ok"), { headers })
+      const answer = reply(`done-${task[1]}\nstatus: completed`)
+      if (released) return new Response(answer, { headers })
+      return new Response(
+        new ReadableStream({
+          start: (c) => {
+            c.enqueue(new TextEncoder().encode(chunk({ choices: [{ index: 0, delta: { role: "assistant" } }] })))
+            held.push(() => {
+              try {
+                c.enqueue(new TextEncoder().encode(answer))
+                c.close()
+              } catch {}
+            })
+          },
+        }),
+        { headers },
+      )
+    },
+  })
+  return {
+    held: () => held.length,
+    release: () => {
+      released = true
+      for (const go of held.splice(0)) go()
+    },
+    url: `http://127.0.0.1:${server.port}/v1`,
+    stop: () => {
+      for (const go of held.splice(0)) go()
+      server.stop(true)
+    },
+  }
 }
 
 /** A git repository of its own under the world's root: a project of its own, so its main agent is this check's. */
@@ -491,6 +550,72 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         // As World.close does for the run's own session: only the one this check started.
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S18",
+    title:
+      "a Pi subagent whose first turn outlasts herdr's 120 s agent.start window keeps its terminal: herdr still names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = heldModel()
+      const session = `${w.herdrSession}-held`
+      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      try {
+        const repo = await project(w, "held")
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
+        const zdot = path.join(w.root, "zdotdir-held")
+        await fs.mkdir(zdot, { recursive: true })
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        const sub = (
+          JSON.parse(
+            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("held")], {
+              cwd: repo,
+              timeoutMs: 60_000,
+            }),
+          ) as { id: string }
+        ).id
+        const started = Date.now()
+        await until("the subagent's turn held by the model", () => model.held() > 0, 60_000)
+        const named = async () =>
+          ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
+            (a) => a.name === `s-${sub}`,
+          )
+        const exited = () =>
+          row<{ e: number | null }>(
+            w,
+            "SELECT json_extract(metadata, '$.exitedAt') AS e FROM session WHERE id = ?",
+            sub,
+          )?.e ?? null
+        // herdr drops a started agent's name when it is not marked ready within agent.start's timeout (120 s); vibestd then
+        // finds no agent of this terminal and records the session as exited while its harness still works.
+        while (Date.now() - started < 135_000) {
+          await Bun.sleep(5_000)
+          const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
+          expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
+          expect(await named(), `herdr no longer names the subagent s-${sub}; vibestd.log:\n${await log()}`)
+        }
+        const peek = await w.vibest(["peek", sub], { cwd: repo })
+        expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
+        model.release()
+        await until(
+          "the held turn's result",
+          async () =>
+            (
+              (await w.json<{ result?: { message?: string } | null }>(["result", sub], { cwd: repo })).result
+                ?.message ?? ""
+            ).includes("done-held"),
+          60_000,
+        )
+      } finally {
+        model.stop()
         await dropHerdrSession(w, session)
       }
     },

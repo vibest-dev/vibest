@@ -11,7 +11,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Effect, FileSystem, Layer, type Scope } from "effect"
+import { Clock, Effect, Fiber, FileSystem, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
@@ -294,6 +294,39 @@ describe("vibestd's HTTP API", () => {
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "again", details: {} })
       const next = yield* inbox.poll(projectId)
       assert.deepStrictEqual(yield* inbox.ack(projectId + 1, next.ids), [])
+    }),
+  )
+
+  test(
+    "the prompt hook writes its start line at once, while the session's lock is held, with the round's stamp",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      yield* until(db.getSession(worker), (s) => s?.turnState === "open")
+      // A check parked inside the runtime holds the lock, as a send's confirm loop does for up to 24 s.
+      const held = yield* herdr.hold("state", worker)
+      const checking = yield* Effect.forkChild(sessions.check(worker))
+      yield* held.reached
+      yield* TestClock.adjust("3 seconds")
+      const stamp = yield* Clock.currentTimeMillis
+      const hook = yield* Effect.forkChild(
+        call(
+          "/hooks/claude/prompt",
+          { sessionId: worker },
+          JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
+        ),
+      )
+      const start = yield* until(
+        fs.readFileString(layout.reportFile(worker)).pipe(Effect.orElseSucceed(() => "")),
+        (text) => text.includes('"turn":"start"'),
+      )
+      assert.include(start, `"ts":${stamp}`)
+      yield* held.release()
+      yield* Fiber.join(checking)
+      assert.strictEqual((yield* Fiber.join(hook)).status, 204)
     }),
   )
 

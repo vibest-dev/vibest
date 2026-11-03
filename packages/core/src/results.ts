@@ -102,10 +102,10 @@ export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) =>
   return prompt?.text.trim() ? prompt.text : undefined
 }
 
-/** The prompt's turn-start report line; written after vibestd stamped the round, so it is not older than that stamp. */
-export const recordPrompt = (sessionId: string, text: string) =>
+/** The prompt's turn-start report line, at `ts`: never older than the stamp vibestd gives the round. */
+export const recordPrompt = (sessionId: string, text: string, ts = Date.now()) =>
   Effect.flatMap(Layout, (layout) =>
-    appendReportLine(layout.reportFile(sessionId), { turn: "start", ts: Date.now(), prompt: text }),
+    appendReportLine(layout.reportFile(sessionId), { turn: "start", ts, prompt: text }),
   )
 
 /** Every report line of a session, oldest first; unreadable lines are skipped, a missing file is empty. */

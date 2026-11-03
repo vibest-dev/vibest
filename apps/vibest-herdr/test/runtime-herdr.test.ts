@@ -11,9 +11,11 @@ import { callerLocation } from "@vibest/runtime-herdr/caller"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
-import { ConfigProvider, Effect, Exit, Layer, Option, Ref, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Ref, Stream } from "effect"
 import { FileSystem } from "effect"
+import { HerdrError, type HerdrShape } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -141,6 +143,174 @@ const withRuntime = <A, E, R>(use: (runtime: TerminalRuntime.Runtime) => Effect.
     })
     return yield* use(runtime)
   })
+
+type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effect<unknown, HerdrError>
+
+/** The terminal runtime over a scripted herdr client (no server). Every call is recorded with its params. */
+const scriptedRuntime = (answer: Scripted) =>
+  Effect.gen(function* () {
+    const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
+    const client: HerdrShape = {
+      socketPath: "/nowhere",
+      subscribe: () => Stream.empty,
+      // Lazy, as the real client's: a retry sends the request again.
+      call: ((method: string, params: Record<string, unknown>) =>
+        Effect.suspend(() => {
+          calls.push({ method, params })
+          return answer(method, params)
+        })) as HerdrShape["call"],
+    }
+    const pool = HerdrPool.of({
+      resolve: () => Effect.succeed("s"),
+      client: () => Effect.succeed(client),
+      events: Stream.empty,
+      restarts: Stream.empty,
+      sessions: Effect.succeed(["s"]),
+    })
+    const runtime = yield* fromPool({
+      pool,
+      spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+      fs: undefined,
+      scope: yield* Effect.scope,
+    })
+    return { runtime, calls }
+  })
+
+const herdrError = (method: string, code: string) => Effect.fail(new HerdrError({ method, code, message: code }))
+
+/**
+ * `send` to a started agent: herdr refuses `agent.prompt` with agent_not_ready for the first `notReady` calls (its
+ * agent.start launch still pending), then takes it. The methods called, agent.get left out.
+ */
+const scriptedSend = (notReady: number) =>
+  Effect.gen(function* () {
+    let refused = 0
+    const { runtime, calls } = yield* scriptedRuntime((method) => {
+      if (method === "agent.get")
+        return Effect.succeed({ agent: { name: "s-abcd1234", pane_id: "w1:p2", agent: "claude" } })
+      if (method === "agent.prompt" && refused < notReady) {
+        refused++
+        return herdrError(method, "agent_not_ready")
+      }
+      return Effect.succeed({})
+    })
+    const sending = yield* Effect.forkChild(
+      runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234"), { text: "line one\nline two" }),
+    )
+    yield* TestClock.adjust("40 seconds")
+    yield* Fiber.join(sending)
+    return calls.map((c) => c.method).filter((m) => m !== "agent.get")
+  }).pipe(Effect.provide(Platform.services))
+
+describe("send to an agent herdr started", () => {
+  it.effect("waits until herdr marks it ready, then prompts it: no text typed into a launch still pending", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* scriptedSend(3), ["agent.prompt", "agent.prompt", "agent.prompt", "agent.prompt"])
+    }),
+  )
+
+  it.effect("an agent herdr never marks ready gets the text as one paste with Enter (pane.send_input)", () =>
+    Effect.gen(function* () {
+      const calls = yield* scriptedSend(Number.POSITIVE_INFINITY)
+      assert.strictEqual(calls.filter((m) => m === "agent.prompt").length, 61)
+      assert.strictEqual(calls.at(-1), "pane.send_input")
+      assert.notInclude(calls, "pane.send_text")
+    }),
+  )
+})
+
+/**
+ * `open` starts claude as s-abcd1234 in pane w1:p2 at /work; then herdr has dropped that name, and the pane holds
+ * `holder` (an agent without a name, or nothing). The state `state` read, or its error code, and the calls after `open`.
+ */
+const afterDroppedName = (holder: Record<string, unknown> | undefined, rename: "ok" | "pending" = "ok") =>
+  Effect.gen(function* () {
+    let opened = false
+    const { runtime, calls } = yield* scriptedRuntime((method, params) => {
+      switch (method) {
+        case "worktree.list":
+          return Effect.succeed({ source: { source_workspace_id: "w1" } })
+        case "tab.create":
+          return Effect.succeed({ root_pane: { pane_id: "w1:p2" } })
+        case "pane.get":
+          return Effect.succeed({ pane: { pane_id: "w1:p2", tab_id: "t1", workspace_id: "w1" } })
+        case "agent.start":
+          opened = true
+          return Effect.succeed({})
+        case "agent.get":
+          if (params.target === "s-abcd1234") return herdrError(method, "agent_not_found")
+          return holder === undefined ? herdrError(method, "agent_not_found") : Effect.succeed({ agent: holder })
+        case "agent.rename":
+          return rename === "ok" ? Effect.succeed({ agent: holder }) : herdrError(method, "agent_launch_pending")
+        default:
+          return Effect.succeed({})
+      }
+    })
+    const terminal = yield* runtime.open(
+      { id: "local" },
+      {
+        project: "/work",
+        cwd: "/work",
+        argv: ["claude", "--x"],
+        env: { VIBEST_SESSION_ID: "abcd1234" },
+        label: "t",
+      },
+    )
+    assert.isTrue(opened)
+    assert.strictEqual(terminal.id, "s/w1:p2/s-abcd1234")
+    const from = calls.length
+    const seen = yield* runtime.state!(terminal).pipe(
+      Effect.map((state) => state as string),
+      Effect.catch((e) => Effect.succeed(`error ${e.code}`)),
+    )
+    return { seen, after: calls.slice(from) }
+  }).pipe(Effect.provide(Platform.services))
+
+describe("a started agent whose herdr name was dropped", () => {
+  const unnamed = {
+    name: null,
+    pane_id: "w1:p2",
+    agent: "claude",
+    cwd: "/work",
+    interactive_ready: true,
+    agent_status: "working",
+  }
+
+  it.effect("the same kind in the same directory is this terminal's agent again, and gets its name back", () =>
+    Effect.gen(function* () {
+      const { seen, after } = yield* afterDroppedName(unnamed)
+      assert.strictEqual(seen, "working")
+      assert.deepInclude(after, { method: "agent.rename", params: { target: "w1:p2", name: "s-abcd1234" } })
+    }),
+  )
+
+  it.effect("a rename herdr refuses (its launch still pending) keeps using the pane", () =>
+    Effect.gen(function* () {
+      const { seen } = yield* afterDroppedName(unnamed, "pending")
+      assert.strictEqual(seen, "working")
+    }),
+  )
+
+  it.effect(
+    "another kind, another directory, a named agent or none: not this terminal's (not_found), nothing renamed",
+    () =>
+      Effect.gen(function* () {
+        for (const holder of [
+          { ...unnamed, agent: "pi" },
+          { ...unnamed, cwd: "/elsewhere" },
+          { ...unnamed, name: "someone" },
+          undefined,
+        ]) {
+          const { seen, after } = yield* afterDroppedName(holder)
+          assert.strictEqual(seen, "error not_found", JSON.stringify(holder))
+          assert.notInclude(
+            after.map((c) => c.method),
+            "agent.rename",
+          )
+        }
+      }),
+  )
+})
 
 describe("terminal ids", () => {
   it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty; the caller's location is the machine target", () => {

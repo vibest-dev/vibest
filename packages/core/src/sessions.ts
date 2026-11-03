@@ -236,7 +236,7 @@ export class Sessions extends Context.Service<
     /** RPC `ResultReady` from a hook: schedule a check and return at once (SPEC §7, §9). */
     readonly resultReady: (id: string) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
-    readonly userPrompt: (id: string, text: string) => Effect.Effect<void, never, FileSystem.FileSystem>
+    readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
     readonly republish: Effect.Effect<number>
     /** Entries vibestd keeps in memory for sessions (vibestd-state.md 5): tests check they shrink back once sessions end. */
@@ -540,8 +540,8 @@ export class Sessions extends Context.Service<
       > = () => Effect.die("collectResult")
 
       /** Whether a turn-start report line of the round prompted at `at` exists: the pickup proof §5 compares, durable
-       * in the report file. Every stamp is taken before its round's start line can be written (the hook sends `Prompt`
-       * first; a continuation is stamped before its paste). */
+       * in the report file. No start line is older than its round's stamp (the HTTP hook writes its line with the stamp
+       * it hands `userPrompt`, the CLI hook sends `Prompt` first; a continuation is stamped before its paste). */
       const reportStartedSince = (id: string, at: number) =>
         readReportLines(layout.reportFile(id)).pipe(
           Effect.map((lines) => lines.some((line) => line.turn === "start" && line.ts >= at)),

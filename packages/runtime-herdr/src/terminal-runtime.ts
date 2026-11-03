@@ -111,6 +111,8 @@ const TICK = Schedule.spaced("500 millis")
 /** How long `open` waits for a fresh pane's shell to draw (generous: a loaded machine draws slowly), and how often `agent_pane_busy` is retried. */
 const OUTPUT_TIMEOUT = Duration.seconds(30)
 const BUSY_RETRIES = 40
+/** How often `send` asks again for an agent herdr has not marked ready (about 30 s at TICK). */
+const READY_RETRIES = 60
 /** Process names of an interactive shell waiting at its prompt. */
 const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
 
@@ -142,6 +144,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
     const watched = new Set<string>()
     /** The agent name of the terminal in each pane (`<session>/<pane>`), from `open` or a `state` read, so events name the terminal the row recorded. */
     const names = new Map<string, string>()
+    /** What `open` started under each agent name: its herdr kind and working directory, to know the agent again once
+     * herdr dropped the name (`ours`). ponytail: in memory, so a vibestd restart forgets it; persist it if that matters. */
+    const launched = new Map<string, { readonly kind: string; readonly cwd: string }>()
     /** herdr keeps a source's seq until it restarts, and drops a report that is not newer. Two publishes in one millisecond still increase. */
     let lastSeq = 0
     const nextSeq = () => Math.max(Date.now(), ++lastSeq)
@@ -308,14 +313,37 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         if (name !== undefined) {
           const started = yield* named(h, name)
-          return started !== undefined && started.pane_id === paneId
-            ? { agent: started, target: name, detected: false }
-            : undefined
+          if (started !== undefined)
+            return started.pane_id === paneId ? { agent: started, target: name, detected: false } : undefined
+          return yield* renamed(h, paneId, name)
         }
         const holds = yield* holder(h, paneId)
         if (holds !== undefined && (holds.name ?? undefined) === undefined)
           return { agent: holds, target: paneId, detected: true }
         return undefined
+      })
+
+    /**
+     * herdr drops a started agent's name when its launch does not settle in agent.start's timeout, while the agent keeps
+     * running in the pane. The one rule that knows it again: the pane still holds an unnamed agent of the kind `open`
+     * started under `name`, in the same working directory. The name is put back (herdr refuses while the launch is still
+     * pending; the pane addresses it then). undefined when the rule does not hold.
+     */
+    const renamed = (h: HerdrShape, paneId: string, name: string) =>
+      Effect.gen(function* () {
+        const want = launched.get(name)
+        if (want === undefined) return undefined
+        const holds = yield* holder(h, paneId)
+        if (holds === undefined || (holds.name ?? undefined) !== undefined || holds.agent !== want.kind)
+          return undefined
+        const real = (dir: string) =>
+          fs === undefined ? Effect.succeed(dir) : fs.realPath(dir).pipe(Effect.orElseSucceed(() => dir))
+        const expected = yield* real(want.cwd)
+        const dirs = [holds.cwd, holds.foreground_cwd].filter((d): d is string => typeof d === "string" && d !== "")
+        if (Option.isNone(yield* Effect.findFirst(dirs, (d) => Effect.map(real(d), (r) => r === expected))))
+          return undefined
+        yield* h.call("agent.rename", { target: paneId, name }).pipe(Effect.ignore)
+        return { agent: holds, target: paneId, detected: false }
       })
 
     /** herdr's agent.start: it types the harness into the pane's shell once that shell is idle, and names it `name`. */
@@ -408,8 +436,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const name = agentNameOf(input.env)
         const kind = input.argv.length > 0 ? agentKindOf(input.argv[0]!) : undefined
         const agent = kind !== undefined
-        if (agent) names.set(`${session}/${paneId}`, name)
-        else names.delete(`${session}/${paneId}`)
+        if (agent) {
+          names.set(`${session}/${paneId}`, name)
+          launched.set(name, { kind, cwd: input.cwd })
+        } else names.delete(`${session}/${paneId}`)
         const tabId = split ? undefined : (yield* failWith(h.call("pane.get", { pane_id: paneId }))).pane.tab_id
         // Everything after the terminal exists is undone when it fails: a start that dies inside it (a harness on
         // its own usage limit, a bad flag) must not leave an empty shell behind (core only closes what `open` returned).
@@ -463,15 +493,23 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         // its pane. `agent.prompt` submits (Enter), as a prompt does; the pane fallback only types.
         const found = yield* ours(h, place.paneId, place.name)
         if (found !== undefined) {
-          // herdr refuses a prompt to an agent it has not marked ready yet (`agent_not_ready`), though its pane already
-          // takes input: typed text and Enter then, as a user would.
+          // herdr refuses a prompt to an agent it has not marked ready yet (`agent_not_ready`): one `open` started is
+          // marked once herdr sees it idle. Prompted before that, it works without the mark, and herdr drops its name
+          // when agent.start's timeout passes unmarked: the terminal reads as exited while its harness works. So the
+          // prompt waits for the mark; an agent herdr never marks (its herdr integration missing) gets the text pasted
+          // and Enter, as a user would.
           if (text !== undefined)
             yield* h.call("agent.prompt", { target: found.target, text }).pipe(
+              Effect.retry({
+                while: (e) => e._tag === "HerdrError" && e.code === "agent_not_ready",
+                times: READY_RETRIES,
+                schedule: TICK,
+              }),
               Effect.catchTag("HerdrError", (e) =>
+                // `send_input`, not `send_text`: one bracketed paste, as agent.prompt sends it. Raw bytes reach a TUI
+                // as keystrokes in chunks, and a long multi-line text arrives split, its first chunks lost.
                 e.code === "agent_not_ready"
-                  ? h
-                      .call("pane.send_text", { pane_id: place.paneId, text })
-                      .pipe(Effect.andThen(h.call("pane.send_keys", { pane_id: place.paneId, keys: ["enter"] })))
+                  ? h.call("pane.send_input", { pane_id: place.paneId, text, keys: ["enter"] })
                   : Effect.fail(e),
               ),
               failWith,
