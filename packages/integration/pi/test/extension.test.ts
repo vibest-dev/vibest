@@ -11,6 +11,7 @@ import {
   savedSession,
   tempDirectory,
   testLayer,
+  TURNS,
   type TestServices,
   until,
 } from "@vibest/cli/test/fakes"
@@ -552,7 +553,9 @@ describe("pi-vibest", () => {
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM message WHERE session_id = 'abcd1234' ORDER BY id`.pipe(Effect.orDie)
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234' ORDER BY id`.pipe(
+          Effect.orDie,
+        )
       const s = yield* session({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234", VIBEST_COMMAND: '["vibest"]' })
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
@@ -568,9 +571,9 @@ describe("pi-vibest", () => {
       assert.isFalse(coordinator.handlers.has("input"))
       yield* coordinator.emit("input", { type: "input", text: "the normal conversation", source: "interactive" })
       assert.deepStrictEqual(
-        yield* sql<{ n: number }>`SELECT count(*) AS n FROM message WHERE session_id = ${coord.sessionId}`.pipe(
-          Effect.orDie,
-        ),
+        yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${coord.sessionId}`.pipe(Effect.orDie),
         [{ n: 0 }],
       )
     }),

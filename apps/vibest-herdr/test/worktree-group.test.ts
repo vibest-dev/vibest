@@ -218,12 +218,7 @@ describe("repository-grouped worktrees", () => {
       const neighbour = layout.allocationWorktree(repository, "cd35")
       yield* marker(neighbour)
       const grouped = layout.allocationWorktree(repository, "cd34")
-      yield* db.insertSession(
-        storedRow(id, { stop: [{ pane: "p", pids: [1], exited: true }] }),
-        key,
-        undefined,
-        grouped,
-      )
+      yield* db.insertSession(storedRow(id, {}, { exitedAt: 1 }), key, undefined, grouped)
       const out = (yield* sessions.remove(id))!
       assert.deepInclude(out, { worktree: "gone", path: grouped })
       assert.include(out.reasons.join("\n"), grouped + " was already gone")

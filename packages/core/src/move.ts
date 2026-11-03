@@ -45,7 +45,7 @@ export const limitMoveBox = (): {
 } => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
 
 export const sessionMove = (deps: {
-  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "patchLive">
+  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess">
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
@@ -142,23 +142,30 @@ export const sessionMove = (deps: {
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
       const pid = ((yield* db.getSession(row.id)) ?? row).metadata.pid
-      // Its pid and ready report go with the signal: ready again only once the next harness reports it.
-      yield* db.patchLive(row.id, { pid: null, ready: null })
       const sent = pid === undefined ? "gone" : yield* deps.terminate(pid)
-      if (sent === "denied") yield* db.patchLive(row.id, { pid: pid ?? null })
-      else running = "none"
+      // Its pid and ready report go with its process (`process.end`): the limited one, or one this move started.
+      if (sent !== "denied") {
+        yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
+        limitedEnded = true
+        running = "none"
+      }
       return sent
     })
-    // The limit that started this move is a real try: kept on the session row, it survives a vibestd restart.
-    // A login the row never named is stored without its key; the plugin's Attempt carries it as undefined.
+    // The limit that started this move is a real try: its process ends with reason `limited` (the row's attempts),
+    // which survives a vibestd restart. A login the row never named has no provider; the plugin's Attempt carries it
+    // as undefined.
     const at = yield* Clock.currentTimeMillis
     const stored = session.metadata.attempts ?? []
     const provider = session.provider ?? undefined
     const recorded = stored.some((a) => a.harness === session.harnessId && a.provider === provider)
       ? stored
       : [...stored, { harness: session.harnessId, provider, outcome: "limited" as const, at }]
-    if (recorded !== stored)
-      yield* db.updateSession(session.id, { metadata: { ...session.metadata, attempts: recorded } })
+    /** The process this move leaves behind ends: the limited one first, any later one a failed try of this move. */
+    let limitedEnded = false
+    const endLeft = Effect.gen(function* () {
+      yield* db.endProcess(row.id, limitedEnded ? "move" : "limited")
+      limitedEnded = true
+    })
     // A preflight miss, a refused or failed start, or an unconfirmed prompt. This move only.
     const skipped: Array<VibestPlugin.Attempt> = []
     const skip = (harness: string, outcome: Exclude<VibestPlugin.Attempt["outcome"], "limited">) => {
@@ -192,7 +199,12 @@ export const sessionMove = (deps: {
           yield* deps.finish(fresh, "failed", "", why)
           if (running === "none") {
             const t = yield* Clock.currentTimeMillis
-            yield* db.updateSession(fresh.id, { status: "unknown", exitedAt: t, lastActive: t })
+            yield* db.updateSession(fresh.id, {
+              status: "unknown",
+              exitedAt: t,
+              lastActive: t,
+              end: limitedEnded ? "move" : "limited",
+            })
           }
           return false
         }
@@ -212,7 +224,12 @@ export const sessionMove = (deps: {
         }
         yield* deps.finish(fresh, "failed", "", why)
         const t = yield* Clock.currentTimeMillis
-        yield* db.updateSession(fresh.id, { status: "unknown", exitedAt: t, lastActive: t })
+        yield* db.updateSession(fresh.id, {
+          status: "unknown",
+          exitedAt: t,
+          lastActive: t,
+          end: limitedEnded ? "move" : "limited",
+        })
         return false
       })
     const options = yield* harnessOptions.pipe(
@@ -320,7 +337,8 @@ export const sessionMove = (deps: {
         terminal = undefined
         owns = false
         gone = true
-      }
+        yield* endLeft
+      } else yield* endLeft
       // The terminal places before the row names the harness, so a failed place leaves the row on the last live one.
       const harnessSessionId = harnesses.get(next.harness).ownSessionId ? yield* deps.uuid : null
       const nextRow: SessionRow = {
@@ -331,6 +349,15 @@ export const sessionMove = (deps: {
         harnessSessionId,
       }
       const argv = yield* deps.launchArgv(nextRow, false, key)
+      // In place the terminal is the same: the next harness's process starts there before it runs, so what it reports
+      // while starting is its own.
+      if (inPlace)
+        yield* db.updateSession(row.id, {
+          harnessId: next.harness,
+          provider: next.provider ?? null,
+          model: next.model ?? null,
+          harnessSessionId,
+        })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
         : yield* deps.open(h, machine, nextRow, { project: root, cwd, key, argv }).pipe(Effect.exit)
@@ -349,7 +376,7 @@ export const sessionMove = (deps: {
           )
           if (gone || inPlace) {
             const t = yield* Clock.currentTimeMillis
-            yield* db.updateSession(row.id, { status: "unknown", exitedAt: t, lastActive: t })
+            yield* db.updateSession(row.id, { status: "unknown", exitedAt: t, lastActive: t, end: "move" })
           }
           return false
         }

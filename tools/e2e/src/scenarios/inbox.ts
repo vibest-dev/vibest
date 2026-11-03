@@ -8,7 +8,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, expect, herdr, row, Skip, transcript, until, type World } from "../world.ts"
+import { agentModel, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -220,9 +220,9 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
   )
   const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main)!.p
   const conversation = () =>
-    row<{ c: string | null }>(w, "SELECT harness_session_id AS c FROM session WHERE id = ?", main)?.c ?? null
+    row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main)?.c ?? null
   const pane = () => {
-    const runtime = row<{ r: string }>(w, "SELECT runtime AS r FROM session WHERE id = ?", main)?.r ?? "{}"
+    const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, main)?.r ?? "{}"
     const id = (JSON.parse(runtime) as { id?: string }).id ?? ""
     return id.split("/")[1] ?? ""
   }
@@ -252,7 +252,7 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_id = ? AND delivery_status = 'delivered'",
+      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_session_id = ? AND status = 'delivered'",
       main,
       from,
     )?.n ?? 0
@@ -451,8 +451,7 @@ const checks: ReadonlyArray<Check> = [
         process.kill(stopped!, "SIGSTOP")
         await Bun.sleep(3_000)
         const who = { main: c.main, projectId: c.projectId }
-        const status = (id: number) =>
-          row<{ s: string }>(w, "SELECT delivery_status AS s FROM inbox WHERE id = ?", id)?.s
+        const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
         let polled: { ids: Array<number>; line: string; text: string } = { ids: [], line: "", text: "" }
         await until(
@@ -589,11 +588,7 @@ const checks: ReadonlyArray<Check> = [
             (a) => a.name === `s-${sub}`,
           )
         const exited = () =>
-          row<{ e: number | null }>(
-            w,
-            "SELECT json_extract(metadata, '$.exitedAt') AS e FROM session WHERE id = ?",
-            sub,
-          )?.e ?? null
+          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
         // herdr drops a started agent's name when it is not marked ready within agent.start's timeout (120 s); vibestd then
         // finds no agent of this terminal and records the session as exited while its harness still works.
         while (Date.now() - started < 135_000) {

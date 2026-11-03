@@ -14,7 +14,6 @@ import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
-type StopRecord = NonNullable<SessionRow["metadata"]["stop"]>[number]
 type ProcessState = RemoveOutcome["processes"]
 
 /** Once the terminal closed: how long between cwd listings while one still names a process, and how long in all. */
@@ -127,25 +126,12 @@ export const make = Effect.gen(function* () {
       const exists = worktree !== "" && (yield* fs.exists(worktree))
       const real = exists ? yield* fs.realPath(worktree) : worktree
 
-      const before = session.metadata.stop ?? []
-      /** The row's metadata with `stop` set to `records` (none: no key, exactly as before any record). */
-      const withStop = (records: ReadonlyArray<StopRecord>) => {
-        const { stop: _, ...rest } = session.metadata
-        return records.length > 0 ? { ...rest, stop: records } : rest
-      }
-
       /** The terminal step: the runtime closes it (its processes signalled with it); already-gone is `closed`. */
       const closeTerminal = () =>
         Effect.gen(function* () {
           // A legacy row names a runtime session without its pane (migrated to id "" before this runs): nothing of its own to close.
-          if (input.terminal === undefined || input.terminal.id === "")
-            return { pane: "none" as const, records: before }
-          // Named before the close, proven nothing yet: a lost reply or a vibestd restart still has the terminal to retry.
-          const unproven = [
-            ...before.filter((r) => r.pane !== input.terminal!.id),
-            { pane: input.terminal.id, pids: [] as ReadonlyArray<number>, exited: false },
-          ]
-          yield* db.updateSession(id, { metadata: withStop(unproven) })
+          if (input.terminal === undefined || input.terminal.id === "") return "none" as const
+          // A lost reply or a vibestd restart still has the terminal on the row to retry.
           const outcome = yield* h.close(input.terminal).pipe(
             Effect.as("closed" as const),
             Effect.catchTag("RuntimeError", (error) =>
@@ -161,17 +147,12 @@ export const make = Effect.gen(function* () {
             ),
           )
           if (outcome === "kept") {
-            // The runtime refused: nothing proven, and the pre-written record is not evidence of anything.
-            yield* db.updateSession(id, { metadata: withStop(before) })
+            // The runtime refused: nothing proven.
             reasons.push(`closing terminal ${input.terminal.id} failed; its processes are not confirmed gone`)
-            return { pane: "kept" as const, records: before }
+            return "kept" as const
           }
           // shortcut: the runtime's close disposes the terminal's processes by contract; vibestd still proves it by cwd before the worktree goes
-          const records = [
-            ...before.filter((r) => r.pane !== input.terminal!.id),
-            { pane: input.terminal.id, pids: [] as ReadonlyArray<number>, exited: true },
-          ]
-          return { pane: "closed" as const, records }
+          return "closed" as const
         })
 
       /**
@@ -210,17 +191,17 @@ export const make = Effect.gen(function* () {
         return { state: "exited" as const, why: "" }
       })
 
-      const { pane, records } = yield* closeTerminal()
+      const pane = yield* closeTerminal()
       // A close that failed proves nothing about the processes (the runtime never said it closed them).
       const confirmed =
         pane === "kept"
           ? { state: "unknown" as const, why: "its terminal was not closed, so nothing is proven" }
           : yield* confirmExited
       const processState: ProcessState = confirmed.state
-      if (pane === "closed" && records !== before) yield* db.updateSession(id, { metadata: withStop(records) })
+      // Its process ends with the archive (`process.end` reason archived) once nothing of it is left.
       if (processState === "exited" && session.exitedAt === null) {
         const t = yield* Clock.currentTimeMillis
-        yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t })
+        yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t, end: "archived" })
       }
       /** The directory stays because another live session works in it. */
       let shared = false

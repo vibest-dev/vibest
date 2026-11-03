@@ -113,7 +113,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
   and where a new terminal opens (beside its spawner), never routing. Today the parent also decides routing: a
   result goes to the parent, else to the main agent.
-- **An optional entry session** (planned rename of `project.main_session_id` to `entry_session_id`): the session a
+- **An optional entry session** (`project.entry_session_id`, `main_session_id` before schema version 2): the session a
   bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
 - **Harnesses registered by plugins** (planned): `context.harness.register(adapter)`, scoped like
@@ -476,11 +476,10 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 - SQLite, WAL, STRICT tables, foreign keys on, all SQL in one service. The database carries an
   `application_id` and a `user_version`; a file that is not vibest's, or not this version, is refused before any
   writable open (`SchemaMismatch`), leaving it untouched. Migrations start with the first release.
-- Tables `project`, `session` (one row per Agent run: one CLI process in one pane), `inbox` (delivery), `message`
-  (each turn and its answer; the open turn has no `ended_at`) in `docs/design/schema.md` are the state, changed in
-  transactions. Run is `session.run`, Workspace is `session.cwd`, the conversation is the Project's `main_session`
-  row. An Agent's status is live from the runtime (memory only); its task is its first `task` inbox row. Events are kept in
-  memory and logs (no `event` table until replay is needed). Rows are never deleted.
+- Tables `project`, `session`, `inbox` (delivery) and the append-only `event` (each process and turn, and each
+  inbox row's queue and status changes) in `docs/design/schema.md` are the state, changed in transactions. The
+  conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
+  task is its `task` inbox row. Rows are never deleted.
 - Files keep one writer each and are written to a temporary file and renamed (omac write model): result files
   and rules files by the daemon; never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
@@ -694,7 +693,8 @@ harness/provider/model and the session's real attempts prefilled: a refusal skip
 started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice moves to
 the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
 round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
-`session.metadata.attempts`, so they survive moves and a vibestd restart; a preflight miss, or a start or prompt
+`process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
+restart; a preflight miss, or a start or prompt
 that fails, is not a limit — the next move may use that harness again. A login already limited before start is
 `agent.start.before`'s to avoid (the builtin does), never a move's.
 

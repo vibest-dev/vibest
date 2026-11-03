@@ -20,9 +20,7 @@ import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
-import { SqlClient } from "effect/sql"
 
-import { migrateLegacyTerminalIds } from "../legacy-terminal-ids.ts"
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
 /**
@@ -84,14 +82,6 @@ export const sqlite = (filename: string) =>
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
         yield* privateDatabase(filename)
         if (existed) yield* inspectSchema.pipe(Effect.provide(sqliteLayer(filename, true)), Effect.scoped)
-        // The herdr product's one-off migration runs on its own short-lived writable connection before core reads the
-        // table (legacy-terminal-ids.ts): any left of the pre-port rows are rewritten before `Db` ever sees them.
-        if (existed)
-          yield* sqliteLayer(filename, false).pipe(
-            Layer.build,
-            Effect.flatMap((context) => migrateLegacyTerminalIds(effect.Context.get(context, SqlClient.SqlClient))),
-            Effect.scoped,
-          )
       }
       return sqliteLayer(filename, false)
     }),

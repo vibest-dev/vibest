@@ -194,7 +194,7 @@ describe("vibest CLI", () => {
       const sql = yield* SqlClient.SqlClient
       const reported = yield* sql<{
         message: string
-      }>`SELECT content AS message FROM inbox WHERE sender_id = ${id} AND sender_type = 'session' AND result_message_id IS NULL ORDER BY id`
+      }>`SELECT content AS message FROM inbox WHERE sender_session_id = ${id} AND kind = 'report' ORDER BY id`
       assert.deepStrictEqual(
         reported.map((r) => /<message>\n([\s\S]*)\n<\/message>/.exec(r.message)?.[1]),
         ["- fix the bug\n- then test", "--help", "--model x"],
@@ -361,7 +361,7 @@ describe("vibest CLI", () => {
       const history = yield* sql<{
         kind: string
         message: string
-      }>`SELECT CASE WHEN m.result_message_id IS NOT NULL THEN 'result' ELSE 'report' END AS kind, CASE WHEN m.result_message_id IS NOT NULL THEN msg.output ELSE m.content END AS message FROM inbox m LEFT JOIN message msg ON msg.id = m.result_message_id WHERE m.sender_id = ${id} ORDER BY m.id`
+      }>`SELECT kind, content AS message FROM inbox WHERE sender_session_id = ${id} AND kind IN ('report', 'result') ORDER BY id`
       assert.isTrue(history.some((row) => row.kind === "report" && row.message.includes("prior note")))
       assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
     }),

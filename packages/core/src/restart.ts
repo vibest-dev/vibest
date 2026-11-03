@@ -196,14 +196,12 @@ export const sessionRestart = (deps: {
       const at = yield* Clock.currentTimeMillis
       const signalled = yield* t.locked(
         Effect.gen(function* () {
-          // The old harness's pid and ready report go with the signal: only the new harness's count.
           yield* deps.restarting.mark(id)
-          yield* db.patchLive(id, { ready: null, pid: null })
           const sent = yield* processes.terminate(pid)
-          if (sent === "denied") {
-            yield* deps.restarting.clear(id)
-            yield* db.patchLive(id, { pid })
-          }
+          // A refused SIGTERM writes nothing. Otherwise the old harness's process ends (its pid and ready report with
+          // it) and the next one starts in the same terminal on the same conversation.
+          if (sent === "denied") yield* deps.restarting.clear(id)
+          else yield* db.restartProcess(id)
           return sent
         }),
       )

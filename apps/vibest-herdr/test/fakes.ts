@@ -155,12 +155,40 @@ export const runHookOutput = (
 /** The harness conversation saved on coordinator session `sessionId`. */
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
+    const db = yield* Db
+    const projectId = yield* db.projectOfSession(sessionId)
+    if (projectId === undefined) return null
+    const main = yield* db.coordinatorOf(projectId)
+    return main?.id === sessionId ? main.harnessSessionId : null
+  })
+
+/** Session `sessionId`'s events of `type` (all when omitted), oldest first, with their data. */
+export const eventsOf = (sessionId: string, type?: string) =>
+  Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{
-      harnessSession: string | null
-    }>`SELECT harness_session_id AS harness_session FROM session WHERE id = ${sessionId} AND id IN (SELECT main_session_id FROM project)`
-    return rows[0]?.harnessSession ?? null
+    const rows = yield* sql<{ id: number; type: string; at: number; data: string }>`SELECT id, type, at, data FROM event
+      WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY id`
+    return rows.map((r) => ({ id: r.id, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
+
+/** Why each of session `sessionId`'s processes ended, oldest first (`process.end` reasons). */
+export const processEnds = (sessionId: string) =>
+  eventsOf(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
+
+/**
+ * Each turn as one row, for test queries (`FROM ${sql.literal(TURNS)} m`): `input` is its typed text or the rows
+ * delivered into it, `inbox_id` the last of those, `status` `working` while it is open, `end_id` its `turn.end`, and
+ * `output` the result row that reports it.
+ */
+export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
+    (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+      AND json_extract(e.data, '$.to') = 'delivered') AS inbox_id,
+    coalesce(json_extract(t.data, '$.typed'), (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
+      FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+        AND json_extract(e.data, '$.to') = 'delivered') ORDER BY i.id)), '') AS input,
+    CASE WHEN te.id IS NULL THEN 'working' ELSE json_extract(te.data, '$.status') END AS status,
+    (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
+  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
 /** A real-path temp directory, removed with the scope. */
 export const tempDirectory = (prefix: string) =>

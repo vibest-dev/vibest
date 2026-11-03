@@ -156,10 +156,10 @@ describe("a vibestd restart", () => {
         // Inbox.layer runs this at start with the harnesses whose adapter polls.
         yield* (yield* Db).recoverSending(["claude"])
         const sql = yield* SqlClient.SqlClient
-        return yield* sql<{ id: number; deliveryStatus: string }>`SELECT id, delivery_status FROM inbox ORDER BY id`
+        return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))
       assert.deepStrictEqual(
-        statuses.map((r) => [r.id, r.deliveryStatus]),
+        statuses.map((r) => [r.id, r.status]),
         [
           [ids[0], "pending"],
           [ids[1], "failed"],
