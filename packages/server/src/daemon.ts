@@ -1,4 +1,5 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -118,6 +119,8 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Runtimes.layer),
     // The agent definitions plugins give: vibestd's alone (the command line reads none).
     Layer.provideMerge(Agents.layer),
+    // What plugins do as a session: the server installs its handlers here; Plugins reads it.
+    Layer.provideMerge(Actions.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(TurnEnds.layer),

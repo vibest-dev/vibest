@@ -88,8 +88,11 @@ subagents. Everything else in this list is planned; each item says what runs tod
   `context.agent.define`. What a caller may do comes from its definition, not from the database: Spawn needs
   `can.spawn`; Send's recipient must be inside `can.message`; Interrupt, Remove and Peek need the user or an
   ancestor of the target (along `parent_session_id`); Report is a message to the caller's reply target; the
-  guard reads `tools`. Today `@vibest/plugin-coordinator` defines `coordinator` and `general`; the entry session is
-  still tagged `coordinator` in the server, and `skills` and `entry` are not definition fields yet.
+  guard reads `tools`. `@vibest/plugin-coordinator` defines `coordinator` (the entry agent: its rules, skills
+  `delegate` and `pipeline`) and `general`; vibestd writes the entry agent's rules file and branches on `entry`, never
+  on a name. A plugin acts as a session with `context.session.send` / `spawn`: vibestd's own Send and Spawn
+  handlers with that session as the caller, so a plugin may do exactly what the session may
+  (`apps/vibest/test/actions.test.ts`: gather, timer, swarm handoff, a team by group address).
 - **An addressable inbox per session**: every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
   natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
@@ -150,7 +153,7 @@ Every other mode is configuration of the same engine (planned):
 | Coordinator and subagents (today) | the default plugin. A subagent's `report_to` is the session that spawned it; a run the user starts reports to the entry session. The main agent's turns are typed or woken by results, so by rule 4 they produce no result: as today                                                                       |
 | Peers                             | two `vibest run --agent peer` (`message: project`, no `report_to`: only when the project has no entry session or the run overrides it, since the default plugin sets `report_to` to the entry). A runs `vibest send B`; B's turn answers A (rule 1); A's turn woken by that result answers no one (rule 4) |
 | Pipeline                          | `vibest run --report-to <B>`; or an `agent.result` plugin that queues A's output as a `task` for the next stage (or spawns it) and clears the original recipients                                                                                                                                          |
-| Fan-out and gather                | a parent spawns N sessions and every result comes back to it (the default). Waiting for all N is a skill or a plugin; the engine does not gather                                                                                                                                                           |
+| Fan-out and gather                | a parent spawns N sessions and every result comes back to it (the default). Waiting for all N is a skill or a plugin (`agent.result` holds them, `context.session.send` hands them over as one); the engine does not gather                                                                                |
 | Reviewer loop                     | the implementer's `report_to` is the reviewer; the reviewer sends changes with `send`, and the implementer's result goes back to it by rule 1. A skill or a plugin counts the rounds                                                                                                                       |
 | A person with a few agents        | no entry session; the user runs `vibest run` directly. Results and notices are rows for the user, read with `vibest inbox` and the unread count in `ls`                                                                                                                                                    |
 | Nested coordinator                | a `lead` definition (spawn, message children). main spawns a lead, the lead spawns workers; workers answer the lead, the lead answers main (its `report_to`). Management rights follow ancestry                                                                                                            |

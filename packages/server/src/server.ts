@@ -1,4 +1,5 @@
 import { spawnDaemon } from "@vibest/client/client"
+import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -22,6 +23,7 @@ import {
 } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { ActionRefused } from "@vibest/plugin"
 import {
   AGENT_HEADER,
   CALLER_HEADER,
@@ -63,7 +65,7 @@ import { NotInRepository } from "@vibest/vibest/worktree"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
+import { Context, Crypto, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -580,7 +582,7 @@ export const handlers = VibestRpcs.toLayer(
         return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
       })
 
-    return VibestRpcs.of({
+    const impl = VibestRpcs.of({
       Ping: () =>
         machinesListing(runtimes, []).pipe(
           Effect.map((machines) =>
@@ -1062,6 +1064,51 @@ export const handlers = VibestRpcs.toLayer(
           )
         }),
     })
+
+    // A plugin's actions (`context.session`): these same handlers, with the session it acts as for the caller.
+    const callerOf = (id: string) =>
+      Effect.gen(function* () {
+        const row = yield* db.sessionIdentity(id)
+        if (!row) return yield* new ActionRefused({ reason: `no session ${id}` })
+        return row.entry
+          ? ({ _tag: "Coordinator", sessionId: row.id, projectId: row.projectId } satisfies CallerShape)
+          : ({
+              _tag: "Session",
+              sessionId: row.id,
+              projectId: row.projectId,
+              can: agents.of(row.agent).can,
+            } satisfies CallerShape)
+      })
+    const spawnContext = yield* Effect.context<
+      ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | FileSystem.FileSystem | Path.Path
+    >()
+    const refusedAs = (e: unknown) =>
+      new ActionRefused({ reason: (e as { readonly message?: string }).message || String(e) })
+    yield* (yield* Actions).install({
+      send: ({ as, to, message }) =>
+        Effect.flatMap(callerOf(as), (caller) =>
+          impl.Send({ id: to, message }).pipe(Effect.provideService(Caller, caller), Effect.mapError(refusedAs)),
+        ),
+      spawn: ({ as, ...input }) =>
+        Effect.flatMap(callerOf(as), (caller) =>
+          impl
+            .Spawn({
+              prompt: input.prompt,
+              ...(input.harness === undefined ? {} : { harness: input.harness }),
+              ...(input.agent === undefined ? {} : { agent: input.agent }),
+              ...(input.name === undefined ? {} : { name: input.name }),
+              ...(input.reportTo === undefined ? {} : { reportTo: input.reportTo }),
+            })
+            .pipe(
+              Effect.provideService(Caller, caller),
+              Effect.map((spawned) => ({ id: spawned.id })),
+              Effect.mapError(refusedAs),
+              Effect.scoped,
+              Effect.provideContext(spawnContext),
+            ),
+        ),
+    })
+    return impl
   }),
 )
 

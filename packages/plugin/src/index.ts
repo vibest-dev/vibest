@@ -14,6 +14,30 @@ export * as Runtime from "./runtime.ts"
 /** An `agent.start.before` callback fails with this to refuse the start; vibestd reports the reason and the plugin. */
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
+/** A plugin's action was not done: the session it acts as may not do it, or it failed (the reason says which). */
+export class ActionRefused extends Schema.TaggedError<ActionRefused>()("ActionRefused", { reason: Schema.String }) {}
+
+/**
+ * What a plugin may do, always as one session (`as`): exactly what that session's own `vibest send` / `vibest run`
+ * may, checked the same way (its agent definition's `can`, its project, the entry session's rights for the main
+ * agent). A send is from `as`, so the answer to it goes back to `as`; a spawn is `as`'s child.
+ */
+export interface SessionActions {
+  readonly send: (input: {
+    readonly as: string
+    readonly to: string
+    readonly message: string
+  }) => Effect.Effect<void, ActionRefused>
+  readonly spawn: (input: {
+    readonly as: string
+    readonly prompt: string
+    readonly harness?: string | undefined
+    readonly agent?: string | undefined
+    readonly name?: string | undefined
+    readonly reportTo?: string | undefined
+  }) => Effect.Effect<{ readonly id: string }, ActionRefused>
+}
+
 /** One usage window a plugin, or a poll, reports. `percent` is 0–100. */
 export interface SubscriptionLimit {
   readonly window: string
@@ -216,4 +240,6 @@ export interface Context {
     /** Set the limits for `(harness, provider)` on this machine. Replaces that row's limits until the next usage poll. */
     readonly report: (input: SubscriptionReport) => Effect.Effect<void>
   }
+  /** Send and spawn as a session, bounded by what that session may do. */
+  readonly session: SessionActions
 }

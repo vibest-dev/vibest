@@ -7,6 +7,7 @@ import { Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/
 import { BUILTIN } from "@vibest/core/harnesses"
 
 const HARNESS_IDS = Object.keys(BUILTIN)
+import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
@@ -560,6 +561,7 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(harnessOf(options)),
         Layer.provideMerge(BuiltinHarnesses.layer),
         Layer.provideMerge(Agents.layer),
+        Layer.provideMerge(Actions.layer),
         Layer.provideMerge(
           Layer.effect(
             Processes,

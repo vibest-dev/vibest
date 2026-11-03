@@ -1,6 +1,7 @@
 // Plugins (plugins.md): found and loaded the way OpenCode V2 does it (§4), kept current by a supervisor that reloads
 // what changed on disk; their hooks run under vibest's own rules (§5): one event mutated in place, a diff of what each
 // callback changed, a timeout, and refusals or failures that always surface.
+import { ActionRefused } from "@vibest/plugin"
 import type * as VibestPlugin from "@vibest/plugin"
 import { AgentRefused, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import {
@@ -19,6 +20,7 @@ import {
   Stream,
 } from "effect"
 
+import { Actions } from "./actions.ts"
 import { Agents } from "./agents.ts"
 import { Harnesses } from "./harness.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
@@ -37,6 +39,8 @@ const DEBOUNCE = Duration.millis(100)
 const RECHECK = Duration.seconds(1)
 
 type HookName = keyof VibestPlugin.Hooks
+
+const noActions = new ActionRefused({ reason: "this vibestd has no session actions" })
 
 export { describeSpawn } from "@vibest/schema/plugin"
 
@@ -197,6 +201,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     // Optional: a host made without the registry (tests) refuses harness registrations.
     const harnesses = yield* Effect.serviceOption(Harnesses)
     const agents = yield* Effect.serviceOption(Agents)
+    const actions = yield* Effect.serviceOption(Actions)
     /** Set `candidate` up in a new scope: what runs, or why it failed. */
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -262,6 +267,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
               : harnesses.value.register(adapter).pipe(Scope.provide(scope)),
         },
         subscription: { report: (input) => subscriptions.report(input) },
+        session: {
+          send: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.send(input)),
+          spawn: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.spawn(input)),
+        },
       }
       const exit = yield* runBounded(plugin.effect(ctx).pipe(Scope.provide(scope)), scope, timeout)
       const error = Option.isNone(exit)
