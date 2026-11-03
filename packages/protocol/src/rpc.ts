@@ -459,8 +459,6 @@ export class VibestRpcs extends RpcGroup.make(
           routing: Schema.optional(Routing),
           /** The caller's own PID: it execs the harness, so this is the harness's (what StopCoordinator signals). */
           pid: Schema.optional(Schema.Number),
-          /** `vibest --env`: kept on the main session, so its start after a restart runs the harness with it again. */
-          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           sessionId: Schema.String,
@@ -625,7 +623,6 @@ export class VibestRpcs extends RpcGroup.make(
         model: Schema.NullOr(Schema.String),
         projectId: Schema.Number,
         runtime: Schema.optional(Schema.String),
-        env: Schema.Record(Schema.String, Schema.String),
       }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),

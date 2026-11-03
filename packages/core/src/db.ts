@@ -45,7 +45,6 @@ const Live = {
 
 const Metadata = Schema.Struct({
   ...Live,
-  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   routing: Schema.optional(Routing),
   /** `vibest run --peer`: the session whose worktree this one shares. It never removes that worktree. */
   peer: Schema.optional(Schema.String),
@@ -133,8 +132,6 @@ export const CoordinatorRow = Schema.Struct({
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   routing: Schema.optional(Routing),
-  /** `vibest --env`: the harness's extra environment, as a subagent's `metadata.env`. */
-  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   ...Live,
 })
 export type CoordinatorRow = typeof CoordinatorRow.Type
@@ -485,12 +482,11 @@ const make = Effect.gen(function* () {
         decodeCoordinators(
           rows.map((row) => {
             const located = row.runtime === null ? undefined : decodeRuntime(row.runtime)
-            const { provider, model, routing, projectDirectory, env, integration, pid } = JSON.parse(row.metadata) as {
+            const { provider, model, routing, projectDirectory, integration, pid } = JSON.parse(row.metadata) as {
               provider?: string | null
               model?: string | null
               routing?: unknown
               projectDirectory?: unknown
-              env?: unknown
               integration?: unknown
               pid?: unknown
             }
@@ -507,7 +503,6 @@ const make = Effect.gen(function* () {
               provider: provider ?? null,
               model: model ?? null,
               ...(routing === undefined ? {} : { routing }),
-              ...(env === undefined ? {} : { env }),
               ...(integration === undefined ? {} : { integration }),
               ...(pid === undefined ? {} : { pid }),
             }
@@ -856,8 +851,6 @@ const make = Effect.gen(function* () {
         /** The project directory. Stored beside the key; never written into `directory`. */
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
-        /** `vibest --env`, replacing the one recorded (absent: kept). */
-        readonly env?: Readonly<Record<string, string>> | undefined
       } = {},
     ) =>
       Effect.gen(function* () {
@@ -895,11 +888,7 @@ const make = Effect.gen(function* () {
               moving: null,
               ...(start.routing ? { routing: start.routing } : {}),
               ...(start.projectDirectory ? { projectDirectory: start.projectDirectory } : {}),
-              ...(start.env !== undefined ? { env: start.env } : {}),
             })
-            // json_patch merges objects: the env is replaced whole, so cleared first.
-            if (start.env !== undefined)
-              yield* sql`UPDATE session SET metadata = json_remove(metadata, '$.env') WHERE id = (SELECT main_session_id FROM project WHERE id = ${project})`
             const [saved] = yield* sql<{ id: string; harnessSession: string | null }>`UPDATE session SET
                 harness_session_id = CASE WHEN ${fresh ? 1 : 0} OR harness != ${harness} THEN NULL ELSE harness_session_id END,
                 harness = ${harness}, runtime = ${runtime}, metadata = json_patch(metadata, ${metadata})
@@ -930,17 +919,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Set (or, with null, remove) the keys a restart keeps in session `id`'s metadata (main agent or not): the harness pid,
-     * its ready report, the main agent's env. One merge patch, so the row's other keys stay.
+     * its ready report. One merge patch, so the row's other keys stay.
      */
     patchLive: (
       id: string,
       patch: {
         readonly pid?: number | null
-        readonly env?: Readonly<Record<string, string>> | null
         readonly ready?: number | null
       },
     ) =>
-      // Each key is replaced whole (a merge patch alone would merge an old env into the new one).
       sql`UPDATE session SET metadata = json_patch(json_patch(metadata, ${JSON.stringify(
         Object.fromEntries(Object.keys(patch).map((key) => [key, null])),
       )}), ${JSON.stringify(patch)}) WHERE id = ${id}`.pipe(Effect.asVoid, Effect.orDie),
@@ -1224,13 +1211,15 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
       // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-      // Leases and the restarting mark are memory only now: drop the keys an older vibestd left in metadata. It is also
-      // the open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
+      // Leases and the restarting mark are memory only, and --env values are never stored: drop the keys an older vibestd
+      // left in metadata. It is also the open's one write, which two processes opening an empty database at once need
+      // (unit.test "two empty opens").
       Effect.andThen(
         SqlClient.SqlClient.pipe(
           Effect.flatMap(
-            (sql) => sql`UPDATE session SET metadata = json_remove(metadata, '$.leases', '$.restarting')
-              WHERE json_extract(metadata, '$.leases') IS NOT NULL OR json_extract(metadata, '$.restarting') IS NOT NULL`,
+            (sql) => sql`UPDATE session SET metadata = json_remove(metadata, '$.leases', '$.restarting', '$.env')
+              WHERE json_extract(metadata, '$.leases') IS NOT NULL OR json_extract(metadata, '$.restarting') IS NOT NULL
+                OR json_extract(metadata, '$.env') IS NOT NULL`,
           ),
         ),
       ),

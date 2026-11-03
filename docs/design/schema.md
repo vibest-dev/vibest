@@ -22,7 +22,8 @@ Four SQLite tables, one purpose each:
 - A JSON value is written once and never changed. The event table is append-only.
 - `--env` values are never stored: not in the database, logs or telemetry. They reach the terminal only when it
   opens. An in-place restart or a harness change in the same pane keeps them (the pane's shell has them); a new
-  terminal does not, and the user passes `--env` again.
+  terminal does not, and the user passes `--env` again. A main agent is the exception: `vibest --env` gives them to
+  the harness it execs, not to the user's shell, so a restart in place (`vibest update`) starts it without them.
 - No peer relation and no worktree table. A session records its machine and directory. A directory under the vibest
   worktrees root is one vibest made; a name is reserved by an atomic `mkdir`. It can be removed when no other live
   session uses the same (machine, directory), then after the lsof and git checks.

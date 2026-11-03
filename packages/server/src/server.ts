@@ -849,18 +849,7 @@ export const handlers = VibestRpcs.toLayer(
           return { ...decision, harness: decision.harness, runtime: rt.kind }
         }),
 
-      "Project.CoordinatorSession": ({
-        harness,
-        fresh,
-        terminal,
-        machine,
-        runtime,
-        provider,
-        model,
-        routing,
-        pid,
-        env,
-      }) =>
+      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.CoordinatorSession")
           const projectDirectory =
@@ -894,7 +883,6 @@ export const handlers = VibestRpcs.toLayer(
                   model,
                   routing,
                   pid,
-                  env: env ?? {},
                   ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
                 },
               )
@@ -953,7 +941,6 @@ export const handlers = VibestRpcs.toLayer(
             model: main.model,
             projectId: main.projectId,
             ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
-            env: main.env ?? {},
           }
         }),
 

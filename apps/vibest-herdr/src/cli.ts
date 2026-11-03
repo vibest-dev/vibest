@@ -185,7 +185,12 @@ const run = Command.make(
       Flag.withDescription("Leave out for the harness default; see vibest models"),
       Flag.optional,
     ),
-    env: Flag.KeyValuePair("env").pipe(Flag.optional),
+    env: Flag.KeyValuePair("env").pipe(
+      Flag.withDescription(
+        "KEY=VALUE for the harness, never stored: a restart or a harness change in the same pane keeps it, a new pane (the old one closed) does not; pass it again then",
+      ),
+      Flag.optional,
+    ),
     peer: Flag.String("peer").pipe(
       Flag.withDescription(
         "A session id: run in its worktree, in a pane split from its pane, instead of a new worktree (archiving this session never removes that worktree)",
@@ -276,7 +281,12 @@ const mainFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
-  env: Flag.KeyValuePair("env").pipe(Flag.optional),
+  env: Flag.KeyValuePair("env").pipe(
+    Flag.withDescription(
+      "KEY=VALUE for the main agent's harness, never stored: a restart by vibest update starts it without them; run vibest --env again",
+    ),
+    Flag.optional,
+  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -385,7 +395,6 @@ const startMain =
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
                 // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
-                env,
               }),
             )
           }),
@@ -868,7 +877,7 @@ const integrationStart = (exec: Exec) =>
           runtime: got.runtime,
         }),
       }).pipe(Effect.provide(Harness.layer))
-      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
+      return yield* Effect.sync(() => exec(main.file, main.args, main.env))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
 
