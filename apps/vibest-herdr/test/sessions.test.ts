@@ -3167,6 +3167,36 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a resume keeps the owner's git rules beside a --peer; only the --peer gets the peer rules",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const owner = yield* idleSession(repo)
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* herdr.endTurn(id)
+      yield* owner.sessions.check(id)
+      // Both terminals gone: the next message resumes each in a new one, with its rules written again.
+      for (const session of [owner.id, id]) {
+        yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))
+        yield* owner.sessions.check(session)
+      }
+      yield* untilVirtual(owner.sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      for (const session of [owner.id, id]) {
+        yield* owner.sessions.send(session, `again ${session}`)
+        yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
+      }
+      assert.include(yield* fs.readFileString(layout.rulesFile(owner.id)), "git switch -c <branch>")
+      const peerRules = yield* fs.readFileString(layout.rulesFile(id))
+      assert.include(peerRules, "others may be making changes in this worktree too")
+      assert.notInclude(peerRules, "git switch -c <branch>")
+    }),
+  )
+
+  test(
     "run --peer refuses a missing, cross-project, archived or ineligible session before it creates a worktree",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

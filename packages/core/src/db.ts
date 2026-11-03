@@ -674,6 +674,20 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * The earliest created live session that shares `id`'s directory and was created before it: the one whose worktree
+     * `id` joined with `--peer` (undefined for the session that owns it).
+     */
+    earlierSharer: (id: string) =>
+      sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
+        WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
+          AND json_extract(o.metadata, '$.archived') IS NOT 1 AND json_extract(o.metadata, '$.removed') IS NOT 1
+          AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
+        ORDER BY o.created_at, o.rowid LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.id),
+        Effect.orDie,
+      ),
+
+    /**
      * Insert a subagent of project `key`, working in `cwd` (a `--peer` records the directory it shares), with its
      * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
      * already running (one transaction).

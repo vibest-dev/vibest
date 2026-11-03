@@ -36,7 +36,7 @@ export const sessionPlacement = (deps: {
     ) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
-    readonly liveSharers: (id: string) => Effect.Effect<ReadonlyArray<string>>
+    readonly earlierSharer: (id: string) => Effect.Effect<string | undefined>
     readonly updateSession: (
       id: string,
       patch: {
@@ -379,8 +379,8 @@ export const sessionPlacement = (deps: {
       layout.rulesFile(session.id),
       sessionRules({
         id: session.id,
-        // Another live session works in its directory too (it was started with --peer, or one was started beside it).
-        peer: (yield* db.liveSharers(session.id))[0],
+        // It joined another live session's directory with --peer: that one was there first. The owner keeps its own rules.
+        peer: yield* db.earlierSharer(session.id),
         scratch: layout.scratch(key),
         vibest,
         ...(yield* projectText(layout.project(key))),
