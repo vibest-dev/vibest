@@ -417,11 +417,11 @@ describe.concurrent("Sessions", () => {
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "open", exitedAt: null })
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: again" })
+      yield* writeResult(id, "pi", { text: "done again" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
-      assert.strictEqual((yield* db.latestInbox(id, "result"))!.details.summary, "again")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "done again")
       // A live session between turns keeps its flags, across polls too; archived, the next poll drops them, though it
       // no longer checks the row (archive set exitedAt).
       yield* TestClock.adjust("10 seconds")

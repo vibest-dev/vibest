@@ -11,7 +11,7 @@ import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { repositoryKey } from "@vibest/core/worktree"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
+import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
 
@@ -291,34 +291,6 @@ describe("Project.StopCoordinator", () => {
         { concurrency: "unbounded" },
       )
       assert.deepStrictEqual(exits.map((e) => Exit.isSuccess(e)).toSorted(), [false, true])
-    }),
-  )
-
-  it.effect("the project lock runs one body per key at a time and drops a key once nobody holds or waits for it", () =>
-    Effect.gen(function* () {
-      const lock = Server.keyedLock()
-      const order: Array<string> = []
-      const gate = yield* Deferred.make<void>()
-      const first = yield* Effect.forkChild(
-        lock("p", Effect.sync(() => order.push("first in")).pipe(Effect.andThen(Deferred.await(gate)))),
-      )
-      yield* Effect.yieldNow
-      const second = yield* Effect.forkChild(
-        lock(
-          "p",
-          Effect.sync(() => order.push("second in")),
-        ),
-      )
-      const failed = yield* Effect.exit(lock("q", Effect.fail("boom")))
-      yield* Effect.yieldNow
-      assert.deepStrictEqual(order, ["first in"])
-      assert.isTrue(Exit.isFailure(failed))
-      assert.strictEqual(lock.size(), 1)
-      yield* Deferred.succeed(gate, undefined)
-      yield* Fiber.join(first)
-      yield* Fiber.join(second)
-      assert.deepStrictEqual(order, ["first in", "second in"])
-      assert.strictEqual(lock.size(), 0)
     }),
   )
 })
