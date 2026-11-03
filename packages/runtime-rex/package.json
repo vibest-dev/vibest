@@ -1,0 +1,17 @@
+{
+  "name": "@vibest/runtime-rex",
+  "version": "0.0.1-beta.13",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "@vibest/plugin": "workspace:*",
+    "effect": "catalog:"
+  }
+}

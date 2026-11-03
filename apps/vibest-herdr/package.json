@@ -46,6 +46,7 @@
     "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
+    "@vibest/runtime-rex": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/server": "workspace:*",
     "effect": "catalog:",

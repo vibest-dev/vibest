@@ -242,6 +242,9 @@ importers:
       '@vibest/runtime-herdr':
         specifier: workspace:*
         version: link:../../packages/runtime-herdr
+      '@vibest/runtime-rex':
+        specifier: workspace:*
+        version: link:../../packages/runtime-rex
       '@vibest/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -377,6 +380,15 @@ importers:
       effect-herdr-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-sdk
+
+  packages/runtime-rex:
+    dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
 
   packages/schema:
     dependencies:

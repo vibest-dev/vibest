@@ -15,6 +15,7 @@ import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibe
 import * as VibestPlugin from "@vibest/plugin"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
+import { plugin as runtimeRexPlugin } from "@vibest/runtime-rex/plugin"
 import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
@@ -240,6 +241,7 @@ const configuredRuntime: ConfiguredRuntime = () =>
 /** The builtin runtime plugins (runtime-port.md §2), first after the default harness choice. */
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
+  { source: "builtin:runtime-rex", revision: "runtime-rex", options: {}, plugin: runtimeRexPlugin },
   {
     source: "builtin:runtime-choice",
     revision: "runtime-choice",

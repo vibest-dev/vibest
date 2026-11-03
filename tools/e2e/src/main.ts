@@ -11,6 +11,7 @@ import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
+import rex from "./scenarios/rex.ts"
 import start from "./scenarios/start.ts"
 import update from "./scenarios/update.ts"
 import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
@@ -26,6 +27,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   update,
   start,
   inbox,
+  rex,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")
