@@ -17,7 +17,7 @@ import {
   type TurnState,
   failureOf,
 } from "./db.ts"
-import { Harnesses, type HarnessAdapter } from "./harness.ts"
+import { Harnesses } from "./harness.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
 import { workspaceGit } from "./project-create.ts"
@@ -48,11 +48,7 @@ export const sessionRounds = (deps: {
   }
   readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
   readonly layout: { readonly resultFile: (id: string) => string; readonly reportFile: (id: string) => string }
-  readonly harnesses: {
-    readonly all: ReadonlyArray<HarnessAdapter>
-    readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
-    readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
-  }
+  readonly harnesses: Harnesses["Service"]
   /** The session's in-memory state: the flag set while vibest itself pastes a prompt. */
   readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
   /** The session's lock alone, not counted by Drain (a typed prompt records its round). */
@@ -232,7 +228,11 @@ export const sessionRounds = (deps: {
       return "delivered" as const
     }
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
-    if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
+    if (
+      harnesses.get(session.harnessId).conversation === "reported" &&
+      !session.harnessSessionId &&
+      found.conversationId
+    )
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
     yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.mtimeMs)
     return "delivered" as const

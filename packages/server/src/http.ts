@@ -35,7 +35,6 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { isHarnessId } from "@vibest/schema/session"
 import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -116,7 +115,7 @@ export const make = Effect.gen(function* () {
       if ("status" in who) return who
       if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
         if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's main agent`)
-        if (harnesses.find(who.harness)?.inbox !== "poll")
+        if (harnesses.find(who.harness)?.delivery !== "poll")
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
@@ -137,7 +136,7 @@ export const make = Effect.gen(function* () {
         return ok()
       }
       const hook = parseHookRoute(request.path)
-      if (!hook || !isHarnessId(hook.harness)) return failure(404, `no route ${request.path}`)
+      if (!hook || !harnesses.find(hook.harness)) return failure(404, `no route ${request.path}`)
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
       const adapter = harnesses.get(hook.harness)

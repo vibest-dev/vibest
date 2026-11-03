@@ -510,7 +510,10 @@ describe("vibest CLI without vibestd", () => {
         }
         const pi = yield* run(["harness", "models", "pi"])
         assert.deepInclude(decodeJson(pi.stdout), { models: [] })
-        assert.strictEqual((yield* run(["harness", "models", "nope"])).code, 2)
+        assert.deepInclude(decodeJson((yield* run(["harness", "models", "nope"])).stdout), {
+          models: [],
+          errors: ['nope: no harness "nope" is registered'],
+        })
       }).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
   )

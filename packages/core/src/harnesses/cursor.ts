@@ -15,12 +15,12 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
 export const cursor: HarnessAdapter = {
   id: "cursor",
   binary: "cursor-agent",
-  ownSessionId: false,
+  conversation: "reported",
   rulesInPrompt: true,
   interruptKey: "ctrl+c",
   resultField: "text",
-  inbox: "prompt",
-  ready: "runtime",
+  delivery: "type",
+  reportsReady: false,
   checkProvider: anthropicOnly("cursor"),
   launchArgs: (i) => [
     // One argument: `--resume [chatId]` takes an optional value, so a separate id starting with - would be read as a flag.

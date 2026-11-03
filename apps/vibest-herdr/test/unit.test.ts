@@ -9,7 +9,6 @@ import {
   Harness,
   type HarnessId,
   HarnessUnavailable,
-  HARNESS_IDS,
   hasNewline,
   type LaunchInput,
   preflight,
@@ -861,7 +860,7 @@ describe("HarnessAdapter", () => {
   const input = launchInput
 
   it("no launch argument contains a newline", () => {
-    for (const id of HARNESS_IDS)
+    for (const id of ["pi", "claude", "cursor"] as const)
       for (const resume of [false, true]) assert.isFalse(hasNewline(ADAPTERS[id].launchArgs({ ...input, resume })))
   })
 
@@ -1033,13 +1032,13 @@ describe("HarnessAdapter", () => {
     ])
     for (const id of ["pi", "claude"] as const)
       assert.notInclude(ADAPTERS[id].coordinatorArgs!(input).join(" "), "session")
-    for (const id of HARNESS_IDS)
+    for (const id of ["pi", "claude", "cursor"] as const)
       if (ADAPTERS[id].coordinatorArgs)
         assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!({ ...input, rules: "a\nb" })))
   })
 
   it("Sessions get no vibest MCP server: claude may run vibest report", () => {
-    for (const id of HARNESS_IDS)
+    for (const id of ["pi", "claude", "cursor"] as const)
       assert.isEmpty(
         ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
         id,

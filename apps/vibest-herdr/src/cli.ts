@@ -12,7 +12,7 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import * as Guard from "@vibest/core/guard"
-import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
+import { Harness, type HarnessAdapter, Harnesses, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
 import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
@@ -177,8 +177,10 @@ const daemon = (host: Daemon.Host) =>
 const run = Command.make(
   "run",
   {
-    harness: Argument.Literals("harness", [...HARNESS_IDS, "auto"] as const).pipe(
-      Argument.withDescription("auto: let spawn plugins choose"),
+    harness: Argument.String("harness").pipe(
+      Argument.withDescription(
+        "A registered harness (claude, pi, cursor, or one a plugin adds); auto: let spawn plugins choose",
+      ),
     ),
     prompt: text("prompt"),
     title: Flag.String("title").pipe(
@@ -282,7 +284,7 @@ const mainFlags = {
     Flag.withDescription("Start a new conversation with the main agent instead of reopening the current one"),
     Flag.withDefault(false),
   ),
-  harness: Flag.Literals("harness", HARNESS_IDS).pipe(
+  harness: Flag.String("harness").pipe(
     Flag.withDescription("Leave out for the main agent's current harness, or what scheduling plugins choose"),
     Flag.optional,
   ),
@@ -580,6 +582,11 @@ const report = Command.make("report", { message: text("message") }, (o) =>
   ),
 )
 
+/** The harnesses this binary knows without vibestd (its built-ins); plugin harnesses are vibestd's. */
+const builtinIds = Effect.gen(function* () {
+  return (yield* Harnesses).all().map((a) => a.id)
+})
+
 const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
   listAllModels(harnesses, Option.getOrNull(provider)).pipe(Effect.flatMap(json))
@@ -587,23 +594,19 @@ const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<s
 const models = Command.make(
   "models",
   {
-    target: Argument.Literals("harness", HARNESS_IDS).pipe(
-      Argument.withDescription("Only this harness's models"),
-      Argument.optional,
-    ),
-    harness: Flag.Literals("harness", HARNESS_IDS).pipe(
-      Flag.withDescription("Same as the harness argument"),
-      Flag.optional,
-    ),
+    target: Argument.String("harness").pipe(Argument.withDescription("Only this harness's models"), Argument.optional),
+    harness: Flag.String("harness").pipe(Flag.withDescription("Same as the harness argument"), Flag.optional),
     provider: providerFlag,
   },
   (o) =>
-    modelsOf(
-      Option.match(
-        Option.orElse(o.target, () => o.harness),
-        { onNone: () => HARNESS_IDS, onSome: (h) => [h] },
+    Effect.flatMap(builtinIds, (all) =>
+      modelsOf(
+        Option.match(
+          Option.orElse(o.target, () => o.harness),
+          { onNone: () => all, onSome: (h) => [h] },
+        ),
+        o.provider,
       ),
-      o.provider,
     ),
 ).pipe(
   Command.withDescription(
@@ -615,27 +618,29 @@ const harness = Command.make("harness").pipe(
   Command.withDescription("The harnesses vibest runs; local, does not need vibestd"),
   Command.withSubcommands([
     Command.make("list", {}, () =>
-      Effect.forEach(
-        HARNESS_IDS,
-        (h) =>
-          Effect.gen(function* () {
-            const host = yield* Harness
-            const summary = { harness: h, binary: (yield* Harnesses).get(h).binary }
-            if (!(yield* host.available(h)))
-              return { ...summary, available: false, defaultModel: null, error: `${summary.binary} is not on PATH` }
-            return yield* host.models(h, null).pipe(
-              Effect.map((models) => ({
-                ...summary,
-                available: true,
-                defaultModel: models.find((m) => m.default)?.model ?? null,
-                error: null,
-              })),
-              Effect.catchTag("HarnessUnavailable", (e) =>
-                Effect.succeed({ ...summary, available: true, defaultModel: null, error: e.message }),
-              ),
-            )
-          }),
-        { concurrency: "unbounded" },
+      Effect.flatMap(builtinIds, (ids) =>
+        Effect.forEach(
+          ids,
+          (h) =>
+            Effect.gen(function* () {
+              const host = yield* Harness
+              const summary = { harness: h, binary: (yield* Harnesses).get(h).binary }
+              if (!(yield* host.available(h)))
+                return { ...summary, available: false, defaultModel: null, error: `${summary.binary} is not on PATH` }
+              return yield* host.models(h, null).pipe(
+                Effect.map((models) => ({
+                  ...summary,
+                  available: true,
+                  defaultModel: models.find((m) => m.default)?.model ?? null,
+                  error: null,
+                })),
+                Effect.catchTag("HarnessUnavailable", (e) =>
+                  Effect.succeed({ ...summary, available: true, defaultModel: null, error: e.message }),
+                ),
+              )
+            }),
+          { concurrency: "unbounded" },
+        ),
       ).pipe(Effect.flatMap(json), Effect.provide(Harness.layer)),
     ).pipe(
       Command.withAlias("ls"),
@@ -643,7 +648,7 @@ const harness = Command.make("harness").pipe(
         "Each harness: its binary, whether it is on PATH and the model it runs by default (null: the harness chooses, or error says why it could not be asked)",
       ),
     ),
-    Command.make("models", { harness: Argument.Literals("harness", HARNESS_IDS), provider: providerFlag }, (o) =>
+    Command.make("models", { harness: Argument.String("harness"), provider: providerFlag }, (o) =>
       modelsOf([o.harness], o.provider),
     ).pipe(Command.withDescription("The models one harness accepts; same JSON as vibest models")),
   ]),
@@ -810,7 +815,7 @@ export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
     yield* writeTerminalStatus("working")
   }).pipe(Effect.ignore)
 
-const hookHarness = Flag.Literals("harness", HARNESS_IDS).pipe(Flag.withDescription("The harness whose hook this is"))
+const hookHarness = Flag.String("harness").pipe(Flag.withDescription("The harness whose hook this is"))
 
 const stop = Command.make("stop", { harness: hookHarness }, (o) =>
   Effect.gen(function* () {
@@ -907,11 +912,12 @@ const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const sections: Array<{ readonly title: string; readonly findings: ReadonlyArray<Finding> }> = []
-    const width = Math.max(...HARNESS_IDS.map((h) => h.length))
+    const ids = yield* builtinIds
+    const width = Math.max(...ids.map((h) => h.length))
 
     // The coding agents vibest starts.
     const harnesses = yield* Effect.forEach(
-      HARNESS_IDS,
+      ids,
       (h) =>
         preflight(h, null, null).pipe(
           Effect.map((models): Finding => ({
@@ -927,7 +933,7 @@ const doctor = Command.make("doctor", {}, () =>
     sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
     const installs = yield* extraVibests
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
-    const usable = HARNESS_IDS.filter((_, i) => harnesses[i]!.mark === "ok")
+    const usable = ids.filter((_, i) => harnesses[i]!.mark === "ok")
 
     // vibestd: the background service. Runtimes and plugins are loaded there, so doctor starts it when it is not running.
     const daemon: Array<Finding> = []

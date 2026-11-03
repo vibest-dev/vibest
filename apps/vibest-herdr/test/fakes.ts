@@ -3,7 +3,10 @@ import fs from "node:fs/promises"
 import { readPing } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { Harness, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
+import { Harness, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
+import { BUILTIN } from "@vibest/core/harnesses"
+
+const HARNESS_IDS = Object.keys(BUILTIN)
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { normalizeModels } from "@vibest/core/models"
@@ -406,15 +409,18 @@ export interface TestOptions extends FakeRuntimeOptions {
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
     available: () => Effect.succeed(true),
+    // A plugin harness (not built in) finds its own integration files: no bundled directory.
     plugin: (id) =>
-      (options.hooked ?? HARNESS_IDS).includes(id)
-        ? Effect.succeed(`/vibest/harnesses/${id}`)
-        : Effect.fail(
-            new HarnessUnavailable({
-              harness: id,
-              message: `vibest's ${id} plugin is missing: /vibest/harnesses/${id}`,
-            }),
-          ),
+      !HARNESS_IDS.includes(id)
+        ? Effect.succeed("")
+        : (options.hooked ?? HARNESS_IDS).includes(id)
+          ? Effect.succeed(`/vibest/harnesses/${id}`)
+          : Effect.fail(
+              new HarnessUnavailable({
+                harness: id,
+                message: `vibest's ${id} plugin is missing: /vibest/harnesses/${id}`,
+              }),
+            ),
     models: (id, provider) =>
       options.unusable?.includes(id)
         ? Effect.fail(new HarnessUnavailable({ harness: id, message: "Not logged in" }))

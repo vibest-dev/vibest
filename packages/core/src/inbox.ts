@@ -118,8 +118,13 @@ export class Inbox extends Context.Service<
       const harnesses = yield* Harnesses
       const restarting = yield* Restarting
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
-      const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      yield* db.recoverSending(harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id))
+      const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.delivery
+      yield* db.recoverSending(
+        harnesses
+          .all()
+          .filter((h) => h.delivery === "poll")
+          .map((h) => h.id),
+      )
       const scope = yield* Effect.scope
       const pubsub = yield* PubSub.unbounded<InboxRow>()
       // Made before any delivery runs, so none is missed.

@@ -129,13 +129,13 @@ export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
 export const claude: HarnessAdapter = {
   id: "claude",
   binary: "claude",
-  ownSessionId: true,
+  conversation: "assigned",
   rulesInPrompt: false,
   interruptKey: "esc",
   startup: claudeStartup,
   resultField: "last_assistant_message",
-  inbox: "poll",
-  ready: "integration",
+  delivery: "poll",
+  reportsReady: true,
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),

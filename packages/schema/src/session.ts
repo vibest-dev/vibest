@@ -46,9 +46,8 @@ export const InboxRow = Schema.Struct({
 })
 export type InboxRow = typeof InboxRow.Type
 
-export const HARNESS_IDS = ["pi", "claude", "cursor"] as const
-export type HarnessId = (typeof HARNESS_IDS)[number]
-export const isHarnessId = (s: string): s is HarnessId => (HARNESS_IDS as ReadonlyArray<string>).includes(s)
+/** A harness id: open, any registered adapter's (built-in or a plugin's). */
+export type HarnessId = string
 
 export class HarnessUnavailable extends Schema.TaggedError<HarnessUnavailable>()("HarnessUnavailable", {
   harness: Schema.String,

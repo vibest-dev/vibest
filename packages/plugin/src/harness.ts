@@ -1,0 +1,120 @@
+// Harness adapter API: what differs between the agent CLIs vibest runs (claude, pi and cursor are built in; a plugin adds
+// another with `context.harness.register`). Core reads these fields and never branches on a harness id.
+import type { Effect, FileSystem, Path } from "effect"
+
+/** One model as the harness reports it; vibest fills in the harness and the requested provider. */
+export interface RawModel {
+  readonly model: string
+  readonly provider?: string | undefined
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly default: boolean
+}
+
+/**
+ * How a harness lists its models: run `binary args`; with `request`, write it and keep stdin open (a server that exits
+ * at EOF before it answers) and stop at the first output `answer` can read; without, `answer` reads the output to its
+ * end. `answer` returns undefined while the output holds no list.
+ */
+export interface ModelLister {
+  readonly args: (provider: string | null) => ReadonlyArray<string>
+  readonly request?: string
+  readonly answer: (lines: ReadonlyArray<string>) => ReadonlyArray<RawModel> | undefined
+}
+
+/** What a session is started with. */
+export interface LaunchInput {
+  readonly worktree: string
+  /** The session's scratch directory: where a plugin harness puts per-session config it loads its integration from. */
+  readonly scratch: string
+  /** The rules text, for a harness with no system-prompt flag (its first prompt carries them). */
+  readonly rules: string
+  readonly rulesFile: string
+  readonly provider: string | null
+  readonly model: string | null
+  /** The conversation to continue (resume), or the one vibest chose up front (`conversation: "assigned"`). */
+  readonly sessionId: string | null
+  readonly resume: boolean
+  /** vibest's bundled integration for a built-in harness; empty for a plugin harness, which finds its own files. */
+  readonly pluginDir: string
+  /** argv that runs vibest, for the permission to run `vibest report`. */
+  readonly vibest: ReadonlyArray<string>
+  /** vibest's variables for the session's shell (VIBEST_SESSION_ID, VIBEST_AGENT …). */
+  readonly env: Readonly<Record<string, string>>
+}
+
+/** What `vibest` starts an entry agent (the main agent) with. */
+export interface CoordinatorInput {
+  /** Repository root, its working directory. */
+  readonly root: string
+  readonly rules: string
+  readonly rulesFile: string
+  readonly provider: string | null
+  readonly model: string | null
+  /** The conversation to reopen, or null: the harness starts a new one. */
+  readonly sessionId: string | null
+  readonly pluginDir: string
+  readonly env: Readonly<Record<string, string>>
+}
+
+/** The session's pane while the harness starts, as a startup adapter sees it. */
+export interface StartupPane {
+  /** The last 40 lines on screen. */
+  readonly screen: Effect.Effect<string>
+  readonly sendKeys: (keys: ReadonlyArray<string>) => Effect.Effect<void>
+}
+
+/** Per launch: makes the step vibestd runs on every tick until the harness is ready. */
+export type Startup = Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
+
+export interface HarnessAdapter {
+  readonly id: string
+  /** Executable that must be on PATH. */
+  readonly binary: string
+  /** `assigned`: vibest picks the conversation id up front; `reported`: the integration reports it after launch. */
+  readonly conversation: "assigned" | "reported"
+  /** No system-prompt flag: rules go in front of the first prompt. */
+  readonly rulesInPrompt: boolean
+  readonly interruptKey: string
+  /** Harness-specific startup handling while vibestd waits for ready (Claude: its trust / bypass menus). */
+  readonly startup?: Startup
+  /**
+   * How vibest hands inbox rows to the session: typed into its pane (`type`), or taken by its integration (`poll`,
+   * HTTP `/inbox/poll`, or `subscribe`, the RPC stream).
+   */
+  readonly delivery: "type" | "poll" | "subscribe"
+  /** The integration reports when the harness takes input (`ready` event); absent: the runtime's agent state says so. */
+  readonly reportsReady: boolean
+  /** Error message when this harness cannot use `provider`, else undefined. */
+  readonly checkProvider: (provider: string | null) => string | undefined
+  readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
+  /** Entry-agent argv. Absent: the harness cannot run an entry agent. */
+  readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
+  readonly models: ModelLister
+  /** The pre-tool hook's answer in the harness's format; `reason` refuses the call. Absent: the harness guards over HTTP. */
+  readonly guardAnswer?: (reason: string | undefined) => unknown
+  /** Field of a built-in turn-end payload holding the last reply. */
+  readonly resultField?: string
+  /** A built-in integration's raw turn end as a result payload; undefined ignores it. */
+  readonly turnEnd?: (
+    event: Readonly<Record<string, unknown>>,
+    coordinator: boolean,
+  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
+  /** A built-in integration's raw prompt event: the user's text, or undefined. */
+  readonly userPrompt?: (
+    event: Readonly<Record<string, unknown>>,
+    coordinator: boolean,
+  ) => { readonly text: string } | undefined
+  /** The conversation id in a raw hook event, for a harness that reports it with every hook. */
+  readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
+  /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
+  readonly canResume?: (
+    root: string,
+    sessionId: string,
+  ) => Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path>
+}
+
+export interface HarnessRegistry {
+  /** Register for the plugin's lifetime; an id already registered is a setup failure. */
+  readonly register: (adapter: HarnessAdapter) => Effect.Effect<void>
+}

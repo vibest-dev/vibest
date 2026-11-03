@@ -12,7 +12,7 @@ import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnStat
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
-import { HARNESS_IDS, type HarnessId } from "./harness.ts"
+import type { HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
 import { isUsageLimitError } from "./results.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
@@ -59,7 +59,7 @@ export const SessionRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.Number,
   agent: Schema.String,
-  harnessId: Schema.Literals(HARNESS_IDS),
+  harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.String,
   address: AddressJson,
@@ -92,7 +92,7 @@ export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent"
 export const CoordinatorRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.Number,
-  harnessId: Schema.Literals(HARNESS_IDS),
+  harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.NullOr(Schema.String),
   address: Schema.NullOr(AddressJson),

@@ -2,13 +2,13 @@
 // runtime-port.md §5), and the session report format.
 import { Effect, FileSystem, Option, Path, Schema } from "effect"
 
-import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "./harness.ts"
+import { type HarnessAdapter, Harnesses, type HarnessId } from "./harness.ts"
 import { Layout, writeAtomic } from "./paths.ts"
 
 /** `{harness, ts, payload}`; payload is the harness's hook input, verbatim. */
 const Envelope = Schema.fromJsonString(
   Schema.Struct({
-    harness: Schema.Literals(HARNESS_IDS),
+    harness: Schema.String,
     ts: Schema.Number,
     payload: Schema.Record(Schema.String, Schema.Unknown),
   }),
@@ -44,7 +44,7 @@ const ReportLineJson = Schema.fromJsonString(
     Schema.Struct({
       turn: Schema.Literals(["end"]),
       ts: Schema.Number,
-      harness: Schema.Literals(HARNESS_IDS),
+      harness: Schema.String,
       payload: Schema.Record(Schema.String, Schema.Unknown),
     }),
   ]),
@@ -153,7 +153,7 @@ export const readResult = Effect.fn("readResult")(function* (file: string) {
   return yield* Effect.gen(function* () {
     const info = yield* fs.stat(file)
     const envelope = yield* decodeEnvelope(yield* fs.readFileString(file))
-    const text = envelope.payload[(yield* Harnesses).get(envelope.harness).resultField]
+    const text = envelope.payload[(yield* Harnesses).find(envelope.harness)?.resultField ?? "text"]
     const error = envelope.payload.error
     // `error` names what ended the turn (Claude's `interrupted`, `refusal`, `error`), `error_details` the text.
     const details = envelope.payload.error_details

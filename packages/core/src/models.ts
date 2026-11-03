@@ -1,9 +1,10 @@
+import type { Harness as HarnessApi } from "@vibest/plugin"
 // The models each harness accepts, as the harness itself reports them (its auth, provider and settings), normalized into
 // one `Model` shape. Each harness is asked through its adapter's listing; nothing here calls a model.
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
+import { type HarnessAdapter, Harnesses, type HarnessId, HarnessUnavailable } from "./harness.ts"
 
 /**
  * vibest's one shape for a model: spawn a session with exactly these `harness`, `provider` and `model`. `provider` null
@@ -11,7 +12,7 @@ import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, HarnessUna
  * empty, as its own settings decide.
  */
 export const Model = Schema.Struct({
-  harness: Schema.Literals(HARNESS_IDS),
+  harness: Schema.String,
   provider: Schema.NullOr(Schema.String),
   model: Schema.String,
   name: Schema.String,
@@ -20,25 +21,8 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-/** One entry as a harness reports it; `normalizeModels` turns these into `Model`s. */
-export interface RawModel {
-  readonly model: string
-  readonly provider?: string | undefined
-  readonly name?: string | undefined
-  readonly description?: string | undefined
-  readonly default: boolean
-}
-
-/**
- * How a harness lists its models: run `binary args`; with `request`, write it and keep stdin open (a
- * server that exits at EOF before it answers) and stop at the first output `answer` can read; without, `answer` reads the output
- * to its end. `answer` returns undefined while the output holds no list.
- */
-export interface ModelLister {
-  readonly args: (provider: string | null) => ReadonlyArray<string>
-  readonly request?: string
-  readonly answer: (lines: ReadonlyArray<string>) => ReadonlyArray<RawModel> | undefined
-}
+export type RawModel = HarnessApi.RawModel
+export type ModelLister = HarnessApi.ModelLister
 
 /** The one place harness output becomes `Model`s: the requested provider filled in, other providers' entries dropped (pi lists every provider). */
 export const normalizeModels = (
@@ -121,7 +105,15 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
 export const listAllModels = (harnesses: ReadonlyArray<HarnessId>, provider: string | null) =>
   Effect.forEach(
     harnesses,
-    (h) => Effect.result(Effect.flatMap(Harnesses, (all) => listModels(all.get(h), provider))),
+    (h) =>
+      Effect.result(
+        Effect.flatMap(Harnesses, (all) => {
+          const adapter = all.find(h)
+          return adapter
+            ? listModels(adapter, provider)
+            : Effect.fail(new HarnessUnavailable({ harness: h, message: `no harness "${h}" is registered` }))
+        }),
+      ),
     { concurrency: "unbounded" },
   ).pipe(
     Effect.map((results) => ({

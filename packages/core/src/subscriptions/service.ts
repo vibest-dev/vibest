@@ -7,7 +7,7 @@ import { Clock, Config, Context, Effect, FileSystem, Layer, Option, Path, Redact
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { Harness, type HarnessId, isHarnessId } from "../harness.ts"
+import { Harness, Harnesses, type HarnessId } from "../harness.ts"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "../keychain.ts"
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, num, piAccount, record } from "./index.ts"
 
@@ -163,6 +163,9 @@ export class Subscriptions extends Context.Service<
 >()("vibest/Subscriptions") {
   static readonly make = Effect.gen(function* () {
     const rows = yield* Ref.make(new Map<string, Row>())
+    // With the registry (vibestd), a report names a registered harness; without it (tests), any harness.
+    const harnesses = yield* Effect.serviceOption(Harnesses)
+    const known = (id: string) => Option.isNone(harnesses) || harnesses.value.find(id) !== undefined
     const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis
@@ -181,7 +184,12 @@ export class Subscriptions extends Context.Service<
 
     const report = Effect.fn("Subscriptions.report")(function* (input: SubscriptionReport) {
       const harness = input.harness
-      if (!isHarnessId(harness) || !Array.isArray(input.limits) || !input.limits.every(isLimit)) {
+      if (
+        typeof harness !== "string" ||
+        !known(harness) ||
+        !Array.isArray(input.limits) ||
+        !input.limits.every(isLimit)
+      ) {
         yield* Effect.logWarning(`subscription report ignored for ${JSON.stringify(input.harness)}`)
         return
       }

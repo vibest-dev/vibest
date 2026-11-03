@@ -9,7 +9,7 @@ import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "e
 import { ChildProcessSpawner } from "effect/process"
 
 import type { Db, SessionRow } from "./db.ts"
-import { Harness, harnessOptions, Harnesses, preflight, type HarnessAdapter, isHarnessId } from "./harness.ts"
+import { Harness, harnessOptions, Harnesses, preflight } from "./harness.ts"
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
@@ -49,7 +49,7 @@ export const sessionMove = (deps: {
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
-  readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter }
+  readonly harnesses: Harnesses["Service"]
   /** The session's in-memory turn state. */
   readonly track: (id: string) => Effect.Effect<{ readonly sawWorking: import("effect").Ref.Ref<boolean> }>
   /** `keepRound` on: a miss leaves the open round working, so the next harness prompts it again. */
@@ -243,7 +243,7 @@ export const sessionMove = (deps: {
       move: { harness: string | undefined; provider?: string | undefined } | undefined,
       rows: ReadonlyArray<Subscription>,
     ) => {
-      if (move === undefined || !isHarnessId(move.harness ?? "")) return true
+      if (move === undefined || harnesses.find(move.harness) === undefined) return true
       const provider = move.provider ?? ""
       return attempts().some(
         (a) =>
@@ -294,7 +294,7 @@ export const sessionMove = (deps: {
         })
         .pipe(Effect.exit)
       const next = Exit.isSuccess(decidedStart) ? decidedStart.value : undefined
-      if (next === undefined || next.harness === undefined || !isHarnessId(next.harness)) {
+      if (next === undefined || next.harness === undefined || harnesses.find(next.harness) === undefined) {
         skip(move.harness, "refused")
         continue
       }
@@ -340,7 +340,7 @@ export const sessionMove = (deps: {
         yield* endLeft
       } else yield* endLeft
       // The terminal places before the row names the harness, so a failed place leaves the row on the last live one.
-      const harnessSessionId = harnesses.get(next.harness).ownSessionId ? yield* deps.uuid : null
+      const harnessSessionId = harnesses.get(next.harness).conversation === "assigned" ? yield* deps.uuid : null
       const nextRow: SessionRow = {
         ...row,
         harnessId: next.harness,

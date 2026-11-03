@@ -5,7 +5,7 @@ import path from "node:path"
 
 // Builtin skills: the invocations they print, and how each harness plugin ships and exposes them.
 import { assert, describe, it } from "@effect/vitest"
-import { type CoordinatorInput, HARNESS_IDS, type LaunchInput } from "@vibest/core/harness"
+import type { CoordinatorInput, LaunchInput } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS } from "@vibest/core/harnesses"
 
 import { ARCHIVE_ROOTS } from "../scripts/archive-layout.ts"
@@ -120,7 +120,7 @@ describe("builtin skills", () => {
       assert.strictEqual(built.status, 0, built.stderr + built.stdout)
       assert.isFalse(fs.existsSync(path.join(harnesses, "main-skills")))
 
-      for (const id of HARNESS_IDS) {
+      for (const id of ["pi", "claude", "cursor"] as const) {
         const dir = path.join(harnesses, id, "skills")
         assert.isFalse(fs.lstatSync(dir).isSymbolicLink(), `${id}/skills must be dereferenced`)
         const names = fs.readdirSync(dir).sort()
@@ -154,7 +154,7 @@ describe("builtin skills", () => {
         }
       }
 
-      for (const id of HARNESS_IDS) {
+      for (const id of ["pi", "claude", "cursor"] as const) {
         const pluginDir = path.join(harnesses, id)
         const input = launch(pluginDir)
         assert.notStrictEqual(input.env.VIBEST_AGENT, "coordinator")

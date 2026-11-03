@@ -49,7 +49,6 @@ import {
   Harnesses,
   HarnessUnavailable,
   type HarnessId,
-  isHarnessId,
   preflight,
   type HarnessAdapter,
 } from "./harness.ts"
@@ -366,7 +365,7 @@ export class Sessions extends Context.Service<
       const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
       const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessAdapter, id: string) =>
         Effect.gen(function* () {
-          const reports = adapter.ready === "integration"
+          const reports = adapter.reportsReady
           if (h.state === undefined && !reports) return "unknown" as AgentState
           const step = adapter.startup ? yield* adapter.startup : undefined
           const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
@@ -682,7 +681,7 @@ export class Sessions extends Context.Service<
       /** The `machines[]` of `agent.start.before` (§7), via the shared helper. */
       const machinesListing = machines(
         runtimes,
-        harnesses.all.map((adapter) => adapter.id),
+        harnesses.all().map((adapter) => adapter.id),
       )
 
       /** §4's check after the chain: the chosen runtime is loaded and online on the machine, else the start refuses with the reason. */
@@ -776,7 +775,7 @@ export class Sessions extends Context.Service<
                 message: `${e.message} (routed: ${describeSpawn({ ...decision, harness: e.harness })})`,
               })
         const harnessId = decision.harness
-        if (!isHarnessId(harnessId))
+        if (harnesses.find(harnessId) === undefined)
           return yield* routed(new HarnessUnavailable({ harness: harnessId, message: `unknown harness ${harnessId}` }))
         yield* preflight(harnessId, provider ?? null, model ?? null).pipe(
           Effect.provideService(Harness, harness),
@@ -851,7 +850,8 @@ export class Sessions extends Context.Service<
               harnessId,
               provider: provider ?? null,
               model: model ?? null,
-              harnessSessionId: adapter.ownSessionId ? yield* crypto.randomUUIDv4.pipe(Effect.orDie) : null,
+              harnessSessionId:
+                adapter.conversation === "assigned" ? yield* crypto.randomUUIDv4.pipe(Effect.orDie) : null,
               runtime: runtimeKind,
               address: { machine: machine.id, id: "" },
               status: "unknown",
@@ -954,7 +954,7 @@ export class Sessions extends Context.Service<
           return
         }
         // A harness whose ids the runtime knows by watching it (Cursor): its record replaces a conversation id adopted from a report.
-        if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
+        if (harnesses.get(session.harnessId).conversation === "reported" && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
           if (sessionId !== null && sessionId !== session.harnessSessionId)
             yield* db.updateSession(id, { harnessSessionId: sessionId })
@@ -1045,7 +1045,7 @@ export class Sessions extends Context.Service<
         const state = stateOf(seen)
         if (state !== undefined && state !== "unknown" && busy(state)) return
         if (seen === "absent" || (state === "unknown" && !(yield* alive(h, terminal)))) {
-          if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
+          if (harnesses.get(session.harnessId).conversation === "reported" && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,
               message: `${id} exited before the runtime reported its session id; spawn a new session`,

@@ -6,7 +6,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
-import type { HarnessAdapter, HarnessId } from "./harness.ts"
+import type { HarnessAdapter, Harnesses, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
 import type { Layout } from "./paths.ts"
 import { errorMessage } from "./plugins.ts"
@@ -83,7 +83,7 @@ export const blockedOf = (
   pid: number | undefined,
   harnessSessionId: string | null,
 ) =>
-  adapter.ready !== "integration"
+  !adapter.reportsReady
     ? "its harness has no integration that reports its pid and when it is ready; quit it and start it again yourself"
     : h?.run === undefined
       ? "its runtime cannot start a program in its terminal again; quit it and start it again yourself"
@@ -133,7 +133,7 @@ interface Target {
 export const sessionRestart = (deps: {
   readonly db: Db["Service"]
   readonly runtimes: Runtimes["Service"]
-  readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
+  readonly harnesses: Harnesses["Service"]
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
   readonly inbox: Inbox["Service"]
@@ -361,7 +361,7 @@ export const sessionRestart = (deps: {
     })
 
   /** Only a harness whose integration reports its version can be on an old one; any other is never listed. */
-  const reports = (harness: HarnessId) => harnesses.get(harness).ready === "integration"
+  const reports = (harness: HarnessId) => harnesses.find(harness)?.reportsReady === true
 
   const outdated = Effect.gen(function* () {
     const agents = (yield* db.listSessions()).filter(

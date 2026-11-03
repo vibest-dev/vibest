@@ -2,8 +2,10 @@
 // loads a plugin, so a plugin imports it normally and never bundles either. See architecture.md §8 and §9.
 import { type Effect, Schema, type Scope } from "effect"
 
+import type { HarnessRegistry } from "./harness.ts"
 import type { RuntimeRegistry } from "./runtime.ts"
 
+export * as Harness from "./harness.ts"
 export * as Plugin from "./plugin.ts"
 export * as Runtime from "./runtime.ts"
 
@@ -175,6 +177,8 @@ export interface Context {
   readonly agent: Domain<"agent">
   /** Register a terminal runtime (`runtime-port.md`). Beside `agent.hook`; kept for the plugin's lifetime. */
   readonly runtime: RuntimeRegistry
+  /** Register an agent CLI (harness adapter). Kept for the plugin's lifetime, like `runtime.register`. */
+  readonly harness: HarnessRegistry
   readonly subscription: {
     /** Set the limits for `(harness, provider)` on this machine. Replaces that row's limits until the next usage poll. */
     readonly report: (input: SubscriptionReport) => Effect.Effect<void>

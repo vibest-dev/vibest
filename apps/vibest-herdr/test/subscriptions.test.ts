@@ -1,6 +1,7 @@
-// Subscription polls and `vibest subscriptions`. CLIs, the keychain and HTTP are fakes: nothing here touches the network.
 import { assert, describe, it } from "@effect/vitest"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
+// Subscription polls and `vibest subscriptions`. CLIs, the keychain and HTTP are fakes: nothing here touches the network.
+import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain, securityArgs } from "@vibest/core/keychain"
 import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
@@ -100,7 +101,7 @@ const world = (options: {
   })
   // The fake spawner is inside Platform.services so it wins: poll must not run the real CLIs.
   const layer = Layer.mergeAll(
-    Subscriptions.layer,
+    Subscriptions.layer.pipe(Layer.provide(BuiltinHarnesses.layer)),
     harnessLayer(options.installed),
     Layer.succeed(Keychain, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
     Layer.succeed(HttpClient.HttpClient, http),

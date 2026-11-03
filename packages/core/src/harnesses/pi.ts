@@ -66,12 +66,12 @@ const providerModel = (provider: string | null, model: string | null) =>
 export const pi: HarnessAdapter = {
   id: "pi",
   binary: "pi",
-  ownSessionId: true,
+  conversation: "assigned",
   rulesInPrompt: false,
   interruptKey: "esc",
   resultField: "text",
-  inbox: "subscribe",
-  ready: "integration",
+  delivery: "subscribe",
+  reportsReady: true,
   checkProvider: () => undefined,
   launchArgs: (i) => [
     "--session-id",

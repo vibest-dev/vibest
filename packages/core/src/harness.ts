@@ -1,122 +1,21 @@
-import type { HarnessOption } from "@vibest/plugin"
+import type { Harness as HarnessApi, HarnessOption } from "@vibest/plugin"
 import { VibestCommand } from "@vibest/schema/layout"
-import { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
-// HarnessAdapter: everything that differs between pi / claude / cursor (SPEC §10); each adapter lives in harnesses/ and
-// reaches the code through the `Harnesses` service.
-import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { HarnessUnavailable } from "@vibest/schema/session"
+// The harness registry: the built-in adapters (claude, pi, cursor, in harnesses/) and the ones plugins register with
+// `context.harness.register`. Every place that differs by harness asks its adapter here, never the harness id.
+import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema, type Scope } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import type { Model, ModelLister } from "./models.ts"
-export { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
+import type { Model } from "./models.ts"
+export { HarnessUnavailable } from "@vibest/schema/session"
 
-export interface LaunchInput {
-  readonly worktree: string
-  readonly scratch: string
-  /** Cursor takes the rules in its first prompt; Pi and Claude read `rulesFile` (herdr refuses multi-line args). */
-  readonly rules: string
-  readonly rulesFile: string
-  readonly provider: string | null
-  readonly model: string | null
-  /** Pi / Claude: the uuid vibestd chose. Cursor: the id herdr reported (resume only). */
-  readonly sessionId: string | null
-  readonly resume: boolean
-  /** vibest's plugin for this harness (`Harness.plugin`), loaded for this session only. */
-  readonly pluginDir: string
-  /** argv that runs vibest, for the permission to run `vibest report`. */
-  readonly vibest: ReadonlyArray<string>
-  /** vibest's variables for the session's shell (VIBEST_SESSION_ID, VIBEST_AGENT …). */
-  readonly env: Readonly<Record<string, string>>
-}
-
-/** What `vibest` starts the main agent with (SPEC §12.1). */
-export interface CoordinatorInput {
-  /** Repository root, the Coordinator's working directory. */
-  readonly root: string
-  readonly rules: string
-  readonly rulesFile: string
-  readonly provider: string | null
-  readonly model: string | null
-  /** The repository's Coordinator session to reopen, as the harness reported it after a turn; null: the harness starts a new one. */
-  readonly sessionId: string | null
-  /** vibest's plugin for this harness (`Harness.plugin`). */
-  readonly pluginDir: string
-  /** vibest's variables for the coordinator's shell (VIBEST_AGENT, HERDR_PANE_ID …). */
-  readonly env: Readonly<Record<string, string>>
-}
-
-/** The session's pane while the harness starts, as a startup adapter sees it. */
-export interface StartupPane {
-  /** The last 40 lines on screen. */
-  readonly screen: Effect.Effect<string>
-  readonly sendKeys: (keys: ReadonlyArray<string>) => Effect.Effect<void>
-}
-
-/** Per launch: makes the step vibestd runs on every tick until the harness is `interactive_ready`. */
-export type Startup = Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
-
-export interface HarnessAdapter {
-  readonly id: HarnessId
-  /** Executable that must be on PATH. */
-  readonly binary: string
-  /** vibestd picks the session id up front (Pi, Claude); otherwise herdr reports it after launch. */
-  readonly ownSessionId: boolean
-  /** No system-prompt flag: rules go in front of the first prompt (Cursor). */
-  readonly rulesInPrompt: boolean
-  readonly interruptKey: string
-  /** Harness-specific startup handling while vibestd waits for ready (Claude: its trust / bypass menus). */
-  readonly startup?: Startup
-  /** Field of the hook payload holding the last reply. */
-  readonly resultField: "text" | "last_assistant_message"
-  /**
-   * A Coordinator's inbox rows: typed into its pane (`prompt`), streamed to its integration over vibest.sock
-   * (`subscribe`: the Pi extension), or polled by its integration over vibestd's HTTP socket (`poll`: the Claude
-   * plugin; rows it took are leased, and a vibestd restart puts them back to pending).
-   */
-  readonly inbox: "prompt" | "subscribe" | "poll"
-  /**
-   * How vibestd knows a started harness takes input: its integration reports it with one request at its start
-   * (`integration`: Session.Ready, or the HTTP `/session/ready`), or the runtime's agent state (`runtime`).
-   */
-  readonly ready: "integration" | "runtime"
-  /** Error message when this harness cannot use `provider`, else undefined. */
-  readonly checkProvider: (provider: string | null) => string | undefined
-  readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
-  /**
-   * Coordinator argv: its rules and the inspection tools, among them the shell it runs `vibest` in; no MCP servers.
-   * Absent: the harness is not currently supported as a Coordinator (Cursor).
-   */
-  readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
-  /** How the harness lists its models. */
-  readonly models: ModelLister
-  /** The pre-tool hook's answer in the harness's format; `reason` refuses the call. Absent: the harness guards in process (Pi). */
-  readonly guardAnswer?: (reason: string | undefined) => unknown
-  /**
-   * A turn end the harness's own plugin hands to vibestd (RPC `TurnEnd`, from `vibest integration stop` or the Pi
-   * extension, or the HTTP hook): a session's result payload; undefined ignores it. Absent: the harness has no turn ends.
-   */
-  readonly turnEnd?: (
-    event: Readonly<Record<string, unknown>>,
-    coordinator: boolean,
-  ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
-  /**
-   * A prompt the harness plugin hands to vibestd (RPC `Prompt`, or the HTTP hook). Undefined ignores it: the main agent,
-   * a nested agent, or text that is not the user typing.
-   */
-  readonly userPrompt?: (
-    event: Readonly<Record<string, unknown>>,
-    coordinator: boolean,
-  ) => { readonly text: string } | undefined
-  /**
-   * The harness's own conversation id in an event its plugin hands to vibest, sent as vibest-harness-session-id.
-   * Absent: the events carry none (the plugin sends it another way).
-   */
-  readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
-  /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
-  readonly canResume?: (
-    root: string,
-    sessionId: string,
-  ) => Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path>
-}
+/** A harness id: any registered adapter's; one read from the database that names none is unavailable, not invalid. */
+export type HarnessId = string
+export type HarnessAdapter = HarnessApi.HarnessAdapter
+export type LaunchInput = HarnessApi.LaunchInput
+export type CoordinatorInput = HarnessApi.CoordinatorInput
+export type StartupPane = HarnessApi.StartupPane
+export type Startup = HarnessApi.Startup
 
 /** `[flag, value]`, or nothing when there is no value. */
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
@@ -129,28 +28,56 @@ export const anthropicOnly = (harness: string) => (provider: string | null) =>
 /** argv as JSON, for the `VIBEST_COMMAND` env the Pi extension reads. */
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
-/**
- * The harnesses vibest runs, provided by the composition root: every place that differs by harness asks its adapter
- * here, never the harness id.
- */
-export class Harnesses extends Context.Service<
-  Harnesses,
-  {
-    readonly all: ReadonlyArray<HarnessAdapter>
-    readonly get: (id: HarnessId) => HarnessAdapter
-    /** The adapter of an id read from outside (herdr, the database); undefined when it names no harness. */
-    readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
+/** The registry's shape: built-ins first, then plugin adapters in registration order. */
+export interface HarnessesShape {
+  readonly all: () => ReadonlyArray<HarnessAdapter>
+  /** The adapter of a registered id; an unregistered one is a defect (callers check with `find` first). */
+  readonly get: (id: HarnessId) => HarnessAdapter
+  /** The adapter of an id read from outside (the database, a flag); undefined when no adapter is registered for it. */
+  readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
+  /** True for an adapter vibest ships, whose integration files are bundled under `harnesses/<id>`. */
+  readonly bundled: (id: HarnessId) => boolean
+  /** Register for the scope's lifetime (a plugin's); an id already registered fails. */
+  readonly register: (adapter: HarnessAdapter) => Effect.Effect<void, never, Scope.Scope>
+}
+
+export class Harnesses extends Context.Service<Harnesses, HarnessesShape>()("vibest/Harnesses") {
+  static readonly make = (builtins: ReadonlyArray<HarnessAdapter>): HarnessesShape => {
+    // The plugin host registers and unregisters sequentially (one supervisor consumer).
+    let registered: ReadonlyArray<HarnessAdapter> = []
+    const all = () => [...builtins, ...registered]
+    const find = (id: string | null | undefined) => (id ? all().find((a) => a.id === id) : undefined)
+    return {
+      all,
+      find,
+      get: (id) => {
+        const found = find(id)
+        if (!found)
+          throw new Error(
+            `no harness "${id}" is registered; registered: ${all()
+              .map((a) => a.id)
+              .join(", ")}`,
+          )
+        return found
+      },
+      bundled: (id) => builtins.some((a) => a.id === id),
+      register: (adapter) =>
+        Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            if (find(adapter.id)) throw new Error(`harness "${adapter.id}" is already registered`)
+            registered = [...registered, adapter]
+          })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              registered = registered.filter((a) => a !== adapter)
+            }),
+          )
+        }),
+    }
   }
->()("vibest/Harnesses") {
-  static readonly layer = (adapters: Readonly<Record<HarnessId, HarnessAdapter>>) =>
-    Layer.succeed(
-      Harnesses,
-      Harnesses.of({
-        all: HARNESS_IDS.map((id) => adapters[id]),
-        get: (id) => adapters[id],
-        find: (id) => (id && isHarnessId(id) ? adapters[id] : undefined),
-      }),
-    )
+
+  static readonly layer = (builtins: ReadonlyArray<HarnessAdapter>) =>
+    Layer.sync(Harnesses, () => Harnesses.make(builtins))
 }
 
 /** Argv check: herdr refuses launch arguments containing newlines. */
@@ -209,6 +136,8 @@ export class Harness extends Context.Service<
           ).pipe(Effect.map((found) => found._tag === "Some")),
         plugin: (id) =>
           Effect.gen(function* () {
+            // A plugin harness finds its own integration files from its module location.
+            if (!harnesses.bundled(id)) return ""
             const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
             if (!plugins)
               return yield* unavailable(
@@ -247,8 +176,9 @@ export const preflight = Effect.fn("preflight")(function* (
   model: string | null,
 ) {
   const harness = yield* Harness
-  const adapter = (yield* Harnesses).get(id)
   const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
+  const adapter = (yield* Harnesses).find(id)
+  if (!adapter) return yield* unavailable(`no harness "${id}" is registered (a plugin that adds it is not loaded)`)
   const providerError = adapter.checkProvider(provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
@@ -266,15 +196,17 @@ export const preflight = Effect.fn("preflight")(function* (
   return models
 })
 
-/** Every harness as preflight saw it, in HARNESS_IDS order: what an `agent.start.before` chain chooses among. */
-export const harnessOptions = Effect.forEach(
-  HARNESS_IDS,
-  (id) =>
-    preflight(id, null, null).pipe(
-      Effect.map((): HarnessOption => ({ harness: id, available: true })),
-      Effect.catchTag("HarnessUnavailable", (e) =>
-        Effect.succeed<HarnessOption>({ harness: id, available: false, problem: e.message }),
+/** Every registered harness as preflight saw it, in registry order: what an `agent.start.before` chain chooses among. */
+export const harnessOptions = Effect.flatMap(Harnesses, (harnesses) =>
+  Effect.forEach(
+    harnesses.all().map((a) => a.id),
+    (id) =>
+      preflight(id, null, null).pipe(
+        Effect.map((): HarnessOption => ({ harness: id, available: true })),
+        Effect.catchTag("HarnessUnavailable", (e) =>
+          Effect.succeed<HarnessOption>({ harness: id, available: false, problem: e.message }),
+        ),
       ),
-    ),
-  { concurrency: "unbounded" },
+    { concurrency: "unbounded" },
+  ),
 )

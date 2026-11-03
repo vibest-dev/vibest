@@ -1,7 +1,7 @@
 import { spawnDaemon } from "@vibest/client/client"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
@@ -56,7 +56,7 @@ import {
   type CallerShape,
   type SessionInfo,
 } from "@vibest/protocol/rpc"
-import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
+import { LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
@@ -686,7 +686,10 @@ export const handlers = VibestRpcs.toLayer(
             machine: { id: at.id },
             runtime,
             parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
+            machines: yield* machinesListing(
+              runtimes,
+              harnesses.all().map((a) => a.id),
+            ).pipe(Effect.orElseSucceed(() => [])),
           })
           if (decision.runtime === undefined) {
             const loaded = (yield* runtimes.all).map((h) => h.kind)
@@ -843,10 +846,13 @@ export const handlers = VibestRpcs.toLayer(
             machine: { id: "local" },
             runtime,
             parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
+            machines: yield* machinesListing(
+              runtimes,
+              harnesses.all().map((a) => a.id),
+            ).pipe(Effect.orElseSucceed(() => [])),
           })
           if (decision.harness === undefined) return yield* new NoHarnessChosen()
-          if (!isHarnessId(decision.harness))
+          if (harnesses.find(decision.harness) === undefined)
             return yield* new HarnessUnavailable({
               harness: decision.harness,
               message: `unknown harness ${decision.harness} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,

@@ -19,6 +19,7 @@ import {
   Stream,
 } from "effect"
 
+import { Harnesses } from "./harness.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -197,6 +198,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
+    // Optional: a host made without the registry (tests) refuses harness registrations.
+    const harnesses = yield* Effect.serviceOption(Harnesses)
     /** Set `candidate` up in a new scope: what runs, or why it failed. */
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -248,6 +251,12 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         }),
         // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
+        harness: {
+          register: (adapter) =>
+            Option.isNone(harnesses)
+              ? Effect.die(new Error("this vibestd has no harness registry"))
+              : harnesses.value.register(adapter).pipe(Scope.provide(scope)),
+        },
         subscription: { report: (input) => subscriptions.report(input) },
       }
       const exit = yield* runBounded(plugin.effect(ctx).pipe(Scope.provide(scope)), scope, timeout)
