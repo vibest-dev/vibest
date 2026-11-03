@@ -5,7 +5,7 @@ export default defineConfig({
   ssr: { resolve: { conditions: ["bun", "import", "default"] } },
   test: {
     include: [
-      "apps/vibest-herdr/test/**/*.test.ts",
+      "apps/vibest/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",
       "packages/effect-herdr-sdk/test/**/*.test.ts",
       "packages/integration/pi/test/**/*.test.ts",

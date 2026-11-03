@@ -7,12 +7,12 @@ import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { type ProcessPlatform, Processes } from "@vibest/core/processes"
-import { Project } from "@vibest/core/project"
 import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { VERSION } from "@vibest/protocol/rpc"
+import { Project } from "@vibest/vibest/project"
 // vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
 // database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket

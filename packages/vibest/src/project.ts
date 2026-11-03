@@ -1,3 +1,4 @@
+import { Layout, writeAtomic } from "@vibest/core/paths"
 import {
   ProjectConflict,
   ProjectDeleteInput,
@@ -17,8 +18,6 @@ import {
 // Writes and deletes must carry `ifVersion` (first 16 hex of the content's sha256, or "new" to create); a mismatch is ProjectConflict.
 import { Context, Crypto, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { Hex } from "effect/encoding"
-
-import { Layout, writeAtomic } from "./paths.ts"
 export {
   ProjectConflict,
   ProjectDeleteInput,

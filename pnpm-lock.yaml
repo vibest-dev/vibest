@@ -219,7 +219,7 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0))
 
-  apps/vibest-herdr:
+  apps/vibest:
     devDependencies:
       '@effect/platform-bun':
         specifier: 'catalog:'
@@ -254,6 +254,9 @@ importers:
       '@vibest/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@vibest/vibest':
+        specifier: workspace:*
+        version: link:../../packages/vibest
       effect:
         specifier: 4.0.2
         version: 4.0.2
@@ -334,6 +337,9 @@ importers:
       '@vibest/schema':
         specifier: workspace:*
         version: link:../../schema
+      '@vibest/vibest':
+        specifier: workspace:*
+        version: link:../../vibest
       effect:
         specifier: 4.0.2
         version: 4.0.2
@@ -346,7 +352,7 @@ importers:
         version: 1.2.0
       '@vibest/cli':
         specifier: workspace:*
-        version: link:../../../apps/vibest-herdr
+        version: link:../../../apps/vibest
       '@vibest/server':
         specifier: workspace:*
         version: link:../../server
@@ -425,6 +431,24 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@vibest/vibest':
+        specifier: workspace:*
+        version: link:../vibest
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
+  packages/vibest:
+    dependencies:
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../core
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol

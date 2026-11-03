@@ -46,9 +46,9 @@ const e2e = (method: string, install: string) =>
 const release = path.join(dir, "release")
 const curl = path.join(dir, "curl")
 step("build the release archive", ["bun", "scripts/build-archive.ts", target, release], {
-  cwd: path.join(root, "apps/vibest-herdr"),
+  cwd: path.join(root, "apps/vibest"),
 })
-step("install.sh", ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "apps/vibest-herdr/install.sh")}`], {
+step("install.sh", ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "apps/vibest/install.sh")}`], {
   env: {
     ...process.env,
     VIBEST_DOWNLOAD_URL: `file://${release}`,
@@ -61,7 +61,7 @@ e2e("curl", curl)
 // npm, as `npm i -g @vibest/cli` installs it.
 const packs = path.join(dir, "packs")
 fs.mkdirSync(packs)
-for (const pkg of [path.join(root, "apps/vibest-herdr"), platform])
+for (const pkg of [path.join(root, "apps/vibest"), platform])
   step(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg })
 const npm = path.join(dir, "npm")
 const tarballs = fs.readdirSync(packs).map((f) => path.join(packs, f))

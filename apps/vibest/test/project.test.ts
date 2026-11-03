@@ -1,7 +1,7 @@
 // Project store (SPEC §5.4, §5.5 Project writes): if_version, path rules, size cap, secret scan, atomic write, list / search / info.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Layout } from "@vibest/core/paths"
-import { describeEntry, ENTRY_LIMIT, findSecret, pathProblem, Project, type ProjectScope } from "@vibest/core/project"
+import { describeEntry, ENTRY_LIMIT, findSecret, pathProblem, Project, type ProjectScope } from "@vibest/vibest/project"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
 import * as Platform from "#platform"

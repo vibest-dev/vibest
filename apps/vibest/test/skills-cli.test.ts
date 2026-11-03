@@ -111,7 +111,7 @@ describe("builtin skills", () => {
     try {
       const built = childProcess.spawnSync(
         "bun",
-        [path.join(root, "apps/vibest-herdr/scripts/build-harnesses.ts"), harnesses],
+        [path.join(root, "apps/vibest/scripts/build-harnesses.ts"), harnesses],
         {
           cwd: root,
           encoding: "utf8",
@@ -166,7 +166,7 @@ describe("builtin skills", () => {
         if (args.includes("--tools")) assert.notInclude(args[args.indexOf("--tools") + 1]!.split(","), "Skill", id)
       }
 
-      const files = JSON.parse(fs.readFileSync(path.join(root, "apps/vibest-herdr/package.json"), "utf8"))
+      const files = JSON.parse(fs.readFileSync(path.join(root, "apps/vibest/package.json"), "utf8"))
         .files as Array<string>
       assert.include(files, "harnesses")
       assert.include(ARCHIVE_ROOTS, "harnesses")

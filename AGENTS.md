@@ -9,7 +9,7 @@ Project rules live in [`.agents/rules/`](.agents/rules/). Read them before chang
 Run from the checkout; nothing is installed for you. Each gate counts by its exit status.
 
 ```sh
-pnpm install && pnpm build   # apps/vibest-herdr/dist/vibest and its harness plugins in apps/vibest-herdr/harnesses/
+pnpm install && pnpm build   # apps/vibest/dist/vibest and its harness plugins in apps/vibest/harnesses/
 pnpm typecheck && pnpm test  # fakes only: no herdr, no harness, no model
 pnpm e2e [area…]             # scripted checks: the built binary, real herdr and harnesses
 pnpm verify [area…]          # the superset: all of the above, then the E2E checks on a curl and an npm install of this checkout

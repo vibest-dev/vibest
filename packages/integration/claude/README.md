@@ -33,7 +33,7 @@ It ships inside `@vibest/cli` and is loaded only into the Claude sessions vibest
 ## Build
 
 This package is private: the plugin is published as part of `@vibest/cli`, whose build writes it to
-`apps/vibest-herdr/harnesses/claude` (`scripts/build-harnesses.ts`).
+`apps/vibest/harnesses/claude` (`scripts/build-harnesses.ts`).
 
     bun scripts/build.ts <outdir>           # the complete plugin directory in <outdir>
     bun run build                           # the generated files in place, for the tests

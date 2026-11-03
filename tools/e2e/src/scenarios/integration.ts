@@ -1,4 +1,4 @@
-// vibest's plugin for each harness ships with vibest (apps/vibest-herdr/harnesses, VIBEST_HARNESSES) and is loaded into each
+// vibest's plugin for each harness ships with vibest (apps/vibest/harnesses, VIBEST_HARNESSES) and is loaded into each
 // harness vibest starts, for that session only: Pi `-e`, Claude and Cursor `--plugin-dir`. Nothing is installed, and the
 // user's own plugins and hooks keep loading beside it. Each check runs the real harness with the user's own login and
 // config (read, not written) and a temp VIBEST_HOME: an agent's herdr call is refused, and its reply lands as the result.
@@ -144,7 +144,7 @@ const checks: ReadonlyArray<Check> = [
     title:
       "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
     run: async (w) => {
-      // Installed: npm's launcher. Built: dist/vibest beside apps/vibest-herdr/harnesses, as bin/vibest in a release archive.
+      // Installed: npm's launcher. Built: dist/vibest beside apps/vibest/harnesses, as bin/vibest in a release archive.
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
       for (const h of ["pi", "claude", "cursor"])
         expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(beside.stdout), `${h}:\n${beside.stdout}`)

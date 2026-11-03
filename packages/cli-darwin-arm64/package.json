@@ -22,7 +22,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64",
-    "prepack": "cd ../../apps/vibest-herdr && bun run build:darwin-arm64"
+    "build": "cd ../../apps/vibest && bun run build:darwin-arm64",
+    "prepack": "cd ../../apps/vibest && bun run build:darwin-arm64"
   }
 }

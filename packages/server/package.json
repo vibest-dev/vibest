@@ -16,6 +16,7 @@
     "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
+    "@vibest/vibest": "workspace:*",
     "effect": "catalog:"
   }
 }

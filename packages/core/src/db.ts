@@ -116,7 +116,7 @@ export const APPLICATION_ID = 0x76696265
 export const SCHEMA_VERSION = 2
 
 /** The one-time migration of a version 1 file (docs/design/schema.md, Moving from version 1). */
-export const MIGRATE_V2_COMMAND = "bun apps/vibest-herdr/scripts/migrate-db-v2.ts"
+export const MIGRATE_V2_COMMAND = "bun apps/vibest/scripts/migrate-db-v2.ts"
 
 export const SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,

@@ -1,5 +1,5 @@
 // One-time move of a version 1 vibest.db to version 2 (docs/design/schema.md, Moving from version 1). Stop vibestd,
-// then: `bun apps/vibest-herdr/scripts/migrate-db-v2.ts ~/.vibest/vibest.db`. It copies the file to
+// then: `bun apps/vibest/scripts/migrate-db-v2.ts ~/.vibest/vibest.db`. It copies the file to
 // <file>.v1-backup-<time> first, builds version 2 from that copy into a new file, checks its foreign keys, and only
 // then puts it in place of <file>. What version 2 does not store is dropped: stop records, the `--peer` link, the
 // runtime's last status, a result's parsed details (derived from its text again), and every other metadata key.
@@ -392,7 +392,7 @@ export const migrateDbV2 = (file: string, now = Date.now()) => {
 if (import.meta.main) {
   const [file] = process.argv.slice(2)
   if (file === undefined) {
-    console.error("usage: bun apps/vibest-herdr/scripts/migrate-db-v2.ts <path to vibest.db>   (stop vibestd first)")
+    console.error("usage: bun apps/vibest/scripts/migrate-db-v2.ts <path to vibest.db>   (stop vibestd first)")
     process.exit(1)
   }
   try {

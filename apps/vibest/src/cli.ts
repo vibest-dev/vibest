@@ -12,11 +12,9 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import { Harness, Harnesses, type HarnessId, preflight } from "@vibest/core/harness"
-import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
 import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
-import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject } from "@vibest/core/results"
 // `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
@@ -26,6 +24,8 @@ import { jsonObject } from "@vibest/core/results"
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
 import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
 import * as Daemon from "@vibest/server/daemon"
+import * as Launch from "@vibest/vibest/launch"
+import { asData, ProjectKind } from "@vibest/vibest/project"
 import {
   Cause,
   Config,

@@ -200,7 +200,7 @@ Not written yet: `turn.start` resumes (a move or restart keeps the open turn; se
 
 vibestd never migrates by itself: on a version 1 file it refuses to start and prints the command of a one-time
 migration script, which the owner runs by hand after stopping vibestd:
-`bun apps/vibest-herdr/scripts/migrate-db-v2.ts ~/.vibest/vibest.db`. It copies the file to
+`bun apps/vibest/scripts/migrate-db-v2.ts ~/.vibest/vibest.db`. It copies the file to
 `vibest.db.v1-backup-<time>` first, builds version 2 from that copy into a new file, checks its foreign keys, and
 only then puts it in place. The script maps:
 

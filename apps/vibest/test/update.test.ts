@@ -54,7 +54,7 @@ describe("vibest update", () => {
     })
     // A build, or vibest from source, was installed by neither.
     for (const self of [
-      ["/repository/apps/vibest-herdr/dist/vibest"],
+      ["/repository/apps/vibest/dist/vibest"],
       ["/usr/bin/bun", "/repository/src/main.ts"],
       ["/s/versions/1/bin/vibest", "x"],
     ])

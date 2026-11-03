@@ -39,8 +39,8 @@ const target = () => {
       harnesses: path.join(version, "harnesses"),
     }
   }
-  const compiled = path.join(checkout, "apps/vibest-herdr/dist/vibest")
-  return { binary: compiled, compiled, harnesses: path.join(checkout, "apps/vibest-herdr/harnesses") }
+  const compiled = path.join(checkout, "apps/vibest/dist/vibest")
+  return { binary: compiled, compiled, harnesses: path.join(checkout, "apps/vibest/harnesses") }
 }
 /** The `vibest` a user runs, the compiled binary behind it, and vibest's plugin for each harness, as installed. */
 export const { binary, compiled, harnesses } = target()

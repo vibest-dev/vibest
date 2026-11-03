@@ -5,10 +5,8 @@ import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
-import * as Launch from "@vibest/core/launch"
 import { Layout, shellQuote } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
-import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
@@ -59,6 +57,8 @@ import {
 } from "@vibest/protocol/rpc"
 import { LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
+import * as Launch from "@vibest/vibest/launch"
+import { Project } from "@vibest/vibest/project"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.

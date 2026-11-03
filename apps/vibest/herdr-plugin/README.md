@@ -9,7 +9,7 @@ vibest does not link or enable this plugin. Registration is global for your user
 From a checkout:
 
 ```sh
-herdr plugin link /absolute/path/to/apps/vibest-herdr/herdr-plugin
+herdr plugin link /absolute/path/to/apps/vibest/herdr-plugin
 ```
 
 From a curl install, the directory is unpacked next to `bin/` and `harnesses/` and is not linked:

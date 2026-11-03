@@ -56,7 +56,7 @@ jobs:
       - name: Version
         id: version
         run: |
-          version=$(node -p 'require("./apps/vibest-herdr/package.json").version')
+          version=$(node -p 'require("./apps/vibest/package.json").version')
           # The same files as the root `release` script. A package left behind fails the run before anything is published.
           for f in apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json; do
             v=$(node -p "const j = require('./$f'); [j.version, j.version].join(' ')")
@@ -96,9 +96,9 @@ jobs:
           out="$RUNNER_TEMP/release/github"
           mkdir -p "$out"
           for target in darwin-arm64 linux-x64; do
-            (cd apps/vibest-herdr && bun scripts/build-archive.ts "$target" "$out")
+            (cd apps/vibest && bun scripts/build-archive.ts "$target" "$out")
           done
-          cp apps/vibest-herdr/install.sh "$out/install.sh"
+          cp apps/vibest/install.sh "$out/install.sh"
           printf '%s\n' "$VERSION" > "$out/version"
       - uses: actions/upload-artifact@v4
         with:

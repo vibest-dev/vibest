@@ -6,11 +6,11 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
-import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
+import { Project } from "@vibest/vibest/project"
 import {
   Cause,
   Context,

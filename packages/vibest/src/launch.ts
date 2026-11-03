@@ -1,15 +1,14 @@
+import { COORDINATOR } from "@vibest/core/guard"
+import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
+import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { projectKey } from "@vibest/core/project-create"
+import { coordinatorRules, projectText } from "@vibest/core/rules"
+import { type Machine, type Runtime } from "@vibest/core/runtimes"
+import { LaunchFailed } from "@vibest/core/sessions"
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
 import { Config, Effect, Option } from "effect"
-
-import { COORDINATOR } from "./guard.ts"
-import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
-import { Layout, VibestCommand, writeAtomic } from "./paths.ts"
-import { projectKey } from "./project-create.ts"
-import { coordinatorRules, projectText } from "./rules.ts"
-import { type Machine, type Runtime } from "./runtimes.ts"
-import { LaunchFailed } from "./sessions.ts"
 
 /**
  * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its rules file. `session` runs only

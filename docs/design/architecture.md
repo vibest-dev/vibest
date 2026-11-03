@@ -159,7 +159,7 @@ started, a main agent) cannot answer results with results (rule 4), and that eve
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ Products (apps/): vibest-herdr = product identity + runtime-herdr          │
+│ Products (apps/): vibest = product identity + runtime-herdr                │
 │                   + herdr plugin + presenter + CLI                         │
 ├───────────────────────────────────────────────────────────────────────────┤
 │ Builtin plugins: harness adapters and integrations · workspace types       │
@@ -196,7 +196,7 @@ on `schema` and `protocol` only. Plugin types derive from the client API.
 | `plugin-guard`          | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
 | `plugin-knowledge`      | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                           |
 | `plugin-skills`         | Builtin skills for the main Agent: delegate, pipeline. Replaceable and removable.                                                                                                                   |
-| `apps/vibest-herdr`     | Composition root of the Herdr TUI product.                                                                                                                                                          |
+| `apps/vibest`           | Composition root of the Herdr TUI product.                                                                                                                                                          |
 
 Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary.md`).
 
@@ -207,11 +207,12 @@ the code sits in:
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/schema` (`@vibest/schema`)                     | The contracts `protocol` and `client` need, moved out of core modules: session, inbox and harness schemas and errors, the `project` / `session` / `inbox` / `message` rows (`model.ts`), plugin traces, Project store inputs, `RemoveOutcome`, `Layout`. Core modules re-export them. |
 | `packages/protocol`                                      | `rpc.ts`, `protocol.ts`. Depends on `schema` only.                                                                                                                                                                                                                                    |
-| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (`apps/vibest-herdr/test/boundaries.test.ts` checks `schema`, `core`, `server`, `protocol`, `client`).                     |
-| `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `apps/vibest-herdr` that imports herdr.                                                                                                                 |
+| `packages/core`                                          | Every other `packages/cli/src` module except the ones below, plus `runtime.ts` (the Runtime port, §10). Depends on `schema` and `protocol`; never on herdr (`apps/vibest/test/boundaries.test.ts` checks `schema`, `core`, `server`, `protocol`, `client`).                           |
+| `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `apps/vibest` that imports herdr.                                                                                                                       |
+| `packages/vibest` (`@vibest/vibest`)                     | The product layer over the engine: `project.ts` (a project's instructions, docs and memory files) and `launch.ts` (the entry agent's command). Depends on `core`. Worktrees and project creation are still in `core`.                                                                 |
 | `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                             |
 | `packages/client`                                        | `client.ts`. Depends on `schema` and `protocol` only.                                                                                                                                                                                                                                 |
-| `apps/vibest-herdr` (`@vibest/cli`)                      | `cli.ts`, `main.ts` (provides `RuntimeHerdr.layer` as the daemon `Host.runtime`), `replace.ts`, `platform/`, `bin/vibest.cjs`, the build script, and the omac CLI tests.                                                                                                              |
+| `apps/vibest` (`@vibest/cli`)                            | `cli.ts`, `main.ts` (provides `RuntimeHerdr.layer` as the daemon `Host.runtime`), `replace.ts`, `platform/`, `bin/vibest.cjs`, the build script, and the omac CLI tests.                                                                                                              |
 | `packages/integration/claude`, `packages/integration/pi` | omac's `packages/claude`, `packages/pi-omac` (with its coordinator TUI). omac's standalone `extensions/pi-tui` package is removed. `packages/integration/cursor` is new.                                                                                                              |
 
 Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/db`).
@@ -680,7 +681,7 @@ continue a limited Agent in place).
 
 Which harness an Agent runs on is one decision, made by the `agent.start.before` chain (§7): the default choice
 first, then every user plugin in order, each able to keep or overwrite what came before. The default choice is a
-plugin, `packages/plugin-harness-choice` (`@vibest/plugin-harness-choice`): the product (`apps/vibest-herdr`) bundles
+plugin, `packages/plugin-harness-choice` (`@vibest/plugin-harness-choice`): the product (`apps/vibest`) bundles
 it into the binary and passes it to the plugin host as its first builtin, before the runtime plugins (runtime-port.md
 §2), so the core holds no harness choice policy. It cannot be turned off yet. vibestd validates the
 final harness (it exists, its plugin directory is there, its model list reads, the model is offered) and
@@ -715,7 +716,7 @@ that fails, is not a limit — the next move may use that harness again. A login
 
 The Herdr TUI product makes vibest usable inside herdr through herdr's own extension points (herdr 0.9.5).
 
-- **herdr plugin** in `apps/vibest-herdr` (`herdr-plugin.toml`). Every entrypoint runs `vibest <command>` and
+- **herdr plugin** in `apps/vibest` (`herdr-plugin.toml`). Every entrypoint runs `vibest <command>` and
   reads `HERDR_PLUGIN_CONTEXT_JSON`; the plugin holds no state.
   - Actions with keybindings: open the main Agent, run a definition on behalf of the main Agent,
     stop. The focused pane resolves to its Agent and Run.

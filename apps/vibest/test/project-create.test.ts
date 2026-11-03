@@ -3,9 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
-import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
-import { Project } from "@vibest/core/project"
 import {
   createIsolatedWorktrees,
   createProject,
@@ -18,6 +16,8 @@ import { git, repositoryKey } from "@vibest/core/worktree"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
+import * as Launch from "@vibest/vibest/launch"
+import { Project } from "@vibest/vibest/project"
 import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 

@@ -1,7 +1,7 @@
 # Feature map
 
 Every product capability vibest carries from omac, and how it is proven in a real environment: the built
-`apps/vibest-herdr/dist/vibest`, a real herdr, real harness CLIs, a scratch git repository with a local bare `origin`,
+`apps/vibest/dist/vibest`, a real herdr, real harness CLIs, a scratch git repository with a local bare `origin`,
 the user's own `HOME` (the harnesses' logins) with a temp `VIBEST_HOME` and temp harness config directories (see
 [e2e-plan.md](e2e-plan.md) §1). Fakes do not count.
 
