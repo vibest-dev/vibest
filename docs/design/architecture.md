@@ -83,18 +83,19 @@ step. vibest gives every type the same engine:
 **What the engine knows.** Status: the coordinator mode runs today with a fixed main Agent and one level of
 subagents. Everything else in this list is planned; each item says what runs today.
 
-- **One kind of session**, described by an **agent definition** (planned): `{ name, rules, tools (inspect | full),
+- **One kind of session**, described by an **agent definition**: `{ name, rules, tools (inspect | full),
   skills, can { spawn, message (report-only | children | project) }, entry? }`, registered by plugins with
   `context.agent.define`. What a caller may do comes from its definition, not from the database: Spawn needs
   `can.spawn`; Send's recipient must be inside `can.message`; Interrupt, Remove and Peek need the user or an
   ancestor of the target (along `parent_session_id`); Report is a message to the caller's reply target; the
-  guard reads `tools`. Today the coordinator and its subagents are two cases in the server and the guard.
-- **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
+  guard reads `tools`. Today `@vibest/plugin-coordinator` defines `coordinator` and `general`; the entry session is
+  still tagged `coordinator` in the server, and `skills` and `entry` are not definition fields yet.
+- **An addressable inbox per session**: every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
   natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
-  read with `vibest inbox`. Today only the main agent polls; subagents are typed into, and a row with
-  no session to go to is dropped.
-- **Reply routing is data** (planned), in one function, `replyTo(turn)`, evaluated when a turn ends:
+  read with `vibest inbox`. Today only the main agent polls (Claude and Pi alike); subagents are typed into, a
+  result addressed to a subagent (a lead, a peer, a pipeline stage) included.
+- **Reply routing is data**, in one function (`Db.replyTo`), `replyTo(turn)`, evaluated when a turn ends:
   1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
      each once.
   2. Otherwise the session's `report_to`, written at spawn and never changed.
@@ -108,11 +109,12 @@ subagents. Everything else in this list is planned; each item says what runs tod
   itself), then to the user. Last, the `agent.result` hook (`{ sessionId, turnId, status, output, recipients }`)
   may rewrite the recipients: forward, merge, or clear them. Notices go through `agent.notice` (`{ about, kind:
   blocked | not_started | undelivered | archived, text, recipients }`); by default to `report_to`, then the
-  entry session, then the user. Today a result goes to the parent, else to the project's main agent.
+  entry session, then the user. Today `agent.result` runs (without `turnId`); `agent.notice` is not there yet, and
+  notices still go to `report_to`, else the entry session. A session without `report_to` (started before the project
+  had an entry session) counts the entry session as its `report_to`.
 
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
-  and where a new terminal opens (beside its spawner), never routing. Today the parent also decides routing: a
-  result goes to the parent, else to the main agent.
+  and where a new terminal opens (beside its spawner), never routing.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before schema version 2): the session a
   bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.

@@ -298,6 +298,8 @@ export class VibestRpcs extends RpcGroup.make(
           peer: Schema.optional(Schema.String),
           /** Archive the session once a completed result reached the coordinator. */
           archive: Schema.optional(Schema.Boolean),
+          /** A session of the same project its results go to instead of the caller (`vibest run --report-to`). */
+          reportTo: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -603,6 +605,16 @@ export class VibestRpcs extends RpcGroup.make(
    * The user's command line only (`vibest update`): the live agents whose integration is not this vibestd's (VERSION and
    * PROTOCOL), main agents included; `working` when they are in a turn.
    */
+  /** The user's own inbox (`vibest inbox`): results and notices of this project with no session to go to; read once. */
+  scoped(
+    Rpc.make("Inbox.Read", {
+      payload: { peek: Schema.optional(Schema.Boolean) },
+      success: Schema.Array(
+        Schema.Struct({ id: Schema.Number, from: Schema.String, kind: Schema.String, message: Schema.String }),
+      ),
+      error: Schema.Union([Forbidden, NotInRepository]),
+    }),
+  ),
   scoped(
     Rpc.make("Agents.Outdated", {
       success: Schema.Array(

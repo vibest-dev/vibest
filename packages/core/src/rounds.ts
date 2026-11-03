@@ -33,6 +33,7 @@ export const sessionRounds = (deps: {
       patch: SessionPatch,
       row: NewInboxRow,
       at?: number,
+      to?: ReadonlyArray<string | null>,
     ) => Effect.Effect<InboxRow>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
@@ -68,6 +69,12 @@ export const sessionRounds = (deps: {
     onHandover?: Effect.Effect<void>,
     options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | RuntimeError, FileSystem.FileSystem>
+  /** Where a finished turn's result goes: reply routing, then the `agent.result` plugins. */
+  readonly route: (
+    session: SessionRow,
+    status: "completed" | "failed" | "lost",
+    output: string,
+  ) => Effect.Effect<ReadonlyArray<string | null>>
   /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
@@ -115,6 +122,7 @@ export const sessionRounds = (deps: {
       ["result", body],
     )
     const failure = failureOf(error)
+    const to = yield* deps.route(session, end, text)
     const row = yield* db.finishTurn(
       session.id,
       { status: end, output: text, ...(failure === undefined ? {} : { failure }) },
@@ -126,6 +134,7 @@ export const sessionRounds = (deps: {
         details: { ...info, summary, remember: report.remember, error },
       },
       at,
+      to,
     )
     yield* inbox.announce(row)
   })

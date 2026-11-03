@@ -205,6 +205,12 @@ const run = Command.make(
       ),
       Flag.optional,
     ),
+    reportTo: Flag.String("report-to").pipe(
+      Flag.withDescription(
+        "A session id: its results go to that session instead of you (a pipeline's next stage, a reviewer)",
+      ),
+      Flag.optional,
+    ),
     archive: Flag.Boolean("archive-on-completion").pipe(
       Flag.withDescription(
         "Archive the session once it reports completed and that result reached you (as vibest archive: branch kept, worktree removed only when git loses nothing)",
@@ -227,6 +233,7 @@ const run = Command.make(
           env: Option.getOrUndefined(o.env),
           peer: Option.getOrUndefined(o.peer),
           archive: o.archive || undefined,
+          reportTo: Option.getOrUndefined(o.reportTo),
           machine,
         }),
       )
@@ -566,6 +573,21 @@ const ls = Command.make(
 ).pipe(
   Command.withDescription(
     "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too). vibest result keeps the full task",
+  ),
+)
+
+const inboxCommand = Command.make(
+  "inbox",
+  {
+    peek: Flag.Boolean("peek").pipe(
+      Flag.withDescription("Show them without marking them read"),
+      Flag.withDefault(false),
+    ),
+  },
+  (o) => vibest((client) => client["Inbox.Read"]({ peek: o.peek || undefined })).pipe(Effect.flatMap(json)),
+).pipe(
+  Command.withDescription(
+    "Your inbox in this project, as JSON: results and notices of sessions you started with no main agent to go to (read once; --peek keeps them)",
   ),
 )
 
@@ -1392,6 +1414,7 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       peek,
       archive,
       ls,
+      inboxCommand,
       report,
       models,
       harness,

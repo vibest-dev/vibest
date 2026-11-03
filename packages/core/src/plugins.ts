@@ -85,7 +85,7 @@ type Registered<N extends HookName> = {
 }
 /** One list per hook, so a callback is stored and called as that hook's event. */
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
-const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
+const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [], "agent.result": [] })
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 /** Builtin plugins of the host app, before user plugins: the default harness choice first (architecture.md §9), then
  * the runtime plugins (runtime-port.md §2). The core itself holds no choice policy. */
@@ -255,6 +255,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         agent: bind("agent", {
           "start.before": (callback) => remember("agent.start.before", callback),
           fail: (callback) => remember("agent.fail", callback),
+          result: (callback) => remember("agent.result", callback),
         }),
         // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
@@ -496,8 +497,19 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    // A crashed or timed-out callback leaves the recipients as the chain had them before it.
+    const result = Effect.fn("Plugins.result")(function* (input: VibestPlugin.AgentResult) {
+      return yield* withHooks("agent.result", (hooks, trace) =>
+        Effect.gen(function* () {
+          const event: VibestPlugin.AgentResult = { ...input, recipients: [...input.recipients] }
+          yield* runHook(bucket(hooks, "agent.result"), "agent.result", event, trace)
+          return event.recipients.filter((r) => r === null || typeof r === "string")
+        }),
+      )
+    })
+
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, list }), activate, ready }
+    return { service: Plugins.of({ start, fail, result, list }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
@@ -518,6 +530,8 @@ export class Plugins extends Context.Service<
       { readonly move: VibestPlugin.AgentFail["move"]; readonly trace: ReadonlyArray<TraceEntry> },
       HookFailed
     >
+    /** A turn's result: every `agent.result` callback in plugin order, each free to rewrite `recipients`. */
+    readonly result: (input: VibestPlugin.AgentResult) => Effect.Effect<ReadonlyArray<string | null>>
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {

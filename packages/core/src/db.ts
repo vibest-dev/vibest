@@ -626,6 +626,14 @@ const make = Effect.gen(function* () {
   const findSend = (sessionId: string, status: InboxStatus) =>
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: number) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
+  /**
+   * What Sessions delivers to `sessionId`: its pending sends, and the results, reports and notices addressed to it
+   * unless it is its project's entry session (Inbox delivers those).
+   */
+  const findPending = (sessionId: string) =>
+    inbox(sql`m.recipient_session_id = ${sessionId} AND m.status = 'pending' AND (m.kind = 'send'
+      OR (m.kind <> 'task' AND m.recipient_session_id IS NOT (SELECT p.entry_session_id FROM session s
+        JOIN project p ON p.id = s.project_id WHERE s.id = ${sessionId})))`)
 
   /** The open turn of `sessionId`: its latest `turn.start` with no `turn.end`. */
   const openTurn = (sessionId: string) =>
@@ -633,6 +641,56 @@ const make = Effect.gen(function* () {
         AND type = 'turn.start') AND NOT EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'turn.end')`.pipe(
       Effect.map((rows) => rows[0]?.id),
     )
+
+  /** The rows turn `open` consumed, with those of the turns it continues (`resumes`), oldest first. */
+  const turnRows = (open: number) =>
+    Effect.gen(function* () {
+      const chain = yield* sql<{ id: number }>`WITH RECURSIVE c(id) AS (SELECT ${open}
+          UNION SELECT json_extract(e.data, '$.resumes') FROM event e JOIN c ON e.id = c.id
+          WHERE json_extract(e.data, '$.resumes') IS NOT NULL) SELECT id FROM c`
+      return yield* sql<{ content: string; kind: string; sender: string | null }>`SELECT i.content, i.kind,
+          i.sender_session_id AS sender FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e
+          WHERE e.type = 'inbox.status' AND json_extract(e.data, '$.to') = 'delivered' AND ${sql.in(
+            "e.turn_id",
+            chain.map((c) => c.id),
+          )}) ORDER BY i.id`
+    })
+
+  /**
+   * Who the result of `id`'s open turn goes to (architecture.md, reply routing; `null` is the user, `[]` nobody):
+   * 1. the sessions whose task or send rows the turn consumed;
+   * 2. else its `report_to` (set at spawn; none: the project's entry session);
+   * 3. else the user, when the turn consumed the user's own task or send;
+   * 4. else nobody: a turn the user typed in the pane, or one a result or notice woke, answers no one. So a result never
+   *    starts a result, and peers cannot loop.
+   * A recipient that has ended is replaced by the project's entry session (never `id` itself), else the user.
+   */
+  const replyTo = (id: string) =>
+    Effect.gen(function* () {
+      const [s] = yield* sql<{ reportTo: string | null; entry: string | null }>`SELECT
+          s.report_to_session_id AS report_to, p.entry_session_id AS entry
+        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${id}`
+      if (s === undefined) return [] as ReadonlyArray<string | null>
+      const ended = (x: string) =>
+        sql<{ n: number }>`SELECT 1 AS n FROM session WHERE id = ${x} AND ended_at IS NULL`.pipe(
+          Effect.map((r) => r.length === 0),
+        )
+      const fallback = s.entry !== null && s.entry !== id && !(yield* ended(s.entry)) ? s.entry : null
+      const live = (x: string) => Effect.map(ended(x), (e) => (e ? fallback : x))
+      const open = yield* openTurn(id)
+      const rows = (open === undefined ? [] : yield* turnRows(open)).filter(
+        (r) => r.kind === "task" || r.kind === "send",
+      )
+      const senders = [...new Set(rows.flatMap((r) => (r.sender === null || r.sender === id ? [] : [r.sender])))]
+      if (senders.length > 0) return [...new Set(yield* Effect.forEach(senders, live))]
+      // No report_to (started before the project had an entry session): the entry session, once there is one.
+      const target = s.reportTo ?? s.entry
+      if (target !== null && target !== id) {
+        const to = yield* live(target)
+        if (to !== null) return [to]
+      }
+      return rows.some((r) => r.sender === null) ? [null] : []
+    })
 
   /**
    * Move the rows `where` selects to `to`, one `inbox.status` event each; returns the ids that moved. A row moved to
@@ -806,19 +864,64 @@ const make = Effect.gen(function* () {
    * (`report_to_session_id` while it has not ended, else the project's entry session), `dropped` when it has no
    * place; with no entry session at all they are kept as the sender's own (dropped), so `vibest result` still reads
    * them. A result row points at the `turn.end` it reports: `end` when the caller is closing the turn, else one made
-   * from `details` (status, error).
+   * from `details` (status, error). A result goes where `to` says (`replyTo`'s answer, as `agent.result` left it): one
+   * row per recipient, `null` a row for the user (read with `vibest inbox`); none: the sender's own, dropped. `from`: a
+   * send's sender (a session; none: the user). Returns the first row.
    */
-  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
+  const insertInboxRow = (
+    row: NewInboxRow,
+    end?: TurnEnd,
+    at?: number,
+    to?: ReadonlyArray<string | null>,
+    from?: string,
+  ) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
         const id = yield* insertInboxSql({
           recipient: row.sessionId,
           kind: "send",
-          sender: null,
+          sender: from ?? null,
           content: row.message,
           status: "pending",
         })
         return (yield* inboxIn([id]))[0]!
+      }
+      if (row.kind === "result") {
+        const recipients = to ?? (yield* replyTo(row.sessionId))
+        const resultEventId = yield* endTurn(
+          row.sessionId,
+          end ?? {
+            status: roundStatus(row.details.status),
+            ...(typeof row.details.error === "string" && row.details.error !== ""
+              ? { failure: failureOf(row.details.error)! }
+              : {}),
+          },
+          at,
+        )
+        const project = (yield* sql<{ project: number }>`SELECT project_id AS project FROM session
+          WHERE id = ${row.sessionId}`)[0]?.project
+        const [entry] =
+          project === undefined
+            ? []
+            : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
+        const ids: Array<number> = []
+        for (const recipient of recipients.length === 0 ? [undefined] : recipients) {
+          const present =
+            recipient === null ||
+            (recipient !== undefined &&
+              (recipient !== entry?.id || placed(project!, (yield* anySession(recipient))?.current)))
+          ids.push(
+            yield* insertInboxSql({
+              recipient: recipient === undefined ? row.sessionId : recipient,
+              kind: "result",
+              sender: row.sessionId,
+              content: row.message,
+              resultEventId,
+              status: present ? "pending" : "dropped",
+            }),
+          )
+        }
+        return (yield* inboxIn(ids.slice(0, 1)))[0]!
       }
       const [route] = yield* sql<{ recipient: string | null; entry: number | null; project: number }>`SELECT
           CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
@@ -833,25 +936,11 @@ const make = Effect.gen(function* () {
       const toEntry = recipient !== null && recipient === entry?.id
       const present =
         recipient !== null && (!toEntry || placed(route!.project, (yield* anySession(recipient))?.current))
-      const resultEventId =
-        row.kind === "result"
-          ? yield* endTurn(
-              row.sessionId,
-              end ?? {
-                status: roundStatus(row.details.status),
-                ...(typeof row.details.error === "string" && row.details.error !== ""
-                  ? { failure: failureOf(row.details.error)! }
-                  : {}),
-              },
-              at,
-            )
-          : undefined
       const id = yield* insertInboxSql({
         recipient: recipient ?? row.sessionId,
         kind: row.kind,
         sender: row.sessionId,
         content: row.message,
-        ...(resultEventId === undefined ? {} : { resultEventId }),
         status: present ? "pending" : "dropped",
       })
       return (yield* inboxIn([id]))[0]!
@@ -1080,6 +1169,8 @@ const make = Effect.gen(function* () {
       cwd = "",
       task?: string,
       parentSessionId?: string,
+      /** Where its results go (`vibest run --report-to`); default its parent, else the project's entry session. */
+      reportToSessionId?: string,
     ) =>
       sql
         .withTransaction(
@@ -1092,7 +1183,8 @@ const make = Effect.gen(function* () {
             const [entry] = yield* sql<{
               id: string | null
             }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-            const reportTo = parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined))
+            const reportTo =
+              reportToSessionId ?? parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined))
             const stopped = row.metadata.archived || row.metadata.removed
             yield* sql`INSERT INTO session ${sql.insert({
               id: row.id,
@@ -1503,13 +1595,19 @@ const make = Effect.gen(function* () {
     insertInbox: (row: NewInboxRow) => sql.withTransaction(insertInboxRow(row)).pipe(Effect.orDie),
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
-    insertSend: (sessionId: string, message: string) =>
+    insertSend: (sessionId: string, message: string, from?: string) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const s = yield* findSession(sessionId)
             if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-            return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
+            return yield* insertInboxRow(
+              { sessionId, kind: "send", message, details: {} },
+              undefined,
+              undefined,
+              undefined,
+              from,
+            )
           }),
         )
         .pipe(Effect.orDie),
@@ -1556,16 +1654,7 @@ const make = Effect.gen(function* () {
             typed: string | null
           }>`SELECT json_extract(data, '$.typed') AS typed FROM event WHERE id = ${open}`
           // A continuation turn (`resumes`) consumed nothing new: the rows of the turn it continues are its input.
-          const chain = yield* sql<{ id: number }>`WITH RECURSIVE c(id) AS (SELECT ${open}
-              UNION SELECT json_extract(e.data, '$.resumes') FROM event e JOIN c ON e.id = c.id
-              WHERE json_extract(e.data, '$.resumes') IS NOT NULL) SELECT id FROM c`
-          const rows = yield* sql<{
-            content: string
-          }>`SELECT i.content FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e
-              WHERE e.type = 'inbox.status' AND json_extract(e.data, '$.to') = 'delivered' AND ${sql.in(
-                "e.turn_id",
-                chain.map((c) => c.id),
-              )}) ORDER BY i.id`
+          const rows = yield* turnRows(open)
           working = t?.typed ?? rows.map((r) => r.content).join("\n\n")
         }
         const [linked] = yield* sql<{ id: number | null }>`SELECT max(e.inbox_id) AS id FROM event e
@@ -1615,12 +1704,19 @@ const make = Effect.gen(function* () {
      * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
      * session row. `at`: no earlier than this (a result file's time), so that file is not taken again.
      */
-    finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
+    finishTurn: (
+      id: string,
+      end: TurnEnd,
+      patch: SessionPatch,
+      row: NewInboxRow,
+      at?: number,
+      to?: ReadonlyArray<string | null>,
+    ) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const stamp = at === undefined ? undefined : Math.max(at, yield* now)
-            const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp)
+            const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp, to)
             const { turnState: _, ...rest } = patch
             yield* updateSession(id, row.kind === "result" ? rest : patch)
             return inserted
@@ -1628,7 +1724,29 @@ const make = Effect.gen(function* () {
         )
         .pipe(Effect.orDie),
 
-    pendingInbox: (sessionId: string) => findSend(sessionId, "pending").pipe(Effect.orDie),
+    pendingInbox: (sessionId: string) => findPending(sessionId).pipe(Effect.orDie),
+
+    /** Who the open turn's result goes to (`replyTo`), before `agent.result` sees it. */
+    replyTo: (id: string) => replyTo(id).pipe(Effect.orDie),
+
+    /**
+     * The rows addressed to the user (results and notices with no session to go to) from sessions of `projectIdValue`,
+     * oldest first; `read` marks the pending ones delivered.
+     */
+    userInbox: (projectIdValue: number, read: boolean) =>
+      Effect.gen(function* () {
+        const rows = yield* inbox(sql`m.recipient_session_id IS NULL AND m.status = 'pending'
+          AND m.sender_session_id IN (SELECT id FROM session WHERE project_id = ${projectIdValue})`)
+        if (read && rows.length > 0)
+          yield* moveInbox(
+            sql.in(
+              "id",
+              rows.map((r) => r.id),
+            ),
+            "delivered",
+          )
+        return rows
+      }).pipe(Effect.orDie),
 
     inboxWithStatus: (sessionId: string, status: InboxStatus) => findSend(sessionId, status).pipe(Effect.orDie),
 

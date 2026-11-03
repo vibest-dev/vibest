@@ -191,6 +191,7 @@ const ACCESS = {
   "Daemon.Handoff": "cli",
   "Session.Start": "self",
   "Agents.Outdated": "cli",
+  "Inbox.Read": "cli",
   "Agents.Restart": "cli",
 } as const satisfies Record<
   RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
@@ -610,6 +611,16 @@ export const handlers = VibestRpcs.toLayer(
               message:
                 "a main agent only starts sessions in its own project: cd into the directory where vibest was started and run it again",
             })
+          if (input.reportTo !== undefined) {
+            const target = yield* db.getSession(input.reportTo)
+            if (target === undefined)
+              return yield* new NoSuchSession({ id: input.reportTo, message: `no session ${input.reportTo}` })
+            if (target.projectId !== (yield* db.projectId(project.key)))
+              return yield* new Forbidden({
+                method: "Spawn",
+                message: `${input.reportTo} is another project's; --report-to names a session of this one`,
+              })
+          }
           return yield* sessions.spawn({
             machine: machineOf(input.machine),
             root: project.root,
@@ -624,6 +635,7 @@ export const handlers = VibestRpcs.toLayer(
             peer: input.peer,
             archive: input.archive,
             parentSessionId: c._tag === "Cli" ? undefined : c.sessionId,
+            reportTo: input.reportTo,
           })
         }),
 
@@ -702,7 +714,23 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      Send: ({ id, message }) => managed("Send", id).pipe(Effect.andThen(sessions.send(id, message))),
+      // A session's send names it as the sender: the receiver's result for that turn goes back to it.
+      Send: ({ id, message }) =>
+        managed("Send", id).pipe(
+          Effect.andThen(Caller),
+          Effect.flatMap((c) => sessions.send(id, message, c._tag === "Cli" ? undefined : c.sessionId)),
+        ),
+
+      "Inbox.Read": ({ peek }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Inbox.Read")
+          const c = yield* Caller
+          const located = yield* atProject(c._tag === "Cli" ? (c.repositoryRoot ?? "") : "")
+          const projectId = yield* db.projectByKey(located.key)
+          if (projectId === undefined) return []
+          const rows = yield* db.userInbox(projectId, peek !== true)
+          return rows.map((r) => ({ id: r.id, from: r.sessionId, kind: r.kind, message: r.message }))
+        }),
       Interrupt: ({ id }) => managed("Interrupt", id).pipe(Effect.andThen(sessions.interrupt(id))),
       Remove: ({ id, keepWorktree }) =>
         managed("Remove", id).pipe(

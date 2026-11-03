@@ -154,10 +154,25 @@ export interface AgentFail extends AgentContext {
   move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined
 }
 
+/**
+ * A session's turn ended with a result. `recipients` is where vibest routes it (reply routing: the senders of what the
+ * turn consumed, else the session's report-to, else the user when the user asked; `null` is the user); a plugin may
+ * rewrite it: forward, fan out, or empty it (the result is then the session's own, read with `vibest result`).
+ */
+export interface AgentResult {
+  readonly sessionId: string
+  readonly agentType: string
+  readonly status: "completed" | "failed" | "lost"
+  /** The harness's last answer text. */
+  readonly output: string
+  recipients: Array<string | null>
+}
+
 /** Every hook: the event its callbacks get and the error they may fail with. */
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
+  readonly "agent.result": { readonly event: AgentResult; readonly error: never }
 }
 
 /** The hook names of one domain without its prefix: `start.before` for `agent.start.before`. */

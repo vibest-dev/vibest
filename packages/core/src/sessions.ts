@@ -163,6 +163,8 @@ export interface SpawnInput {
   readonly archive?: boolean | undefined
   /** The session that asked for it (the main agent); undefined for the user's own `vibest run`. */
   readonly parentSessionId?: string | undefined
+  /** Where its results go instead of its parent (`vibest run --report-to`): a session of the same project. */
+  readonly reportTo?: string | undefined
 }
 
 export interface Spawned extends Routing {
@@ -190,7 +192,8 @@ export class Sessions extends Context.Service<
       Scope.Scope
     >
     /** Queue a message; vibestd delivers it once the session is idle (SPEC §8.4). Returns once the message is stored. */
-    readonly send: (id: string, message: string) => Effect.Effect<void, NoSuchSession>
+    /** `from`: the session that sends it (its turn's result then goes back to it); none for the user. */
+    readonly send: (id: string, message: string, from?: string) => Effect.Effect<void, NoSuchSession>
     /** Interrupt the running turn and keep the session (terminal, worktree, conversation) for follow-ups (SPEC §8.6). */
     readonly interrupt: (
       id: string,
@@ -623,6 +626,18 @@ export class Sessions extends Context.Service<
         undelivered,
         logged,
         prompt,
+        route: (session, status, output) =>
+          db.replyTo(session.id).pipe(
+            Effect.flatMap((recipients) =>
+              plugins.result({
+                sessionId: session.id,
+                agentType: session.agent,
+                status,
+                output,
+                recipients: [...recipients],
+              }),
+            ),
+          ),
         limitMove: limit.move,
       })
       collectResult = rounds.collectResult
@@ -887,6 +902,7 @@ export class Sessions extends Context.Service<
               cwd,
               decision.prompt,
               input.parentSessionId,
+              input.reportTo,
             )
             if (!inserted) {
               // The directory this spawn reserved goes again (still empty: nothing was started in it).
@@ -1115,14 +1131,14 @@ export class Sessions extends Context.Service<
        * other queued messages are left to their own deliveries. Runtime unreachable, or vibestd stopping: it stays pending for
        * the poll's next check.
        */
-      const send = (id: string, message: string) =>
+      const send = (id: string, message: string, from?: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
           const worktree = yield* worktreeOf(session)
           if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
             return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
           // Archived since the read above (vibest run --archive-on-completion decides under the session's lock, not this one): refused, never accepted.
-          const row = yield* db.insertSend(id, message)
+          const row = yield* db.insertSend(id, message, from)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
           // Under the session's lock, like every other change to its rows.
           const failed = (cause: Cause.Cause<unknown>) =>

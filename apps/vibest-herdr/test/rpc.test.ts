@@ -386,6 +386,7 @@ describe("vibest.sock", () => {
         ["Session.Start", c["Session.Start"]({ id: "other000" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
+        ["Inbox.Read", c["Inbox.Read"]({})],
       ]
       const bare = yield* client
       for (const [method, call] of protectedCalls(bare))
