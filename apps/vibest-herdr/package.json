@@ -28,6 +28,9 @@
     "./*": "./src/*.ts"
   },
   "publishConfig": {
+    "exports": {
+      "./package.json": "./package.json"
+    },
     "access": "public"
   },
   "scripts": {
