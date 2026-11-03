@@ -142,8 +142,11 @@ export const sessionMove = (deps: {
     const endRunning = Effect.gen(function* () {
       if (running === "none") return "sent" as const
       const pid = ((yield* db.getSession(row.id)) ?? row).metadata.pid
+      // Its pid and ready report go with the signal: ready again only once the next harness reports it.
+      yield* db.patchLive(row.id, { pid: null, ready: null })
       const sent = pid === undefined ? "gone" : yield* deps.terminate(pid)
-      if (sent !== "denied") running = "none"
+      if (sent === "denied") yield* db.patchLive(row.id, { pid: pid ?? null })
+      else running = "none"
       return sent
     })
     // The limit that started this move is a real try: kept on the session row, it survives a vibestd restart.
@@ -302,8 +305,6 @@ export const sessionMove = (deps: {
           )
           return false
         }
-        // Ready again only once the next harness reports it.
-        yield* db.patchLive(row.id, { ready: null })
       } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {

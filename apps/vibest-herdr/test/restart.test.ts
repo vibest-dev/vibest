@@ -3,7 +3,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
-import { CONTINUE, continueNotice, continueText, type Restarted, Sessions } from "@vibest/core/sessions"
+import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
+import { Sessions } from "@vibest/core/sessions"
 import { repositoryKey } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -100,6 +101,7 @@ describe("restart in place", () => {
       assert.deepInclude(down, { exitedAt: null, turnState: "open" })
       assert.deepStrictEqual(yield* db.coordinatorPending(down.projectId), [])
       assert.isUndefined(yield* db.readyAt(id), "the old harness's ready report is gone")
+      assert.isUndefined(down.metadata.pid, "so is its pid")
       // Its terminal's shell runs the harness again, on the same conversation; the new harness's integration reports,
       // on this version, that it takes input.
       const opened = (yield* herdr.callsTo("open")).length
@@ -159,36 +161,17 @@ describe("restart in place", () => {
     })
 
   test(
-    "a main agent whose harness takes rows typed in (inbox prompt): once its new harness is up, the continue notice is typed into its terminal",
+    "a Cursor main agent (no integration reports its pid or its readiness): never listed as outdated, and a restart asked for anyway signals and runs nothing",
     Effect.gen(function* () {
-      const { db, herdr, id, projectId } = yield* workingMain("cursor")
+      const { herdr, id } = yield* workingMain("cursor")
       const sessions = yield* Sessions
       const processes = yield* FakeProcesses
-      const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
-      yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
-      yield* until(processes.signaled, (t) => t.includes(100))
-      assert.isDefined((yield* db.coordinatorOf(projectId))?.restarting)
-      // Its own shell starts it again (`vibest integration start`); the runtime sees it, as for any harness without a report.
-      yield* until(herdr.callsTo("run"), (calls) => calls.length > 0)
-      assert.deepStrictEqual((yield* herdr.callsTo("run"))[0], {
-        terminal: "test/coord",
-        argv: ["vibest", "integration", "start", id],
-      })
-      yield* db.patchLive(id, { pid: 300, ready: null })
-      yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
-      const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
-      assert.deepInclude(outcome, {
-        id,
-        ok: true,
-        message: `${id} (main agent) restarted; its interrupted turn continues`,
-      })
-      const typed = yield* until(herdr.callsTo("send"), (calls) =>
-        calls.some((c) => c.text?.includes(CONTINUE) === true),
-      )
-      const text = typed.find((c) => c.text?.includes(CONTINUE))!.text!
-      assert.strictEqual(text.split("\n")[0], CONTINUE)
-      assert.include(text, `vibest is now ${VERSION}.`)
-      assert.isUndefined((yield* db.coordinatorOf(projectId))?.restarting)
+      assert.deepStrictEqual(yield* sessions.outdated, [])
+      const [outcome] = yield* sessions.restart([id])
+      assert.deepInclude(outcome, { id, ok: false })
+      assert.include(outcome!.message, "start it again yourself")
+      assert.deepStrictEqual(yield* processes.signaled, [])
+      assert.deepStrictEqual(yield* herdr.callsTo("run"), [])
     }),
   )
 

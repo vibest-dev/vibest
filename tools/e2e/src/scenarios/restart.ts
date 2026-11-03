@@ -291,7 +291,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent restarted on this integration",
           () => {
             const row = subRow(zero)
-            return row?.pid !== subBefore.pid && row?.version !== OLD && row?.version !== null
+            return row?.pid != null && row.pid !== subBefore.pid && row.version !== OLD && row.version !== null
           },
           120_000,
         )
@@ -306,7 +306,8 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        await until("the main agent restarted", () => main()?.pid !== before.pid, 120_000)
+        // The signal clears the pid; the new harness reports its own.
+        await until("the main agent restarted", () => main()?.pid != null && main()?.pid !== before.pid, 120_000)
         const after = main()
         expect(after?.id === before.id, `the main agent's session changed: ${before.id} -> ${after?.id}`)
         expect(
@@ -469,7 +470,13 @@ const checks: ReadonlyArray<Check> = [
           "the main agent restarted on this integration",
           () => {
             const row = main()
-            return row !== undefined && row.pid !== before.pid && row.version !== OLD && row.version !== null
+            return (
+              row !== undefined &&
+              row.pid != null &&
+              row.pid !== before.pid &&
+              row.version !== OLD &&
+              row.version !== null
+            )
           },
           240_000,
         ).catch(async (e: Error) => {
