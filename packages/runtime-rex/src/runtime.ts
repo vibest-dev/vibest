@@ -116,6 +116,8 @@ export interface Options {
   readonly server?: string
   /** How long `open` waits for a new terminal's program to draw and settle (default 20 s). */
   readonly settle?: Duration.Input
+  /** The PATH every program `open` starts gets, unless the env it is given has one (default: this process's PATH). */
+  readonly path?: string
 }
 
 /**
@@ -250,7 +252,12 @@ export const make = (options: Options = {}): Effect.Effect<Runtime> =>
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
         yield* local(machine)
-        const env = Object.entries(input.env).map(([k, v]) => `${k}=${v}`)
+        // Rex runs argv through a non-interactive login shell, which does not read the user's .zshrc: its PATH can lack
+        // the harness (pi in ~/.bun/bin). The PATH of vibestd, which the vibest that started it handed on, goes in front.
+        const searchPath = input.env["PATH"] ?? options.path ?? process.env["PATH"]
+        const env = Object.entries({ ...input.env, ...(searchPath ? { PATH: searchPath } : {}) }).map(
+          ([k, v]) => `${k}=${v}`,
+        )
         const block = {
           flavor: SHELL,
           label: input.label.slice(0, 128),
