@@ -218,6 +218,15 @@ export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/Daemo
   defaultValue: () => Deferred.makeUnsafe<void>(),
 })
 
+/**
+ * Each project's main agent `vibest --env` values, in this vibestd's memory only (never stored, logged or sent as
+ * telemetry): Session.Start hands them back for a restart in place. A handoff passes them to the next vibestd in its
+ * process environment (VIBEST_HANDOFF_ENV), which `vibest daemon --import` reads and removes before anything starts.
+ */
+export type MainEnv = Map<number, { readonly sessionId: string; readonly env: Readonly<Record<string, string>> }>
+export const MainEnv = Context.Reference<MainEnv>("vibest/MainEnv", { defaultValue: () => new Map() })
+export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
+
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
@@ -387,6 +396,7 @@ export const handlers = VibestRpcs.toLayer(
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const shutdown = yield* Shutdown
+    const mainEnv = yield* MainEnv
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
@@ -849,7 +859,18 @@ export const handlers = VibestRpcs.toLayer(
           return { ...decision, harness: decision.harness, runtime: rt.kind }
         }),
 
-      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
+      "Project.CoordinatorSession": ({
+        harness,
+        fresh,
+        terminal,
+        machine,
+        runtime,
+        provider,
+        model,
+        routing,
+        pid,
+        env,
+      }) =>
         Effect.gen(function* () {
           const caller = yield* agent("Project.CoordinatorSession")
           const projectDirectory =
@@ -886,6 +907,9 @@ export const handlers = VibestRpcs.toLayer(
                   ...(projectDirectory ? { projectDirectory: projectDirectory.root } : {}),
                 },
               )
+              const projectId = yield* db.projectId(key)
+              if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
+              else mainEnv.delete(projectId)
               return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
@@ -934,6 +958,7 @@ export const handlers = VibestRpcs.toLayer(
               message: `${id} is not a main agent; only a main agent starts this way`,
             })
           yield* db.patchLive(id, { ready: null })
+          const kept = mainEnv.get(main.projectId)
           return {
             harness: main.harnessId,
             harnessSessionId: main.harnessSessionId,
@@ -941,6 +966,7 @@ export const handlers = VibestRpcs.toLayer(
             model: main.model,
             projectId: main.projectId,
             ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
+            ...(kept?.sessionId === id ? { env: kept.env } : {}),
           }
         }),
 
@@ -1009,7 +1035,7 @@ export const handlers = VibestRpcs.toLayer(
           return yield* stopOnce(
             instance,
             "Daemon.Handoff",
-            spawnDaemon(command, ["--import"]).pipe(
+            spawnDaemon(command, ["--import"], { [HANDOFF_ENV]: JSON.stringify([...mainEnv]) }).pipe(
               Effect.mapError(
                 (e) => new LaunchFailed({ message: `${quoted} did not start: ${e.message}; vibestd keeps running` }),
               ),

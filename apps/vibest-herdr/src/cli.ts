@@ -131,7 +131,14 @@ const daemon = (host: Daemon.Host) =>
       userOnly("daemon").pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            if (foreground) return yield* Daemon.run(host, { handoff })
+            if (foreground) {
+              // The previous vibestd's in-memory main agent --env values: read once, then gone from this process's
+              // environment, so nothing this vibestd starts inherits them.
+              const raw = process.env[Daemon.HANDOFF_ENV]
+              delete process.env[Daemon.HANDOFF_ENV]
+              const mainEnv: Daemon.MainEnv | undefined = handoff && raw ? new Map(JSON.parse(raw)) : undefined
+              return yield* Daemon.run(host, { handoff, ...(mainEnv ? { mainEnv } : {}) })
+            }
             const layout = yield* Layout
             if (!(yield* probe(layout.socket))) yield* startDaemon
             yield* Console.log(`vibestd is running on ${layout.socket}`)
@@ -283,7 +290,7 @@ const mainFlags = {
   model: Flag.String("model").pipe(Flag.optional),
   env: Flag.KeyValuePair("env").pipe(
     Flag.withDescription(
-      "KEY=VALUE for the main agent's harness, never stored: a restart by vibest update starts it without them; run vibest --env again",
+      "KEY=VALUE for the main agent's harness, never stored: vibestd keeps it in memory for a restart in place (vibest update); a vibestd stop or a new terminal loses it; run vibest --env again then",
     ),
     Flag.optional,
   ),
@@ -395,6 +402,8 @@ const startMain =
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
                 // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
+                // Held in vibestd's memory only, for this harness's restart in place (vibest update).
+                ...(Object.keys(env).length > 0 ? { env } : {}),
               }),
             )
           }),
@@ -877,7 +886,7 @@ const integrationStart = (exec: Exec) =>
           runtime: got.runtime,
         }),
       }).pipe(Effect.provide(Harness.layer))
-      return yield* Effect.sync(() => exec(main.file, main.args, main.env))
+      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
 

@@ -231,7 +231,12 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
  * Start `command daemon --foreground` (plus `args`) detached, its output appended to ~/.vibest/vibestd.log; does not wait.
  * `vibest daemon --import` is the new vibestd of a handoff, started by the old one.
  */
-export const spawnDaemon = (command: ReadonlyArray<string>, args: ReadonlyArray<string> = []) =>
+/** `env`: added to the new vibestd's own environment only (a handoff's in-memory state); never written anywhere. */
+export const spawnDaemon = (
+  command: ReadonlyArray<string>,
+  args: ReadonlyArray<string> = [],
+  env?: Record<string, string>,
+) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const path = yield* Path.Path
@@ -253,6 +258,7 @@ export const spawnDaemon = (command: ReadonlyArray<string>, args: ReadonlyArray<
           ],
           {
             detached: true,
+            ...(env ? { env, extendEnv: true } : {}),
             stdin: "ignore",
             stdout: "ignore",
             stderr: "ignore",
