@@ -537,7 +537,7 @@ const checks: ReadonlyArray<Check> = [
         await reached("the main agent's turn on the first result", "done-zero")
         await reached("the main agent's turn on the Claude subagent's first result", "done-one")
         await reached("the main agent's turn on the Claude subagent's second result", "done-two")
-        // `vibest daemon restart` ends the subscription on vibestd's side; the main agent subscribes to the next one.
+        // `vibest daemon restart`: the main agent's polls go unanswered, then reach the next vibestd.
         const restart = await w.tty(["daemon", "restart"], "y\n", {
           cwd: repo,
           env: { CLAUDE_CONFIG_DIR: undefined },

@@ -150,7 +150,7 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
       // The main agent moved to Pi under the same session id: the old Claude process neither polls nor renames the
-      // conversation, and Pi (which subscribes) has no poll either.
+      // conversation; Pi, the session's harness now, polls the same route.
       const key = (yield* db.projectKey(projectId))!
       yield* db.coordinatorLaunch(key, "pi", false, {
         runtime: RUNTIME,
@@ -160,7 +160,7 @@ describe("vibestd's HTTP API", () => {
       const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
       assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 200)
     }),
   )
 

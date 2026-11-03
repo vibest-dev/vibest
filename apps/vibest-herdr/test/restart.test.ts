@@ -203,7 +203,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "a Pi main agent (inbox subscribe) after its subagent: waits for its integration's ready report, then its inbox holds one continue notice naming both",
+    "a Pi main agent (inbox poll) after its subagent: waits for its integration's ready report, then its inbox holds one continue notice naming both",
     Effect.gen(function* () {
       const { db, sessions, id: sub, pid } = yield* started
       const processes = yield* FakeProcesses

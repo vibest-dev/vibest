@@ -69,7 +69,7 @@ export const pi: HarnessAdapter = {
   conversation: "assigned",
   rulesInPrompt: false,
   interruptKey: "esc",
-  delivery: "subscribe",
+  delivery: "poll",
   reportsState: true,
   checkProvider: () => undefined,
   launchArgs: (i) => [

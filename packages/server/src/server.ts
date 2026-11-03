@@ -173,7 +173,6 @@ const ACCESS = {
   Launch: "agent",
   List: "spawner",
   Get: "spawner",
-  "Inbox.Subscribe": "coordinator",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
   "Project.RunningCoordinator": "agent",
@@ -794,19 +793,6 @@ export const handlers = VibestRpcs.toLayer(
             details: {},
           })
         }),
-
-      "Inbox.Subscribe": () =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const c = yield* Caller
-            if (c._tag !== "Coordinator")
-              return yield* new Forbidden({
-                method: "Inbox.Subscribe",
-                message: "Inbox.Subscribe is the coordinator's",
-              })
-            return inbox.stream(c.projectId)
-          }),
-        ),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {

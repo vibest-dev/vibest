@@ -51,14 +51,16 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }))
 
-const served = Layer.mergeAll(
+/** vibestd's two sockets: RPC (vibest.sock) and HTTP (vibest-http.sock), where the coordinator polls its inbox. */
+const vibestd = Layer.mergeAll(
   Server.layer.pipe(
     Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
   ),
   Http.layer.pipe(
     Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.httpServer(layout.httpSocket)))),
   ),
-).pipe(Layer.provideMerge(Project.layer), Layer.provideMerge(testLayer()))
+)
+const served = vibestd.pipe(Layer.provideMerge(Project.layer), Layer.provideMerge(testLayer()))
 
 const test = <E>(
   name: string,
@@ -125,7 +127,7 @@ const cli = Effect.gen(function* () {
 
 describe("pi-vibest", () => {
   it.effect(
-    "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
+    "Coordinator: while no vibestd answers it waits without starting one, then polls the next vibestd",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
@@ -178,9 +180,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isFalse(yield* fs.exists((yield* Path.Path).join(layout.home, "vibestd.log")))
         assert.deepStrictEqual(notes, [])
-        yield* Layer.build(
-          Server.layer.pipe(Layer.provide(Platform.daemon.socketServer(layout.socket)), Layer.provide(Project.layer)),
-        )
+        yield* Layer.build(vibestd.pipe(Layer.provide(Project.layer)))
         yield* TestClock.adjust("2 seconds")
         yield* until(
           Effect.sync(() => s.messages.length),
@@ -197,12 +197,11 @@ describe("pi-vibest", () => {
   )
 
   it.effect(
-    "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive, until the session shuts down",
+    "Coordinator: a vibestd that stops answers no poll; the next vibestd's rows still arrive, until the session shuts down",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
         const inbox = yield* Inbox
-        const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = {
@@ -228,12 +227,9 @@ describe("pi-vibest", () => {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
-        const vibestd = Server.layer.pipe(
-          Layer.provide(Platform.daemon.socketServer(layout.socket)),
-          Layer.provide(Project.layer),
-        )
+        const daemon = vibestd.pipe(Layer.provide(Project.layer))
         const first = yield* Scope.make()
-        yield* Layer.buildWithScope(vibestd, first)
+        yield* Layer.buildWithScope(daemon, first)
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -251,15 +247,14 @@ describe("pi-vibest", () => {
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
-        // `vibest daemon restart`: this vibestd closes (interrupting the stream it serves), the next one listens.
+        // `vibest daemon restart`: this vibestd closes, the next one listens.
         yield* Scope.close(first, Exit.void)
-        yield* Layer.build(vibestd)
+        yield* Layer.build(daemon)
         yield* report("second")
         yield* until(contents, (c) => c.length === 2)
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(notes, [])
-        // The session's own end does stop it: a later row stays pending. (One arriving before vibestd sees the closed
-        // connection is claimed by the closing stream and ends failed; the wait keeps this check off that edge.)
+        // The session's own end does stop it: a later row stays pending.
         yield* s.emit("session_shutdown")
         yield* TestClock.withLive(Effect.sleep("500 millis"))
         yield* report("after shutdown")

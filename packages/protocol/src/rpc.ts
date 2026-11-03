@@ -417,8 +417,6 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Report", { payload: { message: Schema.String }, error: Schema.Union([Forbidden, NoSuchSession]) }),
     ),
   ),
-  /** Coordinator side (the Pi extension): this request's inbox rows, one string per batch, instead of the runtime's prompt. */
-  scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
   /**
    * `vibest`, before it execs: upsert the repository's coordinator row at its terminal. sessionId is that row's id
    * (VIBEST_SESSION_ID); harnessSessionId is the conversation to reopen, null with fresh or a harness switch.

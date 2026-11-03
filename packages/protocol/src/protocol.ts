@@ -6,7 +6,7 @@ import type { Harness } from "@vibest/plugin"
  * misunderstood; old versions are not served. An additive feature does not bump it: it gets a flag in Ping's
  * `capabilities`, and a client uses it only when the flag is there.
  */
-export const PROTOCOL = 6
+export const PROTOCOL = 7
 
 /**
  * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents

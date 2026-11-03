@@ -19,10 +19,9 @@ import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/prot
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Option, type Scope, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
-import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -275,7 +274,6 @@ describe("vibest.sock", () => {
         w["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/p1" }),
       ]
       for (const call of refused) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
-      assert.strictEqual(failureTag(yield* Effect.exit(Stream.runDrain(w["Inbox.Subscribe"](undefined)))), "Forbidden")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       // The refused launch rotated nothing: the Coordinator's launch id and report watermark still hold.
       yield* conversationReport(launch.sessionId, "claude", "stale")
@@ -365,7 +363,6 @@ describe("vibest.sock", () => {
         ["Project.StartMain", c["Project.StartMain"]({})],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
-        ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         [
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
@@ -774,7 +771,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "a Pi pane never gets agent.prompt; its subscription takes pending rows first, then new ones as they arrive",
+    "a Pi pane never gets agent.prompt; its integration polls pending rows first, then new ones as they arrive",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const inbox = yield* Inbox
@@ -817,138 +814,23 @@ describe("vibest.sock", () => {
       )
       assert.lengthOf(yield* db.coordinatorPending(project), 3)
 
-      const c = yield* asSession(yield* client, coord.sessionId)
-      const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
-      yield* until(db.coordinatorPending(project), (rows) => rows.length === 0)
+      const received: Array<string> = []
+      const take = Effect.gen(function* () {
+        const batch = yield* inbox.poll(coord.projectId)
+        received.push(batch.text)
+        yield* inbox.ack(coord.projectId, batch.ids)
+      })
+      yield* take
+      yield* take
       yield* inbox.enqueue(row("cccccccc", "four"))
-      assert.deepStrictEqual(Array.from(yield* Fiber.join(received)), ["one\n\ntwo", "three", "four"])
+      yield* take
+      assert.deepStrictEqual(received, ["one\n\ntwo", "three", "four"])
       assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
       )
     }),
-  )
-
-  test(
-    "a withheld Pi chunk with no Ack stays sending, then failed; a later batch is not confirmed",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
-      const db = yield* Db
-      const layout = yield* Layout
-      const general = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: null,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
-      yield* herdr.addPane("w1:p7", "ws", "/")
-      yield* herdr.seedAgent("w1:p7")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p7" },
-      })
-      yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "one", details: {} })
-      yield* inbox.enqueue({ sessionId: "bbbbbbbb", kind: "result", message: "two", details: {} })
-      const sock = yield* Effect.promise(
-        () =>
-          new Promise<net.Socket>((resolve, reject) => {
-            const socket = net.connect(layout.socket)
-            socket.pause()
-            socket.once("error", reject)
-            socket.once("connect", () => {
-              socket.off("error", reject)
-              socket.on("error", () => {})
-              resolve(socket)
-            })
-          }),
-      )
-      const rpc = (id: string, method: string, params: unknown, headers?: ReadonlyArray<readonly [string, string]>) =>
-        JSON.stringify({ jsonrpc: "2.0", id, method, params, ...(headers ? { headers } : {}) }) + "\n"
-      sock.write(
-        rpc("s", "Inbox.Subscribe", null, [
-          ["vibest-protocol", String(PROTOCOL)],
-          ["vibest-caller", "session"],
-          ["vibest-session-id", coord.sessionId],
-          ["vibest-project-id", String(coord.projectId)],
-        ]),
-      )
-      const claimed = yield* until(db.latestInbox("aaaaaaaa", "result"), (row) => row?.status !== "pending")
-      assert.strictEqual(claimed?.status, "sending")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb", "result"))?.status, "pending")
-      sock.destroy()
-      const closed = yield* until(
-        db.latestInbox("aaaaaaaa", "result"),
-        (row) => row?.status === "failed" || row?.status === "delivered",
-      )
-      assert.strictEqual(closed?.status, "failed")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb", "result"))?.status, "pending")
-    }),
-    undefined,
-    15_000,
-  )
-
-  test(
-    "the next pull marks an acked Pi batch delivered, and closing while idle keeps it",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
-      const db = yield* Db
-      const general = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: null,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
-      yield* herdr.addPane("w1:p6", "ws", "/")
-      yield* herdr.seedAgent("w1:p6")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p6" },
-      })
-      yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "one", details: {} })
-      const c = yield* asSession(yield* client, coord.sessionId)
-      const got = yield* Deferred.make<string>()
-      const fiber = yield* c["Inbox.Subscribe"](undefined).pipe(
-        Stream.runForEach((text) => Deferred.succeed(got, text).pipe(Effect.asVoid)),
-        Effect.forkChild,
-      )
-      assert.strictEqual(yield* Deferred.await(got), "one")
-      yield* until(db.latestInbox("aaaaaaaa", "result"), (row) => row?.status === "delivered")
-      yield* Fiber.interrupt(fiber)
-      yield* TestClock.withLive(Effect.sleep("50 millis"))
-      assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))?.status, "delivered")
-    }),
-    undefined,
-    15_000,
   )
 
   test(

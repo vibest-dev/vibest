@@ -117,9 +117,9 @@ export interface HarnessAdapter {
   readonly startup?: Startup
   /**
    * How vibest hands inbox rows to the session: typed into its pane (`type`), or taken by its integration (`poll`,
-   * HTTP `/inbox/poll`, or `subscribe`, the RPC stream).
+   * HTTP `/inbox/poll` and `/inbox/ack`).
    */
-  readonly delivery: "type" | "poll" | "subscribe"
+  readonly delivery: "type" | "poll"
   /**
    * The integration reports what the harness does: `ready` when it takes input, `turn.start` when it works, `blocked`
    * when it waits on the person. vibest then reads only liveness from the runtime (and idle, for a turn that ended

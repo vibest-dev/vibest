@@ -2,8 +2,8 @@ import type { Polled } from "@vibest/protocol/protocol"
 // Inbox rows and their delivery to a project's coordinator (SPEC §11). Rows live in sqlite. Rows for a session (`send`)
 // are delivered by Sessions; here only coordinator-bound rows (report, result, notice) are pushed. A command-line
 // caller reads a session's latest result with `vibest result`.
-// A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
-// vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
+// A coordinator whose harness adapter has `delivery: "poll"` takes its rows itself, by polling vibestd's HTTP socket
+// (`poll` / `ack`): the Claude plugin and the Pi extension alike. Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
 
@@ -87,8 +87,6 @@ export class Inbox extends Context.Service<
     readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a project's coordinator its next batch now. */
     readonly deliver: (projectId: number) => Effect.Effect<void>
-    /** The coordinator's rows from now on, one string per claimed batch, instead of `agent.prompt`. */
-    readonly stream: (projectId: number) => Stream.Stream<string>
     /** The next coordinator-bound row whose delivery succeeded (`agent.prompt` returned, or the integration acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
     readonly delivered: Effect.Effect<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
     /**
@@ -171,9 +169,8 @@ export class Inbox extends Context.Service<
             const presence = yield* coordinatorIdle(h.value, coord.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
             if (presence !== "idle") return
-            // Its harness takes its rows itself (`stream`, `poll`); they wait until it does.
-            const mode = inboxOf(coord.harnessId)
-            if (mode === "subscribe" || mode === "poll") return
+            // Its harness takes its rows itself (`poll`); they wait until it does.
+            if (inboxOf(coord.harnessId) === "poll") return
             const batch = nextBatch(yield* db.coordinatorPending(projectId))
             if (batch.length === 0) return
             const claimed = yield* db.claim(
@@ -262,7 +259,6 @@ export class Inbox extends Context.Service<
        */
       const claimNext = (
         projectId: number,
-        mode: "subscribe" | "poll",
         origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
         hold: (ids: ReadonlyArray<number>) => Effect.Effect<void>,
       ) =>
@@ -272,7 +268,7 @@ export class Inbox extends Context.Service<
           Effect.uninterruptible(
             Effect.gen(function* () {
               const current = yield* db.coordinatorOf(projectId)
-              if (!current || inboxOf(current.harnessId) !== mode || !current.address || !current.runtime)
+              if (!current || inboxOf(current.harnessId) !== "poll" || !current.address || !current.runtime)
                 return undefined
               const address = encodeAddress(current.address)
               if (
@@ -294,62 +290,6 @@ export class Inbox extends Context.Service<
               return batch.filter((r) => claimed.includes(r.id))
             }),
           ),
-        )
-
-      // Guard is the coordinator row as this stream read it. Two subscribers: whichever claims a batch first takes it.
-      // shortcut: delivered means the RPC client queued the chunk (next pull starts only after the socket Ack), not that pi.sendMessage succeeded; a dropped Ack can mark failed after the client already has it, upgrade when delivery must mean sendMessage returned
-      const stream = (projectId: number) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const subscribed = yield* db.coordinatorOf(projectId)
-            const origin =
-              subscribed?.address && subscribed.runtime
-                ? {
-                    runtime: subscribed.runtime,
-                    address: encodeAddress(subscribed.address),
-                    harnessId: subscribed.harnessId,
-                  }
-                : undefined
-            const arrivals = yield* PubSub.subscribe(pubsub)
-            // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
-            let unconfirmed: ReadonlyArray<number> = []
-            const claimOne = () =>
-              origin === undefined
-                ? Effect.succeed(undefined)
-                : claimNext(projectId, "subscribe", origin, (ids) =>
-                    Effect.sync(() => {
-                      unconfirmed = ids
-                    }),
-                  ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
-            // One batch per pull, no buffer: the socket server starts this pull only after the previous chunk's Ack.
-            return Stream.unfold(0, () =>
-              Effect.gen(function* () {
-                if (unconfirmed.length > 0) {
-                  yield* Effect.uninterruptible(
-                    Effect.gen(function* () {
-                      const ids = unconfirmed.slice()
-                      yield* markDelivered(ids)
-                      unconfirmed = []
-                    }),
-                  )
-                }
-                while (true) {
-                  const batch = yield* claimOne()
-                  if (batch !== undefined) return [batch, 0] as const
-                  const row = yield* PubSub.take(arrivals)
-                  if (row.kind === "send") continue
-                }
-              }),
-            ).pipe(
-              Stream.ensuring(
-                Effect.suspend(() => {
-                  const ids = unconfirmed.slice()
-                  unconfirmed = []
-                  return ids.length === 0 ? Effect.void : db.setInboxStatus(ids, "failed", "sending")
-                }),
-              ),
-            )
-          }),
         )
 
       // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
@@ -386,7 +326,7 @@ export class Inbox extends Context.Service<
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
           yield* endLeases(projectId, now)
-          const rows = yield* claimNext(projectId, "poll", undefined, (ids) =>
+          const rows = yield* claimNext(projectId, undefined, (ids) =>
             Effect.sync(() => {
               const held = leases.get(projectId) ?? new Map<number, number>()
               for (const id of ids) held.set(id, now + Duration.toMillis(LEASE))
@@ -434,7 +374,6 @@ export class Inbox extends Context.Service<
         enqueue: (row) => db.insertInbox(row).pipe(Effect.tap(announce)),
         announce,
         deliver,
-        stream,
         delivered: Queue.take(delivered),
         poll,
         ack,

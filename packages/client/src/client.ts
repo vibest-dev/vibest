@@ -119,7 +119,7 @@ export const claimHeaders = (claim: Claim) =>
 export const connect = (socket: string) =>
   Layer.build(
     // The JSON-RPC serialization does not encode the client's keep-alive pings, so the default 5 s ping timeout would cut
-    // every call longer than that (an Inbox.Subscribe stream). A closed unix socket still fails the read at once.
+    // every call longer than that (a long call). A closed unix socket still fails the read at once.
     RpcClient.layerProtocolSocket({ pingInterval: "1 minute", pingTimeout: "1 day" }).pipe(
       Layer.provide(
         Layer.effect(

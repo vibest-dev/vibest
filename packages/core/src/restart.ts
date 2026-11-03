@@ -294,7 +294,7 @@ export const sessionRestart = (deps: {
 
   /**
    * The main agent last: when it was working, its inbox gets the continue notice once its new harness reports ready,
-   * delivered as any row is for its harness (subscribe, the HTTP poll, or typed in). `before`: the subagents of this
+   * delivered as any row is for its harness (the HTTP poll, or typed in). `before`: the subagents of this
    * restart, which the notice names. `wasWorking`: it was working when the restart was asked (a `vibest update` it
    * ran itself, whose turn may end before the restart comes).
    */

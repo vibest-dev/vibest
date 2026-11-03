@@ -1,5 +1,3 @@
-import net from "node:net"
-
 // Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
@@ -11,7 +9,6 @@ import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
 import {
@@ -25,8 +22,8 @@ import {
   FileSystem,
   Layer,
   Option,
+  Schedule,
   type Scope,
-  Stream,
 } from "effect"
 import * as Headers from "effect/http/Headers"
 
@@ -160,19 +157,17 @@ describe("Daemon.Stop", () => {
   )
 
   test(
-    "working agents, a busy main agent, an open subscription and queued messages neither block nor change",
+    "working agents, a busy main agent and queued messages neither block nor change",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* receiver(repo, "pi")
+      const { db, herdr, worker } = yield* receiver(repo, "pi")
       yield* herdr.updateAgent("wC:p1", (a) => ({ ...a, status: "working" }))
       const user = yield* cli(repo)
       yield* user.Send({ id: worker, message: "keep the exact task" })
       const pending = yield* db.pendingInbox(worker)
       const session = yield* db.getSession(worker)
       const closed = yield* herdr.callsTo("close")
-      const sub = yield* Effect.forkScoped(Stream.runDrain(c["Inbox.Subscribe"](undefined)))
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
-      yield* Fiber.interrupt(sub)
       assert.lengthOf(pending, 1)
       assert.strictEqual(pending[0]!.message, "keep the exact task")
       assert.deepStrictEqual(yield* db.pendingInbox(worker), pending)
@@ -245,21 +240,22 @@ describe("Daemon.Stop", () => {
     "a Send and a Pi arrival deferred by the drain wake after a refused Stop, with nothing failed",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* receiver(repo, "pi")
+      const { db, herdr, worker, projectId } = yield* receiver(repo, "pi")
       const sessions = yield* Sessions
       const drain = yield* Drain
       yield* herdr.endTurn(worker)
       yield* writeResult(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
+      // What the Pi extension does: poll, take the batch, ack it.
+      const inbox = yield* Inbox
       const got: Array<string> = []
-      const subscribed = yield* Effect.forkScoped(
-        c["Inbox.Subscribe"](undefined).pipe(
-          Stream.runForEach((body) =>
-            Effect.sync(() => {
-              got.push(body)
-            }),
-          ),
-        ),
+      const polling = yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          const batch = yield* inbox.poll(projectId)
+          if (batch.ids.length === 0) return
+          got.push(batch.text)
+          yield* inbox.ack(projectId, batch.ids)
+        }).pipe(Effect.repeat(Schedule.spaced("20 millis"))),
       )
       yield* until(db.latestInbox(worker, "result"), (r) => r?.status === "delivered")
       const leave = drain.track("held short operation")
@@ -267,7 +263,7 @@ describe("Daemon.Stop", () => {
       yield* draining
       // An already-admitted Send whose fork reaches the session lock after the cut.
       yield* sessions.send(worker, "after reopen")
-      yield* (yield* Inbox).enqueue({
+      yield* inbox.enqueue({
         sessionId: worker,
         kind: "report",
         message: "arrival while draining",
@@ -281,7 +277,7 @@ describe("Daemon.Stop", () => {
         (bodies) => bodies.some((b) => b.includes("arrival while draining")),
       )
       assert.deepStrictEqual(yield* db.inboxWithStatus(worker, "failed"), [])
-      yield* Fiber.interrupt(subscribed)
+      yield* Fiber.interrupt(polling)
     }),
   )
 
@@ -292,8 +288,9 @@ describe("Daemon.Stop", () => {
       const { db, worker, projectId } = yield* receiver(repo, "pi")
       // A second Inbox with no taker, to stop at the queue-to-consumer seam.
       const inbox = Context.get(yield* Layer.build(Layer.fresh(Inbox.layer)), Inbox)
-      const stream = yield* Effect.forkScoped(Stream.runDrain(inbox.stream(projectId)))
       const row = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
+      const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
+      yield* inbox.ack(projectId, polled.ids)
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
@@ -303,7 +300,6 @@ describe("Daemon.Stop", () => {
       assert.strictEqual(consequence.row.id, row.id)
       yield* consequence.done
       assert.strictEqual(yield* settled(stopping), "accepted")
-      yield* Fiber.interrupt(stream)
     }),
   )
 
@@ -329,46 +325,6 @@ describe("Daemon.Stop", () => {
       yield* held.release()
       yield* Fiber.join(removing)
       assert.strictEqual(yield* stopOnceIdle(repo), "accepted")
-    }),
-  )
-
-  test(
-    "a Pi batch on the wire blocks until its ACK; the drained close fails nothing",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const { db, sessionId, worker, projectId } = yield* receiver(repo, "pi")
-      const layout = yield* Layout
-      const socket = yield* Effect.acquireRelease(
-        Effect.promise(
-          () =>
-            new Promise<net.Socket>((resolve, reject) => {
-              const s = net.connect(layout.socket)
-              s.on("error", reject)
-              s.once("connect", () => resolve(s))
-            }),
-        ),
-        (s) =>
-          Effect.sync(() => {
-            s.destroy()
-          }),
-      )
-      const headers = [
-        [PROTOCOL_HEADER, String(PROTOCOL)],
-        [CALLER_HEADER, "session"],
-        [SESSION_HEADER, sessionId],
-        [PROJECT_HEADER, String(projectId)],
-      ]
-      socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
-      yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
-      yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "sending")
-      const stopping = yield* Effect.forkScoped(stop(repo))
-      yield* draining
-      assert.isFalse(yield* shutdownDone)
-      socket.write(JSON.stringify({ jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: "s" } }) + "\n")
-      yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      assert.strictEqual(yield* settled(stopping), "accepted")
-      socket.destroy()
-      assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
     }),
   )
 

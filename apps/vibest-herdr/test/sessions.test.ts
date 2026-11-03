@@ -26,7 +26,6 @@ import {
   PubSub,
   Ref,
   type Scope,
-  Stream,
 } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -3533,26 +3532,22 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a Pi coordinator: archived once the extension acked the result (its next pull), and a clean archive sends it no batch",
+    "a Pi coordinator: archived once the extension acked the result, and a clean archive sends it no batch",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository, "pi")
       yield* finishTurn(w, "status: completed")
       assert.isFalse(yield* archived(w.db, w.id))
-      const batches: Array<string> = []
-      const pulling = yield* Effect.forkChild(
-        inbox.stream(w.projectId).pipe(
-          Stream.take(2),
-          Stream.runForEach((b) => Effect.sync(() => batches.push(b))),
-        ),
-      )
+      const polled = yield* until(inbox.poll(w.projectId), (r) => r.ids.length > 0)
+      assert.include(polled.text, "<agent-result")
+      yield* settle
+      assert.isFalse(yield* archived(w.db, w.id))
+      yield* inbox.ack(w.projectId, polled.ids)
       yield* until(archived(w.db, w.id), (a) => a)
       yield* settle
-      yield* Fiber.interrupt(pulling)
-      assert.lengthOf(batches, 1)
-      assert.include(batches[0]!, "<agent-result")
+      assert.deepStrictEqual((yield* inbox.poll(w.projectId)).ids, [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      // Each pull claimed its batch under the project's lock; none is left once the claims are done.
+      // Each poll claimed its batch under the project's lock; none is left once the claims are done.
       assert.strictEqual(yield* inbox.locks, 0)
       // The auto-archive left no flags either, once the poll ran.
       yield* untilVirtual((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
@@ -3615,12 +3610,12 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* until(b.db.latestInbox(b.id, "result"), (r) => r?.status === "dropped")
       yield* settle
       assert.isFalse(yield* archived(b.db, b.id))
-      // A Pi stream that took the batch and ended before its next pull: failed, not delivered.
+      // A Pi extension that polled the batch and never acked it: still leased, not delivered.
       const c = yield* archiveSession(repo, "pi")
       yield* finishTurn(c, "status: completed")
-      yield* inbox.stream(c.projectId).pipe(Stream.take(1), Stream.runDrain)
+      yield* until(inbox.poll(c.projectId), (r) => r.ids.length > 0)
       yield* settle
-      assert.strictEqual((yield* c.db.latestInbox(c.id, "result"))!.status, "failed")
+      assert.strictEqual((yield* c.db.latestInbox(c.id, "result"))!.status, "sending")
       assert.isFalse(yield* archived(c.db, c.id))
     }),
   )

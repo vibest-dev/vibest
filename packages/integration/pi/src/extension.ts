@@ -10,12 +10,19 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { claimHeaders, type ClientServices, hookPost, SocketConnector, withVibest } from "@vibest/client/client"
+import { claimHeaders, type ClientServices, hookPost, SocketConnector } from "@vibest/client/client"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { EVENTS_ROUTE, GUARD_ROUTE, type IntegrationEvent } from "@vibest/protocol/protocol"
+import {
+  ACK_ROUTE,
+  EVENTS_ROUTE,
+  GUARD_ROUTE,
+  type IntegrationEvent,
+  isPolled,
+  POLL_ROUTE,
+} from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { isUsageLimitError, toolCallOf } from "@vibest/protocol/tools"
-import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
+import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema } from "effect"
 
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
@@ -150,6 +157,9 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
   yield* pi.handle("agent_end", (_event, ctx) => conversation(ctx))
 })
 
+/** How often the coordinator asks vibestd for its next inbox batch. */
+const POLL_MS = 1000
+
 /** Inbox rows for this pane, as custom messages the model sees but the TUI hides: a turn starts when Pi is idle, otherwise they queue as follow-ups. */
 const coordinator: Role = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -175,43 +185,34 @@ const coordinator: Role = Layer.effectDiscard(
     yield* pi.handle("session_start", (_e, ctx) =>
       ctx.mode === "tui" ? Deferred.succeed(started, ctx).pipe(Effect.asVoid) : Effect.void,
     )
-    const subscribe = () =>
-      withVibest(
-        // No conversation header: only a `conversation` event names it (a nested Pi TUI shares this environment).
-        { _tag: "session", sessionId: sessionId.value, pluginVersion: VERSION },
-        (client) =>
-          client["Inbox.Subscribe"](undefined).pipe(
-            Stream.runForEach((content) =>
-              pi.sendMessage(
-                { customType: "vibest", content, display: false },
-                { triggerTurn: true, deliverAs: "followUp" },
-              ),
-            ),
-            // A vibestd that stops interrupts the stream on its side, and the call ends with that interruption. It is not
-            // this fiber's own (that one never reaches here), so it ends the stream like any close: subscribe again.
-            Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
-          ),
-        // Never start vibestd from here: during `vibest daemon restart` the replacement may be between sockets.
-        { start: false },
-      ).pipe(
-        // The connection dropped or vibestd closed the stream (vibestd restarted): subscribe again; rows not yet taken stay pending.
-        Effect.retry({
-          while: (e) => e._tag === "RpcClientError" || e._tag === "DaemonUnavailable",
-          schedule: Schedule.spaced("2 seconds"),
-        }),
-        Effect.repeat(Schedule.spaced("2 seconds")),
-      )
-    // Anything else ends the subscription; no handler is running, so tell the user.
+    // The same poll and ack as the Claude plugin's (HTTP socket): each batch leased, acked once Pi took it. An ack
+    // that failed is sent again before the next poll; a batch Pi did not take goes back (`release`).
+    const layout = yield* Layout
+    const headers = yield* piHeaders(sessionId.value)
+    let unacked: ReadonlyArray<number> = []
+    let release: ReadonlyArray<number> = []
+    const once = Effect.gen(function* () {
+      if (unacked.length > 0 || release.length > 0) {
+        const r = yield* hookPost(layout.httpSocket, ACK_ROUTE, headers, { ids: unacked, release })
+        if (r.status !== 200) return
+        unacked = []
+        release = []
+      }
+      const r = yield* hookPost(layout.httpSocket, POLL_ROUTE, headers, {})
+      if (r.status !== 200 || !isPolled(r.body) || r.body.ids.length === 0) return
+      const batch = r.body
+      const taken = yield* pi
+        .sendMessage(
+          { customType: "vibest", content: batch.text, display: false },
+          { triggerTurn: true, deliverAs: "followUp" },
+        )
+        .pipe(Effect.exit)
+      if (taken._tag === "Success") unacked = batch.ids
+      else release = batch.ids
+    })
+    // vibestd away or restarting: the next tick tries again; rows not taken stay pending (their lease runs out).
     yield* Deferred.await(started).pipe(
-      Effect.flatMap((ctx) =>
-        subscribe().pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.sync(() => ctx.ui.notify(`vibest: inbox subscription ended: ${Cause.pretty(cause)}`, "error")),
-          ),
-        ),
-      ),
+      Effect.andThen(once.pipe(Effect.ignore, Effect.repeat(Schedule.spaced(`${POLL_MS} millis`)))),
       Effect.forkScoped,
     )
   }),

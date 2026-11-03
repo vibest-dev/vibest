@@ -92,7 +92,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
   natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
-  read with `vibest inbox`. Today only the main agent polls or subscribes; subagents are typed into, and a row with
+  read with `vibest inbox`. Today only the main agent polls; subagents are typed into, and a row with
   no session to go to is dropped.
 - **Reply routing is data** (planned), in one function, `replyTo(turn)`, evaluated when a turn ends:
   1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
@@ -322,10 +322,10 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `sending`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Into the main Agent** natively where the CLI allows it, as its harness adapter's `inbox` says: `poll`, the
-  Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
+- **Into the main Agent** natively where the CLI allows it, as its harness adapter's `delivery` says: `poll`, the
+  Claude plugin and the Pi extension poll vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
   vibestd's memory; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
-  session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
+  session's own harness may poll); `type`, typed through herdr
   `agent.prompt`. No main Agent pane: Messages are `dropped`.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
