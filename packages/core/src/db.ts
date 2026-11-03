@@ -1194,6 +1194,30 @@ const make = Effect.gen(function* () {
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
 
+    /** Whether `ancestor` started `id`, or started a session that did (`parent_session_id`, upward). */
+    descends: (id: string, ancestor: string) =>
+      sql<{ hit: number }>`WITH RECURSIVE up (id, parent) AS (
+          SELECT id, parent_session_id FROM session WHERE id = ${id}
+          UNION SELECT s.id, s.parent_session_id FROM session s JOIN up ON s.id = up.parent
+        ) SELECT 1 AS hit FROM up WHERE parent = ${ancestor} LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
+    /** Who started `id`, when a session did. */
+    parentOf: (id: string) =>
+      sql<{ parent: string | null }>`SELECT parent_session_id AS parent FROM session WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.parent ?? undefined),
+        Effect.orDie,
+      ),
+
+    /** The directory session `id` works in, as its row records it. */
+    directoryOf: (id: string) =>
+      sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.directory),
+        Effect.orDie,
+      ),
+
     /** How many sessions have a live status in memory (tests check it shrinks back once sessions end). */
     liveStatuses: Effect.sync(() => statuses.size),
 

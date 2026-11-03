@@ -44,7 +44,15 @@ export interface RulesInput {
   readonly memory: string
   /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the rules. */
   readonly peer?: string | undefined
+  /** Its agent definition: whether it may start sessions, and the rules it adds. */
+  readonly agent?: { readonly spawn: boolean; readonly rules?: string | undefined } | undefined
 }
+
+const spawnRule = (r: RulesInput) =>
+  r.agent?.spawn
+    ? `
+- You may start sessions of your own for parts of your task with \`${invocation(r.vibest)} run '<prompt>'\` (\`${invocation(r.vibest)} ls\`, \`result\`, \`send\`, \`interrupt\` for the ones you started). Their results arrive in this pane as messages; gather them before you report.`
+    : ""
 
 const gitRule = (r: RulesInput) =>
   r.peer
@@ -58,7 +66,7 @@ Complete exactly what was asked. Don't fix unrelated issues you discover — sug
 - Your working directory is a git worktree (in a project of several repositories, a directory with one worktree per repository; the git rules below apply to each repository you change). Make changes only there, limited to what your task requires; never make another worktree, clone or copy to work in. If you encounter confusing file state or unexpected changes that aren't from your work, stop and report to the coordinator rather than trying to resolve it yourself. Don't modify code you don't understand.
 ${gitRule(r)}
 - Scratchpad for intermediate results: ${r.scratch}. Name files you create there starting with your agent id (for example ${r.id}-research.md), and change only those.
-- Never run herdr commands; vibest manages the panes.
+- Never run herdr commands; vibest manages the panes.${spawnRule(r)}
 
 You may be continued with follow-up instructions after completing a previous task. When this happens:
 - You retain full context from your previous work — use it
@@ -96,7 +104,7 @@ Then the details: what you did or found — be specific with file paths, line nu
 If a background command or task you started is still running when you end your turn, say so in your report: what is running, and that you will continue when it finishes. Your report is still delivered as your result.
 
 Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
-${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
+${r.agent?.rules ? `\n${r.agent.rules}\n` : ""}${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
 }
 
 /** "pi, claude or cursor": every harness, so the prompt stays fixed; `vibest run` itself says when one is not set up. */

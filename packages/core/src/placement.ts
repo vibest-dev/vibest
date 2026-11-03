@@ -33,11 +33,14 @@ export const sessionPlacement = (deps: {
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly earlierSharer: (id: string) => Effect.Effect<string | undefined>
+    readonly parentOf: (id: string) => Effect.Effect<string | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
   }
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
+  /** What the session's agent definition puts in its rules. */
+  readonly agentRules: (agent: string) => { readonly spawn: boolean; readonly rules?: string | undefined }
   readonly layout: {
     readonly scratch: (key: string) => string
     readonly rulesFile: (id: string) => string
@@ -120,15 +123,18 @@ export const sessionPlacement = (deps: {
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  /** The project's main agent terminal, when it runs in this same runtime (pane ids are the runtime's own). */
+  /**
+   * Beside whoever started the session: a session that spawned it (a lead) when its terminal is in this same runtime,
+   * else the project's main agent's terminal when that one is (pane ids are the runtime's own).
+   */
   const nearMain = (session: SessionRow, kind: string) =>
-    db
-      .coordinatorOf(session.projectId)
-      .pipe(
-        Effect.map((main) =>
-          main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined,
-        ),
-      )
+    Effect.gen(function* () {
+      const parent = yield* db.parentOf(session.id)
+      const lead = parent === undefined ? undefined : yield* db.getSession(parent)
+      if (lead?.runtime === kind && lead.exitedAt === null && lead.address.id !== "") return lead.address
+      const main = yield* db.coordinatorOf(session.projectId)
+      return main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined
+    })
 
   /**
    * The session's terminal (runtime-port.md §3 `open`): running `argv`, kept with the project's other terminals, beside
@@ -153,7 +159,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    // Beside the pane a caller names (--peer), else beside the project's main agent when it runs in this runtime.
+    // Beside the pane a caller names (--peer), else beside whoever started it (nearMain).
     const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
     const choice = {
       harnessId: session.harnessId,
@@ -217,6 +223,7 @@ export const sessionPlacement = (deps: {
     const rules = sessionRules({
       id: session.id,
       peer: splitFrom,
+      agent: deps.agentRules(session.agent),
       scratch,
       vibest,
       ...(yield* projectText(layout.project(key))),
@@ -383,6 +390,7 @@ export const sessionPlacement = (deps: {
         id: session.id,
         // It joined another live session's directory with --peer: that one was there first. The owner keeps its own rules.
         peer: yield* db.earlierSharer(session.id),
+        agent: deps.agentRules(session.agent),
         scratch: layout.scratch(key),
         vibest,
         ...(yield* projectText(layout.project(key))),

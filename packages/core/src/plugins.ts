@@ -19,6 +19,7 @@ import {
   Stream,
 } from "effect"
 
+import { Agents } from "./agents.ts"
 import { Harnesses } from "./harness.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
@@ -200,6 +201,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const runtimes = yield* Runtimes
     // Optional: a host made without the registry (tests) refuses harness registrations.
     const harnesses = yield* Effect.serviceOption(Harnesses)
+    const agents = yield* Effect.serviceOption(Agents)
     /** Set `candidate` up in a new scope: what runs, or why it failed. */
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -226,7 +228,12 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             callback: HookFn<Extract<`agent.${S}`, HookName>>,
           ) => Effect.Effect<void, never, Scope.Scope>
         },
-      ): VibestPlugin.Domain<"agent"> => ({
+      ): VibestPlugin.Context["agent"] => ({
+        // Beside the hooks: a definition kept for the plugin's lifetime, in its own scope.
+        define: (definition) =>
+          Option.isNone(agents)
+            ? Effect.die(new Error("this vibestd has no agent registry"))
+            : agents.value.define(definition).pipe(Scope.provide(scope)),
         hook: <S extends VibestPlugin.HookOf<"agent">>(short: S, callback: HookFn<Extract<`agent.${S}`, HookName>>) => {
           // hasOwn, not a property read: `toString` is on the prototype and is not a hook.
           if (typeof short !== "string" || !Object.hasOwn(register, short)) {

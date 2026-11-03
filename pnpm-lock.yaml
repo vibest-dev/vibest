@@ -236,6 +236,9 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../../packages/plugin
+      '@vibest/plugin-coordinator':
+        specifier: workspace:*
+        version: link:../../packages/plugin-coordinator
       '@vibest/plugin-harness-choice':
         specifier: workspace:*
         version: link:../../packages/plugin-harness-choice
@@ -350,6 +353,15 @@ importers:
 
   packages/plugin:
     devDependencies:
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
+  packages/plugin-coordinator:
+    dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
       effect:
         specifier: 4.0.2
         version: 4.0.2

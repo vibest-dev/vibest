@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { Agents } from "@vibest/core/agents"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -16,6 +17,7 @@ Cli.command(Platform.daemon, Platform.exec).pipe(
   Cli.printFailure,
   Effect.provide(Layout.layer),
   Effect.provide(BuiltinHarnesses.layer),
+  Effect.provide(Agents.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
   Effect.provide(Platform.services),
   (program) => Platform.runMain(program, { disableErrorReporting: true, teardown: Cli.teardown }),

@@ -279,7 +279,8 @@ describe("plugins: spawn hook", () => {
       const plugins = yield* Plugins
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
-      assert.deepInclude(listed[0], { id: "harness-choice", status: "active" })
+      assert.deepInclude(listed[0], { id: "coordinator", status: "active" })
+      assert.deepInclude(listed[1], { id: "harness-choice", status: "active" })
       assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
       assert.deepInclude(byId("broken")[0], { id: "broken", status: "failed" })
       assert.include(byId("broken")[0]!.error, "setup boom")
@@ -339,6 +340,7 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         listed.map((p) => [p.id, p.status]),
         [
+          ["coordinator", "active"],
           ["harness-choice", "active"],
           ["runtime-choice", "active"],
           ["session", "failed"],
@@ -349,10 +351,10 @@ describe("plugins: spawn hook", () => {
         ],
       )
       const supported = "agent.start.before, agent.fail"
-      assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
-      assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
-      assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
-      assert.include(listed[5]!.error, `unsupported hook "agent.toString"`)
+      assert.include(listed[3]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
+      assert.include(listed[4]!.error, `unsupported hook "agent.worker.spawn"`)
+      assert.include(listed[5]!.error, `unsupported hook "agent.session.start"`)
+      assert.include(listed[6]!.error, `unsupported hook "agent.toString"`)
     }),
     {
       plugins: [

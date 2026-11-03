@@ -1,4 +1,5 @@
 import { spawnDaemon } from "@vibest/client/client"
+import { Agents } from "@vibest/core/agents"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
@@ -156,6 +157,7 @@ const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> 
 
 /**
  * Who may call each method (SPEC §7). `open`: protocol only, no caller. `session`: a non-coordinator session only.
+ * `spawner`: the command line, a coordinator, or a session whose agent definition `can.spawn` (a lead).
  * `agent`: a coordinator's or the command line's. `coordinator`: a coordinator only. `owner`: a coordinator of the
  * session's project, or the command line. `self`: a subagent's own terminal for its own id, or the command line at the
  * project's root for its main agent (its start after a restart). The table must list every method.
@@ -167,10 +169,10 @@ const ACCESS = {
   Subscriptions: "open",
   Republish: "open",
   Report: "session",
-  Spawn: "agent",
+  Spawn: "spawner",
   Launch: "agent",
-  List: "agent",
-  Get: "agent",
+  List: "spawner",
+  Get: "spawner",
   "Inbox.Subscribe": "coordinator",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
@@ -193,7 +195,7 @@ const ACCESS = {
   "Agents.Restart": "cli",
 } as const satisfies Record<
   RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
-  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
+  "open" | "session" | "spawner" | "agent" | "coordinator" | "owner" | "cli" | "self"
 >
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
@@ -254,7 +256,7 @@ const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id
   })
 
 /** Missing, mixed, or malformed caller headers. Never becomes cli. */
-const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
+const resolveCaller = (db: Db["Service"], agents: Agents["Service"], headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
     const kind = header(headers, CALLER_HEADER)
     const sessionId = header(headers, SESSION_HEADER)
@@ -292,7 +294,12 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
         } satisfies CallerShape
       }
       if (repository._tag === "Some") return yield* bad(`${method} is a session; a repository is not its identity`)
-      return { _tag: "Session", sessionId: row.id, projectId: row.projectId } satisfies CallerShape
+      return {
+        _tag: "Session",
+        sessionId: row.id,
+        projectId: row.projectId,
+        can: agents.of(row.agent).can,
+      } satisfies CallerShape
     }
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
@@ -350,8 +357,9 @@ export const CallerGateLive = Layer.effect(
   CallerGate,
   Effect.gen(function* () {
     const db = yield* Db
+    const agents = yield* Agents
     return CallerGate.of((effect, { headers, rpc }) =>
-      resolveCaller(db, headers, rpc._tag).pipe(
+      resolveCaller(db, agents, headers, rpc._tag).pipe(
         Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
       ),
     )
@@ -376,29 +384,47 @@ export const handlers = VibestRpcs.toLayer(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
 
+    const refused = (method: string, sessionId: string) =>
+      new Forbidden({
+        method,
+        message: `session ${sessionId} may not call ${method}; its agent only reports to whoever started it (vibest report)`,
+      })
+
     /** A coordinator's or the command line's request; a session's is refused. */
-    const agent = (method: MethodOf<"agent" | "owner">) =>
+    const agent = (method: MethodOf<"agent">) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag === "Session")
-          return yield* new Forbidden({
-            method,
-            message: `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)`,
-          })
+        if (c._tag === "Session") return yield* refused(method, c.sessionId)
         return c
       })
 
-    /** A request that may manage session `id`: its project's coordinator, or the command line. */
+    /** A coordinator's, the command line's, or a session's whose agent may spawn. */
+    const spawning = (method: MethodOf<"spawner">) =>
+      Effect.gen(function* () {
+        const c = yield* Caller
+        if (c._tag === "Session" && !c.can.spawn) return yield* refused(method, c.sessionId)
+        return c
+      })
+
+    /**
+     * A request that may manage session `id`: the command line; its project's coordinator; a session whose agent may
+     * message the project, or one that started `id` (directly or through its own sessions) and may message its children.
+     */
     const managed = (method: MethodOf<"owner">, id: string) =>
       Effect.gen(function* () {
-        const c = yield* agent(method)
+        const c = yield* Caller
         const session = yield* db.getSession(id)
         if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-        if (c._tag === "Coordinator" && session.projectId !== c.projectId)
-          return yield* new Forbidden({
-            method,
-            message: `${id} belongs to another coordinator; only it or the user may manage it`,
-          })
+        if (c._tag === "Cli") return
+        const other = new Forbidden({
+          method,
+          message: `${id} is not yours to manage; only whoever started it, its project's main agent or the user may`,
+        })
+        if (session.projectId !== c.projectId) return yield* other
+        if (c._tag === "Coordinator") return
+        if (c.can.message === "project") return
+        if (c.can.message === "children" && (yield* db.descends(id, c.sessionId))) return
+        return yield* c.can.message === "report-only" ? refused(method, c.sessionId) : other
       })
 
     /** Root and key of a directory. A platform failure is a defect; not being a project is `NotInRepository`. */
@@ -557,7 +583,7 @@ export const handlers = VibestRpcs.toLayer(
 
       Spawn: (input) =>
         Effect.gen(function* () {
-          const c = yield* agent("Spawn")
+          const c = yield* spawning("Spawn")
           if (input.agent === "coordinator" || input.agent === "main")
             return yield* new Forbidden({
               method: "Spawn",
@@ -565,15 +591,21 @@ export const handlers = VibestRpcs.toLayer(
             })
           // The main agent starts sessions in its own project wherever its shell is, e.g. inside one repository of a
           // multi-repository Project. Its working directory only counts for a main agent saved without its project directory.
-          const own = c._tag === "Coordinator" ? (yield* db.coordinatorOf(c.projectId))?.projectDirectory : undefined
-          const directory = own ?? c.repositoryRoot
+          // A lead starts them from the directory it works in (its worktree is of the same project).
+          const own =
+            c._tag === "Coordinator"
+              ? (yield* db.coordinatorOf(c.projectId))?.projectDirectory
+              : c._tag === "Session"
+                ? yield* db.directoryOf(c.sessionId)
+                : undefined
+          const directory = own ?? (c._tag === "Session" ? undefined : c.repositoryRoot)
           if (directory === undefined)
             return yield* new InvalidCaller({
               method: "Spawn",
               message: "vibest run needs a project: run it inside a git repository, or a directory of git repositories",
             })
           const project = yield* atProject(directory)
-          if (c._tag === "Coordinator" && (yield* db.projectId(project.key)) !== c.projectId)
+          if (c._tag !== "Cli" && (yield* db.projectId(project.key)) !== c.projectId)
             return yield* new Forbidden({
               method: "Spawn",
               message:
@@ -592,7 +624,7 @@ export const handlers = VibestRpcs.toLayer(
             agent: input.agent,
             peer: input.peer,
             archive: input.archive,
-            parentSessionId: c._tag === "Coordinator" ? c.sessionId : undefined,
+            parentSessionId: c._tag === "Cli" ? undefined : c.sessionId,
           })
         }),
 
@@ -687,11 +719,11 @@ export const handlers = VibestRpcs.toLayer(
 
       List: ({ stopped, all }) =>
         Effect.gen(function* () {
-          const c = yield* agent("List")
+          const c = yield* spawning("List")
           // A cli in a project sees that project, including its main agent. `all`: every project (`stop` in none). Not a
           // Project and not `all`: no sessions of this directory to show.
           const projectId =
-            c._tag === "Coordinator"
+            c._tag !== "Cli"
               ? c.projectId
               : all === true
                 ? undefined
@@ -725,7 +757,7 @@ export const handlers = VibestRpcs.toLayer(
 
       Get: ({ id }) =>
         Effect.gen(function* () {
-          yield* agent("Get")
+          yield* spawning("Get")
           const row = yield* sessions.get(id)
           const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
           return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }

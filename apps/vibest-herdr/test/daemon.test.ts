@@ -6,6 +6,7 @@ import util from "node:util"
 // unlinked. Real vibestd processes on temporary VIBEST_HOMEs, in real time; never the user's.
 import { assert, describe, it } from "@effect/vitest"
 import { probe } from "@vibest/client/client"
+import { Agents } from "@vibest/core/agents"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { type Host, run } from "@vibest/server/daemon"
@@ -213,6 +214,7 @@ describe.concurrent("vibestd.pid lock", () => {
           Effect.provideService(Layout, layout),
           Effect.provideService(VibestCommand, ["vibestd-under-test"]),
           Effect.provide(builtinHarnesses),
+          Effect.provide(Agents.layer),
           Effect.provide(
             ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: layout.home, PATH: "/usr/bin:/bin" })),
           ),

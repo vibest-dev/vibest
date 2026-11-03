@@ -2,9 +2,11 @@
 // loads a plugin, so a plugin imports it normally and never bundles either. See architecture.md §8 and §9.
 import { type Effect, Schema, type Scope } from "effect"
 
+import type { AgentRegistry } from "./agent.ts"
 import type { HarnessRegistry } from "./harness.ts"
 import type { RuntimeRegistry } from "./runtime.ts"
 
+export * as Agent from "./agent.ts"
 export * as Harness from "./harness.ts"
 export * as Plugin from "./plugin.ts"
 export * as Runtime from "./runtime.ts"
@@ -174,7 +176,8 @@ export interface Domain<D extends string> {
 export interface Context {
   /** This plugin's `options` from vibest.json. */
   readonly options: Readonly<Record<string, unknown>>
-  readonly agent: Domain<"agent">
+  /** Agent hooks, and `define`: what a kind of session may do (kept for the plugin's lifetime). */
+  readonly agent: Domain<"agent"> & AgentRegistry
   /** Register a terminal runtime (`runtime-port.md`). Beside `agent.hook`; kept for the plugin's lifetime. */
   readonly runtime: RuntimeRegistry
   /** Register an agent CLI (harness adapter). Kept for the plugin's lifetime, like `runtime.register`. */

@@ -320,7 +320,7 @@ describe("vibest.sock", () => {
       for (const call of others) {
         const exit = yield* Effect.exit(call)
         assert.strictEqual(failureTag(exit), "Forbidden")
-        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another coordinator/)
+        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /is not yours to manage/)
       }
       assert.strictEqual(failureTag(yield* Effect.exit(b.Send({ id: "nope0000", message: "x" }))), "NoSuchSession")
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
@@ -971,6 +971,7 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(
         (yield* c.Plugins()).map((p) => [p.id, p.status, p.calls, p.changed, p.refused]),
         [
+          ["coordinator", "active", 0, 0, 0],
           ["harness-choice", "active", 2, 1, 0],
           ["runtime-choice", "active", 2, 2, 0],
           ["route", "active", 2, 1, 0],

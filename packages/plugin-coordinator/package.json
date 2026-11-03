@@ -1,0 +1,17 @@
+{
+  "name": "@vibest/plugin-coordinator",
+  "version": "0.0.1-beta.16",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "@vibest/plugin": "workspace:*",
+    "effect": "catalog:"
+  }
+}

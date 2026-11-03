@@ -40,6 +40,7 @@ import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
 
+import { Agents } from "./agents.ts"
 import { Db, type InboxRow, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
 import {
@@ -239,6 +240,7 @@ export class Sessions extends Context.Service<
       const runtimes = yield* Runtimes
       const harness = yield* Harness
       const harnesses = yield* Harnesses
+      const agents = yield* Effect.serviceOption(Agents)
       const inbox = yield* Inbox
       const drain = yield* Drain
       const layout = yield* Layout
@@ -650,6 +652,10 @@ export class Sessions extends Context.Service<
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
         db,
         runtimes,
+        agentRules: (agent) => {
+          const definition = Option.isSome(agents) ? agents.value.of(agent) : undefined
+          return { spawn: definition?.can.spawn ?? false, rules: definition?.rules }
+        },
         layout,
         fs,
         path,

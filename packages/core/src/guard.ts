@@ -359,18 +359,21 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   return undefined
 })
 
-/** The built-in agents: the main agent (`vibest`), and `general`, the agent every spawned session runs. */
+/** The role names vibest itself starts: the main agent (`vibest`), and `general`, the default of `vibest run`. */
 export const COORDINATOR = "coordinator"
 export const GENERAL = "general"
 
-/** The rules of `agent` (VIBEST_AGENT): the coordinator's, or every other session's. */
-export const rulesOf = (agent: string): Rules => (agent === COORDINATOR ? coordinator : session)
+/** A tools tier (an agent definition's `tools`): `inspect` edits nothing (the main agent's rules), `full` works in its worktree. */
+export type Tier = "inspect" | "full"
 
-/** The rules of `agent` applied to one neutral tool call: the reason to refuse it, if any. */
-export const check = (agent: string, call: ToolCall) =>
+/** The rules of a tier. */
+export const rulesOf = (tier: Tier): Rules => (tier === "inspect" ? coordinator : session)
+
+/** The rules of `tier` applied to one neutral tool call: the reason to refuse it, if any. */
+export const check = (tier: Tier, call: ToolCall) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     if (!path.isAbsolute(call.cwd))
       return yield* Effect.fail(new Error("the tool call has no absolute working directory"))
-    return yield* rulesOf(agent)({ ...call, cwd: path.normalize(call.cwd) })
+    return yield* rulesOf(tier)({ ...call, cwd: path.normalize(call.cwd) })
   })

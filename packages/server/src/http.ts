@@ -1,3 +1,4 @@
+import { Agents } from "@vibest/core/agents"
 // vibestd's HTTP API (`vibest-http.sock`, beside vibest.sock): what a harness integration that can only make HTTP requests
 // calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once. The caller is
 // a session, named by the shared session headers (@vibest/protocol `sessionHeaders`); the transport is not part of it.
@@ -8,7 +9,7 @@
 //                                                       taken while stopping
 //   /events IntegrationEvent     → 204                  ready, conversation, turn.start, turn.end, blocked (hooks.ts);
 //                                                       a settlement, so still taken while stopping
-//   /guard { tool }              → { deny? }            Guard.check of the neutral ToolCall with the session's own agent
+//   /guard { tool }              → { deny? }            Guard.check of the neutral ToolCall at the tier of the session's agent
 //   /hook { hook, payload }      → { output? }          a shell-hook CLI's raw hook: its adapter's decode turns it into
 //                                                       events (as /events) or a tool call (as /guard, answered in
 //                                                       the CLI's own format); a settlement
@@ -75,6 +76,7 @@ export const make = Effect.gen(function* () {
   const sessions = yield* Sessions
   const drain = yield* Drain
   const harnesses = yield* Harnesses
+  const agents = yield* Agents
   const layout = yield* Layout
   const header = (headers: Headers.Headers, name: string) => Option.getOrUndefined(Headers.get(headers, name))
 
@@ -150,7 +152,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const key = yield* db.projectKey(who.projectId)
           const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
-          return yield* Guard.check(who.agent, tool).pipe(
+          return yield* Guard.check(agents.of(who.agent).tools, tool).pipe(
             Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
             Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),
           )

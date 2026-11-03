@@ -7,6 +7,7 @@ import { Harness, HarnessUnavailable, type HarnessId } from "@vibest/core/harnes
 import { BUILTIN } from "@vibest/core/harnesses"
 
 const HARNESS_IDS = Object.keys(BUILTIN)
+import { Agents } from "@vibest/core/agents"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { normalizeModels } from "@vibest/core/models"
@@ -19,6 +20,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
+import { coordinatorPlugin } from "@vibest/plugin-coordinator"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
@@ -451,6 +453,7 @@ const over = (options: TestOptions) => {
     Plugins,
     Plugins.make(
       [
+        { source: "builtin:coordinator", revision: "coordinator", options: {}, plugin: coordinatorPlugin },
         harnessChoice,
         { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
         ...(options.plugins ?? []).map((entry) => {
@@ -498,6 +501,7 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(runtime),
         Layer.provideMerge(harnessOf(options)),
         Layer.provideMerge(BuiltinHarnesses.layer),
+        Layer.provideMerge(Agents.layer),
         Layer.provideMerge(
           Layer.effect(
             Processes,

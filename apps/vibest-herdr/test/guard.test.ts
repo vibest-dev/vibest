@@ -1,6 +1,7 @@
-// The guard (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
+// The guard (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
+import { Agents } from "@vibest/core/agents"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
@@ -535,6 +536,7 @@ describe("wizard entry", () => {
             return Effect.die("socket")
           }),
           Effect.provide(builtinHarnesses),
+          Effect.provide(Agents.layer),
           Effect.provideService(
             Crypto.Crypto,
             Crypto.make({
@@ -601,6 +603,7 @@ describe("vibest --session inside herdr", () => {
             return Effect.die("socket")
           }),
           Effect.provide(builtinHarnesses),
+          Effect.provide(Agents.layer),
           Effect.provide(Platform.services),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
