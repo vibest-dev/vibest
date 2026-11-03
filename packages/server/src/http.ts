@@ -130,7 +130,7 @@ export const make = Effect.gen(function* () {
         if (harnesses.find(who.harness)?.delivery !== "poll")
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         // The main agent takes its project's results and notices (Inbox); any other session its own tasks and sends.
-        const main = who.agent === "coordinator"
+        const main = who.entry
         if (request.path === POLL_ROUTE) return ok(yield* main ? inbox.poll(who.projectId) : sessions.poll(who.id))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")
@@ -145,7 +145,7 @@ export const make = Effect.gen(function* () {
                 .pipe(Effect.andThen(sessions.release(who.id, release)), Effect.as(ok({ acked: ids }))),
         )
       }
-      const caller = { id: who.id, agent: who.agent, harness: who.harness, projectId: who.projectId }
+      const caller = { id: who.id, agent: who.agent, entry: who.entry, harness: who.harness, projectId: who.projectId }
       const events = (list: ReadonlyArray<IntegrationEvent>, label: string) =>
         admitted(
           label,
@@ -160,7 +160,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const key = yield* db.projectKey(who.projectId)
           const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
-          return yield* Guard.check(agents.of(who.agent).tools, tool).pipe(
+          return yield* Guard.check(agents.ofSession(who).tools, tool).pipe(
             Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
             Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),
           )
@@ -174,7 +174,7 @@ export const make = Effect.gen(function* () {
         const body = yield* Schema.decodeUnknownEffect(GuardBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return ok({ deny: "vibest could not read this tool call; it is refused." })
         // A tool call is the harness at work: a session that waited on the person goes on.
-        if (who.agent !== "coordinator") yield* sessions.activity(who.id, "working")
+        if (!who.entry) yield* sessions.activity(who.id, "working")
         const reason = yield* guard(body.value.tool)
         return ok(reason === undefined ? {} : { deny: reason })
       }

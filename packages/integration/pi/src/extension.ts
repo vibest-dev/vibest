@@ -209,8 +209,6 @@ const inboxLoop = Effect.fn("inboxLoop")(function* (sessionId: string, display: 
 const coordinator: Role = Layer.effectDiscard(
   Effect.gen(function* () {
     const pi = yield* Pi
-    // Only the main agent (`VIBEST_AGENT=coordinator`) gets vibest's multi-agent skills (`delegate` and `pipeline`).
-    yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths: [skillsDir] }))
     // Clear the prompt sections other extensions add for a coding agent. Pi runs these handlers in extension load order,
     // so only sections added by extensions loaded before pi-vibest are cleared; ones loaded after it keep theirs.
     // Turns started by inbox rows skip this event and get the base prompt, which never has them.
@@ -226,6 +224,20 @@ const coordinator: Role = Layer.effectDiscard(
     if (Option.isNone(sessionId)) return
     yield* reportSession(sessionId.value)
     yield* inboxLoop(sessionId.value, false)
+  }),
+)
+
+/** vibest's own skills its agent definition names (VIBEST_SKILLS, comma separated): only those, and none without it. */
+const skills: Role = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const names = (yield* Config.option(Config.String("VIBEST_SKILLS"))).pipe(
+      Option.map((v) => v.split(",").filter((n) => /^[a-z0-9-]+$/.test(n))),
+      Option.getOrElse((): Array<string> => []),
+    )
+    if (names.length === 0) return
+    const pi = yield* Pi
+    const skillPaths = names.map((n) => path.join(skillsDir, n, "SKILL.md"))
+    yield* pi.handle("resources_discover", () => Effect.succeed({ skillPaths }))
   }),
 )
 
@@ -252,8 +264,8 @@ export const extension = Layer.unwrap(
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
     // vibestd knows the session's agent from its id: without one, no guard and no events (a Pi run outside vibest); a
     // coordinator TUI still gets its look.
-    if (!agent || !sessionId) return agent === "coordinator" ? coordinator : Layer.empty
-    const guard = Layer.merge(Layer.effectDiscard(guarded(sessionId)), ready(sessionId))
+    if (!agent || !sessionId) return agent === "coordinator" ? Layer.merge(coordinator, skills) : Layer.empty
+    const guard = Layer.mergeAll(Layer.effectDiscard(guarded(sessionId)), ready(sessionId), skills)
     if (agent === "coordinator") return coordinator.pipe(Layer.provideMerge(guard))
     return session(sessionId).pipe(Layer.provideMerge(guard))
   }),

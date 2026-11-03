@@ -77,12 +77,19 @@ describe("agent definitions", () => {
       const repo = yield* makeRepository
       const user = authed(yield* client, cliHeaders(repo))
       const launched = yield* user["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      // The entry agent is a definition (@vibest/plugin-coordinator's): its name, skills and rules, written by vibestd.
+      assert.deepInclude(launched, { agent: "coordinator", skills: ["delegate", "pipeline"] })
+      const key = yield* (yield* Db).projectKey(launched.projectId!)
+      assert.include(yield* fs.readFileString(layout.coordinatorRules(key!)), "You are a **coordinator**")
       const main = yield* asSession(launched.sessionId)
 
       const { id: lead } = yield* main.Spawn({ harness: "pi", agent: "lead", prompt: "lead the parser work" })
       const { id: other } = yield* main.Spawn({ harness: "pi", prompt: "unrelated" })
       yield* until(db.getSession(lead), (s) => s?.turnState === "open")
-      // Its rules say it may start sessions, and carry what its definition adds.
+      // Its rules say it may start sessions, and carry what its definition adds; it gets no skills of vibest's own.
+      assert.isUndefined(
+        (yield* herdr.callsTo("open")).find((c) => c.env.VIBEST_SESSION_ID === lead)?.env.VIBEST_SKILLS,
+      )
       const rules = yield* fs.readFileString(layout.rulesFile(lead))
       assert.include(rules, "You may start sessions of your own")
       assert.include(rules, "You lead a part of the work")

@@ -1264,13 +1264,13 @@ const make = Effect.gen(function* () {
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
-      sql<{ id: string; projectId: number; agent: string; harness: string }>`SELECT a.id, a.project_id,
-          coalesce(json_extract(p.data, '$.harness'), '') AS harness,
-          CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.role END AS agent
+      sql<{ id: string; projectId: number; agent: string; harness: string; entry: number }>`SELECT a.id, a.project_id,
+          coalesce(json_extract(p.data, '$.harness'), '') AS harness, a.role AS agent,
+          coalesce(q.entry_session_id = a.id, 0) AS entry
         FROM session a JOIN project q ON q.id = a.project_id
         LEFT JOIN event p ON p.id = ${currentStart(sql`a.id`)}
         WHERE a.id = ${id}`.pipe(
-        Effect.map((rows) => rows[0]),
+        Effect.map((rows) => (rows[0] ? { ...rows[0], entry: rows[0].entry === 1 } : undefined)),
         Effect.orDie,
       ),
 

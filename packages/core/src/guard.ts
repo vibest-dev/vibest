@@ -359,10 +359,6 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   return undefined
 })
 
-/** The role names vibest itself starts: the main agent (`vibest`), and `general`, the default of `vibest run`. */
-export const COORDINATOR = "coordinator"
-export const GENERAL = "general"
-
 /** A tools tier (an agent definition's `tools`): `inspect` edits nothing (the main agent's rules), `full` works in its worktree. */
 export type Tier = "inspect" | "full"
 

@@ -4,11 +4,16 @@
 import { Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 
+import { COORDINATOR_RULES } from "./rules.ts"
+
 /** The main agent (`vibest`): inspects, edits nothing, starts and manages the sessions of its project. */
 export const COORDINATOR = {
   name: "coordinator",
   tools: "inspect",
   can: { spawn: true, message: "project" },
+  entry: true,
+  skills: ["delegate", "pipeline"],
+  rules: COORDINATOR_RULES,
 } as const
 
 /** A worker (`vibest run`): works in its own worktree and reports to whoever started it. */

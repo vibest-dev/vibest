@@ -12,6 +12,8 @@ import { Clock, Effect, Schema } from "effect"
 export type HookCaller = {
   readonly id: string
   readonly agent: string
+  /** Its project's entry session (the main agent): its inbox is the project's, and its turns are no one's round. */
+  readonly entry: boolean
   readonly harness: string
   readonly projectId: number
 }
@@ -83,10 +85,10 @@ export const apply = (
       case "turn.start": {
         // The rows this turn took (a polling integration names them): delivered, bound to the turn.
         if (event.inbox !== undefined && event.inbox.length > 0) {
-          if (who.agent === "coordinator") yield* inbox.ack(who.projectId, event.inbox)
+          if (who.entry) yield* inbox.ack(who.projectId, event.inbox)
           else yield* sessions.consumed(who.id, event.inbox)
         }
-        if (who.agent === "coordinator") return
+        if (who.entry) return
         if (event.origin === "typed" && event.text.trim() !== "") {
           // One stamp, taken now: `userPrompt` notes the start at once (before it may wait for the session's lock, held
           // through a send's whole confirm) and stamps the round with the same time.
@@ -97,12 +99,12 @@ export const apply = (
         return
       }
       case "turn.end": {
-        if (who.agent === "coordinator") return
+        if (who.entry) return
         yield* sessions.turnEnded(who.id, turnEndOf(who.harness, event, yield* Clock.currentTimeMillis))
         return
       }
       case "blocked":
-        if (who.agent === "coordinator") return
+        if (who.entry) return
         yield* Effect.logInfo(`session ${who.id} is blocked on a ${event.reason}`)
         yield* sessions.activity(who.id, { blocked: event.reason })
     }

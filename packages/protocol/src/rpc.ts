@@ -161,6 +161,12 @@ export class DaemonStopping extends Schema.TaggedError<DaemonStopping>()("Daemon
 }
 
 /** A daemon operation or unsettled delivery that has not drained, and why. */
+/** What a main agent's start is told by its entry agent definition: the name it runs as (VIBEST_AGENT) and its skills. */
+const EntryStart = {
+  agent: Schema.String,
+  skills: Schema.Array(Schema.String),
+} as const
+
 export const Blocker = Schema.Struct({ id: Schema.String, reason: Schema.String })
 export type Blocker = typeof Blocker.Type
 
@@ -449,6 +455,7 @@ export class VibestRpcs extends RpcGroup.make(
           /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment (absent from an older vibestd). */
           projectId: Schema.optional(Schema.Number),
           runtime: Schema.optional(Schema.String),
+          ...EntryStart,
         }),
         error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
       }),
@@ -597,6 +604,7 @@ export class VibestRpcs extends RpcGroup.make(
         runtime: Schema.optional(Schema.String),
         /** The main agent's `vibest --env`, from vibestd's memory (absent after vibestd was stopped or restarted without a handoff). */
         env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+        ...EntryStart,
       }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),

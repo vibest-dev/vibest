@@ -845,6 +845,8 @@ const integrationStart = (exec: Exec) =>
           harnessSessionId: got.harnessSessionId,
           projectId: got.projectId,
           runtime: got.runtime,
+          agent: got.agent,
+          skills: got.skills,
         }),
       }).pipe(Effect.provide(Harness.layer))
       return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))

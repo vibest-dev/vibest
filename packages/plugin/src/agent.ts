@@ -16,8 +16,15 @@ export interface AgentDefinition {
      */
     readonly message: "report-only" | "children" | "project"
   }
-  /** More rules for a session of this agent, after vibest's own. */
+  /**
+   * More rules for a session of this agent, after vibest's own; for the entry agent, the whole of its rules (the project's
+   * instructions and memory follow).
+   */
   readonly rules?: string
+  /** The agent `vibest` starts at a project's root, one per project; the first definition with it set is used. */
+  readonly entry?: boolean
+  /** The skills of vibest's own (`delegate`, `pipeline`) its sessions get, where the harness can choose per session. */
+  readonly skills?: ReadonlyArray<string>
 }
 
 /** What a session of an agent nobody defined may do: a worker. */

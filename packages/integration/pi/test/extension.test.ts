@@ -1,4 +1,5 @@
 import net from "node:net"
+import path from "node:path"
 
 import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
@@ -283,8 +284,13 @@ describe("pi-vibest", () => {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
       for (const env of [
-        { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "cccccccc", VIBEST_COMMAND: '["vibest"]' },
-        { VIBEST_AGENT: "coordinator" },
+        {
+          VIBEST_AGENT: "coordinator",
+          VIBEST_SKILLS: "delegate,pipeline",
+          VIBEST_SESSION_ID: "cccccccc",
+          VIBEST_COMMAND: '["vibest"]',
+        },
+        { VIBEST_AGENT: "coordinator", VIBEST_SKILLS: "delegate,pipeline" },
       ]) {
         for (const _load of ["startup", "reload"]) {
           const s = yield* session(env)
@@ -292,7 +298,7 @@ describe("pi-vibest", () => {
           assert.isTrue(s.handlers.has("message_start") && s.handlers.has("tool_execution_end"))
           assert.deepStrictEqual(
             yield* s.emit("resources_discover", { type: "resources_discover", cwd: "/", reason: "startup" }),
-            [{ skillPaths: [skillsDir] }],
+            [{ skillPaths: ["delegate", "pipeline"].map((n) => path.join(skillsDir, n, "SKILL.md")) }],
           )
           // A print / RPC child of the coordinator takes no lease.
           yield* s.emit("session_start", { reason: "startup" }, { ...tuiStart, mode: "rpc" })

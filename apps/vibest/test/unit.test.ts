@@ -19,8 +19,9 @@ import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
+import { projectKey } from "@vibest/core/project-create"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
-import { coordinatorRules } from "@vibest/core/rules"
+import { entryRules } from "@vibest/core/rules"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import {
   copyIncluded,
@@ -31,6 +32,7 @@ import {
   repositoryDirectoryName,
   repositoryKey,
 } from "@vibest/core/worktree"
+import { COORDINATOR } from "@vibest/plugin-coordinator"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Launch from "@vibest/vibest/launch"
@@ -68,7 +70,7 @@ const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }
 
 describe("Rules", () => {
   it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorRules({ instructions: "", memory: "" })
+    const rules = entryRules({ rules: COORDINATOR.rules, instructions: "", memory: "" })
     assert.include(rules, "`delegate`")
     assert.include(rules, "`pipeline`")
     assert.notInclude(rules, "--archive-on-completion")
@@ -82,7 +84,7 @@ describe("Rules", () => {
   })
 
   it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorRules({ instructions: "", memory: "" })
+    const rules = entryRules({ rules: COORDINATOR.rules, instructions: "", memory: "" })
     assert.include(rules, "in plain, complete sentences with no shorthand only you know")
     assert.include(rules, "a space between every word, identifier and number")
     assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
@@ -1204,6 +1206,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           models: () => Effect.succeed([]),
         })
         const claudeDir = yield* tempDirectory("vibest-claude-")
+        // What vibestd writes for the main agent's start (Project.CoordinatorSession) before the CLI builds its command.
+        const rulesFile = (yield* Layout.make(home)).coordinatorRules(yield* projectKey(repo))
+        yield* fs.makeDirectory(path.dirname(rulesFile), { recursive: true })
+        yield* fs.writeFileString(rulesFile, entryRules({ rules: COORDINATOR.rules, instructions: "", memory: "" }))
+        const entry = { agent: COORDINATOR.name, skills: COORDINATOR.skills }
         const run = (
           h: "claude" | "pi" | "cursor",
           harnessSessionId: string | null = null,
@@ -1221,7 +1228,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
             provider: null,
             model: null,
             passEnv: CALLER_ENV,
-            session,
+            session: Effect.map(session, (s) => ({ ...s, ...entry })),
           }).pipe(
             Effect.provide(harness),
             Effect.provide(
@@ -1242,6 +1249,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         // What its shell's `vibest` needs, passed on explicitly for harnesses that filter their shell's environment.
         assert.deepStrictEqual(claude.env, {
           VIBEST_AGENT: "coordinator",
+          VIBEST_SKILLS: "delegate,pipeline",
           VIBEST_HARNESS: "claude",
           VIBEST_HOME: home,
           VIBEST_COMMAND: '["/bin/vibest"]',

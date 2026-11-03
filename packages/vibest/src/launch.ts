@@ -1,17 +1,16 @@
-import { COORDINATOR } from "@vibest/core/guard"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
-import { Layout, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { Layout, VibestCommand } from "@vibest/core/paths"
 import { projectKey } from "@vibest/core/project-create"
-import { coordinatorRules, projectText } from "@vibest/core/rules"
 import { type Machine, type Runtime } from "@vibest/core/runtimes"
 import { LaunchFailed } from "@vibest/core/sessions"
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
-import { Config, Effect, Option } from "effect"
+import { Config, Effect, FileSystem, Option } from "effect"
 
 /**
- * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its rules file. `session` runs only
+ * The harness, its arguments and extra env to exec as a Coordinator at `root`, with the rules file vibestd wrote for it
+ * (its entry agent definition's rules and the project's). `session` runs only
  * after every check that can refuse the launch, since it supersedes the running Coordinator's launch; exec can still fail.
  */
 export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, R>(input: {
@@ -28,6 +27,9 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
       readonly harnessSessionId: string | null
       readonly projectId?: number | undefined
       readonly runtime?: string | undefined
+      /** The entry agent definition's name (VIBEST_AGENT) and skills (VIBEST_SKILLS). */
+      readonly agent: string
+      readonly skills: ReadonlyArray<string>
     },
     E,
     R
@@ -47,10 +49,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const pluginDir = yield* harness.plugin(input.harness)
   const key = yield* projectKey(input.root).pipe(Effect.orDie)
   const rulesFile = layout.coordinatorRules(key)
-  const rules = coordinatorRules({ ...(yield* projectText(layout.project(key))) })
-  yield* writeAtomic(rulesFile, rules).pipe(Effect.orDie)
   const env: Record<string, string> = {
-    VIBEST_AGENT: COORDINATOR,
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
@@ -61,11 +60,14 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
+  const rules = yield* (yield* FileSystem.FileSystem).readFileString(rulesFile).pipe(Effect.orDie)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
   const commandEnv: Record<string, string> = {
     ...env,
+    VIBEST_AGENT: saved.agent,
+    ...(saved.skills.length > 0 ? { VIBEST_SKILLS: saved.skills.join(",") } : {}),
     VIBEST_SESSION_ID: saved.sessionId,
     ...(saved.projectId !== undefined ? { VIBEST_PROJECT_ID: String(saved.projectId) } : {}),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),

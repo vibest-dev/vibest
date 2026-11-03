@@ -5,12 +5,13 @@ import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
-import { Layout, shellQuote } from "@vibest/core/paths"
+import { Layout, shellQuote, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { projectRoot } from "@vibest/core/project-create"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
+import { entryRules, projectText } from "@vibest/core/rules"
 import {
   agentState,
   type Machine,
@@ -62,7 +63,7 @@ import { Project } from "@vibest/vibest/project"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Context, Deferred, Duration, Effect, Layer, Option, Schedule, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -285,7 +286,7 @@ const resolveCaller = (db: Db["Service"], agents: Agents["Service"], headers: He
       if (project.value !== String(row.projectId))
         return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
       yield* noteConversation(db, headers, row)
-      if (row.agent === "coordinator") {
+      if (row.entry) {
         return {
           _tag: "Coordinator",
           sessionId: row.id,
@@ -383,6 +384,25 @@ export const handlers = VibestRpcs.toLayer(
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
+    const agents = yield* Agents
+    const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
+
+    /**
+     * The entry agent's rules file for project `key`, written fresh for each start (its definition's rules, then the
+     * project's instructions and memory), and what its harness is told it is: its name and its skills.
+     */
+    const entryStart = (method: string, key: string) =>
+      Effect.gen(function* () {
+        const definition = agents.entry()
+        if (!definition)
+          return yield* new Forbidden({
+            method,
+            message: "no plugin defines the entry agent (an agent with entry: true)",
+          })
+        const rules = entryRules({ rules: definition.rules ?? "", ...(yield* projectText(layout.project(key))) })
+        yield* writeAtomic(layout.coordinatorRules(key), rules).pipe(Effect.orDie)
+        return { agent: definition.name, skills: definition.skills ?? [] }
+      }).pipe(Effect.provideContext(platform))
 
     const refused = (method: string, sessionId: string) =>
       new Forbidden({
@@ -584,7 +604,7 @@ export const handlers = VibestRpcs.toLayer(
       Spawn: (input) =>
         Effect.gen(function* () {
           const c = yield* spawning("Spawn")
-          if (input.agent === "coordinator" || input.agent === "main")
+          if (input.agent === "main" || (input.agent !== undefined && agents.of(input.agent).entry === true))
             return yield* new Forbidden({
               method: "Spawn",
               message: `${input.agent} is reserved for the main agent (vibest)`,
@@ -896,6 +916,7 @@ export const handlers = VibestRpcs.toLayer(
                   method: "Project.CoordinatorSession",
                   message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
                 })
+              const start = yield* entryStart("Project.CoordinatorSession", key)
               const saved = yield* db.coordinatorLaunch(
                 key,
                 harness,
@@ -912,7 +933,7 @@ export const handlers = VibestRpcs.toLayer(
               const projectId = yield* db.projectId(key)
               if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
               else mainEnv.delete(projectId)
-              return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
+              return { ...saved, ...start, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
         }),
@@ -959,9 +980,13 @@ export const handlers = VibestRpcs.toLayer(
               id,
               message: `${id} is not a main agent; only a main agent starts this way`,
             })
+          const key = yield* db.projectKey(main.projectId)
+          if (key === undefined) return yield* new NoSuchSession({ id, message: `${id} has no project` })
+          const start = yield* entryStart("Session.Start", key)
           yield* db.patchLive(id, { ready: null })
           const kept = mainEnv.get(main.projectId)
           return {
+            ...start,
             harness: main.harnessId,
             harnessSessionId: main.harnessSessionId,
             provider: main.provider,

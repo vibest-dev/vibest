@@ -438,10 +438,15 @@ export class Sessions extends Context.Service<
           )
         })
 
+      /** VIBEST_SKILLS: the skills of vibest's own its agent definition names, for a harness that loads them per session. */
+      const skillsEnv = (skills: ReadonlyArray<string> | undefined): Record<string, string> =>
+        skills && skills.length > 0 ? { VIBEST_SKILLS: skills.join(",") } : {}
+
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
       // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
       // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
       const vibestEnv = (session: SessionRow, scratch: string) => ({
+        ...skillsEnv(Option.isSome(agents) ? agents.value.of(session.agent).skills : undefined),
         VIBEST_SESSION_ID: session.id,
         VIBEST_PROJECT_ID: String(session.projectId),
         VIBEST_SCRATCH: scratch,
