@@ -450,10 +450,13 @@ export const handlers = VibestRpcs.toLayer(
         const coord = yield* db.coordinatorOf(yield* db.projectId(key))
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
         if (coord.address.id === terminal) return null
-        const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-        if (Option.isNone(h)) return null
-        const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
-        if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        // A restart (`vibest update`) is between its harnesses there: running, though the runtime sees none right now.
+        if (coord.restarting === undefined) {
+          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
+          if (Option.isNone(h)) return null
+          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+          if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+        }
         return {
           harness: coord.harnessId,
           place: placeOf(coord.runtime, coord.address),
@@ -877,6 +880,12 @@ export const handlers = VibestRpcs.toLayer(
               const place = coord?.address
               if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
                 return { result: "moved" as const }
+              // ponytail: refused, not waited for; the restart's next harness starts there in seconds.
+              if (coord.restarting !== undefined)
+                return {
+                  result: "unsupported" as const,
+                  reason: "vibest update is restarting it there; run vibest again once it is ready",
+                }
               const h = yield* runtimes
                 .route(runtime)
                 .pipe(
