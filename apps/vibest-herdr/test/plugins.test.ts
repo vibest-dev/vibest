@@ -8,13 +8,20 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { mainCheckout, repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
-import { harnessChoice } from "@vibest/plugin-harness-choice"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestOptions, type TestServices, until } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestOptions,
+  type TestServices,
+  until,
+  harnessChoice,
+} from "./fakes.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(repositoryKey(repo), (key) => ({

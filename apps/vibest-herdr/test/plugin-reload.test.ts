@@ -8,11 +8,12 @@ import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibe
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin, type AgentStartBefore } from "@vibest/plugin"
-import { harnessChoice } from "@vibest/plugin-harness-choice"
 import { Context, type Crypto, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schedule, Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
+
+import { harnessChoice } from "./fakes.ts"
 
 // ---- activation (virtual time) ----
 

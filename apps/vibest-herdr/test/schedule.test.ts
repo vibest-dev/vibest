@@ -5,11 +5,11 @@ import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused, Plugin } from "@vibest/plugin"
-import { harnessChoice } from "@vibest/plugin-harness-choice"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 
 import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
+import { harnessChoice } from "./fakes.ts"
 
 const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, unknown> = {}): Candidate => ({
   source: id,

@@ -1,4 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
+import { isLimited, stillLimited } from "@vibest/plugin"
 import type { Subscription } from "@vibest/schema/subscription"
 // The usage-limit move (architecture.md §8): a round that failed on a usage limit restarts the same session, in its
 // same worktree with the same task, on another harness the `agent.fail` chain chooses; the open round stays the one
@@ -12,7 +13,6 @@ import { Harness, harnessOptions, Harnesses, preflight, type HarnessAdapter, isH
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
-import { isLimited, stillLimited } from "./subscriptions/index.ts"
 import type { Subscriptions } from "./subscriptions/service.ts"
 
 /** The platform services `Sessions.make` closes over and hands to the move. */

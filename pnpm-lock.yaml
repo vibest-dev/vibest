@@ -356,9 +356,6 @@ importers:
 
   packages/plugin-harness-choice:
     dependencies:
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../core
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin

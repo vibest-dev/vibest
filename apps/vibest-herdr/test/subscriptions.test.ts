@@ -8,7 +8,6 @@ import { Project } from "@vibest/core/project"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
-import { harnessChoice } from "@vibest/plugin-harness-choice"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
@@ -18,7 +17,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { makeRepository, runVibest, testLayer } from "./fakes.ts"
+import { harnessChoice, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const CURSOR_SECRET = "cursor-token-do-not-log"
