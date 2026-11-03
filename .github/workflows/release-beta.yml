@@ -22,8 +22,11 @@ permissions:
 jobs:
   # The version every job builds and checks: a canary's is computed once here, so the darwin check and Publish agree.
   # The other jobs need this one, so they are skipped with it when someone other than the owner starts the run.
+  # The owner both started the run (actor) and started this attempt (triggering_actor, which differs on a rerun).
   version:
-    if: github.actor == github.repository_owner || github.actor == 'iamdin'
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -79,6 +82,10 @@ jobs:
 
   publish:
     needs: [version, darwin]
+    # Again here: rerunning only this job reuses the version job's earlier success without evaluating its condition.
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners.
     runs-on: ubuntu-latest
     env:
