@@ -3,6 +3,8 @@ name: Release
 # One entry point and one version for every package: the workspace members.
 # A v* tag publishes that version under `beta`, and as the latest GitHub Release (install.sh and an archive per platform).
 # Manual runs (workflow_dispatch) publish one canary version of every package to npm only.
+# Before anything is published, every package to publish is packed, and @vibest/cli is installed from the tarballs and run
+# on linux-x64 and darwin-arm64 (tools/verify/src/release-artifacts.ts).
 # Only the owner starts it: the tag comes from `pnpm release` (.agents/rules/release.md); anyone else's run is skipped.
 on:
   push:
@@ -18,23 +20,16 @@ permissions:
   id-token: write # npm trusted publishing (OIDC)
 
 jobs:
-  publish:
+  # The version every job builds and checks: a canary's is computed once here, so the darwin check and Publish agree.
+  # The other jobs need this one, so they are skipped with it when someone other than the owner starts the run.
+  version:
     if: github.actor == github.repository_owner || github.actor == 'iamdin'
-    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners.
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26.13.0
-
-      - run: pnpm install --frozen-lockfile
-
-      # Versions are set only in this checkout, never committed.
       - name: Version
         id: version
         run: |
@@ -53,15 +48,62 @@ jobs:
             # g<sha>: a prerelease identifier of only digits may not start with 0.
             version="${version%%-*}-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short=7 HEAD)"
             tag=canary
-            # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
-            pnpm -r exec npm pkg set version="$version"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+  # The darwin-arm64 binary, packed and installed as npm users get it, on a GitHub-hosted arm64 Mac. Publish waits for it.
+  darwin:
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+      - run: pnpm install --frozen-lockfile
+      # Versions are set only in this checkout, never committed. Every workspace package moves together: workspace:*
+      # resolves to it, and the binary embeds it (Hello compares it).
+      - name: Set the canary version
+        if: needs.version.outputs.tag == 'canary'
+        run: pnpm -r exec npm pkg set version="$VERSION"
+      - run: pnpm run build
+      - name: Check the packed packages
+        run: bun tools/verify/src/release-artifacts.ts "$VERSION"
+
+  publish:
+    needs: [version, darwin]
+    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners.
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+      - run: pnpm install --frozen-lockfile
+      # As in the darwin job.
+      - name: Set the canary version
+        if: needs.version.outputs.tag == 'canary'
+        run: pnpm -r exec npm pkg set version="$VERSION"
+
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test --maxWorkers=2
+      # Every package Publish publishes, packed; the linux-x64 binary installed with @vibest/cli and run (darwin: above).
+      - name: Check the packed packages
+        run: bun tools/verify/src/release-artifacts.ts "$VERSION"
 
       # OIDC first, then the NPM_TOKEN secret when it exists. The token goes to a private per-run config file
       # (npm reads NPM_CONFIG_USERCONFIG; pnpm falls back to it for auth), removed on any exit, not the runner's ~/.npmrc.
@@ -73,7 +115,7 @@ jobs:
       - name: Publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          DIST_TAG: ${{ steps.version.outputs.tag }}
+          DIST_TAG: ${{ needs.version.outputs.tag }}
         run: |
           umask 077
           NPM_CONFIG_USERCONFIG=$(mktemp "$RUNNER_TEMP/npmrc.XXXXXX")
@@ -90,7 +132,6 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           out=$(mktemp -d "$RUNNER_TEMP/release.XXXXXX")
           for target in darwin-arm64 linux-x64; do

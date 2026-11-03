@@ -24,3 +24,8 @@ In order, stopping at the first failure:
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `guard`, `update`.
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
+
+`bun tools/verify/src/release-artifacts.ts <version>` is the Release workflow's check before Publish: it packs every
+published package, checks each tarball holds what its package.json declares (files, bin, main, exports, the harness
+plugins), installs the packed `@vibest/cli` with this platform's binary package into an empty npm prefix and checks that
+`vibest --version` prints `<version>`. No harness, no model.
