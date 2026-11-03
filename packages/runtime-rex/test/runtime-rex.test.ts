@@ -112,4 +112,31 @@ describe.skipIf(rex === undefined)("rex runtime on an isolated Rex server", () =
       }).pipe(Effect.scoped),
     60_000,
   )
+
+  it.live(
+    "a bare harness name on vibestd's PATH runs, though Rex's login shell PATH lacks its directory",
+    () =>
+      Effect.gen(function* () {
+        // As pi in ~/.bun/bin: on the PATH of the vibest that asked, not on the one a non-interactive login shell sets.
+        const bin = path.join(dir, "bin")
+        fs.mkdirSync(bin, { recursive: true })
+        fs.writeFileSync(path.join(bin, "vbt-fake-harness"), "#!/bin/sh\necho vbt-harness-ran\nsleep 30\n", {
+          mode: 0o755,
+        })
+        const runtime = yield* make({ server, settle: "5 seconds", path: `${bin}:${process.env["PATH"] ?? ""}` })
+        const cwd = fs.realpathSync(os.tmpdir())
+        const terminal = yield* runtime.open(
+          { id: "local" },
+          { project: "/tmp/vbt-project", cwd, argv: ["vbt-fake-harness"], env: { VBT: "1" }, label: "harness" },
+        )
+        let screen = ""
+        for (let i = 0; i < 50 && !screen.includes("vbt-harness-ran"); i++) {
+          yield* Effect.sleep("100 millis")
+          screen = yield* runtime.read(terminal, 20).pipe(Effect.orElseSucceed(() => ""))
+        }
+        yield* runtime.close(terminal)
+        assert.include(screen, "vbt-harness-ran")
+      }).pipe(Effect.scoped),
+    60_000,
+  )
 })
