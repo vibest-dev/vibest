@@ -584,12 +584,15 @@ export class Sessions extends Context.Service<
           ),
         )
         if (delivered) return undefined
-        if (yield* confirmed(h, session, terminal)) return undefined
+        // Only a start of this round is pickup: the row the caller read carries the previous round's prompt time, and
+        // that round's start would confirm a text whose Enter was swallowed.
+        const round = { ...session, turnPromptedAt: now }
+        if (yield* confirmed(h, round, terminal)) return undefined
         yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-        if (yield* confirmed(h, session, terminal)) return undefined
+        if (yield* confirmed(h, round, terminal)) return undefined
         // Re-paste once only, so a task never runs twice.
         yield* send.pipe(Effect.ignore)
-        if (yield* confirmed(h, session, terminal)) return undefined
+        if (yield* confirmed(h, round, terminal)) return undefined
         if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none")
           return undefined
         yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)

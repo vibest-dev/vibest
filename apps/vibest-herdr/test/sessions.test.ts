@@ -2412,6 +2412,28 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a later send whose Enter is swallowed gets Enter again: the previous round's start is no pickup",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
+      // The integration reports the first round's start, as Claude's prompt hook does.
+      yield* sessions.userPrompt(id, "do it")
+      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      yield* TestClock.adjust("1 second")
+      yield* herdr.updateAgent(id, (a) => ({ ...a, registerPrompt: false }))
+      yield* sessions.send(id, "next")
+      const sends = yield* untilVirtual(herdr.callsTo("send"), (calls) => {
+        const at = calls.findIndex((c) => c.text === "next")
+        return at >= 0 && calls.length > at + 1
+      })
+      assert.deepStrictEqual(sends[sends.findIndex((c) => c.text === "next") + 1]!.keys, ["enter"])
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "a queued message the session never starts on: task_not_started fails that batch and tells the owner, with the text",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
