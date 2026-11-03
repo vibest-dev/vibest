@@ -8,13 +8,13 @@ import { assert, describe, it } from "@effect/vitest"
 import { probe } from "@vibest/client/client"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { type Host, readDaemonInfo, run } from "@vibest/server/daemon"
-import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Option, Scope } from "effect"
+import { type Host, run } from "@vibest/server/daemon"
+import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Scope } from "effect"
 import { SocketServer } from "effect/socket/SocketServer"
 
 import * as Platform from "#platform"
 
-import { pingOf, runVibest, tempDirectory } from "./fakes.ts"
+import { pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 
@@ -144,7 +144,7 @@ describe.concurrent("vibestd.pid lock", () => {
           assert.include(run.stdout + run.stderr, "already running")
         }
         assert.strictEqual(Platform.liveness(ping.pid!), "alive")
-        assert.strictEqual(Option.getOrThrow(yield* readDaemonInfo(layout.daemonInfo)).instance, ping.instance)
+        yield* recordedInfo(layout.daemonInfo, ping.instance)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
@@ -157,13 +157,14 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const first = yield* Effect.forkScoped(daemon(layout.home))
         const old = yield* pingOf(layout.socket)
+        // Killed only once it has recorded itself: the PID this test then hands to another process.
+        const info = yield* recordedInfo(layout.daemonInfo, old.instance)
         process.kill(old.pid!, "SIGKILL")
         // Its runVibest dies on the signal; only the exit matters.
         yield* Fiber.await(first)
         assert.strictEqual(Platform.liveness(old.pid!), "exited")
         assert.isTrue(yield* fs.exists(layout.socket))
         // The PID reused by a process that is not vibestd: this test's own.
-        const info = Option.getOrThrow(yield* readDaemonInfo(layout.daemonInfo))
         yield* fs.writeFileString(layout.daemonInfo, JSON.stringify({ ...info, pid: process.pid }))
         yield* Effect.forkScoped(daemon(layout.home))
         const next = yield* pingOf(layout.socket)
