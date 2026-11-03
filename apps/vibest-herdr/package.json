@@ -1,6 +1,6 @@
 {
   "name": "@vibest/cli",
-  "version": "0.0.1-beta.13",
+  "version": "0.0.1-beta.14",
   "description": "vibest: vibestd daemon and the vibest CLI. A coordinator directing sessions in herdr panes.",
   "license": "MIT",
   "repository": {
