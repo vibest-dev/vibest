@@ -470,8 +470,12 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           // when agent.start's timeout passes unmarked: the terminal reads as exited while its harness works. So the
           // prompt waits for the mark; an agent herdr never marks (its herdr integration missing) gets the text pasted
           // and Enter, as a user would.
+          // herdr moves a started agent to ready only when something reads it (agent.get), never on agent.prompt; an agent
+          // whose harness reports its own state (herdr's Pi hook) sends no further event once idle, so each try reads it first.
           if (text !== undefined)
-            yield* h.call("agent.prompt", { target: found.target, text }).pipe(
+            yield* h.call("agent.get", { target: found.target }).pipe(
+              Effect.ignore,
+              Effect.andThen(h.call("agent.prompt", { target: found.target, text })),
               Effect.retry({
                 while: (e) => e._tag === "HerdrError" && e.code === "agent_not_ready",
                 times: READY_RETRIES,

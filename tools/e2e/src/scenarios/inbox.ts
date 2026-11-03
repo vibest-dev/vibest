@@ -615,6 +615,64 @@ const checks: ReadonlyArray<Check> = [
       }
     },
   },
+  {
+    id: "S19",
+    title:
+      "a Pi subagent with herdr's own Pi hook starts its first turn within seconds of vibest run: vibest daemon restart is not refused and vibest interrupt stops it while the model still holds the turn",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = heldModel()
+      const session = `${w.herdrSession}-confirm`
+      try {
+        const repo = await project(w, "confirm")
+        const dir = await piDir(w, "pi-confirm", model.url)
+        // herdr's Pi hook, as a user who ran `herdr integration install pi` has it: herdr then reads Pi's state from
+        // the hook alone, and an idle Pi sends it nothing more.
+        const hook = await w.run(w.root, ["herdr", "integration", "install", "pi"], {
+          env: { PI_CODING_AGENT_DIR: dir },
+        })
+        expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
+        const env = `PI_CODING_AGENT_DIR=${dir}`
+        const zdot = path.join(w.root, "zdotdir-confirm")
+        await fs.mkdir(zdot, { recursive: true })
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        const sub = (
+          JSON.parse(
+            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("confirm")], {
+              cwd: repo,
+              timeoutMs: 60_000,
+            }),
+          ) as { id: string }
+        ).id
+        const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
+        // herdr refuses agent.prompt until it marks the agent ready, and it marks one only when the agent is read.
+        await until("the subagent's first turn at the model", () => model.held() > 0, 15_000)
+        const t0 = Date.now()
+        const restart = await w.tty(["daemon", "restart"], "y\n", {
+          cwd: repo,
+          env: { ZDOTDIR: zdot },
+          timeoutMs: 60_000,
+        })
+        expect(
+          restart.code === 0,
+          `vibest daemon restart exited ${restart.code} after ${Date.now() - t0} ms: ${restart.stderr}${restart.stdout}\nvibestd.log:\n${await log()}`,
+        )
+        const stop = await w.vibest(["interrupt", sub], { cwd: repo, timeoutMs: 60_000 })
+        expect(
+          stop.code === 0 && stop.stdout.includes("interrupted"),
+          `vibest interrupt exited ${stop.code}: ${stop.stderr}${stop.stdout}\nvibestd.log:\n${await log()}`,
+        )
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
 ]
 
 export default checks
