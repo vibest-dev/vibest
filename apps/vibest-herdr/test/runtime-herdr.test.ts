@@ -257,7 +257,10 @@ const afterDroppedName = (holder: Record<string, unknown> | undefined, rename: "
       },
     )
     assert.isTrue(opened)
-    assert.strictEqual(terminal.id, "s/w1:p2/s-abcd1234")
+    // What was started rides in the id, so any vibestd (a restarted one too) knows the agent again from the row.
+    assert.strictEqual(terminal.id, "s/w1:p2/s-abcd1234#claude#%2Fwork")
+    assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-abcd1234")
+    assert.deepStrictEqual(TerminalRuntime.launchOf(terminal).launch, { kind: "claude", cwd: "/work" })
     const from = calls.length
     const seen = yield* runtime.state!(terminal).pipe(
       Effect.map((state) => state as string),
