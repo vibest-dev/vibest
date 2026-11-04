@@ -641,14 +641,15 @@ export const handlers = VibestRpcs.toLayer(
                     (yield* atProject((yield* db.sessionDirectory(c.sessionId)) ?? "")).root,
                 }
               : yield* projectOf(c, "Spawn")
-          if (input.reportTo !== undefined) {
-            const target = yield* db.getSession(input.reportTo)
+          const reportTo = input.reportTo === undefined ? undefined : yield* db.resolveSession(input.reportTo)
+          if (reportTo !== undefined) {
+            const target = yield* db.getSession(reportTo)
             if (target === undefined)
-              return yield* new NoSuchSession({ id: input.reportTo, message: `no session ${input.reportTo}` })
+              return yield* new NoSuchSession({ id: reportTo, message: `no session ${reportTo}` })
             if (target.scope !== project.id)
               return yield* new Forbidden({
                 method: "Spawn",
-                message: `${input.reportTo} is another project's; --report-to names a session of this one`,
+                message: `${reportTo} is another project's; --report-to names a session of this one`,
               })
           }
           return yield* sessions.spawn({
@@ -665,7 +666,7 @@ export const handlers = VibestRpcs.toLayer(
             peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
             parentSessionId: c._tag === "Cli" ? undefined : c.sessionId,
-            reportTo: input.reportTo,
+            reportTo,
           })
         }),
 
@@ -1139,9 +1140,12 @@ export const handlers = VibestRpcs.toLayer(
       // The user may archive any session; a session only one it may manage (as its own `vibest archive`).
       archive: ({ as, id }) =>
         (as === null
-          ? Effect.void
+          ? db.resolveSession(id)
           : Effect.flatMap(callerOf(as), (caller) => managed("Remove", id).pipe(Effect.provideService(Caller, caller)))
-        ).pipe(Effect.andThen(sessions.archiveSettled(id)), Effect.mapError(refusedAs)),
+        ).pipe(
+          Effect.flatMap((resolved) => sessions.archiveSettled(resolved)),
+          Effect.mapError(refusedAs),
+        ),
       notice: ({ about, kind, text, to }) => sessions.notice(about, kind, text, to).pipe(Effect.mapError(refusedAs)),
     })
     return impl

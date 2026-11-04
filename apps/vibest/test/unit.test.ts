@@ -1146,6 +1146,15 @@ describe("HarnessAdapter", () => {
       decode("preToolUse", { tool_name: "Shell", tool_input: { command: "ls", cwd: "sub" }, cwd: "/w" }),
       { tool: { kind: "shell", name: "Shell", command: "ls", paths: [], cwd: "/w/sub" } },
     )
+    // `~` and `file://` stay for toolPath; joining them under the worktree would hide the real directory.
+    assert.deepStrictEqual(
+      decode("preToolUse", { tool_name: "Shell", tool_input: { command: "ls", cwd: "~/somewhere" }, cwd: "/w" }),
+      { tool: { kind: "shell", name: "Shell", command: "ls", paths: [], cwd: "~/somewhere" } },
+    )
+    assert.deepStrictEqual(
+      decode("preToolUse", { tool_name: "Shell", tool_input: { command: "ls", cwd: "file:///tmp/x" }, cwd: "/w" }),
+      { tool: { kind: "shell", name: "Shell", command: "ls", paths: [], cwd: "file:///tmp/x" } },
+    )
     assert.deepStrictEqual(
       decode("preToolUse", { tool_name: "Read", tool_input: { path: "a" }, cwd: "", workspace_roots: ["/r"] }),
       { tool: { kind: "read", name: "Read", paths: ["a"], cwd: "/r" } },

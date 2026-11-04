@@ -34,7 +34,13 @@ export const decodeCursor = (
       : []
     const base = str(payload.cwd) || (roots.length === 1 ? (roots[0] as string) : "")
     const own = str(input.cwd)
-    const cwd = own ? (own.startsWith("/") ? own : `${base}/${own}`) : base
+    // `~` and `file://` are toolPath's forms. Joining them under the worktree hides the real directory from the guard.
+    const cwd =
+      own === undefined
+        ? base
+        : own.startsWith("/") || own.startsWith("file://") || /^~(?=$|\/)/.test(own)
+          ? own
+          : `${base}/${own}`
     return { tool: toolCallOf(str(payload.tool_name) ?? "", input, cwd) }
   }
   const id = str(payload.conversation_id)

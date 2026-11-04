@@ -1,8 +1,8 @@
-import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
-import type { ProjectRepository, RepositoryGit } from "@vibest/core/workspace"
 // `vibest project create <directory> --from <repository>…` (architecture D7, §3 Project and Workspace; plan phase 7):
 // copy each git repository into one new directory as a folder named after it, and one detached worktree per repository
 // for a writing subagent's isolated Workspace.
+import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
+import type { ProjectRepository, RepositoryGit } from "@vibest/core/workspace"
 import { Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
 
 import { addWorktree, copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"

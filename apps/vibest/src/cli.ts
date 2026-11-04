@@ -207,7 +207,7 @@ const run = Command.make(
     ),
     reportTo: Flag.String("report-to").pipe(
       Flag.withDescription(
-        "A session id: its results go to that session instead of you (a pipeline's next stage, a reviewer)",
+        "A session id (or a unique prefix of at least 8 characters): its results go to that session instead of you (a pipeline's next stage, a reviewer)",
       ),
       Flag.optional,
     ),

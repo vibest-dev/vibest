@@ -465,7 +465,10 @@ export const rulesOf = (tier: Tier): Rules => (tier === "inspect" ? coordinator 
 export const check = (tier: Tier, call: ToolCall) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
-    if (!path.isAbsolute(call.cwd))
+    // `~` and `file://` are how Cursor spells a cwd (`toolPath`); anything else must already be absolute.
+    const spelled = call.cwd.startsWith("file://") || /^~(?=$|\/)/.test(call.cwd)
+    const resolved = spelled ? yield* toolPath(call.cwd, call.cwd, yield* Config.String("HOME")) : call.cwd
+    if (resolved === undefined || !path.isAbsolute(resolved))
       return yield* Effect.fail(new Error("the tool call has no absolute working directory"))
-    return yield* rulesOf(tier)({ ...call, cwd: path.normalize(call.cwd) })
+    return yield* rulesOf(tier)({ ...call, cwd: path.normalize(resolved) })
   })

@@ -1,8 +1,8 @@
-import { Layout } from "@vibest/core/paths"
-import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 // The project folder (SPEC §5.4): projects/<project id>/ holds instructions.md (the user edits it) and the fixed
 // subfolders docs/, memories/ and artifacts/. Agents read and write them with their own file tools; vibestd only
 // names the paths and searches the text.
+import { Layout } from "@vibest/core/paths"
+import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 export { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 

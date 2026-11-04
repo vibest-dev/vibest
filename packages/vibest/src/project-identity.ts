@@ -1,6 +1,6 @@
-import { Layout } from "@vibest/core/paths"
 // Where a project is (docs/design/schema.md, Projects): the project whose directory is the realpath of a project root,
 // else the one with a repository there. Its id never changes; a directory or a remote is not identity.
+import { Layout } from "@vibest/core/paths"
 import { ProjectMoved } from "@vibest/schema/session"
 import { Effect, FileSystem, Path } from "effect"
 

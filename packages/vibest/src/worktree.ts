@@ -1,5 +1,5 @@
-import { CopyFailed, GitError, type GitState, NotInRepository } from "@vibest/core/workspace"
 // git side of a session's worktree (SPEC §8.2, §8.7). git is the authority; nothing here is cached.
+import { CopyFailed, GitError, type GitState, NotInRepository } from "@vibest/core/workspace"
 import { Effect, FileSystem, Option, Path, PlatformError, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 export { CopyFailed, GitError, type GitState, NotInRepository }

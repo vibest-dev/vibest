@@ -2,7 +2,16 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 // The guard (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
 import { Agents } from "@vibest/core/agents"
-import { coordinator, GuardArea, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
+import {
+  check,
+  coordinator,
+  GuardArea,
+  HARNESS_CLIS,
+  type Rules,
+  session,
+  shellBlock,
+  splitCommand,
+} from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
@@ -482,6 +491,41 @@ layer(Platform.services)("role rules", (it) => {
             assert.isUndefined(yield* asSession(tool, "cat a.md && ls", cwd), `${tool} ${cwd}`)
         }
       }),
+  )
+
+  it.effect("Cursor: a shell cwd of ~/somewhere outside the session's folder is refused", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("vibest-guard-")
+      const vibestHome = path.join(home, ".vibest")
+      const own = path.join(vibestHome, "projects", "k")
+      const other = path.join(vibestHome, "projects", "j")
+      const repo = path.join(home, "repo")
+      yield* fs.makeDirectory(own, { recursive: true })
+      yield* fs.makeDirectory(other, { recursive: true })
+      yield* fs.makeDirectory(repo, { recursive: true })
+      // Outside the worktree as spelled; the real directory is another project's folder.
+      yield* fs.symlink(other, path.join(home, "somewhere"))
+      const decode = ADAPTERS.cursor.decode!
+      const offLimits =
+        "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+      const reason = (cwd: string) => {
+        const decoded = decode("preToolUse", {
+          tool_name: "Shell",
+          tool_input: { command: "ls", cwd },
+          cwd: repo,
+        })
+        if (decoded === undefined || !("tool" in decoded)) return Effect.die("expected a tool call")
+        return check("full", decoded.tool).pipe(
+          Effect.provideServiceEffect(GuardArea, vibestArea),
+          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
+        )
+      }
+      assert.strictEqual(yield* reason("~/somewhere"), offLimits)
+      assert.strictEqual(yield* reason(`file://${other}`), offLimits)
+    }),
   )
 
   it.effect("Session: its own project folder is the one project directory it may use", () =>

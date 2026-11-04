@@ -176,6 +176,23 @@ describe("orchestration modes", () => {
   )
 
   test(
+    "--report-to accepts the first 8 characters of a session id",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const user = authed(yield* client, cliHeaders(repo))
+      const { id: review } = yield* user.Spawn({ harness: "pi", prompt: "review what arrives" })
+      yield* opened(review)
+      const { id: build } = yield* user.Spawn({ harness: "pi", prompt: "build it", reportTo: review.slice(0, 8) })
+      yield* opened(build)
+      yield* answer(build, "built")
+      assert.deepStrictEqual(
+        (yield* resultsOf(build)).map((r) => r.recipient),
+        [review],
+      )
+    }),
+  )
+
+  test(
     "a reviewer loop: the implementer reports to the reviewer, the reviewer's send comes back answered to it",
     Effect.gen(function* () {
       const repo = yield* makeRepository

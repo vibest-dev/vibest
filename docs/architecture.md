@@ -261,14 +261,14 @@ scope is (vibest's SQLite backend: a project).
 - **Product words left in core.** The storage port, the inbox, placement, restart and the capability rule speak of
   scopes and owners, but other core names still carry vibest's words: an owner session's agent is `main` (the read
   model, `core/rounds.ts`, `core/sessions.ts` and `core/restart.ts` check it); `Layout` (`core/paths.ts`) is vibest's
-  home layout; the harness contract's `LaunchInput.worktree` and `scratch`, and the claude, pi and cursor adapters'
+  home layout; the harness contract's `LaunchInput.worktree` and `projectDir`, and the claude, pi and cursor adapters'
   coordinator arguments, are harness-integration names this branch does not change; the runtime's `present` labels
   carry a `project` key (herdr's); the environment variables are VIBEST_*; and comments in `sessions.ts`, `move.ts`,
   `remove.ts` and `processes.ts` speak of worktrees and the project. None of these touches the database.
-- **The guard's wording and the inspect rule set.** `core/guard.ts` names its `inspect` rule set `coordinator` and its
-  refusal texts speak of the coordinator, the project directory and the scratchpad (harness-visible texts that E2E
-  checks read). `LaunchInput.scratch` in the harness contract keeps its name (it carries the workspace's `files`
-  directory).
+- **The guard's wording and the inspect rule set.** `core/guard.ts` names its `inspect` rule set `coordinator` and some
+  shell refusals still say coordinator (harness-visible texts that E2E checks read). The product's refusal texts live
+  in `packages/vibest/src/guard-area.ts`. `LaunchInput.projectDir` in the harness contract is the session's project
+  folder (the workspace's `files` directory).
 - **Caller identity lives in the server.** The capability rule (who may manage a session: `mayManage` in
   `core/capabilities.ts`, from the manager's `can.message`, provenance and groups) is the engine's; mapping a request
   to a manager (the command line is the user, the entry agent owns its project, a session is itself) and the other
