@@ -419,10 +419,14 @@ export class VibestRpcs extends RpcGroup.make(
       error: Schema.Union([Forbidden, NoSuchSession, NoRuntime, RuntimeUnreachable]),
     }),
   ),
-  /** A non-coordinator session: a message to that session's own coordinator. */
+  /** A non-coordinator session: a message to that session's own coordinator, or (`user`) to the user. */
   scoped(
     admitted(
-      Rpc.make("Report", { payload: { message: Schema.String }, error: Schema.Union([Forbidden, NoSuchSession]) }),
+      Rpc.make("Report", {
+        /** `user`: to the user's inbox (`vibest inbox`), not to its coordinator. */
+        payload: { message: Schema.String, user: Schema.optional(Schema.Boolean) },
+        error: Schema.Union([Forbidden, NoSuchSession]),
+      }),
     ),
   ),
   /**

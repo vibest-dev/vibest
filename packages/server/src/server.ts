@@ -821,7 +821,7 @@ export const handlers = VibestRpcs.toLayer(
           Effect.map((text) => ({ text })),
         ),
 
-      Report: ({ message }) =>
+      Report: ({ message, user }) =>
         Effect.gen(function* () {
           const owner = yield* Caller
           if (owner._tag !== "Session")
@@ -832,6 +832,14 @@ export const handlers = VibestRpcs.toLayer(
           const session = yield* db.getSession(owner.sessionId)
           if (!session)
             return yield* new NoSuchSession({ id: owner.sessionId, message: `no session ${owner.sessionId}` })
+          // To the user: a notice in their inbox, through agent.notice like any other.
+          if (user === true)
+            return yield* sessions.notice(
+              session.id,
+              "message",
+              `Agent "${session.name}" (${session.id}): ${message}`,
+              [null],
+            )
           yield* inbox.enqueue({
             sessionId: session.id,
             kind: "report",

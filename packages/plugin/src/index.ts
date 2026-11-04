@@ -236,13 +236,14 @@ export interface AgentResult {
 /**
  * vibest tells someone about session `sessionId`: it waits on the person (`blocked`), a turn it was sent never started
  * or it never started at all (`not_started`), a message to it was not delivered (`undelivered`), or its archive on
- * completion did not go cleanly (`archived`, from the policy that archives it). `recipients` is where it goes (its live report-to, else its project's
+ * completion did not go cleanly (`archived`, from the policy that archives it), or it has words for the user (`message`:
+ * `vibest report --user`, or a plugin's `context.session.notice`). `recipients` is where it goes (its live report-to, else its project's
  * entry session, else the user: `null`); a plugin may reword `text` or rewrite `recipients` (empty: nobody is told).
  */
 export interface AgentNotice {
   readonly sessionId: string
   readonly agentType: string
-  readonly kind: "blocked" | "not_started" | "undelivered" | "archived"
+  readonly kind: "blocked" | "not_started" | "undelivered" | "archived" | "message"
   text: string
   recipients: Array<string | null>
 }

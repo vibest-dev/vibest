@@ -3,6 +3,7 @@
 // a reviewer loop, and a plugin that forwards a result.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
+import { Actions } from "@vibest/core/actions"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
@@ -255,6 +256,28 @@ describe("orchestration modes", () => {
       const toLead = yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE kind = 'notice'
         AND recipient_session_id = ${lead}`
       assert.strictEqual(toLead[0]!.n, 0)
+    }),
+  )
+
+  test(
+    "pushing to the user: a session's vibest report --user and a plugin's notice to the user land in the user's inbox, though a coordinator would take its other rows",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const user = authed(yield* client, cliHeaders(repo))
+      const { id } = yield* user.Spawn({ harness: "pi", agent: "peer", prompt: "watch the build" })
+      yield* opened(id)
+      yield* (yield* asSession(id)).Report({ message: "the build is red", user: true })
+      yield* (yield* Actions).notice({ about: id, kind: "message", text: "nightly report ready", to: [null] })
+      const rows = yield* until(user["Inbox.Read"]({}), (r) => r.length === 2)
+      assert.deepStrictEqual(
+        rows.map((r) => [r.from, r.kind]),
+        [
+          [id, "notice"],
+          [id, "notice"],
+        ],
+      )
+      assert.include(rows[0]!.message, "the build is red")
+      assert.strictEqual(rows[1]!.message, "nightly report ready")
     }),
   )
 })

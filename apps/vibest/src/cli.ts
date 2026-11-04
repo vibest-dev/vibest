@@ -583,20 +583,42 @@ const inboxCommand = Command.make(
       Flag.withDescription("Show them without marking them read"),
       Flag.withDefault(false),
     ),
+    follow: Flag.Boolean("follow").pipe(
+      Flag.withDescription("Keep reading: print each row as it arrives, one JSON line each, until interrupted"),
+      Flag.withDefault(false),
+    ),
   },
-  (o) => vibest((client) => client["Inbox.Read"]({ peek: o.peek || undefined })).pipe(Effect.flatMap(json)),
+  (o) =>
+    o.follow
+      ? // ponytail: a read every second; a pushed stream if a second is too slow.
+        vibest((client) =>
+          client["Inbox.Read"]({}).pipe(
+            Effect.flatMap((rows) => Effect.forEach(rows, json, { discard: true })),
+            Effect.repeat(Schedule.spaced("1 second")),
+          ),
+        ).pipe(Effect.asVoid)
+      : vibest((client) => client["Inbox.Read"]({ peek: o.peek || undefined })).pipe(Effect.flatMap(json)),
 ).pipe(
   Command.withDescription(
     "Your inbox in this project, as JSON: results and notices of sessions you started with no main agent to go to (read once; --peek keeps them)",
   ),
 )
 
-const report = Command.make("report", { message: text("message") }, (o) =>
-  Effect.gen(function* () {
-    const message = yield* input(o.message, "message")
-    yield* vibest((client) => client.Report({ message }))
-    yield* json({ sent: true })
-  }),
+const report = Command.make(
+  "report",
+  {
+    message: text("message"),
+    user: Flag.Boolean("user").pipe(
+      Flag.withDescription("To the user's inbox (vibest inbox) instead of your coordinator"),
+      Flag.withDefault(false),
+    ),
+  },
+  (o) =>
+    Effect.gen(function* () {
+      const message = yield* input(o.message, "message")
+      yield* vibest((client) => client.Report({ message, ...(o.user ? { user: true } : {}) }))
+      yield* json({ sent: true })
+    }),
 ).pipe(
   Command.withDescription(
     "Sessions only: send a progress report or question to the coordinator that gave you your task",
