@@ -243,11 +243,11 @@ AgentDefinition    Harness    Subscription    Machine
   decide which harness to use, when to wait, and when to switch.
 - **Conversations.** The main Agent has one active conversation per Project; `vibest --new` starts another and
   keeps the earlier ones (their CLI session ids) so they can be resumed. Knowledge belongs to the Project, so
-  every conversation and every subagent sees the same instructions and memories.
-- **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `instructions.md` (the user's), `docs/`,
+  every conversation and every subagent sees the same preferences and memory index.
+- **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `preferences.md` (how the user likes work done), `docs/`,
   `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
-  keeps each Agent to its own project's folder. Instructions and memories are added to every subagent's rules
-  (16,000 characters each). A subagent's `## Remember` section is a proposal the main Agent may write to memories.
+  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's rules (16,000 characters).
+  Memories are an index of at most 200 lines, not the file text. A subagent's `## Remember` section is a proposal the main Agent may write to memories.
 - **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
 - **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
   `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
@@ -805,7 +805,7 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
-  projects/<project id>/     the project folder: instructions.md, docs/, memories/, artifacts/
+  projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
 

@@ -385,7 +385,7 @@ describe("vibest CLI", () => {
       assert.isTrue(directory.startsWith(`${layout.projects}/`))
       assert.deepStrictEqual(info, {
         directory,
-        instructions: `${directory}/instructions.md`,
+        preferences: `${directory}/preferences.md`,
         docs: `${directory}/docs`,
         memories: `${directory}/memories`,
         artifacts: `${directory}/artifacts`,

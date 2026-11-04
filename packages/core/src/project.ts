@@ -1,5 +1,5 @@
 import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
-// The project folder (SPEC §5.4): projects/<project id>/ holds instructions.md (the user edits it) and the fixed
+// The project folder (SPEC §5.4): projects/<project id>/ holds preferences.md (the user edits it) and the fixed
 // subfolders docs/, memories/ and artifacts/. Agents read and write them with their own file tools; vibestd only
 // names the paths and searches the text.
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
@@ -39,7 +39,7 @@ export class Project extends Context.Service<
       const info = (scope: ProjectScope) =>
         Effect.succeed({
           directory: layout.project(scope.id),
-          instructions: path.join(layout.project(scope.id), "instructions.md"),
+          preferences: path.join(layout.project(scope.id), "preferences.md"),
           docs: dir(scope, "docs"),
           memories: dir(scope, "memories"),
           artifacts: dir(scope, "artifacts"),

@@ -691,7 +691,7 @@ const harness = Command.make("harness").pipe(
 
 const project = Command.make("project").pipe(
   Command.withDescription(
-    "This repository's project folder (VIBEST_PROJECT_DIR for agents): instructions.md, docs/, memories/ and artifacts/, read and written with file tools",
+    "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/, read and written with file tools",
   ),
   Command.withSubcommands([
     Command.make(
@@ -723,7 +723,7 @@ const project = Command.make("project").pipe(
       ),
     ),
     Command.make("info", {}, () => vibest((client) => client["Project.Info"]()).pipe(Effect.flatMap(json))).pipe(
-      Command.withDescription("The paths of the project folder, its instructions.md, docs, memories and artifacts"),
+      Command.withDescription("The paths of the project folder, its preferences.md, docs, memories and artifacts"),
     ),
     Command.make(
       "search",

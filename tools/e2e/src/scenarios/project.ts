@@ -7,7 +7,7 @@ import type { Check } from "../check.ts"
 import { expect, row, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, piDir, project as newRepository } from "./inbox.ts"
 
-type Info = { directory: string; instructions: string; docs: string; memories: string; artifacts: string }
+type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
 
 type Step = { readonly tool: string; readonly input: Record<string, string> } | string
 
@@ -187,7 +187,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P1",
     title:
-      "project info names the project folder (projects/<project id>), its instructions.md, docs, memories and artifacts",
+      "project info names the project folder (projects/<project id>), its preferences.md, docs, memories and artifacts",
     run: async (w) => {
       const info = await w.json<Info>(["project", "info"])
       const id = path.basename(info.directory)
@@ -196,7 +196,7 @@ const checks: ReadonlyArray<Check> = [
         `directory: ${JSON.stringify(info)}`,
       )
       for (const [key, rel] of [
-        ["instructions", "instructions.md"],
+        ["preferences", "preferences.md"],
         ["docs", "docs"],
         ["memories", "memories"],
         ["artifacts", "artifacts"],

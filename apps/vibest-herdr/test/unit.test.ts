@@ -132,7 +132,7 @@ describe("System prompt directory", () => {
 
 describe("Rules", () => {
   it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", preferences: "", memories: "" })
     assert.include(rules, "`delegate`")
     assert.include(rules, "`pipeline`")
     assert.notInclude(rules, "--archive-on-completion")
@@ -146,7 +146,7 @@ describe("Rules", () => {
   })
 
   it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", preferences: "", memories: "" })
     assert.include(rules, "in plain, complete sentences with no shorthand only you know")
     assert.include(rules, "a space between every word, identifier and number")
     assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
