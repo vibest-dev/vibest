@@ -14,6 +14,7 @@ import { Restarting } from "@vibest/core/restarting"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { systemPromptRoot } from "@vibest/core/system-prompt"
 import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
@@ -509,6 +510,13 @@ const over = (options: TestOptions) => {
     ),
   )
 }
+
+/** Session `id`'s system prompt file, under this process's TMPDIR as vibestd writes it. */
+export const systemPromptFile = (id: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    return path.join(yield* systemPromptRoot, id, "system-prompt.md")
+  })
 
 /** Product tests: the Runtime service is the in-memory fake, not herdr. */
 export const testLayer = (options: TestOptions = {}) => over(options)

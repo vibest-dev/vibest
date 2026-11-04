@@ -11,6 +11,7 @@ import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
+import { removeSystemPrompt } from "./system-prompt.ts"
 import { TurnEnds } from "./turn-ends.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
@@ -290,11 +291,11 @@ export const make = Effect.gen(function* () {
         tree = kept === undefined ? "removed" : "kept"
         if (kept !== undefined) reasons.push(kept)
       }
-      // Processes that may still be running may still read its rules or report a turn end. Its files are its own even
-      // though a directory another session works in stays.
+      // Processes that may still be running may still read its system prompt or report a turn end. Its files are its
+      // own even though a directory another session works in stays.
       if ((tree !== "kept" || shared) && processState === "exited") {
         yield* turnEnds.forget(id)
-        yield* fs.remove(layout.rulesFile(id), { force: true })
+        yield* removeSystemPrompt(id)
       }
       const branch = multiGit
         ? multiGit

@@ -5,14 +5,14 @@ import { Config, Effect, Option } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
-import { Layout, VibestCommand, writeAtomic } from "./paths.ts"
+import { Layout, VibestCommand } from "./paths.ts"
 import { projectKey } from "./project-create.ts"
-import { coordinatorRules, projectText } from "./rules.ts"
 import { type Machine, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
+import { coordinatorSystemPrompt, projectText, systemPromptRoot, writeSystemPrompt } from "./system-prompt.ts"
 
 /**
- * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its rules file. `session` runs only
+ * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its system prompt file. `session` runs only
  * after every check that can refuse the launch, since it supersedes the running Coordinator's launch; exec can still fail.
  */
 export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, R>(input: {
@@ -47,9 +47,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   // The plugin's pre-tool hook keeps a Coordinator from editing files and from what else it refuses (guard.ts).
   const pluginDir = yield* harness.plugin(input.harness)
   const key = yield* projectKey(input.root).pipe(Effect.orDie)
-  const rulesFile = layout.coordinatorRules(key)
-  const rules = coordinatorRules({ ...(yield* projectText(layout.project(key))) })
-  yield* writeAtomic(rulesFile, rules).pipe(Effect.orDie)
+  // The temporary directory is checked before `session`, which supersedes the running Coordinator's launch.
+  yield* systemPromptRoot.pipe(Effect.orDie)
   const env: Record<string, string> = {
     VIBEST_AGENT: COORDINATOR,
     VIBEST_HARNESS: input.harness,
@@ -62,6 +61,10 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
+  const systemPromptFile = yield* writeSystemPrompt(
+    saved.sessionId,
+    coordinatorSystemPrompt({ ...(yield* projectText(layout.project(key))) }),
+  ).pipe(Effect.orDie)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
@@ -75,8 +78,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     file: adapter.binary,
     args: adapter.coordinatorArgs({
       root: input.root,
-      rules,
-      rulesFile,
+      systemPromptFile,
       provider: input.provider,
       model: input.model,
       sessionId: harnessSessionId,

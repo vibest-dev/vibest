@@ -12,9 +12,8 @@ export { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@v
 export interface LaunchInput {
   readonly worktree: string
   readonly scratch: string
-  /** Cursor takes the rules in its first prompt; Pi and Claude read `rulesFile` (herdr refuses multi-line args). */
-  readonly rules: string
-  readonly rulesFile: string
+  /** Pi and Claude read the system prompt from this file (herdr refuses multi-line args); Cursor gets it in its first prompt. */
+  readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
   /** Pi / Claude: the uuid vibestd chose. Cursor: the id herdr reported (resume only). */
@@ -32,8 +31,7 @@ export interface LaunchInput {
 export interface CoordinatorInput {
   /** Repository root, the Coordinator's working directory. */
   readonly root: string
-  readonly rules: string
-  readonly rulesFile: string
+  readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
   /** The repository's Coordinator session to reopen, as the harness reported it after a turn; null: the harness starts a new one. */
@@ -60,8 +58,8 @@ export interface HarnessAdapter {
   readonly binary: string
   /** vibestd picks the session id up front (Pi, Claude); otherwise herdr reports it after launch. */
   readonly ownSessionId: boolean
-  /** No system-prompt flag: rules go in front of the first prompt (Cursor). */
-  readonly rulesInPrompt: boolean
+  /** No system-prompt flag: the system prompt goes in front of the first prompt (Cursor). */
+  readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
   /** Harness-specific startup handling while vibestd waits for ready (Claude: its trust / bypass menus). */
   readonly startup?: Startup
@@ -82,7 +80,7 @@ export interface HarnessAdapter {
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
   /**
-   * Coordinator argv: its rules and the inspection tools, among them the shell it runs `vibest` in; no MCP servers.
+   * Coordinator argv: its system prompt and the inspection tools, among them the shell it runs `vibest` in; no MCP servers.
    * Absent: the harness is not currently supported as a Coordinator (Cursor).
    */
   readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>

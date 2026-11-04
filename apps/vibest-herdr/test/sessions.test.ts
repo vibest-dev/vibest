@@ -46,6 +46,7 @@ import {
   writeResult,
   resultText,
   dropResult,
+  systemPromptFile,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -191,11 +192,11 @@ describe.concurrent("Sessions", () => {
         "--session-id",
         row.harnessSessionId!,
         "--append-system-prompt",
-        layout.rulesFile(id),
+        yield* systemPromptFile(id),
         "-e",
         "/vibest/harnesses/pi/extension.mjs",
       ])
-      assert.include(yield* fs.readFileString(layout.rulesFile(id)), `You are agent ${id}`)
+      assert.include(yield* fs.readFileString(yield* systemPromptFile(id)), `You are agent ${id}`)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, "do it")
     }),
   )
@@ -1225,6 +1226,31 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(moved.address, before.address)
       // The task reaches the next harness as a turn of the same round.
       assert.include((yield* herdr.callsTo("send")).map((c) => c.text ?? "").join("\n"), "do it")
+    }),
+  )
+
+  test(
+    "a usage-limit move writes the system prompt again: memory written since the first start is in it",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const { id, sessions, db } = yield* spawnWorking(repo)
+      assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned before the move")
+      const memory = `${layout.project(yield* repositoryKey(repo))}/memory`
+      yield* fs.makeDirectory(memory, { recursive: true })
+      yield* fs.writeFileString(`${memory}/moved.md`, "learned before the move")
+      yield* fs.writeFileString(yield* systemPromptFile(id), "stale text")
+      yield* writeResult(id, "pi", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
+      const [run] = yield* herdr.callsTo("run")
+      assert.include(run!.argv, yield* systemPromptFile(id))
+      const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
+      assert.include(prompt, "learned before the move")
+      assert.notInclude(prompt, "stale text")
     }),
   )
 
@@ -2367,27 +2393,34 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "resuming a session writes today's rules and leaves the repository's own files alone",
+    "resuming a session writes today's system prompt and leaves the repository's own files alone",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const layout = yield* Layout
-      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
+      const repo = yield* makeRepository
+      const { id, sessions } = yield* spawnWorking(repo)
+      assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned between starts")
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const cursorMcp = `${yield* sessionWorktree(id)}/.cursor/mcp.json`
       yield* fs.makeDirectory(`${yield* sessionWorktree(id)}/.cursor`, { recursive: true })
       yield* fs.writeFileString(cursorMcp, JSON.stringify({ mcpServers: { repo: { command: "repo-server" } } }))
-      yield* fs.writeFileString(layout.rulesFile(id), "use the send_message tool")
+      // The old file is never the source: the next start writes the prompt again, with memory written since.
+      yield* fs.writeFileString(yield* systemPromptFile(id), "use the send_message tool")
+      const memory = `${layout.project(yield* repositoryKey(repo))}/memory`
+      yield* fs.makeDirectory(memory, { recursive: true })
+      yield* fs.writeFileString(`${memory}/later.md`, "learned between starts")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
 
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)!.text === "next")
       assert.isTrue(yield* fs.exists(cursorMcp))
-      const rules = yield* fs.readFileString(layout.rulesFile(id))
-      assert.include(rules, "report -- '<message>'")
-      assert.notInclude(rules, "send_message")
+      const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
+      assert.include(prompt, "report -- '<message>'")
+      assert.notInclude(prompt, "send_message")
+      assert.include(prompt, "learned between starts")
     }),
     { hooked: ["pi"] },
   )
@@ -2490,12 +2523,11 @@ describe.concurrent("Sessions", () => {
     "launch failure rolls back the worktree and notifies the owner",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const db = yield* Db
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))
       yield* until(db.getSession(id), (w) => !!w && w.exitedAt !== null)
       assert.isFalse(yield* fs.exists(yield* sessionWorktree(id)))
-      assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
+      assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
       // Its exit stays visible after the next check.
       yield* (yield* Sessions).check(id)
       const failed = (yield* db.getSession(id))!
@@ -2639,7 +2671,6 @@ describe.concurrent("Sessions", () => {
     "remove: git removes a clean worktree without force; the pane and its workspace close; the branch stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* idleSession(repo)
@@ -2658,7 +2689,8 @@ describe.concurrent("Sessions", () => {
         reasons: [],
       })
       assert.isFalse(yield* fs.exists(worktree))
-      assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
+      // The session's whole temporary directory goes, not only its system prompt file.
+      assert.isFalse(yield* fs.exists((yield* Path.Path).dirname(yield* systemPromptFile(id))))
       assert.strictEqual(yield* sh(repo, "branch", "--list", "feat/x"), "feat/x")
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
       // Only its own pane and workspace: herdr's other panes are untouched.
@@ -2672,7 +2704,6 @@ describe.concurrent("Sessions", () => {
     "remove keeps what git would lose (changes, untracked files, commits on no branch, a lock) and tries again when asked",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const repo = yield* makeRepository
       const kept = (out: { readonly worktree: string; readonly reasons: ReadonlyArray<string> }, why: string) => {
         assert.strictEqual(out.worktree, "kept")
@@ -2684,7 +2715,7 @@ describe.concurrent("Sessions", () => {
       yield* fs.writeFileString(`${wa}/README.md`, "changed\n")
       kept((yield* a.sessions.remove(a.id))!, "uncommitted changes")
       assert.isNotNull((yield* a.db.getSession(a.id))!.exitedAt)
-      assert.isTrue(yield* fs.exists(layout.rulesFile(a.id)))
+      assert.isTrue(yield* fs.exists(yield* systemPromptFile(a.id)))
       yield* sh(wa, "checkout", "--", "README.md")
       yield* fs.writeFileString(`${wa}/new.txt`, "x")
       kept((yield* a.sessions.remove(a.id))!, "uncommitted changes")
@@ -3095,7 +3126,6 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const peer = yield* idleSession(repo)
@@ -3118,7 +3148,7 @@ describe.concurrent("Sessions", () => {
       assert.notProperty(got.metadata, "peer")
       assert.strictEqual(yield* sessionWorktree(id), worktree)
       assert.match(path.basename(worktree), /^[0-9a-f]{4}$/)
-      const rules = yield* fs.readFileString(layout.rulesFile(id))
+      const rules = yield* fs.readFileString(yield* systemPromptFile(id))
       assert.include(rules, "others may be making changes in this worktree too")
       assert.notInclude(rules, peer.id)
       assert.notInclude(rules, "git switch -c <branch>")
@@ -3144,7 +3174,7 @@ describe.concurrent("Sessions", () => {
       const borrower = (yield* peer.sessions.remove(id))!
       assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
       assert.include(borrower.reasons.join("\n"), `session ${third.id} still works in it`)
-      assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
+      assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
       assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(worktree))
 
@@ -3169,7 +3199,6 @@ describe.concurrent("Sessions", () => {
     "a resume keeps the owner's git rules beside a --peer; only the --peer gets the peer rules",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
@@ -3188,8 +3217,8 @@ describe.concurrent("Sessions", () => {
         yield* owner.sessions.send(session, `again ${session}`)
         yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
       }
-      assert.include(yield* fs.readFileString(layout.rulesFile(owner.id)), "git switch -c <branch>")
-      const peerRules = yield* fs.readFileString(layout.rulesFile(id))
+      assert.include(yield* fs.readFileString(yield* systemPromptFile(owner.id)), "git switch -c <branch>")
+      const peerRules = yield* fs.readFileString(yield* systemPromptFile(id))
       assert.include(peerRules, "others may be making changes in this worktree too")
       assert.notInclude(peerRules, "git switch -c <branch>")
     }),
