@@ -433,26 +433,22 @@ export class Sessions extends Context.Service<
         VIBEST_COMMAND: encodeCommand(vibest),
       })
 
-      /** The session's system prompt, made now from its row and the project files (`key`: the row's project). */
-      const systemPromptOf = (session: SessionRow, key: string) =>
+      /** The session's system prompt, made now from its row and its project's files. */
+      const systemPromptOf = (session: SessionRow) =>
         Effect.gen(function* () {
           return sessionSystemPrompt({
             id: session.id,
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
-            scratch: layout.scratch(key),
+            scratch: layout.scratch(String(session.projectId)),
             vibest,
-            ...(yield* projectText(layout.project(key))),
+            ...(yield* projectText(layout.project(String(session.projectId)))),
           })
         })
 
       /** The argv that starts the session's harness in a terminal (what `open` runs); writes its system prompt anew. */
-      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (
-        session: SessionRow,
-        resume: boolean,
-        key: string,
-      ) {
-        const file = yield* systemPromptOf(session, key).pipe(
+      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (session: SessionRow, resume: boolean) {
+        const file = yield* systemPromptOf(session).pipe(
           Effect.flatMap((text) => writeSystemPrompt(session.id, text)),
           Effect.provideContext(platform),
         )
@@ -463,7 +459,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: layout.scratch(key),
+            scratch: layout.scratch(String(session.projectId)),
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -471,7 +467,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session, layout.scratch(key)),
+            env: vibestEnv(session, layout.scratch(String(session.projectId))),
           }),
         ]
       })
@@ -639,19 +635,12 @@ export class Sessions extends Context.Service<
       // ---- spawn ----
 
       /** The first turn, once the terminal exists: the system prompt in front where the harness has no flag for it, else the text alone. */
-      const afterOpen = (
-        h: Runtime,
-        session: SessionRow,
-        terminal: Terminal,
-        root: string,
-        key: string,
-        firstPrompt: string,
-      ) =>
+      const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
           const first = harnesses.get(session.harnessId).systemPromptInPrompt
-            ? `${yield* systemPromptOf(session, key)}\n\n# Task\n\n${firstPrompt}`
+            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
           const notStarted = yield* prompt(h, session, terminal, first)
           if (notStarted) yield* notice(session, notStarted)
@@ -1443,7 +1432,7 @@ export class Sessions extends Context.Service<
         inbox,
         scope,
         locked: (id) => locked(id),
-        launchArgv: (session, resume, key) => launchArgv(session, resume, key).pipe(Effect.provideContext(platform)),
+        launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
         worktreeOf,
         withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
         awaitReady,

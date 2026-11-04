@@ -6,7 +6,6 @@ import { Config, Effect, Option } from "effect"
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
-import { projectKey } from "./project-create.ts"
 import { type Machine, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
 import {
@@ -37,7 +36,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     {
       readonly sessionId: string
       readonly harnessSessionId: string | null
-      readonly projectId?: number | undefined
+      readonly projectId: number
       readonly runtime?: string | undefined
     },
     E,
@@ -56,7 +55,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   // The plugin's pre-tool hook keeps a Coordinator from editing files and from what else it refuses (guard.ts).
   const pluginDir = yield* harness.plugin(input.harness)
-  const key = yield* projectKey(input.root).pipe(Effect.orDie)
   // The temporary directory is checked before `session`, which supersedes the running Coordinator's launch.
   yield* unsafeOnly(systemPromptRoot)
   const env: Record<string, string> = {
@@ -72,7 +70,10 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
   const saved = yield* input.session
   const systemPromptFile = yield* unsafeOnly(
-    writeSystemPrompt(saved.sessionId, coordinatorSystemPrompt({ ...(yield* projectText(layout.project(key))) })),
+    writeSystemPrompt(
+      saved.sessionId,
+      coordinatorSystemPrompt({ ...(yield* projectText(layout.project(String(saved.projectId)))) }),
+    ),
   )
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
@@ -80,7 +81,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
-    ...(saved.projectId !== undefined ? { VIBEST_PROJECT_ID: String(saved.projectId) } : {}),
+    VIBEST_PROJECT_ID: String(saved.projectId),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {

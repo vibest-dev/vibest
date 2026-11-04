@@ -154,8 +154,7 @@ export const make = Effect.gen(function* () {
           Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
-      const key = yield* db.projectKey(who.projectId)
-      const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
+      const scratch = { VIBEST_SCRATCH: layout.scratch(String(who.projectId)) }
       return yield* Guard.check(who.agent, request.body).pipe(
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),

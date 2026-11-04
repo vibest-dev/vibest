@@ -13,7 +13,7 @@ import {
   ProjectWriteResult,
 } from "@vibest/schema/project"
 // Project store (SPEC §5.4, §5.5 Project writes; PLAN §8): markdown on disk is the authority, no index is stored.
-// `docs` / `memory` / `scratch` live under projects/<key>/; instructions.md is read-only here (the user edits it).
+// `docs` / `memory` / `scratch` live under projects/<project id>/; instructions.md is read-only here (the user edits it).
 // Writes and deletes must carry `ifVersion` (first 16 hex of the content's sha256, or "new" to create); a mismatch is ProjectConflict.
 import { Context, Crypto, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { Hex } from "effect/encoding"
@@ -43,7 +43,7 @@ const KINDS: ReadonlyArray<ProjectKind> = ["docs", "memory", "scratch"]
 
 /** Which Project. */
 export interface ProjectScope {
-  readonly key: string
+  readonly id: string
 }
 
 /** Relative, `/`-separated, no `..` or dot segments, whitelisted extension; undefined when valid. */
@@ -138,7 +138,7 @@ export class Project extends Context.Service<
         )
 
       const dir = (scope: ProjectScope, kind: ProjectKind) =>
-        kind === "scratch" ? layout.scratch(scope.key) : path.join(layout.project(scope.key), kind)
+        kind === "scratch" ? layout.scratch(scope.id) : path.join(layout.project(scope.id), kind)
 
       const file = (scope: ProjectScope, kind: ProjectKind, p: string) => {
         const problem = pathProblem(p)
@@ -200,7 +200,7 @@ export class Project extends Context.Service<
       const info = (scope: ProjectScope) =>
         Effect.gen(function* () {
           const instructions = yield* fs
-            .readFileString(path.join(layout.project(scope.key), "instructions.md"))
+            .readFileString(path.join(layout.project(scope.id), "instructions.md"))
             .pipe(Effect.orElseSucceed(() => ""))
           return {
             instructions,

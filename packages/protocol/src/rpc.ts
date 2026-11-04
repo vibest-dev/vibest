@@ -469,8 +469,8 @@ export class VibestRpcs extends RpcGroup.make(
         success: Schema.Struct({
           sessionId: Schema.String,
           harnessSessionId: Schema.NullOr(Schema.String),
-          /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment (absent from an older vibestd). */
-          projectId: Schema.optional(Schema.Number),
+          /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment. */
+          projectId: Schema.Number,
           runtime: Schema.optional(Schema.String),
         }),
         error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),

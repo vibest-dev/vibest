@@ -475,9 +475,10 @@ export const handlers = VibestRpcs.toLayer(
           const key = yield* db.projectKey(c.projectId)
           if (key === undefined)
             return yield* new NotInRepository({ path: c.repositoryRoot ?? `project ${c.projectId}` })
-          return { key }
+          return { key, id: String(c.projectId) }
         }
-        return { key: (yield* atProject(c.repositoryRoot)).key }
+        const { key } = yield* atProject(c.repositoryRoot)
+        return { key, id: String(yield* db.projectId(key)) }
       })
 
     /** The machine a caller names: `local` unless it says more (`RuntimeMachine`), opaque `target` included. */

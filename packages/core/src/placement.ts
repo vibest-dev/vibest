@@ -40,7 +40,6 @@ export const sessionPlacement = (deps: {
   readonly db: {
     readonly coordinatorOf: (projectId: number) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: number }) => Effect.Effect<ReadonlyArray<SessionRow>>
-    readonly projectKey: (id: number) => Effect.Effect<string | undefined>
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
@@ -50,7 +49,7 @@ export const sessionPlacement = (deps: {
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
   readonly layout: {
-    readonly scratch: (key: string) => string
+    readonly scratch: (projectId: string) => string
   }
   readonly fs: {
     readonly makeDirectory: (
@@ -71,7 +70,6 @@ export const sessionPlacement = (deps: {
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
-    key: string,
   ) => Effect.Effect<
     ReadonlyArray<string>,
     HarnessUnavailable | NoSuchSession | PlatformError.PlatformError | SystemPromptDirUnsafe | Config.ConfigError
@@ -91,8 +89,6 @@ export const sessionPlacement = (deps: {
     session: SessionRow,
     terminal: Terminal,
     root: string,
-    /** The row's project key: Cursor's system prompt goes in front of the first prompt. */
-    key: string,
     firstPrompt: string,
   ) => Effect.Effect<void, unknown, FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | Path.Path>
   /** The usage-limit move (move.ts), wired in after placement exists. */
@@ -154,8 +150,6 @@ export const sessionPlacement = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
-      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
-      readonly key: string
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
       /** `vibest run --env`: given only to the first terminal, never stored (a later terminal starts without it). */
@@ -180,7 +174,7 @@ export const sessionPlacement = (deps: {
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
+        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(String(session.projectId))) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -217,13 +211,11 @@ export const sessionPlacement = (deps: {
     env?: Readonly<Record<string, string>>,
   ) {
     const folders = yield* listProjectRepositories(root)
-    // The row's own project key: the scratch directory goes to the project the session belongs to.
-    const key = yield* db.projectKey(session.projectId)
-    if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
     // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
-    yield* fs.makeDirectory(layout.scratch(key), { recursive: true })
+    // The row's own project: the scratch directory goes to the project the session belongs to.
+    yield* fs.makeDirectory(layout.scratch(String(session.projectId)), { recursive: true })
     // The same limit-move a failed start always had: it runs inside the scope, so the worktree the move reuses is still there.
     const openOrMove = (
       open: Effect.Effect<
@@ -272,12 +264,11 @@ export const sessionPlacement = (deps: {
     if (!folders) yield* copyIncluded(root, worktree)
     // The system prompt launchArgv writes goes again when the start fails.
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
-    const argv = yield* deps.launchArgv(session, false, key)
+    const argv = yield* deps.launchArgv(session, false)
     const terminal = yield* openOrMove(
       openTerminal(h, machine, session, {
         project: root,
         cwd: worktree,
-        key,
         argv,
         env,
         endedByCaller: true,
@@ -286,7 +277,7 @@ export const sessionPlacement = (deps: {
       }),
     )
     if (Option.isNone(terminal)) return
-    return yield* deps.afterOpen(h, session, terminal.value, root, key, firstPrompt)
+    return yield* deps.afterOpen(h, session, terminal.value, root, firstPrompt)
     // The undos above (worktree, terminal) run when this scope closes: before `launch`'s catch below turns the failure into a notice.
   }, Effect.scoped)
   /** A failed launch closes the row's turn and tells the owner why, with no screen text (its terminal is closed by then). */
@@ -363,26 +354,24 @@ export const sessionPlacement = (deps: {
       .pipe(Effect.ignore)
   })
 
-  /** Where a resumed session is placed, and which project key its system prompt uses: the row's own project, always. */
+  /** Where a resumed session is placed (its system prompt is its row's own project's, always). */
   const locate = (session: SessionRow) =>
     Effect.gen(function* () {
       const cwd = yield* deps.worktreeOf(session)
-      const key = yield* db.projectKey(session.projectId)
-      if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
       const stored = yield* storedDirectory(session.projectId)
-      if (yield* listProjectRepositories(cwd)) return { root: stored ?? (yield* projectRoot(cwd)).root, cwd, key }
-      return { root: stored ?? (yield* mainCheckout(cwd)), cwd, key }
+      if (yield* listProjectRepositories(cwd)) return { root: stored ?? (yield* projectRoot(cwd)).root, cwd }
+      return { root: stored ?? (yield* mainCheckout(cwd)), cwd }
     })
 
   const resume = Effect.fn("Sessions.resume")(function* (h: Runtime, session: SessionRow) {
     const machine: Machine = { id: session.address.machine }
-    const { root, cwd, key } = yield* locate(session)
+    const { root, cwd } = yield* locate(session)
     // The terminal is undone when the start fails, like launch: a failed resume must not leave a shell beside the main agent.
     // (openTerminal places it beside the project's main agent, as any start.)
     const terminal = yield* undoOnFailure(
       deps
-        .launchArgv(session, true, key)
-        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, key, argv }))),
+        .launchArgv(session, true)
+        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, argv }))),
       (terminal) => h.close(terminal).pipe(Effect.ignore),
     )
     yield* show(h, session, terminal, root)

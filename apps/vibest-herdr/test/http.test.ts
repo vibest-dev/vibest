@@ -368,13 +368,13 @@ describe("vibestd's HTTP API", () => {
       )
       assert.strictEqual(yield* resultText(main), "")
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
-      const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
+      const key = String((yield* db.getSession(worker))!.projectId)
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
       const other = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
       // ...but its own scratch is its to use, as VIBEST_SCRATCH in its terminal says.
-      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
+      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
       // The main agent edits nothing.
       const coordinator = yield* call("/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))

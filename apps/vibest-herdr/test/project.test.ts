@@ -8,7 +8,7 @@ import * as Platform from "#platform"
 
 import { tempDirectory } from "./fakes.ts"
 
-const scope: ProjectScope = { key: "github.com/acme/app" }
+const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
 
 /** A Project service over a fresh temp VIBEST_HOME. */
 const withProject = <A, E>(program: Effect.Effect<A, E, Project | Layout | FileSystem.FileSystem | Path.Path>) =>
@@ -101,7 +101,7 @@ layer(Platform.services)("on the platform", (it) => {
           content: "v1",
           ifVersion: "new",
         })
-        yield* fs.writeFileString(path.join(layout.project(scope.key), "docs", "plan.md"), "edited by hand")
+        yield* fs.writeFileString(path.join(layout.project(scope.id), "docs", "plan.md"), "edited by hand")
         assert.strictEqual(
           (yield* project
             .write(scope, { kind: "docs", path: "plan.md", content: "v2", ifVersion: version })
@@ -134,7 +134,7 @@ layer(Platform.services)("on the platform", (it) => {
           }),
         ]
         for (const attempt of refused) assert.strictEqual((yield* Effect.flip(attempt))._tag, "ProjectInvalid")
-        assert.isFalse(yield* fs.exists(layout.project(scope.key)))
+        assert.isFalse(yield* fs.exists(layout.project(scope.id)))
       }),
     ),
   )
@@ -147,7 +147,7 @@ layer(Platform.services)("on the platform", (it) => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         yield* project.write(scope, { kind: "docs", path: "a.md", content: "x", ifVersion: "new" })
-        assert.deepStrictEqual(yield* fs.readDirectory(path.join(layout.project(scope.key), "docs")), ["a.md"])
+        assert.deepStrictEqual(yield* fs.readDirectory(path.join(layout.project(scope.id), "docs")), ["a.md"])
       }),
     ),
   )
@@ -173,7 +173,7 @@ layer(Platform.services)("on the platform", (it) => {
           ifVersion: "new",
         })
         // Hidden and non-whitelisted files are not entries.
-        yield* fs.writeFileString(path.join(layout.project(scope.key), "docs", "skip.sh"), "needle")
+        yield* fs.writeFileString(path.join(layout.project(scope.id), "docs", "skip.sh"), "needle")
 
         const docs = yield* project.list(scope, { kind: "docs" })
         assert.deepStrictEqual(
@@ -191,10 +191,10 @@ layer(Platform.services)("on the platform", (it) => {
           "docs/b/deep.md:4: Needle here",
         ])
 
-        yield* fs.writeFileString(path.join(layout.project(scope.key), "instructions.md"), "be nice")
+        yield* fs.writeFileString(path.join(layout.project(scope.id), "instructions.md"), "be nice")
         const info = yield* project.info(scope)
         assert.strictEqual(info.instructions, "be nice")
-        assert.strictEqual(info.scratchPath, layout.scratch(scope.key))
+        assert.strictEqual(info.scratchPath, layout.scratch(scope.id))
         assert.lengthOf(info.scratch, 1)
       }),
     ),

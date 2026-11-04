@@ -1437,9 +1437,9 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           session: Effect.Effect<{
             sessionId: string
             harnessSessionId: string | null
-            projectId?: number
+            projectId: number
             runtime?: string
-          }> = Effect.succeed({ sessionId, harnessSessionId }),
+          }> = Effect.succeed({ sessionId, harnessSessionId, projectId: 1 }),
         ) =>
           Launch.coordinatorCommand({
             harness: h,
@@ -1473,6 +1473,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           VIBEST_HOME: home,
           VIBEST_COMMAND: '["/bin/vibest"]',
           VIBEST_SESSION_ID: "",
+          VIBEST_PROJECT_ID: "1",
           HERDR_PANE_ID: "w1:p1",
           HERDR_SOCKET_PATH: "/h/herdr.sock",
         })
@@ -1518,7 +1519,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         // A refused launch never asks vibestd for the session, so it does not supersede the running Coordinator's launch.
         let asked = 0
         const counted = Effect.sync(
-          () => (asked++, { sessionId: "abcd1234-abcd-4abc-8abc-abcd1234abcd", harnessSessionId: null }),
+          () => (asked++, { sessionId: "abcd1234-abcd-4abc-8abc-abcd1234abcd", harnessSessionId: null, projectId: 1 }),
         )
         assert.strictEqual((yield* Effect.flip(run("cursor", null, "", counted)))._tag, "HarnessUnavailable")
         assert.include((yield* Effect.flip(run("pi", null, "", counted))).message, "vibest's pi plugin is missing")
