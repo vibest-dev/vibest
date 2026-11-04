@@ -2,15 +2,25 @@
 // integration sends to vibestd's `/guard` (Cursor's preToolUse through its adapter's decode). A call is allowed unless a rule here
 // names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest hook bridge. The
 // coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
-// may not touch the projects directory except its project's scratch directory (VIBEST_SCRATCH): not another project's
-// scratch, and not its own project's instructions.md, docs or memory, for every harness. Which vibest commands an agent may run is
+// may not touch the protected directory the product names (`GuardArea`) except the one place in it the product allows
+// it, for every harness. Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
 import type { ToolCall as ProtocolToolCall } from "@vibest/protocol/protocol"
-import { Config, Effect, FileSystem, Option, Path } from "effect"
+import { Config, Context, Effect, FileSystem, Option, Path } from "effect"
 
-import { Layout, VibestCommand } from "./paths.ts"
+import { VibestCommand } from "./paths.ts"
+
+/**
+ * What the `full` tier keeps a session out of, from the product: its `home` (a later relative path would land in it),
+ * the `protected` directory under it, and the one place in that directory the session may use (`allowed`; none:
+ * nothing there). vibest's: VIBEST_HOME, the projects directory and the session's project's scratch directory.
+ */
+export class GuardArea extends Context.Service<
+  GuardArea,
+  { readonly home: string; readonly protected: string; readonly allowed: string | undefined }
+>()("vibest/GuardArea") {}
 
 /** A tool call in the neutral shape every integration sends (@vibest/protocol ToolCall): no harness tool names here. */
 export type ToolCall = ProtocolToolCall
@@ -279,7 +289,7 @@ export const toolPath = (raw: string, base: string, home: string) =>
 /** One agent's rules: the reason to refuse `call`, if any. */
 export type Rules = (
   call: ToolCall,
-) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem>
+) => Effect.Effect<string | undefined, Config.ConfigError, GuardArea | Path.Path | FileSystem.FileSystem>
 
 /** The coordinator: the shared shell denials plus its own, and no file edits (a session makes changes). */
 export const coordinator: Rules = (call) =>
@@ -300,17 +310,19 @@ const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
 const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
 /**
- * Every agent but the coordinator: the shared shell denials, and nothing under the projects directory but the session's own
- * scratch directory (VIBEST_SCRATCH, which vibestd sets as it opens the session's terminal); without one, nothing there.
+ * Every agent but the coordinator: the shared shell denials, and nothing under the protected directory but the place
+ * `GuardArea` allows it; without one, nothing there.
  */
 export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
   const path = yield* Path.Path
   const home = yield* Config.String("HOME")
-  const layout = yield* Layout
-  const projects = yield* physical(layout.projects)
-  const vibestHome = yield* physical(layout.home)
-  const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SCRATCH")))
-  const scratch = own ? yield* physical(own) : undefined
+  const area = yield* GuardArea
+  const projects = yield* physical(area.protected)
+  const vibestHome = yield* physical(area.home)
+  const scratch = area.allowed ? yield* physical(area.allowed) : undefined
+  // How the home and the protected directory are spelled in a shell word (vibest's: its home's name, then projects).
+  const homeName = path.basename(area.home)
+  const protectedName = path.join(homeName, path.relative(area.home, area.protected))
   const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
   const inScratch = (target: string) => scratch !== undefined && inside(target, scratch)
   /**
@@ -336,15 +348,15 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     // The shell starts in the project (a cwd the call chose): every bare file name is inside it.
     if (blocked(yield* physical(call.cwd), false)) return OFF_LIMITS
     for (const word of command.match(SHELL_WORDS) ?? []) {
-      if (!word.includes("/") && !word.startsWith("~") && !word.includes(".vibest")) continue
+      if (!word.includes("/") && !word.startsWith("~") && !word.includes(homeName)) continue
       // Globs and variables around vibest's home could expand to anything in it.
-      if (word.includes(".vibest") && /[*?[{$]/.test(word)) return OFF_LIMITS
+      if (word.includes(homeName) && /[*?[{$]/.test(word)) return OFF_LIMITS
       const targets = yield* resolve(word)
       if (targets === undefined) return BAD_URL
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
       if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
       // Relative to a directory an earlier `cd` moved to, which the hook does not see.
-      if (word.includes(".vibest/projects") && !targets.every(inScratch)) return OFF_LIMITS
+      if (word.includes(protectedName) && !targets.every(inScratch)) return OFF_LIMITS
     }
     return undefined
   }

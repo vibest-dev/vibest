@@ -77,6 +77,9 @@ Core defines these services; `@vibest/vibest` provides the vibest implementation
   built in (`core/harnesses/`), a plugin registers more with `context.harness.register`. Core reads the fields and
   never branches on a harness id.
 - **Processes** (`core/processes.ts`): liveness, SIGTERM to one pid, and the processes whose cwd is in a directory.
+- **GuardArea** (`core/guard.ts`): what the `full` tier keeps a session out of: a home, a protected directory under
+  it, and the one place in it the session may use. vibestd gives vibest's (VIBEST_HOME, the projects directory, the
+  session's project's scratch directory) for each `/guard` call (`packages/server/src/http.ts`).
 
 ## Plugin API
 
@@ -169,9 +172,9 @@ placement policy), and its system prompt text (vibest's SessionPrompt).
   to the entry session, `core/inbox.ts` delivers the entry session's rows on its own path, `core/restart.ts` restarts
   main agents, and the user inbox is per project. Replacing them with an opaque grouping is a database shape change;
   it is proposed to the owner and not implemented.
-- **The guard's path rules are vibest's.** `core/guard.ts` keeps sessions out of the projects directory except their
-  VIBEST_SCRATCH and names the coordinator's rule set; the neutral form (a rule set the product hands the guard) is
-  not done. `LaunchInput.scratch` in the harness contract keeps its name (it carries the workspace's `files`
+- **The guard's wording and the inspect rule set.** `core/guard.ts` names its `inspect` rule set `coordinator` and its
+  refusal texts speak of the coordinator, the project directory and the scratchpad (harness-visible texts that E2E
+  checks read). `LaunchInput.scratch` in the harness contract keeps its name (it carries the workspace's `files`
   directory).
 - **Caller rights live in the server.** Who may send to, spawn or archive whom (`managed`, the `can` checks) is in
   `packages/server/src/server.ts`; a product composed from core alone (the engine-only test) brings its own.

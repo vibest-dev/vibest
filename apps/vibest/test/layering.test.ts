@@ -69,9 +69,9 @@ it("the product's notions stay out of the engine", () => {
     ),
     [],
   )
-  // The shared files directory reaches a session through the workspace's `files`; only the guard still names it
-  // (docs/architecture.md, known limits).
-  assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH/), ["packages/core/src/guard.ts"])
+  // The shared files directory reaches a session through the workspace's `files`, the guard's area through
+  // `GuardArea`: the engine names neither.
+  assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH|layout\.projects?\b/), [])
   // Terminal placement, removal and the system prompt file know no entry agent: the product's policy decides.
   for (const file of ["placement.ts", "remove.ts", "system-prompt.ts", "workspace.ts"])
     assert.notMatch(

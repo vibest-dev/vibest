@@ -2,14 +2,27 @@ import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 // The guard (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
 import { Agents } from "@vibest/core/agents"
-import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
+import { coordinator, GuardArea, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { toolCallOf } from "@vibest/protocol/tools"
 import { LaunchFailed } from "@vibest/schema/session"
 import type { Host } from "@vibest/server/daemon"
-import { Cause, ConfigProvider, Crypto, Effect, Exit, FileSystem, Option, Path, Queue, Stdio, Terminal } from "effect"
+import {
+  Cause,
+  Config,
+  ConfigProvider,
+  Crypto,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Path,
+  Queue,
+  Stdio,
+  Terminal,
+} from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
 import { ChildProcessSpawner } from "effect/process"
@@ -18,6 +31,13 @@ import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
 import { makeRepository, tempDirectory } from "./fakes.ts"
+
+/** vibest's guard area as vibestd gives it (server/http.ts): the Layout's home and projects, and the session's VIBEST_SCRATCH. */
+const vibestArea = Effect.gen(function* () {
+  const layout = yield* Layout
+  const allowed = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SCRATCH")))
+  return { home: layout.home, protected: layout.projects, allowed }
+})
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const both = (command: string) => [shellBlock(command, source, true), shellBlock(command, source, false)]
@@ -205,6 +225,7 @@ layer(Platform.services)("role rules", (it) => {
       yield* fs.symlink(path.join(vibestHome, "projects"), path.join(home, "link"))
       const as = (rules: Rules) => (tool: string, input: Record<string, unknown>) =>
         rules(toolCallOf(tool, input, home)).pipe(
+          Effect.provideServiceEffect(GuardArea, vibestArea),
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
         )
@@ -245,6 +266,7 @@ layer(Platform.services)("role rules", (it) => {
           yield* fs.makeDirectory(dir, { recursive: true })
         const asSession = (tool: string, input: Record<string, unknown>, scratch: string | null = own) =>
           session(toolCallOf(tool, input, worktree)).pipe(
+            Effect.provideServiceEffect(GuardArea, vibestArea),
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(
               ConfigProvider.layer(
@@ -312,6 +334,7 @@ layer(Platform.services)("role rules", (it) => {
         yield* fs.symlink(project, path.join(home, "p"))
         const asSession = (tool: string, command: string, cwd: string) =>
           session(toolCallOf(tool, { command }, cwd)).pipe(
+            Effect.provideServiceEffect(GuardArea, vibestArea),
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: scratch }))),
           )
@@ -336,6 +359,7 @@ layer(Platform.services)("role rules", (it) => {
       const own = path.join(vibestHome, "projects", "k", "scratch")
       const asSession = (tool: string, input: Record<string, unknown>) =>
         session(toolCallOf(tool, input, home)).pipe(
+          Effect.provideServiceEffect(GuardArea, vibestArea),
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_SCRATCH: own }))),
         )
@@ -379,6 +403,7 @@ layer(Platform.services)("role rules", (it) => {
         yield* fs.symlink(path.join(project, "docs", "sub"), path.join(scratch, "deep"))
         const asSession = (tool: string, input: Record<string, unknown>) =>
           session(toolCallOf(tool, input, home)).pipe(
+            Effect.provideServiceEffect(GuardArea, vibestArea),
             Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
             Effect.provide(
               ConfigProvider.layer(
@@ -440,6 +465,7 @@ layer(Platform.services)("role rules", (it) => {
         const as = (rules: Rules, tool: string, command: string) =>
           rules(toolCallOf(tool, { command }, "/")).pipe(
             Effect.provideService(VibestCommand, source),
+            Effect.provideServiceEffect(GuardArea, vibestArea),
             Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
             Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
           )
@@ -466,6 +492,7 @@ layer(Platform.services)("role rules", (it) => {
         for (const rules of [coordinator, session])
           assert.isString(
             yield* rules(toolCallOf("Bash", {}, "/")).pipe(
+              Effect.provideServiceEffect(GuardArea, vibestArea),
               Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
               Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
             ),
@@ -477,6 +504,7 @@ layer(Platform.services)("role rules", (it) => {
     Effect.gen(function* () {
       const as = (tool: string, input: Record<string, unknown>) =>
         coordinator(toolCallOf(tool, input, "/")).pipe(
+          Effect.provideServiceEffect(GuardArea, vibestArea),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
         )
@@ -546,6 +574,7 @@ describe("wizard entry", () => {
           ),
           Effect.provide(FileSystem.layerNoop({})),
           Effect.provide(Stdio.layerTest({})),
+          Effect.provideServiceEffect(GuardArea, vibestArea),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
           Effect.provide(
@@ -605,6 +634,7 @@ describe("vibest --session inside herdr", () => {
           Effect.provide(builtinHarnesses),
           Effect.provide(Agents.layer),
           Effect.provide(Platform.services),
+          Effect.provideServiceEffect(GuardArea, vibestArea),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
           Effect.provideService(VibestCommand, ["/bin/vibest"]),

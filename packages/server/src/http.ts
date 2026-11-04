@@ -43,7 +43,7 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { ConfigProvider, Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -156,13 +156,17 @@ export const make = Effect.gen(function* () {
             Effect.catch((e) => Effect.succeed(failure(500, `the event was not recorded: ${String(e)}`))),
           ),
         )
-      // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
+      // vibest's guard area: its home and projects directory, and the session's own project's scratch directory.
       const guard = (tool: Guard.ToolCall) =>
         Effect.gen(function* () {
           const key = yield* db.projectKey(who.projectId)
-          const scratch = key === undefined ? {} : { VIBEST_SCRATCH: layout.scratch(key) }
+          const area = {
+            home: layout.home,
+            protected: layout.projects,
+            allowed: key === undefined ? undefined : layout.scratch(key),
+          }
           return yield* Guard.check(agents.ofSession(who).tools, tool).pipe(
-            Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
+            Effect.provideService(Guard.GuardArea, area),
             Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),
           )
         })
