@@ -4,13 +4,12 @@ import readline from "node:readline"
 
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
 import type { SessionInfo } from "@vibest/protocol/rpc"
-import { callerMachine } from "@vibest/runtime-herdr/caller"
-import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { VibestCommand } from "@vibest/schema/layout"
 import { RuntimeAddress } from "@vibest/schema/session"
 import { Config, Console, Effect, Option, Schema } from "effect"
-import { Herdr } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
+
+import { callerMachine, HERDR_KIND as KIND, Herdr, parseTerminal } from "#platform"
 
 /** HERDR_PLUGIN_CONTEXT_JSON is missing or not the object herdr documents. */
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {

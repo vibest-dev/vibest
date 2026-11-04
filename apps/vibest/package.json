@@ -20,7 +20,7 @@
   "type": "module",
   "imports": {
     "#platform": {
-      "bun": "./src/platform/bun.ts"
+      "bun": "@vibest/server/platform/bun"
     }
   },
   "exports": {

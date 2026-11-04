@@ -422,6 +422,12 @@ importers:
 
   packages/server:
     dependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+      '@effect/sql-sqlite-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
       '@vibest/client':
         specifier: workspace:*
         version: link:../client
@@ -431,9 +437,18 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/plugin-coordinator':
+        specifier: workspace:*
+        version: link:../plugin-coordinator
+      '@vibest/plugin-harness-choice':
+        specifier: workspace:*
+        version: link:../plugin-harness-choice
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema
@@ -443,6 +458,9 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
+      effect-herdr-sdk:
+        specifier: workspace:*
+        version: link:../effect-herdr-sdk
 
   packages/vibest:
     dependencies:

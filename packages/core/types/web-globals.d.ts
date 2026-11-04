@@ -8,3 +8,4 @@ declare var URL: {
 declare var TextDecoder: {
   new (): { decode(input?: Uint8Array, options?: { stream?: boolean }): string }
 }
+declare var crypto: { randomUUID(): string }

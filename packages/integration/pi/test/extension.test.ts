@@ -5,7 +5,6 @@ import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-codi
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 // The Pi extension against a fake ExtensionAPI and a real vibestd (vibest's RPC server over the fake herdr).
 import { assert, describe, it } from "@effect/vitest"
-import * as Platform from "@vibest/cli/platform/bun"
 import {
   authed,
   FakeRuntime,
@@ -22,6 +21,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { TurnEnds } from "@vibest/core/turn-ends"
 import * as Http from "@vibest/server/http"
+import * as Platform from "@vibest/server/platform/bun"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
 import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"

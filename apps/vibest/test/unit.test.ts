@@ -845,7 +845,7 @@ describe("Db", () => {
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
-      const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
+      const platformModule = url.fileURLToPath(new URL("../../../packages/server/src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [

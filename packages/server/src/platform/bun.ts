@@ -3,7 +3,8 @@ import fs from "node:fs"
 import fsPromises from "node:fs/promises"
 import path from "node:path"
 
-// vibest on Bun: the only file under src/ that names a runtime. Reached through the `#platform` import, which
+// vibest on Bun: the vibestd host (engine plus product plus the bundled plugins) and the CLI's platform services, the
+// only server file that names a runtime. Reached through the app's `#platform` import, which
 // package.json `imports` resolves by condition ("bun" here); another runtime adds a condition and a sibling file.
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
@@ -21,6 +22,11 @@ import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
+
+// The bundled runtime's caller side, for the frontends: which herdr terminal a command runs in.
+export { ambientHerdr, CALLER_ENV, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
+export { KIND as HERDR_KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+export { Herdr } from "effect-herdr-sdk"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 

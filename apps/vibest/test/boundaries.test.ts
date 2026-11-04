@@ -6,6 +6,9 @@ import { assert, describe, it } from "@effect/vitest"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const PACKAGES = ["schema", "core", "server", "protocol", "client"]
+/** The host on Bun (packages/server/src/platform): it bundles the default runtime plugin, so it alone names herdr. */
+const HOST = new Set(["packages/server/package.json"])
+const isHost = (rel: string) => HOST.has(rel) || rel.startsWith("packages/server/src/platform/")
 const HERDR = /["'](effect-herdr-sdk|@vibest\/runtime-herdr)(\/[^"']*)?["']/
 
 /** May import `effect-herdr-sdk`. Every other unit test uses FakeRuntime. */
@@ -17,10 +20,12 @@ describe("runtime boundary", () => {
     for (const name of PACKAGES) {
       const dir = path.join(root, "packages", name)
       const manifest = path.join(dir, "package.json")
-      if (HERDR.test(fs.readFileSync(manifest, "utf8"))) offenders.push(path.relative(root, manifest))
+      if (HERDR.test(fs.readFileSync(manifest, "utf8")) && !isHost(path.relative(root, manifest)))
+        offenders.push(path.relative(root, manifest))
       for (const file of fs.readdirSync(path.join(dir, "src"), { recursive: true, encoding: "utf8" })) {
         const full = path.join(dir, "src", file)
-        if (/\.tsx?$/.test(file) && HERDR.test(fs.readFileSync(full, "utf8"))) offenders.push(path.relative(root, full))
+        const rel = path.relative(root, full)
+        if (/\.tsx?$/.test(file) && !isHost(rel) && HERDR.test(fs.readFileSync(full, "utf8"))) offenders.push(rel)
       }
     }
     assert.deepStrictEqual(offenders, [])

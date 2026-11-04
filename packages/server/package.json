@@ -11,12 +11,18 @@
     "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
     "@vibest/plugin": "workspace:*",
+    "@vibest/plugin-coordinator": "workspace:*",
+    "@vibest/plugin-harness-choice": "workspace:*",
     "@vibest/protocol": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/vibest": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "effect-herdr-sdk": "workspace:*"
   }
 }

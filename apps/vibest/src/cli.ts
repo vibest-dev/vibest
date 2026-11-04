@@ -16,17 +16,12 @@ import {
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
 // Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
-import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
 import { jsonObject } from "@vibest/schema/json"
 import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
 import { describeSpawn } from "@vibest/schema/plugin"
 import { type HarnessId, LaunchFailed } from "@vibest/schema/session"
 import { askYesNo, interactive, writeAtomic } from "@vibest/schema/terminal"
-import * as Daemon from "@vibest/server/daemon"
-import * as LocalHarnesses from "@vibest/vibest/harnesses"
-import * as Launch from "@vibest/vibest/launch"
-import { asData, ProjectKind } from "@vibest/vibest/project"
-import { createProject, projectRoot } from "@vibest/vibest/project-create"
+import { asData, createProject, Daemon, Launch, LocalHarnesses, ProjectKind, projectRoot } from "@vibest/server/entry"
 import {
   Cause,
   Config,
@@ -47,6 +42,8 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
+
+import { ambientHerdr, CALLER_ENV, callerMachine, callerTerminal, runAtRoot } from "#platform"
 
 import { herdrCommands } from "./herdr-plugin.ts"
 import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"

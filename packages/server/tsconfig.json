@@ -1,5 +1,7 @@
 {
   "extends": "@vibest/tsconfig/base.json",
   "compilerOptions": { "types": [], "customConditions": [] },
-  "include": ["src", "../core/types"]
+  "include": ["src", "../core/types"],
+  // The Bun host: type-checked with Bun's types where the app imports it (apps/vibest, through #platform).
+  "exclude": ["src/platform"]
 }
