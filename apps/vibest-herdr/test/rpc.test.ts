@@ -18,7 +18,7 @@ import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/prot
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, type Scope, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -1323,6 +1323,22 @@ describe("vibest.sock", () => {
       // Back at its shell: `state` reports idle now (§3), a live status of its own.
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
       assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "idle" })
+    }),
+  )
+
+  test(
+    "Remove names the resolved session when the runtime is unreachable, not the prefix typed",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* Ref.set(herdr.reachable, false)
+      const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
+      assert.strictEqual(failed._tag, "RuntimeUnreachable")
+      assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
     }),
   )
 })

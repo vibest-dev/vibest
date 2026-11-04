@@ -705,12 +705,16 @@ export const handlers = VibestRpcs.toLayer(
         ),
       Remove: ({ id: input, keepWorktree }) =>
         managed("Remove", input).pipe(
-          Effect.flatMap((id) => sessions.remove(id, { keepWorktree })),
-          // Unreachable is the protocol's own error; any other runtime refusal is a server bug.
-          Effect.catchTag("RuntimeError", (e) =>
-            e.code === "unreachable"
-              ? Effect.fail(new RuntimeUnreachable({ session: input, message: e.message }))
-              : Effect.die(e),
+          Effect.flatMap((id) =>
+            sessions.remove(id, { keepWorktree }).pipe(
+              // Unreachable is the protocol's own error; any other runtime refusal is a server bug.
+              // `id` is the resolved session, not the prefix the caller typed.
+              Effect.catchTag("RuntimeError", (e) =>
+                e.code === "unreachable"
+                  ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+                  : Effect.die(e),
+              ),
+            ),
           ),
           Effect.map((out) => out ?? null),
         ),
