@@ -1,7 +1,7 @@
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
-import { Config, Effect, Option } from "effect"
+import { Config, Effect, FileSystem, Option } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
@@ -72,9 +72,16 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const systemPromptFile = yield* unsafeOnly(
     writeSystemPrompt(
       saved.sessionId,
-      coordinatorSystemPrompt({ ...(yield* projectText(layout.project(saved.projectId))) }),
+      coordinatorSystemPrompt({
+        projectDir: layout.project(saved.projectId),
+        ...(yield* projectText(layout.project(saved.projectId))),
+      }),
     ),
   )
+  // The project folder the Coordinator writes in (--add-dir must exist).
+  yield* (yield* FileSystem.FileSystem)
+    .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
+    .pipe(Effect.ignore)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
@@ -82,12 +89,14 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
     VIBEST_PROJECT_ID: saved.projectId,
+    VIBEST_PROJECT_DIR: layout.project(saved.projectId),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {
     file: adapter.binary,
     args: adapter.coordinatorArgs({
       root: input.root,
+      projectDir: layout.project(saved.projectId),
       systemPromptFile,
       provider: input.provider,
       model: input.model,

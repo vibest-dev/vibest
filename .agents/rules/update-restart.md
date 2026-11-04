@@ -10,7 +10,7 @@
 8. A usage-limit move takes the same path: only the limited harness ends and the next harness runs in the same terminal.
 9. A main agent moved from another terminal (`vibest` there, answered y) ends the same way: SIGTERM to the pid it last reported, its terminal and shell kept, then it starts in the new terminal. While a restart is between its harnesses, that start is refused and nothing is signalled.
 
-Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project scratch). 1 to 9 are built on `feat/update-restart-agents-v3` (runtime-herdr implements `run`; core in `packages/core/src/restart.ts`); `vibest daemon restart` offers it too since `feat/multi-install-daemon-restart`.
+Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project artifacts). 1 to 9 are built on `feat/update-restart-agents-v3` (runtime-herdr implements `run`; core in `packages/core/src/restart.ts`); `vibest daemon restart` offers it too since `feat/multi-install-daemon-restart`.
 
 Known limits:
 

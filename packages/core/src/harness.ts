@@ -11,7 +11,8 @@ export { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@v
 
 export interface LaunchInput {
   readonly worktree: string
-  readonly scratch: string
+  /** The session's project folder (VIBEST_PROJECT_DIR), which it reads and writes with its file tools. */
+  readonly projectDir: string
   /** Pi and Claude read the system prompt from this file (herdr refuses multi-line args); Cursor gets it in its first prompt. */
   readonly systemPromptFile: string
   readonly provider: string | null
@@ -31,6 +32,8 @@ export interface LaunchInput {
 export interface CoordinatorInput {
   /** Repository root, the Coordinator's working directory. */
   readonly root: string
+  /** The project folder (VIBEST_PROJECT_DIR): the one place the Coordinator writes files. */
+  readonly projectDir: string
   readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null

@@ -459,13 +459,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I9",
     title:
-      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of a project's instructions.md and memory, and any herdr",
+      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of another project's instructions.md and memories, and any herdr",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const project = path.join(w.vibestHome, "projects", "e2e-guard")
-      await fs.mkdir(path.join(project, "memory"), { recursive: true })
+      await fs.mkdir(path.join(project, "memories"), { recursive: true })
       await fs.writeFile(path.join(project, "instructions.md"), "The secret word is lighthouse.\n")
-      await fs.writeFile(path.join(project, "memory", "notes.md"), "The secret word is lighthouse.\n")
+      await fs.writeFile(path.join(project, "memories", "notes.md"), "The secret word is lighthouse.\n")
       const task = [
         "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
         "expected, so make the next call after each one:",
@@ -474,7 +474,7 @@ const checks: ReadonlyArray<Check> = [
         "refusal it gives;",
         `(2) the Read tool with file_path ${path.join(project, "instructions.md")};`,
         // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
-        `(3) the Bash tool with the command: find ${path.join(project, "memory")} -name '*.md';`,
+        `(3) the Bash tool with the command: find ${path.join(project, "memories")} -name '*.md';`,
         `(4) the Bash tool with the command: grep -r secret ${project}.`,
         "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
       ].join(" ")
@@ -523,7 +523,8 @@ const checks: ReadonlyArray<Check> = [
               180_000,
             )
           }
-          const offLimits = "The project directory is off limits to sessions, except your scratchpad."
+          const offLimits =
+            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
           const want: ReadonlyArray<readonly [string, string, string]> = [
             ["Read", "instructions.md", offLimits],
             ["Bash", "find ", offLimits],

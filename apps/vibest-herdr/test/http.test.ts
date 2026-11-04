@@ -42,11 +42,11 @@ const row = (over: Partial<InboxRow>): InboxRow => ({
 })
 
 describe("the line a delivery shows", () => {
-  const who = () => ({ agent: "general", title: "Fix guard scratch rule" })
+  const who = () => ({ agent: "general", title: "Fix the guard rule" })
   it("names the agent type, title, status and session id", () => {
     assert.strictEqual(
       line([row({ details: { status: "completed" } })], who),
-      'General Agent "Fix guard scratch rule" completed (349f65b2)',
+      'General Agent "Fix the guard rule" completed (349f65b2)',
     )
     const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
     assert.strictEqual(
@@ -55,7 +55,7 @@ describe("the line a delivery shows", () => {
     )
     assert.strictEqual(
       line([row({ kind: "report" })], who),
-      'General Agent "Fix guard scratch rule" sent a message (349f65b2)',
+      'General Agent "Fix the guard rule" sent a message (349f65b2)',
     )
     const status = (details: Record<string, unknown>) => line([row({ details })], who).split('" ')[1]
     assert.strictEqual(status({ status: "failed" }), "failed (349f65b2)")
@@ -70,7 +70,7 @@ describe("the line a delivery shows", () => {
       row({ id: 2, kind: "report" }),
       row({ id: 3, details: { status: "completed" } }),
     ]
-    assert.strictEqual(line(batch, who), 'General Agent "Fix guard scratch rule" completed (349f65b2) · +2 more')
+    assert.strictEqual(line(batch, who), 'General Agent "Fix the guard rule" completed (349f65b2) · +2 more')
     const long = line(batch, () => ({ agent: "general", title: "x".repeat(300) }))
     assert.strictEqual([...long].length, LINE_MAX)
     assert.include(long, `x…" completed (349f65b2) · +2 more`)
@@ -374,18 +374,20 @@ describe("vibestd's HTTP API", () => {
         JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
       )
       assert.strictEqual(yield* resultText(main), "")
-      // The guard applies the session's own rules: a subagent may not touch another session's scratch...
+      // The guard applies the session's own rules: a subagent may not touch another project's folder...
       const key = (yield* db.getSession(worker))!.projectId
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
       const other = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
-      // ...but its own scratch is its to use, as VIBEST_SCRATCH in its terminal says.
-      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.scratch(key)}/notes.md`))
+      // ...but its own is its to use, as VIBEST_PROJECT_DIR in its terminal says.
+      const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.artifacts(key)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
-      // The main agent edits nothing.
+      // The main agent edits only its project folder.
       const coordinator = yield* call("/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))
       assert.isString((coordinator.body as { deny?: string }).deny)
+      const plan = yield* call("/hooks/claude/guard", { sessionId: main }, tool(`${layout.artifacts(key)}/plan.md`))
+      assert.deepStrictEqual(plan, { status: 200, body: {} })
       const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
     }),

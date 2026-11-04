@@ -55,7 +55,7 @@ recognizes a moved checkout: a directory with no project, whose origins are exac
 directory no longer exists, is that project moved (`ProjectMoved`). `vibest` asks `[Y/n]`: yes moves the project there
 (its id kept, its session directories rewritten, vibest's own worktrees repaired; for the user's worktrees it prints
 `git worktree repair`), no makes a new project. Several such projects: a new project, the candidates printed. Its
-files are `projects/<project id>/` under `VIBEST_HOME` (instructions, memory, docs, scratch). `vibest ls` and the other
+folder is `projects/<project id>/` under `VIBEST_HOME` (instructions.md, docs/, memories/, artifacts/). `vibest ls` and the other
 read-only lookups never create one.
 
 ## DDL

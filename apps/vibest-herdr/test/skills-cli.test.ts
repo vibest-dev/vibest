@@ -32,7 +32,7 @@ const commandsOn = (line: string) => {
 
 const launch = (pluginDir: string): LaunchInput => ({
   worktree: "/wt",
-  scratch: "/scratch",
+  projectDir: "/project",
   systemPromptFile: "/rules.md",
   provider: null,
   model: null,
@@ -45,6 +45,7 @@ const launch = (pluginDir: string): LaunchInput => ({
 
 const coordinator = (pluginDir: string): CoordinatorInput => ({
   root: "/repo",
+  projectDir: "/project",
   systemPromptFile: "/r.md",
   provider: null,
   model: null,

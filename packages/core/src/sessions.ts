@@ -148,7 +148,7 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project `root` is (vibestd resolved it once): the row, the scratch directory and the system prompt use it. */
+  /** The project `root` is (vibestd resolved it once): the row, the project folder and the system prompt use it. */
   readonly projectId: string
   readonly name: string
   readonly prompt: string
@@ -420,12 +420,12 @@ export class Sessions extends Context.Service<
         })
 
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
-      // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
+      // VIBEST_PROJECT_DIR: the session's project folder, the one place under projects its guard lets it use.
       // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
-      const vibestEnv = (session: SessionRow, scratch: string) => ({
+      const vibestEnv = (session: SessionRow) => ({
         VIBEST_SESSION_ID: session.id,
         VIBEST_PROJECT_ID: session.projectId,
-        VIBEST_SCRATCH: scratch,
+        VIBEST_PROJECT_DIR: layout.project(session.projectId),
         VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
         VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
@@ -440,7 +440,7 @@ export class Sessions extends Context.Service<
             id: session.id,
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
-            scratch: layout.scratch(session.projectId),
+            projectDir: layout.project(session.projectId),
             vibest,
             ...(yield* projectText(layout.project(session.projectId))),
           })
@@ -459,7 +459,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: layout.scratch(session.projectId),
+            projectDir: layout.project(session.projectId),
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -467,7 +467,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session, layout.scratch(session.projectId)),
+            env: vibestEnv(session),
           }),
         ]
       })

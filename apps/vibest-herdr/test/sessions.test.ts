@@ -177,11 +177,8 @@ describe.concurrent("Sessions", () => {
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
-      // The project's own scratch directory, the one place under projects the session's guard allows.
-      assert.strictEqual(
-        placed.env.VIBEST_SCRATCH,
-        layout.scratch(String((yield* (yield* Db).getSession(id))!.projectId)),
-      )
+      // The project's folder, the one place under projects the session's guard allows.
+      assert.strictEqual(placed.env.VIBEST_PROJECT_DIR, layout.project((yield* (yield* Db).getSession(id))!.projectId))
       // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
       // field (no terminal yet: the one it gets is opened after the env is fixed).
       const identity = (yield* (yield* Db).sessionIdentity(id))!
@@ -1246,7 +1243,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
       assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned before the move")
-      const memory = `${layout.project(String((yield* db.getSession(id))!.projectId))}/memory`
+      const memory = `${layout.project(String((yield* db.getSession(id))!.projectId))}/memories`
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/moved.md`, "learned before the move")
       yield* fs.writeFileString(yield* systemPromptFile(id), "stale text")
@@ -2417,7 +2414,7 @@ describe.concurrent("Sessions", () => {
       yield* fs.writeFileString(cursorMcp, JSON.stringify({ mcpServers: { repo: { command: "repo-server" } } }))
       // The old file is never the source: the next start writes the prompt again, with memory written since.
       yield* fs.writeFileString(yield* systemPromptFile(id), "use the send_message tool")
-      const memory = `${layout.project(String((yield* (yield* Db).getSession(id))!.projectId))}/memory`
+      const memory = `${layout.project(String((yield* (yield* Db).getSession(id))!.projectId))}/memories`
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/later.md`, "learned between starts")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))

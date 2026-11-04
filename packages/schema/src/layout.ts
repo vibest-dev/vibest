@@ -19,9 +19,9 @@ export class Layout extends Context.Service<
     readonly plugins: string
     /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
-    /** `projects/<project id>`: the project's docs, memory, scratch and instructions.md. */
+    /** `projects/<project id>`: the project folder, VIBEST_PROJECT_DIR (instructions.md, docs/, memories/, artifacts/). */
     readonly project: (projectId: string) => string
-    readonly scratch: (projectId: string) => string
+    readonly artifacts: (projectId: string) => string
   }
 >()("vibest/Layout") {
   static readonly make = (home: string) =>
@@ -39,7 +39,7 @@ export class Layout extends Context.Service<
         plugins: path.join(home, "plugins"),
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (projectId) => path.join(home, "projects", projectId),
-        scratch: (projectId) => path.join(home, "projects", projectId, "scratch"),
+        artifacts: (projectId) => path.join(home, "projects", projectId, "artifacts"),
       })
     })
 

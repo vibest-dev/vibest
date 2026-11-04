@@ -21,12 +21,13 @@ Show the plan in full, including open questions. Do not implement until the user
 
 ## 3. Implement
 
+Save the agreed plan, verbatim, with your file tool as `$VIBEST_PROJECT_DIR/artifacts/pipeline-<topic>-plan.md` (a new file name if that one exists). Then:
+
 ```
-vibest project write scratch pipeline-<topic>-plan.md --if-version new -- '<the agreed plan, verbatim>'
-vibest run <harness> --title 'Implement <topic>' -- 'Implement the plan at <absolute scratch path> exactly. Run the tests and typecheck, commit on a branch, push, and report the branch and hash. Do not open a pull request.'
+vibest run <harness> --title 'Implement <topic>' -- 'Implement the plan at <absolute plan path> exactly. Run the tests and typecheck, commit on a branch, push, and report the branch and hash. Do not open a pull request.'
 ```
 
-Its id is <implementer id>. The absolute path is `scratchPath` from `vibest project info`, plus the file name. If write says the file already exists, `vibest project read scratch pipeline-<topic>-plan.md`, then write again with the version it prints, or pick a new file name. Do not pass `--archive-on-completion`: this session stays for review and the pull request. When it reports, check the diff and the tests yourself before review.
+Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name. Do not pass `--archive-on-completion`: this session stays for review and the pull request. When it reports, check the diff and the tests yourself before review.
 
 ## 4. Review
 
@@ -34,7 +35,7 @@ Its id is <implementer id>. The absolute path is `scratchPath` from `vibest proj
 Read-only here is the prompt you pass, plus the peer git rule the session already has: no commit, and nothing that moves HEAD, a branch, or the index.
 
 ```
-vibest run <harness> --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute scratch path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Start with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
+vibest run <harness> --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Start with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
 Its id is <reviewer id>. Do not pass `--archive-on-completion`: later rounds go to this reviewer with `vibest send`.

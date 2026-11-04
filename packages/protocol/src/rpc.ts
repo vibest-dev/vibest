@@ -1,18 +1,6 @@
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, Routing } from "@vibest/schema/plugin"
-import {
-  ProjectConflict,
-  ProjectDeleteInput,
-  ProjectEntry,
-  ProjectInfoResult,
-  ProjectInvalid,
-  ProjectListInput,
-  ProjectReadInput,
-  ProjectReadResult,
-  ProjectSearchInput,
-  ProjectWriteInput,
-  ProjectWriteResult,
-} from "@vibest/schema/project"
+import { ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
@@ -609,42 +597,11 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Project.List", {
-      payload: ProjectListInput.fields,
-      success: Schema.Array(ProjectEntry),
-      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
-    }),
-  ),
-  scoped(
-    Rpc.make("Project.Read", {
-      payload: ProjectReadInput.fields,
-      success: ProjectReadResult,
-      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectInvalid]),
-    }),
-  ),
-  scoped(
     Rpc.make("Project.Search", {
       payload: ProjectSearchInput.fields,
       success: Schema.Array(Schema.String),
       error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Project.Write", {
-        payload: ProjectWriteInput.fields,
-        success: ProjectWriteResult,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectConflict, ProjectInvalid]),
-      }),
-    ),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Project.Delete", {
-        payload: ProjectDeleteInput.fields,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectConflict, ProjectInvalid]),
-      }),
-    ),
   ),
   /**
    * The user's command line only: stop this vibestd (`instance` from its Ping) once its own operations drain (agents keep running), else DaemonBusy and it

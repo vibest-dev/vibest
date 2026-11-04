@@ -183,11 +183,7 @@ const ACCESS = {
   "Project.RunningCoordinator": "agent",
   "Project.StopCoordinator": "agent",
   "Project.Info": "agent",
-  "Project.List": "agent",
-  "Project.Read": "agent",
   "Project.Search": "agent",
-  "Project.Write": "agent",
-  "Project.Delete": "agent",
   Send: "owner",
   Interrupt: "owner",
   Peek: "owner",
@@ -979,11 +975,7 @@ export const handlers = VibestRpcs.toLayer(
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
         db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
       "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
-      "Project.List": (input) => scope("Project.List").pipe(Effect.flatMap((s) => project.list(s, input))),
-      "Project.Read": (input) => scope("Project.Read").pipe(Effect.flatMap((s) => project.read(s, input))),
       "Project.Search": (input) => scope("Project.Search").pipe(Effect.flatMap((s) => project.search(s, input))),
-      "Project.Write": (input) => scope("Project.Write").pipe(Effect.flatMap((s) => project.write(s, input))),
-      "Project.Delete": (input) => scope("Project.Delete").pipe(Effect.flatMap((s) => project.delete(s, input))),
 
       // Stop admitting changes, let the admitted ones and the daemon's own operations finish, and accept once nothing is
       // running and no claimed delivery is unsettled. Agents keep running; pending Messages stay in sqlite for the next

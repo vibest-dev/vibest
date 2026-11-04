@@ -153,10 +153,10 @@ export const make = Effect.gen(function* () {
           true,
           Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
-      // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
-      const scratch = { VIBEST_SCRATCH: layout.scratch(who.projectId) }
+      // The guard reads the session's project folder as its terminal's VIBEST_PROJECT_DIR; vibestd has none.
+      const own = { VIBEST_PROJECT_DIR: layout.project(who.projectId) }
       return yield* Guard.check(who.agent, request.body).pipe(
-        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
+        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: own }), { asPrimary: true })),
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>
           Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),

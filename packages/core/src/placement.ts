@@ -49,7 +49,7 @@ export const sessionPlacement = (deps: {
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
   readonly layout: {
-    readonly scratch: (projectId: string) => string
+    readonly artifacts: (projectId: string) => string
   }
   readonly fs: {
     readonly makeDirectory: (
@@ -65,7 +65,7 @@ export const sessionPlacement = (deps: {
   readonly path: { readonly dirname: (path: string) => string }
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly systemPromptInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow, scratch: string) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
   /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
@@ -174,7 +174,7 @@ export const sessionPlacement = (deps: {
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(session.projectId)) },
+        env: { ...input.env, ...deps.vibestEnv(session) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -214,8 +214,8 @@ export const sessionPlacement = (deps: {
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
     // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
-    // The row's own project: the scratch directory goes to the project the session belongs to.
-    yield* fs.makeDirectory(layout.scratch(session.projectId), { recursive: true })
+    // The row's own project folder, with its artifacts/ (the session's --add-dir must exist).
+    yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })
     // The same limit-move a failed start always had: it runs inside the scope, so the worktree the move reuses is still there.
     const openOrMove = (
       open: Effect.Effect<

@@ -32,8 +32,14 @@ const claudeStartup: Startup = Effect.map(
     }),
 )
 
-/** Claude's built-in tools a Coordinator inspects with; its pre-tool hook (guard.ts) refuses edits and the other calls it names, the rest run. */
+/** Claude's built-in tools a Coordinator inspects with; its pre-tool hook (guard.ts) refuses the calls it names, the rest run. */
 const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
+
+/**
+ * Claude's permission rules for the project folder: read and edit there without a prompt. Claude matches file tools
+ * only against Read and Edit rules (an Edit rule covers Write), and `//` starts an absolute path.
+ */
+const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
 
 /** Claude's permission rules that let `vibest report` run without asking, however vibest is invoked (`vibest`, `bun …/main.ts`). */
 const vibestReport = (vibest: ReadonlyArray<string>) =>
@@ -142,9 +148,9 @@ export const claude: HarnessAdapter = {
     "--append-system-prompt-file",
     i.systemPromptFile,
     "--add-dir",
-    i.scratch,
+    i.projectDir,
     "--allowedTools",
-    vibestReport(i.vibest),
+    [vibestReport(i.vibest), ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     // `claude --help`: --permission-mode plan is the read-only session mode.
@@ -154,12 +160,15 @@ export const claude: HarnessAdapter = {
     ...opt("--resume", i.sessionId),
     "--append-system-prompt-file",
     i.systemPromptFile,
-    // No MCP servers, only the inspection tools; they run without a permission prompt, the pre-tool hook refuses what it names.
+    // No MCP servers, only the inspection tools and the file tools for the project folder; they run without a
+    // permission prompt there, and the pre-tool hook refuses an edit anywhere else and the other calls it names.
     "--strict-mcp-config",
     "--tools",
-    CLAUDE_INSPECT_TOOLS.join(","),
+    [...CLAUDE_INSPECT_TOOLS, "Edit", "Write"].join(","),
+    "--add-dir",
+    i.projectDir,
     "--allowedTools",
-    CLAUDE_INSPECT_TOOLS.join(","),
+    [...CLAUDE_INSPECT_TOOLS, ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),

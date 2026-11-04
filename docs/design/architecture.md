@@ -243,11 +243,11 @@ AgentDefinition    Harness    Subscription    Machine
   decide which harness to use, when to wait, and when to switch.
 - **Conversations.** The main Agent has one active conversation per Project; `vibest --new` starts another and
   keeps the earlier ones (their CLI session ids) so they can be resumed. Knowledge belongs to the Project, so
-  every conversation and every subagent sees the same instructions and memory.
-- **Project knowledge** (omac's Project store, copied): `instructions.md`, `memory/`, `docs/` written only by
-  the main Agent through `vibest knowledge write --if-version`, with secret scanning; `scratch/` shared by every
-  Agent of the Project. Instructions and memory are added to every subagent's rules (16,000 characters each).
-  A subagent's `## Remember` section is a proposal the main Agent may write to memory.
+  every conversation and every subagent sees the same instructions and memories.
+- **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `instructions.md` (the user's), `docs/`,
+  `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
+  keeps each Agent to its own project's folder. Instructions and memories are added to every subagent's rules
+  (16,000 characters each). A subagent's `## Remember` section is a proposal the main Agent may write to memories.
 - **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
 - **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
   `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
@@ -422,8 +422,8 @@ main Agent's integration delivers it as new input     ← back in the main conve
   summary, so the main Agent recovers the whole picture after compaction or a restart without relying on its
   context.
 - **Subagent rules** (omac `rules.ts`, copied): work on a detached HEAD, then branch, commit, and push when done;
-  destructive git or file actions need the user's quoted consent; never control herdr; shared files go to
-  scratch prefixed with the Agent id; the final reply format of §3.1.
+  destructive git or file actions need the user's quoted consent; never control herdr; shared files go to the
+  project folder's `artifacts/` prefixed with the Agent id; the final reply format of §3.1.
 
 ### 4.2 Skills
 
@@ -753,7 +753,7 @@ vibest wait | resume <run>
 vibest ls [--run …] [--all]             Runs and their Agents
 vibest read <agent> · attach <agent> · result <run|agent> · events [--run …]
 vibest report [--json] -- <text|->      from inside a subagent
-vibest knowledge info | list | read | search | write --if-version | delete      Project knowledge
+vibest project info | search                                                     the project folder's paths, text search
 vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · models [<harness>]
 vibest harness list | models <harness>
 vibest integration guard | stop --harness <h>   internal: what the harness plugins call
@@ -805,7 +805,7 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
-  projects/<project id>/     knowledge (instructions.md, memory/, docs/) and scratch/
+  projects/<project id>/     the project folder: instructions.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
 

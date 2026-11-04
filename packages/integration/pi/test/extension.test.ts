@@ -423,7 +423,11 @@ describe("pi-vibest", () => {
         ],
       )
       assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
-        { block: true, reason: "The coordinator does not edit files; hand the change to a session." },
+        {
+          block: true,
+          reason:
+            "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session.",
+        },
       ])
       const start = { systemPromptOptions: { sections: { ponytail: "be lazy" } as Record<string, string> } }
       yield* s.emit("before_agent_start", start)
@@ -464,7 +468,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Session: guard on tool calls (its scratchpad is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
+    "Session: guard on tool calls (its project folder is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
     Effect.gen(function* () {
       const layout = yield* Layout
       yield* (yield* Db).insertSession(
@@ -489,17 +493,21 @@ describe("pi-vibest", () => {
         },
         yield* projectOf("r"),
       )
-      const scratch = `${layout.projects}/k/scratch/pane:test/w1:p7`
+      const own = `${layout.projects}/k`
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
         VIBEST_COMMAND: '["vibest"]',
-        VIBEST_SCRATCH: `${layout.projects}/k/scratch`,
+        VIBEST_PROJECT_DIR: own,
       })
       yield* s.emit("session_start", {}, { mode: "tui" })
       const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
       const offLimits = [
-        { block: true, reason: "The project directory is off limits to sessions, except your scratchpad." },
+        {
+          block: true,
+          reason:
+            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR).",
+        },
       ]
       assert.deepStrictEqual(yield* call("bash", { command: "herdr pane list" }), [
         {
@@ -512,15 +520,13 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* call("bash", { command: "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd" }), [
         undefined,
       ])
-      assert.deepStrictEqual(yield* call("write", { path: `${scratch}/abcd1234-notes.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("bash", { command: `cat ${scratch}/a.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memory/a.md` }), offLimits)
-      assert.deepStrictEqual(yield* call("read", { path: `${scratch}/../../../memory/a.md` }), offLimits)
-      assert.deepStrictEqual(yield* call("bash", { command: `cat ${scratch}/../../../memory/a.md` }), offLimits)
-      assert.deepStrictEqual(
-        yield* call("bash", { command: `cat ${layout.projects}/k/scratch/pane:test/w2:p1/a.md` }),
-        [undefined],
-      )
+      assert.deepStrictEqual(yield* call("write", { path: `${own}/artifacts/abcd1234-notes.md` }), [undefined])
+      assert.deepStrictEqual(yield* call("edit", { path: `${own}/artifacts/abcd1234-notes.md` }), [undefined])
+      assert.deepStrictEqual(yield* call("bash", { command: `cat ${own}/artifacts/a.md` }), [undefined])
+      assert.deepStrictEqual(yield* call("read", { path: `${own}/memories/a.md` }), [undefined])
+      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/j/memories/a.md` }), offLimits)
+      assert.deepStrictEqual(yield* call("write", { path: `${own}/artifacts/../../j/artifacts/a.md` }), offLimits)
+      assert.deepStrictEqual(yield* call("bash", { command: `cat ${own}/../j/memories/a.md` }), offLimits)
       yield* s.emit("agent_end", {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
@@ -603,8 +609,12 @@ describe("pi-vibest", () => {
       const s = yield* session({ VIBEST_AGENT: "general", VIBEST_COMMAND: '["vibest"]' })
       assert.deepStrictEqual([...s.handlers.keys()].sort(), ["session_shutdown", "tool_call"])
       const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memory/a.md` }), [
-        { block: true, reason: "The project directory is off limits to sessions, except your scratchpad." },
+      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memories/a.md` }), [
+        {
+          block: true,
+          reason:
+            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR).",
+        },
       ])
     }),
   )

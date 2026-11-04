@@ -132,7 +132,7 @@ describe("System prompt directory", () => {
 
 describe("Rules", () => {
   it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
     assert.include(rules, "`delegate`")
     assert.include(rules, "`pipeline`")
     assert.notInclude(rules, "--archive-on-completion")
@@ -146,7 +146,7 @@ describe("Rules", () => {
   })
 
   it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
     assert.include(rules, "in plain, complete sentences with no shorthand only you know")
     assert.include(rules, "a space between every word, identifier and number")
     assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
@@ -1093,7 +1093,7 @@ describe("Db", () => {
 
 const launchInput: LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
-  scratch: "/h/.vibest/projects/k/scratch/cli",
+  projectDir: "/h/.vibest/projects/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b",
   systemPromptFile: "/tmp/vibest/abcd1234-abcd-4abc-8abc-abcd1234abcd/system-prompt.md",
   provider: null,
   model: null,
@@ -1104,7 +1104,7 @@ const launchInput: LaunchInput = {
   env: {
     VIBEST_AGENT: "general",
     VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-    VIBEST_SCRATCH: "/h/.vibest/projects/k/scratch/cli",
+    VIBEST_PROJECT_DIR: "/h/.vibest/projects/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b",
   },
 }
 
@@ -1145,6 +1145,7 @@ describe("HarnessAdapter", () => {
     assert.strictEqual(after(ADAPTERS.pi.launchArgs(input), "-e"), `${dir}/extension.mjs`)
     const coordinator = {
       root: "/r",
+      projectDir: "/p",
       systemPromptFile: "/r.md",
       provider: null,
       model: null,
@@ -1242,9 +1243,10 @@ describe("HarnessAdapter", () => {
     assert.notInclude(ADAPTERS.claude.launchArgs(input), "--settings")
   })
 
-  it("Coordinator argv: rules and the inspection tools, no MCP server at all; cursor cannot be one", () => {
+  it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {
     const input: CoordinatorInput = {
       root: "/repo",
+      projectDir: "/h/p",
       systemPromptFile: "/tmp/vibest/c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff/system-prompt.md",
       provider: null,
       model: "m",
@@ -1254,8 +1256,16 @@ describe("HarnessAdapter", () => {
     }
     const claude = ADAPTERS.claude.coordinatorArgs!(input)
     assert.deepStrictEqual(
-      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 5),
-      ["--strict-mcp-config", "--tools", "Bash,Read,Grep,Glob,Skill", "--allowedTools", "Bash,Read,Grep,Glob,Skill"],
+      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 7),
+      [
+        "--strict-mcp-config",
+        "--tools",
+        "Bash,Read,Grep,Glob,Skill,Edit,Write",
+        "--add-dir",
+        "/h/p",
+        "--allowedTools",
+        "Bash,Read,Grep,Glob,Skill,Read(//h/p/**),Edit(//h/p/**)",
+      ],
     )
     assert.notInclude(claude, "--mcp-config")
     assert.include(claude, "--append-system-prompt-file")
@@ -1263,7 +1273,7 @@ describe("HarnessAdapter", () => {
       "--system-prompt",
       input.systemPromptFile,
       "--tools",
-      "read,bash,codemode,grep,find,ls",
+      "read,bash,codemode,grep,find,ls,write,edit",
       "--no-mcp",
       "-e",
       `${input.pluginDir}/extension.mjs`,
@@ -1286,7 +1296,7 @@ describe("HarnessAdapter", () => {
       if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
   })
 
-  it("Sessions get no vibest MCP server: claude may run vibest report", () => {
+  it("Sessions get no vibest MCP server: claude may run vibest report, and read and edit in the project folder", () => {
     for (const id of HARNESS_IDS)
       assert.isEmpty(
         ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
@@ -1295,8 +1305,9 @@ describe("HarnessAdapter", () => {
     const claude = ADAPTERS.claude.launchArgs(input)
     assert.strictEqual(
       claude[claude.indexOf("--allowedTools") + 1],
-      "Bash(vibest report:*),Bash(/usr/bin/bun /src/main.ts report:*)",
+      `Bash(vibest report:*),Bash(/usr/bin/bun /src/main.ts report:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
     )
+    assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
   })
 })
 
@@ -1659,6 +1670,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           VIBEST_COMMAND: '["/bin/vibest"]',
           VIBEST_SESSION_ID: "",
           VIBEST_PROJECT_ID: PROJECT,
+          VIBEST_PROJECT_DIR: `${home}/projects/${PROJECT}`,
           HERDR_PANE_ID: "w1:p1",
           HERDR_SOCKET_PATH: "/h/herdr.sock",
         })

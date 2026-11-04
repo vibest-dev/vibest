@@ -15,6 +15,12 @@ type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: strin
 const GENERAL = "e2e0a001-e2e0-4e2e-8e2e-e2e0a001e2e0"
 const COORDINATOR = "e2e0c001-e2e0-4e2e-8e2e-e2e0c001e2e0"
 const projects = new WeakMap<World, Promise<string>>()
+const projectOf = (w: World) => {
+  projects.set(w, projects.get(w) ?? knownSessions(w, { [GENERAL]: "general", [COORDINATOR]: "coordinator" }))
+  return projects.get(w)!
+}
+/** The project folder of those sessions (VIBEST_PROJECT_DIR): vibestd's for Claude, the environment's for Cursor. */
+const projectDir = async (w: World) => path.join(w.vibestHome, "projects", await projectOf(w))
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
@@ -28,8 +34,7 @@ const ask = async (
   const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
   if (harness === "claude" && agent !== undefined) {
     const sessionId = agent === "coordinator" ? COORDINATOR : GENERAL
-    projects.set(w, projects.get(w) ?? knownSessions(w, { [GENERAL]: "general", [COORDINATOR]: "coordinator" }))
-    const projectId = await projects.get(w)!
+    const projectId = await projectOf(w)
     const r = await fetch("http://vibestd/hooks/claude/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
@@ -41,7 +46,13 @@ const ask = async (
     return { code: 0, decision: json.deny === undefined ? "none" : "deny", reason: json.deny ?? "" }
   }
   const env =
-    agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001-e2e0-4e2e-8e2e-e2e00001e2e0" }
+    agent === undefined
+      ? {}
+      : {
+          VIBEST_AGENT: agent,
+          VIBEST_SESSION_ID: "e2e00001-e2e0-4e2e-8e2e-e2e00001e2e0",
+          VIBEST_PROJECT_DIR: await projectDir(w),
+        }
   const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", harness], { env, stdin })
   const out = r.stdout.trim()
   if (!out) return { code: r.code, decision: "none", reason: r.stderr }
@@ -67,23 +78,30 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "R2",
-    title: "a session reading the project store's files directly is denied",
+    title: "a session reads and writes its own project folder (VIBEST_PROJECT_DIR); another project's folder is denied",
     run: async (w) => {
-      const file = path.join(w.vibestHome, "projects", "x", "memory", "a.md")
+      const own = path.join(await projectDir(w), "memories", "a.md")
+      const other = path.join(w.vibestHome, "projects", "00000000-0000-4000-8000-000000000000", "memories", "a.md")
       for (const h of both) {
-        for (const [tool, input] of [
-          [shell(h), { command: `cat ${file}` }],
-          ["Read", { file_path: file }],
-        ] as const) {
-          const a = await ask(w, h, "general", tool, input)
-          expect(a.decision === "deny", `${h} ${tool}: ${JSON.stringify(a)}`)
-        }
+        const allowed = h === "cursor" ? "allow" : "none"
+        for (const [file, decision] of [
+          [own, allowed],
+          [other, "deny"],
+        ] as const)
+          for (const [tool, input] of [
+            [shell(h), { command: `cat ${file}` }],
+            ["Read", { file_path: file }],
+            ["Write", { file_path: file, content: "x" }],
+          ] as const) {
+            const a = await ask(w, h, "general", tool, input)
+            expect(a.decision === decision, `${h} ${tool} ${file}: ${JSON.stringify(a)}`)
+          }
       }
     },
   },
   {
     id: "R3",
-    title: "ordinary work is allowed for both roles; the coordinator edits no file",
+    title: "ordinary work is allowed for both roles; the coordinator edits files only in its project folder",
     run: async (w) => {
       for (const h of both) {
         const allowed = h === "cursor" ? "allow" : "none"
@@ -93,6 +111,9 @@ const checks: ReadonlyArray<Check> = [
         expect(s.code === 0 && s.decision === allowed, `${h} session git status: ${JSON.stringify(s)}`)
         const e = await ask(w, h, "coordinator", "Write", { file_path: path.join(w.repository, "x.txt"), content: "x" })
         expect(e.decision === "deny", `${h} coordinator edit: ${JSON.stringify(e)}`)
+        const plan = path.join(await projectDir(w), "artifacts", "plan.md")
+        const p = await ask(w, h, "coordinator", "Write", { file_path: plan, content: "x" })
+        expect(p.decision === allowed, `${h} coordinator edit in its project folder: ${JSON.stringify(p)}`)
       }
     },
   },

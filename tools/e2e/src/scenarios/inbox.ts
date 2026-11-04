@@ -142,7 +142,7 @@ const heldModel = () => {
 }
 
 /** A git repository of its own under the world's root: a project of its own, so its main agent is this check's. */
-const project = async (w: World, name: string) => {
+export const project = async (w: World, name: string) => {
   const repo = path.join(w.root, name)
   await fs.mkdir(repo, { recursive: true })
   for (const argv of [
@@ -156,7 +156,7 @@ const project = async (w: World, name: string) => {
 }
 
 /** A PI_CODING_AGENT_DIR whose only model is the fake one at `url`. */
-const piDir = async (w: World, name: string, url: string) => {
+export const piDir = async (w: World, name: string, url: string) => {
   const dir = path.join(w.root, name)
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(
@@ -177,7 +177,7 @@ const piDir = async (w: World, name: string, url: string) => {
 }
 
 /** Stops and deletes a herdr session this check started, as World.close does for the run's own. */
-const dropHerdrSession = async (w: World, session: string) => {
+export const dropHerdrSession = async (w: World, session: string) => {
   if (
     await fs.stat(path.join(w.home, ".config", "herdr", "sessions", session)).then(
       () => true,

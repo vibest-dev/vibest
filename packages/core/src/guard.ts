@@ -1,9 +1,9 @@
 // The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT): Claude's plugin tool.call
 // (in PreToolUse's shape) and Cursor's preToolUse through `vibest integration guard`, Pi's tool_call in process. A call is allowed unless a rule here
 // names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest turn-end bridge. The
-// coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
-// may not touch the projects directory except its project's scratch directory (VIBEST_SCRATCH): not another project's
-// scratch, and not its own project's instructions.md, docs or memory, for every harness. Which vibest commands an agent may run is
+// coordinator also does not edit files outside its project folder (VIBEST_PROJECT_DIR), start harness CLIs or run gh's
+// credential and config commands. Any other session may not touch the projects directory except its own project folder
+// (VIBEST_PROJECT_DIR): not another project's, for every harness. Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
@@ -270,7 +270,7 @@ export const shellBlock = (
 
 /**
  * Where an absolute path really leads: segment by segment, following each symlink that exists before applying a later
- * `..` (as the system does), so neither `scratch/link/x` nor `scratch/../../docs` hides where it goes.
+ * `..` (as the system does), so neither `artifacts/link/x` nor `<project>/../<other project>` hides where it goes.
  */
 const physical = (p: string) =>
   Effect.gen(function* () {
@@ -315,7 +315,33 @@ export type Rules = (
   call: ToolCall,
 ) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem>
 
-/** The coordinator: the shared shell denials plus its own, and no file edits (a session makes changes). */
+const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWith(dir + sep)
+
+/** The physical path of the agent's project folder (VIBEST_PROJECT_DIR, which vibestd sets in its terminal), if set. */
+const projectDir = Effect.gen(function* () {
+  const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROJECT_DIR")))
+  return own ? yield* physical(own) : undefined
+})
+
+/**
+ * Where `raw` leads from `cwd` (`~` and file URLs expanded), both as the system follows it (symlinks before a later
+ * `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse.
+ */
+const targetsOf = (raw: string, cwd: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    const p = yield* toolPath(raw, cwd, yield* Config.String("HOME"))
+    return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
+  })
+
+/** The path arguments of a file tool call. */
+const pathArgs = (input: ToolCall["input"]) =>
+  [str(input.file_path), str(input.notebook_path), str(input.path)].filter((p): p is string => !!p)
+
+const COORDINATOR_EDITS =
+  "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
+
+/** The coordinator: the shared shell denials plus its own, and file edits only in its project folder (a session makes changes). */
 export const coordinator: Rules = (call) =>
   Effect.gen(function* () {
     const tool = call.tool.toLowerCase()
@@ -324,11 +350,20 @@ export const coordinator: Rules = (call) =>
       if (command === undefined) return "The shell call has no command string; refused."
       return shellBlock(command, yield* VibestCommand, true)
     }
-    if (fileWritingTool(call.tool)) return "The coordinator does not edit files; hand the change to a session."
+    if (!fileWritingTool(call.tool)) return undefined
+    const own = yield* projectDir
+    const raws = pathArgs(call.input)
+    if (own === undefined || raws.length === 0) return COORDINATOR_EDITS
+    const sep = (yield* Path.Path).sep
+    for (const raw of raws) {
+      const targets = yield* targetsOf(raw, call.cwd)
+      if (targets === undefined || !targets.every((t) => inside(t, own, sep))) return COORDINATOR_EDITS
+    }
     return undefined
   })
 
-const OFF_LIMITS = "The project directory is off limits to sessions, except your scratchpad."
+const OFF_LIMITS =
+  "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
 
 /** Shell words that may stand for a path: a word, or the value of `--opt=value` / `VAR=value`. */
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
@@ -337,31 +372,20 @@ const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
 /**
  * Every agent but the coordinator: the shared shell denials, and nothing under the projects directory but the session's own
- * scratch directory (VIBEST_SCRATCH, which vibestd sets as it opens the session's terminal); without one, nothing there.
+ * project folder (VIBEST_PROJECT_DIR, which vibestd sets as it opens the session's terminal); without one, nothing there.
  */
 export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
   const path = yield* Path.Path
-  const home = yield* Config.String("HOME")
   const layout = yield* Layout
   const projects = yield* physical(layout.projects)
   const vibestHome = yield* physical(layout.home)
-  const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SCRATCH")))
-  const scratch = own ? yield* physical(own) : undefined
-  const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
-  const inScratch = (target: string) => scratch !== undefined && inside(target, scratch)
-  /**
-   * Where `raw` leads from the agent's cwd (`~` and file URLs expanded), both as the system follows it (symlinks before a
-   * later `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse.
-   */
-  const resolve = (raw: string) =>
-    Effect.gen(function* () {
-      const p = yield* toolPath(raw, call.cwd, home)
-      return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
-    })
+  const own = yield* projectDir
+  const inOwn = (target: string) => own !== undefined && inside(target, own, path.sep)
+  const resolve = (raw: string) => targetsOf(raw, call.cwd)
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
-  /** Off limits: inside the projects directory but not the session's scratch; with search, also a directory above it. */
+  /** Off limits: inside the projects directory but not the session's project folder; with search, also a directory above it. */
   const blocked = (target: string, search: boolean) =>
-    (search && inside(projects, target)) || (inside(target, projects) && !inScratch(target))
+    (search && inside(projects, target, path.sep)) || (inside(target, projects, path.sep) && !inOwn(target))
   const tool = call.tool.toLowerCase()
 
   if (SHELL_TOOLS.has(tool)) {
@@ -382,7 +406,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
       if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
       // Relative to a directory an earlier `cd` moved to, which the hook does not see.
-      if (word.includes(".vibest/projects") && !targets.every(inScratch)) return OFF_LIMITS
+      if (word.includes(".vibest/projects") && !targets.every(inOwn)) return OFF_LIMITS
     }
     return undefined
   }
@@ -390,8 +414,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   const search = SEARCH_TOOLS.has(tool)
   // A Glob pattern may itself be a path: its part before the first wildcard.
   const pattern = tool === "glob" ? str(call.input.pattern)?.split(/[*?[{]/)[0] : undefined
-  for (const raw of [str(call.input.file_path), str(call.input.notebook_path), str(call.input.path), pattern]) {
-    if (raw === undefined || raw === "") continue
+  for (const raw of [...pathArgs(call.input), ...(pattern ? [pattern] : [])]) {
     const targets = yield* resolve(raw)
     if (targets === undefined) return BAD_URL
     if (targets.some((t) => blocked(t, search))) return OFF_LIMITS
