@@ -14,6 +14,7 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import {
   agentModel,
+  agentName,
   alive,
   binary,
   expect,
@@ -211,7 +212,7 @@ const checks: ReadonlyArray<Check> = [
         // herdr's own list: a subagent's harness carries the name s-<id> that `open` gave it, and `run` again after a restart.
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
         const listed = async (id: string) =>
-          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.name === `s-${id}`)
+          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.name === agentName(id))
         const reached = (what: string, ok: (messages: ReadonlyArray<string>) => boolean) =>
           until(what, () => model.seen.some(ok), 120_000).catch(async (e: Error) => {
             const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
@@ -439,7 +440,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
         const listed = async (id: string) =>
-          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.name === `s-${id}`)
+          ((await herdr(socket, "agent.list", {})).agents as Array<Agent>).find((a) => a.name === agentName(id))
 
         // The old vibest starts vibestd and a Pi subagent, which reports the old integration after its first turn.
         await w.stopDaemon()
@@ -755,7 +756,7 @@ export default Plugin.define({
         // undefined until the subagent's herdr session is up.
         const listed = async () =>
           ((await herdr(socket, "agent.list", {}).catch(() => ({ agents: [] }))).agents as Array<Agent>).find(
-            (a) => a.name === `s-${id}`,
+            (a) => a.name === agentName(id),
           )
         const log = async () =>
           (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
@@ -790,7 +791,10 @@ export default Plugin.define({
           `the second login got no request: ${JSON.stringify(seen)}`,
         )
         const after = await listed()
-        expect(after?.agent === "pi" && after.pane_id === pane, `herdr lists s-${id} at ${after?.pane_id}, not ${pane}`)
+        expect(
+          after?.agent === "pi" && after.pane_id === pane,
+          `herdr lists ${agentName(id)} at ${after?.pane_id}, not ${pane}`,
+        )
       } finally {
         server.stop(true)
         await fs.rm(plugin, { force: true })

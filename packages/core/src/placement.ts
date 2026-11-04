@@ -1,3 +1,4 @@
+import { shortId } from "@vibest/schema/id"
 import { NoSuchSession, NotReady } from "@vibest/schema/session"
 // Where a session's terminal goes, and the labels the runtime shows on it. `root` is a project directory, never the
 // project key. Placement is the runtime's (runtime-port.md §3): core asks for a terminal running the harness argv,
@@ -180,7 +181,7 @@ export const sessionPlacement = (deps: {
         cwd: input.cwd,
         argv: input.argv,
         env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
-        label: `${session.id} ${session.name}`.slice(0, 60),
+        label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
       })

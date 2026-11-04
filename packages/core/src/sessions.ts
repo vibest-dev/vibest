@@ -1,3 +1,4 @@
+import { newId, shortId } from "@vibest/schema/id"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -105,7 +106,7 @@ export {
 } from "@vibest/schema/session"
 
 /** Test barrier after `--peer` validation and before insert, while the owner's session lock is held. Production leaves this void. */
-/** The lock key of a session directory, beside the session-id keys (8 hex, never a path). */
+/** The lock key of a session directory, beside the session-id keys (UUIDs, never a path). */
 const directoryLock = (directory: string) => `directory:${directory}`
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -688,13 +689,11 @@ export class Sessions extends Context.Service<
         launchArgv,
         turnEnds,
         systemPromptOf,
-        uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+        uuid: newId(),
         terminate: processes.terminate,
         platform,
       })
       limit.move.rerun = move.rerun
-
-      const newId = crypto.randomBytes(4).pipe(Effect.map(Hex.encode), Effect.orDie)
 
       /** The `machines[]` of `agent.start.before` (§7), via the shared helper. */
       const machinesListing = machines(
@@ -802,11 +801,7 @@ export class Sessions extends Context.Service<
         )
         const adapter = harnesses.get(harnessId)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
-        const id = yield* newId.pipe(
-          Effect.flatMap((id) => db.sessionExists(id).pipe(Effect.map((taken) => (taken ? undefined : id)))),
-          Effect.repeat({ until: (id) => id !== undefined }),
-          Effect.map((id) => id!),
-        )
+        const id = yield* db.newSessionId
         const now = yield* Clock.currentTimeMillis
         /** `shared`: the directory of the session `--peer` named, which this one works in too. */
         const admit = (shared: string | undefined) =>
@@ -828,7 +823,7 @@ export class Sessions extends Context.Service<
                 : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
               if (!safeRepositoryDirectory(repository))
                 return yield* refuse(
-                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
+                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
                 )
               const parentPath = path.join(layout.worktrees, repository)
               if (
@@ -868,7 +863,7 @@ export class Sessions extends Context.Service<
               harnessId,
               provider: provider ?? null,
               model: model ?? null,
-              harnessSessionId: adapter.ownSessionId ? yield* crypto.randomUUIDv4.pipe(Effect.orDie) : null,
+              harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
               runtime: runtimeKind,
               address: { machine: machine.id, id: "" },
               status: "unknown",
@@ -994,7 +989,7 @@ export class Sessions extends Context.Service<
             const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
             yield* notice(
               session,
-              `${id} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
+              `${shortId(id)} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
             )
           }
           return

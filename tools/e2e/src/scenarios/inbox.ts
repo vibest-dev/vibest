@@ -8,7 +8,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
+import { agentModel, agentName, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -615,7 +615,7 @@ const checks: ReadonlyArray<Check> = [
         await until("the subagent's turn held by the model", () => model.held() > 0, 60_000)
         const named = async () =>
           ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
-            (a) => a.name === `s-${sub}`,
+            (a) => a.name === agentName(sub),
           )
         const exited = () =>
           row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
@@ -625,7 +625,7 @@ const checks: ReadonlyArray<Check> = [
           await Bun.sleep(5_000)
           const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
           expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
-          expect(await named(), `herdr no longer names the subagent s-${sub}; vibestd.log:\n${await log()}`)
+          expect(await named(), `herdr no longer names the subagent ${agentName(sub)}; vibestd.log:\n${await log()}`)
         }
         const peek = await w.vibest(["peek", sub], { cwd: repo })
         expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)

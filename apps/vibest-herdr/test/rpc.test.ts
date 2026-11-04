@@ -266,7 +266,7 @@ describe("vibest.sock", () => {
       const reported = yield* db.latestInbox(id, "report")
       assert.match(
         reported!.message,
-        /^<agent-message>\n<agent-id>[a-f0-9]{8}<\/agent-id>\n<summary>Agent "do it" sent a message before finishing<\/summary>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
+        /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<summary>Agent "do it" sent a message before finishing<\/summary>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
       )
       const refused: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         w.Spawn({ harness: "pi", prompt: "more" }),

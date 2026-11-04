@@ -1,5 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin"
 import { Runtime as RuntimeApi } from "@vibest/plugin"
+import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
 import { Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
@@ -95,12 +96,17 @@ const agentKindOf = (binary: string): string | undefined => {
   return KINDS[name]
 }
 
-/** The herdr agent name `open` gives a harness (`[a-z][a-z0-9_-]{0,31}`): never from the pane id, which is reused and carries uppercase (`w1:pC`). */
+/**
+ * The herdr agent name of vibest session `id` (herdr allows `[a-z][a-z0-9_-]{0,31}`): `s-` and the first 30 hex of the
+ * UUID without its dashes, so `herdr agent list` shows which session runs where.
+ */
+export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
+
+/** The herdr agent name `open` gives a harness: never from the pane id, which is reused and carries uppercase (`w1:pC`). */
 const agentNameOf = (env: Readonly<Record<string, string>>) => {
-  // The vibest session's own id (8 lowercase hex), as the builds before the port named it: `herdr agent list` shows
-  // which session runs where, and a migrated `s-<id>` row still finds its agent. Else unique per open.
+  // The vibest session's own id; else unique per open.
   const id = env["VIBEST_SESSION_ID"]
-  return id !== undefined && /^[a-z0-9_-]{1,30}$/.test(id) ? `s-${id}` : `vbt-${crypto.randomUUID().slice(0, 8)}`
+  return id !== undefined && ID.test(id) ? agentName(id) : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
 }
 
 /** `done` is herdr's own; the Runtime API's state has no such value, and an agent that is done is idle for input. */

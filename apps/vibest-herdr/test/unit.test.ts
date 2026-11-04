@@ -35,7 +35,8 @@ import {
   repositoryKey,
 } from "@vibest/core/worktree"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { agentName, KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
@@ -67,6 +68,26 @@ const session = (id: string, patch: Partial<Omit<SessionRow, "projectId">> = {})
   ...patch,
 })
 const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }
+
+describe("ids", () => {
+  it.effect("a new id is a UUIDv4; one whose first 8 characters are taken is drawn again", () =>
+    Effect.gen(function* () {
+      assert.match(yield* newId(), ID)
+      const asked: Array<string> = []
+      const id = yield* newId((short) => Effect.sync(() => asked.push(short) < 3))
+      assert.match(id, ID)
+      assert.lengthOf(asked, 3)
+      assert.strictEqual(shortId(id), asked[2])
+      assert.strictEqual(shortId(id).length, 8)
+    }),
+  )
+
+  it("a session's herdr agent name fits herdr's 32 characters", () => {
+    const id = "0123abcd-4567-4abc-8def-0123456789ab"
+    assert.strictEqual(agentName(id), "s-0123abcd45674abc8def0123456789")
+    assert.match(agentName(id), /^[a-z][a-z0-9_-]{0,31}$/)
+  })
+})
 
 describe("System prompt directory", () => {
   const refused = <A, E, R>(e: Effect.Effect<A, E, R>) =>
@@ -190,7 +211,7 @@ describe("Db", () => {
           yield* db.insertSession(session("aaaaaaaa"), "r")
           const coord = yield* db.coordinatorLaunch("r", "pi", false, place)
           yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "m", details: {} })
-          assert.strictEqual(coord.sessionId.length, 8)
+          assert.match(coord.sessionId, ID)
           assert.lengthOf(yield* db.coordinatorPending(yield* db.projectId("r")), 1)
         }),
       )
@@ -740,7 +761,7 @@ describe("Db", () => {
         yield* Effect.gen(function* () {
           const db = yield* Db
           assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r"))
-          assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId.length, 8)
+          assert.match((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.strictEqual((yield* header(file)).userVersion, SCHEMA_VERSION)

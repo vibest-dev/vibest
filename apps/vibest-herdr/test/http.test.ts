@@ -226,7 +226,7 @@ describe("vibestd's HTTP API", () => {
         text: string
       }
       assert.lengthOf(first.ids, 1)
-      assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker})`)
+      assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker.slice(0, 8)})`)
       assert.strictEqual(first.text, "hello")
       assert.strictEqual(yield* statusOf(db, worker), "sending")
       // The lease is in sqlite: the row `sending`, its end in the main agent's session metadata.

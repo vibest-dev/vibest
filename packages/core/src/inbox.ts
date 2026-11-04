@@ -1,4 +1,5 @@
 import type { Polled } from "@vibest/protocol/protocol"
+import { shortId } from "@vibest/schema/id"
 // Inbox rows and their delivery to a project's coordinator (SPEC §11). Rows live in sqlite. Rows for a session (`send`)
 // are delivered by Sessions; here only coordinator-bound rows (report, result, notice) are pushed. A command-line
 // caller reads a session's latest result with `vibest result`.
@@ -76,7 +77,7 @@ export const line = (
   const session = who(last.sessionId)
   const agent = session?.agent || "general"
   const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
-  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${last.sessionId})${more}`)
+  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${shortId(last.sessionId)})${more}`)
 }
 
 export class Inbox extends Context.Service<

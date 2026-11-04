@@ -353,6 +353,9 @@ export const agentModel = (): ReadonlyArray<string> => {
 }
 
 /** One call to a herdr session's socket API: newline-delimited JSON, one response per connection (effect-herdr-sdk). */
+/** The herdr agent name runtime-herdr gives session `id` (packages/runtime-herdr/src/terminal-runtime.ts `agentName`). */
+export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
+
 export const herdr = (socket: string, method: string, params: object) =>
   new Promise<Record<string, unknown>>((resolve, reject) => {
     const id = crypto.randomUUID()

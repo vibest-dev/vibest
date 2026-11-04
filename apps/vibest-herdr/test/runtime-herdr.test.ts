@@ -588,10 +588,10 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           return Effect.gen(function* () {
             for (let i = 0; i < 10; i++) yield* open(["/bin/sh"])
             const terminal = yield* open(["pi", "--no-extensions", "--no-mcp", "--no-skills", "--no-session"], {
-              VIBEST_SESSION_ID: "ab12cd34",
+              VIBEST_SESSION_ID: "ab12cd34-5678-4abc-8def-0123456789ab",
             })
             // Named after the vibest session, as before the port: `herdr agent list` shows which session runs where.
-            assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-ab12cd34")
+            assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-ab12cd3456784abc8def0123456789")
             if (runtime.state !== undefined)
               yield* waitFor(runtime.state(terminal), (state) => state === "idle", "the started agent idle", 1400)
             yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' STARTED" })

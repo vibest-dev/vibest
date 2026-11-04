@@ -7,6 +7,7 @@ import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
 import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until } from "./fakes.ts"
@@ -69,7 +70,7 @@ describe("repository-grouped worktrees", () => {
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const wt = yield* directoryOf(id)
       const leaf = path.basename(wt)
-      assert.match(id, /^[0-9a-f]{8}$/)
+      assert.match(id, ID)
       assert.match(leaf, /^[0-9a-f]{4}$/)
       assert.notStrictEqual(leaf, id)
       assert.strictEqual(path.basename(path.dirname(wt)), yield* repositoryDirectoryName(repo))

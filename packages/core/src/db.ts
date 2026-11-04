@@ -1,3 +1,4 @@
+import { newId } from "@vibest/schema/id"
 import { MessageStatus } from "@vibest/schema/model"
 import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 // The only place with SQL (docs/design/schema.md, version 2: project, session, inbox, event). One schema, no
@@ -239,12 +240,6 @@ export const migrate = Effect.gen(function* () {
   }
   if ((yield* inspectSchema) !== "ready") return yield* mismatch(0, 0, "empty after install")
 })
-
-const newId = Effect.sync(() =>
-  Math.floor(Math.random() * 0x100000000)
-    .toString(16)
-    .padStart(8, "0"),
-)
 
 /** `process.start` data (schema.md): the choice and where it runs. An empty terminal: chosen, its terminal not open yet. */
 type ProcessStart = {
@@ -996,13 +991,12 @@ const make = Effect.gen(function* () {
       }
     })
 
-  const unusedId = newId.pipe(
-    Effect.flatMap((id) =>
-      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => (rows.length > 0 ? undefined : id))),
-    ),
-    Effect.repeat({ until: (id) => id !== undefined }),
-    Effect.map((id) => id!),
-  )
+  /** Some session id already starts with `short` (index-backed on the primary key). */
+  const sessionPrefixTaken = (short: string) =>
+    sql`SELECT 1 FROM session WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+  const unusedId = newId(sessionPrefixTaken)
 
   /** The conversation of session `id`'s current process, and that process. */
   const conversationOf = (id: string) =>
@@ -1168,11 +1162,8 @@ const make = Effect.gen(function* () {
         )
         .pipe(Effect.orDie),
 
-    sessionExists: (id: string) =>
-      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
+    /** A new session id: no other session's id starts with its first 8 characters. */
+    newSessionId: unusedId.pipe(Effect.orDie),
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>

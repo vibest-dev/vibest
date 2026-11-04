@@ -13,6 +13,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { ID } from "@vibest/schema/id"
 import {
   Cause,
   Clock,
@@ -161,7 +162,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const { id, row } = yield* spawnWorking(repo)
-      assert.match(id, /^[a-f0-9]{8}$/)
+      assert.match(id, ID)
       assert.strictEqual(row.status, "working")
       assert.strictEqual(row.turnState, "open")
 
@@ -529,7 +530,7 @@ describe.concurrent("Sessions", () => {
       const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
       assert.include(
         row!.message,
-        `${id} (pi) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
+        `${id.slice(0, 8)} (pi) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id.slice(0, 8)} to see the request.`,
       )
       assert.notInclude(row!.message, "Switch to its terminal")
       assert.lengthOf(yield* sqlNotices(id), 1)

@@ -1,17 +1,12 @@
 // The four tables in docs/design/schema.md. Times are epoch milliseconds; JSON columns are decoded here.
 import { Schema } from "effect"
 
+import { ID } from "./id.ts"
+
 export const ProjectID = Schema.brand("ProjectID")(Schema.Int)
 export type ProjectID = typeof ProjectID.Type
 
-const sessionId = Schema.brand("SessionID")(Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}$/)))
-export const SessionID = Object.assign(sessionId, {
-  create: (): typeof sessionId.Type => {
-    let id = ""
-    for (let i = 0; i < 8; i++) id += Math.floor(Math.random() * 16).toString(16)
-    return id as typeof sessionId.Type
-  },
-})
+export const SessionID = Schema.brand("SessionID")(Schema.String.check(Schema.isPattern(ID)))
 export type SessionID = typeof SessionID.Type
 
 export const InboxID = Schema.brand("InboxID")(Schema.Int)
@@ -38,7 +33,7 @@ export type Runtime = typeof Runtime.Type
 
 /** One row per Agent run: one CLI process in one pane. */
 export const Session = Schema.Struct({
-  /** 8 hex characters, shown to the user. */
+  /** A UUIDv4 (`newId`), shown to the user by its first 8 characters. */
   id: SessionID,
   projectId: ProjectID,
   /** The session that started it. Absent: the user. */

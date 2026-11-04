@@ -7,7 +7,18 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
+import {
+  agentModel,
+  agentName,
+  binary,
+  compiled,
+  expect,
+  harnesses,
+  knownSessions,
+  Skip,
+  until,
+  type World,
+} from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -393,7 +404,7 @@ const checks: ReadonlyArray<Check> = [
           await w.ok(["send", id, STORY])
           await until("the story turn", settled("open"), 60_000)
           await Bun.sleep(10_000)
-          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", `s-${id}`, "esc"], {
+          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
           expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)

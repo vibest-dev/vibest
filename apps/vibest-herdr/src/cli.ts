@@ -26,6 +26,7 @@ import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
 // Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
 import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
+import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
@@ -1320,15 +1321,15 @@ const restartAgents = (version: string, yes: boolean, command: "vibest update" |
       withVibest({ _tag: "cli", repositoryRoot: cwd }, f, { start: false })
     const outdated = yield* ask((client) => client["Agents.Outdated"]())
     if (outdated.length === 0) return yield* Console.log("No agent runs an old integration.")
-    const working = outdated.filter((a) => a.working).map((a) => a.id)
-    const ids = outdated.map((a) => a.id).join(", ")
+    const working = outdated.filter((a) => a.working).map((a) => shortId(a.id))
+    const ids = outdated.map((a) => shortId(a.id)).join(", ")
     const busy = working.length === 0 ? "" : `; ${working.join(", ")} ${working.length === 1 ? "is" : "are"} working`
     const blocked = outdated.filter((a) => a.blocked !== null)
     const restartable = outdated.filter((a) => a.blocked === null)
     const refused = "their calls to vibestd will be refused with a message that names vibest update"
     const lead = command === "vibest update" ? `vibest ${version} installed.` : `vibestd ${version} runs now.`
     const list = `${outdated.length} agent${outdated.length === 1 ? "" : "s"} still run${outdated.length === 1 ? "s" : ""} the old integration (${ids}${busy})`
-    for (const a of blocked) yield* Console.log(`${a.id} cannot be restarted in place: ${a.blocked}.`)
+    for (const a of blocked) yield* Console.log(`${shortId(a.id)} cannot be restarted in place: ${a.blocked}.`)
     if (restartable.length === 0) return
     if (!yes) {
       if (!(yield* interactive))
@@ -1346,7 +1347,7 @@ const restartAgents = (version: string, yes: boolean, command: "vibest update" |
     }
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after: process.pid }))
     yield* Console.log(
-      `${command} has finished. vibestd restarts ${restartable.map((a) => a.id).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })
 

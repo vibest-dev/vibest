@@ -18,7 +18,8 @@ import { VERSION } from "@vibest/protocol/rpc"
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
 // database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
 // server) come from the entry through `Host`, so this file stays on effect's abstract services.
-import { Clock, Crypto, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
+import { newId } from "@vibest/schema/id"
+import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
 import type { HttpServer } from "effect/http/HttpServer"
 import type { SocketServer } from "effect/socket/SocketServer"
@@ -188,7 +189,7 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
     }
     const identity = {
       pid: host.processes.pid,
-      instance: yield* Effect.flatMap(Crypto.Crypto, (c) => c.randomUUIDv4).pipe(Effect.orDie),
+      instance: yield* newId(),
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }
