@@ -287,6 +287,31 @@ export const projectKey = Effect.fn("projectKey")(function* (directory: string) 
   return (yield* projectRoot(directory)).key
 })
 
+/** A repository of a project: its main checkout's realpath and `remote.origin.url` as git prints it (not identity). */
+export interface RepositoryPlace {
+  readonly path: string
+  readonly remote: string | undefined
+}
+
+/**
+ * The repositories of the project at `root` (as `projectRoot` returns it): the main checkout itself, or each direct
+ * child repository's main checkout of a multi-repository project.
+ */
+export const projectRepositories = Effect.fn("projectRepositories")(function* (root: string) {
+  const fs = yield* FileSystem.FileSystem
+  const children = yield* listProjectRepositories(root)
+  const checkouts = children
+    ? yield* Effect.forEach(children, (child) => mainCheckout(child.path))
+    : [yield* mainCheckout(root)]
+  const places: RepositoryPlace[] = []
+  for (const checkout of checkouts) {
+    const path = yield* fs.realPath(checkout)
+    if (places.some((place) => place.path === path)) continue
+    places.push({ path, remote: (yield* optionalGit(path, "config", "--get", "remote.origin.url")) || undefined })
+  }
+  return places
+})
+
 /** Remove each worktree (from its repository, without force: it refuses on anything not clean), then `workspace` when it is empty. Never deletes a branch. */
 const removeWorktrees = (
   worktrees: ReadonlyArray<{ readonly repository: string; readonly worktree: string }>,

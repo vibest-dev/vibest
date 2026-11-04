@@ -11,6 +11,7 @@ import {
   createProject,
   listProjectRepositories,
   plainDirectoryKey,
+  projectRepositories,
   projectRoot,
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
@@ -316,6 +317,18 @@ describe("multi-repository project", () => {
       const inside = yield* projectRoot(sub)
       assert.strictEqual(inside.root, app)
       assert.strictEqual(inside.key, single.key)
+      // Each repository by its main checkout's realpath, with origin as git prints it; through a symlink too.
+      yield* sh(app, "remote", "add", "origin", "git@github.com:O/App.git")
+      const link = path.join(parent, "link")
+      yield* fs.symlink(root, link)
+      for (const at of [root, link])
+        assert.deepStrictEqual(yield* projectRepositories(at), [
+          { path: app, remote: "git@github.com:O/App.git" },
+          { path: path.join(root, "sdk"), remote: undefined },
+        ])
+      assert.deepStrictEqual(yield* projectRepositories(path.join(link, "app")), [
+        { path: app, remote: "git@github.com:O/App.git" },
+      ])
     }),
   )
 
