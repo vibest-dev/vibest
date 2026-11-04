@@ -84,6 +84,7 @@ const emptyBuckets = (): HookBuckets => ({
   "agent.fail": [],
   "agent.result": [],
   "agent.notice": [],
+  "agent.delivered": [],
 })
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 /** Builtin plugins of the host app, before user plugins: the default harness choice first (architecture.md §9), then
@@ -257,6 +258,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           fail: (callback) => remember("agent.fail", callback),
           result: (callback) => remember("agent.result", callback),
           notice: (callback) => remember("agent.notice", callback),
+          delivered: (callback) => remember("agent.delivered", callback),
         }),
         // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
@@ -270,6 +272,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         session: {
           send: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.send(input)),
           spawn: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.spawn(input)),
+          archive: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.archive(input)),
+          notice: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.notice(input)),
         },
       }
       const exit = yield* runBounded(plugin.effect(ctx).pipe(Scope.provide(scope)), scope, timeout)
@@ -527,8 +531,15 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    // Told, nothing to return: a crashed or timed-out callback only ends its own run.
+    const delivered = Effect.fn("Plugins.delivered")(function* (input: VibestPlugin.AgentDelivered) {
+      yield* withHooks("agent.delivered", (hooks, trace) =>
+        runHook(bucket(hooks, "agent.delivered"), "agent.delivered", { ...input }, trace).pipe(Effect.asVoid),
+      )
+    })
+
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, result, notice, list }), activate, ready }
+    return { service: Plugins.of({ start, fail, result, notice, delivered, list }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
@@ -555,6 +566,8 @@ export class Plugins extends Context.Service<
     readonly notice: (
       input: VibestPlugin.AgentNotice,
     ) => Effect.Effect<{ readonly text: string; readonly recipients: ReadonlyArray<string | null> }>
+    /** A session's result reached its recipient: every `agent.delivered` callback in plugin order. */
+    readonly delivered: (input: VibestPlugin.AgentDelivered) => Effect.Effect<void>
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {

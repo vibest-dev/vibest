@@ -36,7 +36,41 @@ export interface SessionActions {
     readonly name?: string | undefined
     readonly reportTo?: string | undefined
   }) => Effect.Effect<{ readonly id: string }, ActionRefused>
+  /**
+   * Archive session `id` as `vibest archive` would, only once it has settled: its turn completed, its newest result
+   * delivered, its harness idle and nothing queued for it. `as` must be allowed to manage `id` (`null`: the user).
+   */
+  readonly archive: (input: {
+    readonly as: string | null
+    readonly id: string
+  }) => Effect.Effect<Archived, ActionRefused>
+  /**
+   * Tell someone about session `about`, as vibest's own notices go: through `agent.notice`, to its live report-to, else
+   * its project's entry session, else the user. `to` replaces that route (`[null]`: the user).
+   */
+  readonly notice: (input: {
+    readonly about: string
+    readonly kind: AgentNotice["kind"]
+    readonly text: string
+    readonly to?: ReadonlyArray<string | null> | undefined
+  }) => Effect.Effect<void, ActionRefused>
 }
+
+/** What `archive` did: nothing yet (`busy`: it has work again), nothing and why (`skipped`), or the archive itself. */
+export type Archived =
+  | { readonly outcome: "busy" }
+  | { readonly outcome: "skipped"; readonly reason: string }
+  | {
+      readonly outcome: "archived"
+      /** Whether the processes its terminal ran are gone (`unknown`: vibest cannot tell). */
+      readonly processes: "exited" | "alive" | "unknown"
+      readonly pane: "closed" | "kept" | "none"
+      readonly worktree: "removed" | "kept" | "gone"
+      readonly path: string
+      readonly branch: string | null
+      /** Why anything was kept. */
+      readonly reasons: ReadonlyArray<string>
+    }
 
 /** One usage window a plugin, or a poll, reports. `percent` is 0–100. */
 export interface SubscriptionLimit {
@@ -195,7 +229,7 @@ export interface AgentResult {
 /**
  * vibest tells someone about session `sessionId`: it waits on the person (`blocked`), a turn it was sent never started
  * or it never started at all (`not_started`), a message to it was not delivered (`undelivered`), or its archive on
- * completion did not go cleanly (`archived`). `recipients` is where it goes (its live report-to, else its project's
+ * completion did not go cleanly (`archived`, from the policy that archives it). `recipients` is where it goes (its live report-to, else its project's
  * entry session, else the user: `null`); a plugin may reword `text` or rewrite `recipients` (empty: nobody is told).
  */
 export interface AgentNotice {
@@ -206,12 +240,22 @@ export interface AgentNotice {
   recipients: Array<string | null>
 }
 
+/** A session's result reached whom it went to. */
+export interface AgentDelivered {
+  readonly sessionId: string
+  readonly agentType: string
+  readonly status: "completed" | "failed" | "lost"
+  /** Whoever started it asked for it to be archived once a completed result reached them (`--archive-on-completion`). */
+  readonly archiveOnCompletion: boolean
+}
+
 /** Every hook: the event its callbacks get and the error they may fail with. */
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
   readonly "agent.result": { readonly event: AgentResult; readonly error: never }
   readonly "agent.notice": { readonly event: AgentNotice; readonly error: never }
+  readonly "agent.delivered": { readonly event: AgentDelivered; readonly error: never }
 }
 
 /** The hook names of one domain without its prefix: `start.before` for `agent.start.before`. */

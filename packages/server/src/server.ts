@@ -1107,6 +1107,13 @@ export const handlers = VibestRpcs.toLayer(
               Effect.provideContext(spawnContext),
             ),
         ),
+      // The user may archive any session; a session only one it may manage (as its own `vibest archive`).
+      archive: ({ as, id }) =>
+        (as === null
+          ? Effect.void
+          : Effect.flatMap(callerOf(as), (caller) => managed("Remove", id).pipe(Effect.provideService(Caller, caller)))
+        ).pipe(Effect.andThen(sessions.archiveSettled(id)), Effect.mapError(refusedAs)),
+      notice: ({ about, kind, text, to }) => sessions.notice(about, kind, text, to).pipe(Effect.mapError(refusedAs)),
     })
     return impl
   }),

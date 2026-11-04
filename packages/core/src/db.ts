@@ -32,7 +32,7 @@ const Live = {
 const Metadata = Schema.Struct({
   ...Live,
   routing: Schema.optional(Routing),
-  /** `vibest run --archive-on-completion`: archived once a completed result reached the coordinator. */
+  /** `vibest run --archive-on-completion`: asked for; a plugin acts on it (plugin-coordinator archives once a completed result was delivered). */
   archive: Schema.optional(Schema.Boolean),
   /** `vibest archive` (alias `rm`) ran (`session.ended_at`): never resumed again, even when its worktree was kept. */
   archived: Schema.optional(Schema.Boolean),

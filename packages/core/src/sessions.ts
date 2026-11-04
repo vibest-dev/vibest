@@ -1,4 +1,4 @@
-import type { AgentNotice } from "@vibest/plugin"
+import type { AgentNotice, Archived } from "@vibest/plugin"
 import type { Polled } from "@vibest/protocol/protocol"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
@@ -166,7 +166,7 @@ export interface SpawnInput {
   readonly agent?: string | undefined
   /** Run in this session's worktree, in a terminal beside its own, instead of a new worktree (`vibest run --peer`). */
   readonly peer?: string | undefined
-  /** Archive it once a completed result reached the coordinator (`vibest run --archive-on-completion`). */
+  /** Asked to be archived once a completed result was delivered; a plugin acts on it (`vibest run --archive-on-completion`). */
   readonly archive?: boolean | undefined
   /** The session that asked for it (the main agent); undefined for the user's own `vibest run`. */
   readonly parentSessionId?: string | undefined
@@ -254,6 +254,17 @@ export class Sessions extends Context.Service<
      * these agents) has exited or AFTER_WAIT passed. Returns at once.
      */
     readonly restartLater: (ids: ReadonlyArray<string>, after: number | undefined) => Effect.Effect<void>
+    /** Archive `id` once it has settled (the mechanism an archive policy uses); see `context.session.archive`. */
+    readonly archiveSettled: (
+      id: string,
+    ) => Effect.Effect<Archived, NoRuntime | NoSuchSession | RuntimeUnreachable | RuntimeError>
+    /** A notice about session `about`, through `agent.notice`; `to` replaces vibest's own route. */
+    readonly notice: (
+      about: string,
+      kind: AgentNotice["kind"],
+      text: string,
+      to?: ReadonlyArray<string | null>,
+    ) => Effect.Effect<void, NoSuchSession>
   }
 >()("vibest/Sessions") {
   /** `maxSessions`: non-stopped sessions on this machine; undefined = no limit. */
@@ -342,14 +353,19 @@ export class Sessions extends Context.Service<
           )
 
       /** Tell whoever `agent.notice` names (by default its live report-to, its entry session, the user) about `session`. */
-      const notice = (session: SessionRow, kind: AgentNotice["kind"], message: string) =>
+      const notice = (
+        session: SessionRow,
+        kind: AgentNotice["kind"],
+        message: string,
+        to?: ReadonlyArray<string | null>,
+      ) =>
         Effect.gen(function* () {
           const told = yield* plugins.notice({
             sessionId: session.id,
             agentType: session.agent,
             kind,
             text: message,
-            recipients: [...(yield* db.noticeTo(session.id))],
+            recipients: [...(to ?? (yield* db.noticeTo(session.id)))],
           })
           if (told.recipients.length === 0) return
           yield* inbox.enqueue(
@@ -1468,86 +1484,83 @@ export class Sessions extends Context.Service<
           Effect.provideContext(platform),
         )
 
-      /**
-       * `vibest run --archive-on-completion` (SPEC §8.6b): once a completed result reached the coordinator, archive the session as
-       * `vibest archive` would, unless it still has work: a message queued or a newer turn. What became of it follows as a notice.
-       */
-      const archiveDelivered = (row: InboxRow) =>
+      /** A result reached whom it went to: the `agent.delivered` hooks hear it (plugin-coordinator archives on completion). */
+      const resultDelivered = (row: InboxRow) =>
         Effect.gen(function* () {
           if (row.kind !== "result") return
-          const id = row.sessionId
-          const owner = yield* db.getSession(id)
-          if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
-          if (row.details.status !== "completed") return
-          // Each delivered result takes its turn under the lock, so one delivered while another archive holds it still gets its own look.
-          yield* locked(
-            id,
-            true,
-          )(
-            Effect.gen(function* () {
-              // Looked up under the lock: an ended session's flags may be dropped while nobody holds it.
-              const r = yield* track(id)
-              // An vibest archive already running does it.
-              if (yield* Ref.getAndSet(r.stopping, true)) return
-              yield* Effect.gen(function* () {
-                const session = yield* getRow(id)
-                if (session.metadata.archived || session.metadata.removed) return
-                const skip = (why: string) =>
-                  notice(session, "archived", `${id} not archived (vibest run --archive-on-completion): ${why}`)
-                // The newest result decides: a newer completed one already delivered archives it now; one not delivered yet takes its own turn once it is.
-                const latest = yield* db.latestInbox(id, "result")
-                // It has work again (a message was sent to it or it started a new turn): its next completed result archives it.
-                // Nothing for the coordinator to do, so no notice (each notice is a coordinator turn).
-                if (
-                  session.turnState !== "completed" ||
-                  latest?.status !== "delivered" ||
-                  latest.details.status !== "completed"
-                )
-                  return
-                const h = yield* live(session)
-                const terminal = session.address
-                const seen = yield* agentState(h, terminal)
-                if (seen === "absent")
-                  return yield* skip(
-                    `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
-                  )
-                // The runtime can still read `working` right after the turn-end hook.
-                const settled = yield* settleAfterInterrupt(h, session, terminal)
-                if (!settled)
-                  return yield* skip(
-                    `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
-                  )
-                const out = yield* removeLocked(id, { unlessPending: true })
-                // It has work again (removeLocked refused): no notice, as above.
-                if (!out) return
-                const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""
-                const again = out.processes === "exited" ? "" : ` Run vibest archive ${id} again to check.`
-                // A clean archive gives the coordinator nothing to do: only something kept or left over is worth a notice (a coordinator turn).
-                if (kept || again)
-                  yield* notice(
-                    session,
-                    "archived",
-                    `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
-                  )
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : getRow(id).pipe(
-                        Effect.flatMap((session) =>
-                          notice(
-                            session,
-                            "archived",
-                            `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`,
-                          ),
-                        ),
-                      ),
-                ),
-                // Cleared before the lock is let go, so the next result's turn never finds it still set.
-                Effect.ensuring(Ref.set(r.stopping, false)),
+          const owner = yield* db.getSession(row.sessionId)
+          if (!owner) return
+          const status = row.details.status
+          yield* plugins.delivered({
+            sessionId: owner.id,
+            agentType: owner.agent,
+            status: status === "failed" || status === "lost" ? status : "completed",
+            archiveOnCompletion: owner.metadata.archive === true,
+          })
+        })
+
+      /**
+       * Archive `id` as `vibest archive` would, once it has settled (SPEC §8.6b, the mechanism of an archive policy): its
+       * turn completed, its newest result delivered and completed, its harness idle, nothing queued (`busy` otherwise:
+       * it has work again). A harness that already exited is `skipped`: vibest cannot prove its processes are gone.
+       */
+      const archiveSettled = (id: string) =>
+        locked(
+          id,
+          true,
+        )(
+          Effect.gen(function* () {
+            // Looked up under the lock: an ended session's flags may be dropped while nobody holds it.
+            const r = yield* track(id)
+            // An vibest archive already running does it.
+            if (yield* Ref.getAndSet(r.stopping, true)) return { outcome: "busy" } as Archived
+            return yield* Effect.gen(function* () {
+              const session = yield* getRow(id)
+              if (session.metadata.archived || session.metadata.removed) return { outcome: "busy" } as Archived
+              const latest = yield* db.latestInbox(id, "result")
+              if (
+                session.turnState !== "completed" ||
+                latest?.status !== "delivered" ||
+                latest.details.status !== "completed"
               )
-            }),
-          )
+                return { outcome: "busy" } as Archived
+              const h = yield* live(session)
+              const terminal = session.address
+              const seen = yield* agentState(h, terminal)
+              if (seen === "absent")
+                return {
+                  outcome: "skipped",
+                  reason: `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
+                } as Archived
+              // The runtime can still read `working` right after the turn-end hook.
+              if (!(yield* settleAfterInterrupt(h, session, terminal)))
+                return {
+                  outcome: "skipped",
+                  reason: `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
+                } as Archived
+              const out = yield* removeLocked(id, { unlessPending: true })
+              if (!out) return { outcome: "busy" } as Archived
+              return {
+                outcome: "archived",
+                processes: out.processes,
+                pane: out.pane,
+                worktree: out.worktree,
+                path: out.path,
+                branch: out.branch,
+                reasons: out.reasons,
+              } as Archived
+            }).pipe(
+              // Cleared before the lock is let go, so the next archive never finds it still set.
+              Effect.ensuring(Ref.set(r.stopping, false)),
+            )
+          }),
+        )
+
+      /** A notice about session `about` (`context.session.notice`): vibest's own route unless `to` replaces it. */
+      const noticeAbout = (about: string, kind: AgentNotice["kind"], text: string, to?: ReadonlyArray<string | null>) =>
+        Effect.gen(function* () {
+          const session = yield* getRow(about)
+          yield* notice(session, kind, text, to)
         })
 
       // ---- views ----
@@ -1636,9 +1649,9 @@ export class Sessions extends Context.Service<
         inbox.delivered.pipe(
           Effect.flatMap(({ row, done }) =>
             Effect.forkIn(
-              archiveDelivered(row).pipe(
+              resultDelivered(row).pipe(
                 Effect.ensuring(done),
-                logged(`archive ${row.sessionId}`),
+                logged(`delivered ${row.sessionId}`),
                 Effect.provideContext(platform),
               ),
               scope,
@@ -1712,6 +1725,12 @@ export class Sessions extends Context.Service<
         outdated,
         restart,
         restartLater,
+        archiveSettled: (id) =>
+          archiveSettled(id).pipe(
+            Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked an archive"))),
+            Effect.provideContext(platform),
+          ),
+        notice: (about, kind, text, to) => noticeAbout(about, kind, text, to),
       })
     })
 

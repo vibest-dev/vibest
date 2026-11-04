@@ -21,6 +21,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import type * as VibestPlugin from "@vibest/plugin"
+import { ActionRefused } from "@vibest/plugin"
 import { coordinatorPlugin } from "@vibest/plugin-coordinator"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -499,6 +500,15 @@ const over = (options: TestOptions) => {
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
       const sessions = yield* Sessions
+      // With no server, the actions that need no caller check (a test with the server installs its own).
+      const refused = (e: { readonly message: string }) => new ActionRefused({ reason: e.message })
+      const none = Effect.fail(new ActionRefused({ reason: "no server in this test" }))
+      yield* (yield* Actions).install({
+        send: () => none,
+        spawn: () => none,
+        archive: ({ id }) => sessions.archiveSettled(id).pipe(Effect.mapError(refused)),
+        notice: ({ about, kind, text, to }) => sessions.notice(about, kind, text, to).pipe(Effect.mapError(refused)),
+      })
       yield* Ref.set(fake.onActivity, (session, status) =>
         sessions.activity(session, status === "working" ? "working" : { blocked: "permission" }),
       )

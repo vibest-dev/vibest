@@ -1,4 +1,4 @@
-// What a plugin does as a session (`context.session`): vibestd's own Send and Spawn handlers, run with that session
+// What a plugin does as a session (`context.session`): vibestd's own Send and Spawn handlers (and archive and notice), run with that session
 // as the caller, so a plugin may do exactly what the session itself may. The server installs them once its handlers
 // exist; until then (and in a host without a server) every action is refused.
 import type { SessionActions } from "@vibest/plugin"
@@ -17,6 +17,8 @@ export class Actions extends Context.Service<Actions, ActionsShape>()("vibest/Ac
     return {
       send: (input) => (installed ? installed.send(input) : none),
       spawn: (input) => (installed ? installed.spawn(input) : none),
+      archive: (input) => (installed ? installed.archive(input) : none),
+      notice: (input) => (installed ? installed.notice(input) : none),
       install: (actions) => Effect.sync(() => void (installed = actions)),
     }
   }
