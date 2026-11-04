@@ -24,6 +24,7 @@ import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
   Config,
+  ConfigProvider,
   Context,
   Deferred,
   type Duration,
@@ -454,6 +455,14 @@ const over = (options: TestOptions) => {
     Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
   )
   const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
+  // A TMPDIR of the test's own: system prompts go there, never into the real $TMPDIR/vibest.
+  const tmp = Layer.unwrap(
+    tempDirectory("vibest-tmp-").pipe(
+      Effect.map((dir) =>
+        ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
+      ),
+    ),
+  )
   const plugins = Layer.effect(
     Plugins,
     Plugins.make(
@@ -503,6 +512,7 @@ const over = (options: TestOptions) => {
         ).pipe(Layer.provideMerge(FakeProcesses.layer)),
       ),
       Layer.provideMerge(home),
+      Layer.provideMerge(tmp),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(TurnEnds.layer),
@@ -511,7 +521,7 @@ const over = (options: TestOptions) => {
   )
 }
 
-/** Session `id`'s system prompt file, under this process's TMPDIR as vibestd writes it. */
+/** Session `id`'s system prompt file, under the test's own TMPDIR (testLayer) as vibestd writes it. */
 export const systemPromptFile = (id: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path

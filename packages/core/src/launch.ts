@@ -9,7 +9,17 @@ import { Layout, VibestCommand } from "./paths.ts"
 import { projectKey } from "./project-create.ts"
 import { type Machine, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
-import { coordinatorSystemPrompt, projectText, systemPromptRoot, writeSystemPrompt } from "./system-prompt.ts"
+import {
+  coordinatorSystemPrompt,
+  projectText,
+  SystemPromptDirUnsafe,
+  systemPromptRoot,
+  writeSystemPrompt,
+} from "./system-prompt.ts"
+
+/** An unusable temporary directory is the user's to fix and fails the start; any other error there is a defect. */
+const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
 
 /**
  * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its system prompt file. `session` runs only
@@ -48,7 +58,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const pluginDir = yield* harness.plugin(input.harness)
   const key = yield* projectKey(input.root).pipe(Effect.orDie)
   // The temporary directory is checked before `session`, which supersedes the running Coordinator's launch.
-  yield* systemPromptRoot.pipe(Effect.orDie)
+  yield* unsafeOnly(systemPromptRoot)
   const env: Record<string, string> = {
     VIBEST_AGENT: COORDINATOR,
     VIBEST_HARNESS: input.harness,
@@ -61,10 +71,9 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
-  const systemPromptFile = yield* writeSystemPrompt(
-    saved.sessionId,
-    coordinatorSystemPrompt({ ...(yield* projectText(layout.project(key))) }),
-  ).pipe(Effect.orDie)
+  const systemPromptFile = yield* unsafeOnly(
+    writeSystemPrompt(saved.sessionId, coordinatorSystemPrompt({ ...(yield* projectText(layout.project(key))) })),
+  )
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null

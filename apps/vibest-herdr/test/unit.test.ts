@@ -1298,6 +1298,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           models: () => Effect.succeed([]),
         })
         const claudeDir = yield* tempDirectory("vibest-claude-")
+        const tmp = yield* tempDirectory("vibest-tmp-")
         const run = (
           h: "claude" | "pi" | "cursor",
           harnessSessionId: string | null = null,
@@ -1322,6 +1323,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
               ConfigProvider.layerAdd(
                 ConfigProvider.fromUnknown({
                   CLAUDE_CONFIG_DIR: claudeDir,
+                  TMPDIR: tmp,
                   HERDR_PANE_ID: "w1:p1",
                   HERDR_SOCKET_PATH: "/h/herdr.sock",
                 }),
