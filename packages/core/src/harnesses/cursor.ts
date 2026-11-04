@@ -1,5 +1,5 @@
-// Cursor (cursor-agent): vibest's plugin @vibest/cursor, loaded with `--plugin-dir` into each Cursor vibest starts; rules
-// in the first prompt; models from `cursor-agent models`. Not a Coordinator.
+// Cursor (cursor-agent): vibest's plugin @vibest/cursor, loaded with `--plugin-dir` into each Cursor vibest starts; the system
+// prompt in the first prompt; models from `cursor-agent models`. Not a Coordinator.
 import { anthropicOnly, type HarnessAdapter, opt } from "../harness.ts"
 import type { RawModel } from "../models.ts"
 
@@ -16,7 +16,7 @@ export const cursor: HarnessAdapter = {
   id: "cursor",
   binary: "cursor-agent",
   ownSessionId: false,
-  rulesInPrompt: true,
+  systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
   resultField: "text",
   inbox: "prompt",

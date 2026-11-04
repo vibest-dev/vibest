@@ -82,6 +82,7 @@ import {
   type AgentSeen,
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
+import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
 import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
 import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 /**
@@ -146,7 +147,7 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project key of `root` (`projectRoot(root).key`), computed once by the caller: the row, the scratch directory and the rules all use it. */
+  /** The project key of `root` (`projectRoot(root).key`), computed once by the caller: the row, the scratch directory and the system prompt all use it. */
   readonly key: string
   readonly name: string
   readonly prompt: string
@@ -431,13 +432,29 @@ export class Sessions extends Context.Service<
         VIBEST_COMMAND: encodeCommand(vibest),
       })
 
-      /** The argv that starts the session's harness in a terminal (what `open` runs). */
+      /** The session's system prompt, made now from its row and the project files (`key`: the row's project). */
+      const systemPromptOf = (session: SessionRow, key: string) =>
+        Effect.gen(function* () {
+          return sessionSystemPrompt({
+            id: session.id,
+            // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
+            peer: yield* db.earlierSharer(session.id),
+            scratch: layout.scratch(key),
+            vibest,
+            ...(yield* projectText(layout.project(key))),
+          })
+        })
+
+      /** The argv that starts the session's harness in a terminal (what `open` runs); writes its system prompt anew. */
       const launchArgv = Effect.fn("Sessions.launchArgv")(function* (
         session: SessionRow,
         resume: boolean,
         key: string,
       ) {
-        const file = layout.rulesFile(session.id)
+        const file = yield* systemPromptOf(session, key).pipe(
+          Effect.flatMap((text) => writeSystemPrompt(session.id, text)),
+          Effect.provideContext(platform),
+        )
         const adapter = harnesses.get(session.harnessId)
         const pluginDir = yield* harness.plugin(adapter.id)
         // The binary first: `open` runs argv exactly (runtime-port §3), and a runtime knows the harness by it.
@@ -446,8 +463,7 @@ export class Sessions extends Context.Service<
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
             scratch: layout.scratch(key),
-            rules: yield* fs.readFileString(file),
-            rulesFile: file,
+            systemPromptFile: file,
             provider: session.provider,
             model: session.model,
             sessionId: session.harnessSessionId,
@@ -621,20 +637,20 @@ export class Sessions extends Context.Service<
 
       // ---- spawn ----
 
-      /** The first turn, once the terminal exists: the rules in the prompt where the harness reads them, else the text alone. */
+      /** The first turn, once the terminal exists: the system prompt in front where the harness has no flag for it, else the text alone. */
       const afterOpen = (
         h: Runtime,
         session: SessionRow,
         terminal: Terminal,
         root: string,
-        rules: string,
+        key: string,
         firstPrompt: string,
       ) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
-          const first = harnesses.get(session.harnessId).rulesInPrompt
-            ? `${rules}\n\n# Task\n\n${firstPrompt}`
+          const first = harnesses.get(session.harnessId).systemPromptInPrompt
+            ? `${yield* systemPromptOf(session, key)}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
           const notStarted = yield* prompt(h, session, terminal, first)
           if (notStarted) yield* notice(session, notStarted)
@@ -646,7 +662,6 @@ export class Sessions extends Context.Service<
         layout,
         fs,
         path,
-        vibest,
         harnesses,
         worktreeOf,
         vibestEnv,
@@ -672,8 +687,7 @@ export class Sessions extends Context.Service<
         finish,
         launchArgv,
         turnEnds,
-        rulesFile: layout.rulesFile,
-        fs: { remove: (p, o) => fs.remove(p, o), readFileString: (p) => fs.readFileString(p) },
+        systemPromptOf,
         uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
         terminate: processes.terminate,
         platform,

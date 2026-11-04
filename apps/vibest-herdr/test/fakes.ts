@@ -14,6 +14,7 @@ import { Restarting } from "@vibest/core/restarting"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { systemPromptRoot } from "@vibest/core/system-prompt"
 import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
@@ -23,6 +24,7 @@ import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
   Config,
+  ConfigProvider,
   Context,
   Deferred,
   type Duration,
@@ -453,6 +455,14 @@ const over = (options: TestOptions) => {
     Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
   )
   const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
+  // A TMPDIR of the test's own: system prompts go there, never into the real $TMPDIR/vibest.
+  const tmp = Layer.unwrap(
+    tempDirectory("vibest-tmp-").pipe(
+      Effect.map((dir) =>
+        ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
+      ),
+    ),
+  )
   const plugins = Layer.effect(
     Plugins,
     Plugins.make(
@@ -502,6 +512,7 @@ const over = (options: TestOptions) => {
         ).pipe(Layer.provideMerge(FakeProcesses.layer)),
       ),
       Layer.provideMerge(home),
+      Layer.provideMerge(tmp),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(TurnEnds.layer),
@@ -509,6 +520,13 @@ const over = (options: TestOptions) => {
     ),
   )
 }
+
+/** Session `id`'s system prompt file, under the test's own TMPDIR (testLayer) as vibestd writes it. */
+export const systemPromptFile = (id: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    return path.join(yield* systemPromptRoot, id, "system-prompt.md")
+  })
 
 /** Product tests: the Runtime service is the in-memory fake, not herdr. */
 export const testLayer = (options: TestOptions = {}) => over(options)

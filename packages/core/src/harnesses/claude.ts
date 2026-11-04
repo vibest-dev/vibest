@@ -130,7 +130,7 @@ export const claude: HarnessAdapter = {
   id: "claude",
   binary: "claude",
   ownSessionId: true,
-  rulesInPrompt: false,
+  systemPromptInPrompt: false,
   interruptKey: "esc",
   startup: claudeStartup,
   resultField: "last_assistant_message",
@@ -140,7 +140,7 @@ export const claude: HarnessAdapter = {
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
     "--append-system-prompt-file",
-    i.rulesFile,
+    i.systemPromptFile,
     "--add-dir",
     i.scratch,
     "--allowedTools",
@@ -153,7 +153,7 @@ export const claude: HarnessAdapter = {
   coordinatorArgs: (i) => [
     ...opt("--resume", i.sessionId),
     "--append-system-prompt-file",
-    i.rulesFile,
+    i.systemPromptFile,
     // No MCP servers, only the inspection tools; they run without a permission prompt, the pre-tool hook refuses what it names.
     "--strict-mcp-config",
     "--tools",

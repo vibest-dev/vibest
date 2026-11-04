@@ -480,8 +480,8 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   inbox row's queue and status changes) in `docs/design/schema.md` are the state, changed in transactions. The
   conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
   task is its `task` inbox row. Rows are never deleted.
-- Files keep one writer each and are written to a temporary file and renamed (omac write model): rules files
-  by the daemon; never the user's harness configuration.
+- Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
+  files by the daemon (the main Agent's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
 
 ## 7. Plugin architecture (Effect only)
@@ -805,10 +805,15 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
-  rules/<agent>.md           written by the daemon
   projects/<project>/        knowledge (instructions.md, memory/, docs/) and scratch/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
+
+The system prompt each harness gets is not kept here. It is generated again from the session's row and the
+Project's files on every harness start (new, resume, restart, move to another harness) and written to
+`$TMPDIR/vibest/<session id>/system-prompt.md`; without TMPDIR, to `/tmp/vibest-<uid>/<session id>/`, a directory
+that must be the user's own with mode 0700 and no symlink. Archive removes the session's directory; the system
+cleans the rest.
 
 ## 15. Copied from omac and refactored (D12)
 

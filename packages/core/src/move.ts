@@ -81,7 +81,7 @@ export const sessionMove = (deps: {
     terminal: Terminal,
     root: string,
   ) => Effect.Effect<void, unknown, MovePlatform>
-  /** Where the session works now, and which project key its rules use. */
+  /** Where the session works now, and which project key its system prompt uses. */
   readonly locate: (
     session: SessionRow,
   ) => Effect.Effect<{ readonly root: string; readonly cwd: string; readonly key: string }, unknown, MovePlatform>
@@ -99,14 +99,8 @@ export const sessionMove = (deps: {
   ) => Effect.Effect<unknown, unknown, MovePlatform>
   /** The reported turn ends: the old harness's end is dropped (turn-ends.ts). */
   readonly turnEnds: { readonly drop: (id: string) => Effect.Effect<void> }
-  readonly rulesFile: (id: string) => string
-  readonly fs: {
-    readonly remove: (
-      path: string,
-      options?: { readonly force?: boolean },
-    ) => Effect.Effect<void, unknown, MovePlatform>
-    readonly readFileString: (path: string) => Effect.Effect<string, unknown, MovePlatform>
-  }
+  /** The session's system prompt, made now from its row and the project files (sessions.ts `systemPromptOf`). */
+  readonly systemPromptOf: (session: SessionRow, key: string) => Effect.Effect<string, unknown, MovePlatform>
   readonly uuid: Effect.Effect<string>
   /** SIGTERM to the harness pid alone (never its group: that is the terminal's shell). */
   readonly terminate: (pid: number) => Effect.Effect<"sent" | "gone" | "denied">
@@ -252,7 +246,7 @@ export const sessionMove = (deps: {
           (a.outcome !== "limited" || a.provider === undefined || (a.provider === provider && stillLimited(a, rows))),
       )
     }
-    // The move stays in the session's directory with its rules: what both hook calls repeat.
+    // The move stays in the session's directory with its system prompt: what both hook calls repeat.
     const { root, cwd, key } = yield* deps.locate(session)
     const base = {
       project: root,
@@ -396,11 +390,9 @@ export const sessionMove = (deps: {
       })
       row = (yield* db.getSession(row.id))!
       yield* deps.turnEnds.drop(row.id)
-      const rules = yield* deps.fs.readFileString(deps.rulesFile(row.id)).pipe(Effect.orElseSucceed(() => ""))
-      const text =
-        rules !== "" && harnesses.get(row.harnessId).rulesInPrompt
-          ? `${rules}\n\n# Task\n\n${next.prompt}`
-          : next.prompt
+      const text = harnesses.get(row.harnessId).systemPromptInPrompt
+        ? `${yield* deps.systemPromptOf(row, key)}\n\n# Task\n\n${next.prompt}`
+        : next.prompt
       const prompted = yield* deps.prompt(h, row, terminal, text, Effect.void, { keepRound: true }).pipe(Effect.exit)
       // A reason is the runtime taking the text and the turn never starting. Same as a failed prompt: try the next one.
       // The round stays working; the next harness prompts it again.

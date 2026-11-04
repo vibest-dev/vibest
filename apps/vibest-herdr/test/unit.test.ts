@@ -23,7 +23,7 @@ import * as Launch from "@vibest/core/launch"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
-import { coordinatorRules } from "@vibest/core/rules"
+import { coordinatorSystemPrompt, privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import {
   copyIncluded,
@@ -68,9 +68,57 @@ const session = (id: string, patch: Partial<Omit<SessionRow, "projectId">> = {})
 })
 const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }
 
+describe("System prompt directory", () => {
+  const refused = <A, E, R>(e: Effect.Effect<A, E, R>) =>
+    e.pipe(
+      Effect.exit,
+      Effect.map((exit) => {
+        assert.isTrue(Exit.isFailure(exit))
+        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /not a private directory/)
+      }),
+    )
+
+  it.effect("under TMPDIR: <TMPDIR>/vibest, made with mode 0700", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const tmp = yield* tempDirectory("vibest-tmpdir-")
+      assert.strictEqual(yield* privateTmp(tmp, "/nowhere"), `${tmp}/vibest`)
+      assert.strictEqual((yield* fs.stat(`${tmp}/vibest`)).mode & 0o777, 0o700)
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "no TMPDIR: <parent>/vibest-<uid>, made 0700 and used again; a wrong mode, a symlink or another owner is refused",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const user = yield* UserPlatform
+        const uid = user.uid!
+        const parent = yield* tempDirectory("vibest-fallback-")
+        const dir = `${parent}/vibest-${uid}`
+        assert.strictEqual(yield* privateTmp("", parent), dir)
+        assert.strictEqual((yield* fs.stat(dir)).mode & 0o777, 0o700)
+        assert.strictEqual(yield* privateTmp("", parent), dir, "an existing private directory is used again")
+
+        yield* fs.chmod(dir, 0o755)
+        yield* refused(privateTmp("", parent))
+
+        yield* fs.remove(dir, { recursive: true })
+        const target = `${parent}/elsewhere`
+        yield* fs.makeDirectory(target, { mode: 0o700 })
+        yield* fs.symlink(target, dir)
+        yield* refused(privateTmp("", parent))
+
+        // Owned by someone else: this process is told it is another uid, so the directory it finds is not its own.
+        yield* fs.remove(dir)
+        yield* refused(privateTmp("", parent).pipe(Effect.provideService(UserPlatform, { ...user, uid: uid + 1 })))
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+})
+
 describe("Rules", () => {
   it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorRules({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
     assert.include(rules, "`delegate`")
     assert.include(rules, "`pipeline`")
     assert.notInclude(rules, "--archive-on-completion")
@@ -84,7 +132,7 @@ describe("Rules", () => {
   })
 
   it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorRules({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
     assert.include(rules, "in plain, complete sentences with no shorthand only you know")
     assert.include(rules, "a space between every word, identifier and number")
     assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
@@ -870,8 +918,7 @@ describe("Db", () => {
 const launchInput: LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234",
   scratch: "/h/.vibest/projects/k/scratch/cli",
-  rules: 'line one\nline "two"',
-  rulesFile: "/h/.vibest/rules/abcd1234.md",
+  systemPromptFile: "/tmp/vibest/abcd1234/system-prompt.md",
   provider: null,
   model: null,
   sessionId: "uuid-1",
@@ -918,8 +965,7 @@ describe("HarnessAdapter", () => {
     assert.strictEqual(after(ADAPTERS.pi.launchArgs(input), "-e"), `${dir}/extension.mjs`)
     const coordinator = {
       root: "/r",
-      rules: "",
-      rulesFile: "/r.md",
+      systemPromptFile: "/r.md",
       provider: null,
       model: null,
       sessionId: null,
@@ -1019,8 +1065,7 @@ describe("HarnessAdapter", () => {
   it("Coordinator argv: rules and the inspection tools, no MCP server at all; cursor cannot be one", () => {
     const input: CoordinatorInput = {
       root: "/repo",
-      rules: "be a coordinator",
-      rulesFile: "/vibest/coordinator/key.md",
+      systemPromptFile: "/tmp/vibest/c0ffee00/system-prompt.md",
       provider: null,
       model: "m",
       sessionId: null,
@@ -1036,7 +1081,7 @@ describe("HarnessAdapter", () => {
     assert.include(claude, "--append-system-prompt-file")
     assert.deepStrictEqual(ADAPTERS.pi.coordinatorArgs!(input), [
       "--system-prompt",
-      input.rulesFile,
+      input.systemPromptFile,
       "--tools",
       "read,bash,codemode,grep,find,ls",
       "--no-mcp",
@@ -1058,8 +1103,7 @@ describe("HarnessAdapter", () => {
     for (const id of ["pi", "claude"] as const)
       assert.notInclude(ADAPTERS[id].coordinatorArgs!(input).join(" "), "session")
     for (const id of HARNESS_IDS)
-      if (ADAPTERS[id].coordinatorArgs)
-        assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!({ ...input, rules: "a\nb" })))
+      if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
   })
 
   it("Sessions get no vibest MCP server: claude may run vibest report", () => {
@@ -1254,6 +1298,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           models: () => Effect.succeed([]),
         })
         const claudeDir = yield* tempDirectory("vibest-claude-")
+        const tmp = yield* tempDirectory("vibest-tmp-")
         const run = (
           h: "claude" | "pi" | "cursor",
           harnessSessionId: string | null = null,
@@ -1278,6 +1323,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
               ConfigProvider.layerAdd(
                 ConfigProvider.fromUnknown({
                   CLAUDE_CONFIG_DIR: claudeDir,
+                  TMPDIR: tmp,
                   HERDR_PANE_ID: "w1:p1",
                   HERDR_SOCKET_PATH: "/h/herdr.sock",
                 }),

@@ -3,7 +3,6 @@
 // lsof, real git.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { Layout } from "@vibest/core/paths"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
 import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
@@ -27,6 +26,7 @@ import {
   untilVirtual,
   writeResult,
   resultText,
+  systemPromptFile,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -37,7 +37,6 @@ const workingSession = Effect.gen(function* () {
   const sessions = yield* Sessions
   const db = yield* Db
   const herdr = yield* FakeRuntime
-  const layout = yield* Layout
   const repo = yield* makeRepository
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
@@ -53,7 +52,7 @@ const workingSession = Effect.gen(function* () {
   const row = (yield* db.getSession(id))!
   const worktree = yield* db.sessionDirectory(row.id)
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
-  return { id, pane, sessions, db, herdr, worktree, rules: layout.rulesFile(id) }
+  return { id, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
 
 /** A session whose first turn is over, and the terminal its agent runs in. */
