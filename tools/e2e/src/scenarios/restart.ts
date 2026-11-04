@@ -292,7 +292,9 @@ const checks: ReadonlyArray<Check> = [
         // Yes: vibestd is current now; it restarts the agents once `vibest update` has exited, the subagent first.
         const yes = await update("y")
         expect(
-          yes.includes("vibest update has finished") && yes.includes(before.id) && yes.includes(zero),
+          yes.includes("vibest update has finished") &&
+            yes.includes(before.id.slice(0, 8)) &&
+            yes.includes(zero.slice(0, 8)),
           `the agents were not handed to vibestd for a restart: ${yes}`,
         )
         expect((await w.daemonPid()) === daemonAfter, `vibestd changed again on the second update: ${yes}`)
@@ -473,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
             out,
           ) &&
             out.includes("vibest daemon restart has finished") &&
-            out.includes(id),
+            out.includes(id.slice(0, 8)),
           `the subagent was not offered for a restart: ${out}`,
         )
         const daemonAfter = await w.daemonPid()

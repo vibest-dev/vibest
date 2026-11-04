@@ -289,7 +289,8 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
   /** One result from subagent `sub` reaches the main agent: its line as the prompt, its full text as context. */
   const result = async (sub: string, title: string, marker: string, before: number) => {
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
-    return shown(`General Agent "${title}" completed (${sub})`, marker)
+    // The line names the subagent by the first 8 characters of its id.
+    return shown(`General Agent "${title}" completed (${sub.slice(0, 8)})`, marker)
   }
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
   const typeIn = async (text: string) => {
@@ -431,7 +432,7 @@ const checks: ReadonlyArray<Check> = [
           [a, "Answer probe alpha"],
           [b, "Answer probe beta"],
         ] as const) {
-          const line = `General Agent "${title}" completed (${sub})`
+          const line = `General Agent "${title}" completed (${sub.slice(0, 8)})`
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
