@@ -236,6 +236,50 @@ layer(Platform.services)("role rules", (it) => {
     }),
   )
 
+  it.effect("a dangling symlink is judged by where it points; one whose target cannot be resolved is refused", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("vibest-guard-")
+      const vibestHome = path.join(home, ".vibest")
+      const own = path.join(vibestHome, "projects", "own")
+      const other = path.join(vibestHome, "projects", "other")
+      const work = path.join(vibestHome, "worktrees", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+      yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
+      yield* fs.makeDirectory(path.join(other, "artifacts"), { recursive: true })
+      yield* fs.makeDirectory(work, { recursive: true })
+      // The target does not exist yet: realPath fails, and a write would create it there.
+      const outside = path.join(home, "outside.md")
+      const stolen = path.join(other, "artifacts", "stolen.md")
+      yield* fs.symlink(outside, path.join(own, "artifacts", "leak"))
+      yield* fs.symlink(path.join(own, "artifacts", "plan.md"), path.join(own, "artifacts", "alias"))
+      yield* fs.symlink("loop", path.join(own, "artifacts", "loop"))
+      yield* fs.symlink(stolen, path.join(work, "leak"))
+      const provide =
+        (rules: Rules, dir: string | null) => (tool: string, input: Record<string, unknown>, cwd: string) =>
+          rules({ tool, input, cwd }).pipe(
+            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+            Effect.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown(dir === null ? { HOME: home } : { HOME: home, VIBEST_PROJECT_DIR: dir }),
+              ),
+            ),
+          )
+      const asCoordinator = provide(coordinator, own)
+      const asSession = provide(session, own)
+      const edits =
+        "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
+      const offLimits =
+        "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+      assert.strictEqual(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "leak") }, home), edits)
+      assert.isUndefined(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "alias") }, home))
+      assert.isString(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "loop") }, home))
+      assert.strictEqual(yield* asSession("Write", { file_path: path.join(work, "leak") }, work), offLimits)
+      assert.isUndefined(yield* asSession("Write", { file_path: path.join(own, "artifacts", "alias") }, work))
+      assert.isString(yield* asSession("Write", { file_path: path.join(own, "artifacts", "loop") }, work))
+    }),
+  )
+
   it.effect(
     "Coordinator: no edits without its project folder; session: no herdr control and no project directory, symlinks included",
     () =>

@@ -271,21 +271,55 @@ export const shellBlock = (
 /**
  * Where an absolute path really leads: segment by segment, following each symlink that exists before applying a later
  * `..` (as the system does), so neither `artifacts/link/x` nor `<project>/../<other project>` hides where it goes.
+ * A dangling symlink as the last segment has no real path, but a write creates its target, so that location is what
+ * counts. None when that target cannot be read: the call is refused.
  */
-const physical = (p: string) =>
+const physical = (
+  p: string,
+  seen?: ReadonlySet<string>,
+): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const key = path.resolve(p)
+    if (seen?.has(key)) return Option.none<string>()
+    const visited = new Set(seen).add(key)
     let current = path.parse(p).root
-    for (const segment of p.split(path.sep)) {
+    const parts = p.split(path.sep)
+    for (let i = 0; i < parts.length; i++) {
+      const segment = parts[i]!
       if (segment === "" || segment === ".") continue
-      if (segment === "..") current = path.dirname(current)
-      else
-        current = Option.getOrElse(yield* fs.realPath(path.join(current, segment)).pipe(Effect.option), () =>
-          path.join(current, segment),
-        )
+      if (segment === "..") {
+        current = path.dirname(current)
+        continue
+      }
+      const joined = path.join(current, segment)
+      const resolved = yield* fs.realPath(joined).pipe(Effect.option)
+      if (Option.isSome(resolved)) {
+        current = resolved.value
+        continue
+      }
+      // A later segment is not the file a write would create through this link.
+      if (parts.slice(i + 1).some((s) => s !== "" && s !== ".")) {
+        current = joined
+        continue
+      }
+      const link = yield* fs.readLink(joined).pipe(
+        Effect.map((target): { readonly target: string } | undefined => ({ target })),
+        Effect.catchTag("PlatformError", (e) =>
+          e.reason._tag === "NotFound" || (e.reason.cause as { code?: unknown } | undefined)?.code === "EINVAL"
+            ? Effect.succeed(undefined)
+            : Effect.succeed("refuse" as const),
+        ),
+      )
+      if (link === "refuse" || link?.target === "") return Option.none<string>()
+      if (link !== undefined) {
+        const target = path.isAbsolute(link.target) ? link.target : path.resolve(current, link.target)
+        return yield* physical(target, visited)
+      }
+      current = joined
     }
-    return current
+    return Option.some(current)
   })
 
 const str = (value: unknown) => (typeof value === "string" ? value : undefined)
@@ -320,18 +354,21 @@ const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWit
 /** The physical path of the agent's project folder (VIBEST_PROJECT_DIR, which vibestd sets in its terminal), if set. */
 const projectDir = Effect.gen(function* () {
   const own = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROJECT_DIR")))
-  return own ? yield* physical(own) : undefined
+  return own ? Option.getOrUndefined(yield* physical(own)) : undefined
 })
 
 /**
  * Where `raw` leads from `cwd` (`~` and file URLs expanded), both as the system follows it (symlinks before a later
- * `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse.
+ * `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse, or a
+ * symlink whose target cannot be resolved (the call is refused).
  */
 const targetsOf = (raw: string, cwd: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const p = yield* toolPath(raw, cwd, yield* Config.String("HOME"))
-    return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
+    if (p === undefined) return undefined
+    const [followed, normalized] = yield* Effect.all([physical(p), physical(path.normalize(p))])
+    return Option.isSome(followed) && Option.isSome(normalized) ? [followed.value, normalized.value] : undefined
   })
 
 /** The path arguments of a file tool call. */
@@ -377,8 +414,11 @@ const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
   const path = yield* Path.Path
   const layout = yield* Layout
-  const projects = yield* physical(layout.projects)
-  const vibestHome = yield* physical(layout.home)
+  const projectsOpt = yield* physical(layout.projects)
+  const homeOpt = yield* physical(layout.home)
+  if (Option.isNone(projectsOpt) || Option.isNone(homeOpt)) return OFF_LIMITS
+  const projects = projectsOpt.value
+  const vibestHome = homeOpt.value
   const own = yield* projectDir
   const inOwn = (target: string) => own !== undefined && inside(target, own, path.sep)
   const resolve = (raw: string) => targetsOf(raw, call.cwd)
@@ -396,7 +436,8 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     // A regex cannot sandbox a shell; this catches the project named directly, which is what an honest mistake looks like.
     const search = SHELL_SEARCH.test(command)
     // The shell starts in the project (a cwd the call chose): every bare file name is inside it.
-    if (blocked(yield* physical(call.cwd), false)) return OFF_LIMITS
+    const cwd = yield* physical(call.cwd)
+    if (Option.isNone(cwd) || blocked(cwd.value, false)) return OFF_LIMITS
     for (const word of command.match(SHELL_WORDS) ?? []) {
       if (!word.includes("/") && !word.startsWith("~") && !word.includes(".vibest")) continue
       // Globs and variables around vibest's home could expand to anything in it.
