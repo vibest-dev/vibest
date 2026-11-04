@@ -5,7 +5,6 @@ import { Db } from "@vibest/core/db"
 import { AWAY, Inbox, LEASE, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -17,7 +16,16 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until, resultText, startedSince } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestServices,
+  until,
+  resultText,
+  startedSince,
+  projectOf,
+} from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -74,7 +82,7 @@ const project = Effect.gen(function* () {
   const db = yield* Db
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   const main = yield* db.coordinatorLaunch(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
@@ -84,7 +92,7 @@ const project = Effect.gen(function* () {
   const { id: worker } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
-    key,
+    projectId: key,
     name: "Fix the guard",
     prompt: "do it",
     harness: "claude",
@@ -154,8 +162,7 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
       // The main agent moved to Pi under the same session id: the old Claude process neither polls nor renames the
       // conversation, and Pi (which subscribes) has no poll either.
-      const key = (yield* db.projectKey(projectId))!
-      yield* db.coordinatorLaunch(key, "pi", false, {
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -368,7 +375,7 @@ describe("vibestd's HTTP API", () => {
       )
       assert.strictEqual(yield* resultText(main), "")
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
-      const key = String((yield* db.getSession(worker))!.projectId)
+      const key = (yield* db.getSession(worker))!.projectId
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
       const other = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))

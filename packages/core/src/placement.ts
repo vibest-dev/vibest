@@ -38,8 +38,8 @@ class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message
 
 export const sessionPlacement = (deps: {
   readonly db: {
-    readonly coordinatorOf: (projectId: number) => Effect.Effect<CoordinatorRow | undefined>
-    readonly listSessions: (filter?: { readonly projectId?: number }) => Effect.Effect<ReadonlyArray<SessionRow>>
+    readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
+    readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
@@ -101,7 +101,7 @@ export const sessionPlacement = (deps: {
       Effect.catch(() => Effect.flatMap(Path.Path, (p) => Effect.succeed(p.basename(root)))),
     )
 
-  const liveCount = (projectId: number) =>
+  const liveCount = (projectId: string) =>
     db
       .listSessions({ projectId })
       .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
@@ -174,7 +174,7 @@ export const sessionPlacement = (deps: {
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(String(session.projectId))) },
+        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(session.projectId)) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -215,7 +215,7 @@ export const sessionPlacement = (deps: {
     // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
     // The row's own project: the scratch directory goes to the project the session belongs to.
-    yield* fs.makeDirectory(layout.scratch(String(session.projectId)), { recursive: true })
+    yield* fs.makeDirectory(layout.scratch(session.projectId), { recursive: true })
     // The same limit-move a failed start always had: it runs inside the scope, so the worktree the move reuses is still there.
     const openOrMove = (
       open: Effect.Effect<
@@ -310,7 +310,7 @@ export const sessionPlacement = (deps: {
     )
 
   /** The project directory stored on the main agent, if this start wrote one. Never the lookup key. */
-  const storedDirectory = (projectId: number) =>
+  const storedDirectory = (projectId: string) =>
     db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
 
   /**
@@ -318,7 +318,7 @@ export const sessionPlacement = (deps: {
    * removed): each remaining live session's terminal relabels it, as `republish` does; with none left, the main agent's
    * terminal publishes the workspace alone, without labels of its own. Best-effort: callers ignore failures.
    */
-  const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: number) {
+  const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
     const h = yield* runtimes.route(kind).pipe(Effect.option)
     if (Option.isNone(h)) return
     const rows = (yield* db.listSessions({ projectId })).filter(

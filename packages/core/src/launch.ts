@@ -36,7 +36,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     {
       readonly sessionId: string
       readonly harnessSessionId: string | null
-      readonly projectId: number
+      readonly projectId: string
       readonly runtime?: string | undefined
     },
     E,
@@ -72,7 +72,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const systemPromptFile = yield* unsafeOnly(
     writeSystemPrompt(
       saved.sessionId,
-      coordinatorSystemPrompt({ ...(yield* projectText(layout.project(String(saved.projectId)))) }),
+      coordinatorSystemPrompt({ ...(yield* projectText(layout.project(saved.projectId))) }),
     ),
   )
   let harnessSessionId = saved.harnessSessionId
@@ -81,7 +81,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
-    VIBEST_PROJECT_ID: String(saved.projectId),
+    VIBEST_PROJECT_ID: saved.projectId,
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {

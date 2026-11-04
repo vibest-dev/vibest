@@ -148,8 +148,8 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project key of `root` (`projectRoot(root).key`), computed once by the caller: the row, the scratch directory and the system prompt all use it. */
-  readonly key: string
+  /** The project `root` is (vibestd resolved it once): the row, the scratch directory and the system prompt use it. */
+  readonly projectId: string
   readonly name: string
   readonly prompt: string
   /** Optional when a plugin picks it (plugins.md §5). */
@@ -208,7 +208,7 @@ export class Sessions extends Context.Service<
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
     /** The last `lines` lines on the session's terminal (`vibest peek`), read on demand; never sent to an agent. */
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
-    readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
+    readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
     /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
@@ -424,7 +424,7 @@ export class Sessions extends Context.Service<
       // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
       const vibestEnv = (session: SessionRow, scratch: string) => ({
         VIBEST_SESSION_ID: session.id,
-        VIBEST_PROJECT_ID: String(session.projectId),
+        VIBEST_PROJECT_ID: session.projectId,
         VIBEST_SCRATCH: scratch,
         VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
@@ -440,9 +440,9 @@ export class Sessions extends Context.Service<
             id: session.id,
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
-            scratch: layout.scratch(String(session.projectId)),
+            scratch: layout.scratch(session.projectId),
             vibest,
-            ...(yield* projectText(layout.project(String(session.projectId)))),
+            ...(yield* projectText(layout.project(session.projectId))),
           })
         })
 
@@ -459,7 +459,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: layout.scratch(String(session.projectId)),
+            scratch: layout.scratch(session.projectId),
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -467,7 +467,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session, layout.scratch(String(session.projectId))),
+            env: vibestEnv(session, layout.scratch(session.projectId)),
           }),
         ]
       })
@@ -719,8 +719,7 @@ export class Sessions extends Context.Service<
           const refuse = (why: string) => new NoSuchSession({ id, message: `--peer ${id}: ${why}` })
           const p = yield* db.getSession(id)
           if (!p) return yield* refuse(`no session ${id}`)
-          // Reads only: a check must not insert a project row as a side effect.
-          if (p.projectId !== (yield* db.projectByKey(input.key))) return yield* refuse("it belongs to another project")
+          if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
           if (p.metadata.archived || p.metadata.removed) return yield* refuse("it was archived")
           if (p.runtime !== runtime || p.address.machine !== machineId)
             return yield* refuse(
@@ -799,7 +798,6 @@ export class Sessions extends Context.Service<
             const folders = yield* listProjectRepositories(root).pipe(
               Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
             )
-            const key = input.key
             const base = {
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
               ...(input.archive ? { archive: true } : {}),
@@ -866,7 +864,7 @@ export class Sessions extends Context.Service<
             }
             const inserted = yield* db.insertSession(
               draft,
-              key,
+              input.projectId,
               options.maxSessions,
               cwd,
               decision.prompt,
@@ -1349,7 +1347,7 @@ export class Sessions extends Context.Service<
       })
 
       const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
-      const list = (filter: { projectId?: number; stopped?: boolean } = {}) =>
+      const list = (filter: { projectId?: string; stopped?: boolean } = {}) =>
         db.listSessions(filter).pipe(
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>

@@ -34,7 +34,7 @@ export interface Outdated {
 }
 export interface Restarted {
   readonly id: string
-  readonly projectId: number
+  readonly projectId: string
   readonly ok: boolean
   readonly message: string
 }
@@ -108,7 +108,7 @@ type LiveNow = Effect.Effect<
 /** One agent to restart in place: what differs between a subagent and a main agent. */
 interface Target {
   readonly id: string
-  readonly projectId: number
+  readonly projectId: string
   /** How messages name it: its id, and "(main agent)" for one. */
   readonly label: string
   readonly adapter: HarnessAdapter
@@ -242,7 +242,7 @@ export const sessionRestart = (deps: {
     Effect.gen(function* () {
       const session = yield* db.getSession(id)
       if (session === undefined)
-        return { id, projectId: -1, ok: false, message: `${id} not restarted: no such session` }
+        return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
       // An open round stays open across the restart: the continue is another turn of it, and it reports once.
       const interrupted = session.turnState === "open"
       return yield* inPlace({

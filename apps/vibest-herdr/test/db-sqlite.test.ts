@@ -9,7 +9,7 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { tempDirectory } from "./fakes.ts"
+import { projectOf, tempDirectory } from "./fakes.ts"
 
 const database = (filename: string) => Db.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
 
@@ -145,7 +145,7 @@ describe("a vibestd restart", () => {
           ["a", "claude"],
           ["b", "pi"],
         ] as const) {
-          const { sessionId } = yield* db.coordinatorLaunch(key, harness, false, place(key))
+          const { sessionId } = yield* db.coordinatorLaunch(yield* projectOf(key), harness, false, place(key))
           const row = yield* db.insertInbox({ sessionId, kind: "notice", message: key, details: {} })
           assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
           ids.push(row.id)

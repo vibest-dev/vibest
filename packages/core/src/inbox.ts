@@ -87,22 +87,22 @@ export class Inbox extends Context.Service<
     /** For rows inserted inside another transaction (Db.finishTurn). */
     readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a project's coordinator its next batch now. */
-    readonly deliver: (projectId: number) => Effect.Effect<void>
+    readonly deliver: (projectId: string) => Effect.Effect<void>
     /** The coordinator's rows from now on, one string per claimed batch, instead of `agent.prompt`. */
-    readonly stream: (projectId: number) => Stream.Stream<string>
+    readonly stream: (projectId: string) => Stream.Stream<string>
     /** The next coordinator-bound row whose delivery succeeded (`agent.prompt` returned, or the integration acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
     readonly delivered: Effect.Effect<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
     /**
      * The coordinator's next batch, each row leased for LEASE (answered at once, empty when there is none or vibestd is
      * stopping). Rows whose lease ran out go back to pending first.
      */
-    readonly poll: (projectId: number) => Effect.Effect<Polled>
+    readonly poll: (projectId: string) => Effect.Effect<Polled>
     /**
      * The rows the coordinator took (`ids`: delivered) and gave back (`release`: pending again). Only its own leased or
      * pending rows count; repeating is harmless. Returns the rows now delivered.
      */
     readonly ack: (
-      projectId: number,
+      projectId: string,
       ids: ReadonlyArray<number>,
       release?: ReadonlyArray<number>,
     ) => Effect.Effect<ReadonlyArray<number>>
@@ -145,12 +145,12 @@ export class Inbox extends Context.Service<
         )
 
       // Dropped once released with nobody waiting (vibestd-state.md 3).
-      const locks = keyedLock<number>()
+      const locks = keyedLock<string>()
 
-      const withLock = <A, E, R>(label: string, projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
+      const withLock = <A, E, R>(label: string, projectId: string, body: Effect.Effect<A, E, R>, settlement = false) =>
         drain.work(label, locks.withLock(projectId)(body), settlement)
 
-      const deliver = (projectId: number) =>
+      const deliver = (projectId: string) =>
         withLock(
           `deliver project ${projectId}`,
           projectId,
@@ -257,7 +257,7 @@ export class Inbox extends Context.Service<
        * claim, so a cut-off caller cannot lose the ids.
        */
       const claimNext = (
-        projectId: number,
+        projectId: string,
         mode: "subscribe" | "poll",
         origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
         hold: (ids: ReadonlyArray<number>) => Effect.Effect<void>,
@@ -294,7 +294,7 @@ export class Inbox extends Context.Service<
 
       // Guard is the coordinator row as this stream read it. Two subscribers: whichever claims a batch first takes it.
       // shortcut: delivered means the RPC client queued the chunk (next pull starts only after the socket Ack), not that pi.sendMessage succeeded; a dropped Ack can mark failed after the client already has it, upgrade when delivery must mean sendMessage returned
-      const stream = (projectId: number) =>
+      const stream = (projectId: string) =>
         Stream.unwrap(
           Effect.gen(function* () {
             const subscribed = yield* db.coordinatorOf(projectId)
@@ -352,16 +352,16 @@ export class Inbox extends Context.Service<
       // its lease ends; changed under the project's lock. Also the last poll per project, for the away check; its entry
       // goes when the project is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
       // polling main agent back to pending.
-      const leases = new Map<number, Map<number, number>>()
-      const lastPoll = new Map<number, number>()
-      const forget = (projectId: number, ids: ReadonlyArray<number>) => {
+      const leases = new Map<string, Map<number, number>>()
+      const lastPoll = new Map<string, number>()
+      const forget = (projectId: string, ids: ReadonlyArray<number>) => {
         const held = leases.get(projectId)
         if (held === undefined) return
         for (const id of ids) held.delete(id)
         if (held.size === 0) leases.delete(projectId)
       }
       /** Ends the leases that ran out by `now` (every one when `now` is undefined): their rows still `sending` go back to pending. */
-      const endLeases = (projectId: number, now: number | undefined) =>
+      const endLeases = (projectId: string, now: number | undefined) =>
         withLock(
           `end leases project ${projectId}`,
           projectId,
@@ -374,7 +374,7 @@ export class Inbox extends Context.Service<
           true,
         )
 
-      const poll = (projectId: number) =>
+      const poll = (projectId: string) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           lastPoll.set(projectId, now)
@@ -399,7 +399,7 @@ export class Inbox extends Context.Service<
           }
         })
 
-      const ack = (projectId: number, ids: ReadonlyArray<number>, release: ReadonlyArray<number> = []) =>
+      const ack = (projectId: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number> = []) =>
         withLock(
           `ack inbox ${ids.join(",")}`,
           projectId,

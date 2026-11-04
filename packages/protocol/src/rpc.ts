@@ -142,10 +142,10 @@ export type CallerShape =
   | {
       readonly _tag: "Coordinator"
       readonly sessionId: string
-      readonly projectId: number
+      readonly projectId: string
       readonly repositoryRoot?: string
     }
-  | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: number }
+  | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: string }
 
 export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}
 
@@ -243,7 +243,7 @@ export const SessionInfo = Schema.Struct({
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
   turnState: TurnState,
-  projectId: Schema.Number,
+  projectId: Schema.String,
   runtime: Schema.String,
   address: RuntimeAddress,
   worktree: Schema.String,
@@ -470,7 +470,7 @@ export class VibestRpcs extends RpcGroup.make(
           sessionId: Schema.String,
           harnessSessionId: Schema.NullOr(Schema.String),
           /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment. */
-          projectId: Schema.Number,
+          projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
         }),
         error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
@@ -627,7 +627,7 @@ export class VibestRpcs extends RpcGroup.make(
         harnessSessionId: Schema.NullOr(Schema.String),
         provider: Schema.NullOr(Schema.String),
         model: Schema.NullOr(Schema.String),
-        projectId: Schema.Number,
+        projectId: Schema.String,
         runtime: Schema.optional(Schema.String),
         /** The main agent's `vibest --env`, from vibestd's memory (absent after vibestd was stopped or restarted without a handoff). */
         env: Schema.optional(Schema.Record(Schema.String, Schema.String)),

@@ -89,7 +89,7 @@ export const make = Effect.gen(function* () {
       const row = sessionId ? yield* db.sessionIdentity(sessionId) : undefined
       if (!row) return failure(404, `no session ${sessionId ?? "(no vibest-session-id)"}`)
       const project = header(headers, PROJECT_HEADER)
-      if (project !== String(row.projectId))
+      if (project !== row.projectId)
         return failure(403, `session ${row.id} is not in project ${project ?? "(no vibest-project-id)"}`)
       // A process of another harness under this session id (an old main agent after a switch) changes nothing.
       const harness = header(headers, HARNESS_HEADER)
@@ -154,7 +154,7 @@ export const make = Effect.gen(function* () {
           Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       // The guard reads the session's own scratch directory as its terminal's VIBEST_SCRATCH; vibestd has none.
-      const scratch = { VIBEST_SCRATCH: layout.scratch(String(who.projectId)) }
+      const scratch = { VIBEST_SCRATCH: layout.scratch(who.projectId) }
       return yield* Guard.check(who.agent, request.body).pipe(
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: scratch }), { asPrimary: true })),
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),

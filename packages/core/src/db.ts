@@ -66,7 +66,7 @@ const Metadata = Schema.Struct({
 /** A session in the shape its callers read: its columns plus what its events say. */
 export const SessionRow = Schema.Struct({
   id: Schema.String,
-  projectId: Schema.Number,
+  projectId: Schema.String,
   agent: Schema.String,
   harnessId: Schema.Literals(HARNESS_IDS),
   harnessSessionId: Schema.NullOr(Schema.String),
@@ -100,14 +100,12 @@ export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent"
 /** The project's main agent. */
 export const CoordinatorRow = Schema.Struct({
   id: Schema.String,
-  projectId: Schema.Number,
+  projectId: Schema.String,
   harnessId: Schema.Literals(HARNESS_IDS),
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.NullOr(Schema.String),
   address: Schema.NullOr(AddressJson),
-  /** The project lookup key (`project.key`). Not a filesystem path. */
-  directory: Schema.String,
-  /** The project directory (`session.directory`), written at its first start. Absent when none was given. */
+  /** The project directory (`project.directory`), else its main session's. Absent when neither is known. */
   projectDirectory: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   /** What scheduling chose when it last started (Project.StartMain): provider, model, routing. */
@@ -120,6 +118,9 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
 
+/** A repository of a project as `project_repository` keeps it: its main checkout's realpath and raw origin. */
+export type RepositoryRow = { readonly path: string; readonly remote: string | undefined }
+
 /** "vibe", as a 32-bit application id. */
 export const APPLICATION_ID = 0x76696265
 export const SCHEMA_VERSION = 2
@@ -128,13 +129,19 @@ export const SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `PRAGMA user_version = ${SCHEMA_VERSION}`,
   `CREATE TABLE project (
-    id               INTEGER PRIMARY KEY,
-    key              TEXT NOT NULL UNIQUE,
+    id               TEXT PRIMARY KEY CHECK (length(id) = 36),
+    directory        TEXT UNIQUE,
     entry_session_id TEXT REFERENCES session (id)
   ) STRICT`,
+  `CREATE TABLE project_repository (
+    project_id TEXT NOT NULL REFERENCES project (id),
+    path       TEXT NOT NULL UNIQUE,
+    remote_url TEXT
+  ) STRICT`,
+  `CREATE INDEX project_repository_project ON project_repository (project_id)`,
   `CREATE TABLE session (
     id                    TEXT PRIMARY KEY,
-    project_id            INTEGER NOT NULL REFERENCES project (id),
+    project_id            TEXT NOT NULL REFERENCES project (id),
     parent_session_id     TEXT REFERENCES session (id),
     report_to_session_id  TEXT REFERENCES session (id),
     role                  TEXT NOT NULL,
@@ -270,7 +277,7 @@ type Integration = { readonly version: string; readonly protocol: number }
 /** One session row with what its events say, as the read query returns it. */
 type SessionSql = {
   readonly id: string
-  readonly project: number
+  readonly project: string
   readonly role: string
   readonly name: string
   readonly machine: string
@@ -475,7 +482,7 @@ const make = Effect.gen(function* () {
    */
   const prompted = new Map<number, number>()
   /** Projects whose main agent left its place to move to another terminal (`detachCoordinator`): memory only. */
-  const moving = new Set<number>()
+  const moving = new Set<string>()
   /** No entry for `unknown` (what a missing one reads as) or an archived session (never live again): the map does not grow with ended sessions. */
   const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) => {
     if (row.metadata.archived || row.metadata.removed) integrations.delete(row.id)
@@ -505,13 +512,21 @@ const make = Effect.gen(function* () {
       return row!.id
     })
 
-  /** The project row for `key`, created on first use. The no-op `DO UPDATE` makes RETURNING answer for an existing row too. */
-  const projectId = (key: string) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{ id: number }>`INSERT INTO project ${sql.insert({ key })}
-        ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`
-      return rows[0]!.id
-    })
+  /** Some project id already starts with `short`. */
+  const projectPrefixTaken = (short: string) =>
+    sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+  /** Each repository row of project `id`; a path another project has is left to it. Its origin as git prints it now. */
+  const putRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
+    Effect.forEach(
+      repositories,
+      (
+        r,
+      ) => sql`INSERT INTO project_repository ${sql.insert({ projectId: id, path: r.path, remoteUrl: r.remote ?? null })}
+        ON CONFLICT (path) DO UPDATE SET remote_url = excluded.remote_url WHERE project_id = excluded.project_id`,
+      { discard: true },
+    )
 
   const SESSION_COLUMNS = sql`a.id, a.project_id AS project, a.role, a.name, a.machine,
       a.archive_on_completion AS archive, a.created_at, a.ended_at,
@@ -571,10 +586,10 @@ const make = Effect.gen(function* () {
     )
 
   /** The main agent has its place: its latest process runs, and it is not moving to another terminal. */
-  const placed = (projectIdValue: number, current: Current | undefined) =>
+  const placed = (projectIdValue: string, current: Current | undefined) =>
     current !== undefined && current.ended === null && current.start.terminal !== "" && !moving.has(projectIdValue)
 
-  const findCoordinators = (project?: number) =>
+  const findCoordinators = (project?: string) =>
     selectRaw([
       sql`a.id IN (SELECT entry_session_id FROM project ${project === undefined ? sql`` : sql`WHERE id = ${project}`})`,
     ]).pipe(
@@ -583,13 +598,16 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const current = currentOf(row)
             const start = current?.start
-            const [project] = yield* sql<{ key: string }>`SELECT key FROM project WHERE id = ${row.project}`
+            const [project] = yield* sql<{
+              directory: string | null
+            }>`SELECT directory FROM project WHERE id = ${row.project}`
             const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${row.id}`
             const integration =
               integrations.get(row.id) ??
               (row.integration !== null ? (JSON.parse(row.integration) as Integration) : undefined)
             const pid = row.pid ?? start?.pid
             const here = placed(row.project, current)
+            const directory = project?.directory || own?.directory
             return {
               id: row.id,
               projectId: row.project,
@@ -597,8 +615,7 @@ const make = Effect.gen(function* () {
               harnessSessionId: row.conversation ?? start?.resume ?? null,
               runtime: here ? start!.runtime : null,
               address: here ? JSON.stringify({ machine: start!.machine, id: start!.terminal }) : null,
-              directory: project?.key ?? "",
-              ...(own?.directory ? { projectDirectory: own.directory } : {}),
+              ...(directory ? { projectDirectory: directory } : {}),
               createdAt: row.createdAt,
               provider: start?.provider ?? null,
               model: start?.model ?? null,
@@ -624,7 +641,7 @@ const make = Effect.gen(function* () {
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(sql.in("m.id", ids))
   const findSend = (sessionId: string, status: InboxStatus) =>
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
-  const entryOf = (projectIdValue: number) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
+  const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
   /** The open turn of `sessionId`: its latest `turn.start` with no `turn.end`. */
   const openTurn = (sessionId: string) =>
@@ -818,7 +835,7 @@ const make = Effect.gen(function* () {
         })
         return (yield* inboxIn([id]))[0]!
       }
-      const [route] = yield* sql<{ recipient: string | null; entry: number | null; project: number }>`SELECT
+      const [route] = yield* sql<{ recipient: string | null; entry: number | null; project: string }>`SELECT
           CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
           (p.entry_session_id IS NOT NULL) AS entry, p.id AS project
         FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
@@ -955,7 +972,7 @@ const make = Effect.gen(function* () {
    * only while that project's main agent still has no place, so a launch that landed in between is left alone.
    */
   const dropWaiting = (
-    projectIdValue: number,
+    projectIdValue: string,
     guard?: { readonly runtime: string; readonly address: string } | "absent",
   ) =>
     Effect.gen(function* () {
@@ -979,9 +996,9 @@ const make = Effect.gen(function* () {
     })
 
   /** Main agents whose live process is at this place (outside `except`), not moving. */
-  const mainsAt = (runtime: string, address: RuntimeAddress, except?: number) =>
+  const mainsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ id: string; project: number }>`SELECT s.id, s.project_id AS project FROM session s
+      const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
         JOIN project q ON q.entry_session_id = s.id
         JOIN event p ON p.id = ${currentStart(sql`s.id`)}
         WHERE json_extract(p.data, '$.runtime') = ${runtime} AND json_extract(p.data, '$.machine') = ${address.machine}
@@ -992,7 +1009,7 @@ const make = Effect.gen(function* () {
     })
 
   /** Clear the place of every main agent at it (outside `except`), and drop what was waiting for them. */
-  const clearMainAt = (runtime: string, address: RuntimeAddress, except?: number) =>
+  const clearMainAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       for (const main of yield* mainsAt(runtime, address, except)) {
         yield* endProcess(main.id, "exited")
@@ -1017,18 +1034,39 @@ const make = Effect.gen(function* () {
     )
 
   return {
-    projectId: (key: string) => projectId(key).pipe(Effect.orDie),
-
-    /** The project id for `key`, if one exists. Does not create a row. */
-    projectByKey: (key: string) =>
-      sql<{ id: number }>`SELECT id FROM project WHERE key = ${key}`.pipe(
-        Effect.map((rows) => rows[0]?.id),
+    /**
+     * The project `root` (a realpath) is: the project at that directory, else the one with a repository there (a
+     * repository of a multi-repository project belongs to it). Reads only.
+     */
+    projectAt: (root: string) =>
+      sql<{ id: string; directory: string }>`SELECT id, directory FROM project WHERE directory = ${root}
+        UNION ALL SELECT p.id, p.directory FROM project_repository r JOIN project p ON p.id = r.project_id
+          WHERE r.path = ${root} LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),
 
-    projectKey: (id: number) =>
-      sql<{ key: string }>`SELECT key FROM project WHERE id = ${id}`.pipe(
-        Effect.map((rows) => rows[0]?.key),
+    /** A new project at `directory` (a realpath) with its repositories; its id. */
+    createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const id = yield* newId(projectPrefixTaken)
+            yield* sql`INSERT INTO project ${sql.insert({ id, directory })}`
+            yield* putRepositories(id, repositories)
+            return id
+          }),
+        )
+        .pipe(Effect.orDie),
+
+    /** Project `id`'s repositories as they are now: origins refreshed, newly present ones added. */
+    refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
+      sql.withTransaction(putRepositories(id, repositories)).pipe(Effect.orDie),
+
+    /** Where project `id` is; undefined for a project with no directory (migrated without one). */
+    projectDirectory: (id: string) =>
+      sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.directory ?? undefined),
         Effect.orDie,
       ),
 
@@ -1066,13 +1104,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Insert a subagent of project `key`, working in `cwd` (a `--peer` records the directory it shares), with its
+     * Insert a subagent of project `project`, working in `cwd` (a `--peer` records the directory it shares), with its
      * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
      * already running (one transaction). Its results go to its parent, or with none to the project's entry session.
      */
     insertSession: (
       row: Omit<SessionRow, "projectId">,
-      key: string,
+      project: string,
       max?: number,
       cwd = "",
       task?: string,
@@ -1085,7 +1123,6 @@ const make = Effect.gen(function* () {
               const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
               if (n >= max) return false
             }
-            const project = yield* projectId(key)
             const [entry] = yield* sql<{
               id: string | null
             }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
@@ -1196,7 +1233,7 @@ const make = Effect.gen(function* () {
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
-      sql<{ id: string; projectId: number; agent: string; harness: string }>`SELECT a.id, a.project_id,
+      sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
           coalesce(json_extract(p.data, '$.harness'), '') AS harness,
           CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.role END AS agent
         FROM session a JOIN project q ON q.id = a.project_id
@@ -1215,7 +1252,7 @@ const make = Effect.gen(function* () {
       sql.withTransaction(updateSession(id, patch)).pipe(Effect.orDie),
 
     /** `projectId` limits to one project; `stopped` includes subagents whose process is gone and ended main conversations. */
-    listSessions: (filter: { projectId?: number; stopped?: boolean } = {}) =>
+    listSessions: (filter: { projectId?: string; stopped?: boolean } = {}) =>
       selectSessions(
         filter.projectId === undefined ? [] : [sql`a.project_id = ${filter.projectId}`],
         filter.stopped === true,
@@ -1263,7 +1300,7 @@ const make = Effect.gen(function* () {
     /** Every project's main agent. */
     coordinators: findCoordinators().pipe(Effect.orDie),
 
-    coordinatorOf: (projectIdValue: number) =>
+    coordinatorOf: (projectIdValue: string) =>
       findCoordinators(projectIdValue).pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
@@ -1284,7 +1321,7 @@ const make = Effect.gen(function* () {
      * unless it is moving here (`detachCoordinator`): then what waits for it is delivered here.
      */
     coordinatorLaunch: (
-      key: string,
+      project: string,
       harness: HarnessId,
       fresh: boolean,
       location: { readonly runtime: string; readonly address: RuntimeAddress },
@@ -1301,7 +1338,6 @@ const make = Effect.gen(function* () {
         const id = yield* unusedId
         return yield* sql.withTransaction(
           Effect.gen(function* () {
-            const project = yield* projectId(key)
             yield* clearMainAt(location.runtime, location.address, project)
             const movingHere = moving.has(project)
             const [existing] = yield* sql<{
@@ -1473,7 +1509,7 @@ const make = Effect.gen(function* () {
      * stopped: no place, so its exit drops nothing (`clearCoordinator` no longer matches), and what waits for it stays
      * pending for the launch that follows. False when it is no longer at that place.
      */
-    detachCoordinator: (projectIdValue: number, runtime: string, address: RuntimeAddress) =>
+    detachCoordinator: (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
       Effect.gen(function* () {
         const here = (yield* mainsAt(runtime, address)).some((m) => m.project === projectIdValue)
         if (here) moving.add(projectIdValue)
@@ -1481,7 +1517,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orDie),
 
     /** Undo `detachCoordinator` when its harness did not stop: back at its place, unless something took the row since. */
-    reattachCoordinator: (projectIdValue: number, _runtime: string, _address: RuntimeAddress) =>
+    reattachCoordinator: (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
       Effect.sync(() => {
         moving.delete(projectIdValue)
       }),
@@ -1631,7 +1667,7 @@ const make = Effect.gen(function* () {
 
     inboxWithStatus: (sessionId: string, status: InboxStatus) => findSend(sessionId, status).pipe(Effect.orDie),
 
-    coordinatorPending: (projectIdValue: number) =>
+    coordinatorPending: (projectIdValue: string) =>
       inbox(
         sql`m.kind NOT IN ${sql.literal(TO_SESSION)} AND m.status = 'pending' AND m.recipient_session_id = ${entryOf(projectIdValue)}`,
       ).pipe(Effect.orDie),
@@ -1640,7 +1676,7 @@ const make = Effect.gen(function* () {
      * The project's main agent gave up rows `ids` without settling them (Inbox.poll: their lease ended): those still
      * `sending` go back to pending. Returns the rows put back.
      */
-    releaseLeased: (projectIdValue: number, ids: ReadonlyArray<number>) =>
+    releaseLeased: (projectIdValue: string, ids: ReadonlyArray<number>) =>
       ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
         : moveInbox(
@@ -1652,7 +1688,7 @@ const make = Effect.gen(function* () {
      * The main agent took `ids` (delivered) and gave back `release` (pending again): only its own rows, `sending` or
      * `pending`. Returns the rows now delivered.
      */
-    settleLeased: (projectIdValue: number, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
+    settleLeased: (projectIdValue: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
@@ -1702,14 +1738,14 @@ const make = Effect.gen(function* () {
 
     /** Projects with main-Agent-bound Messages waiting (the reconcile tick). */
     pendingProjects: sql<{
-      project: number
+      project: string
     }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.recipient_session_id
       WHERE m.status = 'pending' AND m.kind NOT IN ${sql.literal(TO_SESSION)}`.pipe(
       Effect.map((rows) => rows.map((r) => r.project)),
       Effect.orDie,
     ),
 
-    dropWaiting: (projectIdValue: number, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
+    dropWaiting: (projectIdValue: string, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
       sql.withTransaction(dropWaiting(projectIdValue, guard)).pipe(Effect.asVoid, Effect.orDie),
 
     /**
@@ -1719,7 +1755,7 @@ const make = Effect.gen(function* () {
     claim: (
       ids: ReadonlyArray<number>,
       guard?: {
-        readonly projectId: number
+        readonly projectId: string
         readonly runtime: string
         readonly address: string
         readonly harnessId?: string
@@ -1770,7 +1806,7 @@ const make = Effect.gen(function* () {
       ),
 
     projectOfSession: (sessionId: string) =>
-      sql<{ project: number }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(
+      sql<{ project: string }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
@@ -1792,7 +1828,9 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
       // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
       // The open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
-      Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET key = key WHERE id < 0`))),
+      Effect.andThen(
+        SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET directory = directory WHERE id = ''`)),
+      ),
       Effect.andThen(make),
     ),
   )

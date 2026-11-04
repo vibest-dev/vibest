@@ -6,7 +6,6 @@ import { line } from "@vibest/core/inbox"
 import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
 import { Restarting } from "@vibest/core/restarting"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -23,6 +22,7 @@ import {
   until,
   untilVirtual,
   writeResult,
+  projectOf,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
@@ -49,12 +49,12 @@ const started = Effect.gen(function* () {
   const db = yield* Db
   const sessions = yield* Sessions
   const repo = yield* makeRepository
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   yield* db.coordinatorLaunch(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
-    key,
+    projectId: key,
     name: "t",
     prompt: "do it",
     harness: "pi",
@@ -135,7 +135,12 @@ describe("restart in place", () => {
   it("a main agent's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
     const notice = continueNotice(version, [
-      { id: "ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12", projectId: 1, ok: true, message: "" },
+      {
+        id: "ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12",
+        projectId: "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e",
+        ok: true,
+        message: "",
+      },
     ])
     const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
@@ -149,14 +154,13 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
-      const key = yield* repositoryKey(yield* makeRepository)
-      yield* db.coordinatorLaunch(key, harness, false, {
+      const projectId = yield* projectOf(yield* makeRepository)
+      yield* db.coordinatorLaunch(projectId, harness, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      const projectId = (yield* db.projectByKey(key))!
       const main = (yield* db.coordinatorOf(projectId))!
       yield* db.reportCoordinatorSession(main.id, harness, "conversation-1")
       yield* db.patchLive(main.id, { pid: 100 })

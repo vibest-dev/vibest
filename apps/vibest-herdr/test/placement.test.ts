@@ -2,20 +2,29 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
+import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 
-import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  sh,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
 
 const spawnInput = (repo: string) =>
-  Effect.map(repositoryKey(repo), (key) => ({
+  Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
-    key,
+    projectId,
     name: "task",
     prompt: "do it",
     harness: "pi" as const,
@@ -32,7 +41,7 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "main:coord" },
       })
@@ -81,7 +90,7 @@ describe("placement", () => {
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
       yield* db.coordinatorLaunch(
-        yield* repositoryKey(repo),
+        yield* projectOf(repo),
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } },
@@ -117,7 +126,7 @@ describe("placement", () => {
       // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: "other",
         address: { machine: "local", id: "w1:coord" },
       })

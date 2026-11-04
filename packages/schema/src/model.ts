@@ -3,7 +3,7 @@ import { Schema } from "effect"
 
 import { ID } from "./id.ts"
 
-export const ProjectID = Schema.brand("ProjectID")(Schema.Int)
+export const ProjectID = Schema.brand("ProjectID")(Schema.String.check(Schema.isPattern(ID)))
 export type ProjectID = typeof ProjectID.Type
 
 export const SessionID = Schema.brand("SessionID")(Schema.String.check(Schema.isPattern(ID)))

@@ -14,6 +14,7 @@ import {
   TURNS,
   type TestServices,
   until,
+  projectOf,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -148,8 +149,8 @@ describe("pi-vibest", () => {
           createdAt: 1,
           lastActive: 1,
         }
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
-        const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -164,7 +165,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
-          VIBEST_PROJECT_ID: String(coord.projectId),
+          VIBEST_PROJECT_ID: coord.projectId,
           VIBEST_COMMAND: '["/nonexistent-vibest-fixture"]',
         })
         yield* s.emit(
@@ -220,8 +221,8 @@ describe("pi-vibest", () => {
           createdAt: 1,
           lastActive: 1,
         }
-        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
-        const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -235,7 +236,7 @@ describe("pi-vibest", () => {
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
-          VIBEST_PROJECT_ID: String(coord.projectId),
+          VIBEST_PROJECT_ID: coord.projectId,
           VIBEST_COMMAND: '["vibest"]',
         })
         yield* s.emit(
@@ -263,7 +264,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(yield* db.projectId("r"))).map((r) => r.message),
+          (yield* db.coordinatorPending(yield* projectOf("r"))).map((r) => r.message),
           ["after shutdown"],
         )
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
@@ -380,9 +381,9 @@ describe("pi-vibest", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, "r")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -396,7 +397,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
-        VIBEST_PROJECT_ID: String(coord.projectId),
+        VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["/usr/bin/bun","/src/main.ts"]',
       })
       assert.deepStrictEqual(
@@ -431,7 +432,7 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.coordinatorPending(yield* db.projectId("r"))).length, 1)
+      assert.strictEqual((yield* db.coordinatorPending(yield* projectOf("r"))).length, 1)
       yield* s.emit("session_start", { reason: "startup" }, { mode: "tui" })
       yield* until(
         Effect.sync(() => s.messages.length),
@@ -458,7 +459,7 @@ describe("pi-vibest", () => {
           options: { triggerTurn: true, deliverAs: "followUp" },
         },
       ])
-      assert.deepStrictEqual(yield* db.coordinatorPending(yield* db.projectId("r")), [])
+      assert.deepStrictEqual(yield* db.coordinatorPending(yield* projectOf("r")), [])
     }),
   )
 
@@ -486,7 +487,7 @@ describe("pi-vibest", () => {
           createdAt: 1,
           lastActive: 1,
         },
-        "r",
+        yield* projectOf("r"),
       )
       const scratch = `${layout.projects}/k/scratch/pane:test/w1:p7`
       const s = yield* session({
@@ -556,8 +557,8 @@ describe("pi-vibest", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, "r")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -581,7 +582,7 @@ describe("pi-vibest", () => {
       const coordinator = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: coord.sessionId,
-        VIBEST_PROJECT_ID: String(coord.projectId),
+        VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["vibest"]',
       })
       assert.isFalse(coordinator.handlers.has("input"))

@@ -17,7 +17,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
-import { pingOf, recordedInfo, runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
+import { pingOf, projectOf, recordedInfo, runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({
@@ -269,7 +269,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
               createdAt: 1,
               lastActive: 1,
             },
-            "seeded-project",
+            yield* projectOf("seeded-project"),
           )
           return yield* db.insertInbox({
             sessionId: "b0050001-b005-4b00-8b00-b0050001b005",

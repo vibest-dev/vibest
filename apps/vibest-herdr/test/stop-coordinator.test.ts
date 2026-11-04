@@ -10,7 +10,6 @@ import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { Restarting } from "@vibest/core/restarting"
-import { repositoryKey } from "@vibest/core/worktree"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
 
@@ -26,6 +25,7 @@ import {
   type TestOptions,
   type TestServices,
   untilVirtual,
+  projectOf,
 } from "./fakes.ts"
 
 const served = (options: TestOptions) =>
@@ -92,8 +92,7 @@ const launched = Effect.gen(function* () {
     pid: HARNESS,
   })
   yield* db.reportCoordinatorSession(started.sessionId, "pi", "conversation-1")
-  const key = yield* repositoryKey(repo)
-  const projectId = yield* db.projectId(key)
+  const projectId = yield* projectOf(repo)
   const coord = (yield* db.coordinatorOf(projectId))!
   const origin = { runtime: coord.runtime!, address: coord.address! }
   const address = encodeAddress(origin.address)
@@ -117,7 +116,7 @@ const launched = Effect.gen(function* () {
       createdAt: 1,
       lastActive: 1,
     },
-    key,
+    projectId,
   )
   yield* db.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -129,7 +128,7 @@ const launched = Effect.gen(function* () {
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.CoordinatorSession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
   const pending = Effect.map(db.coordinatorPending(projectId), (rows) => rows.map((r) => r.message))
-  return { db, herdr, processes, c, paneId, origin, key, projectId, started, stop, startAt, pending }
+  return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
 
 describe("Project.StopCoordinator", () => {
@@ -275,17 +274,20 @@ describe("Project.StopCoordinator", () => {
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded, a remote machine, or no agent seen but a live PID",
     Effect.gen(function* () {
       const s = yield* launched
-      const restore = s.db.coordinatorLaunch(s.key, "pi", false, s.origin, { pid: HARNESS })
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, { ...s.origin, address: { machine: "local", id: "test/p9" } })
+      const restore = s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin, { pid: HARNESS })
+      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, {
+        ...s.origin,
+        address: { machine: "local", id: "test/p9" },
+      })
       assert.deepStrictEqual(yield* s.stop, { result: "moved" })
       // No PID recorded (a main agent started by an older vibest).
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, s.origin)
+      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin)
       const old = yield* s.stop
       assert.strictEqual(old.result, "unsupported")
       assert.include(old.reason, "started by an older vibest")
       // Another machine: its PID means nothing here.
       const remote = { ...s.origin, address: { machine: "elsewhere", id: s.paneId } }
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, remote, { pid: HARNESS })
+      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, remote, { pid: HARNESS })
       const far = yield* s.c["Project.StopCoordinator"]({
         runtime: remote.runtime,
         address: encodeAddress(remote.address),

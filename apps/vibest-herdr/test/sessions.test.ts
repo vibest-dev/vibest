@@ -10,7 +10,6 @@ import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
@@ -48,6 +47,7 @@ import {
   resultText,
   dropResult,
   systemPromptFile,
+  projectOf,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -55,8 +55,9 @@ const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ?
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
-    repositoryKey(repo),
-    (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
+    projectOf(repo),
+    (projectId) =>
+      ({ machine: { id: "local" }, root: repo, projectId, name: "task", prompt: "do it", harness }) as const,
   )
 
 /** The result payload `vibest integration stop` writes for the Claude plugin's turn.complete with `reason`. */
@@ -74,7 +75,7 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+    yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
@@ -415,7 +416,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -449,7 +450,10 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { status: "unknown", turnState: "failed" })
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
-      const [row] = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
+      // The result row, whatever its delivery made of it: the main agent's terminal is not in the fake runtime.
+      const [row] = yield* (yield* SqlClient.SqlClient)<{
+        message: string
+      }>`SELECT content AS message FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
       assert.notInclude(row!.message, "pane tail")
@@ -613,7 +617,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -803,7 +807,7 @@ describe.concurrent("Sessions", () => {
       const sessions = yield* Sessions
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -1829,7 +1833,7 @@ describe.concurrent("Sessions", () => {
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2013,7 +2017,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2076,7 +2080,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2121,7 +2125,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2167,7 +2171,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -3533,7 +3537,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), coordinator, false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -3623,13 +3627,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const coord = yield* db.coordinatorLaunch(yield* repositoryKey(repo), "claude", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* db.reportCoordinatorSession(coord.sessionId, "claude", "claude-1")
       yield* herdr.seedAgent("test/coord")
-      const projectId = yield* db.projectId(yield* repositoryKey(repo))
+      const projectId = yield* projectOf(repo)
       const sessions = yield* Sessions
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -4095,7 +4099,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       // A coordinator that takes its rows by terminal text, so the result is delivered without its integration.
       const db = yield* Db
       const sessions = yield* Sessions
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "cursor", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "cursor", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

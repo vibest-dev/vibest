@@ -7,7 +7,6 @@ import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
 import { Effect, FileSystem, Layer, Option, Path, type Scope, Schema } from "effect"
@@ -26,6 +25,7 @@ import {
   writeResult,
   resultText,
   systemPromptFile,
+  projectOf,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -224,7 +224,7 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const coord = yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -240,7 +240,7 @@ describe("vibest CLI", () => {
           args,
         )
       const otherRepo = yield* makeRepository
-      const other = yield* db.coordinatorLaunch(yield* repositoryKey(otherRepo), "pi", false, {
+      const other = yield* db.coordinatorLaunch(yield* projectOf(otherRepo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w9:p9" },
       })

@@ -13,7 +13,6 @@ import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
@@ -38,6 +37,7 @@ import {
   type TestServices,
   until,
   writeResult,
+  projectOf,
 } from "./fakes.ts"
 
 const served = (options?: TestOptions) =>
@@ -130,7 +130,7 @@ describe("vibest.sock", () => {
       // Another id with the same first 8 characters: those 8 no longer name one session.
       const twin = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
       const row = (yield* db.getSession(id))!
-      yield* db.insertSession({ ...row, id: twin }, "other")
+      yield* db.insertSession({ ...row, id: twin }, row.projectId)
       const ambiguous = yield* Effect.flip(c.Get({ id: id.slice(0, 8) }))
       assert.strictEqual(ambiguous._tag, "AmbiguousSession")
       assert.include(ambiguous.message, id)
@@ -718,7 +718,7 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual(failureTag(refused), "Forbidden")
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
-      const project = yield* db.projectId(yield* repositoryKey(repo))
+      const project = yield* projectOf(repo)
       const row = (yield* db.coordinatorOf(project))!
       assert.strictEqual(row.address?.id, "test/p1")
       assert.strictEqual(row.harnessId, "claude")
@@ -811,9 +811,9 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, "r")
-      yield* db.coordinatorLaunch("r", "cursor", false, {
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
+      yield* db.coordinatorLaunch(yield* projectOf("r"), "cursor", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p9" },
       })
@@ -864,12 +864,12 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, "r")
-      yield* db.insertSession({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p8", "ws", "/")
       yield* herdr.seedAgent("w1:p8")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p8" },
       })
@@ -922,11 +922,11 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p7", "ws", "/")
       yield* herdr.seedAgent("w1:p7")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -1007,10 +1007,10 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p6", "ws", "/")
       yield* herdr.seedAgent("w1:p6")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p6" },
       })
@@ -1238,7 +1238,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       assert.strictEqual((yield* c["Project.StartMain"]({ harness: "pi" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
-      assert.notStrictEqual(seenDirectory.project, yield* repositoryKey(repo))
+      assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
     }),
     {
       plugins: [

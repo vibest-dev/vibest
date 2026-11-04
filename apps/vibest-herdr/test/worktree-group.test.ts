@@ -5,17 +5,18 @@ import { Db, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
-import { repositoryDirectoryName, repositoryKey } from "@vibest/core/worktree"
+import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
-import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until } from "./fakes.ts"
+import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, projectOf } from "./fakes.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
-    repositoryKey(repo),
-    (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
+    projectOf(repo),
+    (projectId) =>
+      ({ machine: { id: "local" }, root: repo, projectId, name: "task", prompt: "do it", harness }) as const,
   )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
@@ -214,7 +215,7 @@ describe("repository-grouped worktrees", () => {
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const id = "d4e5f6a7-d4e5-4d4e-8d4e-d4e5f6a7d4e5"
-      const key = yield* repositoryKey(repo)
+      const key = yield* projectOf(repo)
       const repository = yield* repositoryDirectoryName(repo)
       const neighbour = layout.allocationWorktree(repository, "cd35")
       yield* marker(neighbour)
@@ -236,7 +237,7 @@ describe("repository-grouped worktrees", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      const key = yield* repositoryKey(repo)
+      const key = yield* projectOf(repo)
       const outside = "e5f6a7b8-e5f6-4e5f-8e5f-e5f6a7b8e5f6"
       const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
