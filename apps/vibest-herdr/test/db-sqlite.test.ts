@@ -131,6 +131,28 @@ describe("SQLite", () => {
       }).pipe(Effect.provide(database(file)))
     }).pipe(Effect.provide(Platform.services)),
   )
+
+  it.effect("two creates of one never-seen directory are the same project", () =>
+    Effect.gen(function* () {
+      const file = `${yield* tempDirectory("vibest-sqlite-project-")}/vibest.db`
+      const open = database(file)
+      // The file exists before the two opens: two empty opens at once fail with SQLITE_CANTOPEN.
+      yield* Effect.void.pipe(Effect.provide(open))
+      const dir = `${file}-repo`
+      const create = Effect.gen(function* () {
+        return yield* (yield* Db).createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
+      }).pipe(Effect.provide(open))
+      const [a, b] = yield* Effect.all([create, create], { concurrency: 2 })
+      assert.strictEqual(a, b)
+      assert.strictEqual(yield* create, a)
+      const rows = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{ id: string; path: string }>`SELECT p.id, r.path FROM project p
+          LEFT JOIN project_repository r ON r.project_id = p.id WHERE p.directory = ${dir}`
+      }).pipe(Effect.provide(open))
+      assert.deepStrictEqual(rows, [{ id: a, path: `${dir}/app` }])
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })
 
 describe("a vibestd restart", () => {

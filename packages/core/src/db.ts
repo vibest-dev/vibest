@@ -1056,15 +1056,17 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** A new project at `directory` (a realpath) with its repositories; its id. */
+    /** A new project at `directory` (a realpath) with its repositories; its id. One already there is that project. */
     createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             const id = yield* newId(projectPrefixTaken)
-            yield* sql`INSERT INTO project ${sql.insert({ id, directory })}`
-            yield* putRepositories(id, repositories)
-            return id
+            // Two first requests can both miss projectAt; the second must not die on directory UNIQUE.
+            yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
+            const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+            yield* putRepositories(row!.id, repositories)
+            return row!.id
           }),
         )
         .pipe(Effect.orDie),
