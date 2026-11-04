@@ -11,9 +11,11 @@ vibest is an agent engine with a product on it, hosted by one daemon (vibestd) a
 - **Contracts.** `@vibest/schema` (shared types and the on-disk layout), `@vibest/plugin` (the plugin API: agent
   definitions, hooks, session actions, the harness adapter and runtime contracts), `@vibest/protocol` (the RPC
   between clients and vibestd).
-- **Engine.** `@vibest/core`: sessions, inbox, reply routing, delivery, turn tracking, events and storage, the guard,
-  capabilities of agent definitions, the harness adapters claude, pi and cursor, and the plugin host.
-- **Product.** `@vibest/vibest`: the workspace (git checkouts and the detached worktrees sessions work in), terminal
+- **Engine.** `@vibest/core`: sessions, inbox, reply routing, delivery, turn tracking, the storage port with its read
+  model, an in-memory store and the contract suite every store passes, the guard, capabilities of agent definitions,
+  the harness adapters claude, pi and cursor, and the plugin host. Core holds no SQL and no database schema.
+- **Product.** `@vibest/vibest`: the SQLite store (`sqlite-store.ts`: the schema, its checks, the SQL, and the
+  project rows a scope maps to), the workspace (git checkouts and the detached worktrees sessions work in), terminal
   placement policy, the system prompt text and the project files it reads, project lookup, and the main agent's
   start (`launch.ts`).
 - **Default plugins.** `@vibest/plugin-coordinator` (the coordinator and worker definitions, archive on completion),
@@ -40,10 +42,12 @@ Who imports whom (package.json dependencies, `@vibest/` packages only):
 
 `apps/vibest/test/layering.test.ts` enforces: the command line's sources import only the client, the contracts,
 effect, the server entry and `#platform`; core runs no git, imports no worktree or project code and nothing of
-`@vibest/vibest`, and does not list it as a dependency; core's sources contain none of the product notions moved out
-in this round (the worktrees root and leaf names, `instructions.md`, the session system prompt text), and its
-placement, removal, system prompt and workspace modules name no entry agent; and the engine-only product test
-imports nothing but core, the contracts and effect. `apps/vibest/test/boundaries.test.ts` keeps herdr out of every
+`@vibest/vibest`, and does not list it as a dependency; core imports nothing whose name contains `sql`, uses no
+`SqlClient`, and its package.json names no SQL package, while the schema lives in vibest's store; core's sources
+contain none of the product notions moved out (the worktrees root and leaf names, `instructions.md`, the session
+system prompt text, VIBEST_SCRATCH and the projects directory); its storage port, store, read model and inbox name
+no project id or coordinator operation; its placement, removal, system prompt and workspace modules name no entry
+agent; and the engine-only product test imports nothing but core, the contracts and effect. `apps/vibest/test/boundaries.test.ts` keeps herdr out of every
 runtime-neutral package but the host.
 
 ## Engine ports (filled by a product)
@@ -51,14 +55,19 @@ runtime-neutral package but the host.
 Core defines these services; `@vibest/vibest` provides the vibest implementations, and
 `apps/vibest/test/engine-only.test.ts` provides a second, minimal set.
 
+- **Db, the storage port** (`core/db.ts` `DbShape`; see "Storage model" for its contracts). Operations on sessions,
+  owners, processes, turns and inbox rows, never table access. vibest's implementation is its SQLite store; core's
+  own is `core/memory-store.ts`.
+
 - **Workspace** (`core/workspace.ts`). Where a session works. `project(directory)` gives the grouping root and key;
   `repositories`, `mainCheckout`, `state`, `repositoryStates` read it; `reserve(root)` names and makes a new
   session's directory (failing with `WorkspaceRefused`); `prepare(root, path, shared)` makes it ready for the
   harness inside a scope and undoes that when the scope closes failed; `release({ id, path, keep, processes,
   liveSharers })` decides, once the engine has closed the terminal and proven which processes still work there,
   whether the directory goes, and returns `removed`, `kept` or `gone`, why, whether a live sharer kept it, and its
-  branch; `files(key)` makes the directory a group's sessions share working files in and gives the variables that
-  name it in their shell (vibest: the project's scratch directory, VIBEST_SCRATCH). vibest's implementation (`vibest/workspace.ts`) uses detached git worktrees under the worktrees root,
+  branch; `files(key)` makes the directory a scope's sessions share working files in and gives the product's
+  variables for that scope in their shell (vibest: the project's scratch directory as VIBEST_SCRATCH, and the
+  project's id as VIBEST_PROJECT_ID, which its integrations send back to name the project). vibest's implementation (`vibest/workspace.ts`) uses detached git worktrees under the worktrees root,
   one per repository for a multi-repository project, and removes one only when no live session shares it and git
   would lose nothing.
 - **SessionPrompt** (`core/system-prompt.ts`). `text(input)` gives a session's system prompt text from its id,
@@ -68,9 +77,10 @@ Core defines these services; `@vibest/vibest` provides the vibest implementation
   `SystemPromptDirUnsafe`. vibest's text (`vibest/system-prompt.ts`) adds the project's instructions and memory.
 - **PlacementPolicy** (`core/placement.ts`). `near(session, kind)` (the terminal a new one opens beside),
   `root(session, cwd)` and `labelRoot(session, cwd)` (the directory a session's terminals belong to),
-  `project(projectId, root)` (the project labels shown on a terminal) and `alone(projectId, kind, live)` (the
-  terminal that shows the project when no session is labelled). vibest's policy (`vibest/placement.ts`) opens a
-  session beside the lead that started it, else beside the project's main agent.
+  `labels(scope, root)` (the scope's labels shown on a terminal) and `alone(scope, kind, live)` (the terminal that
+  shows the scope when no session is labelled). vibest's policy (`vibest/placement.ts`) opens a session beside the
+  lead that started it, else beside the scope's owner (its main agent), and labels the project's name and how many
+  of its sessions are live.
 - **Runtime** (`@vibest/plugin` `Runtime`). A terminal runtime: `open`, `send`, `close`, `state`, `present` and the
   rest in `packages/plugin/src/runtime.ts`; registered by a plugin and routed by `runtime.kind`.
 - **HarnessAdapter** (`packages/plugin/src/harness.ts`). What differs between agent CLIs; claude, pi and cursor are
@@ -109,15 +119,19 @@ Hooks (`packages/plugin/src/index.ts` `Hooks`), run one after another in plugin 
 
 ## Session, inbox and turn lifecycle
 
-A session row (`session` table) is created by `Sessions.spawn`: plugins choose harness and runtime, the workspace
-reserves its directory, and the row is inserted with its first prompt. `placement.ts` prepares the workspace, writes
+A session is created by `Sessions.spawn` in a scope (the grouping the product gives it; vibest: the project's key):
+plugins choose harness and runtime, the workspace reserves its directory, and the store inserts it with its first
+prompt (`insertSession`). `placement.ts` prepares the workspace, writes
 the system prompt, and opens the session's terminal running the adapter's argv. A session's process starts and ends
 as `process.start` / `process.end` events; archiving closes its terminal and releases its workspace
 (`core/remove.ts`).
 
-Every message to a session is an inbox row (`inbox` table) with a kind: `task` (its first prompt, while a polling
+Every message to a session is an inbox row with a kind: `task` (its first prompt, while a polling
 integration has not taken it), `send`, `report`, `result` and `notice`, and a status: `pending`, `delivering`,
-`delivered`, `failed`, `dropped`. A row with no recipient is the user's (`vibest inbox`).
+`delivered`, `failed`, `dropped`. A row with no recipient is the
+user's (`vibest inbox`). A scope may have one owner, a session the product starts with `startOwner` (vibest: the
+project's main agent): rows with no other session to go to go to it, `core/inbox.ts` delivers them (typed when it is
+idle, or leased to a polling integration), and they drop while it has no place.
 
 A turn's state on the session is `none`, `open`, `completed`, `failed`, `interrupted`, `lost` or `not_started`. A turn
 opens when what was delivered starts it (the integration's `turn.start`, or the runtime's state for an adapter that
@@ -127,15 +141,16 @@ events.
 
 ## Reply routing
 
-`replyTo` in `core/db.ts` decides where a finished turn's result goes, then `agent.result` may rewrite it:
+The store's `replyTo` (contract in `core/db.ts`, the same in both stores) decides where a finished turn's result goes,
+then `agent.result` may rewrite it:
 
 1. the sessions whose `task` or `send` rows the turn consumed;
-2. else the session's report-to (set at spawn), or, with none, the project's entry session;
+2. else the session's report-to (set at spawn: `--report-to`, its parent, else the scope's owner);
 3. else the user, when the turn consumed the user's own task or send;
 4. else nobody: a turn typed in the pane, or woken by a result or notice, answers no one, so a result never starts a
    result.
 
-A recipient that has ended is replaced by the project's entry session (never the session itself), else the user.
+A recipient that has ended is replaced by the scope's owner (never the session itself), else the user.
 
 ## Delivery per harness
 
@@ -151,28 +166,60 @@ integration (`/inbox/poll`), which acks what it took (`/inbox/ack`). A poll answ
 
 ## Storage model
 
-One SQLite file (`~/.vibest/vibest.db`, schema version 2, `core/db.ts` `SCHEMA`): tables `project`, `session`,
-`inbox`, `event`. `event` is append-only (a trigger refuses updates): processes, turns, inbox status changes and
-results are events. JSON on a row is written once; state that changes has its own column; environment variables
-given with `--env` are never stored; leases, restarting marks and groups are kept in memory. vibest never migrates
-the file by itself.
+Storage is a port. `core/db.ts` defines `Db` (`DbShape`): the operations the engine needs, grouped by an opaque
+**scope** string the engine only compares, and each scope's **owner**. What the store keeps are facts: sessions (a
+scope, parent, report-to, role, name, machine, directory, created and ended), inbox rows, and append-only events
+(`process.start`, `process.ready`, `process.conversation`, `process.end`, `turn.start`, `turn.end`, `inbox.queued`,
+`inbox.status`). Every row the port returns is derived from them by the shared read model (`core/read-model.ts`),
+so a session's process, turn, ready and pid are what its latest events say. The contract every store keeps:
+
+- **Atomic operations.** Each operation sees and leaves a consistent state; two never interleave their changes
+  (SQLite: one connection and transactions; memory: one lock around every operation).
+- **Append-only events, ordered by id.** Nothing updates an event. One `process.end` per process (`endProcess` is
+  false the second time); one `turn.end` per turn (`finishTurn`, `closeTurn` and a result row close the open turn
+  once; with none open a result opens and closes one).
+- **Exclusive claims.** `claim` moves pending rows to delivering and returns each id to one caller only, however many
+  race; with a guard it claims only while the scope's owner is at the place the caller read. A guarded move
+  (`setInboxStatus` with `from`) changes only rows still in that status, so a claim and a drop never both land.
+- **Owners.** `startOwner` creates the scope's owner on first use and keeps its id across starts; the same harness
+  continues its conversation unless `fresh`, which replaces the owner (the old one stays readable). Starting at a
+  place takes it from another scope's owner, whose waiting rows drop. While an owner has no place (its process ended,
+  `clearOwnerAt`, or it moves: `detachOwner`), rows to it are dropped, except a moving owner's, which wait.
+- **Reads.** Unknown ids read as absent and write nothing; an owner whose process lives is not listed among its scope's sessions;
+  `listSessions` lists live processes unless `stopped`.
+- **Memory only.** The runtime status, the integration a session's requests carry until its next ready report, the
+  hand-over time of an open turn and a moving owner are kept in the store's memory; leases, restarting marks and
+  groups in vibestd's. `--env` values are never stored.
+
+`core/store-contract.ts` is the shared suite; the in-memory store (`core/memory-store.test.ts`) and vibest's SQLite
+store (`apps/vibest/test/store-contract.test.ts`) both pass it.
+
+vibest's store (`packages/vibest/src/sqlite-store.ts`) is one SQLite file (`~/.vibest/vibest.db`, schema version 2,
+application id `vibe`): tables `project`, `session`, `inbox`, `event`, with a trigger refusing event updates. A scope
+is a project's key: the store maps it to `session.project_id`, and the owner to `project.entry_session_id`; vibest's
+own reads of its project rows (the numeric project id the command line and VIBEST_PROJECT_ID show) are its
+`Projects` service. The file is accepted only when its version pragmas and objects match; vibest never migrates it by
+itself. JSON on a row is written once; state that changes has its own column.
 
 ## Engine mechanism and product policy
 
 Mechanism in core: the delivery state machine, reply routing, turn tracking and reconciliation, the guard's checks,
-the capability model of agent definitions, the settled-archive check, the system prompt file, the plugin host and the
-storage. Policy outside core: which harness and runtime a start gets (plugin-harness-choice, the runtime plugin),
+the capability model of agent definitions, the settled-archive check, the system prompt file, the plugin host, the
+storage port's contract and its in-memory store. Policy outside core: which harness and runtime a start gets (plugin-harness-choice, the runtime plugin),
 the coordinator and worker definitions and archive on completion (plugin-coordinator), where a session works and
 when its directory may go (vibest's workspace), where its terminal opens and what its project shows (vibest's
-placement policy), and its system prompt text (vibest's SessionPrompt).
+placement policy), its system prompt text (vibest's SessionPrompt), and how sessions are kept on disk and what a
+scope is (vibest's SQLite store: a project).
 
 ## Known limits
 
-- **The engine still names the project and the entry agent.** The `project` table, `session.project_id` and
-  `project.entry_session_id` are in the engine's schema, so core's queries group by project, reply routing falls back
-  to the entry session, `core/inbox.ts` delivers the entry session's rows on its own path, `core/restart.ts` restarts
-  main agents, and the user inbox is per project. Replacing them with an opaque grouping is a database shape change;
-  it is proposed to the owner and not implemented.
+- **Product words left in core.** The storage port, the inbox, placement, restart and the capability rule speak of
+  scopes and owners, but other core names still carry vibest's words: an owner session's agent is `main` (the read
+  model, `core/rounds.ts`, `core/sessions.ts` and `core/restart.ts` check it); `Layout` (`core/paths.ts`) is vibest's
+  home layout; the harness contract's `LaunchInput.worktree` and `scratch`, and the claude, pi and cursor adapters'
+  coordinator arguments, are harness-integration names this branch does not change; the runtime's `present` labels
+  carry a `project` key (herdr's); the environment variables are VIBEST_*; and comments in `sessions.ts`, `move.ts`,
+  `remove.ts` and `processes.ts` speak of worktrees and the project. None of these touches the database.
 - **The guard's wording and the inspect rule set.** `core/guard.ts` names its `inspect` rule set `coordinator` and its
   refusal texts speak of the coordinator, the project directory and the scratchpad (harness-visible texts that E2E
   checks read). `LaunchInput.scratch` in the harness contract keeps its name (it carries the workspace's `files`
