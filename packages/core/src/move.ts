@@ -70,7 +70,7 @@ export const sessionMove = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
-      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
+      /** The session's grouping key: the workspace's shared files directory for it goes in the environment. */
       readonly key: string
       readonly near?: Terminal | undefined
     },

@@ -78,6 +78,16 @@ export interface WorkspaceShape {
     path: string,
     shared: boolean,
   ) => Effect.Effect<void, Failure | CopyFailed, Scope.Scope>
+  /**
+   * The directory sessions of grouping `key` share their working files in (made when missing), and the variables
+   * that name it in a session's shell (the product decides both).
+   */
+  readonly files: (
+    key: string,
+  ) => Effect.Effect<
+    { readonly directory: string; readonly env: Readonly<Record<string, string>> },
+    PlatformError.PlatformError
+  >
   /** Git state of a session's workspace; undefined when the path is missing or not a directory. */
   readonly state: (path: string) => Effect.Effect<GitState | undefined, PlatformError.PlatformError>
   /** Git state per repository of a multi-repository workspace; undefined when `path` is not one. */

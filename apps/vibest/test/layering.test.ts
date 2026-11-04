@@ -45,14 +45,33 @@ it("the engine runs no git and imports no worktree code or the product", () => {
   assert.notInclude(fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8"), '"@vibest/vibest"')
 })
 
+it("the engine-only product (engine-only.test.ts) is composed without vibest's product, server or default plugins", () => {
+  const files = ["apps/vibest/test/engine-only.test.ts", "apps/vibest/test/fake-runtime.ts"]
+  const allowed = /^(node:|\.|effect(\/|$)|@effect\/|@vibest\/(core|plugin|protocol|schema)(\/|$))/
+  assert.deepStrictEqual(
+    files.flatMap((f) =>
+      specifiers(f)
+        .filter((s) => !allowed.test(s))
+        .map((s) => `${f}: ${s}`),
+    ),
+    [],
+  )
+})
+
 it("the product's notions stay out of the engine", () => {
   const core = sources("packages/core/src")
   // Where worktrees go and how they are named, the project's files and the system prompt text are the product's
   // (@vibest/vibest: workspace, placement, system-prompt).
   assert.deepStrictEqual(
-    importing(core, /layout\.worktrees|allocationWorktree|ALLOCATION_LEAF|"instructions\.md"|You are agent \$\{/),
+    importing(
+      core,
+      /layout\.(worktrees|scratch)\b|allocationWorktree|ALLOCATION_LEAF|"instructions\.md"|You are agent \$\{/,
+    ),
     [],
   )
+  // The shared files directory reaches a session through the workspace's `files`; only the guard still names it
+  // (docs/architecture.md, known limits).
+  assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH/), ["packages/core/src/guard.ts"])
   // Terminal placement, removal and the system prompt file know no entry agent: the product's policy decides.
   for (const file of ["placement.ts", "remove.ts", "system-prompt.ts", "workspace.ts"])
     assert.notMatch(

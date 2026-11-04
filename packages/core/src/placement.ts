@@ -78,19 +78,11 @@ export const sessionPlacement = (deps: {
   readonly runtimes: RuntimesShape
   readonly workspace: WorkspaceShape
   readonly policy: PlacementPolicyShape
-  readonly layout: {
-    readonly scratch: (key: string) => string
-  }
-  readonly fs: {
-    readonly makeDirectory: (
-      path: string,
-      options?: { readonly recursive?: boolean },
-    ) => Effect.Effect<void, PlatformError.PlatformError>
-  }
   readonly path: { readonly dirname: (path: string) => string }
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly systemPromptInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow, scratch: string) => Readonly<Record<string, string>>
+  /** vibest's variables in the session's terminal; `files`: the workspace's for its shared files directory. */
+  readonly vibestEnv: (session: SessionRow, files: Readonly<Record<string, string>>) => Readonly<Record<string, string>>
   /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
@@ -122,7 +114,7 @@ export const sessionPlacement = (deps: {
   /** The usage-limit move (move.ts), wired in after placement exists. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, runtimes, layout, fs, workspace, policy } = deps
+  const { db, runtimes, workspace, policy } = deps
 
   /** Terminal labels (§3 `present`, [the `label` given to `open`] when absent). A failure here does not fail the session: the terminal is already up. */
   const show = (h: Runtime, session: SessionRow, terminal: Terminal, root: string) =>
@@ -157,7 +149,7 @@ export const sessionPlacement = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
-      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
+      /** The session's grouping key: the workspace's shared files directory for it goes in the environment. */
       readonly key: string
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
@@ -183,7 +175,7 @@ export const sessionPlacement = (deps: {
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session, layout.scratch(input.key)) },
+        env: { ...input.env, ...deps.vibestEnv(session, (yield* workspace.files(input.key)).env) },
         label: `${session.id} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -219,13 +211,12 @@ export const sessionPlacement = (deps: {
     splitFrom?: string,
     env?: Readonly<Record<string, string>>,
   ) {
-    // The row's own project key: the scratch directory goes to the project the session belongs to.
+    // The row's own grouping key: its shared files and system prompt are its group's.
     const key = yield* db.projectKey(session.projectId)
     if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
     // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
-    yield* fs.makeDirectory(layout.scratch(key), { recursive: true })
     // The same limit-move a failed start always had: it runs inside the scope, so the worktree the move reuses is still there.
     const openOrMove = (
       open: Effect.Effect<

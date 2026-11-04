@@ -8,8 +8,6 @@ import { writeAtomic } from "./paths.ts"
 /** What a session's system prompt is made from, as the engine knows it; the product adds its own files. */
 export interface SessionPromptInput {
   readonly id: string
-  /** The session's scratch directory. */
-  readonly scratch: string
   /** argv that runs vibest (`VibestCommand`). */
   readonly vibest: ReadonlyArray<string>
   /** The session's grouping key (its row's project). */

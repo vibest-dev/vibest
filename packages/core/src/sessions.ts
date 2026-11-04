@@ -480,13 +480,13 @@ export class Sessions extends Context.Service<
         skills && skills.length > 0 ? { VIBEST_SKILLS: skills.join(",") } : {}
 
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
-      // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
-      // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
-      const vibestEnv = (session: SessionRow, scratch: string) => ({
+      // `files`: the workspace's variables for its shared files directory. VIBEST_RUNTIME names no terminal: the one
+      // it gets is opened after this.
+      const vibestEnv = (session: SessionRow, files: Readonly<Record<string, string>>) => ({
         ...skillsEnv(Option.isSome(agents) ? agents.value.of(session.agent).skills : undefined),
+        ...files,
         VIBEST_SESSION_ID: session.id,
         VIBEST_PROJECT_ID: String(session.projectId),
-        VIBEST_SCRATCH: scratch,
         VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
         VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
@@ -503,7 +503,6 @@ export class Sessions extends Context.Service<
             agent: { spawn: definition?.can.spawn ?? false, rules: definition?.rules },
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
-            scratch: layout.scratch(key),
             vibest,
             key,
           })
@@ -520,6 +519,7 @@ export class Sessions extends Context.Service<
           Effect.provideContext(platform),
         )
         const adapter = harnesses.get(session.harnessId)
+        const files = yield* workspace.files(key)
         const definition = Option.isSome(agents) ? agents.value.of(session.agent) : undefined
         const pluginDir = yield* sessionPlugin(
           adapter,
@@ -532,7 +532,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: layout.scratch(key),
+            scratch: files.directory,
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -540,7 +540,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session, layout.scratch(key)),
+            env: vibestEnv(session, files.env),
           }),
         ]
       })
@@ -775,8 +775,6 @@ export class Sessions extends Context.Service<
         runtimes,
         workspace,
         policy: yield* PlacementPolicy,
-        layout,
-        fs,
         path,
         harnesses,
         worktreeOf,

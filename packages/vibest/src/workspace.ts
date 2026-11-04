@@ -240,6 +240,11 @@ export const layer = Layer.effect(
       mainCheckout: (directory) => run(mainCheckout(directory)),
       reserve,
       prepare,
+      // The project's scratch directory: the one place under the projects directory its sessions' guard lets them use.
+      files: (key) =>
+        fs
+          .makeDirectory(layout.scratch(key), { recursive: true })
+          .pipe(Effect.as({ directory: layout.scratch(key), env: { VIBEST_SCRATCH: layout.scratch(key) } })),
       state: (at) => run(gitState(at)),
       repositoryStates: (at) => run(workspaceGit(at)),
       release,

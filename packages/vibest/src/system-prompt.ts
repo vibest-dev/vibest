@@ -130,7 +130,7 @@ export const layer = Layer.effect(
     return SessionPrompt.of({
       text: ({ key, ...input }) =>
         projectText(layout.project(key)).pipe(
-          Effect.map((project) => sessionSystemPrompt({ ...input, ...project })),
+          Effect.map((project) => sessionSystemPrompt({ ...input, scratch: layout.scratch(key), ...project })),
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(Path.Path, path),
         ),
