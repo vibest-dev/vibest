@@ -148,7 +148,7 @@ export type CallerShape =
       readonly sessionId: string
       readonly projectId: number
       /** What its agent definition lets it do (@vibest/plugin AgentDefinition `can`). */
-      readonly can: { readonly spawn: boolean; readonly message: "report-only" | "children" | "project" }
+      readonly can: { readonly spawn: boolean; readonly message: "report-only" | "children" | "group" | "project" }
     }
 
 export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}

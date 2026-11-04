@@ -56,6 +56,13 @@ export interface SessionActions {
   }) => Effect.Effect<void, ActionRefused>
 }
 
+/** Groups of sessions (a team) a plugin keeps; `can.message: "group"` lets a member message the others. In memory. */
+export interface SessionGroups {
+  readonly join: (group: string, sessionId: string) => Effect.Effect<void>
+  readonly leave: (group: string, sessionId: string) => Effect.Effect<void>
+  readonly members: (group: string) => Effect.Effect<ReadonlyArray<string>>
+}
+
 /** What `archive` did: nothing yet (`busy`: it has work again), nothing and why (`skipped`), or the archive itself. */
 export type Archived =
   | { readonly outcome: "busy" }
@@ -286,4 +293,6 @@ export interface Context {
   }
   /** Send and spawn as a session, bounded by what that session may do. */
   readonly session: SessionActions
+  /** Groups of sessions: who a `can.message: "group"` session may message. */
+  readonly group: SessionGroups
 }

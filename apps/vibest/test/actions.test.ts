@@ -3,6 +3,7 @@
 // timer, a swarm handoff to an agent that does not run yet, and a team reached by a group address.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
+import { Actions } from "@vibest/core/actions"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
@@ -127,20 +128,24 @@ const handoff = Plugin.define({
     }),
 })
 
-/** Teams: a group address. A result saying `to @<team>: <text>` is sent as its session to every member of the team. */
-const teams = new Map<string, ReadonlyArray<string>>()
+/**
+ * Teams: a group address. A result saying `to @<team>: <text>` is sent as its session to every member of the team; a
+ * member may message its team (`can.message: "group"`), nobody else. `joins` is how the test names the members.
+ */
+const joins: Array<readonly [string, string]> = []
 const team = Plugin.define({
   id: "team",
   effect: (context) =>
     Effect.gen(function* () {
       const scope = yield* Effect.scope
-      yield* context.agent.define({ name: "member", tools: "full", can: { spawn: false, message: "project" } })
+      yield* context.agent.define({ name: "member", tools: "full", can: { spawn: false, message: "group" } })
       yield* context.agent.hook("result", (event) =>
         Effect.gen(function* () {
           const m = /^to @(\w+): (.+)$/m.exec(event.output)
           if (!m) return
           event.recipients = []
-          const members = (teams.get(m[1]!) ?? []).filter((id) => id !== event.sessionId)
+          for (const [group, id] of joins.splice(0)) yield* context.group.join(group, id)
+          const members = (yield* context.group.members(m[1]!)).filter((id) => id !== event.sessionId)
           yield* Effect.forkIn(
             Effect.forEach(members, (to) =>
               context.session
@@ -294,7 +299,7 @@ describe("plugin actions", () => {
         ids.push(id)
       }
       const [a, b, c] = ids as [string, string, string]
-      teams.set("docs", [a, b, c])
+      for (const id of [a, b, c]) joins.push(["docs", id])
       yield* answer(b, "ready")
       yield* answer(c, "ready")
       yield* answer(a, "draft done\nto @docs: review the draft")
@@ -312,7 +317,7 @@ describe("plugin actions", () => {
       // A worker (report-only) addressing the team is refused for each member, and nothing is sent.
       const { id: worker } = yield* user.Spawn({ harness: "pi", prompt: "chat" })
       yield* opened(worker)
-      teams.set("docs", [a, b, c, worker])
+      joins.push(["docs", worker])
       yield* answer(worker, "to @docs: hello")
       yield* until(
         Effect.sync(() => refusals.length),
@@ -320,6 +325,12 @@ describe("plugin actions", () => {
       )
       for (const reason of refusals) assert.include(reason, "only reports to whoever started it")
       for (const member of [a, b, c]) assert.isFalse((yield* inboxOf(member)).some((m) => m.content === "hello"))
+      // A member's group is all it may message: the worker is in no group of the reviewer's own.
+      const { id: outsider } = yield* user.Spawn({ harness: "pi", agent: "member", prompt: "elsewhere" })
+      yield* opened(outsider)
+      const refused = yield* (yield* Actions).send({ as: outsider, to: a, message: "hi" }).pipe(Effect.flip)
+      assert.include(refused.reason, "is not yours to manage")
+      yield* (yield* Actions).send({ as: b, to: a, message: "thanks" })
     }),
   )
 })

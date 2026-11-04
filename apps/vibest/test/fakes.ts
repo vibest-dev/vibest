@@ -9,6 +9,7 @@ import { BUILTIN } from "@vibest/core/harnesses"
 const HARNESS_IDS = Object.keys(BUILTIN)
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
+import { Groups } from "@vibest/core/groups"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { normalizeModels } from "@vibest/core/models"
@@ -572,6 +573,7 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(BuiltinHarnesses.layer),
         Layer.provideMerge(Agents.layer),
         Layer.provideMerge(Actions.layer),
+        Layer.provideMerge(Groups.layer),
         Layer.provideMerge(
           Layer.effect(
             Processes,

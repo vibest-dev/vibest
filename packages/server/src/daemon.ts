@@ -3,6 +3,7 @@ import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { Groups } from "@vibest/core/groups"
 import { Harness } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
@@ -121,6 +122,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Agents.layer),
     // What plugins do as a session: the server installs its handlers here; Plugins reads it.
     Layer.provideMerge(Actions.layer),
+    Layer.provideMerge(Groups.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(TurnEnds.layer),

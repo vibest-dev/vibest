@@ -12,9 +12,10 @@ export interface AgentDefinition {
     readonly spawn: boolean
     /**
      * Whom it may send to, interrupt, peek and remove: `report-only` none (it only reports), `children` the sessions it
-     * started and theirs, `project` any session of its project.
+     * started and theirs, `group` the sessions of its project it shares a group with (`context.group`), `project` any
+     * session of its project.
      */
-    readonly message: "report-only" | "children" | "project"
+    readonly message: "report-only" | "children" | "group" | "project"
   }
   /**
    * More rules for a session of this agent, after vibest's own; for the entry agent, the whole of its rules (the project's

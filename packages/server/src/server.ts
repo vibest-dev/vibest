@@ -3,6 +3,7 @@ import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { Groups } from "@vibest/core/groups"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
@@ -374,6 +375,7 @@ export const handlers = VibestRpcs.toLayer(
     const sessions = yield* Sessions
     const inbox = yield* Inbox
     const db = yield* Db
+    const groups = yield* Groups
     const restarting = yield* Restarting
     const runtimes = yield* Runtimes
     const project = yield* Project
@@ -446,6 +448,7 @@ export const handlers = VibestRpcs.toLayer(
         if (c._tag === "Coordinator") return
         if (c.can.message === "project") return
         if (c.can.message === "children" && (yield* db.descends(id, c.sessionId))) return
+        if (c.can.message === "group" && (yield* groups.shared(id, c.sessionId))) return
         return yield* c.can.message === "report-only" ? refused(method, c.sessionId) : other
       })
 

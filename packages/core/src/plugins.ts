@@ -22,6 +22,7 @@ import {
 
 import { Actions } from "./actions.ts"
 import { Agents } from "./agents.ts"
+import { Groups } from "./groups.ts"
 import { Harnesses } from "./harness.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
@@ -203,6 +204,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const harnesses = yield* Effect.serviceOption(Harnesses)
     const agents = yield* Effect.serviceOption(Agents)
     const actions = yield* Effect.serviceOption(Actions)
+    const groups = yield* Effect.serviceOption(Groups)
     /** Set `candidate` up in a new scope: what runs, or why it failed. */
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
@@ -275,6 +277,13 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           archive: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.archive(input)),
           notice: (input) => (Option.isNone(actions) ? Effect.fail(noActions) : actions.value.notice(input)),
         },
+        group: Option.isNone(groups)
+          ? {
+              join: () => Effect.die(new Error("this vibestd keeps no groups")),
+              leave: () => Effect.die(new Error("this vibestd keeps no groups")),
+              members: () => Effect.succeed([]),
+            }
+          : groups.value,
       }
       const exit = yield* runBounded(plugin.effect(ctx).pipe(Scope.provide(scope)), scope, timeout)
       const error = Option.isNone(exit)
