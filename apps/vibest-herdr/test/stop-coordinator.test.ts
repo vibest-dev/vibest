@@ -99,7 +99,7 @@ const launched = Effect.gen(function* () {
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
     {
-      id: "aaaaaaaa",
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       agent: "general",
       name: "n",
       harnessId: "pi",
@@ -119,7 +119,12 @@ const launched = Effect.gen(function* () {
     },
     key,
   )
-  yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "waiting for the main agent", details: {} })
+  yield* db.insertInbox({
+    sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    kind: "notice",
+    message: "waiting for the main agent",
+    details: {},
+  })
   const stop = c["Project.StopCoordinator"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.CoordinatorSession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })

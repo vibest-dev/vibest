@@ -148,13 +148,13 @@ describe("pi-vibest", () => {
           createdAt: 1,
           lastActive: 1,
         }
-        yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
+        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
         const coord = yield* db.coordinatorLaunch("r", "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
         yield* (yield* Inbox).enqueue({
-          sessionId: "aaaaaaaa",
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           kind: "report",
           message: "survives the gap",
           details: {},
@@ -220,7 +220,7 @@ describe("pi-vibest", () => {
           createdAt: 1,
           lastActive: 1,
         }
-        yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
+        yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
         const coord = yield* db.coordinatorLaunch("r", "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
@@ -244,7 +244,7 @@ describe("pi-vibest", () => {
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
         const report = (message: string) =>
-          inbox.enqueue({ sessionId: "aaaaaaaa", kind: "report", message, details: {} })
+          inbox.enqueue({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "report", message, details: {} })
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -284,7 +284,11 @@ describe("pi-vibest", () => {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
       for (const env of [
-        { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "cccccccc", VIBEST_COMMAND: '["vibest"]' },
+        {
+          VIBEST_AGENT: "coordinator",
+          VIBEST_SESSION_ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          VIBEST_COMMAND: '["vibest"]',
+        },
         { VIBEST_AGENT: "coordinator" },
       ]) {
         for (const _load of ["startup", "reload"]) {
@@ -320,7 +324,11 @@ describe("pi-vibest", () => {
       const render = UserMessageComponent.prototype.render
       for (const env of [
         {},
-        { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234", VIBEST_COMMAND: '["vibest"]' },
+        {
+          VIBEST_AGENT: "general",
+          VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+          VIBEST_COMMAND: '["vibest"]',
+        },
         { VIBEST_AGENT: "general" },
       ]) {
         const s = yield* session(env)
@@ -372,14 +380,14 @@ describe("pi-vibest", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb", ...row }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, "r")
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, "r")
       const coord = yield* db.coordinatorLaunch("r", "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
       yield* inbox.enqueue({
-        sessionId: "aaaaaaaa",
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         kind: "result",
         message: "<agent-result>one</agent-result>",
         details: {},
@@ -400,16 +408,19 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts run pi 'Fix it.\nKeep $HOME as text.'"), [
         undefined,
       ])
-      assert.deepStrictEqual(yield* bash("vibest send abcd1234 'more'"), [undefined])
+      assert.deepStrictEqual(yield* bash("vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd 'more'"), [undefined])
       assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts daemon"), [undefined])
       assert.deepStrictEqual(yield* bash("jq . a.json > /tmp/b"), [undefined])
-      assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234"), [
-        {
-          block: true,
-          reason:
-            "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused.",
-        },
-      ])
+      assert.deepStrictEqual(
+        yield* bash("VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234-abcd-4abc-8abc-abcd1234abcd"),
+        [
+          {
+            block: true,
+            reason:
+              "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused.",
+          },
+        ],
+      )
       assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
         { block: true, reason: "The coordinator does not edit files; hand the change to a session." },
       ])
@@ -427,7 +438,7 @@ describe("pi-vibest", () => {
         (n) => n === 1,
       )
       yield* inbox.enqueue({
-        sessionId: "bbbbbbbb",
+        sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         kind: "report",
         message: "<agent-message>two</agent-message>",
         details: {},
@@ -457,7 +468,7 @@ describe("pi-vibest", () => {
       const layout = yield* Layout
       yield* (yield* Db).insertSession(
         {
-          id: "abcd1234",
+          id: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
           agent: "general",
           name: "n",
           harnessId: "pi",
@@ -480,7 +491,7 @@ describe("pi-vibest", () => {
       const scratch = `${layout.projects}/k/scratch/pane:test/w1:p7`
       const s = yield* session({
         VIBEST_AGENT: "general",
-        VIBEST_SESSION_ID: "abcd1234",
+        VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_SCRATCH: `${layout.projects}/k/scratch`,
       })
@@ -497,7 +508,9 @@ describe("pi-vibest", () => {
       ])
       assert.deepStrictEqual(yield* call("bash", { command: "git commit -m 'herdr pane list'" }), [undefined])
       assert.deepStrictEqual(yield* call("bash", { command: "vibest report 'half way'" }), [undefined])
-      assert.deepStrictEqual(yield* call("bash", { command: "vibest rm abcd1234" }), [undefined])
+      assert.deepStrictEqual(yield* call("bash", { command: "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd" }), [
+        undefined,
+      ])
       assert.deepStrictEqual(yield* call("write", { path: `${scratch}/abcd1234-notes.md` }), [undefined])
       assert.deepStrictEqual(yield* call("bash", { command: `cat ${scratch}/a.md` }), [undefined])
       assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memory/a.md` }), offLimits)
@@ -511,7 +524,7 @@ describe("pi-vibest", () => {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
       yield* s.emit("agent_settled", { aborted: false }, { isIdle: () => true })
-      assert.deepInclude(yield* (yield* TurnEnds).latest("abcd1234"), {
+      assert.deepInclude(yield* (yield* TurnEnds).latest("abcd1234-abcd-4abc-8abc-abcd1234abcd"), {
         harness: "pi",
         text: "status: completed",
         error: undefined,
@@ -543,7 +556,7 @@ describe("pi-vibest", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "abcd1234", ...row }, "r")
+      yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, "r")
       const coord = yield* db.coordinatorLaunch("r", "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
@@ -552,10 +565,14 @@ describe("pi-vibest", () => {
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234' ORDER BY id`.pipe(
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
           Effect.orDie,
         )
-      const s = yield* session({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234", VIBEST_COMMAND: '["vibest"]' })
+      const s = yield* session({
+        VIBEST_AGENT: "general",
+        VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+        VIBEST_COMMAND: '["vibest"]',
+      })
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
       assert.deepStrictEqual(yield* messages(), [{ input: "hello from the pane", inbox: null }])
       yield* s.emit("input", { type: "input", text: "vibest handed this over", source: "extension" })

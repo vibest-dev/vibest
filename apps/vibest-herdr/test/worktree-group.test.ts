@@ -213,7 +213,7 @@ describe("repository-grouped worktrees", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      const id = "d4e5f6a7"
+      const id = "d4e5f6a7-d4e5-4d4e-8d4e-d4e5f6a7d4e5"
       const key = yield* repositoryKey(repo)
       const repository = yield* repositoryDirectoryName(repo)
       const neighbour = layout.allocationWorktree(repository, "cd35")
@@ -237,8 +237,8 @@ describe("repository-grouped worktrees", () => {
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const key = yield* repositoryKey(repo)
-      const outside = "e5f6a7b8"
-      const none = "a7b8c9d0"
+      const outside = "e5f6a7b8-e5f6-4e5f-8e5f-e5f6a7b8e5f6"
+      const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
       yield* marker(elsewhere)
       yield* db.insertSession(storedRow(outside, {}), key, undefined, elsewhere)

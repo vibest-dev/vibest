@@ -134,7 +134,7 @@ describe("vibest CLI", () => {
       const empty = yield* run(["send", id, "-"], "")
       assert.deepStrictEqual([empty.code, empty.stdout], [1, ""])
       assert.match(empty.stderr, /^EmptyInput: /)
-      const missing = yield* run(["result", "nope0000"])
+      const missing = yield* run(["result", "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e"])
       assert.deepStrictEqual([missing.code, missing.stdout], [1, ""])
       assert.match(missing.stderr, /^NoSuchSession: /)
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
@@ -206,7 +206,10 @@ describe("vibest CLI", () => {
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
       }
-      assert.match((yield* asSession("nope0000", ["report", "x"])).stderr, /^NoSuchSession: /)
+      assert.match(
+        (yield* asSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", ["report", "x"])).stderr,
+        /^NoSuchSession: /,
+      )
       assert.match((yield* vibest(repo, cli, ["report", "x"])).stderr, /^Forbidden: /)
     }),
   )
@@ -406,7 +409,7 @@ describe("vibest CLI without vibestd", () => {
         const vibestHome = path.join(home, "vibest")
         const commands = [
           ["ls"],
-          ["send", "abcd1234", "--", "x"],
+          ["send", "abcd1234-abcd-4abc-8abc-abcd1234abcd", "--", "x"],
           ["run", "pi", "--", "x"],
           ["report", "--", "x"],
           ["project", "info"],
@@ -420,8 +423,8 @@ describe("vibest CLI without vibestd", () => {
           ["update"],
         ]
         const runs = [
-          { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" },
-          { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234" },
+          { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+          { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
         ]
           .flatMap((env) => commands.map((args) => ({ env, args })))
           // The main agent may run vibest update from its own shell (its integration is the one an update replaces).
@@ -455,7 +458,12 @@ describe("vibest CLI without vibestd", () => {
         // status reports vibestd as not running, and does not start it either.
         const status = yield* vibest(
           home,
-          { HOME: home, VIBEST_HOME: vibestHome, VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234" },
+          {
+            HOME: home,
+            VIBEST_HOME: vibestHome,
+            VIBEST_AGENT: "coordinator",
+            VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+          },
           ["status"],
         )
         assert.strictEqual(status.code, 0, status.stderr)
@@ -579,8 +587,8 @@ describe("vibest CLI without vibestd", () => {
         })
         const before = yield* files
         const env = { HOME: home, VIBEST_HOME: vibestHome, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }
-        const coordinator = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00" }
-        const general = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" }
+        const coordinator = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff" }
+        const general = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
         // One at a time, to add little load to the suite: each kind of command (starts vibestd, updates, writes config, unknown)
         // as the user, help as a coordinator, help and version as a session. guard.test covers every path and alias.
         const runs = [

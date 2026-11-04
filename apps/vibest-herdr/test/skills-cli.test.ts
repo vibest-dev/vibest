@@ -40,7 +40,7 @@ const launch = (pluginDir: string): LaunchInput => ({
   resume: false,
   pluginDir,
   vibest: ["vibest"],
-  env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" },
+  env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
 })
 
 const coordinator = (pluginDir: string): CoordinatorInput => ({
@@ -50,7 +50,7 @@ const coordinator = (pluginDir: string): CoordinatorInput => ({
   model: null,
   sessionId: null,
   pluginDir,
-  env: { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00" },
+  env: { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff" },
 })
 
 const frontmatterField = (file: string, key: string) =>

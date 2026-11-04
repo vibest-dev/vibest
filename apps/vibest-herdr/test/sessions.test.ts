@@ -266,7 +266,7 @@ describe.concurrent("Sessions", () => {
   test(
     "TurnEnd for an unknown session is ignored",
     Effect.gen(function* () {
-      yield* (yield* Sessions).resultReady("ffffffff")
+      yield* (yield* Sessions).resultReady("ffffffff-ffff-4fff-8fff-ffffffffffff")
     }),
   )
 
@@ -3233,9 +3233,14 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      const unknown = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff" }))
+      const unknown = yield* Effect.flip(
+        sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff-ffff-4fff-8fff-ffffffffffff" }),
+      )
       assert.strictEqual(unknown._tag, "NoSuchSession")
-      assert.include(unknown.message, "--peer ffffffff: no session ffffffff")
+      assert.include(
+        unknown.message,
+        "--peer ffffffff-ffff-4fff-8fff-ffffffffffff: no session ffffffff-ffff-4fff-8fff-ffffffffffff",
+      )
 
       const { id, row } = yield* spawnWorking(repo)
       const created = () => herdr.callsTo("open").pipe(Effect.map((calls) => calls.length))
@@ -3260,7 +3265,7 @@ describe.concurrent("Sessions", () => {
       const archived = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
       assert.include(archived.message, "it was archived")
       assert.strictEqual(yield* created(), before)
-      assert.isUndefined(yield* db.getSession("ffffffff"))
+      assert.isUndefined(yield* db.getSession("ffffffff-ffff-4fff-8fff-ffffffffffff"))
     }),
   )
 

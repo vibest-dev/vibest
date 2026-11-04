@@ -36,7 +36,7 @@ const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
 })
 
 const session = (patch: Partial<LiveSession> = {}): LiveSession => ({
-  id: "abcd1234",
+  id: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
   agent: "general",
   harness: "pi",
   status: "working",
@@ -47,7 +47,7 @@ const session = (patch: Partial<LiveSession> = {}): LiveSession => ({
 const fake = (over: Partial<HerdrDaemon> = {}): HerdrDaemon => ({
   republish: () => Effect.succeed(0),
   openMain: () => Effect.succeed({ action: "focused", place: "w1:p1" }),
-  spawn: () => Effect.succeed("abcd1234"),
+  spawn: () => Effect.succeed("abcd1234-abcd-4abc-8abc-abcd1234abcd"),
   interrupt: () => Effect.void,
   list: () => Effect.succeed([]),
   usage: () => Effect.succeed(undefined),
@@ -82,14 +82,14 @@ describe("herdr plugin context", () => {
         focused_pane_id: "w1:p1",
         focused_pane_cwd: "/repo",
         focused_pane_status: "unknown",
-        focused_pane_agent: "s-abcd1234",
+        focused_pane_agent: "s-abcd1234abcd4abc8abcabcd1234ab",
         worktree: { root: "/repo", checkout_path: "/repo", linked: false },
         selected_text: null,
       })
       const parsed = yield* parsePluginContext(raw)
       assert.strictEqual(projectDirectory(parsed), "/repo")
       assert.strictEqual(parsed.focusedPaneId, "w1:p1")
-      assert.strictEqual(parsed.focusedPaneAgent, "s-abcd1234")
+      assert.strictEqual(parsed.focusedPaneAgent, "s-abcd1234abcd4abc8abcabcd1234ab")
       assert.notStrictEqual(projectDirectory(parsed), process.cwd())
     }),
   )
@@ -202,7 +202,7 @@ describe("herdr plugin commands", () => {
           spawn: (directory, prompt) =>
             Effect.sync(() => {
               got = { directory, prompt }
-              return "abcd1234"
+              return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
             }),
         }),
         ["fix the login bug"],
@@ -223,7 +223,7 @@ describe("herdr plugin commands", () => {
             spawn: () =>
               Effect.sync(() => {
                 called = true
-                return "abcd1234"
+                return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
               }),
           }),
           ["  "],
@@ -240,12 +240,12 @@ describe("herdr plugin commands", () => {
       const error = yield* Effect.flip(
         shown(
           "stop",
-          ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-main0001" }),
+          ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
           fake({
             list: () =>
               Effect.succeed([
-                session({ id: "main0001", agent: "main", paneId: "w1:p1" }),
-                session({ id: "abcd1234", paneId: "w1:p9" }),
+                session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main", paneId: "w1:p1" }),
+                session({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", paneId: "w1:p9" }),
               ]),
             interrupt: () =>
               Effect.sync(() => {
@@ -270,7 +270,7 @@ describe("herdr plugin commands", () => {
           list: (directory) =>
             Effect.sync(() => {
               listed = directory
-              return [session({ id: "aaaa1111", paneId: "w1:p1" }), session()]
+              return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
             }),
           interrupt: (id) =>
             Effect.sync(() => {
@@ -279,7 +279,7 @@ describe("herdr plugin commands", () => {
         }),
       )
       assert.strictEqual(text, "stopped abcd1234")
-      assert.strictEqual(removed, "abcd1234")
+      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
       assert.isUndefined(listed)
     }),
   )
@@ -289,7 +289,7 @@ describe("herdr plugin commands", () => {
       let removed = ""
       const text = yield* shown(
         "stop",
-        ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234" }),
+        ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
         fake({
           list: () => Effect.succeed([session({ paneId: "w1:p2" })]),
           interrupt: (id) =>
@@ -299,7 +299,7 @@ describe("herdr plugin commands", () => {
         }),
       )
       assert.strictEqual(text, "stopped abcd1234")
-      assert.strictEqual(removed, "abcd1234")
+      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
     }),
   )
 
@@ -388,7 +388,7 @@ describe("herdr plugin commands", () => {
           spawn: (_dir, text) =>
             Effect.sync(() => {
               prompt = text
-              return "abcd1234"
+              return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
             }),
         }),
         ["2", "fix the login bug"],
@@ -408,8 +408,8 @@ describe("herdr plugin commands", () => {
 
   it("formatRuns prints the live sessions the daemon listed, the main agent included", () => {
     assert.strictEqual(
-      formatRuns([session(), session({ id: "main0001", agent: "main" })]),
-      "abcd1234  general  pi  working  w1:p2\nmain0001  main  pi  working  w1:p2",
+      formatRuns([session(), session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main" })]),
+      "abcd1234  general  pi  working  w1:p2\na1a10001  main  pi  working  w1:p2",
     )
     assert.strictEqual(formatRuns([]), "no live sessions")
     assert.strictEqual(formatUsage(undefined), "unknown")
@@ -488,7 +488,10 @@ describe("herdr plugin package", () => {
         assert.strictEqual(empty.code, 1, empty.stderr)
         assert.match(empty.stderr, /^EmptyInput: /)
         assert.match(empty.stdout, /^Prompt:/)
-        const agent = yield* runVibest(cwd, { ...env, VIBEST_SESSION_ID: "abcd1234" }, ["herdr", "stop"])
+        const agent = yield* runVibest(cwd, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
+          "herdr",
+          "stop",
+        ])
         assert.strictEqual(agent.code, 1, agent.stderr)
         assert.match(agent.stderr, /^Forbidden: /)
         const help = yield* runVibest(cwd, env, ["herdr", "--help"])

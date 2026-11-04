@@ -409,7 +409,7 @@ describe("multi-repository project", () => {
       assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
-      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234" }, [
+      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
         "project",
         "create",
         again,

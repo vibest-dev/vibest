@@ -134,12 +134,14 @@ describe("restart in place", () => {
 
   it("a main agent's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
-    const notice = continueNotice(version, [{ id: "ab12cd34", projectId: 1, ok: true, message: "" }])
+    const notice = continueNotice(version, [
+      { id: "ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12", projectId: 1, ok: true, message: "" },
+    ])
     const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
     assert.include(shown, "do not run it again, continue the interrupted work.")
     assert.include(notice, `vibest is now ${version}.`)
-    assert.include(notice, "Restarted: ab12cd34.")
+    assert.include(notice, "Restarted: ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12.")
   })
 
   /** The project's main agent at `test/coord`, working, on harness `harness`, its harness pid 100. */

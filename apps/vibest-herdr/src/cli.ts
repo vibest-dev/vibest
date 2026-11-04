@@ -109,7 +109,9 @@ const text = (name: string) =>
     ),
   )
 
-const id = Argument.String("id").pipe(Argument.withDescription("session id"))
+const id = Argument.String("id").pipe(
+  Argument.withDescription("session id, or a unique prefix of at least 8 of its characters (as vibest shows ids)"),
+)
 const sessionFlag = Flag.String("session").pipe(
   Flag.withDescription(
     "The herdr session to use, overriding the ambient herdr session when run inside herdr (default vibest); bare `vibest` refuses it inside herdr",
@@ -201,7 +203,7 @@ const run = Command.make(
     ),
     peer: Flag.String("peer").pipe(
       Flag.withDescription(
-        "A session id: run in its directory, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
+        "A session id (or a unique prefix of at least 8 characters): run in its directory, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
       ),
       Flag.optional,
     ),
@@ -442,8 +444,8 @@ const startMain =
 const send = Command.make("send", { id, message: text("message") }, (o) =>
   Effect.gen(function* () {
     const message = yield* input(o.message, "message")
-    yield* vibest((client) => client.Send({ id: o.id, message }))
-    yield* json({ id: o.id, queued: true })
+    const sent = yield* vibest((client) => client.Send({ id: o.id, message }))
+    yield* json({ id: sent.id, queued: true })
   }),
 ).pipe(
   Command.withDescription(
@@ -499,7 +501,7 @@ const result = Command.make("result", { id }, (o) =>
 ).pipe(Command.withDescription("A session's latest result (JSON; null before its first)"))
 
 const interrupt = Command.make("interrupt", { id }, (o) =>
-  vibest((client) => client.Interrupt({ id: o.id })).pipe(Effect.flatMap((r) => json({ id: o.id, ...r }))),
+  vibest((client) => client.Interrupt({ id: o.id })).pipe(Effect.flatMap(json)),
 ).pipe(
   Command.withDescription(
     "Interrupt a session's running turn; the session stays for follow-ups (no result arrives for that turn)",

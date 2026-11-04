@@ -17,6 +17,7 @@ import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
+  AmbiguousSession,
   HARNESS_IDS,
   HarnessUnavailable,
   InboxRow,
@@ -312,6 +313,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoRuntime,
           AgentRefused,
           NoSuchSession,
+          AmbiguousSession,
           RuntimeUnreachable,
           RuntimeIncompatible,
         ]),
@@ -356,8 +358,10 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
+        /** `id`: a session id, or a unique prefix of at least 8 characters; the answer names the full id. */
         payload: { id: Schema.String, message: Schema.String },
-        error: Schema.Union([Forbidden, NoSuchSession]),
+        success: Schema.Struct({ id: Schema.String }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
       }),
     ),
   ),
@@ -365,8 +369,8 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Interrupt", {
         payload: { id: Schema.String },
-        success: Schema.Struct({ message: Schema.String }),
-        error: Schema.Union([Forbidden, NoSuchSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        success: Schema.Struct({ id: Schema.String, message: Schema.String }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
       }),
     ),
   ),
@@ -376,7 +380,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
-        error: Schema.Union([Forbidden, NoSuchSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
       }),
     ),
   ),
@@ -392,7 +396,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Get", {
       payload: { id: Schema.String },
       success: SessionStatusInfo,
-      error: Schema.Union([Forbidden, NoSuchSession]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
     }),
   ),
   /**
@@ -403,7 +407,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Peek", {
       payload: { id: Schema.String, lines: Schema.optional(Schema.Number) },
       success: Schema.Struct({ text: Schema.String }),
-      error: Schema.Union([Forbidden, NoSuchSession, NoRuntime, RuntimeUnreachable]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable]),
     }),
   ),
   /** A non-coordinator session: a message to that session's own coordinator. */

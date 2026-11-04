@@ -431,10 +431,11 @@ export const handlers = VibestRpcs.toLayer(
         return c
       })
 
-    /** A request that may manage session `id`: its project's coordinator, or the command line. */
-    const managed = (method: MethodOf<"owner">, id: string) =>
+    /** A request that may manage the session `input` names (`resolveSession`): its project's coordinator, or the command line. Its full id. */
+    const managed = (method: MethodOf<"owner">, input: string) =>
       Effect.gen(function* () {
         const c = yield* agent(method)
+        const id = yield* db.resolveSession(input)
         const session = yield* db.getSession(id)
         if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
         if (c._tag === "Coordinator" && session.projectId !== c.projectId)
@@ -442,6 +443,7 @@ export const handlers = VibestRpcs.toLayer(
             method,
             message: `${id} belongs to another coordinator; only it or the user may manage it`,
           })
+        return id
       })
 
     /** Root and key of a directory. A platform failure is a defect; not being a project is `NotInRepository`. */
@@ -633,7 +635,7 @@ export const handlers = VibestRpcs.toLayer(
             model: input.model,
             env: input.env,
             agent: input.agent,
-            peer: input.peer,
+            peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
             parentSessionId: c._tag === "Coordinator" ? c.sessionId : undefined,
           })
@@ -711,15 +713,19 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      Send: ({ id, message }) => managed("Send", id).pipe(Effect.andThen(sessions.send(id, message))),
-      Interrupt: ({ id }) => managed("Interrupt", id).pipe(Effect.andThen(sessions.interrupt(id))),
-      Remove: ({ id, keepWorktree }) =>
-        managed("Remove", id).pipe(
-          Effect.andThen(sessions.remove(id, { keepWorktree })),
+      Send: ({ id: input, message }) =>
+        managed("Send", input).pipe(Effect.flatMap((id) => sessions.send(id, message).pipe(Effect.as({ id })))),
+      Interrupt: ({ id: input }) =>
+        managed("Interrupt", input).pipe(
+          Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),
+        ),
+      Remove: ({ id: input, keepWorktree }) =>
+        managed("Remove", input).pipe(
+          Effect.flatMap((id) => sessions.remove(id, { keepWorktree })),
           // Unreachable is the protocol's own error; any other runtime refusal is a server bug.
           Effect.catchTag("RuntimeError", (e) =>
             e.code === "unreachable"
-              ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+              ? Effect.fail(new RuntimeUnreachable({ session: input, message: e.message }))
               : Effect.die(e),
           ),
           Effect.map((out) => out ?? null),
@@ -763,17 +769,18 @@ export const handlers = VibestRpcs.toLayer(
           ]
         }),
 
-      Get: ({ id }) =>
+      Get: ({ id: input }) =>
         Effect.gen(function* () {
           yield* agent("Get")
+          const id = yield* db.resolveSession(input)
           const row = yield* sessions.get(id)
           const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
           return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
         }),
 
-      Peek: ({ id, lines }) =>
-        managed("Peek", id).pipe(
-          Effect.andThen(sessions.peek(id, lines ?? 30)),
+      Peek: ({ id: input, lines }) =>
+        managed("Peek", input).pipe(
+          Effect.flatMap((id) => sessions.peek(id, lines ?? 30)),
           Effect.map((text) => ({ text })),
         ),
 

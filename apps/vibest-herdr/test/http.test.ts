@@ -24,7 +24,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const row = (over: Partial<InboxRow>): InboxRow => ({
   id: 1,
-  sessionId: "349f65b2",
+  sessionId: "349f65b2-349f-4349-8349-349f65b2349f",
   kind: "result",
   message: "full text",
   details: {},
@@ -42,7 +42,7 @@ describe("the line a delivery shows", () => {
     )
     const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
     assert.strictEqual(
-      line([row({ sessionId: "95603b88", details: { status: "failed" } })], reviewer),
+      line([row({ sessionId: "95603b88-9560-4956-8956-95603b889560", details: { status: "failed" } })], reviewer),
       'Reviewer Agent "Review the guard fix" failed (95603b88)',
     )
     assert.strictEqual(
@@ -138,7 +138,10 @@ describe("vibestd's HTTP API", () => {
       })
       assert.strictEqual((newer.body as { error: string }).error, `vibestd is older (${VERSION}); run vibest update`)
       assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
+      assert.strictEqual(
+        (yield* call("/inbox/poll", { sessionId: "05c00000-05c0-405c-805c-05c0000005c0" })).status,
+        404,
+      )
       // Missing project id: refused.
       assert.strictEqual((yield* raw(own)).status, 403)
       // Another harness than the session's, or none: refused before anything is recorded.

@@ -62,8 +62,8 @@ describe("Shell denials", () => {
       "ls # herdr pane list",
       "echo 'claude -p x' && echo \"gh auth token\"",
       // vibest decides who may run its commands (cli.ts userOnly, server.ts ACCESS), not the guard.
-      "vibest rm abcd1234",
-      "vibest send abcd1234 x",
+      "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
       "vibest daemon restart",
       "vibest --harness pi",
@@ -73,8 +73,8 @@ describe("Shell denials", () => {
       "vibest integration guard",
       "vibest inbox pull gen sess",
       "vibest project write memory a.md -- x",
-      "/usr/bin/bun /src/main.ts interrupt abcd1234",
-      "/usr/local/bin/vibest archive abcd1234",
+      "/usr/bin/bun /src/main.ts interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "/usr/local/bin/vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send x -- integration stop",
       // Reading the identity is not changing it.
       "echo $VIBEST_SESSION_ID",
@@ -106,19 +106,19 @@ describe("Shell denials", () => {
 
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
     for (const command of [
-      "env -u VIBEST_AGENT vibest rm abcd1234",
+      "env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "env -uVIBEST_SESSION_ID vibest ls",
       "env --unset=VIBEST_AGENT vibest ls",
-      "env -i PATH=/bin vibest interrupt abcd1234",
+      "env -i PATH=/bin vibest interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "env - vibest ls",
-      "VIBEST_AGENT= vibest rm abcd1234",
-      "VIBEST_SESSION_ID=x /usr/bin/bun /src/main.ts send abcd1234 x",
+      "VIBEST_AGENT= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "VIBEST_SESSION_ID=x /usr/bin/bun /src/main.ts send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "env VIBEST_SESSION_ID= /usr/local/bin/vibest ls",
-      "unset VIBEST_SESSION_ID; vibest rm abcd1234",
+      "unset VIBEST_SESSION_ID; vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "export VIBEST_AGENT=coordinator && vibest ls",
       "VIBEST_SESSION_ID=; vibest ls",
-      "sh -c 'env -u VIBEST_AGENT vibest rm abcd1234'",
-      "echo $(VIBEST_AGENT= vibest rm abcd1234)",
+      "sh -c 'env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd'",
+      "echo $(VIBEST_AGENT= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd)",
       "nohup env -i vibest daemon restart",
       "echo a | VIBEST_AGENT= xargs vibest rm",
     ])
@@ -235,7 +235,7 @@ layer(Platform.services)("role rules", (it) => {
         const home = yield* tempDirectory("vibest-guard-")
         const vibestHome = path.join(home, ".vibest")
         const projects = path.join(vibestHome, "projects")
-        const worktree = path.join(vibestHome, "worktrees", "abcd1234")
+        const worktree = path.join(vibestHome, "worktrees", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         yield* fs.makeDirectory(worktree, { recursive: true })
         // A key named like the old shapes (a scratch or docs segment) changes nothing: only VIBEST_SCRATCH counts.
         const project = path.join(projects, "github.com", "o", "docs")
@@ -319,7 +319,7 @@ layer(Platform.services)("role rules", (it) => {
           for (const cwd of [project, path.join(project, "docs"), path.join(home, "p")])
             for (const command of ["cat instructions.md", "cat a.md", "ls"])
               assert.isString(yield* asSession(tool, command, cwd), `${tool} ${cwd}: ${command}`)
-          for (const cwd of [scratch, path.join(vibestHome, "worktrees", "abcd1234"), home])
+          for (const cwd of [scratch, path.join(vibestHome, "worktrees", "abcd1234-abcd-4abc-8abc-abcd1234abcd"), home])
             assert.isUndefined(yield* asSession(tool, "cat a.md && ls", cwd), `${tool} ${cwd}`)
         }
       }),
@@ -389,7 +389,7 @@ layer(Platform.services)("role rules", (it) => {
         for (const [tool, input] of [
           ["Bash", { command: `cat ${scratch}/x/../a.md` }],
           ["Bash", { command: "git commit -m 'fix: a/b' && bun test src/a.test.ts" }],
-          ["Bash", { command: "cd ~/.vibest/worktrees/abcd1234 && ls" }],
+          ["Bash", { command: "cd ~/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd && ls" }],
           ["Bash", { command: `rg TODO ${scratch}` }],
           ["Bash", { command: "rg TODO src ~/notes.md" }],
           ["Bash", { command: `ls ${home}` }],
@@ -446,16 +446,16 @@ layer(Platform.services)("role rules", (it) => {
         for (const rules of [coordinator, session]) {
           for (const tool of ["Bash", "Shell"]) {
             for (const command of [
-              "vibest rm abcd1234",
+              "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "vibest daemon restart",
-              "/usr/bin/bun /src/main.ts send abcd1234 x",
+              "/usr/bin/bun /src/main.ts send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
               "jq . a.json > /tmp/b",
               "git log $REV",
             ])
               assert.isUndefined(yield* as(rules, tool, command), `${tool}: ${command}`)
             for (const command of [
-              "env -u VIBEST_AGENT vibest rm abcd1234",
-              "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234",
+              "env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+              "VIBEST_SESSION_ID= /usr/bin/bun /src/main.ts rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
               "vibest integration stop",
               "herdr pane list",
             ])
@@ -550,7 +550,7 @@ describe("wizard entry", () => {
           Effect.provide(
             ConfigProvider.layer(
               ConfigProvider.fromUnknown({
-                VIBEST_SESSION_ID: "abcd1234",
+                VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
                 VIBEST_AGENT: "general",
                 HOME: "/nonexistent",
               }),

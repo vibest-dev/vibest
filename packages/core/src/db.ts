@@ -1,6 +1,15 @@
 import { newId } from "@vibest/schema/id"
 import { MessageStatus } from "@vibest/schema/model"
-import { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
+import {
+  AgentStatus,
+  AmbiguousSession,
+  InboxKind,
+  InboxRow,
+  InboxStatus,
+  NoSuchSession,
+  RuntimeAddress,
+  TurnState,
+} from "@vibest/schema/session"
 // The only place with SQL (docs/design/schema.md, version 2: project, session, inbox, event). One schema, no
 // migrations: an empty database gets it in one transaction; any other file is accepted only when its version pragmas
 // and required objects already match, and a version 1 file is refused, naming the one-time migration script given with the release.
@@ -1161,6 +1170,26 @@ const make = Effect.gen(function* () {
           }),
         )
         .pipe(Effect.orDie),
+
+    /**
+     * The session `input` names: its full id, or a prefix of at least 8 characters that exactly one session's id
+     * starts with (as people see ids: their first 8).
+     */
+    resolveSession: (input: string) =>
+      Effect.gen(function* () {
+        if (!/^[0-9a-f-]{8,36}$/.test(input))
+          return yield* new NoSuchSession({
+            id: input,
+            message: /^[0-9a-f-]{1,7}$/.test(input)
+              ? `${input}: a session id or a prefix of at least 8 of its characters`
+              : `no session ${input}`,
+          })
+        const rows = yield* sql<{ id: string }>`SELECT id FROM session WHERE id >= ${input} AND id < ${`${input}~`}
+          ORDER BY id LIMIT 11`.pipe(Effect.orDie)
+        if (rows.length === 0) return yield* new NoSuchSession({ id: input, message: `no session ${input}` })
+        if (rows.length > 1) return yield* new AmbiguousSession({ prefix: input, matches: rows.map((r) => r.id) })
+        return rows[0]!.id
+      }),
 
     /** A new session id: no other session's id starts with its first 8 characters. */
     newSessionId: unusedId.pipe(Effect.orDie),

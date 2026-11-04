@@ -141,7 +141,7 @@ describe("vibest update", () => {
         assert.include((yield* run()).stderr, notice)
         assert.strictEqual(hits, 1)
         assert.notInclude(
-          (yield* run({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" })).stderr,
+          (yield* run({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })).stderr,
           "is available",
         )
         assert.notInclude((yield* run({ VIBEST_NO_UPDATE_CHECK: "1" })).stderr, "is available")
@@ -319,9 +319,11 @@ describe("vibest update", () => {
         )
 
         // An agent may not update vibest.
-        const agent = yield* runVibest(home, { HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" }, [
-          "update",
-        ])
+        const agent = yield* runVibest(
+          home,
+          { HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+          ["update"],
+        )
         assert.match(agent.stderr, /^Forbidden: an agent may not run vibest update/)
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(Platform.services, builtinHarnesses))),
     60_000,

@@ -251,7 +251,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           const db = yield* Db
           yield* db.insertSession(
             {
-              id: "b0050001",
+              id: "b0050001-b005-4b00-8b00-b0050001b005",
               agent: "general",
               harnessId: "pi",
               harnessSessionId: null,
@@ -271,7 +271,12 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             },
             "seeded-project",
           )
-          return yield* db.insertInbox({ sessionId: "b0050001", kind: "send", message: "queued", details: {} })
+          return yield* db.insertInbox({
+            sessionId: "b0050001-b005-4b00-8b00-b0050001b005",
+            kind: "send",
+            message: "queued",
+            details: {},
+          })
         }).pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
@@ -292,7 +297,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           assert.strictEqual(yield* tag(stop(old.instance!, {})), "ProtocolRejected")
           assert.strictEqual(yield* tag(stop(old.instance!, protocolHeaders())), "InvalidCaller")
           assert.strictEqual(
-            yield* tag(stop(old.instance!, sessionHeaders({ sessionId: "nosuch00" }))),
+            yield* tag(stop(old.instance!, sessionHeaders({ sessionId: "05c00000-05c0-405c-805c-05c0000005c0" }))),
             "NoSuchSession",
           )
           assert.strictEqual(yield* tag(stop("another", cliHeaders(layout.home))), "WrongInstance")
@@ -302,7 +307,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           assert.deepStrictEqual(yield* stop(old.instance!, cliHeaders(layout.home)), { instance: old.instance! })
           assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
           assert.isFalse(yield* probe(layout.socket))
-          const rows = yield* Effect.flatMap(Db, (db) => db.pendingInbox("b0050001")).pipe(
+          const rows = yield* Effect.flatMap(Db, (db) => db.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005")).pipe(
             Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
           )
           assert.deepStrictEqual(rows, [pending])

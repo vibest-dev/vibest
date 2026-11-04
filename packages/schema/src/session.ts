@@ -73,6 +73,15 @@ export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSe
   id: Schema.String,
   message: Schema.String,
 }) {}
+/** A session id prefix that more than one session's id starts with. */
+export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("AmbiguousSession", {
+  prefix: Schema.String,
+  matches: Schema.Array(Schema.String),
+}) {
+  override get message() {
+    return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
+  }
+}
 export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
   message: Schema.String,
 }) {}
