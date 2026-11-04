@@ -1,6 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 // `vibest` in a checkout that moved: it asks `[Y/n]` before anything starts. y or Enter moves the project, n makes a
 // new one; anything else, EOF or a non-interactive terminal asks vibestd for nothing more.
+import { assert, describe, it } from "@effect/vitest"
 import { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Exit, Sink, Stdio, Stream } from "effect"
 

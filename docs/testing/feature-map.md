@@ -50,6 +50,7 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 | P4  | secret refusal (a key-like value)                                       | script | non-zero exit, nothing written                       |
 | P5  | entries survive `daemon restart`                                        | script | read after restart equals the write                  |
 | P6  | path escape (`../`, absolute) refused                                   | script | non-zero exit                                        |
+| P7  | a moved checkout: `vibest` asks `[Y/n]`, y moves it                     | script | same project id, new path, memory read, worktree ok  |
 
 ## Plugins
 
@@ -124,3 +125,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
 | S18 | a subagent whose first turn outlasts herdr's agent.start window keeps its terminal (no false exit)                | inbox: `tools/e2e` S18                                          |
 | S19 | a Pi subagent under herdr's Pi hook gets its first prompt within seconds; restart and interrupt work              | inbox: `tools/e2e` S19                                          |
+| S20 | ids: `run` answers a UUID, herdr agent `s-<30 hex>`, `result <8>`, `peek <12>`, system prompt file                | inbox: `tools/e2e` S20                                          |

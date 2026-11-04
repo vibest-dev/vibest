@@ -1,5 +1,8 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+
 import type { Check } from "../check.ts"
-import { expect, until, type World } from "../world.ts"
+import { expect, row, until, type World } from "../world.ts"
 
 type Entry = { path: string; version: string }
 const KINDS = ["docs", "memory", "scratch"] as const
@@ -102,6 +105,56 @@ const checks: ReadonlyArray<Check> = [
         got.version === version && got.content.includes("kept across restarts"),
         `after restart: ${JSON.stringify(got)}`,
       )
+    },
+  },
+  {
+    id: "P7",
+    title:
+      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memory, and repairs vibest's worktree",
+    run: async (w) => {
+      const sh = async (cwd: string, ...argv: Array<string>) => {
+        const r = await w.run(cwd, argv)
+        expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
+        return r.stdout.trim()
+      }
+      const before = path.join(w.root, "p7", "repo")
+      await fs.mkdir(before, { recursive: true })
+      await sh(before, "git", "init", "-q", "-b", "main")
+      await sh(before, "git", "commit", "-q", "--allow-empty", "-m", "init")
+      await sh(before, "git", "remote", "add", "origin", "git@example.com:e2e/p7.git")
+      const old = await fs.realpath(before)
+      await w.ok(["project", "write", "memory", "a.md", "--if-version", "new", "--", "kept across the move\n"], {
+        cwd: old,
+      })
+      const project = row<{ id: string }>(w, "SELECT project_id AS id FROM project_repository WHERE path = ?", old)
+      expect(project !== undefined, `no project_repository row for ${old}`)
+      // A worktree where vibest keeps its own, as `vibest run` makes one.
+      const worktree = path.join(w.vibestHome, "worktrees", "repo", "p7a1")
+      await fs.mkdir(path.dirname(worktree), { recursive: true })
+      await sh(old, "git", "worktree", "add", "-q", "--detach", worktree)
+
+      await fs.rename(old, path.join(w.root, "p7", "moved"))
+      const moved = await fs.realpath(path.join(w.root, "p7", "moved"))
+      const info = await w.vibest(["project", "info"], { cwd: moved })
+      expect(
+        info.code !== 0 && info.stderr.includes(old) && info.stderr.includes(moved),
+        `project info in the moved checkout: ${info.code} ${info.stderr}${info.stdout}`,
+      )
+      // y moves it; the start after it fails on a runtime that does not exist, so no harness runs.
+      const r = await w.tty(["--headless", "--runtime", "e2e-none"], "y\n", { cwd: moved, timeoutMs: 60_000 })
+      const out = `${r.stdout}${r.stderr}`
+      expect(out.includes(`The project moved from ${old} to here, move it? [Y/n]`), `no question: ${out}`)
+      expect(out.includes(`moved the project from ${old} to ${moved}`), `not moved: ${out}`)
+      expect(!out.includes("a worktree of yours"), `vibest's own worktree was left to the user: ${out}`)
+      const after = row<{ id: string }>(w, "SELECT project_id AS id FROM project_repository WHERE path = ?", moved)
+      expect(after?.id === project!.id, `the project at ${moved} is ${after?.id}, was ${project!.id}`)
+      expect(
+        row<{ d: string }>(w, "SELECT directory AS d FROM project WHERE id = ?", project!.id)?.d === moved,
+        "project.directory is not the new place",
+      )
+      const got = await w.json<{ content: string }>(["project", "read", "memory", "a.md"], { cwd: moved })
+      expect(got.content.includes("kept across the move"), `memory after the move: ${JSON.stringify(got)}`)
+      await sh(worktree, "git", "status", "--short")
     },
   },
   {

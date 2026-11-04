@@ -12,7 +12,9 @@ type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
 
 /** The project of each world's Claude guard sessions, made on first use. */
-const projects = new WeakMap<World, Promise<number>>()
+const GENERAL = "e2e0a001-e2e0-4e2e-8e2e-e2e0a001e2e0"
+const COORDINATOR = "e2e0c001-e2e0-4e2e-8e2e-e2e0c001e2e0"
+const projects = new WeakMap<World, Promise<string>>()
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
@@ -25,12 +27,9 @@ const ask = async (
 ): Promise<Answer> => {
   const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
   if (harness === "claude" && agent !== undefined) {
-    const sessionId = `e2e-${agent}`
-    projects.set(
-      w,
-      projects.get(w) ?? knownSessions(w, "e2e/guard", { "e2e-general": "general", "e2e-coordinator": "coordinator" }),
-    )
-    const projectId = String(await projects.get(w))
+    const sessionId = agent === "coordinator" ? COORDINATOR : GENERAL
+    projects.set(w, projects.get(w) ?? knownSessions(w, { [GENERAL]: "general", [COORDINATOR]: "coordinator" }))
+    const projectId = await projects.get(w)!
     const r = await fetch("http://vibestd/hooks/claude/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
@@ -41,7 +40,8 @@ const ask = async (
     if (r.status !== 200) return { code: r.status, decision: "none", reason: json.error ?? "" }
     return { code: 0, decision: json.deny === undefined ? "none" : "deny", reason: json.deny ?? "" }
   }
-  const env = agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001" }
+  const env =
+    agent === undefined ? {} : { VIBEST_AGENT: agent, VIBEST_SESSION_ID: "e2e00001-e2e0-4e2e-8e2e-e2e00001e2e0" }
   const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", harness], { env, stdin })
   const out = r.stdout.trim()
   if (!out) return { code: r.code, decision: "none", reason: r.stderr }

@@ -205,9 +205,9 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       const cwd = await workdir(w, "pi-turn")
-      const id = "e2e00003"
+      const id = "e2e00003-e2e0-4e2e-8e2e-e2e00003e2e0"
       // The extension sends its turn end to vibestd, which writes the result for a session it knows.
-      const project = await knownSessions(w, "e2e/i3", { [id]: "general" }, cwd, "pi")
+      const project = await knownSessions(w, { [id]: "general" }, cwd, "pi")
       // The user's own Pi config (its login and extensions); --no-session keeps the conversation out of it.
       const r = await untilResult(w, id, (marker) =>
         w.run(
@@ -250,9 +250,9 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       if (!Bun.which("claude")) throw new Skip("claude not on PATH")
       const cwd = await workdir(w, "claude-turn")
-      const id = "e2e00004"
+      const id = "e2e00004-e2e0-4e2e-8e2e-e2e00004e2e0"
       // The plugin talks to vibestd over HTTP, which answers only a session it knows.
-      const project = await knownSessions(w, "e2e/i4", { [id]: "general" }, cwd)
+      const project = await knownSessions(w, { [id]: "general" }, cwd)
       // The user's own Claude config (its login and plugins); --no-session-persistence keeps the conversation out of it.
       const r = await w.run(
         cwd,
@@ -337,9 +337,9 @@ const checks: ReadonlyArray<Check> = [
         `#!/bin/sh\nin=$(cat)\nout=$(printf '%s' "$in" | "${binary}" "$@" 2>>"${calls}"); code=$?\nprintf '%s => %s (exit %s) <= %s\\n' "$*" "$out" "$code" "$in" >> "${calls}"\nprintf '%s\\n' "$out"\nexit $code\n`,
         { mode: 0o755 },
       )
-      const id = "e2e00005"
+      const id = "e2e00005-e2e0-4e2e-8e2e-e2e00005e2e0"
       // `vibest integration stop` sends the turn end to vibestd, which writes the result for a session it knows.
-      const project = await knownSessions(w, "e2e/i5", { [id]: "general" }, cwd, "cursor")
+      const project = await knownSessions(w, { [id]: "general" }, cwd, "cursor")
       const r = await untilResult(w, id, (marker) =>
         w.run(
           cwd,
