@@ -32,7 +32,9 @@ export interface Moved {
 const repairWorktrees = Effect.fn("repairWorktrees")(function* (repositories: ReadonlyArray<string>) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const root = (yield* Layout).worktrees
+  // git names worktrees by their realpath.
+  const worktrees = (yield* Layout).worktrees
+  const root = yield* fs.realPath(worktrees).pipe(Effect.orElseSucceed(() => worktrees))
   const repaired: Array<string> = []
   const manual: Array<string> = []
   for (const repository of repositories) {
