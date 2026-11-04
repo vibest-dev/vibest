@@ -177,6 +177,7 @@ const ACCESS = {
   List: "agent",
   Get: "agent",
   "Inbox.Subscribe": "coordinator",
+  "Project.Open": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
   "Project.RunningCoordinator": "agent",
@@ -849,6 +850,21 @@ export const handlers = VibestRpcs.toLayer(
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
           return { ...decision, harness: decision.harness, runtime: rt.kind }
+        }),
+
+      "Project.Open": ({ move }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Project.Open")
+          const c = yield* Caller
+          if (c._tag !== "Cli")
+            return yield* new Forbidden({ method: "Project.Open", message: "only the user runs Project.Open" })
+          const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot), move)
+          return {
+            projectId: project.id,
+            directory: project.directory,
+            ...("moved" in project ? { moved: project.moved } : {}),
+            ...("candidates" in project ? { candidates: project.candidates } : {}),
+          }
         }),
 
       "Project.CoordinatorSession": ({

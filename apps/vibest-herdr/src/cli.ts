@@ -15,7 +15,7 @@ import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
-import { askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { asData, ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
@@ -276,6 +276,39 @@ export const soleMainAgent = <A, E, R>(
     return yield* start
   })
 
+/**
+ * `vibest` in the user's shell, before anything starts: the directory's project (`Project.Open`). A checkout that moved
+ * is asked about: y or Enter moves the project here, n makes a new one; anything else, no answer, EOF or a
+ * non-interactive terminal starts nothing and changes nothing.
+ */
+export const openProject = (client: Pick<VibestClient, "Project.Open">) =>
+  Effect.gen(function* () {
+    const opened = yield* client["Project.Open"]({}).pipe(
+      Effect.catchTag("ProjectMoved", (moved) =>
+        Effect.gen(function* () {
+          const refused = new LaunchFailed({
+            message: `not starting: ${moved.message} on an interactive terminal (nothing changed)`,
+          })
+          if (!(yield* interactive)) return yield* refused
+          const line = yield* askLine(`The project moved from ${moved.from} to here, move it? [Y/n]: `)
+          const answer = Option.getOrUndefined(line)?.trim().toLowerCase()
+          if (answer === undefined || !["", "y", "yes", "n", "no"].includes(answer)) return yield* refused
+          return yield* client["Project.Open"]({ move: answer === "" || answer.startsWith("y") })
+        }),
+      ),
+    )
+    if (opened.moved !== undefined) {
+      yield* Console.error(`moved the project from ${opened.moved.from} to ${opened.directory}`)
+      for (const command of opened.moved.manual)
+        yield* Console.error(`a worktree of yours still names the old place; to repair it, run: ${command}`)
+    }
+    if (opened.candidates !== undefined)
+      yield* Console.error(
+        `a new project here: more than one moved project had these origins (${opened.candidates.join(", ")})`,
+      )
+    return opened
+  })
+
 /** Replaces this process (from #platform). */
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
@@ -340,6 +373,8 @@ const startMain =
       const cwd = path.resolve(".")
       // A linked worktree starts at its main checkout. A directory of repositories is itself the Project.
       const { root } = yield* projectRoot(cwd)
+      // The first run, in the user's shell: a checkout that moved is moved (or a new project made) before anything starts.
+      if (Option.isNone(o.inParent)) yield* withVibest((yield* caller).claim, openProject)
       const harness = Option.getOrUndefined(o.harness)
       const provider = Option.getOrUndefined(o.provider)
       const model = Option.getOrUndefined(o.model)

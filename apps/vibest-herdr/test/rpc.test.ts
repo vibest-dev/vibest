@@ -409,6 +409,7 @@ describe("vibest.sock", () => {
         ["Spawn", c.Spawn({ harness: "pi", prompt: "more" })],
         ["Launch", c.Launch({ argv: [], focus: false })],
         ["Project.StartMain", c["Project.StartMain"]({})],
+        ["Project.Open", c["Project.Open"]({})],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],

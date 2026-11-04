@@ -1474,7 +1474,93 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           assert.deepStrictEqual(yield* resolve(path.join(parent, "app")), multi)
           // Looking a project up creates nothing.
           assert.isUndefined(yield* db.projectAt(yield* tempDirectory("vibest-none-")))
-        }).pipe(Effect.provide(database(file)))
+        }).pipe(
+          Effect.provide(database(file)),
+          Effect.provide(Layer.effect(Layout, Layout.make(path.join(path.dirname(file), "home")))),
+        )
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a moved checkout: ProjectMoved; move keeps the id and repairs vibest's worktrees, not the user's; no move, or the old directory still there, is another project",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-move-")
+        const file = path.join(dir, "vibest.db")
+        const home = path.join(dir, "home")
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          const layout = yield* Layout
+          const resolve = (directory: string, move?: boolean) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located, move))
+          const repo = path.join(dir, "a", "repo")
+          yield* fs.makeDirectory(repo, { recursive: true })
+          yield* sh(repo, "init", "-q", "-b", "main")
+          yield* sh(
+            repo,
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+          )
+          yield* sh(repo, "remote", "add", "origin", "git@github.com:O/R.git")
+          const first = yield* resolve(repo)
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), first.id, undefined, repo)
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), first.id, undefined, `${repo}/sub`)
+          yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), first.id, undefined, `${repo}-other`)
+          const ours = layout.allocationWorktree("repo", "ab12")
+          yield* fs.makeDirectory(path.dirname(ours), { recursive: true })
+          yield* sh(repo, "worktree", "add", "-q", "--detach", ours)
+          const theirs = path.join(dir, "theirs")
+          yield* sh(repo, "worktree", "add", "-q", "--detach", theirs)
+          const theirsGit = yield* fs.readFileString(path.join(theirs, ".git"))
+          // The old directory still there: a copy is another project, nothing asked.
+          const copy = path.join(dir, "copy")
+          yield* sh(dir, "clone", "-q", repo, copy)
+          yield* sh(copy, "remote", "set-url", "origin", "git@github.com:O/R.git")
+          assert.notStrictEqual((yield* resolve(copy)).id, first.id)
+          // Moved: asked, nothing changed until it is answered.
+          const moved = path.join(dir, "b", "repo")
+          yield* fs.makeDirectory(path.dirname(moved))
+          yield* fs.rename(repo, moved)
+          const asked = yield* Effect.flip(resolve(moved))
+          assert.strictEqual(asked._tag, "ProjectMoved")
+          assert.deepStrictEqual(asked._tag === "ProjectMoved" ? [asked.projectId, asked.from, asked.to] : [], [
+            first.id,
+            repo,
+            moved,
+          ])
+          assert.isUndefined(yield* db.projectAt(moved))
+          const done = yield* resolve(moved, true)
+          assert.strictEqual(done.id, first.id)
+          assert.strictEqual(done.directory, moved)
+          assert.deepStrictEqual("moved" in done && done.moved, {
+            from: repo,
+            repaired: [ours],
+            manual: [`git -C ${moved} worktree repair ${theirs}`],
+          })
+          assert.deepStrictEqual(yield* db.projectAt(moved), { id: first.id, directory: moved })
+          assert.strictEqual(yield* db.sessionDirectory("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), moved)
+          assert.strictEqual(yield* db.sessionDirectory("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), `${moved}/sub`)
+          assert.strictEqual(yield* db.sessionDirectory("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), `${repo}-other`)
+          // vibest's worktree works again; the user's own is left as it was.
+          assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
+          assert.strictEqual(yield* fs.readFileString(path.join(theirs, ".git")), theirsGit)
+          // Moved again, answered no: a second project; the first stays where it was.
+          const again = path.join(dir, "c")
+          yield* fs.rename(moved, again)
+          const other = yield* resolve(again, false)
+          assert.notStrictEqual(other.id, first.id)
+          assert.deepStrictEqual(yield* db.projectAt(again), { id: other.id, directory: again })
+          assert.strictEqual(yield* db.projectDirectory(first.id), moved)
+        }).pipe(Effect.provide(database(file)), Effect.provide(Layer.effect(Layout, Layout.make(home))))
       }).pipe(Effect.provide(Platform.services)),
   )
 

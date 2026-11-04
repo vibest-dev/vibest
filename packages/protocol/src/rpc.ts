@@ -26,6 +26,7 @@ import {
   NoHarnessChosen,
   NoSuchSession,
   NotInRepository,
+  ProjectMoved,
   NoRuntime,
   RuntimeAddress,
   RuntimeIncompatible,
@@ -309,6 +310,7 @@ export class VibestRpcs extends RpcGroup.make(
           AllocationFailed,
           HarnessUnavailable,
           NotInRepository,
+          ProjectMoved,
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
@@ -350,7 +352,15 @@ export class VibestRpcs extends RpcGroup.make(
           place: Schema.String,
           attach: Schema.NullOr(Schema.Array(Schema.String)),
         }),
-        error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, LaunchFailed, NoRuntime, AgentRefused]),
+        error: Schema.Union([
+          InvalidCaller,
+          Forbidden,
+          NotInRepository,
+          ProjectMoved,
+          LaunchFailed,
+          NoRuntime,
+          AgentRefused,
+        ]),
       }),
     ),
   ),
@@ -473,7 +483,14 @@ export class VibestRpcs extends RpcGroup.make(
           projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
         }),
-        error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
+        error: Schema.Union([
+          InvalidCaller,
+          Forbidden,
+          NotInRepository,
+          ProjectMoved,
+          RuntimeUnreachable,
+          RuntimeIncompatible,
+        ]),
       }),
     ),
   ),
@@ -502,11 +519,36 @@ export class VibestRpcs extends RpcGroup.make(
         InvalidCaller,
         Forbidden,
         NotInRepository,
+        ProjectMoved,
         NoHarnessChosen,
         AgentRefused,
         HarnessUnavailable,
         NoRuntime,
       ]),
+    }),
+  ),
+  /**
+   * `vibest` before anything else (the user's command line only): the project of its directory, found or created.
+   * A checkout that moved is `ProjectMoved` unless `move` says what to do: true moves the project here (its id kept,
+   * vibest's worktrees repaired; `manual` are the commands for the user's own worktrees), false makes a new one.
+   * `candidates`: several moved projects had these origins, so a new one was made; their directories.
+   */
+  scoped(
+    Rpc.make("Project.Open", {
+      payload: { move: Schema.optional(Schema.Boolean) },
+      success: Schema.Struct({
+        projectId: Schema.String,
+        directory: Schema.String,
+        moved: Schema.optional(
+          Schema.Struct({
+            from: Schema.String,
+            repaired: Schema.Array(Schema.String),
+            manual: Schema.Array(Schema.String),
+          }),
+        ),
+        candidates: Schema.optional(Schema.Array(Schema.String)),
+      }),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   /** A coordinator still running in another pane: display text and the opaque address to pass to StopCoordinator. */
@@ -521,7 +563,14 @@ export class VibestRpcs extends RpcGroup.make(
           address: Schema.String,
         }),
       ),
-      error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
+      error: Schema.Union([
+        InvalidCaller,
+        Forbidden,
+        NotInRepository,
+        ProjectMoved,
+        RuntimeUnreachable,
+        RuntimeIncompatible,
+      ]),
     }),
   ),
   /**
@@ -538,7 +587,7 @@ export class VibestRpcs extends RpcGroup.make(
           result: Schema.Literals(["stopped", "running", "moved", "unsupported"]),
           reason: Schema.optional(Schema.String),
         }),
-        error: Schema.Union([Forbidden, NotInRepository, RuntimeUnreachable, NoRuntime, InvalidCaller]),
+        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, RuntimeUnreachable, NoRuntime, InvalidCaller]),
       }),
     ),
   ),
@@ -553,26 +602,31 @@ export class VibestRpcs extends RpcGroup.make(
       }),
     ),
   ),
-  scoped(Rpc.make("Project.Info", { success: ProjectInfoResult, error: Schema.Union([Forbidden, NotInRepository]) })),
+  scoped(
+    Rpc.make("Project.Info", {
+      success: ProjectInfoResult,
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
+    }),
+  ),
   scoped(
     Rpc.make("Project.List", {
       payload: ProjectListInput.fields,
       success: Schema.Array(ProjectEntry),
-      error: Schema.Union([Forbidden, NotInRepository]),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   scoped(
     Rpc.make("Project.Read", {
       payload: ProjectReadInput.fields,
       success: ProjectReadResult,
-      error: Schema.Union([Forbidden, NotInRepository, ProjectInvalid]),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectInvalid]),
     }),
   ),
   scoped(
     Rpc.make("Project.Search", {
       payload: ProjectSearchInput.fields,
       success: Schema.Array(Schema.String),
-      error: Schema.Union([Forbidden, NotInRepository]),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   scoped(
@@ -580,7 +634,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Project.Write", {
         payload: ProjectWriteInput.fields,
         success: ProjectWriteResult,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectConflict, ProjectInvalid]),
+        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectConflict, ProjectInvalid]),
       }),
     ),
   ),
@@ -588,7 +642,7 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Project.Delete", {
         payload: ProjectDeleteInput.fields,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectConflict, ProjectInvalid]),
+        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, ProjectConflict, ProjectInvalid]),
       }),
     ),
   ),

@@ -1063,6 +1063,48 @@ const make = Effect.gen(function* () {
     refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
       sql.withTransaction(putRepositories(id, repositories)).pipe(Effect.orDie),
 
+    /**
+     * Projects with a directory whose repositories have exactly the origins `remotes` (non-null ones, as a set): where
+     * a moved checkout came from. Whether that directory still exists is the caller's to check.
+     */
+    moveCandidates: (remotes: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const wanted = [...new Set(remotes)].sort()
+        if (wanted.length === 0) return []
+        const rows = yield* sql<{ id: string; directory: string; remote: string | null }>`SELECT p.id, p.directory,
+            r.remote_url AS remote FROM project p JOIN project_repository r ON r.project_id = p.id
+          WHERE p.directory IS NOT NULL AND p.id IN (SELECT project_id FROM project_repository WHERE ${sql.in("remote_url", wanted)})`
+        const byProject = new Map<string, { directory: string; remotes: Set<string> }>()
+        for (const row of rows) {
+          const entry = byProject.get(row.id) ?? { directory: row.directory, remotes: new Set<string>() }
+          if (row.remote !== null) entry.remotes.add(row.remote)
+          byProject.set(row.id, entry)
+        }
+        return [...byProject]
+          .filter(([, p]) => [...p.remotes].sort().join("\n") === wanted.join("\n"))
+          .map(([id, p]) => ({ id, directory: p.directory }))
+      }).pipe(Effect.orDie),
+
+    /**
+     * Project `id` now lives at `to` with `repositories`: its directory, its repository rows, and every session
+     * directory under its old directory move with it. Returns the old directory.
+     */
+    moveProject: (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
+            const from = row!.directory
+            yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
+            yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
+            yield* putRepositories(id, repositories)
+            yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
+              WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
+            return from
+          }),
+        )
+        .pipe(Effect.orDie),
+
     /** Where project `id` is; undefined for a project with no directory (migrated without one). */
     projectDirectory: (id: string) =>
       sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
