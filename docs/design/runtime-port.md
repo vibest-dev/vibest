@@ -110,7 +110,7 @@ vibest machine remove <id>       # forgets it; stops nothing on the machine
   `machine` and `runtime`; the builtin plugin keeps `local` and the parent's runtime (§4). Core checks after the chain:
   the runtime online on that machine, harness there; else refuses with the reason.
 - The Project must have a git remote, and the machine uses the same remote. The mirror is
-  `<remote VIBEST_HOME>/projects/<key>`: cloned on first use, fetched after. The start commit must already be on the
+  `<remote VIBEST_HOME>/projects/<project id>`: cloned on first use, fetched after. The start commit must already be on the
   remote, else refused ("push first"). The Workspace is `git worktree add --detach <commit>` there, plus the
   `.worktreeinclude` files (size-capped). Work comes back by the Agent pushing its branch, as locally.
 - Offline (`status` not online, or `unreachable` errors): the machine's Agents show `offline`, not failed; their

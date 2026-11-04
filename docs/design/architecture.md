@@ -805,7 +805,7 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 ~/.vibest/                   (VIBEST_HOME overrides)
   vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
-  projects/<project>/        knowledge (instructions.md, memory/, docs/) and scratch/
+  projects/<project id>/     knowledge (instructions.md, memory/, docs/) and scratch/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
 
@@ -834,7 +834,7 @@ and are the acceptance for each part.
 | Interrupt and stop                         | `sessions.ts`, `remove.ts`, `processes.ts`                                                                    | archive → `stop`; `--archive-on-completion` → `once`                            | `remove.test.ts`, `stop-coordinator.test.ts`                                                               |
 | Main Agent launch and resume               | `launch.ts`, `sessions.ts`, `server.ts`                                                                       | coordinator → main Agent of a Project                                           | `stop-coordinator.test.ts`                                                                                 |
 | Rules                                      | `rules.ts`                                                                                                    | subagent rules; main Agent rules become builtin skills                          | `unit.test.ts`                                                                                             |
-| Knowledge                                  | `project.ts`                                                                                                  | repository key → Project id                                                     | `project.test.ts`                                                                                          |
+| Knowledge                                  | `project.ts`                                                                                                  | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |
 | Models                                     | `models.ts`                                                                                                   | Availability capability                                                         | `unit.test.ts`                                                                                             |
 | Integrations                               | `integration.ts`, `packages/claude`, `claude-inbox.ts`, `packages/pi-omac`                                    | forward the §8 events; agent instead of session                                 | `integration.test.ts`, `claude-inbox-*.test.ts`, `claude-integration-stop.test.ts`, `cursor-allow.test.ts` |
 | Guard                                      | `guard.ts`                                                                                                    | `plugin-guard` on `agent.tool`; roles main / subagent                           | `guard.test.ts`                                                                                            |

@@ -7,9 +7,10 @@ shape, read from these tables and the memory listed below. Not built yet: rows f
 `recipient_session_id`), the `replyTo(turn)` routing below (a result or report still goes to
 `report_to_session_id` while it has not ended, else to the entry session).
 
-Four SQLite tables, one purpose each:
+Five SQLite tables, one purpose each:
 
-- `project`: a Project, and its optional entry session.
+- `project`: a Project, where it is, and its optional entry session.
+- `project_repository`: the git repositories of a Project, by the realpath of each main checkout.
 - `session`: one agent's identity and conversation, described by an agent definition; who spawned it and where its
   results go.
 - `inbox`: text for a session or for the user, and whether it was delivered. `status` is its only changing column.
@@ -37,7 +38,25 @@ Four SQLite tables, one purpose each:
 - Leases, the restarting mark, running work and per-session locks are memory only (see Memory).
 - Agent capabilities (spawn, message, tools) come from the agent definition in configuration, not from the
   database. A routing decision is not recorded separately: it is the recipient of the result row.
-- Times are epoch milliseconds. Session ids are 8 hex characters.
+- Times are epoch milliseconds.
+- Project and session ids are UUIDv4 strings from one generator (`newId`, packages/schema/src/id.ts), which draws
+  again when the first 8 characters are already taken. People see the first 8 (`shortId`); every command that takes
+  a session id takes the full id or a unique prefix of 8 or more characters, and JSON output keeps the full id. The
+  herdr agent of a session is `s-` and the first 30 hex digits of its id (herdr names are at most 32 characters).
+
+## Projects
+
+A Project is found by realpath, never by a remote or a key. `projectRoot` of the working directory is a main checkout,
+or the parent directory of a multi-repository project (a plain directory whose direct children are repositories). The
+project is the one whose `directory` is that realpath, else the one with a repository at that path (a repository of
+a multi-repository project belongs to it). Not found: a new project, with an id that never changes. Two clones of one
+remote are two projects. `remote_url` is `remote.origin.url` as git prints it, refreshed on every resolve; it only
+recognizes a moved checkout: a directory with no project, whose origins are exactly those of one project whose
+directory no longer exists, is that project moved (`ProjectMoved`). `vibest` asks `[Y/n]`: yes moves the project there
+(its id kept, its session directories rewritten, vibest's own worktrees repaired; for the user's worktrees it prints
+`git worktree repair`), no makes a new project. Several such projects: a new project, the candidates printed. Its
+files are `projects/<project id>/` under `VIBEST_HOME` (instructions, memory, docs, scratch). `vibest ls` and the other
+read-only lookups never create one.
 
 ## DDL
 
@@ -46,14 +65,21 @@ PRAGMA application_id = 1986617957;  -- 0x76696265, "vibe"
 PRAGMA user_version = 2;
 
 CREATE TABLE project (
-  id               INTEGER PRIMARY KEY,
-  key              TEXT NOT NULL UNIQUE,              -- projectRoot key; not a path
+  id               TEXT PRIMARY KEY CHECK (length(id) = 36),  -- UUIDv4, never changed
+  directory        TEXT UNIQUE,                       -- realpath of the project root; null: migrated with none known
   entry_session_id TEXT REFERENCES session (id)       -- what a bare `vibest` reopens, and the fallback recipient; not identity
 ) STRICT;
 
+CREATE TABLE project_repository (
+  project_id TEXT NOT NULL REFERENCES project (id),
+  path       TEXT NOT NULL UNIQUE,                    -- realpath of the repository's main checkout
+  remote_url TEXT                                     -- remote.origin.url as git prints it; not identity
+) STRICT;
+CREATE INDEX project_repository_project ON project_repository (project_id);
+
 CREATE TABLE session (
-  id                    TEXT PRIMARY KEY,
-  project_id            INTEGER NOT NULL REFERENCES project (id),
+  id                    TEXT PRIMARY KEY,             -- UUIDv4
+  project_id            TEXT NOT NULL REFERENCES project (id),
   parent_session_id     TEXT REFERENCES session (id), -- who spawned it; null: the user. Rights and placement, never routing
   report_to_session_id  TEXT REFERENCES session (id), -- where its results go; written at spawn, never changed; null: the user
   role                  TEXT NOT NULL,                -- agent definition name (open set)
@@ -207,8 +233,15 @@ foreign keys, and only then puts it in place with `user_version` 2. The script m
 
 - `session.report_to_session_id` = `parent_session_id`; when that is null and the role is not `main`, the
   project's `main_session_id`.
-- `project.entry_session_id` = `main_session_id`; `project.key` = `directory`; a main session's `directory` = its
-  `metadata.projectDirectory`.
+- Every project and session id becomes a new UUIDv4 (the script prints the old to new mapping), rewritten wherever
+  it is held: `session.id`, `parent_session_id`, `report_to_session_id`, `project.entry_session_id`, the inbox sender
+  and recipient, `event.session_id`, and a session id held as a value in event data. Harness conversation ids and
+  message text are kept as they are. Stop every agent first: a running one still carries its old id.
+- `project.entry_session_id` = `main_session_id`; a main session's `directory` = its `metadata.projectDirectory`.
+  `project.directory` is the realpath of the main session's project directory (else the main checkout of a
+  subagent's), with its repositories and their origins; projects claim directories newest first, and one with
+  none known keeps a null directory (history only). `projects/<v1 key>/` is renamed `projects/<project id>/`; any
+  failure puts every renamed directory back and leaves the version 1 file untouched.
 - The session's harness, runtime, terminal and conversation become its `process.start`; its pid, ready time and
   integration a `process.ready`; its exit (or archive) a `process.end`; each usage-limit attempt a `process.start`
   and `process.end` (limited).
