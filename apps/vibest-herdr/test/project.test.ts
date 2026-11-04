@@ -47,7 +47,7 @@ describe("Project", () => {
         ])
         assert.deepStrictEqual(yield* project.info(scope), {
           directory: dir,
-          instructions: path.join(dir, "instructions.md"),
+          preferences: path.join(dir, "preferences.md"),
           docs: path.join(dir, "docs"),
           memories: path.join(dir, "memories"),
           artifacts: layout.artifacts(scope.id),

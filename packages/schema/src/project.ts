@@ -5,10 +5,10 @@ import { Schema } from "effect"
 export const ProjectKind = Schema.Literals(["docs", "memories", "artifacts"])
 export type ProjectKind = typeof ProjectKind.Type
 
-/** Absolute paths: the project folder, its instructions.md and its subfolders. */
+/** Absolute paths: the project folder, its preferences.md and its subfolders. */
 export const ProjectInfoResult = Schema.Struct({
   directory: Schema.String,
-  instructions: Schema.String,
+  preferences: Schema.String,
   docs: Schema.String,
   memories: Schema.String,
   artifacts: Schema.String,

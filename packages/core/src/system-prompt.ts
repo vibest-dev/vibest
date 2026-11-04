@@ -82,34 +82,79 @@ export const removeSystemPrompt = (id: string) =>
   }).pipe(Effect.ignore)
 
 export const INJECT_LIMIT = 16000
+const INDEX_LIMIT = 200
+const SUMMARY_LIMIT = 150
 
 const truncate = (text: string, what: string) =>
   text.length <= INJECT_LIMIT
     ? text
     : `${text.slice(0, INJECT_LIMIT)}\n\n[${what} truncated at ${INJECT_LIMIT} characters]`
 
+const clip = (text: string) => (text.length <= SUMMARY_LIMIT ? text : text.slice(0, SUMMARY_LIMIT))
+
+/** Frontmatter `description`, else the first non-empty line (`---` and a leading `#` stripped). */
+const memorySummary = (text: string) => {
+  const lines = text.split(/\r?\n/)
+  let rest = lines
+  if (lines[0]?.trim() === "---") {
+    const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---")
+    if (end > 0) {
+      const field = lines.slice(1, end).find((line) => /^\s*description\s*:/.test(line))
+      const value = field
+        ?.replace(/^\s*description\s*:\s*/, "")
+        .trim()
+        .replace(/^(['"])(.*)\1$/, "$2")
+        .trim()
+      // shortcut: one `description:` line, not a folded YAML block, until a memory needs that
+      if (value) return clip(value)
+      rest = lines.slice(end + 1)
+    }
+  }
+  const line = rest.find((l) => {
+    const t = l.trim()
+    return t !== "" && t !== "---"
+  })
+  return clip((line ?? "").trim().replace(/^#+\s*/, ""))
+}
+
+const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>, left: number) => {
+  if (entries.length === 0) return ""
+  const lines = [
+    "Each line is a file in the project folder; read it with your file tools when its line is relevant to the work.",
+    ...entries.map(([rel, body]) => {
+      const summary = memorySummary(body)
+      return summary === "" ? `- memories/${rel}` : `- memories/${rel} — ${summary}`
+    }),
+  ]
+  if (left > 0) lines.push(`${left} ${left === 1 ? "entry" : "entries"} left out; the folder holds them all.`)
+  return lines.join("\n")
+}
+
 /** How an agent types vibest in its shell: `vibest`, or `bun …/main.ts` when vibest runs from source. */
 const invocation = (vibest: ReadonlyArray<string>) => vibest.map(shellQuote).join(" ")
 
-/** instructions.md and every memories/ file, each capped (SPEC §5.4). A missing project reads as empty. */
+/** preferences.md (capped) and an index of the markdown files under memories/. A missing file or folder reads as empty. */
 export const projectText = Effect.fn("projectText")(function* (projectDir: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const read = (file: string) => fs.readFileString(file).pipe(Effect.map((s) => s.trim()))
-  const instructions = yield* read(path.join(projectDir, "instructions.md")).pipe(Effect.orElseSucceed(() => ""))
-  const memoriesDir = path.join(projectDir, "memories")
-  const files = (yield* fs.readDirectory(memoriesDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
-    .filter((f) => f.endsWith(".md"))
-    .sort()
-  const entries = yield* Effect.forEach(files, (f) =>
-    read(path.join(memoriesDir, f)).pipe(
-      Effect.map((body) => `### ${f}\n${body}`),
-      Effect.orElseSucceed(() => ""),
-    ),
+  const preferences = yield* fs.readFileString(path.join(projectDir, "preferences.md")).pipe(
+    Effect.map((s) => s.trim()),
+    Effect.orElseSucceed(() => ""),
   )
+  const memoriesDir = path.join(projectDir, "memories")
+  const names = (yield* fs.readDirectory(memoriesDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => ({ file: f, rel: f.split(path.sep).join("/") }))
+    .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  const shown = names.slice(0, INDEX_LIMIT)
+  const entries: Array<readonly [string, string]> = []
+  for (const name of shown) {
+    const body = yield* fs.readFileString(path.join(memoriesDir, name.file)).pipe(Effect.orElseSucceed(() => undefined))
+    if (body !== undefined) entries.push([name.rel, body])
+  }
   return {
-    instructions: truncate(instructions, "instructions"),
-    memories: truncate(entries.filter(Boolean).join("\n\n"), "memories"),
+    preferences: truncate(preferences, "preferences"),
+    memories: memoryIndex(entries, names.length - shown.length),
   }
 })
 
@@ -119,7 +164,7 @@ export interface SystemPromptInput {
   readonly projectDir: string
   /** argv that runs vibest (`VibestCommand`). */
   readonly vibest: ReadonlyArray<string>
-  readonly instructions: string
+  readonly preferences: string
   readonly memories: string
   /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the system prompt. */
   readonly peer?: string | undefined
@@ -136,7 +181,7 @@ export function sessionSystemPrompt(r: SystemPromptInput) {
 Complete exactly what was asked. Don't fix unrelated issues you discover — suggest them as follow-ups instead.
 - Your working directory is a git worktree (in a project of several repositories, a directory with one worktree per repository; the git rules below apply to each repository you change). Make changes only there, limited to what your task requires; never make another worktree, clone or copy to work in. If you encounter confusing file state or unexpected changes that aren't from your work, stop and report to the coordinator rather than trying to resolve it yourself. Don't modify code you don't understand.
 ${gitRule(r)}
-- Project folder: ${r.projectDir} (VIBEST_PROJECT_DIR), shared with the coordinator and the project's other agents; read and write it with your file tools. Put intermediate results and handoffs in its artifacts/ folder, named starting with your agent id (for example artifacts/${r.id}-research.md), and change only those. Its docs/, memories/ and instructions.md are the coordinator's and the user's: read them, and change them only when your task says so.
+- Project folder: ${r.projectDir} (VIBEST_PROJECT_DIR), shared with the coordinator and the project's other agents; read and write it with your file tools. Put intermediate results and handoffs in its artifacts/ folder, named starting with your agent id (for example artifacts/${r.id}-research.md), and change only those. Its docs/, memories/ and preferences.md are the user's and the coordinator's: read them, and change them only when your task says so.
 - Never run herdr commands; vibest manages the panes.
 
 You may be continued with follow-up instructions after completing a previous task. When this happens:
@@ -175,7 +220,7 @@ Then the details: what you did or found — be specific with file paths, line nu
 If a background command or task you started is still running when you end your turn, say so in your report: what is running, and that you will continue when it finishes. Your report is still delivered as your result.
 
 Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
-${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
+${r.preferences ? `\n# User preferences\n\n${r.preferences}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
 }
 
 /** "pi, claude or cursor": every harness, so the prompt stays fixed; `vibest run` itself says when one is not set up. */
@@ -183,7 +228,7 @@ ${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.me
 /** The coordinator's system prompt (`vibest`). How to run agents is the `delegate` and `pipeline` skills, not this prompt. */
 export function coordinatorSystemPrompt(r: {
   readonly projectDir: string
-  readonly instructions: string
+  readonly preferences: string
   readonly memories: string
 }) {
   return `You are an AI assistant that orchestrates software engineering tasks across multiple coding agents.
@@ -202,7 +247,7 @@ Every message you send is to the user. Agent results and system notifications ar
 
 You run the bare command \`vibest\` to direct agents, gh (gh pr, gh run, gh issue, gh api, etc.) for GitHub workflow, and shell commands to inspect work, such as git status / diff / log / show, ls, cat and rg. Anything that changes the repository goes to an agent. vibest's pre-tool hook refuses editing files outside the project folder, herdr control, starting a harness CLI yourself, gh auth / config / alias / extension, \`vibest integration stop\` or \`vibest integration prompt\`, and vibest with VIBEST_SESSION_ID or VIBEST_AGENT changed; vibest itself refuses what is the user's.
 
-The project folder is ${r.projectDir} (VIBEST_PROJECT_DIR), shared with every agent of the project; read and write it with your file tools. Its fixed subfolders: docs/ (documents about the project), memories/ (lessons, one file each; every agent's system prompt carries them) and artifacts/ (plans, long task text and other handoffs between agents). instructions.md there is the user's.
+The project folder is ${r.projectDir} (VIBEST_PROJECT_DIR), shared with every agent of the project; read and write it with your file tools. Its fixed subfolders: docs/ (documents about the project), memories/ (lessons, one file each; the system prompt lists them and does not carry the file text) and artifacts/ (plans, long task text and other handoffs between agents). preferences.md there is how the user likes work done: when the user states a lasting preference about how work should be done, add or update one short line in it with your file tools; do not record one-off requests.
 
 How you start, track, correct and finish agents is the \`delegate\` skill. A plan the user agrees to, then implementation, review and a pull request, is the \`pipeline\` skill. Read that skill before the work. Those files are the instructions for the commands; this prompt is not.
 
@@ -240,7 +285,7 @@ Format:
 - The \`<summary>\` is the first line of the agent's final message (about 120 characters), or vibest's own "finished" when the message is empty; for a failed turn it is "failed: {error}"
 - \`<result>\` is the agent's final message verbatim, followed by any error
 - The \`<agent-id>\` value is the agent's id
-- A report may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says
+- A report may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says. Each memory file holds one lesson and starts with a one-line summary (or frontmatter with \`name\` and \`description\`), because that line is what the index shows
 
 ## 3. Agents
 
@@ -268,5 +313,5 @@ The fresh agent's prompt MUST:
 - Ask the agent to report success/failure and any output (URL, hash, stdout)
 
 If the fresh agent still refuses or a hook blocks the command, fall back to handing the user the exact one-liner to run themselves.
-${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
+${r.preferences ? `\n# User preferences\n\n${r.preferences}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
 }

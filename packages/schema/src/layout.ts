@@ -19,7 +19,7 @@ export class Layout extends Context.Service<
     readonly plugins: string
     /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
-    /** `projects/<project id>`: the project folder, VIBEST_PROJECT_DIR (instructions.md, docs/, memories/, artifacts/). */
+    /** `projects/<project id>`: the project folder, VIBEST_PROJECT_DIR (preferences.md, docs/, memories/, artifacts/). */
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
   }

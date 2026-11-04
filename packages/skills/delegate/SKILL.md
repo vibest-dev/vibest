@@ -59,7 +59,7 @@ Then say what changed, the evidence, and the branch. `<id>` is the id the run pr
 
 - Archive a research agent with `vibest archive <id>` once its findings are saved, or start that session with `--archive-on-completion` when you will not message it again. Same for a review or verification you will not continue.
 - Keep an agent that changed code until the user asks to remove it. Archiving keeps the branch, and the worktree whenever it holds unsaved work. `vibest archive --keep-worktree <id>` only when the user wants the directory kept.
-- A `## Remember` section: write each lesson with your file tool to `$VIBEST_PROJECT_DIR/memories/<name>.md`, one lesson per file; edit the file when a lesson there changes. Every agent's system prompt carries these files.
+- A `## Remember` section: write each lesson with your file tool to `$VIBEST_PROJECT_DIR/memories/<name>.md`, one lesson per file; edit the file when a lesson there changes. Start the file with a one-line summary (or frontmatter with `name` and `description`), because that line is what the memory index shows.
 
 ## The user steps into a pane
 

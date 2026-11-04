@@ -393,11 +393,11 @@ layer(Platform.services)("role rules", (it) => {
         for (const dir of [own, ...["docs", "memories", "artifacts"].map((kind) => path.join(own, kind))])
           for (const [tool, input] of calls(dir, path.join(dir, "notes.md")))
             assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
-        for (const [tool, input] of calls(own, path.join(own, "instructions.md")))
+        for (const [tool, input] of calls(own, path.join(own, "preferences.md")))
           assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
         // Another project's folder, one whose name starts with its own, and the projects directory: refused.
         for (const [dir, file] of [
-          [other, path.join(other, "instructions.md")],
+          [other, path.join(other, "preferences.md")],
           [path.join(other, "artifacts"), path.join(other, "artifacts", "a.md")],
           [path.join(other, "memories"), path.join(other, "memories", "a.md")],
           [`${own}2`, `${own}2/a.md`],
@@ -408,7 +408,7 @@ layer(Platform.services)("role rules", (it) => {
         // A search over a directory holding the projects directory reaches into it.
         for (const [tool, input] of [
           ["Grep", { pattern: "x", path: vibestHome }],
-          ["Glob", { pattern: `${vibestHome}/**/instructions.md` }],
+          ["Glob", { pattern: `${vibestHome}/**/preferences.md` }],
           ["Bash", { command: `grep -r x ${vibestHome}` }],
         ] as const)
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
@@ -443,7 +443,7 @@ layer(Platform.services)("role rules", (it) => {
           )
         for (const tool of ["Bash", "Shell"]) {
           for (const cwd of [other, path.join(other, "docs"), path.join(home, "p"), path.join(vibestHome, "projects")])
-            for (const command of ["cat instructions.md", "cat a.md", "ls"])
+            for (const command of ["cat preferences.md", "cat a.md", "ls"])
               assert.isString(yield* asSession(tool, command, cwd), `${tool} ${cwd}: ${command}`)
           for (const cwd of [
             own,
