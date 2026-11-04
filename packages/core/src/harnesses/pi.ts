@@ -79,7 +79,6 @@ export const pi: HarnessAdapter = {
     i.systemPromptFile,
     "-e",
     extension(i.pluginDir),
-    // Exact allowlist, as coordinatorArgs does: no write or edit tool. bash stays; the guard refuses commands that write.
     ...providerModel(i.provider, i.model),
   ],
   // The coordinator's system prompt replaces Pi's coding-assistant preamble; Pi still adds context files (AGENTS.md), skills and cwd after them.
@@ -89,8 +88,9 @@ export const pi: HarnessAdapter = {
     i.systemPromptFile,
     // An exact allowlist, not +/- entries on the defaults: those keep every extension's tools, and a user's delegation
     // extension (pi-subagents' `subagent`) then wins over `vibest run`. Extensions still load; only their tools are off.
+    // write and edit are for the project folder: the guard refuses them anywhere else.
     "--tools",
-    "read,bash,codemode,grep,find,ls",
+    "read,bash,codemode,grep,find,ls,write,edit",
     "--no-mcp",
     "-e",
     extension(i.pluginDir),

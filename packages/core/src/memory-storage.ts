@@ -3,6 +3,7 @@
 // append-only events, the owner of each scope), held in arrays; every read derives its rows through the shared read
 // model (read-model.ts), so both backends answer alike and pass the same conformance suite (storage-conformance.ts).
 // One lock around every operation makes each atomic.
+import { newId } from "@vibest/schema/id"
 import { Clock, Effect, Layer, Schema, Semaphore } from "effect"
 
 import {
@@ -11,8 +12,8 @@ import {
   decodeSessions,
   fromColumns,
   MESSAGE_STATUSES,
-  newId,
   type ProcessStart,
+  resolveSessionId,
   roundStatus,
   type SessionFacts,
   storedStatus,
@@ -627,7 +628,9 @@ export const make = Effect.gen(function* () {
       }
     })
 
-  const unusedId = newId.pipe(Effect.repeat({ until: (id) => !sessions.has(id) }))
+  /** Session ids that start with `prefix`, sorted. */
+  const withPrefix = (prefix: string) => [...sessions.keys()].filter((id) => id.startsWith(prefix)).sort()
+  const unusedId = newId((short) => Effect.sync(() => withPrefix(short).length > 0))
 
   const conversationOf = (id: string) => {
     const found = anySession(id)
@@ -751,7 +754,8 @@ export const make = Effect.gen(function* () {
         return true
       }),
 
-    sessionExists: (id) => Effect.sync(() => sessions.has(id)),
+    resolveSession: (input) => resolveSessionId(input, (prefix) => Effect.sync(() => withPrefix(prefix).slice(0, 11))),
+    newSessionId: unusedId,
     sessionIdentity: (id) =>
       Effect.sync(() => {
         const s = sessions.get(id)

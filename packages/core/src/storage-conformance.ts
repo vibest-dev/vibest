@@ -29,6 +29,12 @@ export const sessionRow = (id: string, patch: Partial<Omit<SessionRow, "scope">>
   ...patch,
 })
 
+// Scopes are UUIDs: vibest's backend keeps a scope as a project id.
+const S = "00000000-0000-4000-8000-000000000001"
+const S1 = "00000000-0000-4000-8000-000000000011"
+const S2 = "00000000-0000-4000-8000-000000000012"
+const OTHER = "00000000-0000-4000-8000-000000000099"
+
 const place = (id: string) => ({ runtime: RUNTIME, address: { machine: "local", id } })
 
 export const storageConformance = (name: string, layer: Layer.Layer<Storage, unknown>) =>
@@ -40,15 +46,15 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "sessions: inserted in a scope, read back, listed per scope; `max` refuses all or nothing; unknown ids are absent",
       Effect.gen(function* () {
         const db = yield* Storage
-        assert.isTrue(yield* db.insertSession(sessionRow("a1"), "s1", undefined, "/w/a", "do a"))
-        assert.isTrue(yield* db.insertSession(sessionRow("b1"), "s2"))
-        assert.isFalse(yield* db.insertSession(sessionRow("c1"), "s1", 2))
-        assert.isFalse(yield* db.sessionExists("c1"))
-        assert.strictEqual((yield* db.getSession("a1"))?.scope, "s1")
-        assert.strictEqual(yield* db.scopeOf("b1"), "s2")
+        assert.isTrue(yield* db.insertSession(sessionRow("a1"), S1, undefined, "/w/a", "do a"))
+        assert.isTrue(yield* db.insertSession(sessionRow("b1"), S2))
+        assert.isFalse(yield* db.insertSession(sessionRow("c1"), S1, 2))
+        assert.isUndefined(yield* db.getSession("c1"))
+        assert.strictEqual((yield* db.getSession("a1"))?.scope, S1)
+        assert.strictEqual(yield* db.scopeOf("b1"), S2)
         assert.strictEqual(yield* db.sessionDirectory("a1"), "/w/a")
         assert.deepStrictEqual(
-          (yield* db.listSessions({ scope: "s1" })).map((s) => s.id),
+          (yield* db.listSessions({ scope: S1 })).map((s) => s.id),
           ["a1"],
         )
         assert.deepStrictEqual(
@@ -57,7 +63,7 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
         )
         assert.deepStrictEqual(yield* db.sessionIdentity("a1"), {
           id: "a1",
-          scope: "s1",
+          scope: S1,
           agent: "general",
           harness: "pi",
           owner: false,
@@ -70,12 +76,33 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
     )
 
     test(
+      "session ids: new ids are UUIDs with an unused first 8; a full id or a unique prefix of 8 or more resolves",
+      Effect.gen(function* () {
+        const db = yield* Storage
+        const a = "0a1b2c3d-0000-4000-8000-000000000001"
+        const b = "0a1b2c3d-1111-4000-8000-000000000002"
+        yield* db.insertSession(sessionRow(a), S)
+        yield* db.insertSession(sessionRow(b), S)
+        const fresh = yield* db.newSessionId
+        assert.match(fresh, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+        assert.notStrictEqual(fresh.slice(0, 8), "0a1b2c3d")
+        assert.strictEqual(yield* db.resolveSession(a), a)
+        assert.strictEqual(yield* db.resolveSession("0a1b2c3d-1"), b)
+        const ambiguous = yield* db.resolveSession("0a1b2c3d").pipe(Effect.flip)
+        assert.strictEqual(ambiguous._tag, "AmbiguousSession")
+        assert.deepStrictEqual(ambiguous._tag === "AmbiguousSession" ? ambiguous.matches : [], [a, b])
+        assert.strictEqual((yield* db.resolveSession("0a1b2c3").pipe(Effect.flip))._tag, "NoSuchSession")
+        assert.strictEqual((yield* db.resolveSession("ffffffff").pipe(Effect.flip))._tag, "NoSuchSession")
+      }),
+    )
+
+    test(
       "provenance and shared directories: descends follows parents upward; sharers are live sessions of one directory",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.insertSession(sessionRow("p1", { createdAt: 1 }), "s", undefined, "/w/1")
-        yield* db.insertSession(sessionRow("c1", { createdAt: 2 }), "s", undefined, "/w/1", undefined, "p1")
-        yield* db.insertSession(sessionRow("g1", { createdAt: 3 }), "s", undefined, "/w/2", undefined, "c1")
+        yield* db.insertSession(sessionRow("p1", { createdAt: 1 }), S, undefined, "/w/1")
+        yield* db.insertSession(sessionRow("c1", { createdAt: 2 }), S, undefined, "/w/1", undefined, "p1")
+        yield* db.insertSession(sessionRow("g1", { createdAt: 3 }), S, undefined, "/w/2", undefined, "c1")
         assert.isTrue(yield* db.descends("g1", "p1"))
         assert.isFalse(yield* db.descends("p1", "g1"))
         assert.strictEqual(yield* db.parentOf("c1"), "p1")
@@ -92,7 +119,7 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "processes: one end per process; a restart keeps the open turn and its conversation; ended ones leave the live list",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.insertSession(sessionRow("a1", { harnessSessionId: "conv-1" }), "s")
+        yield* db.insertSession(sessionRow("a1", { harnessSessionId: "conv-1" }), S)
         yield* db.updateSession("a1", { turnState: "open", turnPromptedAt: 5 })
         assert.strictEqual(yield* db.readyAt("a1"), undefined)
         yield* db.patchLive("a1", { ready: 7, pid: 42 })
@@ -119,8 +146,8 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "turns: a typed turn is taken; one end per turn; a result goes to the senders the turn consumed",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.insertSession(sessionRow("a1"), "s")
-        yield* db.insertSession(sessionRow("b1"), "s")
+        yield* db.insertSession(sessionRow("a1"), S)
+        yield* db.insertSession(sessionRow("b1"), S)
         assert.isTrue(yield* db.beginUserTurn("a1", "hello", {}))
         assert.isFalse(yield* db.beginUserTurn("a1", "again", {}))
         assert.isTrue(yield* db.turnTaken("a1"))
@@ -161,7 +188,7 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "inbox: a claim is exclusive, even when many race for the same rows; a guarded move needs the status it names",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.insertSession(sessionRow("a1"), "s")
+        yield* db.insertSession(sessionRow("a1"), S)
         const rows = yield* Effect.forEach(["one", "two", "three"], (m) => db.insertSend("a1", m))
         const ids = rows.map((r) => r!.id)
         const claims = yield* Effect.all(
@@ -193,17 +220,17 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "the user: a notice with no owner is the user's; userInbox reads a scope's, and marks them read",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.insertSession(sessionRow("a1"), "s")
-        yield* db.insertSession(sessionRow("b1"), "other")
+        yield* db.insertSession(sessionRow("a1"), S)
+        yield* db.insertSession(sessionRow("b1"), OTHER)
         assert.deepStrictEqual(yield* db.noticeTo("a1"), [null])
         yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "hi", details: {} })
         yield* db.insertInbox({ sessionId: "b1", kind: "notice", message: "elsewhere", details: {} })
         assert.deepStrictEqual(
-          (yield* db.userInbox("s", false)).map((r) => r.message),
+          (yield* db.userInbox(S, false)).map((r) => r.message),
           ["hi"],
         )
-        assert.lengthOf(yield* db.userInbox("s", true), 1)
-        assert.deepStrictEqual(yield* db.userInbox("s", false), [])
+        assert.lengthOf(yield* db.userInbox(S, true), 1)
+        assert.deepStrictEqual(yield* db.userInbox(S, false), [])
         // No recipient at all: kept as the sender's own, dropped.
         const [own] = yield* db.insertInbox({ sessionId: "a1", kind: "report", message: "x", details: {} }, [])
         assert.strictEqual(own?.status, "dropped")
@@ -214,15 +241,15 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "owners: a scope's owner gets its rows while it has a place, claims are guarded by that place, leases settle",
       Effect.gen(function* () {
         const db = yield* Storage
-        const started = yield* db.startOwner("s", "pi", false, place("o1"), { directory: "/repo" })
-        yield* db.insertSession(sessionRow("a1"), "s")
-        const owner = (yield* db.ownerOf("s"))!
+        const started = yield* db.startOwner(S, "pi", false, place("o1"), { directory: "/repo" })
+        yield* db.insertSession(sessionRow("a1"), S)
+        const owner = (yield* db.ownerOf(S))!
         assert.strictEqual(owner.id, started.sessionId)
         assert.strictEqual(owner.directory, "/repo")
-        assert.strictEqual(yield* db.ownerAt(RUNTIME, place("o1").address), "s")
+        assert.strictEqual(yield* db.ownerAt(RUNTIME, place("o1").address), S)
         assert.deepStrictEqual(
           (yield* db.owners).map((o) => o.scope),
-          ["s"],
+          [S],
         )
         assert.isTrue((yield* db.sessionIdentity(started.sessionId))?.owner)
         assert.deepStrictEqual(
@@ -232,30 +259,27 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
         assert.deepStrictEqual(yield* db.noticeTo("a1"), [started.sessionId])
         const [notice] = yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n1", details: {} })
         assert.deepStrictEqual(
-          (yield* db.ownerPending("s")).map((r) => r.id),
+          (yield* db.ownerPending(S)).map((r) => r.id),
           [notice!.id],
         )
-        assert.deepStrictEqual(yield* db.pendingScopes, ["s"])
+        assert.deepStrictEqual(yield* db.pendingScopes, [S])
         // The owner's own rows are the owner's inbox, not what it takes as a session.
         assert.deepStrictEqual(yield* db.pendingInbox(started.sessionId), [])
         const address = encodeAddress(place("o1").address)
+        assert.deepStrictEqual(yield* db.claim([notice!.id], { scope: S, runtime: RUNTIME, address: "elsewhere" }), [])
+        assert.deepStrictEqual(yield* db.claim([notice!.id], { scope: S, runtime: RUNTIME, address }), [notice!.id])
+        assert.deepStrictEqual(yield* db.releaseLeased(S, [notice!.id]), [notice!.id])
+        yield* db.claim([notice!.id], { scope: S, runtime: RUNTIME, address })
         assert.deepStrictEqual(
-          yield* db.claim([notice!.id], { scope: "s", runtime: RUNTIME, address: "elsewhere" }),
-          [],
-        )
-        assert.deepStrictEqual(yield* db.claim([notice!.id], { scope: "s", runtime: RUNTIME, address }), [notice!.id])
-        assert.deepStrictEqual(yield* db.releaseLeased("s", [notice!.id]), [notice!.id])
-        yield* db.claim([notice!.id], { scope: "s", runtime: RUNTIME, address })
-        assert.deepStrictEqual(
-          (yield* db.settleLeased("s", [notice!.id], [])).map((r) => r.id),
+          (yield* db.settleLeased(S, [notice!.id], [])).map((r) => r.id),
           [notice!.id],
         )
-        assert.deepStrictEqual(yield* db.settleLeased("other", [notice!.id], []), [])
+        assert.deepStrictEqual(yield* db.settleLeased(OTHER, [notice!.id], []), [])
         // Its place gone: the owner-bound rows waiting for it drop, and a new one to it is dropped at once.
         yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n2", details: {} })
         yield* db.clearOwnerAt(RUNTIME, place("o1").address)
-        assert.strictEqual((yield* db.ownerOf("s"))?.runtime, null)
-        assert.deepStrictEqual(yield* db.ownerPending("s"), [])
+        assert.strictEqual((yield* db.ownerOf(S))?.runtime, null)
+        assert.deepStrictEqual(yield* db.ownerPending(S), [])
         const [late] = yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n3", details: {} })
         assert.strictEqual(late?.status, "dropped")
       }),
@@ -265,25 +289,25 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "owners: the same harness continues its conversation; a fresh start replaces the owner, which stays readable",
       Effect.gen(function* () {
         const db = yield* Storage
-        const first = yield* db.startOwner("s", "pi", false, place("o1"))
+        const first = yield* db.startOwner(S, "pi", false, place("o1"))
         yield* db.reportOwnerConversation(first.sessionId, "pi", "conv-1")
         yield* db.reportOwnerConversation(first.sessionId, "claude", "ignored")
-        const again = yield* db.startOwner("s", "pi", false, place("o2"))
+        const again = yield* db.startOwner(S, "pi", false, place("o2"))
         assert.deepStrictEqual(again, { sessionId: first.sessionId, harnessSessionId: "conv-1" })
         assert.strictEqual(yield* db.ownerAt(RUNTIME, place("o1").address), undefined)
         // Another scope's owner starting at the same place takes it.
-        yield* db.startOwner("t", "pi", false, place("o2"))
-        assert.strictEqual((yield* db.ownerOf("s"))?.runtime, null)
-        const fresh = yield* db.startOwner("s", "pi", true, place("o3"))
+        yield* db.startOwner(OTHER, "pi", false, place("o2"))
+        assert.strictEqual((yield* db.ownerOf(S))?.runtime, null)
+        const fresh = yield* db.startOwner(S, "pi", true, place("o3"))
         assert.notStrictEqual(fresh.sessionId, first.sessionId)
         assert.strictEqual(fresh.harnessSessionId, null)
         assert.strictEqual((yield* db.getSession(first.sessionId))?.id, first.sessionId)
-        assert.strictEqual((yield* db.ownerOf("s"))?.id, fresh.sessionId)
+        assert.strictEqual((yield* db.ownerOf(S))?.id, fresh.sessionId)
         // Moving: no place while it moves, and its rows wait for the next start there.
-        assert.isTrue(yield* db.detachOwner("s", RUNTIME, place("o3").address))
-        assert.strictEqual((yield* db.ownerOf("s"))?.runtime, null)
-        yield* db.reattachOwner("s", RUNTIME, place("o3").address)
-        assert.strictEqual((yield* db.ownerOf("s"))?.runtime, RUNTIME)
+        assert.isTrue(yield* db.detachOwner(S, RUNTIME, place("o3").address))
+        assert.strictEqual((yield* db.ownerOf(S))?.runtime, null)
+        yield* db.reattachOwner(S, RUNTIME, place("o3").address)
+        assert.strictEqual((yield* db.ownerOf(S))?.runtime, RUNTIME)
       }),
     )
 
@@ -291,15 +315,15 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       "after a restart: an owner's cut-off claims go back to pending when it polls, else fail; a session's stay",
       Effect.gen(function* () {
         const db = yield* Storage
-        yield* db.startOwner("s", "pi", false, place("o1"))
-        yield* db.insertSession(sessionRow("a1"), "s")
+        yield* db.startOwner(S, "pi", false, place("o1"))
+        yield* db.insertSession(sessionRow("a1"), S)
         const [n] = yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n", details: {} })
         const sent = (yield* db.insertSend("a1", "m"))!
         yield* db.claim([n!.id, sent.id])
         assert.lengthOf(yield* db.sendingInbox, 2)
         yield* db.recoverSending(["pi"])
         assert.deepStrictEqual(
-          (yield* db.ownerPending("s")).map((r) => r.id),
+          (yield* db.ownerPending(S)).map((r) => r.id),
           [n!.id],
         )
         yield* db.claim([n!.id])
@@ -317,7 +341,7 @@ export const storageConformance = (name: string, layer: Layer.Layer<Storage, unk
       Effect.gen(function* () {
         const db = yield* Storage
         const row = sessionRow("a1")
-        yield* db.insertSession(row, "s")
+        yield* db.insertSession(row, S)
         ;(row.address as { id: string }).id = "changed"
         const read = (yield* db.getSession("a1"))!
         assert.strictEqual(read.address.id, "t-a1")

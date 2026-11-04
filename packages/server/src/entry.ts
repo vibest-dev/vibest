@@ -5,5 +5,5 @@
 export * as Daemon from "./daemon.ts"
 export * as Launch from "@vibest/vibest/launch"
 export * as LocalHarnesses from "@vibest/vibest/harnesses"
-export { asData, ProjectKind } from "@vibest/vibest/project"
+export { ProjectKind } from "@vibest/vibest/project"
 export { createProject, projectRoot } from "@vibest/vibest/project-create"

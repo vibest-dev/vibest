@@ -62,8 +62,8 @@ export interface ModelLister {
 /** What a session is started with. */
 export interface LaunchInput {
   readonly worktree: string
-  /** The session's scratch directory: where a plugin harness puts per-session config it loads its integration from. */
-  readonly scratch: string
+  /** The session's project folder (VIBEST_PROJECT_DIR), which it reads and writes with its file tools. */
+  readonly projectDir: string
   /** The session's system prompt, regenerated on every start ($TMPDIR/vibest/<id>/system-prompt.md); a harness with no
    * system-prompt flag gets its text in the first prompt instead. */
   readonly systemPromptFile: string
@@ -84,6 +84,8 @@ export interface LaunchInput {
 export interface CoordinatorInput {
   /** Repository root, its working directory. */
   readonly root: string
+  /** The project folder (VIBEST_PROJECT_DIR): the one place the entry agent writes files. */
+  readonly projectDir: string
   readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null

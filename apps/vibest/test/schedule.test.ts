@@ -44,7 +44,7 @@ const failed = {
   project: "/r",
   agentType: "general",
   parentSessionId: undefined,
-  sessionId: "aaaaaaaa",
+  sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   reason: "limited" as const,
   error: "rate_limit",
   turn: "p",

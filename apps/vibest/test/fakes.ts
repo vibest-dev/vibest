@@ -191,14 +191,14 @@ export const savedSession = (sessionId: string) =>
     return main?.id === sessionId ? main.harnessSessionId : null
   })
 
-/** vibest's project id for scope `key` (what VIBEST_PROJECT_ID names). */
-export const projectNumber = (key: string) => Effect.flatMap(SqliteStorage.ProjectStore, (p) => p.projectId(key))
+/** vibest's project id for scope `scope` (what VIBEST_PROJECT_ID names): the scope is the project id. */
+export const projectNumber = (scope: string) => Effect.succeed(scope)
 
-/** `Storage.startOwner` as vibest's main agent start: with its scope and project id. */
+/** `Storage.startOwner` as vibest's main agent start: its scope is its project id (what VIBEST_PROJECT_ID names). */
 export const launchMain = (key: string, ...rest: Tail<Parameters<Storage["Service"]["startOwner"]>>) =>
   Effect.gen(function* () {
     const saved = yield* (yield* Storage).startOwner(key, ...rest)
-    return { ...saved, scope: key, projectId: yield* projectNumber(key) }
+    return { ...saved, scope: key, projectId: key }
   })
 type Tail<T extends ReadonlyArray<unknown>> = T extends readonly [unknown, ...infer R] ? R : never
 
@@ -229,6 +229,16 @@ export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS e
     CASE WHEN te.id IS NULL THEN 'working' ELSE json_extract(te.data, '$.status') END AS status,
     (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
+
+/** A project id to group test sessions under (the SQLite store makes the project row on first use). */
+export const R = "0e0e0000-0e0e-40e0-80e0-0e0e0000000r"
+
+/** The project at `directory`, created on first use: the one vibestd resolves for a repository at that realpath. */
+export const projectOf = (directory: string) =>
+  Effect.gen(function* () {
+    const db = yield* SqliteStorage.ProjectStore
+    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
+  })
 
 /** A real-path temp directory, removed with the scope. */
 export const tempDirectory = (prefix: string) =>

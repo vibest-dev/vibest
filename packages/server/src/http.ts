@@ -43,7 +43,7 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { ProjectStore } from "@vibest/vibest/sqlite-storage"
+import { guardArea } from "@vibest/vibest/guard-area"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -75,7 +75,6 @@ const HookBody = Schema.fromJsonString(
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
   const db = yield* Storage
-  const projects = yield* ProjectStore
   const inbox = yield* Inbox
   const sessions = yield* Sessions
   const drain = yield* Drain
@@ -102,10 +101,10 @@ export const make = Effect.gen(function* () {
       const sessionId = header(headers, SESSION_HEADER)
       const found = sessionId ? yield* db.sessionIdentity(sessionId) : undefined
       if (!found) return failure(404, `no session ${sessionId ?? "(no vibest-session-id)"}`)
-      // The session's scope is its project's key; its environment names the project by id (VIBEST_PROJECT_ID).
-      const row = { ...found, entry: found.owner, projectId: yield* projects.projectId(found.scope) }
+      // The session's scope is its project's id; its environment names it (VIBEST_PROJECT_ID).
+      const row = { ...found, entry: found.owner, projectId: found.scope }
       const project = header(headers, PROJECT_HEADER)
-      if (project !== String(row.projectId))
+      if (project !== row.projectId)
         return failure(403, `session ${row.id} is not in project ${project ?? "(no vibest-project-id)"}`)
       // A process of another harness under this session id (an old main agent after a switch) changes nothing.
       const harness = header(headers, HARNESS_HEADER)
@@ -160,10 +159,10 @@ export const make = Effect.gen(function* () {
             Effect.catch((e) => Effect.succeed(failure(500, `the event was not recorded: ${String(e)}`))),
           ),
         )
-      // vibest's guard area: its home and projects directory, and the session's own project's scratch directory.
+      // vibest's guard area: its home and projects directory, and the caller's own project folder (VIBEST_PROJECT_DIR).
       const guard = (tool: Guard.ToolCall) =>
         Effect.gen(function* () {
-          const area = { home: layout.home, protected: layout.projects, allowed: layout.scratch(who.scope) }
+          const area = guardArea(layout, layout.project(who.scope))
           return yield* Guard.check(agents.ofSession(who).tools, tool).pipe(
             Effect.provideService(Guard.GuardArea, area),
             Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),

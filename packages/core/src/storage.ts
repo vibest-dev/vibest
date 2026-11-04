@@ -1,5 +1,7 @@
 import { MessageStatus } from "@vibest/schema/model"
 import {
+  type AmbiguousSession,
+  type NoSuchSession,
   RuntimeAddress,
   type InboxKind,
   type InboxRow,
@@ -180,7 +182,14 @@ export interface StorageShape {
     reportToSessionId?: string,
     taskPending?: boolean,
   ) => Effect.Effect<boolean>
-  readonly sessionExists: (id: string) => Effect.Effect<boolean>
+  /**
+   * The session `input` names: its full id, or a prefix of at least 8 characters that exactly one session's id starts
+   * with (as people see ids: their first 8). A shorter or unknown one is NoSuchSession; one more ids start with is
+   * AmbiguousSession.
+   */
+  readonly resolveSession: (input: string) => Effect.Effect<string, NoSuchSession | AmbiguousSession>
+  /** A new session id (UUIDv4): no other session's id starts with its first 8 characters. */
+  readonly newSessionId: Effect.Effect<string>
   /** Any session, the owner's too: its scope, definition, current harness, and whether it owns its scope. */
   readonly sessionIdentity: (
     id: string,

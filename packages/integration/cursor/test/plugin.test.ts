@@ -38,7 +38,7 @@ const run = (event: string, env: Record<string, string>, stdin = "{}") => {
   }
 }
 
-const agent = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234" }
+const agent = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
 
 describe("@vibest/cursor", () => {
   it("hooks the guard fail-closed, the prompt, and both turn-end events", () => {

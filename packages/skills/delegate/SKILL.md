@@ -28,7 +28,7 @@ vibest run <harness> --title '<Title>' --archive-on-completion -- '<task>'
 - Each session gets its own new worktree.
 - Several `vibest run` commands in one message start in parallel.
 - A subagent cannot see this conversation. Say what to achieve, where (paths, lines), what done means, and how to verify it. For code: run the tests and typecheck, commit, and report the branch and hash.
-- Long material: `vibest project write scratch <name>.md --if-version new -- '<text>'`. The absolute path is `scratchPath` from `vibest project info`, plus the file name. If write says the file already exists, `vibest project read scratch <name>.md`, then write again with the version it prints, or pick a new file name.
+- Long material: write it with your file tool to `$VIBEST_PROJECT_DIR/artifacts/<name>.md` (a new file name if that one exists) and give the agent its absolute path: the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name.
 - If the user approved a specific action, quote their exact words.
 
 ## After you start
@@ -59,7 +59,7 @@ Then say what changed, the evidence, and the branch. `<id>` is the id the run pr
 
 - Archive a research agent with `vibest archive <id>` once its findings are saved, or start that session with `--archive-on-completion` when you will not message it again. Same for a review or verification you will not continue.
 - Keep an agent that changed code until the user asks to remove it. Archiving keeps the branch, and the worktree whenever it holds unsaved work. `vibest archive --keep-worktree <id>` only when the user wants the directory kept.
-- A `## Remember` section: `vibest project write memory <name>.md --if-version new -- '<lesson>'`. If write says the file already exists, `vibest project read memory <name>.md`, then write again with the version it prints, or pick a new file name.
+- A `## Remember` section: write each lesson with your file tool to `$VIBEST_PROJECT_DIR/memories/<name>.md`, one lesson per file; edit the file when a lesson there changes. Every agent's system prompt carries these files.
 
 ## The user steps into a pane
 

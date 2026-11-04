@@ -9,7 +9,7 @@ import path from "node:path"
 
 import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
-import { agentModel, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
+import { agentModel, agentName, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 type Message = { role: string; content: unknown }
@@ -143,7 +143,7 @@ const heldModel = () => {
 }
 
 /** A git repository of its own under the world's root: a project of its own, so its main agent is this check's. */
-const project = async (w: World, name: string) => {
+export const project = async (w: World, name: string) => {
   const repo = path.join(w.root, name)
   await fs.mkdir(repo, { recursive: true })
   for (const argv of [
@@ -157,7 +157,7 @@ const project = async (w: World, name: string) => {
 }
 
 /** A PI_CODING_AGENT_DIR whose only model is the fake one at `url`. */
-const piDir = async (w: World, name: string, url: string) => {
+export const piDir = async (w: World, name: string, url: string) => {
   const dir = path.join(w.root, name)
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(
@@ -178,7 +178,7 @@ const piDir = async (w: World, name: string, url: string) => {
 }
 
 /** Stops and deletes a herdr session this check started, as World.close does for the run's own. */
-const dropHerdrSession = async (w: World, session: string) => {
+export const dropHerdrSession = async (w: World, session: string) => {
   if (
     await fs.stat(path.join(w.home, ".config", "herdr", "sessions", session)).then(
       () => true,
@@ -290,7 +290,8 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof fakeM
   /** One result from subagent `sub` reaches the main agent: its line as the prompt, its full text as context. */
   const result = async (sub: string, title: string, marker: string, before: number) => {
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
-    return shown(`General Agent "${title}" completed (${sub})`, marker)
+    // The line names the subagent by the first 8 characters of its id.
+    return shown(`General Agent "${title}" completed (${sub.slice(0, 8)})`, marker)
   }
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
   const typeIn = async (text: string) => {
@@ -432,7 +433,7 @@ const checks: ReadonlyArray<Check> = [
           [a, "Answer probe alpha"],
           [b, "Answer probe beta"],
         ] as const) {
-          const line = `General Agent "${title}" completed (${sub})`
+          const line = `General Agent "${title}" completed (${sub.slice(0, 8)})`
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
@@ -507,7 +508,7 @@ const checks: ReadonlyArray<Check> = [
           `ack answered ${acked.status}: ${JSON.stringify(acked.body)}`,
         )
         expect(status(id) === "delivered", `after the ack the row is ${status(id)}`)
-        const other = await curl(w, "/inbox/poll", { ...who, projectId: 999_999 })
+        const other = await curl(w, "/inbox/poll", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
         expect(other.status === 403, `another project's poll answered ${other.status}`)
         const old = await curl(w, "/inbox/poll", { ...who, protocol: "3" })
         expect(
@@ -616,7 +617,7 @@ const checks: ReadonlyArray<Check> = [
         await until("the subagent's turn held by the model", () => model.held() > 0, 60_000)
         const named = async () =>
           ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
-            (a) => a.name === `s-${sub}`,
+            (a) => a.name === agentName(sub),
           )
         const exited = () =>
           row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
@@ -626,7 +627,7 @@ const checks: ReadonlyArray<Check> = [
           await Bun.sleep(5_000)
           const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
           expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
-          expect(await named(), `herdr no longer names the subagent s-${sub}; vibestd.log:\n${await log()}`)
+          expect(await named(), `herdr no longer names the subagent ${agentName(sub)}; vibestd.log:\n${await log()}`)
         }
         const peek = await w.vibest(["peek", sub], { cwd: repo })
         expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
@@ -640,6 +641,65 @@ const checks: ReadonlyArray<Check> = [
             ).includes("done-held"),
           60_000,
         )
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S20",
+    title:
+      "ids: vibest run answers a UUID, herdr names the agent s-<30 hex>, result takes 8 characters and peek 12, and the system prompt is $TMPDIR/vibest/<id>/system-prompt.md",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = heldModel()
+      model.release()
+      const session = `${w.herdrSession}-ids`
+      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      try {
+        const repo = await project(w, "ids")
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
+        const zdot = path.join(w.root, "zdotdir-ids")
+        await fs.mkdir(zdot, { recursive: true })
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        const sub = (
+          JSON.parse(
+            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("ids")], {
+              cwd: repo,
+              timeoutMs: 60_000,
+            }),
+          ) as { id: string }
+        ).id
+        expect(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(sub), `run answered ${sub}`)
+        await until(
+          `herdr names ${agentName(sub)}`,
+          async () =>
+            ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
+              (a) => a.name === agentName(sub),
+            ),
+          60_000,
+        )
+        await until(
+          "the result by its first 8 characters",
+          async () =>
+            (
+              (await w.json<{ result?: { message?: string } | null }>(["result", sub.slice(0, 8)], { cwd: repo }))
+                .result?.message ?? ""
+            ).includes("done-ids"),
+          60_000,
+        )
+        const peek = await w.vibest(["peek", sub.slice(0, 12)], { cwd: repo })
+        expect(peek.code === 0, `vibest peek ${sub.slice(0, 12)} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
+        const prompt = path.join(w.root, "tmp", "vibest", sub, "system-prompt.md")
+        expect(await Bun.file(prompt).exists(), `no ${prompt}`)
+        const short = await w.vibest(["result", sub.slice(0, 7)], { cwd: repo })
+        expect(short.code !== 0 && short.stderr.includes("at least 8"), `7 characters: ${short.code} ${short.stderr}`)
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

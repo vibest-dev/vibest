@@ -7,7 +7,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { Storage } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
-import { mainCheckout, repositoryKey } from "@vibest/vibest/worktree"
+import { mainCheckout } from "@vibest/vibest/worktree"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -21,13 +21,14 @@ import {
   type TestServices,
   until,
   harnessChoice,
+  projectOf,
 } from "./fakes.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
-  Effect.map(repositoryKey(repo), (key) => ({
+  Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
-    key,
+    key: projectId,
     name: "task",
     prompt: extra.prompt ?? "do it",
     ...extra,

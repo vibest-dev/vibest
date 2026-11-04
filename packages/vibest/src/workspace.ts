@@ -14,7 +14,6 @@ import {
   projectRoot,
   workspaceGit,
 } from "./project-create.ts"
-import { ProjectStore } from "./sqlite-storage.ts"
 import {
   addWorktree,
   allocationParentBlocked,
@@ -39,7 +38,6 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const platform = yield* Effect.context<Platform>()
     const layout = yield* Layout
-    const projects = yield* ProjectStore
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto
@@ -78,7 +76,7 @@ export const layer = Layer.effect(
             : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
           if (!safeRepositoryDirectory(repository))
             return yield* refuse(
-              `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
+              `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
             )
           const parentPath = path.join(layout.worktrees, repository)
           if (
@@ -242,15 +240,15 @@ export const layer = Layer.effect(
       mainCheckout: (directory) => run(mainCheckout(directory)),
       reserve,
       prepare,
-      // The project's scratch directory: the one place under the projects directory its sessions' guard lets them use.
-      // The project's id goes with its files directory: a session's environment names its project (VIBEST_PROJECT_ID).
+      // The project folder (a scope is a project id): the one place under the projects directory its sessions' guard
+      // lets them use, with its artifacts/ made (a harness's --add-dir must exist). A session's environment names its
+      // project (VIBEST_PROJECT_ID) and its folder (VIBEST_PROJECT_DIR).
       files: (key) =>
         Effect.gen(function* () {
-          yield* fs.makeDirectory(layout.scratch(key), { recursive: true })
-          const project = yield* projects.projectId(key)
+          yield* fs.makeDirectory(layout.artifacts(key), { recursive: true })
           return {
-            directory: layout.scratch(key),
-            env: { VIBEST_SCRATCH: layout.scratch(key), VIBEST_PROJECT_ID: String(project) },
+            directory: layout.project(key),
+            env: { VIBEST_PROJECT_DIR: layout.project(key), VIBEST_PROJECT_ID: key },
           }
         }),
       state: (at) => run(gitState(at)),

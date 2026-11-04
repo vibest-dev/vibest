@@ -36,7 +36,7 @@ every script check on that install, a skip failing the run (tools/verify/README.
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Daemon        | `vibest status` auto-start, `daemon restart`, the lock against a second daemon, `update` replacement with agents working (they keep running)        |
 | Protocol      | an old protocol header is refused; caller roles (`VIBEST_AGENT`, `VIBEST_SESSION_ID`) are checked                                                   |
-| Project store | `project info/list/read/search/write/delete` with `ifVersion` conflicts, secret refusal, across a daemon restart                                    |
+| Project store | `project info` and `search`; agents write and read the project folder with file tools, another project refused                                      |
 | Plugins       | `plugins` lists a routing plugin; edit it on disk and see the reload; a refusing plugin blocks `run`                                                |
 | Integrations  | each harness loads vibest's plugin from the built `harnesses/` (`pi -e`, `--plugin-dir`) beside the user's own; `doctor` without `VIBEST_HARNESSES` |
 | Guard         | the hook script denies `vibest rm` / project-store paths for a worker and allows them for the coordinator                                           |

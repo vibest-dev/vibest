@@ -144,8 +144,8 @@ Status: now.
 
 _Workers cannot escape their role._
 
-- A worker running `vibest run`, `vibest archive`, or reading the Project store's `docs/` and `memory/` directly is
-  refused by the guard in its own CLI (Claude, Pi, Cursor each).
+- A worker running `vibest run` or `vibest archive`, or reading another Project's folder, is refused by the guard in
+  its own CLI (Claude, Pi, Cursor each); its own project folder it reads and writes with its file tools.
 - `VIBEST_MAX_SESSIONS=2`: the third `run` gets `LimitReached`.
 - Typing into a worker's pane by hand works and does not interrupt the main conversation.
 
@@ -155,8 +155,7 @@ Status: now.
 
 _Workers share Project knowledge, and a plugin picks the harness for me._
 
-- The main Agent writes `memory/decisions.md` with `vibest project write`; a worker's rules include it; a stale
-  `ifVersion` write is refused.
+- The main Agent writes `memories/decisions.md` in the project folder with its file tool; a worker's rules include it.
 - A routing plugin in `$VIBEST_HOME/plugins` picks Cursor for `test`-related tasks; `vibest plugins` shows its calls;
   editing the plugin file changes the choice without a daemon restart; a plugin that refuses blocks the run with its
   reason.
@@ -168,8 +167,8 @@ Status: now.
 _I work across several repositories. Each keeps its own Project knowledge and worktrees, the same repository is one
 Project wherever I stand in it, and I can run agents in two repositories at once without them mixing._
 
-Today a Project is one repository, keyed by `VIBEST_PROJECT_KEY`, else its normalized `origin` URL, else a hash of the
-main checkout's real path. Composing several repositories into one Project directory is milestone M7.
+A Project is found by the realpath of its main checkout (or of a directory of repositories), never by its `origin`;
+`origin` only recognizes a checkout that moved (docs/design/schema.md, Projects).
 
 Fixture, beside `shop`:
 
@@ -179,19 +178,18 @@ Fixture, beside `shop`:
 - `shop-copy`: a second clone of `shop`'s `origin`.
 - `shop-wt`: a linked worktree of `shop` (`git worktree add`).
 
-| Step                                                                                                           | Expect                                                                                                                               |
-| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| in `shop`: `vibest project write --if-version new docs a.md A-<nonce>`; in `admin`: `vibest project list docs` | `admin` has no `docs/a.md`; `project info` shows a different `scratchPath`                                                           |
-| `vibest project read docs a.md` in `shop/src` and in `shop-wt`                                                 | `A-<nonce>` both times: a subdirectory and a linked worktree are `shop`'s Project                                                    |
-| `vibest project info` / `list docs` in `shop/vendor/sdk`                                                       | its own Project, without `docs/a.md`                                                                                                 |
-| in `notes`: write, then `project info` twice                                                                   | works without an `origin`; the same Project both times                                                                               |
-| move `notes` to `notes-moved`; `project list docs`                                                             | a new, empty Project (the key is the path)                                                                                           |
-| `vibest project read docs a.md` in `shop-copy`                                                                 | `A-<nonce>`: clones of one `origin` share a Project (current design)                                                                 |
-| `VIBEST_PROJECT_KEY=team` in `shop` and in `admin`: write in one, read in the other                            | one shared Project                                                                                                                   |
-| `vibest run cursor -- "<task>; reply DONE-<nonce1>"` in `shop` and `… DONE-<nonce2>` in `admin`, back to back  | two rows in `vibest ls`, each with its own repository; each worktree is a checkout of its own `origin` (`git remote get-url origin`) |
-| wait for both                                                                                                  | `vibest result <id>` holds the right nonce for each; neither result reached the other's repository                                   |
-| the `shop` worktree                                                                                            | does not contain `vendor/sdk` (a nested repository is never copied)                                                                  |
-| `vibest archive` both                                                                                          | both panes closed, worktrees removed, branches kept                                                                                  |
+| Step                                                                                                            | Expect                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| in `shop`: write `docs/a.md` (`A-<nonce>`) in the folder `vibest project info` names; `project info` in `admin` | `admin`'s folder is another one, without `docs/a.md`                                                                                 |
+| `vibest project info` in `shop/src` and in `shop-wt`                                                            | `shop`'s folder both times: a subdirectory and a linked worktree are `shop`'s Project                                                |
+| `vibest project info` in `shop/vendor/sdk`                                                                      | its own Project, without `docs/a.md`                                                                                                 |
+| in `notes`: write, then `project info` twice                                                                    | works without an `origin`; the same Project both times                                                                               |
+| move `notes` to `notes-moved`; `project info`                                                                   | a new, empty Project (no `origin` to recognize the move by)                                                                          |
+| `vibest project info` in `shop-copy`                                                                            | another folder: another clone of one `origin` is another Project                                                                     |
+| `vibest run cursor -- "<task>; reply DONE-<nonce1>"` in `shop` and `… DONE-<nonce2>` in `admin`, back to back   | two rows in `vibest ls`, each with its own repository; each worktree is a checkout of its own `origin` (`git remote get-url origin`) |
+| wait for both                                                                                                   | `vibest result <id>` holds the right nonce for each; neither result reached the other's repository                                   |
+| the `shop` worktree                                                                                             | does not contain `vendor/sdk` (a nested repository is never copied)                                                                  |
+| `vibest archive` both                                                                                           | both panes closed, worktrees removed, branches kept                                                                                  |
 
 Status: now, except the M7 rows below.
 

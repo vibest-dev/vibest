@@ -1,6 +1,6 @@
 {
   "name": "@vibest/claude",
-  "version": "0.0.1-beta.16",
+  "version": "0.0.1-beta.17",
   "private": true,
   "description": "VIBEST for Claude Code: native turn-end reports, the tool guard, and the coordinator inbox.",
   "license": "MIT",

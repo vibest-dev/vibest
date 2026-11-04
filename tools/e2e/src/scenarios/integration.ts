@@ -7,7 +7,18 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { agentModel, binary, compiled, expect, harnesses, knownSessions, Skip, until, type World } from "../world.ts"
+import {
+  agentModel,
+  agentName,
+  binary,
+  compiled,
+  expect,
+  harnesses,
+  knownSessions,
+  Skip,
+  until,
+  type World,
+} from "../world.ts"
 
 /**
  * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
@@ -194,9 +205,9 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       const cwd = await workdir(w, "pi-turn")
-      const id = "e2e00003"
+      const id = "e2e00003-e2e0-4e2e-8e2e-e2e00003e2e0"
       // The extension sends its turn end to vibestd, which writes the result for a session it knows.
-      const project = await knownSessions(w, "e2e/i3", { [id]: "general" }, cwd, "pi")
+      const project = await knownSessions(w, { [id]: "general" }, cwd, "pi")
       // The user's own Pi config (its login and extensions); --no-session keeps the conversation out of it.
       const r = await untilResult(w, id, (marker) =>
         w.run(
@@ -239,9 +250,9 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       if (!Bun.which("claude")) throw new Skip("claude not on PATH")
       const cwd = await workdir(w, "claude-turn")
-      const id = "e2e00004"
+      const id = "e2e00004-e2e0-4e2e-8e2e-e2e00004e2e0"
       // The plugin talks to vibestd over HTTP, which answers only a session it knows.
-      const project = await knownSessions(w, "e2e/i4", { [id]: "general" }, cwd)
+      const project = await knownSessions(w, { [id]: "general" }, cwd)
       // The user's own Claude config (its login and plugins); --no-session-persistence keeps the conversation out of it.
       const r = await w.run(
         cwd,
@@ -326,9 +337,9 @@ const checks: ReadonlyArray<Check> = [
         `#!/bin/sh\nin=$(cat)\nout=$(printf '%s' "$in" | "${binary}" "$@" 2>>"${calls}"); code=$?\nprintf '%s => %s (exit %s) <= %s\\n' "$*" "$out" "$code" "$in" >> "${calls}"\nprintf '%s\\n' "$out"\nexit $code\n`,
         { mode: 0o755 },
       )
-      const id = "e2e00005"
+      const id = "e2e00005-e2e0-4e2e-8e2e-e2e00005e2e0"
       // `vibest integration event` sends each hook to vibestd, which writes the result for a session it knows.
-      const project = await knownSessions(w, "e2e/i5", { [id]: "general" }, cwd, "cursor")
+      const project = await knownSessions(w, { [id]: "general" }, cwd, "cursor")
       const r = await untilResult(w, id, (marker) =>
         w.run(
           cwd,
@@ -400,7 +411,7 @@ const checks: ReadonlyArray<Check> = [
           await w.ok(["send", id, STORY])
           await until("the story turn", settled("open"), 60_000)
           await Bun.sleep(10_000)
-          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", `s-${id}`, "esc"], {
+          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
           expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
@@ -455,13 +466,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I9",
     title:
-      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of a project's instructions.md and memory, and any herdr",
+      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of another project's instructions.md and memories, and any herdr",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const project = path.join(w.vibestHome, "projects", "e2e-guard")
-      await fs.mkdir(path.join(project, "memory"), { recursive: true })
+      await fs.mkdir(path.join(project, "memories"), { recursive: true })
       await fs.writeFile(path.join(project, "instructions.md"), "The secret word is lighthouse.\n")
-      await fs.writeFile(path.join(project, "memory", "notes.md"), "The secret word is lighthouse.\n")
+      await fs.writeFile(path.join(project, "memories", "notes.md"), "The secret word is lighthouse.\n")
       const task = [
         "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
         "expected, so make the next call after each one:",
@@ -470,7 +481,7 @@ const checks: ReadonlyArray<Check> = [
         "refusal it gives;",
         `(2) the Read tool with file_path ${path.join(project, "instructions.md")};`,
         // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
-        `(3) the Bash tool with the command: find ${path.join(project, "memory")} -name '*.md';`,
+        `(3) the Bash tool with the command: find ${path.join(project, "memories")} -name '*.md';`,
         `(4) the Bash tool with the command: grep -r secret ${project}.`,
         "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
       ].join(" ")
@@ -519,7 +530,8 @@ const checks: ReadonlyArray<Check> = [
               180_000,
             )
           }
-          const offLimits = "The project directory is off limits to sessions, except your scratchpad."
+          const offLimits =
+            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
           const want: ReadonlyArray<readonly [string, string, string]> = [
             ["Read", "instructions.md", offLimits],
             ["Bash", "find ", offLimits],

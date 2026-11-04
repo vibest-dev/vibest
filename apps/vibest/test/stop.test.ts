@@ -178,9 +178,7 @@ describe("Daemon.Stop", () => {
       const stopping = yield* Effect.forkScoped(stop(repo))
       yield* draining
       assert.strictEqual(
-        tagOf(
-          yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "a.md", content: "x", ifVersion: "new" })),
-        ),
+        tagOf(yield* Effect.exit(user.Send({ id: "00000000-0000-4000-8000-000000000000", message: "x" }))),
         "DaemonStopping",
       )
       const refused = yield* settled(stopping)
@@ -347,10 +345,9 @@ describe("Daemon.Stop", () => {
       assert.include(yield* drain.pending, "still running")
       const user = yield* cli(repo)
       assert.strictEqual(
-        tagOf(
-          yield* Effect.exit(user["Project.Write"]({ kind: "memory", path: "b.md", content: "x", ifVersion: "new" })),
-        ),
-        "success",
+        tagOf(yield* Effect.exit(user.Send({ id: "00000000-0000-4000-8000-000000000000", message: "x" }))),
+        // Admitted: it reaches the handler, which knows no such session.
+        "NoSuchSession",
       )
       yield* leave
       assert.isFalse(yield* shutdownDone)

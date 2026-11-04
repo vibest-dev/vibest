@@ -2,6 +2,7 @@
 // and ready events say, an inbox row as its result's `turn.end` says. Pure: every store implementation (vibest's SQLite
 // store, the in-memory one) reads its facts into these shapes and derives the rows the port returns here.
 import { MessageStatus } from "@vibest/schema/model"
+import { AmbiguousSession, NoSuchSession } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
 
 import {
@@ -14,11 +15,27 @@ import {
   type TurnEnd,
 } from "./storage.ts"
 
-export const newId = Effect.sync(() =>
-  Math.floor(Math.random() * 0x100000000)
-    .toString(16)
-    .padStart(8, "0"),
-)
+/**
+ * The session `input` names, given `find` (the ids that start with a prefix, sorted; at most 11): its full id, or a
+ * prefix of at least 8 characters that exactly one session's id starts with (as people see ids: their first 8).
+ */
+export const resolveSessionId = <R>(
+  input: string,
+  find: (prefix: string) => Effect.Effect<ReadonlyArray<string>, never, R>,
+) =>
+  Effect.gen(function* () {
+    if (!/^[0-9a-f-]{8,36}$/.test(input))
+      return yield* new NoSuchSession({
+        id: input,
+        message: /^[0-9a-f-]{1,7}$/.test(input)
+          ? `${input}: a session id or a prefix of at least 8 of its characters`
+          : `no session ${input}`,
+      })
+    const rows = yield* find(input)
+    if (rows.length === 0) return yield* new NoSuchSession({ id: input, message: `no session ${input}` })
+    if (rows.length > 1) return yield* new AmbiguousSession({ prefix: input, matches: rows })
+    return rows[0]!
+  })
 
 /** `process.start` data (schema.md): the choice and where it runs. An empty terminal: chosen, its terminal not open yet. */
 export type ProcessStart = {

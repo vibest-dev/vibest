@@ -1,3 +1,7 @@
+// vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
+// holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
+// database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
+// server) come from the entry through `Host`, so this file stays on effect's abstract services.
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
@@ -15,16 +19,13 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { TurnEnds } from "@vibest/core/turn-ends"
 import { VERSION } from "@vibest/protocol/rpc"
+import { newId } from "@vibest/schema/id"
 import * as ProductPlacement from "@vibest/vibest/placement"
 import { Project } from "@vibest/vibest/project"
 import * as SqliteStorage from "@vibest/vibest/sqlite-storage"
 import * as ProductPrompt from "@vibest/vibest/system-prompt"
 import * as GitWorkspace from "@vibest/vibest/workspace"
-// vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
-// holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
-// database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
-// server) come from the entry through `Host`, so this file stays on effect's abstract services.
-import { Clock, Crypto, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
+import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
 import type { HttpServer } from "effect/http/HttpServer"
 import type { SocketServer } from "effect/socket/SocketServer"
@@ -202,7 +203,7 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
     }
     const identity = {
       pid: host.processes.pid,
-      instance: yield* Effect.flatMap(Crypto.Crypto, (c) => c.randomUUIDv4).pipe(Effect.orDie),
+      instance: yield* newId(),
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }

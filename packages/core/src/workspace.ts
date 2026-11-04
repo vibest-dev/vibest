@@ -57,10 +57,10 @@ export interface Released {
 }
 
 export interface WorkspaceShape {
-  /** The project `directory` is in: its root and its key. */
+  /** The project `directory` is in: its root. */
   readonly project: (
     directory: string,
-  ) => Effect.Effect<{ readonly root: string; readonly key: string }, NotInRepository | PlatformError.PlatformError>
+  ) => Effect.Effect<{ readonly root: string }, NotInRepository | PlatformError.PlatformError>
   /** The repositories of a multi-repository project at `directory`; undefined when it is one repository (or none). */
   readonly repositories: (
     directory: string,

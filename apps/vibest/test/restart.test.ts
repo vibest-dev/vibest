@@ -9,7 +9,6 @@ import { Storage } from "@vibest/core/storage"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import { Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -24,6 +23,7 @@ import {
   untilVirtual,
   writeResult,
   launchMain,
+  projectOf,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
@@ -50,12 +50,12 @@ const started = Effect.gen(function* () {
   const db = yield* Storage
   const sessions = yield* Sessions
   const repo = yield* makeRepository
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   yield* launchMain(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
-    key,
+    key: key,
     name: "t",
     prompt: "do it",
     harness: "pi",
@@ -137,12 +137,19 @@ describe("restart in place", () => {
 
   it("a main agent's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
-    const notice = continueNotice(version, [{ id: "ab12cd34", scope: "k", ok: true, message: "" }])
+    const notice = continueNotice(version, [
+      {
+        id: "ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12",
+        scope: "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e",
+        ok: true,
+        message: "",
+      },
+    ])
     const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
     assert.include(shown, "do not run it again, continue the interrupted work.")
     assert.include(notice, `vibest is now ${version}.`)
-    assert.include(notice, "Restarted: ab12cd34.")
+    assert.include(notice, "Restarted: ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12.")
   })
 
   /** The project's main agent at `test/coord`, working, on harness `harness`, its harness pid 100. */
@@ -150,7 +157,7 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const db = yield* Storage
       const herdr = yield* FakeRuntime
-      const key = yield* repositoryKey(yield* makeRepository)
+      const key = yield* projectOf(yield* makeRepository)
       yield* launchMain(key, harness, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },

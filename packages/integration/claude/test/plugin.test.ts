@@ -44,7 +44,7 @@ type Answer = { status: number; body?: unknown } | Error
 
 const COORDINATOR = {
   VIBEST_AGENT: "coordinator",
-  VIBEST_SESSION_ID: "main0001",
+  VIBEST_SESSION_ID: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1",
   VIBEST_PROJECT_ID: "7",
   VIBEST_HOME: "/vh",
   VIBEST_RUNTIME: '{"runtime":"herdr"}',
@@ -183,7 +183,7 @@ describe("Claude plugin requests", () => {
     assert.deepInclude(poll!.headers, {
       "vibest-protocol": String(PROTOCOL),
       "vibest-caller": "session",
-      "vibest-session-id": "main0001",
+      "vibest-session-id": "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1",
       "vibest-project-id": "7",
       "vibest-harness-session-id": "c1",
       "vibest-agent": "coordinator",

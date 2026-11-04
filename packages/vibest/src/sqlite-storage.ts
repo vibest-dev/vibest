@@ -6,19 +6,20 @@ import {
   fromColumns,
   type InboxFacts,
   MESSAGE_STATUSES,
-  newId,
   type ProcessStart,
+  resolveSessionId,
   roundStatus,
   type SessionFacts,
   storedStatus,
   summaryIn,
   toInbox,
 } from "@vibest/core/read-model"
-// vibest's backend of the engine's Storage port (@vibest/core/storage): one SQLite file (docs/design/schema.md, version 2:
-// project, session, inbox, event). One schema, no migrations: an empty database gets it in one transaction; any other
-// file is accepted only when its version pragmas and required objects already match, and a version 1 file is refused,
-// naming the one-time migration script given with the release. `inspectSchema` only reads; the driver must run it on a
-// read-only connection before opening an existing file writable. One SQLite connection through effect/sql (the driver
+// vibest's backend of the engine's Storage port (@vibest/core/storage): one SQLite file (docs/design/schema.md, version 1:
+// project, project_repository, session, inbox, event). One schema, no migrations: an empty database gets it in one
+// transaction; any other file is accepted only when its version pragmas and required objects already match. A file of
+// the shape from before this baseline (it also says version 1, but has no event table) is refused, naming the one-time
+// migration script given with the release. `inspectSchema` only reads; the driver must run it on a read-only connection
+// before opening an existing file writable. A scope is a project id (`project.id`, a UUID). One SQLite connection through effect/sql (the driver
 // comes from #platform); rows are decoded with Schema; multi-row changes run in `sql.withTransaction`.
 import {
   type AgentStatus,
@@ -40,25 +41,32 @@ import {
   type TurnEnd,
   type TurnState,
 } from "@vibest/core/storage"
+import { newId } from "@vibest/schema/id"
 import { RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 /** "vibe", as a 32-bit application id. */
 export const APPLICATION_ID = 0x76696265
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 1
 
 export const SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `PRAGMA user_version = ${SCHEMA_VERSION}`,
   `CREATE TABLE project (
-    id               INTEGER PRIMARY KEY,
-    key              TEXT NOT NULL UNIQUE,
+    id               TEXT PRIMARY KEY CHECK (length(id) = 36),
+    directory        TEXT UNIQUE,
     entry_session_id TEXT REFERENCES session (id)
   ) STRICT`,
+  `CREATE TABLE project_repository (
+    project_id TEXT NOT NULL REFERENCES project (id),
+    path       TEXT NOT NULL UNIQUE,
+    remote_url TEXT
+  ) STRICT`,
+  `CREATE INDEX project_repository_project ON project_repository (project_id)`,
   `CREATE TABLE session (
     id                    TEXT PRIMARY KEY,
-    project_id            INTEGER NOT NULL REFERENCES project (id),
+    project_id            TEXT NOT NULL REFERENCES project (id),
     parent_session_id     TEXT REFERENCES session (id),
     report_to_session_id  TEXT REFERENCES session (id),
     role                  TEXT NOT NULL,
@@ -112,13 +120,15 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   version: Schema.Number,
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
+  /** vibest's own file in the shape from before this baseline (no event table). */
+  older: Schema.optional(Schema.Boolean),
   /** The database file, set by the driver that opened it. */
   file: Schema.optional(Schema.String),
 }) {
   override get message() {
     const file = this.file ?? "vibest.db"
-    if (this.applicationId === APPLICATION_ID && this.version === 1)
-      return `${file} is from an older vibest (database version 1); this vibest reads version 2 and never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
+    if (this.older)
+      return `${file} is from an older vibest (its tables are the shape from before this release); this vibest never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
     const extra = this.detail === undefined ? "" : `, ${this.detail}`
     return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}); stop vibestd and move it aside to start empty`
@@ -142,6 +152,13 @@ export const inspectSchema = Effect.gen(function* () {
   const applicationId = (yield* sql<{ applicationId: number }>`PRAGMA application_id`)[0]?.applicationId ?? 0
   const userVersion = (yield* sql<{ userVersion: number }>`PRAGMA user_version`)[0]?.userVersion ?? 0
   const missing = REQUIRED.find((object) => !rows.some((row) => row.type === object.type && row.name === object.name))
+  // The shape before this baseline carries the same pragmas; it is told apart by its tables.
+  if (
+    applicationId === APPLICATION_ID &&
+    userVersion === SCHEMA_VERSION &&
+    !rows.some((row) => row.type === "table" && row.name === "event")
+  )
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
   if (applicationId !== APPLICATION_ID || userVersion !== SCHEMA_VERSION || missing !== undefined) {
     return yield* mismatch(
       userVersion,
@@ -239,15 +256,29 @@ const make = Effect.gen(function* () {
       return row!.id
     })
 
-  /** The project row for `key`, created on first use. The no-op `DO UPDATE` makes RETURNING answer for an existing row too. */
-  const projectId = (key: string) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{ id: number }>`INSERT INTO project ${sql.insert({ key })}
-        ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`
-      return rows[0]!.id
-    })
+  /**
+   * The project row of `scope` (a project id), created with no directory when the engine names a scope vibest has not
+   * made (vibest makes its projects with `ProjectStore.createProject`). Returns the scope.
+   */
+  const projectId = (scope: string) =>
+    sql`INSERT INTO project ${sql.insert({ id: scope })} ON CONFLICT (id) DO NOTHING`.pipe(Effect.as(scope))
+  /** Some project id already starts with `short`. */
+  const projectPrefixTaken = (short: string) =>
+    sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+  /** Each repository row of project `id`; a path another project has is left to it. Its origin as git prints it now. */
+  const putRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
+    Effect.forEach(
+      repositories,
+      (
+        r,
+      ) => sql`INSERT INTO project_repository ${sql.insert({ projectId: id, path: r.path, remoteUrl: r.remote ?? null })}
+        ON CONFLICT (path) DO UPDATE SET remote_url = excluded.remote_url WHERE project_id = excluded.project_id`,
+      { discard: true },
+    )
 
-  const SESSION_COLUMNS = sql`a.id, (SELECT key FROM project WHERE id = a.project_id) AS scope, a.role, a.name, a.machine,
+  const SESSION_COLUMNS = sql`a.id, a.project_id AS scope, a.role, a.name, a.machine,
       a.archive_on_completion AS archive, a.created_at, a.ended_at,
       p.id AS p_id, p.at AS p_at, p.data AS p_data,
       (SELECT e.at FROM event e WHERE e.process_id = p.id AND e.type = 'process.end') AS p_ended,
@@ -310,7 +341,7 @@ const make = Effect.gen(function* () {
 
   const findCoordinators = (scope?: string) =>
     selectRaw([
-      sql`a.id IN (SELECT entry_session_id FROM project ${scope === undefined ? sql`` : sql`WHERE key = ${scope}`})`,
+      sql`a.id IN (SELECT entry_session_id FROM project ${scope === undefined ? sql`` : sql`WHERE id = ${scope}`})`,
     ]).pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
@@ -356,7 +387,7 @@ const make = Effect.gen(function* () {
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(sql.in("m.id", ids))
   const findSend = (sessionId: string, status: InboxStatus) =>
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
-  const entryOf = (scope: string) => sql`(SELECT entry_session_id FROM project WHERE key = ${scope})`
+  const entryOf = (scope: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${scope})`
   /**
    * What Sessions delivers to `sessionId`: its pending tasks (a polling integration's) and sends, and the results, reports and notices addressed to it
    * unless it is its project's entry session (Inbox delivers those).
@@ -632,7 +663,7 @@ const make = Effect.gen(function* () {
    */
   const insertTo = (row: NewInboxRow, recipients: ReadonlyArray<string | null>, resultEventId?: number) =>
     Effect.gen(function* () {
-      const [entry] = yield* sql<{ id: string | null; scope: string }>`SELECT p.entry_session_id AS id, p.key AS scope
+      const [entry] = yield* sql<{ id: string | null; scope: string }>`SELECT p.entry_session_id AS id, p.id AS scope
         FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${row.sessionId}`
       const ids: Array<number> = []
       for (const recipient of recipients.length === 0 ? [undefined] : recipients) {
@@ -784,13 +815,13 @@ const make = Effect.gen(function* () {
   /** Main agents whose live process is at this place (outside `except`), not moving. */
   const mainsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ id: string; scope: string }>`SELECT s.id, q.key AS scope FROM session s
+      const rows = yield* sql<{ id: string; scope: string }>`SELECT s.id, q.id AS scope FROM session s
         JOIN project q ON q.entry_session_id = s.id
         JOIN event p ON p.id = ${currentStart(sql`s.id`)}
         WHERE json_extract(p.data, '$.runtime') = ${runtime} AND json_extract(p.data, '$.machine') = ${address.machine}
           AND json_extract(p.data, '$.terminal') = ${address.id}
           AND NOT EXISTS (SELECT 1 FROM event e WHERE e.process_id = p.id AND e.type = 'process.end')
-          ${except === undefined ? sql`` : sql`AND q.key != ${except}`}`
+          ${except === undefined ? sql`` : sql`AND q.id != ${except}`}`
       return rows.filter((r) => !moving.has(r.scope))
     })
 
@@ -803,13 +834,12 @@ const make = Effect.gen(function* () {
       }
     })
 
-  const unusedId = newId.pipe(
-    Effect.flatMap((id) =>
-      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(Effect.map((rows) => (rows.length > 0 ? undefined : id))),
-    ),
-    Effect.repeat({ until: (id) => id !== undefined }),
-    Effect.map((id) => id!),
-  )
+  /** Some session id already starts with `short` (index-backed on the primary key). */
+  const sessionPrefixTaken = (short: string) =>
+    sql`SELECT 1 FROM session WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+  const unusedId = newId(sessionPrefixTaken)
 
   /** The conversation of session `id`'s current process, and that process. */
   const conversationOf = (id: string) =>
@@ -855,13 +885,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Insert a subagent of project `key`, working in `cwd` (a `--peer` records the directory it shares), with its
+     * Insert a subagent of project `scope`, working in `cwd` (a `--peer` records the directory it shares), with its
      * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
      * already running (one transaction). Its results go to its parent, or with none to the project's entry session.
      */
     insertSession: (
       row: Omit<SessionRow, "scope">,
-      key: string,
+      scope: string,
       max?: number,
       cwd = "",
       task?: string,
@@ -878,7 +908,7 @@ const make = Effect.gen(function* () {
               const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
               if (n >= max) return false
             }
-            const project = yield* projectId(key)
+            const project = yield* projectId(scope)
             const [entry] = yield* sql<{
               id: string | null
             }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
@@ -965,15 +995,20 @@ const make = Effect.gen(function* () {
         )
         .pipe(Effect.orDie),
 
-    sessionExists: (id: string) =>
-      sql`SELECT 1 FROM session WHERE id = ${id}`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
+    resolveSession: (input: string) =>
+      resolveSessionId(input, (prefix) =>
+        sql<{ id: string }>`SELECT id FROM session WHERE id >= ${prefix} AND id < ${`${prefix}~`}
+          ORDER BY id LIMIT 11`.pipe(
+          Effect.map((rows) => rows.map((r) => r.id)),
+          Effect.orDie,
+        ),
       ),
+
+    newSessionId: unusedId.pipe(Effect.orDie),
 
     /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
-      sql<{ id: string; scope: string; agent: string; harness: string; owner: number }>`SELECT a.id, q.key AS scope,
+      sql<{ id: string; scope: string; agent: string; harness: string; owner: number }>`SELECT a.id, q.id AS scope,
           coalesce(json_extract(p.data, '$.harness'), '') AS harness, a.role AS agent,
           coalesce(q.entry_session_id = a.id, 0) AS owner
         FROM session a JOIN project q ON q.id = a.project_id
@@ -1011,7 +1046,7 @@ const make = Effect.gen(function* () {
     /** `projectId` limits to one project; `stopped` includes subagents whose process is gone and ended main conversations. */
     listSessions: (filter: { scope?: string; stopped?: boolean } = {}) =>
       selectSessions(
-        filter.scope === undefined ? [] : [sql`a.project_id = (SELECT id FROM project WHERE key = ${filter.scope})`],
+        filter.scope === undefined ? [] : [sql`a.project_id = ${filter.scope}`],
         filter.stopped === true,
         filter.stopped ? undefined : running,
       ).pipe(Effect.orDie),
@@ -1078,7 +1113,7 @@ const make = Effect.gen(function* () {
      * unless it is moving here (`detachCoordinator`): then what waits for it is delivered here.
      */
     startOwner: (
-      key: string,
+      scope: string,
       harness: HarnessId,
       fresh: boolean,
       location: { readonly runtime: string; readonly address: RuntimeAddress },
@@ -1086,7 +1121,7 @@ const make = Effect.gen(function* () {
         readonly provider?: string | undefined
         readonly model?: string | undefined
         readonly routing?: unknown
-        /** The project directory. Stored as the main session's directory; never the key. */
+        /** The project directory. Stored as the main session's directory. */
         readonly directory?: string | undefined
         readonly pid?: number | undefined
       } = {},
@@ -1095,9 +1130,9 @@ const make = Effect.gen(function* () {
         const id = yield* unusedId
         return yield* sql.withTransaction(
           Effect.gen(function* () {
-            const project = yield* projectId(key)
-            yield* clearMainAt(location.runtime, location.address, key)
-            const movingHere = moving.has(key)
+            const project = yield* projectId(scope)
+            yield* clearMainAt(location.runtime, location.address, scope)
+            const movingHere = moving.has(scope)
             const [existing] = yield* sql<{
               main: string | null
             }>`SELECT entry_session_id AS main FROM project WHERE id = ${project}`
@@ -1141,8 +1176,8 @@ const make = Effect.gen(function* () {
               },
               at,
             )
-            moving.delete(key)
-            if (!movingHere || fresh) yield* dropWaiting(key)
+            moving.delete(scope)
+            if (!movingHere || fresh) yield* dropWaiting(scope)
             return { sessionId: mainId, harnessSessionId: resume ?? null }
           }),
         )
@@ -1459,7 +1494,7 @@ const make = Effect.gen(function* () {
     userInbox: (scope: string, read: boolean) =>
       Effect.gen(function* () {
         const rows = yield* inbox(sql`m.recipient_session_id IS NULL AND m.status = 'pending'
-          AND m.sender_session_id IN (SELECT id FROM session WHERE project_id = (SELECT id FROM project WHERE key = ${scope}))`)
+          AND m.sender_session_id IN (SELECT id FROM session WHERE project_id = ${scope})`)
         if (read && rows.length > 0)
           yield* moveInbox(
             sql.in(
@@ -1545,7 +1580,7 @@ const make = Effect.gen(function* () {
     /** Projects with main-Agent-bound Messages waiting (the reconcile tick). */
     pendingScopes: sql<{
       scope: string
-    }>`SELECT DISTINCT p.key AS scope FROM inbox m JOIN session s ON s.id = m.recipient_session_id
+    }>`SELECT DISTINCT p.id AS scope FROM inbox m JOIN session s ON s.id = m.recipient_session_id
       JOIN project p ON p.id = s.project_id
       WHERE m.status = 'pending' AND m.kind NOT IN ${sql.literal(TO_SESSION)}`.pipe(
       Effect.map((rows) => rows.map((r) => r.scope)),
@@ -1606,40 +1641,113 @@ const make = Effect.gen(function* () {
       ),
 
     scopeOf: (sessionId: string) =>
-      sql<{ scope: string }>`SELECT p.key AS scope FROM session s JOIN project p ON p.id = s.project_id
-        WHERE s.id = ${sessionId}`.pipe(
+      sql<{ scope: string }>`SELECT project_id AS scope FROM session WHERE id = ${sessionId}`.pipe(
         Effect.map((rows) => rows[0]?.scope),
         Effect.orDie,
       ),
   }
 
-  /** vibest's own reads of its project rows: a scope is a project's key. */
+  /** vibest's own reads and writes of its project rows: a scope is a project id. */
   const projects: ProjectStoreShape = {
-    projectId: (key: string) => projectId(key).pipe(Effect.orDie),
-
-    /** The project id for `key`, if one exists. Does not create a row. */
-    projectByKey: (key: string) =>
-      sql<{ id: number }>`SELECT id FROM project WHERE key = ${key}`.pipe(
-        Effect.map((rows) => rows[0]?.id),
+    projectAt: (root) =>
+      sql<{ id: string; directory: string | null }>`SELECT id, directory FROM project WHERE directory = ${root}
+        UNION ALL SELECT p.id, p.directory FROM project_repository r JOIN project p ON p.id = r.project_id
+          WHERE r.path = ${root} LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),
 
-    projectKey: (id: number) =>
-      sql<{ key: string }>`SELECT key FROM project WHERE id = ${id}`.pipe(
-        Effect.map((rows) => rows[0]?.key),
+    createProject: (directory, repositories) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const id = yield* newId(projectPrefixTaken)
+            // Two first requests can both miss projectAt; the second must not die on directory UNIQUE.
+            yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
+            const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+            yield* putRepositories(row!.id, repositories)
+            return row!.id
+          }),
+        )
+        .pipe(Effect.orDie),
+
+    refreshRepositories: (id, repositories) =>
+      sql.withTransaction(putRepositories(id, repositories)).pipe(Effect.orDie),
+
+    moveCandidates: (remotes) =>
+      Effect.gen(function* () {
+        const wanted = [...new Set(remotes)].sort()
+        if (wanted.length === 0) return []
+        const rows = yield* sql<{ id: string; directory: string; remote: string | null }>`SELECT p.id, p.directory,
+            r.remote_url AS remote FROM project p JOIN project_repository r ON r.project_id = p.id
+          WHERE p.directory IS NOT NULL AND p.id IN (SELECT project_id FROM project_repository WHERE ${sql.in("remote_url", wanted)})`
+        const byProject = new Map<string, { directory: string; remotes: Set<string> }>()
+        for (const row of rows) {
+          const entry = byProject.get(row.id) ?? { directory: row.directory, remotes: new Set<string>() }
+          if (row.remote !== null) entry.remotes.add(row.remote)
+          byProject.set(row.id, entry)
+        }
+        return [...byProject]
+          .filter(([, p]) => [...p.remotes].sort().join("\n") === wanted.join("\n"))
+          .map(([id, p]) => ({ id, directory: p.directory }))
+      }).pipe(Effect.orDie),
+
+    moveProject: (id, to, repositories) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
+            const from = row!.directory
+            yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
+            yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
+            yield* putRepositories(id, repositories)
+            yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
+              WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
+            return from
+          }),
+        )
+        .pipe(Effect.orDie),
+
+    projectDirectory: (id) =>
+      sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
+        Effect.map((rows) => rows[0]?.directory ?? undefined),
         Effect.orDie,
       ),
   }
   return { engine, projects }
 })
 
-/** vibest's project rows behind the engine's scopes (a scope is a project's key; `project.id` is what vibest shows). */
+/** A repository of a project as `project_repository` keeps it: its main checkout's realpath and raw origin. */
+export type RepositoryRow = { readonly path: string; readonly remote: string | undefined }
+
+/**
+ * vibest's project rows behind the engine's scopes (a scope is a project id, `project.id`, a UUID). A project is found
+ * by the realpath of its directory or of one of its repositories (docs/design/schema.md, Projects).
+ */
 export interface ProjectStoreShape {
-  /** The project id for `key`, created on first use. */
-  readonly projectId: (key: string) => Effect.Effect<number>
-  /** The project id for `key`, if one exists. Does not create a row. */
-  readonly projectByKey: (key: string) => Effect.Effect<number | undefined>
-  readonly projectKey: (id: number) => Effect.Effect<string | undefined>
+  /**
+   * The project `root` (a realpath) is: the project at that directory, else the one with a repository there (a
+   * repository of a multi-repository project belongs to it). Reads only.
+   */
+  readonly projectAt: (root: string) => Effect.Effect<{ id: string; directory: string | null } | undefined>
+  /** A new project at `directory` (a realpath) with its repositories; its id. One already there is that project. */
+  readonly createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) => Effect.Effect<string>
+  /** Project `id`'s repositories as they are now: origins refreshed, newly present ones added. */
+  readonly refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) => Effect.Effect<void>
+  /**
+   * Projects with a directory whose repositories have exactly the origins `remotes` (non-null ones, as a set): where
+   * a moved checkout came from. Whether that directory still exists is the caller's to check.
+   */
+  readonly moveCandidates: (
+    remotes: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<{ id: string; directory: string }>>
+  /**
+   * Project `id` now lives at `to` with `repositories`: its directory, its repository rows, and every session
+   * directory under its old directory move with it. Returns the old directory.
+   */
+  readonly moveProject: (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) => Effect.Effect<string>
+  /** Where project `id` is; undefined for a project with no directory (migrated without one). */
+  readonly projectDirectory: (id: string) => Effect.Effect<string | undefined>
 }
 export class ProjectStore extends Context.Service<ProjectStore, ProjectStoreShape>()("vibest/ProjectStore") {}
 
@@ -1656,7 +1764,9 @@ export const layer = Layer.effectContext(
     // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
     // The open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
-    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET key = key WHERE id < 0`))),
+    Effect.andThen(
+      SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET directory = directory WHERE id = ''`)),
+    ),
     Effect.andThen(make),
     Effect.map(({ engine, projects }) => Context.make(Storage, engine).pipe(Context.add(ProjectStore, projects))),
   ),

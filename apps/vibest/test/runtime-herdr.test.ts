@@ -185,7 +185,9 @@ const scriptedSend = (notReady: number) =>
     let refused = 0
     const { runtime, calls } = yield* scriptedRuntime((method) => {
       if (method === "agent.get")
-        return Effect.succeed({ agent: { name: "s-abcd1234", pane_id: "w1:p2", agent: "claude" } })
+        return Effect.succeed({
+          agent: { name: "s-abcd1234abcd4abc8abcabcd1234ab", pane_id: "w1:p2", agent: "claude" },
+        })
       if (method === "agent.prompt" && refused < notReady) {
         refused++
         return herdrError(method, "agent_not_ready")
@@ -193,7 +195,9 @@ const scriptedSend = (notReady: number) =>
       return Effect.succeed({})
     })
     const sending = yield* Effect.forkChild(
-      runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234"), { text: "line one\nline two" }),
+      runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234abcd4abc8abcabcd1234ab"), {
+        text: "line one\nline two",
+      }),
     )
     yield* TestClock.adjust("40 seconds")
     yield* Fiber.join(sending)
@@ -216,13 +220,13 @@ describe("send to an agent herdr started", () => {
       const { runtime, calls } = yield* scriptedRuntime((method) => {
         if (method === "agent.get") {
           if (++gets > 2) ready = true
-          return Effect.succeed({ agent: { name: "s-abcd1234", pane_id: "w1:p2", agent: "pi" } })
+          return Effect.succeed({ agent: { name: "s-abcd1234abcd4abc8abcabcd1234ab", pane_id: "w1:p2", agent: "pi" } })
         }
         if (method === "agent.prompt" && !ready) return herdrError(method, "agent_not_ready")
         return Effect.succeed({})
       })
       const sending = yield* Effect.forkChild(
-        runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234"), { text: "task" }),
+        runtime.send(TerminalRuntime.terminalOf("s", "w1:p2", "s-abcd1234abcd4abc8abcabcd1234ab"), { text: "task" }),
       )
       yield* TestClock.adjust("40 seconds")
       yield* Fiber.join(sending)
@@ -359,7 +363,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 harness: "pi",
                 title: "task",
                 definition: "general",
-                session: "abcd1234",
+                session: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
                 project: "repo",
                 live: "2",
               })
@@ -369,7 +373,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             assert.strictEqual(pane.display_agent, "general \u00b7 pi")
             assert.strictEqual(pane.title, "task")
             assert.strictEqual(pane.tokens?.definition, "general")
-            assert.strictEqual(pane.tokens?.session, "abcd1234")
+            assert.strictEqual(pane.tokens?.session, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
             assert.strictEqual(pane.state_labels?.blocked, "waiting for you")
             const workspace = (yield* herdr.call("workspace.list", {})).workspaces.find(
               (item) => item.workspace_id === pane.workspace_id,
@@ -588,10 +592,10 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           return Effect.gen(function* () {
             for (let i = 0; i < 10; i++) yield* open(["/bin/sh"])
             const terminal = yield* open(["pi", "--no-extensions", "--no-mcp", "--no-skills", "--no-session"], {
-              VIBEST_SESSION_ID: "ab12cd34",
+              VIBEST_SESSION_ID: "ab12cd34-5678-4abc-8def-0123456789ab",
             })
             // Named after the vibest session, as before the port: `herdr agent list` shows which session runs where.
-            assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-ab12cd34")
+            assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-ab12cd3456784abc8def0123456789")
             if (runtime.state !== undefined)
               yield* waitFor(runtime.state(terminal), (state) => state === "idle", "the started agent idle", 1400)
             yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' STARTED" })

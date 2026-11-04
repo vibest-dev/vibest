@@ -79,7 +79,7 @@ const product = Plugin.define({
       >()
       yield* context.agent.hook("result", (event) =>
         Effect.gen(function* () {
-          const fan = /^gather: (\w{8}) (\w{8}) into (\w{8})$/m.exec(event.output)
+          const fan = /^gather: ([0-9a-f-]{36}) ([0-9a-f-]{36}) into ([0-9a-f-]{36})$/m.exec(event.output)
           if (fan) {
             const group = { lead: fan[3]!, size: 2, outputs: [] as Array<string> }
             gathers.set(fan[1]!, group)

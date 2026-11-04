@@ -45,7 +45,7 @@ effect, the server entry and `#platform`; core runs no git, imports no worktree 
 `@vibest/vibest`, and does not list it as a dependency; core imports nothing whose name contains `sql`, uses no
 `SqlClient`, and its package.json names no SQL package, while the schema lives in vibest's backend; core's sources
 contain none of the product notions moved out (the worktrees root and leaf names, `instructions.md`, the session
-system prompt text, VIBEST_SCRATCH and the projects directory); its storage port, memory backend, read model and inbox name
+system prompt text, VIBEST_PROJECT_DIR and the projects directory); its storage port, memory backend, read model and inbox name
 no project id or coordinator operation; its placement, removal, system prompt and workspace modules name no entry
 agent; and the engine-only product test imports nothing but core, the contracts and effect. `apps/vibest/test/boundaries.test.ts` keeps herdr out of every
 runtime-neutral package but the host.
@@ -66,8 +66,9 @@ Core defines these services; `@vibest/vibest` provides the vibest implementation
   liveSharers })` decides, once the engine has closed the terminal and proven which processes still work there,
   whether the directory goes, and returns `removed`, `kept` or `gone`, why, whether a live sharer kept it, and its
   branch; `files(key)` makes the directory a scope's sessions share working files in and gives the product's
-  variables for that scope in their shell (vibest: the project's scratch directory as VIBEST_SCRATCH, and the
-  project's id as VIBEST_PROJECT_ID, which its integrations send back to name the project). vibest's implementation (`vibest/workspace.ts`) uses detached git worktrees under the worktrees root,
+  variables for that scope in their shell (vibest: the project folder `projects/<project id>` as VIBEST_PROJECT_DIR,
+  with its `artifacts/` made, and the project's id as VIBEST_PROJECT_ID, which its integrations send back to name the
+  project). vibest's implementation (`vibest/workspace.ts`) uses detached git worktrees under the worktrees root,
   one per repository for a multi-repository project, and removes one only when no live session shares it and git
   would lose nothing.
 - **SessionPrompt** (`core/system-prompt.ts`). `text(input)` gives a session's system prompt text from its id,
@@ -88,8 +89,9 @@ Core defines these services; `@vibest/vibest` provides the vibest implementation
   never branches on a harness id.
 - **Processes** (`core/processes.ts`): liveness, SIGTERM to one pid, and the processes whose cwd is in a directory.
 - **GuardArea** (`core/guard.ts`): what the `full` tier keeps a session out of: a home, a protected directory under
-  it, and the one place in it the session may use. vibestd gives vibest's (VIBEST_HOME, the projects directory, the
-  session's project's scratch directory) for each `/guard` call (`packages/server/src/http.ts`).
+  it, the one place in it the caller may use (the entry agent edits files only there), and the product's words for a
+  refusal. vibestd gives vibest's (VIBEST_HOME, the projects directory, the caller's own project folder;
+  `packages/vibest/src/guard-area.ts`) for each `/guard` call (`packages/server/src/http.ts`).
 
 ## Plugin API
 
@@ -201,11 +203,13 @@ case a fresh, empty backend; the in-memory backend (`core/memory-storage.test.ts
 (`apps/vibest/test/storage-conformance.test.ts`) both register it. What only one backend has (the SQLite file's
 schema check, two processes opening one empty file) is tested beside that backend.
 
-vibest's backend (`packages/vibest/src/sqlite-storage.ts`) is one SQLite file (`~/.vibest/vibest.db`, schema version 2,
-application id `vibe`): tables `project`, `session`, `inbox`, `event`, with a trigger refusing event updates. A scope
-is a project's key: the backend maps it to `session.project_id`, and the owner to `project.entry_session_id`; vibest's
-own reads of its project rows (the numeric project id the command line and VIBEST_PROJECT_ID show) are its
-`ProjectStore` service. The file is accepted only when its version pragmas and objects match; vibest never migrates it by
+vibest's backend (`packages/vibest/src/sqlite-storage.ts`) is one SQLite file (`~/.vibest/vibest.db`, the baseline
+schema `user_version` 1, application id `vibe`), the same schema main's vibest writes: tables `project` (a UUID id),
+`project_repository`, `session`, `inbox`, `event`, with a trigger refusing event updates. A scope is a project's id:
+the backend maps it to `session.project_id` (making the project row on first use) and the owner to
+`project.entry_session_id`; vibest's own reads and writes of its project rows (a project by its directory or one of
+its repositories, a moved checkout) are its `ProjectStore` service. Session ids are UUIDs whose first 8 characters are
+unused when made; a session is named by its full id or a unique prefix of at least 8 (`Storage.resolveSession`). The file is accepted only when its version pragmas and objects match; vibest never migrates it by
 itself. JSON on a row is written once; state that changes has its own column.
 
 ### What the port took from pi-durable

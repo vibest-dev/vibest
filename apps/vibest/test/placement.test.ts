@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Sessions } from "@vibest/core/sessions"
 import { Storage } from "@vibest/core/storage"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { repositoryDirectoryName, repositoryKey } from "@vibest/vibest/worktree"
+import { repositoryDirectoryName } from "@vibest/vibest/worktree"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 
 import {
@@ -15,16 +15,17 @@ import {
   until,
   writeResult,
   launchMain,
+  projectOf,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
 
 const spawnInput = (repo: string) =>
-  Effect.map(repositoryKey(repo), (key) => ({
+  Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
-    key,
+    key: projectId,
     name: "task",
     prompt: "do it",
     harness: "pi" as const,
@@ -41,7 +42,7 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "main:coord" },
       })
@@ -90,7 +91,7 @@ describe("placement", () => {
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
       yield* launchMain(
-        yield* repositoryKey(repo),
+        yield* projectOf(repo),
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } },
@@ -126,7 +127,7 @@ describe("placement", () => {
       // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: "other",
         address: { machine: "local", id: "w1:coord" },
       })

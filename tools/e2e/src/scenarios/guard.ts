@@ -12,15 +12,24 @@ import { binary, expect, knownSessions, type World } from "../world.ts"
 type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
 
+/** Each harness's guard sessions (UUIDs, as vibest makes them). */
+const SESSIONS: Record<Harness, Record<"general" | "coordinator", string>> = {
+  claude: { general: "e2e0a001-e2e0-4e2e-8e2e-e2e0a001e2e0", coordinator: "e2e0c001-e2e0-4e2e-8e2e-e2e0c001e2e0" },
+  cursor: { general: "e2e0a002-e2e0-4e2e-8e2e-e2e0a002e2e0", coordinator: "e2e0c002-e2e0-4e2e-8e2e-e2e0c002e2e0" },
+}
 /** The project of each world's guard sessions per harness, made on first use. */
-const projects = new WeakMap<World, Map<Harness, Promise<number>>>()
+const projects = new WeakMap<World, Map<Harness, Promise<string>>>()
 const projectOf = (w: World, harness: Harness) => {
-  const own = projects.get(w) ?? new Map<Harness, Promise<number>>()
+  const own = projects.get(w) ?? new Map<Harness, Promise<string>>()
   projects.set(w, own)
-  const sessions = { [`e2e-${harness}-general`]: "general", [`e2e-${harness}-coordinator`]: "coordinator" }
-  if (!own.has(harness)) own.set(harness, knownSessions(w, `e2e/guard-${harness}`, sessions, w.repository, harness))
+  const { general, coordinator } = SESSIONS[harness]
+  if (!own.has(harness))
+    own.set(harness, knownSessions(w, { [general]: "general", [coordinator]: "coordinator" }, w.repository, harness))
   return own.get(harness)!
 }
+/** The project folder of a harness's guard sessions (VIBEST_PROJECT_DIR). */
+const projectDir = async (w: World, harness: Harness) =>
+  path.join(w.vibestHome, "projects", await projectOf(w, harness))
 
 /** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
@@ -31,9 +40,9 @@ const ask = async (
   input: Record<string, unknown>,
   raw?: string,
 ): Promise<Answer> => {
-  const sessionId = `e2e-${harness}-${agent}`
+  const sessionId = SESSIONS[harness][agent === "coordinator" ? "coordinator" : "general"]
   if (harness === "claude" && agent !== undefined) {
-    const projectId = String(await projectOf(w, harness))
+    const projectId = await projectOf(w, harness)
     const r = await fetch("http://vibestd/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
@@ -51,7 +60,8 @@ const ask = async (
       : {
           VIBEST_AGENT: agent,
           VIBEST_SESSION_ID: sessionId,
-          VIBEST_PROJECT_ID: String(await projectOf(w, harness)),
+          VIBEST_PROJECT_ID: await projectOf(w, harness),
+          VIBEST_PROJECT_DIR: await projectDir(w, harness),
           VIBEST_HARNESS: harness,
         }
   const r = await w.run(w.repository, [binary, "integration", "event", "--harness", harness, "preToolUse"], {
@@ -82,23 +92,30 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "R2",
-    title: "a session reading the project store's files directly is denied",
+    title: "a session reads and writes its own project folder (VIBEST_PROJECT_DIR); another project's folder is denied",
     run: async (w) => {
-      const file = path.join(w.vibestHome, "projects", "x", "memory", "a.md")
+      const other = path.join(w.vibestHome, "projects", "00000000-0000-4000-8000-000000000000", "memories", "a.md")
       for (const h of both) {
-        for (const [tool, input] of [
-          [shell(h), { command: `cat ${file}` }],
-          ["Read", { file_path: file }],
-        ] as const) {
-          const a = await ask(w, h, "general", tool, input)
-          expect(a.decision === "deny", `${h} ${tool}: ${JSON.stringify(a)}`)
-        }
+        const own = path.join(await projectDir(w, h), "memories", "a.md")
+        const allowed = h === "cursor" ? "allow" : "none"
+        for (const [file, decision] of [
+          [own, allowed],
+          [other, "deny"],
+        ] as const)
+          for (const [tool, input] of [
+            [shell(h), { command: `cat ${file}` }],
+            ["Read", { file_path: file }],
+            ["Write", { file_path: file, content: "x" }],
+          ] as const) {
+            const a = await ask(w, h, "general", tool, input)
+            expect(a.decision === decision, `${h} ${tool} ${file}: ${JSON.stringify(a)}`)
+          }
       }
     },
   },
   {
     id: "R3",
-    title: "ordinary work is allowed for both roles; the coordinator edits no file",
+    title: "ordinary work is allowed for both roles; the coordinator edits files only in its project folder",
     run: async (w) => {
       for (const h of both) {
         const allowed = h === "cursor" ? "allow" : "none"
@@ -108,6 +125,9 @@ const checks: ReadonlyArray<Check> = [
         expect(s.code === 0 && s.decision === allowed, `${h} session git status: ${JSON.stringify(s)}`)
         const e = await ask(w, h, "coordinator", "Write", { file_path: path.join(w.repository, "x.txt"), content: "x" })
         expect(e.decision === "deny", `${h} coordinator edit: ${JSON.stringify(e)}`)
+        const plan = path.join(await projectDir(w, h), "artifacts", "plan.md")
+        const p = await ask(w, h, "coordinator", "Write", { file_path: plan, content: "x" })
+        expect(p.decision === allowed, `${h} coordinator edit in its project folder: ${JSON.stringify(p)}`)
       }
     },
   },

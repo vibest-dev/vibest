@@ -39,7 +39,7 @@ const forwarding = Plugin.define({
   effect: (context) =>
     context.agent.hook("result", (event) =>
       Effect.sync(() => {
-        const match = /forward to (\w{8})/.exec(event.output)
+        const match = /forward to ([0-9a-f-]{36})/.exec(event.output)
         if (match) event.recipients = [match[1]!]
       }),
     ),
@@ -51,7 +51,7 @@ const copying = Plugin.define({
   effect: (context) =>
     context.agent.hook("result", (event) =>
       Effect.sync(() => {
-        const match = /copy to (\w{8}) (\w{8})/.exec(event.output)
+        const match = /copy to ([0-9a-f-]{36}) ([0-9a-f-]{36})/.exec(event.output)
         if (match) event.recipients = [match[1]!, match[2]!]
       }),
     ),

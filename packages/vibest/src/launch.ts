@@ -13,7 +13,7 @@ import { LaunchFailed } from "@vibest/core/sessions"
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
 import { SystemPromptDirUnsafe, systemPromptRoot, writeSystemPrompt } from "@vibest/core/system-prompt"
-import { Config, Effect, Option } from "effect"
+import { Config, Effect, FileSystem, Option } from "effect"
 
 /** An unusable temporary directory is the user's to fix and fails the start; any other error there is a defect. */
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -36,7 +36,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     {
       readonly sessionId: string
       readonly harnessSessionId: string | null
-      readonly projectId?: number | undefined
+      readonly projectId: string
       readonly runtime?: string | undefined
       /** The entry agent definition's name (VIBEST_AGENT) and skills (VIBEST_SKILLS). */
       readonly agent: string
@@ -75,6 +75,10 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const saved = yield* input.session
   const pluginDir = yield* sessionPlugin(adapter, base, saved.sessionId, saved.skills).pipe(Effect.orDie)
   const systemPromptFile = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, saved.systemPrompt))
+  // The project folder the Coordinator writes in (--add-dir must exist).
+  yield* (yield* FileSystem.FileSystem)
+    .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
+    .pipe(Effect.ignore)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
@@ -83,13 +87,15 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     VIBEST_AGENT: saved.agent,
     ...(saved.skills.length > 0 ? { VIBEST_SKILLS: saved.skills.join(",") } : {}),
     VIBEST_SESSION_ID: saved.sessionId,
-    ...(saved.projectId !== undefined ? { VIBEST_PROJECT_ID: String(saved.projectId) } : {}),
+    VIBEST_PROJECT_ID: saved.projectId,
+    VIBEST_PROJECT_DIR: layout.project(saved.projectId),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {
     file: adapter.binary,
     args: adapter.coordinatorArgs({
       root: input.root,
+      projectDir: layout.project(saved.projectId),
       systemPromptFile,
       provider: input.provider,
       model: input.model,

@@ -8,9 +8,9 @@ import { Storage } from "@vibest/core/storage"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { shortId } from "@vibest/schema/id"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import { Clock, Effect, Fiber, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
@@ -26,6 +26,7 @@ import {
   resultText,
   startedSince,
   launchMain,
+  projectOf,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
@@ -33,7 +34,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const row = (over: Partial<InboxRow>): InboxRow => ({
   id: 1,
-  sessionId: "349f65b2",
+  sessionId: "349f65b2-349f-4349-8349-349f65b2349f",
   kind: "result",
   message: "full text",
   details: {},
@@ -43,20 +44,20 @@ const row = (over: Partial<InboxRow>): InboxRow => ({
 })
 
 describe("the line a delivery shows", () => {
-  const who = () => ({ agent: "general", title: "Fix guard scratch rule" })
+  const who = () => ({ agent: "general", title: "Fix the guard rule" })
   it("names the agent type, title, status and session id", () => {
     assert.strictEqual(
       line([row({ details: { status: "completed" } })], who),
-      'General Agent "Fix guard scratch rule" completed (349f65b2)',
+      'General Agent "Fix the guard rule" completed (349f65b2)',
     )
     const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
     assert.strictEqual(
-      line([row({ sessionId: "95603b88", details: { status: "failed" } })], reviewer),
+      line([row({ sessionId: "95603b88-9560-4956-8956-95603b889560", details: { status: "failed" } })], reviewer),
       'Reviewer Agent "Review the guard fix" failed (95603b88)',
     )
     assert.strictEqual(
       line([row({ kind: "report" })], who),
-      'General Agent "Fix guard scratch rule" sent a message (349f65b2)',
+      'General Agent "Fix the guard rule" sent a message (349f65b2)',
     )
     const status = (details: Record<string, unknown>) => line([row({ details })], who).split('" ')[1]
     assert.strictEqual(status({ status: "failed" }), "failed (349f65b2)")
@@ -71,7 +72,7 @@ describe("the line a delivery shows", () => {
       row({ id: 2, kind: "report" }),
       row({ id: 3, details: { status: "completed" } }),
     ]
-    assert.strictEqual(line(batch, who), 'General Agent "Fix guard scratch rule" completed (349f65b2) · +2 more')
+    assert.strictEqual(line(batch, who), 'General Agent "Fix the guard rule" completed (349f65b2) · +2 more')
     const long = line(batch, () => ({ agent: "general", title: "x".repeat(300) }))
     assert.strictEqual([...long].length, LINE_MAX)
     assert.include(long, `x…" completed (349f65b2) · +2 more`)
@@ -83,7 +84,7 @@ const project = Effect.gen(function* () {
   const db = yield* Storage
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   const main = yield* launchMain(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
@@ -93,7 +94,7 @@ const project = Effect.gen(function* () {
   const { id: worker } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
-    key,
+    key: key,
     name: "Fix the guard",
     prompt: "do it",
     harness: "claude",
@@ -150,7 +151,10 @@ describe("vibestd's HTTP API", () => {
       })
       assert.strictEqual((newer.body as { error: string }).error, `vibestd is older (${VERSION}); run vibest update`)
       assert.strictEqual((yield* raw({ ...own, "vibest-protocol": "" })).status, 409)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: "nosuch00" })).status, 404)
+      assert.strictEqual(
+        (yield* call("/inbox/poll", { sessionId: "05c00000-05c0-405c-805c-05c0000005c0" })).status,
+        404,
+      )
       // Missing project id: refused.
       assert.strictEqual((yield* raw(own)).status, 403)
       // Another harness than the session's, or none: refused before anything is recorded.
@@ -239,7 +243,7 @@ describe("vibestd's HTTP API", () => {
         text: string
       }
       assert.lengthOf(first.ids, 1)
-      assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker})`)
+      assert.strictEqual(first.line, `General Agent "Fix the guard" sent a message (${worker.slice(0, 8)})`)
       assert.strictEqual(first.text, "hello")
       assert.strictEqual(yield* statusOf(db, worker), "sending")
       // The lease is in sqlite: the row `sending`, its end in the main agent's session metadata.
@@ -366,17 +370,19 @@ describe("vibestd's HTTP API", () => {
       yield* call("/events", { sessionId: main }, { type: "turn.end", outcome: "completed", text: "x" })
       assert.strictEqual(yield* resultText(main), "")
       assert.strictEqual((yield* call("/events", { sessionId: worker }, { type: "nope" })).status, 400)
-      // The guard applies the session's own rules: a subagent may not touch another session's scratch...
+      // The guard applies the session's own rules: a subagent may not touch another project's folder...
       const key = (yield* db.getSession(worker))!.scope
       const tool = (file: string) => ({ tool: { kind: "edit", name: "Write", paths: [file], cwd: "/tmp" } })
       const other = yield* call("/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
-      // ...but its own scratch is its to use, as VIBEST_SCRATCH in its terminal says.
-      const own = yield* call("/guard", { sessionId: worker }, tool(`${layout.scratch(key!)}/notes.md`))
+      // ...but its own is its to use, as VIBEST_PROJECT_DIR in its terminal says.
+      const own = yield* call("/guard", { sessionId: worker }, tool(`${layout.artifacts(key!)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
-      // The main agent edits nothing.
+      // The main agent edits only its project folder.
       const coordinator = yield* call("/guard", { sessionId: main }, tool("/tmp/x"))
       assert.isString((coordinator.body as { deny?: string }).deny)
+      const plan = yield* call("/guard", { sessionId: main }, tool(`${layout.artifacts(key!)}/plan.md`))
+      assert.deepStrictEqual(plan, { status: 200, body: {} })
       const bad = yield* call("/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
     }),
@@ -389,7 +395,7 @@ describe("vibestd's HTTP API", () => {
       const sessions = yield* Sessions
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const key = yield* repositoryKey(repo)
+      const key = yield* projectOf(repo)
       const main = yield* launchMain(key, "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
@@ -436,7 +442,10 @@ describe("vibestd's HTTP API", () => {
       yield* event({ type: "blocked", reason: "question" })
       assert.strictEqual((yield* db.getSession(worker))!.status, "blocked")
       const notice = yield* db.latestInbox(worker, "notice")
-      assert.include(notice!.message, `${worker} (claude) has been waiting for an answer to its question since`)
+      assert.include(
+        notice!.message,
+        `${shortId(worker)} (claude) has been waiting for an answer to its question since`,
+      )
       // The person answered: its next tool call is the harness at work.
       yield* call("/guard", { sessionId: worker }, { tool: { kind: "read", name: "Read", paths: [], cwd: "/tmp" } })
       assert.strictEqual((yield* db.getSession(worker))!.status, "working")

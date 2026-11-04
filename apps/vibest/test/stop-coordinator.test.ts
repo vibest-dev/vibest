@@ -11,7 +11,6 @@ import { Restarting } from "@vibest/core/restarting"
 import { Storage, encodeAddress } from "@vibest/core/storage"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
 
 import * as Platform from "#platform"
@@ -26,6 +25,7 @@ import {
   type TestOptions,
   type TestServices,
   untilVirtual,
+  projectOf,
 } from "./fakes.ts"
 
 const served = (options: TestOptions) =>
@@ -92,14 +92,14 @@ const launched = Effect.gen(function* () {
     pid: HARNESS,
   })
   yield* db.reportOwnerConversation(started.sessionId, "pi", "conversation-1")
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   const scope = key
   const coord = (yield* db.ownerOf(scope))!
   const origin = { runtime: coord.runtime!, address: coord.address! }
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
     {
-      id: "aaaaaaaa",
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       agent: "general",
       name: "n",
       harnessId: "pi",
@@ -117,9 +117,14 @@ const launched = Effect.gen(function* () {
       createdAt: 1,
       lastActive: 1,
     },
-    key,
+    scope,
   )
-  yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "waiting for the main agent", details: {} })
+  yield* db.insertInbox({
+    sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    kind: "notice",
+    message: "waiting for the main agent",
+    details: {},
+  })
   const stop = c["Project.StopCoordinator"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.CoordinatorSession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })

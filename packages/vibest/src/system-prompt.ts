@@ -1,5 +1,5 @@
 // The system prompt text vibest gives each harness: a session's (its rules, its agent definition's, the project's
-// instructions and memory) and the entry agent's. The engine writes the file (@vibest/core/system-prompt).
+// folder, instructions and memories) and the entry agent's. The engine writes the file (@vibest/core/system-prompt).
 import { Layout, shellQuote } from "@vibest/core/paths"
 import { SessionPrompt } from "@vibest/core/system-prompt"
 import { Effect, FileSystem, Layer, Path } from "effect"
@@ -14,35 +14,36 @@ const truncate = (text: string, what: string) =>
 /** How an agent types vibest in its shell: `vibest`, or `bun …/main.ts` when vibest runs from source. */
 const invocation = (vibest: ReadonlyArray<string>) => vibest.map(shellQuote).join(" ")
 
-/** instructions.md and every memory entry, each capped (SPEC §5.4). A missing project reads as empty. */
+/** instructions.md and every memories/ file, each capped (SPEC §5.4). A missing project reads as empty. */
 export const projectText = Effect.fn("projectText")(function* (projectDir: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const read = (file: string) => fs.readFileString(file).pipe(Effect.map((s) => s.trim()))
   const instructions = yield* read(path.join(projectDir, "instructions.md")).pipe(Effect.orElseSucceed(() => ""))
-  const memoryDir = path.join(projectDir, "memory")
-  const files = (yield* fs.readDirectory(memoryDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
+  const memoriesDir = path.join(projectDir, "memories")
+  const files = (yield* fs.readDirectory(memoriesDir, { recursive: true }).pipe(Effect.orElseSucceed(() => [])))
     .filter((f) => f.endsWith(".md"))
     .sort()
   const entries = yield* Effect.forEach(files, (f) =>
-    read(path.join(memoryDir, f)).pipe(
+    read(path.join(memoriesDir, f)).pipe(
       Effect.map((body) => `### ${f}\n${body}`),
       Effect.orElseSucceed(() => ""),
     ),
   )
   return {
     instructions: truncate(instructions, "instructions"),
-    memory: truncate(entries.filter(Boolean).join("\n\n"), "memory"),
+    memories: truncate(entries.filter(Boolean).join("\n\n"), "memories"),
   }
 })
 
 export interface SystemPromptInput {
   readonly id: string
-  readonly scratch: string
+  /** The project folder (VIBEST_PROJECT_DIR). */
+  readonly projectDir: string
   /** argv that runs vibest (`VibestCommand`). */
   readonly vibest: ReadonlyArray<string>
   readonly instructions: string
-  readonly memory: string
+  readonly memories: string
   /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the system prompt. */
   readonly peer?: string | undefined
   /** Its agent definition: whether it may start sessions, and the rules it adds. */
@@ -66,7 +67,7 @@ export function sessionSystemPrompt(r: SystemPromptInput) {
 Complete exactly what was asked. Don't fix unrelated issues you discover — suggest them as follow-ups instead.
 - Your working directory is a git worktree (in a project of several repositories, a directory with one worktree per repository; the git rules below apply to each repository you change). Make changes only there, limited to what your task requires; never make another worktree, clone or copy to work in. If you encounter confusing file state or unexpected changes that aren't from your work, stop and report to the coordinator rather than trying to resolve it yourself. Don't modify code you don't understand.
 ${gitRule(r)}
-- Scratchpad for intermediate results: ${r.scratch}. Name files you create there starting with your agent id (for example ${r.id}-research.md), and change only those.
+- Project folder: ${r.projectDir} (VIBEST_PROJECT_DIR), shared with the coordinator and the project's other agents; read and write it with your file tools. Put intermediate results and handoffs in its artifacts/ folder, named starting with your agent id (for example artifacts/${r.id}-research.md), and change only those. Its docs/, memories/ and instructions.md are the coordinator's and the user's: read them, and change them only when your task says so.
 - Never run herdr commands; vibest manages the panes.${spawnRule(r)}
 
 You may be continued with follow-up instructions after completing a previous task. When this happens:
@@ -105,22 +106,27 @@ Then the details: what you did or found — be specific with file paths, line nu
 If a background command or task you started is still running when you end your turn, say so in your report: what is running, and that you will continue when it finishes. Your report is still delivered as your result.
 
 Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
-${r.agent?.rules ? `\n${r.agent.rules}\n` : ""}${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
+${r.agent?.rules ? `\n${r.agent.rules}\n` : ""}${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
 }
 
 /**
- * The entry agent's system prompt (`vibest`): its definition's own, then the project's instructions and memory. How to run agents
- * is the skills its definition names, not this prompt.
+ * The entry agent's system prompt (`vibest`): its definition's own, then the project folder, the project's instructions
+ * and memories. How to run agents is the skills its definition names, not this prompt.
  */
 export function entrySystemPrompt(r: {
   readonly rules: string
+  readonly projectDir: string
   readonly instructions: string
-  readonly memory: string
+  readonly memories: string
 }) {
-  return `${r.rules}${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
+  return `${r.rules}
+## Project folder
+
+The project folder is ${r.projectDir} (VIBEST_PROJECT_DIR), shared with every agent of the project; read and write it with your file tools. Its fixed subfolders: docs/ (documents about the project), memories/ (lessons, one file each; every agent's system prompt carries them) and artifacts/ (plans, long task text and other handoffs between agents). instructions.md there is the user's.
+${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
 }
 
-/** The engine's `SessionPrompt`: the session's text with its project's instructions and memory, read on every start. */
+/** The engine's `SessionPrompt`: the session's text with its project's folder, instructions and memories, read on every start. */
 export const layer = Layer.effect(
   SessionPrompt,
   Effect.gen(function* () {
@@ -130,7 +136,7 @@ export const layer = Layer.effect(
     return SessionPrompt.of({
       text: ({ key, ...input }) =>
         projectText(layout.project(key)).pipe(
-          Effect.map((project) => sessionSystemPrompt({ ...input, scratch: layout.scratch(key), ...project })),
+          Effect.map((project) => sessionSystemPrompt({ ...input, projectDir: layout.project(key), ...project })),
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(Path.Path, path),
         ),

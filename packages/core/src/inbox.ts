@@ -1,4 +1,5 @@
 import type { Polled } from "@vibest/protocol/protocol"
+import { shortId } from "@vibest/schema/id"
 // Inbox rows and their delivery to a scope's owner (SPEC §11; docs/architecture.md, delivery). Rows live in the storage
 // port. Rows for a session (`send`, `task`) are delivered by Sessions; here only owner-bound rows (report, result,
 // notice) are pushed. An owner whose harness adapter has `delivery: "poll"` takes its rows itself, by polling
@@ -75,7 +76,7 @@ export const line = (
   const session = who(last.sessionId)
   const agent = session?.agent || "general"
   const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
-  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${last.sessionId})${more}`)
+  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${shortId(last.sessionId)})${more}`)
 }
 
 export class Inbox extends Context.Service<

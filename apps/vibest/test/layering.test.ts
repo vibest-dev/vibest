@@ -89,9 +89,9 @@ it("the product's notions stay out of the engine", () => {
     ),
     [],
   )
-  // The shared files directory reaches a session through the workspace's `files`, the guard's area through
+  // The project folder reaches a session through the workspace's `files`, the guard's area and its refusals through
   // `GuardArea`: the engine names neither.
-  assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH|layout\.projects?\b/), [])
+  assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH|VIBEST_PROJECT_DIR|layout\.projects?\b/), [])
   // The storage port and the inbox group by an opaque scope with an owner, not by project and coordinator.
   for (const file of ["storage.ts", "inbox.ts", "memory-storage.ts", "read-model.ts"])
     assert.notMatch(

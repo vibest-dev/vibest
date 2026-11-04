@@ -9,12 +9,11 @@ import type { Harness } from "@vibest/plugin"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import { Effect } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, testLayer, until, launchMain } from "./fakes.ts"
+import { FakeRuntime, makeRepository, testLayer, until, launchMain, projectOf } from "./fakes.ts"
 import { hookcliPlugin } from "./fixtures/harness-hookcli.ts"
 
 const fake: Harness.HarnessAdapter = {
@@ -26,8 +25,8 @@ const fake: Harness.HarnessAdapter = {
   delivery: "type",
   reportsState: false,
   checkProvider: () => undefined,
-  // A per-session config directory under scratch: how a plugin harness loads its own integration for one session.
-  launchArgs: (i) => ["--session", i.sessionId!, "--config", `${i.scratch}/fakecli`, "--rules", i.systemPromptFile],
+  // A per-session config directory under the project folder: how a plugin harness loads its own integration for one session.
+  launchArgs: (i) => ["--session", i.sessionId!, "--config", `${i.projectDir}/fakecli`, "--rules", i.systemPromptFile],
   models: { args: () => ["models"], answer: () => [{ model: "m", default: true }] },
 }
 
@@ -37,7 +36,7 @@ it.effect("a plugin harness is spawned by its id", () =>
   Effect.gen(function* () {
     const repo = yield* makeRepository
     const db = yield* Storage
-    const key = yield* repositoryKey(repo)
+    const key = yield* projectOf(repo)
     yield* launchMain(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
     const { id } = yield* (yield* Sessions).spawn({
       machine: { id: "local" },
@@ -66,7 +65,7 @@ it.effect(
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const layout = yield* Layout
-      const key = yield* repositoryKey(repo)
+      const key = yield* projectOf(repo)
       const main = yield* launchMain(key, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },

@@ -9,13 +9,21 @@ import { Storage } from "@vibest/core/storage"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import { Duration, Effect, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until, writeResult, launchMain } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  launchMain,
+  projectOf,
+} from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ integrationPolls: false }))), 30_000)
@@ -25,7 +33,7 @@ const started = Effect.gen(function* () {
   const db = yield* Storage
   const sessions = yield* Sessions
   const repo = yield* makeRepository
-  const key = yield* repositoryKey(repo)
+  const key = yield* projectOf(repo)
   const main = yield* launchMain(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },

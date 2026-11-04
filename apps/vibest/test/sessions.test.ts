@@ -11,8 +11,8 @@ import { Storage } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { ID } from "@vibest/schema/id"
 import * as GitWorkspace from "@vibest/vibest/workspace"
-import { repositoryKey } from "@vibest/vibest/worktree"
 import {
   Cause,
   Clock,
@@ -49,6 +49,7 @@ import {
   systemPromptFile,
   launchMain,
   projectNumber,
+  projectOf,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -56,8 +57,9 @@ const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ?
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
-    repositoryKey(repo),
-    (key) => ({ machine: { id: "local" }, root: repo, key, name: "task", prompt: "do it", harness }) as const,
+    projectOf(repo),
+    (projectId) =>
+      ({ machine: { id: "local" }, root: repo, key: projectId, name: "task", prompt: "do it", harness }) as const,
   )
 
 /** The result payload vibestd writes for an interrupted turn end (the Claude plugin's turn.complete aborted). */
@@ -72,7 +74,7 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Storage
-    yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+    yield* launchMain(yield* projectOf(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
@@ -162,7 +164,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const { id, row } = yield* spawnWorking(repo)
-      assert.match(id, /^[a-f0-9]{8}$/)
+      assert.match(id, ID)
       assert.strictEqual(row.status, "working")
       assert.strictEqual(row.turnState, "open")
 
@@ -176,8 +178,8 @@ describe.concurrent("Sessions", () => {
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
-      // The project's own scratch directory, the one place under projects the session's guard allows.
-      assert.strictEqual(placed.env.VIBEST_SCRATCH, layout.scratch(yield* repositoryKey(repo)))
+      // The project's folder, the one place under projects the session's guard allows.
+      assert.strictEqual(placed.env.VIBEST_PROJECT_DIR, layout.project((yield* (yield* Storage).getSession(id))!.scope))
       // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
       // field (no terminal yet: the one it gets is opened after the env is fixed).
       const identity = (yield* (yield* Storage).sessionIdentity(id))!
@@ -269,7 +271,7 @@ describe.concurrent("Sessions", () => {
   test(
     "TurnEnd for an unknown session is ignored",
     Effect.gen(function* () {
-      yield* (yield* Sessions).resultReady("ffffffff")
+      yield* (yield* Sessions).resultReady("ffffffff-ffff-4fff-8fff-ffffffffffff")
     }),
   )
 
@@ -415,7 +417,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Storage
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -449,7 +451,10 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { status: "unknown", turnState: "failed" })
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
-      const [row] = yield* db.ownerPending((yield* db.getSession(id))!.scope)
+      // The result row, whatever its delivery made of it: the main agent's terminal is not in the fake runtime.
+      const [row] = yield* (yield* SqlClient.SqlClient)<{
+        message: string
+      }>`SELECT content AS message FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
       assert.notInclude(row!.message, "pane tail")
@@ -533,7 +538,7 @@ describe.concurrent("Sessions", () => {
       const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
       assert.include(
         row!.message,
-        `${id} (pi) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
+        `${id.slice(0, 8)} (pi) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id.slice(0, 8)} to see the request.`,
       )
       assert.notInclude(row!.message, "Switch to its terminal")
       assert.lengthOf(yield* sqlNotices(id), 1)
@@ -613,7 +618,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -803,7 +808,7 @@ describe.concurrent("Sessions", () => {
       const sessions = yield* Sessions
       const db = yield* Storage
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -1217,7 +1222,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
       assert.notInclude(yield* fs.readFileString(yield* systemPromptFile(id)), "learned before the move")
-      const memory = `${layout.project(yield* repositoryKey(repo))}/memory`
+      const memory = `${layout.project(String((yield* db.getSession(id))!.scope))}/memories`
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/moved.md`, "learned before the move")
       yield* fs.writeFileString(yield* systemPromptFile(id), "stale text")
@@ -1804,7 +1809,7 @@ describe.concurrent("Sessions", () => {
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -1989,7 +1994,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2052,7 +2057,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2097,7 +2102,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2143,7 +2148,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2389,7 +2394,7 @@ describe.concurrent("Sessions", () => {
       yield* fs.writeFileString(cursorMcp, JSON.stringify({ mcpServers: { repo: { command: "repo-server" } } }))
       // The old file is never the source: the next start writes the prompt again, with memory written since.
       yield* fs.writeFileString(yield* systemPromptFile(id), "use the send_message tool")
-      const memory = `${layout.project(yield* repositoryKey(repo))}/memory`
+      const memory = `${layout.project(String((yield* (yield* Storage).getSession(id))!.scope))}/memories`
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/later.md`, "learned between starts")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
@@ -3215,9 +3220,14 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Storage
-      const unknown = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff" }))
+      const unknown = yield* Effect.flip(
+        sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff-ffff-4fff-8fff-ffffffffffff" }),
+      )
       assert.strictEqual(unknown._tag, "NoSuchSession")
-      assert.include(unknown.message, "--peer ffffffff: no session ffffffff")
+      assert.include(
+        unknown.message,
+        "--peer ffffffff-ffff-4fff-8fff-ffffffffffff: no session ffffffff-ffff-4fff-8fff-ffffffffffff",
+      )
 
       const { id, row } = yield* spawnWorking(repo)
       const created = () => herdr.callsTo("open").pipe(Effect.map((calls) => calls.length))
@@ -3242,7 +3252,7 @@ describe.concurrent("Sessions", () => {
       const archived = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
       assert.include(archived.message, "it was archived")
       assert.strictEqual(yield* created(), before)
-      assert.isUndefined(yield* db.getSession("ffffffff"))
+      assert.isUndefined(yield* db.getSession("ffffffff-ffff-4fff-8fff-ffffffffffff"))
     }),
   )
 
@@ -3507,7 +3517,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Storage
-      yield* launchMain(yield* repositoryKey(repo), coordinator, false, {
+      yield* launchMain(yield* projectOf(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -3599,13 +3609,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const db = yield* Storage
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const coord = yield* launchMain(yield* repositoryKey(repo), "claude", false, {
+      const coord = yield* launchMain(yield* projectOf(repo), "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* db.reportOwnerConversation(coord.sessionId, "claude", "claude-1")
       yield* herdr.seedAgent("test/coord")
-      const projectId = yield* repositoryKey(repo)
+      const projectId = yield* projectOf(repo)
       const sessions = yield* Sessions
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -4073,7 +4083,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       // A coordinator that takes its rows by terminal text, so the result is delivered without its integration.
       const db = yield* Storage
       const sessions = yield* Sessions
-      yield* launchMain(yield* repositoryKey(repo), "cursor", false, {
+      yield* launchMain(yield* projectOf(repo), "cursor", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

@@ -1,5 +1,6 @@
 import type { AgentNotice, Archived } from "@vibest/plugin"
 import type { Polled } from "@vibest/protocol/protocol"
+import { newId, shortId } from "@vibest/schema/id"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -39,7 +40,6 @@ import {
   SynchronizedRef,
 } from "effect"
 import type { Scope } from "effect"
-import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "./agents.ts"
@@ -108,7 +108,7 @@ export {
 } from "@vibest/schema/session"
 
 /** Test barrier after `--peer` validation and before insert, while the owner's session lock is held. Production leaves this void. */
-/** The lock key of a session directory, beside the session-id keys (8 hex, never a path). */
+/** The lock key of a session directory, beside the session-id keys (UUIDs, never a path). */
 const directoryLock = (directory: string) => `directory:${directory}`
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -153,7 +153,7 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project key of `root` (`Workspace.project(root).key`), computed once by the caller: the row, the scratch directory and the system prompt all use it. */
+  /** The project `root` is (`Workspace.project(root).key`; vibest: the project id), resolved once by the caller: the row, the project folder and the system prompt use it. */
   readonly key: string
   readonly name: string
   readonly prompt: string
@@ -281,7 +281,6 @@ export class Sessions extends Context.Service<
       const drain = yield* Drain
       const layout = yield* Layout
       const fs = yield* FileSystem.FileSystem
-      const crypto = yield* Crypto.Crypto
       const path = yield* Path.Path
       const vibest = yield* VibestCommand
       const plugins = yield* Plugins
@@ -531,7 +530,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: files.directory,
+            projectDir: files.directory,
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -801,13 +800,11 @@ export class Sessions extends Context.Service<
         launchArgv,
         turnEnds,
         systemPromptOf,
-        uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+        uuid: newId(),
         terminate: processes.terminate,
         platform,
       })
       limit.move.rerun = move.rerun
-
-      const newId = crypto.randomBytes(4).pipe(Effect.map(Hex.encode), Effect.orDie)
 
       /** The `machines[]` of `agent.start.before` (§7), via the shared helper. */
       const machinesListing = machines(
@@ -914,11 +911,7 @@ export class Sessions extends Context.Service<
         )
         const adapter = harnesses.get(harnessId)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
-        const id = yield* newId.pipe(
-          Effect.flatMap((id) => db.sessionExists(id).pipe(Effect.map((taken) => (taken ? undefined : id)))),
-          Effect.repeat({ until: (id) => id !== undefined }),
-          Effect.map((id) => id!),
-        )
+        const id = yield* db.newSessionId
         const now = yield* Clock.currentTimeMillis
         /** `shared`: the directory of the session `--peer` named, which this one works in too. */
         const admit = (shared: string | undefined) =>
@@ -938,8 +931,7 @@ export class Sessions extends Context.Service<
               harnessId,
               provider: provider ?? null,
               model: model ?? null,
-              harnessSessionId:
-                adapter.conversation === "assigned" ? yield* crypto.randomUUIDv4.pipe(Effect.orDie) : null,
+              harnessSessionId: adapter.conversation === "assigned" ? yield* newId() : null,
               runtime: runtimeKind,
               address: { machine: machine.id, id: "" },
               status: "unknown",
@@ -1011,7 +1003,7 @@ export class Sessions extends Context.Service<
           yield* notice(
             session,
             "blocked",
-            `${session.id} (${session.harnessId}) has been waiting for ${what} since ${hhmm}. Run vibest peek ${session.id} to see the request.`,
+            `${shortId(session.id)} (${session.harnessId}) has been waiting for ${what} since ${hhmm}. Run vibest peek ${shortId(session.id)} to see the request.`,
           )
         })
 

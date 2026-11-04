@@ -26,7 +26,7 @@ import * as HerdrBun from "effect-herdr-sdk/bun"
 
 // The bundled runtime's caller side, for the frontends: which herdr terminal a command runs in.
 export { ambientHerdr, CALLER_ENV, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
-export { KIND as HERDR_KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+export { agentName, KIND as HERDR_KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 export { Herdr } from "effect-herdr-sdk"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
@@ -98,6 +98,7 @@ const inspectFile = (filename: string) =>
             version: e.version,
             applicationId: e.applicationId,
             ...(e.detail === undefined ? {} : { detail: e.detail }),
+            ...(e.older === undefined ? {} : { older: e.older }),
             file: filename,
           })
         : e,

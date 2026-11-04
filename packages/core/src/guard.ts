@@ -1,9 +1,10 @@
 // The tool-call rules every harness's pre-tool hook applies, one set per agent (VIBEST_AGENT), on the neutral ToolCall each
 // integration sends to vibestd's `/guard` (Cursor's preToolUse through its adapter's decode). A call is allowed unless a rule here
 // names it. Every agent: no herdr control (a session: no herdr at all), no vibest with its identity variables changed, no vibest hook bridge. The
-// coordinator also does not edit files, start harness CLIs or run gh's credential and config commands. Any other session
-// may not touch the protected directory the product names (`GuardArea`) except the one place in it the product allows
-// it, for every harness. Which vibest commands an agent may run is
+// coordinator also does not edit files outside the one place the product allows it (`GuardArea`: vibest's project
+// folder), start harness CLIs or run gh's credential and config commands. Any other session may not touch the protected
+// directory the product names except that place (vibest: its own project folder, not another project's), for every
+// harness. Which vibest commands an agent may run is
 // vibest's own check where they run (cli.ts userOnly, server.ts ACCESS), not this one.
 // These are checks on what a tool call says, not a sandbox: a shell command can reach a path or program no rule here
 // recognizes, and a hook that times out lets the call through (the harness decides). The harness's own sandbox is the boundary (SPEC §13).
@@ -15,11 +16,20 @@ import { VibestCommand } from "./paths.ts"
 /**
  * What the `full` tier keeps a session out of, from the product: its `home` (a later relative path would land in it),
  * the `protected` directory under it, and the one place in that directory the session may use (`allowed`; none:
- * nothing there). vibest's: VIBEST_HOME, the projects directory and the session's project's scratch directory.
+ * nothing there). vibest's: VIBEST_HOME, the projects directory and the caller's own project folder.
+ * The entry agent (the `inspect` tier) edits files only in `allowed`. The refusals are the product's words for its area.
  */
 export class GuardArea extends Context.Service<
   GuardArea,
-  { readonly home: string; readonly protected: string; readonly allowed: string | undefined }
+  {
+    readonly home: string
+    readonly protected: string
+    readonly allowed: string | undefined
+    /** Why a session's call into the protected directory is refused. */
+    readonly offLimits: string
+    /** Why the entry agent's edit outside `allowed` is refused. */
+    readonly entryEdits: string
+  }
 >()("vibest/GuardArea") {}
 
 /** A tool call in the neutral shape every integration sends (@vibest/protocol ToolCall): no harness tool names here. */
@@ -248,22 +258,58 @@ export const shellBlock = (
 
 /**
  * Where an absolute path really leads: segment by segment, following each symlink that exists before applying a later
- * `..` (as the system does), so neither `scratch/link/x` nor `scratch/../../docs` hides where it goes.
+ * `..` (as the system does), so neither `artifacts/link/x` nor `<project>/../<other project>` hides where it goes.
+ * A dangling symlink as the last segment has no real path, but a write creates its target, so that location is what
+ * counts. None only when that segment is a link whose target cannot be read, or the link refers to itself.
  */
-const physical = (p: string) =>
+const physical = (
+  p: string,
+  seen?: ReadonlySet<string>,
+): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const key = path.resolve(p)
+    if (seen?.has(key)) return Option.none<string>()
+    const visited = new Set(seen).add(key)
     let current = path.parse(p).root
-    for (const segment of p.split(path.sep)) {
+    const parts = p.split(path.sep)
+    for (let i = 0; i < parts.length; i++) {
+      const segment = parts[i]!
       if (segment === "" || segment === ".") continue
-      if (segment === "..") current = path.dirname(current)
-      else
-        current = Option.getOrElse(yield* fs.realPath(path.join(current, segment)).pipe(Effect.option), () =>
-          path.join(current, segment),
-        )
+      if (segment === "..") {
+        current = path.dirname(current)
+        continue
+      }
+      const joined = path.join(current, segment)
+      const resolved = yield* fs.realPath(joined).pipe(Effect.option)
+      if (Option.isSome(resolved)) {
+        current = resolved.value
+        continue
+      }
+      // A later segment is not the file a write would create through this link.
+      if (parts.slice(i + 1).some((s) => s !== "" && s !== ".")) {
+        current = joined
+        continue
+      }
+      const link = yield* fs.readLink(joined).pipe(
+        Effect.map((target): { readonly target: string } | undefined => ({ target })),
+        Effect.catchTag("PlatformError", (e) => {
+          // Not a link, or not a path a link can be read from: judge the path as written.
+          const code = (e.reason.cause as { code?: unknown } | undefined)?.code
+          return e.reason._tag === "NotFound" || code === "EINVAL" || code === "ENOTDIR" || code === "ENAMETOOLONG"
+            ? Effect.succeed(undefined)
+            : Effect.succeed("refuse" as const)
+        }),
+      )
+      if (link === "refuse" || link?.target === "") return Option.none<string>()
+      if (link !== undefined) {
+        const target = path.isAbsolute(link.target) ? link.target : path.resolve(current, link.target)
+        return yield* physical(target, visited)
+      }
+      current = joined
     }
-    return current
+    return Option.some(current)
   })
 
 /**
@@ -291,18 +337,59 @@ export type Rules = (
   call: ToolCall,
 ) => Effect.Effect<string | undefined, Config.ConfigError, GuardArea | Path.Path | FileSystem.FileSystem>
 
-/** The coordinator: the shared shell denials plus its own, and no file edits (a session makes changes). */
+const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWith(dir + sep)
+
+/** The physical path of the one place `GuardArea` allows the caller (vibest: its own project folder), if any. */
+const allowedPlace = Effect.gen(function* () {
+  const area = yield* GuardArea
+  return area.allowed ? Option.getOrUndefined(yield* physical(area.allowed)) : undefined
+})
+
+/** A symlink that refers to itself, or whose target cannot be read. Not a bad file URL. */
+const UNRESOLVED_LINK = "The path is a symlink that refers to itself or whose target cannot be read; refused."
+
+/**
+ * Where `raw` leads from `cwd` (`~` and file URLs expanded), both as the system follows it (symlinks before a later
+ * `..`) and as a tool that normalizes the path first (Cursor's do). Undefined for a file URL that does not parse.
+ * `UNRESOLVED_LINK` when a symlink's target cannot be read.
+ */
+const targetsOf = (
+  raw: string,
+  cwd: string,
+): Effect.Effect<
+  ReadonlyArray<string> | typeof UNRESOLVED_LINK | undefined,
+  Config.ConfigError,
+  Path.Path | FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    const p = yield* toolPath(raw, cwd, yield* Config.String("HOME"))
+    if (p === undefined) return undefined
+    const [followed, normalized] = yield* Effect.all([physical(p), physical(path.normalize(p))])
+    if (Option.isNone(followed) || Option.isNone(normalized)) return UNRESOLVED_LINK
+    return [followed.value, normalized.value]
+  })
+
+/** The coordinator: the shared shell denials plus its own, and file edits only in its project folder (a session makes changes). */
 export const coordinator: Rules = (call) =>
   Effect.gen(function* () {
     if (call.kind === "shell") {
       if (call.command === undefined) return "The shell call has no command string; refused."
       return shellBlock(call.command, yield* VibestCommand, true)
     }
-    if (call.kind === "edit") return "The coordinator does not edit files; hand the change to a session."
+    if (call.kind !== "edit") return undefined
+    const own = yield* allowedPlace
+    const refused = (yield* GuardArea).entryEdits
+    const raws = call.paths.filter((p) => p !== "")
+    if (own === undefined || raws.length === 0) return refused
+    const sep = (yield* Path.Path).sep
+    for (const raw of raws) {
+      const targets = yield* targetsOf(raw, call.cwd)
+      if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
+      if (targets === undefined || !targets.every((t) => inside(t, own, sep))) return refused
+    }
     return undefined
   })
-
-const OFF_LIMITS = "The project directory is off limits to sessions, except your scratchpad."
 
 /** Shell words that may stand for a path: a word, or the value of `--opt=value` / `VAR=value`. */
 const SHELL_WORDS = /[^\s'"`;|&()<>=,]+/g
@@ -311,33 +398,27 @@ const SHELL_SEARCH = /(?:^|[\s;&|(])(?:rg|ag|ack|grep|egrep|find|fd|tree|du)\s/
 
 /**
  * Every agent but the coordinator: the shared shell denials, and nothing under the protected directory but the place
- * `GuardArea` allows it; without one, nothing there.
+ * `GuardArea` allows it (vibest: its own project folder); without one, nothing there.
  */
 export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCall) {
   const path = yield* Path.Path
-  const home = yield* Config.String("HOME")
   const area = yield* GuardArea
-  const projects = yield* physical(area.protected)
-  const vibestHome = yield* physical(area.home)
-  const scratch = area.allowed ? yield* physical(area.allowed) : undefined
+  const offLimits = area.offLimits
+  const projectsOpt = yield* physical(area.protected)
+  const homeOpt = yield* physical(area.home)
+  if (Option.isNone(projectsOpt) || Option.isNone(homeOpt)) return offLimits
+  const projects = projectsOpt.value
+  const vibestHome = homeOpt.value
+  const own = yield* allowedPlace
   // How the home and the protected directory are spelled in a shell word (vibest's: its home's name, then projects).
   const homeName = path.basename(area.home)
   const protectedName = path.join(homeName, path.relative(area.home, area.protected))
-  const inside = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep)
-  const inScratch = (target: string) => scratch !== undefined && inside(target, scratch)
-  /**
-   * Where `raw` leads from the agent's cwd (`~` and file URLs expanded), both as the system follows it (symlinks before a
-   * later `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse.
-   */
-  const resolve = (raw: string) =>
-    Effect.gen(function* () {
-      const p = yield* toolPath(raw, call.cwd, home)
-      return p === undefined ? undefined : [yield* physical(p), yield* physical(path.normalize(p))]
-    })
+  const inOwn = (target: string) => own !== undefined && inside(target, own, path.sep)
+  const resolve = (raw: string) => targetsOf(raw, call.cwd)
   const BAD_URL = "The call names a file URL vibest cannot read; refused."
-  /** Off limits: inside the projects directory but not the session's scratch; with search, also a directory above it. */
+  /** Off limits: inside the projects directory but not the session's project folder; with search, also a directory above it. */
   const blocked = (target: string, search: boolean) =>
-    (search && inside(projects, target)) || (inside(target, projects) && !inScratch(target))
+    (search && inside(projects, target, path.sep)) || (inside(target, projects, path.sep) && !inOwn(target))
   if (call.kind === "shell") {
     const command = call.command
     if (command === undefined) return "The shell call has no command string; refused."
@@ -346,17 +427,19 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
     // A regex cannot sandbox a shell; this catches the project named directly, which is what an honest mistake looks like.
     const search = SHELL_SEARCH.test(command)
     // The shell starts in the project (a cwd the call chose): every bare file name is inside it.
-    if (blocked(yield* physical(call.cwd), false)) return OFF_LIMITS
+    const cwd = yield* physical(call.cwd)
+    if (Option.isNone(cwd) || blocked(cwd.value, false)) return offLimits
     for (const word of command.match(SHELL_WORDS) ?? []) {
       if (!word.includes("/") && !word.startsWith("~") && !word.includes(homeName)) continue
       // Globs and variables around vibest's home could expand to anything in it.
-      if (word.includes(homeName) && /[*?[{$]/.test(word)) return OFF_LIMITS
+      if (word.includes(homeName) && /[*?[{$]/.test(word)) return offLimits
       const targets = yield* resolve(word)
+      if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
       if (targets === undefined) return BAD_URL
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
-      if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
+      if (targets.some((t) => t === vibestHome || blocked(t, search))) return offLimits
       // Relative to a directory an earlier `cd` moved to, which the hook does not see.
-      if (word.includes(protectedName) && !targets.every(inScratch)) return OFF_LIMITS
+      if (word.includes(protectedName) && !targets.every(inOwn)) return offLimits
     }
     return undefined
   }
@@ -365,8 +448,9 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   for (const raw of call.paths) {
     if (raw === undefined || raw === "") continue
     const targets = yield* resolve(raw)
+    if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
     if (targets === undefined) return BAD_URL
-    if (targets.some((t) => blocked(t, search))) return OFF_LIMITS
+    if (targets.some((t) => blocked(t, search))) return offLimits
   }
   return undefined
 })
