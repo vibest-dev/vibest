@@ -1,4 +1,11 @@
-import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
+import {
+  encodeCommand,
+  Harness,
+  Harnesses,
+  HarnessUnavailable,
+  type HarnessId,
+  sessionPlugin,
+} from "@vibest/core/harness"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { type Machine, type Runtime } from "@vibest/core/runtimes"
 import { LaunchFailed } from "@vibest/core/sessions"
@@ -47,7 +54,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   // The plugin's pre-tool hook keeps a Coordinator from editing files and from what else it refuses (guard.ts).
-  const pluginDir = yield* harness.plugin(input.harness)
+  const base = yield* harness.plugin(input.harness)
   const key = yield* projectKey(input.root).pipe(Effect.orDie)
   const rulesFile = layout.coordinatorRules(key)
   const env: Record<string, string> = {
@@ -61,6 +68,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
+  const pluginDir = yield* sessionPlugin(adapter, base, saved.sessionId, saved.skills).pipe(Effect.orDie)
   const rules = yield* (yield* FileSystem.FileSystem).readFileString(rulesFile).pipe(Effect.orDie)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))

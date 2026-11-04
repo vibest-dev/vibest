@@ -54,6 +54,7 @@ import {
   type HarnessId,
   preflight,
   type HarnessAdapter,
+  sessionPlugin,
   subagentPolls,
 } from "./harness.ts"
 import { Inbox, LEASE, nextBatch, text as inboxText } from "./inbox.ts"
@@ -501,7 +502,13 @@ export class Sessions extends Context.Service<
       ) {
         const file = layout.rulesFile(session.id)
         const adapter = harnesses.get(session.harnessId)
-        const pluginDir = yield* harness.plugin(adapter.id)
+        const definition = Option.isSome(agents) ? agents.value.of(session.agent) : undefined
+        const pluginDir = yield* sessionPlugin(
+          adapter,
+          yield* harness.plugin(adapter.id),
+          session.id,
+          definition?.skills ?? [],
+        ).pipe(Effect.provideContext(platform))
         // The binary first: `open` runs argv exactly (runtime-port §3), and a runtime knows the harness by it.
         return [
           adapter.binary,

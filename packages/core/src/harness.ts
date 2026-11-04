@@ -29,6 +29,36 @@ export const anthropicOnly = (harness: string) => (provider: string | null) =>
     ? `${harness} has no provider option; only "anthropic" (or none) is accepted, got "${provider}"`
     : undefined
 
+/**
+ * The plugin directory session `sessionId` runs with: `dir` itself, or for an adapter whose skills are the plugin
+ * directory's (`skills: "plugin-dir"`) a copy under $TMPDIR/vibest/<session id>/ with only `skills` of its skills/.
+ * Made again on every start (what the definition names now); files are copied, since a harness may refuse a plugin
+ * file that resolves outside the plugin's folder.
+ */
+export const sessionPlugin = Effect.fn("sessionPlugin")(function* (
+  adapter: HarnessAdapter,
+  dir: string,
+  sessionId: string,
+  skills: ReadonlyArray<string>,
+) {
+  if (adapter.skills !== "plugin-dir" || dir === "") return dir
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  // No skills to leave out (or a test's stand-in path): as it is; a launch checks the real one (preflight).
+  if (!(yield* fs.exists(path.join(dir, "skills")))) return dir
+  const tmp = yield* Config.String("TMPDIR").pipe(Effect.orElseSucceed(() => "/tmp"))
+  const copy = path.join(tmp, "vibest", sessionId, `${adapter.id}-plugin`)
+  yield* fs.remove(copy, { recursive: true, force: true })
+  yield* fs.makeDirectory(copy, { recursive: true })
+  for (const entry of yield* fs.readDirectory(dir))
+    if (entry !== "skills") yield* fs.copy(path.join(dir, entry), path.join(copy, entry))
+  for (const name of skills) {
+    const from = path.join(dir, "skills", name)
+    if (yield* fs.exists(from)) yield* fs.copy(from, path.join(copy, "skills", name))
+  }
+  return copy
+})
+
 /** argv as JSON, for the `VIBEST_COMMAND` env the Pi extension reads. */
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 

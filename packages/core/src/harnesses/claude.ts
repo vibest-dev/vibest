@@ -112,6 +112,7 @@ export const claude: HarnessAdapter = {
   startup: claudeStartup,
   delivery: "poll",
   subagentDelivery: "type",
+  skills: "plugin-dir",
   reportsState: true,
   checkProvider: anthropicOnly("claude"),
   launchArgs: (i) => [

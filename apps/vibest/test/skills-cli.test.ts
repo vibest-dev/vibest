@@ -5,8 +5,11 @@ import path from "node:path"
 
 // Builtin skills: the invocations they print, and how each harness plugin ships and exposes them.
 import { assert, describe, it } from "@effect/vitest"
-import type { CoordinatorInput, LaunchInput } from "@vibest/core/harness"
+import { type CoordinatorInput, type LaunchInput, sessionPlugin } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS } from "@vibest/core/harnesses"
+import { ConfigProvider, Effect } from "effect"
+
+import * as Platform from "#platform"
 
 import { ARCHIVE_ROOTS } from "../scripts/archive-layout.ts"
 
@@ -174,4 +177,35 @@ describe("builtin skills", () => {
       fs.rmSync(harnesses, { recursive: true, force: true })
     }
   })
+
+  it.effect("Claude: each session runs a copy of the plugin directory holding only its definition's skills", () =>
+    Effect.gen(function* () {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-plugin-"))
+      for (const dir of [".claude-plugin", "hooks", "skills/delegate", "skills/pipeline"])
+        fs.mkdirSync(path.join(base, dir), { recursive: true })
+      fs.writeFileSync(path.join(base, "hooks", "hooks.json"), "{}")
+      fs.writeFileSync(path.join(base, "skills", "delegate", "SKILL.md"), "d")
+      const claude = ADAPTERS.claude
+      const entry = yield* sessionPlugin(claude, base, "e2e-entry", ["delegate"])
+      assert.notStrictEqual(entry, base)
+      assert.deepStrictEqual(fs.readdirSync(path.join(entry, "skills")), ["delegate"])
+      assert.isTrue(fs.existsSync(path.join(entry, "hooks", "hooks.json")))
+      assert.isFalse(fs.lstatSync(path.join(entry, "hooks")).isSymbolicLink())
+      const worker = yield* sessionPlugin(claude, base, "e2e-worker", [])
+      assert.isFalse(fs.existsSync(path.join(worker, "skills")))
+      // Made again on each start: a skill the definition no longer names is gone.
+      yield* sessionPlugin(claude, base, "e2e-entry", [])
+      assert.isFalse(fs.existsSync(path.join(entry, "skills")))
+      // Pi picks its skills itself (VIBEST_SKILLS): its directory is used as it is.
+      const pi = ADAPTERS.pi
+      assert.strictEqual(yield* sessionPlugin(pi, base, "e2e-pi", []), base)
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({ TMPDIR: fs.mkdtempSync(path.join(os.tmpdir(), "vibest-tmp-")) }),
+        ),
+      ),
+      Effect.provide(Platform.services),
+    ),
+  )
 })

@@ -124,6 +124,12 @@ export interface HarnessAdapter {
    * Esc in the pane, so a subagent's tasks and sends are typed). Absent: as `delivery`. */
   readonly subagentDelivery?: "type" | "poll"
   /**
+   * `plugin-dir`: vibest's skills ship in the plugin directory (`skills/<name>`) and the harness offers every one it
+   * finds there, with no flag to pick (Claude Code). Each session then gets its own copy of the directory holding only
+   * the skills its agent definition names. Absent: the integration picks them itself (Pi reads VIBEST_SKILLS).
+   */
+  readonly skills?: "plugin-dir"
+  /**
    * The integration reports what the harness does: `ready` when it takes input, `turn.start` when it works, `blocked`
    * when it waits on the person. vibest then reads only liveness from the runtime (and idle, for a turn that ended
    * without its event). False: the runtime's agent state says all of it.

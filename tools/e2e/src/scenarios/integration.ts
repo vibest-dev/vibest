@@ -382,6 +382,13 @@ const checks: ReadonlyArray<Check> = [
           const settled = (want: string) => async () => (await turnState(w, id)) === want
           await until("the answer's result", settled("completed"), 120_000)
           const first = await latest(w, id)
+          // A worker's own copy of vibest's Claude plugin: its hooks, none of vibest's skills (only the main agent's has them).
+          const own = path.join(w.root, "tmp", "vibest", id, "claude-plugin")
+          const entries = await fs.readdir(own).catch(() => [] as Array<string>)
+          expect(
+            entries.includes("hooks") && !entries.includes("skills"),
+            `the session's plugin copy ${own} holds: ${entries.join(", ")}`,
+          )
           expect(
             /<status>completed<\/status>/.test(first?.message ?? "") &&
               /summary: e2e answer/.test(first?.message ?? ""),
