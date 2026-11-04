@@ -16,7 +16,9 @@ import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { TurnEnds } from "@vibest/core/turn-ends"
 import { VERSION } from "@vibest/protocol/rpc"
+import * as ProductPlacement from "@vibest/vibest/placement"
 import { Project } from "@vibest/vibest/project"
+import * as ProductPrompt from "@vibest/vibest/system-prompt"
 import * as GitWorkspace from "@vibest/vibest/workspace"
 // vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
@@ -113,7 +115,9 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Inbox.layer),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(Harness.layer),
+    Layer.provideMerge(ProductPlacement.layer),
     Layer.provideMerge(GitWorkspace.layer),
+    Layer.provideMerge(ProductPrompt.layer),
     Layer.provideMerge(Db.layer.pipe(Layer.provide(host.sqlite(layout.database)))),
     // One registry per daemon (a Service, never a global), provided after every layer that reads it — a provideMerge
     // satisfies only requirements outstanding before it (runtime-port §2): two hosts in one process each get their own.

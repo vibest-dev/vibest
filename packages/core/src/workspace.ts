@@ -2,7 +2,7 @@
 // and to make or take away a session's own workspace; it never runs git itself. The product layer gives the one
 // implementation (@vibest/vibest/workspace: git checkouts and detached worktrees).
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, type Effect, type PlatformError, Schema } from "effect"
+import { Context, type Effect, type PlatformError, Schema, type Scope } from "effect"
 
 export { NotInRepository }
 
@@ -39,6 +39,23 @@ export interface RepositoryGit extends GitState {
 
 type Failure = GitError | PlatformError.PlatformError
 
+/** The product refused to name a new session's workspace (an unsafe repository name, a blocked parent, no free name). */
+export class WorkspaceRefused extends Schema.TaggedError<WorkspaceRefused>()("WorkspaceRefused", {
+  message: Schema.String,
+}) {}
+
+/** What `release` decides about a session's workspace once its terminal is closed. */
+export interface Released {
+  /** `gone`: it was already missing. */
+  readonly worktree: "removed" | "kept" | "gone"
+  /** Why it stays (or that it was already gone). */
+  readonly reason?: string | undefined
+  /** It stays because another live session works in it. */
+  readonly shared: boolean
+  /** Its branch (one `name=branch` line per repository of a multi-repository workspace), or null. */
+  readonly branch: string | null
+}
+
 export interface WorkspaceShape {
   /** The project `directory` is in: its root and its key. */
   readonly project: (
@@ -50,29 +67,35 @@ export interface WorkspaceShape {
   ) => Effect.Effect<ReadonlyArray<ProjectRepository> | undefined, PlatformError.PlatformError>
   /** The main checkout of the repository `directory` is in (a linked worktree's is its main checkout). */
   readonly mainCheckout: (directory: string) => Effect.Effect<string, NotInRepository | GitError>
-  /** The project's name for people: origin's repository name, else the main checkout's directory name. */
-  readonly name: (directory: string) => Effect.Effect<string, NotInRepository | GitError | PlatformError.PlatformError>
-  /** Whether a session's workspace may not be made under `directory` (it is a checkout, or not a directory). */
-  readonly parentBlocked: (directory: string) => Effect.Effect<boolean, PlatformError.PlatformError>
+  /** A new session's workspace directory for the project at `root`, reserved (made, empty) so no other session gets it. */
+  readonly reserve: (root: string) => Effect.Effect<string, WorkspaceRefused>
   /**
-   * A session's own workspace at `path` (which must not exist yet): a detached worktree of `root`, or one per
-   * repository of a multi-repository project (with their included files); `discard` takes it away again.
+   * The session's workspace at `path` made ready for its harness: made in the directory `reserve` gave (unless `shared`:
+   * it works in another session's) with the files a checkout keeps beside git. Undone when the scope closes failed.
    */
-  readonly allocate: (root: string, path: string) => Effect.Effect<void, Failure | CopyFailed>
-  /** Undo `allocate` after a start that failed; git without force, so a refusal leaves it for `vibest archive`. */
-  readonly discard: (root: string, path: string) => Effect.Effect<void, Failure>
-  /** The files a checkout keeps beside git (`.worktreeinclude`) copied into `path`; the names copied. */
-  readonly copyIncluded: (root: string, path: string) => Effect.Effect<ReadonlyArray<string>, Failure | CopyFailed>
+  readonly prepare: (
+    root: string,
+    path: string,
+    shared: boolean,
+  ) => Effect.Effect<void, Failure | CopyFailed, Scope.Scope>
   /** Git state of a session's workspace; undefined when the path is missing or not a directory. */
   readonly state: (path: string) => Effect.Effect<GitState | undefined, PlatformError.PlatformError>
   /** Git state per repository of a multi-repository workspace; undefined when `path` is not one. */
   readonly repositoryStates: (
     path: string,
   ) => Effect.Effect<ReadonlyArray<RepositoryGit> | undefined, PlatformError.PlatformError>
-  /** Whether `path` is a linked worktree of `repository` (its main checkout does not count). */
-  readonly isLinked: (repository: string, path: string) => Effect.Effect<boolean>
-  /** Remove linked worktree `path` of `repository`, without force: git refuses one with changes. */
-  readonly removeLinked: (repository: string, path: string) => Effect.Effect<void, GitError>
+  /**
+   * Take away session `id`'s workspace at `path` once its terminal is closed, only when nothing can be lost (the
+   * product's checks: it made it, no live sharer, git loses nothing). `processes`: whether the engine proved no process
+   * works in it any more; `liveSharers` is read again just before anything is removed.
+   */
+  readonly release: (input: {
+    readonly id: string
+    readonly path: string
+    readonly keep: boolean
+    readonly processes: { readonly state: "exited" | "alive" | "unknown"; readonly why: string }
+    readonly liveSharers: Effect.Effect<ReadonlyArray<string>>
+  }) => Effect.Effect<Released, PlatformError.PlatformError>
 }
 
 export class Workspace extends Context.Service<Workspace, WorkspaceShape>()("vibest/Workspace") {}

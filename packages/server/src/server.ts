@@ -23,7 +23,6 @@ import {
 } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { entrySystemPrompt, projectText } from "@vibest/core/system-prompt"
 import { ActionRefused } from "@vibest/plugin"
 import {
   AGENT_HEADER,
@@ -62,6 +61,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 import * as Launch from "@vibest/vibest/launch"
 import { Project } from "@vibest/vibest/project"
 import { projectRoot } from "@vibest/vibest/project-create"
+import { entrySystemPrompt, projectText } from "@vibest/vibest/system-prompt"
 import { NotInRepository } from "@vibest/vibest/worktree"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the

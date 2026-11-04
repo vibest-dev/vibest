@@ -28,6 +28,8 @@ import { coordinatorPlugin } from "@vibest/plugin-coordinator"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
+import * as ProductPlacement from "@vibest/vibest/placement"
+import * as ProductPrompt from "@vibest/vibest/system-prompt"
 import * as GitWorkspace from "@vibest/vibest/workspace"
 import { git } from "@vibest/vibest/worktree"
 import {
@@ -573,6 +575,8 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(integration),
         Layer.provideMerge(plugins),
         Layer.provideMerge(Inbox.layer),
+        Layer.provideMerge(ProductPlacement.layer),
+        Layer.provideMerge(GitWorkspace.layer),
         Layer.provideMerge(
           (options.db ? Layer.effect(Db, Effect.map(Db, options.db)).pipe(Layer.provide(Db.layer)) : Db.layer).pipe(
             Layer.provideMerge(Platform.sqlite(":memory:")),
@@ -592,12 +596,12 @@ const over = (options: TestOptions) => {
             }),
           ).pipe(Layer.provideMerge(FakeProcesses.layer)),
         ),
+        Layer.provideMerge(ProductPrompt.layer),
         Layer.provideMerge(home),
         Layer.provideMerge(tmp),
         Layer.provideMerge(Drain.layer),
         Layer.provideMerge(Restarting.layer),
         Layer.provideMerge(TurnEnds.layer),
-        Layer.provideMerge(GitWorkspace.layer),
         Layer.provideMerge(Platform.services),
       ),
     ),

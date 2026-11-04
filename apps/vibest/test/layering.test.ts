@@ -41,4 +41,23 @@ it("the engine runs no git and imports no worktree code or the product", () => {
     importing(core, /ChildProcess\.make\("git"|from "\.\/(worktree|project-create)\.ts"|from "@vibest\/vibest\//),
     [],
   )
+  // Nothing in the engine depends on the product package either.
+  assert.notInclude(fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8"), '"@vibest/vibest"')
+})
+
+it("the product's notions stay out of the engine", () => {
+  const core = sources("packages/core/src")
+  // Where worktrees go and how they are named, the project's files and the system prompt text are the product's
+  // (@vibest/vibest: workspace, placement, system-prompt).
+  assert.deepStrictEqual(
+    importing(core, /layout\.worktrees|allocationWorktree|ALLOCATION_LEAF|"instructions\.md"|You are agent \$\{/),
+    [],
+  )
+  // Terminal placement, removal and the system prompt file know no entry agent: the product's policy decides.
+  for (const file of ["placement.ts", "remove.ts", "system-prompt.ts", "workspace.ts"])
+    assert.notMatch(
+      fs.readFileSync(path.join(root, "packages/core/src", file), "utf8"),
+      /coordinatorOf|projectDirectory/,
+      file,
+    )
 })

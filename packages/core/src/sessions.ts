@@ -60,8 +60,8 @@ import {
 import { Inbox, LEASE, nextBatch, text as inboxText } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
-import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeRepositoryDirectory } from "./paths.ts"
-import { sessionPlacement } from "./placement.ts"
+import { Layout, VibestCommand } from "./paths.ts"
+import { PlacementPolicy, sessionPlacement } from "./placement.ts"
 import { describeSpawn, errorMessage, Plugins, type Routing } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import * as Remove from "./remove.ts"
@@ -85,7 +85,7 @@ import {
   type AgentSeen,
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
-import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
+import { SessionPrompt, writeSystemPrompt } from "./system-prompt.ts"
 import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
 import { type GitState, Workspace } from "./workspace.ts"
 /**
@@ -112,8 +112,6 @@ export {
 const directoryLock = (directory: string) => `directory:${directory}`
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
-/** Test seam: try these 4-hex leaves in order instead of random draws. Unset in production. */
-export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined } = { leaves: undefined }
 
 export const START_TIMEOUT = Duration.seconds(120)
 export const READY_TIMEOUT = Duration.seconds(60)
@@ -278,6 +276,7 @@ export class Sessions extends Context.Service<
       const harnesses = yield* Harnesses
       const agents = yield* Effect.serviceOption(Agents)
       const workspace = yield* Workspace
+      const sessionPrompt = yield* SessionPrompt
       const inbox = yield* Inbox
       const drain = yield* Drain
       const layout = yield* Layout
@@ -499,14 +498,14 @@ export class Sessions extends Context.Service<
       const systemPromptOf = (session: SessionRow, key: string) =>
         Effect.gen(function* () {
           const definition = Option.isSome(agents) ? agents.value.of(session.agent) : undefined
-          return sessionSystemPrompt({
+          return yield* sessionPrompt.text({
             id: session.id,
             agent: { spawn: definition?.can.spawn ?? false, rules: definition?.rules },
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
             scratch: layout.scratch(key),
             vibest,
-            ...(yield* projectText(layout.project(key))),
+            key,
           })
         })
 
@@ -775,6 +774,7 @@ export class Sessions extends Context.Service<
         db,
         runtimes,
         workspace,
+        policy: yield* PlacementPolicy,
         layout,
         fs,
         path,
@@ -928,55 +928,13 @@ export class Sessions extends Context.Service<
         const admit = (shared: string | undefined) =>
           Effect.gen(function* () {
             const refuse = (message: string) => new AllocationFailed({ message })
-            const folders = yield* workspace
-              .repositories(root)
-              .pipe(Effect.mapError((e) => refuse(`${root}: ${e.message}`)))
             const key = input.key
             const base = {
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
               ...(input.archive ? { archive: true } : {}),
             }
-            let cwd = shared
-            if (cwd === undefined) {
-              // `<worktrees>/<project>/<leaf>/<repository>` for a multi-repository project; otherwise the repository's own name.
-              const repository = folders
-                ? path.basename(root)
-                : yield* workspace.name(root).pipe(Effect.mapError((e) => refuse(e.message)))
-              if (!safeRepositoryDirectory(repository))
-                return yield* refuse(
-                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
-                )
-              const parentPath = path.join(layout.worktrees, repository)
-              if (
-                yield* workspace
-                  .parentBlocked(parentPath)
-                  .pipe(Effect.mapError((e) => refuse(`${parentPath}: ${e.message}`)))
-              )
-                return yield* refuse(
-                  `refusing to allocate inside ${parentPath}: it is an existing worktree or not a directory`,
-                )
-              yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
-              const scripted = allocationNameSource.leaves
-              const attempts =
-                scripted === undefined ? ALLOCATION_NAME_ATTEMPTS : Math.min(scripted.length, ALLOCATION_NAME_ATTEMPTS)
-              for (let i = 0; i < attempts && cwd === undefined; i++) {
-                const candidate = scripted?.[i] ?? Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
-                if (!ALLOCATION_LEAF.test(candidate)) continue
-                const where = layout.allocationWorktree(repository, candidate)
-                // The name is reserved by creating its directory: an atomic mkdir, which fails when anything is there.
-                const made = yield* fs.makeDirectory(where).pipe(
-                  Effect.as(true),
-                  Effect.catchTag("PlatformError", (e) =>
-                    e.reason._tag === "AlreadyExists"
-                      ? Effect.succeed(false)
-                      : Effect.fail(refuse(`${where}: ${e.message}`)),
-                  ),
-                )
-                if (made) cwd = where
-              }
-              if (cwd === undefined)
-                return yield* refuse(`no unused 4-hex worktree name under ${repository} after ${attempts} attempts`)
-            }
+            // A new session's directory: the workspace names and reserves it.
+            const cwd = shared ?? (yield* workspace.reserve(root).pipe(Effect.mapError((e) => refuse(e.message))))
             const draft: Omit<SessionRow, "projectId"> = {
               id,
               agent,

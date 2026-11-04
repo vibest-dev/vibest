@@ -20,12 +20,13 @@ import { piModels } from "@vibest/core/harnesses/pi"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
-import { entrySystemPrompt, privateTmp, UserPlatform } from "@vibest/core/system-prompt"
+import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import { COORDINATOR } from "@vibest/plugin-coordinator"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Launch from "@vibest/vibest/launch"
+import { entrySystemPrompt } from "@vibest/vibest/system-prompt"
 import {
   copyIncluded,
   git,

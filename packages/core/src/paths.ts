@@ -3,8 +3,6 @@ export { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 export { askYesNo, interactive, writeAtomic } from "@vibest/schema/terminal"
 
 const SESSION_ID = /^[0-9a-f]{8}$/
-export const ALLOCATION_LEAF = /^[0-9a-f]{4}$/
-export const ALLOCATION_NAME_ATTEMPTS = 16
 
 /** Darwin and Windows worktree volumes fold case. Linux keeps two spellings as two directories. */
 const hostPlatform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform

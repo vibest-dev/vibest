@@ -6,6 +6,7 @@ import {
   Cause,
   Clock,
   type Config,
+  Context,
   Data,
   Effect,
   Exit,
@@ -17,33 +18,66 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { CoordinatorRow, EndReason, SessionPatch, SessionRow } from "./db.ts"
+import type { EndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { isUsageLimitError } from "./results.ts"
 import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
-import type { WorkspaceShape } from "./workspace.ts"
+import type { GitError, NotInRepository, WorkspaceShape } from "./workspace.ts"
+
+type Labels = Readonly<Record<string, string>>
+
+/**
+ * The product's terminal placement policy (@vibest/vibest/placement): which terminal a new one opens beside, which
+ * directory a session's terminals belong to, and what its project's workspace shows. The engine opens, labels and
+ * closes terminals; it asks here where and what.
+ */
+export interface PlacementPolicyShape {
+  /** The terminal a new one of `session` opens beside in runtime `kind` when no caller named one, or none. */
+  readonly near: (session: SessionRow, kind: string) => Effect.Effect<Terminal | undefined>
+  /** The directory a resumed or moved session at `cwd` is placed in (the runtime groups terminals by it). */
+  readonly root: (
+    session: SessionRow,
+    cwd: string,
+  ) => Effect.Effect<string, NotInRepository | GitError | PlatformError.PlatformError>
+  /** The directory a live session's terminal is labelled for again. */
+  readonly labelRoot: (
+    session: SessionRow,
+    cwd: string,
+  ) => Effect.Effect<string, NotInRepository | PlatformError.PlatformError>
+  /** The project labels (`present`'s `project` and `live`) on a terminal of the project at `root`. */
+  readonly project: (projectId: number, root: string) => Effect.Effect<Labels>
+  /** No live session of the project is labelled in runtime `kind` (`live` of them still are): the terminal that shows the project alone, and its labels. */
+  readonly alone: (
+    projectId: number,
+    kind: string,
+    live: number,
+  ) => Effect.Effect<{ readonly terminal: Terminal; readonly labels: Labels } | undefined>
+}
+
+export class PlacementPolicy extends Context.Service<PlacementPolicy, PlacementPolicyShape>()(
+  "vibest/PlacementPolicy",
+) {}
 
 /** The harness dying on its own usage limit inside `open` (§3): the launch hands over to the limit move, as a failed start did. */
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
 export const sessionPlacement = (deps: {
   readonly db: {
-    readonly coordinatorOf: (projectId: number) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: number }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly projectKey: (id: number) => Effect.Effect<string | undefined>
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
-    readonly parentOf: (id: string) => Effect.Effect<string | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
   }
   /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
   readonly workspace: WorkspaceShape
+  readonly policy: PlacementPolicyShape
   readonly layout: {
     readonly scratch: (key: string) => string
   }
@@ -52,11 +86,6 @@ export const sessionPlacement = (deps: {
       path: string,
       options?: { readonly recursive?: boolean },
     ) => Effect.Effect<void, PlatformError.PlatformError>
-    readonly remove: (
-      path: string,
-      options?: { readonly force?: boolean; readonly recursive?: boolean },
-    ) => Effect.Effect<void, PlatformError.PlatformError>
-    readonly readDirectory: (path: string) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError>
   }
   readonly path: { readonly dirname: (path: string) => string }
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly systemPromptInPrompt: boolean } }
@@ -93,15 +122,7 @@ export const sessionPlacement = (deps: {
   /** The usage-limit move (move.ts), wired in after placement exists. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, runtimes, layout, fs, workspace } = deps
-  /** Project name on the workspace: the directory's own name, not the key. */
-  const projectName = (root: string) =>
-    workspace.name(root).pipe(Effect.catch(() => Effect.flatMap(Path.Path, (p) => Effect.succeed(p.basename(root)))))
-
-  const liveCount = (projectId: number) =>
-    db
-      .listSessions({ projectId })
-      .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
+  const { db, runtimes, layout, fs, workspace, policy } = deps
 
   /** Terminal labels (§3 `present`, [the `label` given to `open`] when absent). A failure here does not fail the session: the terminal is already up. */
   const show = (h: Runtime, session: SessionRow, terminal: Terminal, root: string) =>
@@ -113,8 +134,7 @@ export const sessionPlacement = (deps: {
         title: session.name,
         definition: session.agent,
         session: session.id,
-        project: yield* projectName(root),
-        live: String(yield* liveCount(session.projectId)),
+        ...(yield* policy.project(session.projectId, root)),
       })
     }).pipe(Effect.ignore)
 
@@ -123,19 +143,6 @@ export const sessionPlacement = (deps: {
     acquire: Effect.Effect<A, E, R>,
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
-
-  /**
-   * Beside whoever started the session: a session that spawned it (a lead) when its terminal is in this same runtime,
-   * else the project's main agent's terminal when that one is (pane ids are the runtime's own).
-   */
-  const nearMain = (session: SessionRow, kind: string) =>
-    Effect.gen(function* () {
-      const parent = yield* db.parentOf(session.id)
-      const lead = parent === undefined ? undefined : yield* db.getSession(parent)
-      if (lead?.runtime === kind && lead.exitedAt === null && lead.address.id !== "") return lead.address
-      const main = yield* db.coordinatorOf(session.projectId)
-      return main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined
-    })
 
   /**
    * The session's terminal (runtime-port.md §3 `open`): running `argv`, kept with the project's other terminals, beside
@@ -160,8 +167,8 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    // Beside the pane a caller names (--peer), else beside whoever started it (nearMain).
-    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
+    // Beside the pane a caller names (--peer), else where the policy puts it.
+    const near = input.near !== undefined ? input.near : yield* policy.near(session, h.kind)
     const choice = {
       harnessId: session.harnessId,
       provider: session.provider,
@@ -212,7 +219,6 @@ export const sessionPlacement = (deps: {
     splitFrom?: string,
     env?: Readonly<Record<string, string>>,
   ) {
-    const folders = yield* workspace.repositories(root)
     // The row's own project key: the scratch directory goes to the project the session belongs to.
     const key = yield* db.projectKey(session.projectId)
     if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
@@ -247,20 +253,7 @@ export const sessionPlacement = (deps: {
       )
     // The worktree comes first: the terminal's cwd is in it, the harness argv names it, and the `.worktreeinclude` files are in place before the harness starts.
     const worktree = yield* deps.worktreeOf(session)
-    if (peer === undefined) {
-      // Spawn reserved the name by creating the directory, empty. A failed start removes it again, unless git left
-      // something in it (a refused undo leaves it for `vibest archive`).
-      yield* undoOnFailure(Effect.void, () =>
-        fs.readDirectory(worktree).pipe(
-          Effect.flatMap((left) => (left.length === 0 ? fs.remove(worktree, { recursive: true }) : Effect.void)),
-          Effect.ignore,
-        ),
-      )
-      // Detached, made by vibest: a linked worktree of the main checkout would group away from the project's terminals.
-      // Undone without force (it deletes ignored files, refuses on anything else); a refusal leaves it for `vibest archive`.
-      yield* undoOnFailure(workspace.allocate(root, worktree), () => workspace.discard(root, worktree))
-    }
-    if (!folders) yield* workspace.copyIncluded(root, worktree)
+    yield* workspace.prepare(root, worktree, peer !== undefined)
     // The system prompt launchArgv writes goes again when the start fails.
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
     const argv = yield* deps.launchArgv(session, false, key)
@@ -310,10 +303,6 @@ export const sessionPlacement = (deps: {
       ),
     )
 
-  /** The project directory stored on the main agent, if this start wrote one. Never the lookup key. */
-  const storedDirectory = (projectId: number) =>
-    db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
-
   /**
    * The project's workspace presentation again, after its live count changed (a session ended, was archived or
    * removed): each remaining live session's terminal relabels it, as `republish` does; with none left, the main agent's
@@ -325,33 +314,18 @@ export const sessionPlacement = (deps: {
     const rows = (yield* db.listSessions({ projectId })).filter(
       (row) => row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
     )
-    const stored = yield* storedDirectory(projectId)
     let shown = false
     for (const session of rows) {
       if (session.address.id === "") continue
-      yield* show(
-        h.value,
-        session,
-        session.address,
-        stored ?? (yield* workspace.project(yield* deps.worktreeOf(session))).root,
-      )
+      yield* show(h.value, session, session.address, yield* policy.labelRoot(session, yield* deps.worktreeOf(session)))
       shown = true
     }
     if (shown) return
-    // shortcut: without a stored project directory the workspace's project token cannot be named again, so it is left as it is
-    const main = yield* db.coordinatorOf(projectId)
-    if (main?.runtime !== kind || !main.address || main.address.id === "" || stored === undefined) return
     if (h.value.present === undefined) return
+    const alone = yield* policy.alone(projectId, kind, rows.length)
+    if (alone === undefined) return
     yield* h.value
-      .present(main.address, {
-        agent: "",
-        harness: "",
-        title: "",
-        definition: "",
-        session: "",
-        project: yield* projectName(stored),
-        live: String(rows.length),
-      })
+      .present(alone.terminal, { agent: "", harness: "", title: "", definition: "", session: "", ...alone.labels })
       .pipe(Effect.ignore)
   })
 
@@ -361,9 +335,7 @@ export const sessionPlacement = (deps: {
       const cwd = yield* deps.worktreeOf(session)
       const key = yield* db.projectKey(session.projectId)
       if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
-      const stored = yield* storedDirectory(session.projectId)
-      if (yield* workspace.repositories(cwd)) return { root: stored ?? (yield* workspace.project(cwd)).root, cwd, key }
-      return { root: stored ?? (yield* workspace.mainCheckout(cwd)), cwd, key }
+      return { root: yield* policy.root(session, cwd), cwd, key }
     })
 
   const resume = Effect.fn("Sessions.resume")(function* (h: Runtime, session: SessionRow) {
@@ -389,8 +361,7 @@ export const sessionPlacement = (deps: {
       Effect.gen(function* () {
         const h = yield* runtimes.route(session.runtime).pipe(Effect.option)
         if (Option.isNone(h)) return 0
-        const stored = yield* storedDirectory(session.projectId)
-        const root = stored ?? (yield* workspace.project(yield* deps.worktreeOf(session))).root
+        const root = yield* policy.labelRoot(session, yield* deps.worktreeOf(session))
         yield* show(h.value, session, session.address, root)
         return 1
       }).pipe(Effect.orElseSucceed(() => 0)),

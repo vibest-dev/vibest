@@ -7,7 +7,6 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 
 import { Db, type SessionRow } from "./db.ts"
-import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
@@ -93,7 +92,6 @@ export interface ReleaseInput {
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
-  const layout = yield* Layout
   const turnEnds = yield* TurnEnds
   const processes = yield* Processes
   const workspace = yield* Workspace
@@ -206,94 +204,24 @@ export const make = Effect.gen(function* () {
         const t = yield* Clock.currentTimeMillis
         yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t, end: "archived" })
       }
-      /** The directory stays because another live session works in it. */
-      let shared = false
-      const g = exists ? yield* workspace.state(worktree) : undefined
-      const multiGit = exists ? yield* workspace.repositoryStates(worktree).pipe(Effect.orDie) : undefined
-      const root = exists
-        ? yield* workspace.mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
-        : undefined
-      const linked = workspace.isLinked
-      /** Why the worktree stays, checked in this order and only as far as needed; undefined once git removed it. */
-      const keepWorktree = Effect.gen(function* () {
-        if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
-        // Only a directory vibest made: one under its worktrees root.
-        if (!worktree.startsWith(layout.worktrees + "/"))
-          return `${worktree} is not under ${layout.worktrees}; left alone`
-        const sharing = (live: ReadonlyArray<string>) =>
-          live.length > 0 ? `worktree kept: session ${live.join(", ")} still works in it` : undefined
-        const liveSharers = db.liveSharers(id)
-        const early = sharing(yield* liveSharers)
-        if (early) {
-          shared = true
-          return early
-        }
-        // Re-read git and sharers immediately before `worktree remove`. Undefined: removed.
-        /** Removed: undefined. A live sharer stops the whole removal; any other keep stays on this worktree. */
-        const removeLinked = (repoRoot: string, path: string) =>
-          Effect.gen(function* () {
-            const state = yield* workspace.state(path)
-            if (!state?.saved) return { stop: false, reason: `worktree kept: ${state?.why ?? "git cannot read it"}` }
-            const again = sharing(yield* liveSharers)
-            if (again) {
-              shared = true
-              return { stop: true, reason: again }
-            }
-            const refused = yield* workspace.removeLinked(repoRoot, path).pipe(
-              Effect.as(undefined),
-              Effect.catchTag("GitError", (e) => Effect.succeed(e.message)),
-            )
-            return refused === undefined ? undefined : { stop: false, reason: `worktree kept: git refused: ${refused}` }
-          })
-        // Another terminal still works there: its shell keeps the worktree. (The runtime API has no terminal listing;
-        // `confirmExited` above — no process of this user with its cwd there — is the check that covers this now.)
-        // A multi-repository workspace is not itself a worktree: the same removal per repository, then the directory if empty.
-        const isLinked = root !== undefined && (yield* linked(root, worktree))
-        const children = isLinked ? undefined : yield* workspace.repositories(worktree).pipe(Effect.orDie)
-        if (!isLinked && !children) return `${worktree} is not a worktree of its repository; left alone`
-        if (processState !== "exited") return `worktree kept: ${confirmed.why}`
-        if (children) {
-          const notes: string[] = []
-          for (const child of children) {
-            const repoRoot = yield* workspace
-              .mainCheckout(child.path)
-              .pipe(Effect.option, Effect.map(Option.getOrUndefined))
-            if (repoRoot === undefined || !(yield* linked(repoRoot, child.path))) {
-              notes.push(`${child.name}: ${child.path} is not a worktree of its repository; left alone`)
-              continue
-            }
-            const kept = yield* removeLinked(repoRoot, child.path)
-            if (kept === undefined) continue
-            if (kept.stop) return [kept.reason, ...notes].join("; ")
-            notes.push(`${child.name}: ${kept.reason}`)
-          }
-          if (notes.length > 0) return notes.join("; ")
-          const left = yield* fs.readDirectory(worktree).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
-          if (left.length === 0) yield* fs.remove(worktree, { recursive: true }).pipe(Effect.ignore)
-          return undefined
-        }
-        if (root === undefined) return `${worktree} is not a worktree of its repository; left alone`
-        return (yield* removeLinked(root, worktree))?.reason
+      // Whether the worktree goes is the workspace's to decide (its own checks), given what is proven of the processes.
+      const released = yield* workspace.release({
+        id,
+        path: worktree,
+        keep: input.keepWorktree === true,
+        processes: confirmed,
+        liveSharers: db.liveSharers(id),
       })
-      let tree: "removed" | "kept" | "gone" = "gone"
-      if (!exists) reasons.push(`${worktree} was already gone`)
-      else {
-        const kept = yield* keepWorktree
-        tree = kept === undefined ? "removed" : "kept"
-        if (kept !== undefined) reasons.push(kept)
-      }
+      const tree = released.worktree
+      const shared = released.shared
+      if (released.reason !== undefined) reasons.push(released.reason)
       // Processes that may still be running may still read its system prompt or report a turn end. Its files are its
       // own even though a directory another session works in stays.
       if ((tree !== "kept" || shared) && processState === "exited") {
         yield* turnEnds.forget(id)
         yield* removeSystemPrompt(id)
       }
-      const branch = multiGit
-        ? multiGit
-            .map((r) => (r.branch ? `${r.name}=${r.branch}` : ""))
-            .filter(Boolean)
-            .join("\n") || null
-        : g?.branch || null
+      const branch = released.branch
       return {
         id,
         processes: processState,
