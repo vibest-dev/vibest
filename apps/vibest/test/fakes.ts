@@ -29,6 +29,7 @@ import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import * as ProductPlacement from "@vibest/vibest/placement"
+import * as SqliteStore from "@vibest/vibest/sqlite-store"
 import * as ProductPrompt from "@vibest/vibest/system-prompt"
 import * as GitWorkspace from "@vibest/vibest/workspace"
 import { git } from "@vibest/vibest/worktree"
@@ -184,11 +185,22 @@ export const runHookOutput = (
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const projectId = yield* db.projectOfSession(sessionId)
-    if (projectId === undefined) return null
-    const main = yield* db.coordinatorOf(projectId)
+    const scope = yield* db.scopeOf(sessionId)
+    if (scope === undefined) return null
+    const main = yield* db.ownerOf(scope)
     return main?.id === sessionId ? main.harnessSessionId : null
   })
+
+/** vibest's project id for scope `key` (what VIBEST_PROJECT_ID names). */
+export const projectNumber = (key: string) => Effect.flatMap(SqliteStore.Projects, (p) => p.projectId(key))
+
+/** `Db.startOwner` as vibest's main agent start: with its scope and project id. */
+export const launchMain = (key: string, ...rest: Tail<Parameters<Db["Service"]["startOwner"]>>) =>
+  Effect.gen(function* () {
+    const saved = yield* (yield* Db).startOwner(key, ...rest)
+    return { ...saved, scope: key, projectId: yield* projectNumber(key) }
+  })
+type Tail<T extends ReadonlyArray<unknown>> = T extends readonly [unknown, ...infer R] ? R : never
 
 /** Session `sessionId`'s events of `type` (all when omitted), oldest first, with their data. */
 export const eventsOf = (sessionId: string, type?: string) =>
@@ -578,9 +590,16 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(ProductPlacement.layer),
         Layer.provideMerge(GitWorkspace.layer),
         Layer.provideMerge(
-          (options.db ? Layer.effect(Db, Effect.map(Db, options.db)).pipe(Layer.provide(Db.layer)) : Db.layer).pipe(
-            Layer.provideMerge(Platform.sqlite(":memory:")),
-          ),
+          (options.db
+            ? Layer.merge(
+                Layer.effect(Db, Effect.map(Db, options.db)),
+                Layer.effect(
+                  SqliteStore.Projects,
+                  Effect.map(SqliteStore.Projects, (p) => p),
+                ),
+              ).pipe(Layer.provide(SqliteStore.layer))
+            : SqliteStore.layer
+          ).pipe(Layer.provideMerge(Platform.sqlite(":memory:"))),
         ),
         Layer.provideMerge(runtime),
         Layer.provideMerge(harnessOf(options)),

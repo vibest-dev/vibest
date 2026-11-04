@@ -37,6 +37,8 @@ import {
   type TestServices,
   until,
   writeResult,
+  launchMain,
+  projectNumber,
 } from "./fakes.ts"
 
 const served = (options?: TestOptions) =>
@@ -59,7 +61,10 @@ const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string) => au
 const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
-    return authed(raw, sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(row.projectId) }))
+    return authed(
+      raw,
+      sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(yield* projectNumber(row.scope)) }),
+    )
   })
 
 const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
@@ -247,7 +252,7 @@ describe("vibest.sock", () => {
       )
 
       // The harness's conversation id rides on a session's calls: kept from the session's own harness (pi) alone.
-      const projectId = String((yield* db.sessionIdentity(id))!.projectId)
+      const projectId = String(yield* projectNumber((yield* db.sessionIdentity(id))!.scope))
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
       yield* as("pi", "pi-1").Report({ message: "one" })
@@ -649,8 +654,8 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual(failureTag(refused), "Forbidden")
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
-      const project = yield* db.projectId(yield* repositoryKey(repo))
-      const row = (yield* db.coordinatorOf(project))!
+      const project = yield* repositoryKey(repo)
+      const row = (yield* db.ownerOf(project))!
       assert.strictEqual(row.address?.id, "test/p1")
       assert.strictEqual(row.harnessId, "claude")
       // Its own terminal may start it again; another one may once it exited.
@@ -658,7 +663,7 @@ describe("vibest.sock", () => {
       yield* herdr.updateAgent("test/p1", (a) => ({ ...a, alive: false }))
       const moved = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p2" })
       assert.strictEqual(moved.sessionId, first.sessionId)
-      assert.strictEqual((yield* db.coordinatorOf(project))!.address?.id, "test/p2")
+      assert.strictEqual((yield* db.ownerOf(project))!.address?.id, "test/p2")
     }),
   )
 
@@ -744,17 +749,17 @@ describe("vibest.sock", () => {
       }
       yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
       yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
-      yield* db.coordinatorLaunch("r", "cursor", false, {
+      yield* launchMain("r", "cursor", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p9" },
       })
       yield* herdr.seedAgent("w1:p9")
-      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const project = (yield* db.getSession("aaaaaaaa"))!.scope
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
       yield* inbox.enqueue(row("aaaaaaaa", "one"))
       yield* inbox.enqueue(row("aaaaaaaa", "two"))
       yield* inbox.enqueue(row("bbbbbbbb", "three"))
-      yield* until(db.coordinatorPending(project), (rows) => rows.length === 1)
+      yield* until(db.ownerPending(project), (rows) => rows.length === 1)
       const prompts = (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9")
       assert.deepStrictEqual(
         prompts.map((p) => p.text),
@@ -763,10 +768,10 @@ describe("vibest.sock", () => {
 
       // The prompt made the pane busy: nothing more until it is idle again.
       yield* Effect.void
-      assert.strictEqual((yield* db.coordinatorPending(project)).length, 1)
+      assert.strictEqual((yield* db.ownerPending(project)).length, 1)
       yield* herdr.endTurn("w1:p9")
       yield* inbox.deliver(project)
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
+      assert.deepStrictEqual(yield* db.ownerPending(project), [])
       assert.strictEqual((yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9").at(-1)!.text, "three")
     }),
   )
@@ -800,11 +805,11 @@ describe("vibest.sock", () => {
       yield* db.insertSession({ id: "cccccccc", ...general }, "r")
       yield* herdr.addPane("w1:p8", "ws", "/")
       yield* herdr.seedAgent("w1:p8")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* launchMain("r", "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p8" },
       })
-      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const project = (yield* db.getSession("aaaaaaaa"))!.scope
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
       yield* inbox.enqueue(row("aaaaaaaa", "one"))
       yield* inbox.enqueue(row("aaaaaaaa", "two"))
@@ -813,20 +818,20 @@ describe("vibest.sock", () => {
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
       )
-      assert.lengthOf(yield* db.coordinatorPending(project), 3)
+      assert.lengthOf(yield* db.ownerPending(project), 3)
 
       const received: Array<string> = []
       const take = Effect.gen(function* () {
-        const batch = yield* inbox.poll(coord.projectId)
+        const batch = yield* inbox.poll(coord.scope)
         received.push(batch.text)
-        yield* inbox.ack(coord.projectId, batch.ids)
+        yield* inbox.ack(coord.scope, batch.ids)
       })
       yield* take
       yield* take
       yield* inbox.enqueue(row("cccccccc", "four"))
       yield* take
       assert.deepStrictEqual(received, ["one\n\ntwo", "three", "four"])
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
+      assert.deepStrictEqual(yield* db.ownerPending(project), [])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],

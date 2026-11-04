@@ -47,6 +47,8 @@ import {
   resultText,
   dropResult,
   systemPromptFile,
+  launchMain,
+  projectNumber,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -70,7 +72,7 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+    yield* launchMain(yield* repositoryKey(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
@@ -179,7 +181,10 @@ describe.concurrent("Sessions", () => {
       // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
       // field (no terminal yet: the one it gets is opened after the env is fixed).
       const identity = (yield* (yield* Db).sessionIdentity(id))!
-      assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
+      assert.deepInclude(placed.env, {
+        VIBEST_PROJECT_ID: String(yield* projectNumber(identity.scope)),
+        VIBEST_HARNESS: "pi",
+      })
       const runtime = JSON.parse(placed.env.VIBEST_RUNTIME!) as Record<string, unknown>
       assert.deepStrictEqual(Object.keys(runtime).sort(), ["machine", "runtime"])
       assert.strictEqual(runtime.machine, "local")
@@ -385,7 +390,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* db.ownerPending((yield* db.getSession(id))!.scope), [])
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "lost", exitedAt: null })
@@ -410,7 +415,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -444,7 +449,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { status: "unknown", turnState: "failed" })
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
-      const [row] = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
+      const [row] = yield* db.ownerPending((yield* db.getSession(id))!.scope)
       assert.include(row!.message, "<status>failed</status>")
       assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
       assert.notInclude(row!.message, "pane tail")
@@ -608,7 +613,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -798,7 +803,7 @@ describe.concurrent("Sessions", () => {
       const sessions = yield* Sessions
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -1082,7 +1087,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       const prompts = (yield* herdr.callsTo("send")).length
       const notices = db
-        .coordinatorPending((yield* db.getSession(id))!.projectId)
+        .ownerPending((yield* db.getSession(id))!.scope)
         .pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice")))
 
       // The connection breaks in the first message's agent.get; a second message arrives meanwhile.
@@ -1172,7 +1177,7 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "claude", { text: "status: completed\nsummary: moved" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const result = (yield* db.coordinatorPending(moved.projectId)).find((row) => row.kind === "result")
+      const result = (yield* db.ownerPending(moved.scope)).find((row) => row.kind === "result")
       assert.include(result!.message, "moved")
       assert.notInclude(result!.message, "usage limit")
     }),
@@ -1234,14 +1239,14 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const project = (yield* db.getSession(id))!.projectId
+      const project = (yield* db.getSession(id))!.scope
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const moved = (yield* db.getSession(id))!
       assert.strictEqual(moved.harnessId, "claude")
       assert.strictEqual(moved.turnState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
+      assert.deepStrictEqual(yield* db.ownerPending(project), [])
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)
@@ -1279,7 +1284,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.deepStrictEqual(yield* rounds(), [{ status: "completed", inbox: open[0]!.inbox, task: open[0]!.task }])
-      const result = (yield* db.coordinatorPending(project)).find((row) => row.kind === "result")
+      const result = (yield* db.ownerPending(project)).find((row) => row.kind === "result")
       assert.include(result!.message, "moved")
       assert.notInclude(result!.message, "stale")
       const linked = yield* sql<{
@@ -1799,7 +1804,7 @@ describe.concurrent("Sessions", () => {
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -1984,7 +1989,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2047,7 +2052,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2092,7 +2097,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2138,7 +2143,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -2250,7 +2255,7 @@ describe.concurrent("Sessions", () => {
       const subs = yield* Subscriptions
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       const row = (yield* db.getSession(id))!
-      const main = (yield* db.coordinatorOf(row.projectId))!
+      const main = (yield* db.ownerOf(row.scope))!
       yield* sql`UPDATE session SET parent_session_id = ${main.id} WHERE id = ${id}`
       yield* subs.report({
         harness: "pi",
@@ -2335,7 +2340,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-      const notice = (yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)).find(
+      const notice = (yield* db.ownerPending((yield* db.getSession(id))!.scope)).find(
         (r) => r.kind === "notice" && r.message.startsWith("A message to"),
       )!
       assert.deepStrictEqual(notice.details, {})
@@ -2920,7 +2925,7 @@ describe.concurrent("Sessions", () => {
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* db.ownerPending((yield* db.getSession(id))!.scope), [])
       yield* sessions.send(id, "do it differently")
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
     }),
@@ -2935,7 +2940,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
-      const pending = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
+      const pending = yield* db.ownerPending((yield* db.getSession(id))!.scope)
       assert.deepStrictEqual(
         pending.map((r) => r.kind),
         ["result"],
@@ -2974,7 +2979,7 @@ describe.concurrent("Sessions", () => {
         const row = (yield* db.getSession(id))!
         assert.strictEqual(row.turnState, "interrupted")
         assert.isUndefined(yield* db.latestInbox(id, "result"))
-        assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+        assert.deepStrictEqual(yield* db.ownerPending(row.scope), [])
         assert.deepStrictEqual(yield* countRows(id), before)
         assert.strictEqual(before.results, 0)
       }),
@@ -3012,7 +3017,7 @@ describe.concurrent("Sessions", () => {
             yield* sessions.check(id)
             assert.deepStrictEqual(yield* countRows(id), { rounds: 1, results: 0 }, id)
             assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted", id)
-            assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+            assert.deepStrictEqual(yield* db.ownerPending(row.scope), [])
           }
         }),
         harness === "pi" ? { hooked: ["pi"] } : undefined,
@@ -3027,7 +3032,7 @@ describe.concurrent("Sessions", () => {
       assert.include((yield* sessions.interrupt(id)).message, "already finished")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
       assert.deepStrictEqual((yield* herdr.callsTo("send")).slice(1), [])
-      assert.strictEqual((yield* db.coordinatorPending((yield* db.getSession(id))!.projectId))[0]!.kind, "result")
+      assert.strictEqual((yield* db.ownerPending((yield* db.getSession(id))!.scope))[0]!.kind, "result")
     }),
     { hooked: ["pi"] },
   )
@@ -3502,7 +3507,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), coordinator, false, {
+      yield* launchMain(yield* repositoryKey(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -3511,7 +3516,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       yield* until(db.getSession(id), (w) => w?.turnState !== "none" || w.exitedAt !== null)
-      return { id, sessions, db, herdr, projectId: (yield* db.getSession(id))!.projectId }
+      return { id, sessions, db, herdr, scope: (yield* db.getSession(id))!.scope }
     })
 
   /** The turn ends with this report and vibestd collects it. */
@@ -3566,14 +3571,14 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const w = yield* archiveSession(yield* makeRepository, "pi")
       yield* finishTurn(w, "status: completed")
       assert.isFalse(yield* archived(w.db, w.id))
-      const polled = yield* until(inbox.poll(w.projectId), (r) => r.ids.length > 0)
+      const polled = yield* until(inbox.poll(w.scope), (r) => r.ids.length > 0)
       assert.include(polled.text, "<agent-result")
       yield* settle
       assert.isFalse(yield* archived(w.db, w.id))
-      yield* inbox.ack(w.projectId, polled.ids)
+      yield* inbox.ack(w.scope, polled.ids)
       yield* until(archived(w.db, w.id), (a) => a)
       yield* settle
-      assert.deepStrictEqual((yield* inbox.poll(w.projectId)).ids, [])
+      assert.deepStrictEqual((yield* inbox.poll(w.scope)).ids, [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       // Each poll claimed its batch under the project's lock; none is left once the claims are done.
       assert.strictEqual(yield* inbox.locks, 0)
@@ -3589,13 +3594,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const coord = yield* db.coordinatorLaunch(yield* repositoryKey(repo), "claude", false, {
+      const coord = yield* launchMain(yield* repositoryKey(repo), "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.reportCoordinatorSession(coord.sessionId, "claude", "claude-1")
+      yield* db.reportOwnerConversation(coord.sessionId, "claude", "claude-1")
       yield* herdr.seedAgent("test/coord")
-      const projectId = yield* db.projectId(yield* repositoryKey(repo))
+      const projectId = yield* repositoryKey(repo)
       const sessions = yield* Sessions
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -3625,7 +3630,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* a.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
       const held = yield* a.herdr.hold("send", "test/coord")
       const inbox = yield* Inbox
-      const delivering = yield* Effect.forkChild(inbox.deliver(a.projectId))
+      const delivering = yield* Effect.forkChild(inbox.deliver(a.scope))
       yield* held.reached
       yield* held.release("failed")
       yield* Fiber.join(delivering)
@@ -3642,7 +3647,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       // A Pi extension that polled the batch and never acked it: still leased, not delivered.
       const c = yield* archiveSession(repo, "pi")
       yield* finishTurn(c, "status: completed")
-      yield* until(inbox.poll(c.projectId), (r) => r.ids.length > 0)
+      yield* until(inbox.poll(c.scope), (r) => r.ids.length > 0)
       yield* settle
       assert.strictEqual((yield* c.db.latestInbox(c.id, "result"))!.status, "sending")
       assert.isFalse(yield* archived(c.db, c.id))
@@ -3872,7 +3877,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* check.reached
       yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
       const looked = yield* archiveLooks(w.id)
-      yield* inbox.deliver(w.projectId)
+      yield* inbox.deliver(w.scope)
       assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
       // Its archive has started; the check holds the lock, so it gets no further until `release`.
       yield* looked
@@ -3911,7 +3916,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const w = yield* archiveSession(yield* makeRepository)
       const first = yield* firstWaiting(w, { status: "completed", summary: "second" })
       const looked = yield* archiveLooks(w.id)
-      yield* inbox.deliver(w.projectId)
+      yield* inbox.deliver(w.scope)
       assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
       // The newer result's archive has started while the first one still waits.
       yield* looked
@@ -3935,7 +3940,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         const w = yield* archiveSession(repo)
         const first = yield* firstWaiting(w, { status: "completed", summary: "second" })
         const prompt = yield* w.herdr.hold("send", "test/coord")
-        const sending = yield* Effect.forkChild(inbox.deliver(w.projectId))
+        const sending = yield* Effect.forkChild(inbox.deliver(w.scope))
         yield* prompt.reached
         const read = { reached: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() }
         resultRead = read
@@ -3980,7 +3985,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         if (newer === "turn") yield* w.db.updateSession(w.id, { turnState: "open" })
         // A result that is not completed never starts an archive of its own, so there is nothing of it to wait for.
         const looked = completed ? yield* archiveLooks(w.id) : Effect.void
-        yield* inbox.deliver(w.projectId)
+        yield* inbox.deliver(w.scope)
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
         yield* looked
         yield* first.release
@@ -4063,7 +4068,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       // A coordinator that takes its rows by terminal text, so the result is delivered without its integration.
       const db = yield* Db
       const sessions = yield* Sessions
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "cursor", false, {
+      yield* launchMain(yield* repositoryKey(repo), "cursor", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

@@ -79,8 +79,8 @@ export interface WorkspaceShape {
     shared: boolean,
   ) => Effect.Effect<void, Failure | CopyFailed, Scope.Scope>
   /**
-   * The directory sessions of grouping `key` share their working files in (made when missing), and the variables
-   * that name it in a session's shell (the product decides both).
+   * The directory sessions of scope `key` share their working files in (made when missing), and the product's
+   * variables for that scope in a session's shell (the product decides both).
    */
   readonly files: (
     key: string,

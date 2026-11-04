@@ -15,7 +15,7 @@ import * as Headers from "effect/http/Headers"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import { FakeRuntime, makeRepository, testLayer, type TestServices, until, writeResult, launchMain } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ integrationPolls: false }))), 30_000)
@@ -26,7 +26,7 @@ const started = Effect.gen(function* () {
   const sessions = yield* Sessions
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)
-  const main = yield* db.coordinatorLaunch(key, "claude", false, {
+  const main = yield* launchMain(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
   })

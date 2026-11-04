@@ -23,6 +23,7 @@ import {
   until,
   untilVirtual,
   writeResult,
+  launchMain,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
@@ -50,7 +51,7 @@ const started = Effect.gen(function* () {
   const sessions = yield* Sessions
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)
-  yield* db.coordinatorLaunch(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
+  yield* launchMain(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
@@ -102,7 +103,7 @@ describe("restart in place", () => {
       yield* sessions.send(id, "queued meanwhile")
       const down = (yield* db.getSession(id))!
       assert.deepInclude(down, { exitedAt: null, turnState: "open" })
-      assert.deepStrictEqual(yield* db.coordinatorPending(down.projectId), [])
+      assert.deepStrictEqual(yield* db.ownerPending(down.scope), [])
       assert.isUndefined(yield* db.readyAt(id), "the old harness's ready report is gone")
       assert.isUndefined(down.metadata.pid, "so is its pid")
       // Its terminal's shell runs the harness again, on the same conversation; the new harness's integration reports,
@@ -128,7 +129,7 @@ describe("restart in place", () => {
       yield* writeResult(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const results = (yield* db.coordinatorPending(row.projectId)).filter((r) => r.kind === "result")
+      const results = (yield* db.ownerPending(row.scope)).filter((r) => r.kind === "result")
       assert.lengthOf(results, 1)
       assert.include(results[0]!.message, "done")
     }),
@@ -136,7 +137,7 @@ describe("restart in place", () => {
 
   it("a main agent's continue notice: the line its delivery shows carries the instruction, even on a long version", () => {
     const version = "10.20.300-beta.4000+build.5"
-    const notice = continueNotice(version, [{ id: "ab12cd34", projectId: 1, ok: true, message: "" }])
+    const notice = continueNotice(version, [{ id: "ab12cd34", scope: "k", ok: true, message: "" }])
     const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
     assert.include(shown, "do not run it again, continue the interrupted work.")
@@ -150,17 +151,16 @@ describe("restart in place", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const key = yield* repositoryKey(yield* makeRepository)
-      yield* db.coordinatorLaunch(key, harness, false, {
+      yield* launchMain(key, harness, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      const projectId = (yield* db.projectByKey(key))!
-      const main = (yield* db.coordinatorOf(projectId))!
-      yield* db.reportCoordinatorSession(main.id, harness, "conversation-1")
+      const main = (yield* db.ownerOf(key))!
+      yield* db.reportOwnerConversation(main.id, harness, "conversation-1")
       yield* db.patchLive(main.id, { pid: 100 })
-      return { db, herdr, id: main.id, projectId }
+      return { db, herdr, id: main.id, scope: key }
     })
 
   test(
@@ -181,7 +181,7 @@ describe("restart in place", () => {
   test(
     "a main agent that ran vibest update itself: working when it asked, idle once the update exited, it still gets the continue notice",
     Effect.gen(function* () {
-      const { db, herdr, id, projectId } = yield* workingMain("pi")
+      const { db, herdr, id, scope: projectId } = yield* workingMain("pi")
       const sessions = yield* Sessions
       const processes = yield* FakeProcesses
       // The `vibest update` process, a child of the main agent's harness.
@@ -197,7 +197,7 @@ describe("restart in place", () => {
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* db.patchLive(id, { ready: 1 })
       const notices = yield* untilVirtual(
-        db.coordinatorPending(projectId).pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice"))),
+        db.ownerPending(projectId).pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice"))),
         (rows) => rows.length > 0,
       )
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
@@ -210,11 +210,11 @@ describe("restart in place", () => {
       const { db, sessions, id: sub, pid } = yield* started
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
-      const projectId = (yield* db.getSession(sub))!.projectId
-      const main = (yield* db.coordinatorOf(projectId))!.id
+      const projectId = (yield* db.getSession(sub))!.scope
+      const main = (yield* db.ownerOf(projectId))!.id
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      yield* db.reportCoordinatorSession(main, "pi", "conversation-1")
+      yield* db.reportOwnerConversation(main, "pi", "conversation-1")
       yield* db.patchLive(main, { pid: 400 })
       // The subagent is idle: it restarts without a continue turn.
       yield* herdr.endTurn(sub)
@@ -240,7 +240,7 @@ describe("restart in place", () => {
           [main, true],
         ],
       )
-      const notices = (yield* db.coordinatorPending(projectId)).filter((r) => r.kind === "notice")
+      const notices = (yield* db.ownerPending(projectId)).filter((r) => r.kind === "notice")
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)

@@ -14,6 +14,8 @@ import {
   TURNS,
   type TestServices,
   until,
+  launchMain,
+  projectNumber,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -156,7 +158,7 @@ describe("pi-vibest", () => {
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
-        const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+        const coord = yield* launchMain("r", "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -225,7 +227,7 @@ describe("pi-vibest", () => {
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
-        const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+        const coord = yield* launchMain("r", "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -263,7 +265,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(yield* db.projectId("r"))).map((r) => r.message),
+          (yield* db.ownerPending("r")).map((r) => r.message),
           ["after shutdown"],
         )
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
@@ -379,7 +381,7 @@ describe("pi-vibest", () => {
       }
       yield* db.insertSession({ id: "aaaaaaaa", ...row }, "r")
       yield* db.insertSession({ id: "bbbbbbbb", ...row }, "r")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* launchMain("r", "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -425,7 +427,7 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.coordinatorPending(yield* db.projectId("r"))).length, 1)
+      assert.strictEqual((yield* db.ownerPending("r")).length, 1)
       yield* s.emit("session_start", { reason: "startup" }, { mode: "tui" })
       yield* until(
         Effect.sync(() => s.messages.length),
@@ -452,7 +454,7 @@ describe("pi-vibest", () => {
           options: { triggerTurn: true, deliverAs: "followUp" },
         },
       ])
-      assert.deepStrictEqual(yield* db.coordinatorPending(yield* db.projectId("r")), [])
+      assert.deepStrictEqual(yield* db.ownerPending("r"), [])
     }),
   )
 
@@ -487,7 +489,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234",
-        VIBEST_PROJECT_ID: String(yield* (yield* Db).projectId("r")),
+        VIBEST_PROJECT_ID: String(yield* projectNumber("r")),
         VIBEST_COMMAND: '["vibest"]',
       })
       yield* s.emit("session_start", {}, { mode: "tui" })
@@ -549,7 +551,7 @@ describe("pi-vibest", () => {
         lastActive: 1,
       }
       yield* db.insertSession({ id: "abcd1234", ...row }, "r")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* launchMain("r", "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -563,7 +565,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "general",
         VIBEST_SESSION_ID: "abcd1234",
-        VIBEST_PROJECT_ID: String(yield* db.projectId("r")),
+        VIBEST_PROJECT_ID: String(yield* projectNumber("r")),
         VIBEST_COMMAND: '["vibest"]',
       })
       yield* s.emit("input", { type: "input", text: "hello from the pane", source: "interactive" })
@@ -634,7 +636,7 @@ describe("pi-vibest", () => {
       )
       assert.strictEqual(yield* saved, s1)
       // Once sent, the same id is not sent again.
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "other")
+      yield* db.reportOwnerConversation(launched.sessionId, "pi", "other")
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
@@ -654,7 +656,7 @@ describe("pi-vibest", () => {
         (yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s-fork",
       )
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "kept")
+      yield* db.reportOwnerConversation(launched.sessionId, "pi", "kept")
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
       // `vibest --new` ends that conversation. savedSession only reads the current main agent, so the old id is gone.

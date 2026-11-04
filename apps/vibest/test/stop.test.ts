@@ -29,6 +29,7 @@ import {
   untilVirtual,
   writeResult,
   resultText,
+  projectNumber,
 } from "./fakes.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
@@ -101,11 +102,11 @@ const receiver = (repo: string, harness: "pi" | "claude") =>
       fresh: true,
       terminal: "wC:p1",
     })
-    if (harness === "claude") yield* db.reportCoordinatorSession(sessionId, "claude", "claude-session")
+    if (harness === "claude") yield* db.reportOwnerConversation(sessionId, "claude", "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ harness: "pi", prompt: "work" })
     yield* until(db.getSession(worker), (w) => w?.turnState === "open")
-    return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
+    return { db, herdr, c, sessionId, worker, projectId: (yield* db.scopeOf(sessionId))! }
   })
 
 describe("Daemon.Stop", () => {
@@ -204,7 +205,7 @@ describe("Daemon.Stop", () => {
       yield* draining
       // A typed harness's turn start and end, as its integration sends them to /events.
       const handle = yield* Http.make
-      const projectId = String((yield* (yield* Db).sessionIdentity(id))!.projectId)
+      const projectId = String(yield* projectNumber((yield* (yield* Db).sessionIdentity(id))!.scope))
       const hook = (event: object) =>
         Effect.forkScoped(
           handle({

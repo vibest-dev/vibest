@@ -43,6 +43,7 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
+import { Projects } from "@vibest/vibest/sqlite-store"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -74,6 +75,7 @@ const HookBody = Schema.fromJsonString(
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
   const db = yield* Db
+  const projects = yield* Projects
   const inbox = yield* Inbox
   const sessions = yield* Sessions
   const drain = yield* Drain
@@ -98,8 +100,10 @@ export const make = Effect.gen(function* () {
         return { status: 409, body: { error: mismatch.message, ...mismatch } } satisfies Reply
       }
       const sessionId = header(headers, SESSION_HEADER)
-      const row = sessionId ? yield* db.sessionIdentity(sessionId) : undefined
-      if (!row) return failure(404, `no session ${sessionId ?? "(no vibest-session-id)"}`)
+      const found = sessionId ? yield* db.sessionIdentity(sessionId) : undefined
+      if (!found) return failure(404, `no session ${sessionId ?? "(no vibest-session-id)"}`)
+      // The session's scope is its project's key; its environment names the project by id (VIBEST_PROJECT_ID).
+      const row = { ...found, entry: found.owner, projectId: yield* projects.projectId(found.scope) }
       const project = header(headers, PROJECT_HEADER)
       if (project !== String(row.projectId))
         return failure(403, `session ${row.id} is not in project ${project ?? "(no vibest-project-id)"}`)
@@ -132,7 +136,7 @@ export const make = Effect.gen(function* () {
         const adapter = harnesses.find(who.harness)
         if (main ? adapter?.delivery !== "poll" : !subagentPolls(adapter))
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
-        if (request.path === POLL_ROUTE) return ok(yield* main ? inbox.poll(who.projectId) : sessions.poll(who.id))
+        if (request.path === POLL_ROUTE) return ok(yield* main ? inbox.poll(who.scope) : sessions.poll(who.id))
         const body = yield* Schema.decodeUnknownEffect(AckBody)(request.body).pipe(Effect.option)
         if (Option.isNone(body)) return failure(400, "the body is not { ids: number[], release?: number[] }")
         const { ids, release = [] } = body.value
@@ -140,13 +144,13 @@ export const make = Effect.gen(function* () {
           "inbox ack",
           true,
           main
-            ? Effect.map(inbox.ack(who.projectId, ids, release), (acked) => ok({ acked }))
+            ? Effect.map(inbox.ack(who.scope, ids, release), (acked) => ok({ acked }))
             : sessions
                 .consumed(who.id, ids)
                 .pipe(Effect.andThen(sessions.release(who.id, release)), Effect.as(ok({ acked: ids }))),
         )
       }
-      const caller = { id: who.id, agent: who.agent, entry: who.entry, harness: who.harness, projectId: who.projectId }
+      const caller = { id: who.id, agent: who.agent, entry: who.entry, harness: who.harness, scope: who.scope }
       const events = (list: ReadonlyArray<IntegrationEvent>, label: string) =>
         admitted(
           label,
@@ -159,12 +163,7 @@ export const make = Effect.gen(function* () {
       // vibest's guard area: its home and projects directory, and the session's own project's scratch directory.
       const guard = (tool: Guard.ToolCall) =>
         Effect.gen(function* () {
-          const key = yield* db.projectKey(who.projectId)
-          const area = {
-            home: layout.home,
-            protected: layout.projects,
-            allowed: key === undefined ? undefined : layout.scratch(key),
-          }
+          const area = { home: layout.home, protected: layout.projects, allowed: layout.scratch(who.scope) }
           return yield* Guard.check(agents.ofSession(who).tools, tool).pipe(
             Effect.provideService(Guard.GuardArea, area),
             Effect.catch((e) => Effect.succeed(`vibest could not check this tool call (${String(e)}); it is refused.`)),

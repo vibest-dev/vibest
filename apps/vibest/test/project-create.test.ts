@@ -24,7 +24,16 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { liveDaemon } from "../src/herdr-plugin.ts"
-import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  runVibest,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  launchMain,
+} from "./fakes.ts"
 
 // Not from fakes.ts: this suite needs no herdr, db or harness doubles.
 const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
@@ -459,7 +468,7 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repository(root, "app")
       const sdk = yield* repository(root, "sdk")
-      yield* db.coordinatorLaunch(yield* plainDirectoryKey(root), "pi", false, {
+      yield* launchMain(yield* plainDirectoryKey(root), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -580,9 +589,9 @@ describe("multi-repository isolated workspace", () => {
         ),
       )
       assert.strictEqual(command.env.VIBEST_AGENT, "coordinator")
-      const main = yield* db.coordinatorOf(yield* db.projectId(yield* plainDirectoryKey(root)))
-      assert.strictEqual(main?.projectDirectory, root)
-      assert.notStrictEqual(main?.directory, root)
+      const main = yield* db.ownerOf(yield* plainDirectoryKey(root))
+      assert.strictEqual(main?.directory, root)
+      assert.notStrictEqual(main?.scope, root)
     }),
   )
 
@@ -613,7 +622,7 @@ describe("multi-repository isolated workspace", () => {
       })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
-      assert.strictEqual(yield* db.projectKey(row.projectId), yield* plainDirectoryKey(root))
+      assert.strictEqual(row.scope, yield* plainDirectoryKey(root))
       const workspace = (yield* db.sessionDirectory(row.id))!
       assert.isTrue(yield* fs.exists(path.join(workspace, "app")))
       assert.isTrue(yield* fs.exists(path.join(workspace, "sdk")))
@@ -641,7 +650,7 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.turnState === "open")
       const key = yield* plainDirectoryKey(root)
-      assert.strictEqual(yield* db.projectKey((yield* db.getSession(id))!.projectId), key)
+      assert.strictEqual((yield* db.getSession(id))!.scope, key)
       assert.notStrictEqual(key, yield* plainDirectoryKey(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
 

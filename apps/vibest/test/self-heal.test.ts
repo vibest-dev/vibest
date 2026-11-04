@@ -11,6 +11,7 @@ import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { readDaemonInfo } from "@vibest/server/daemon"
+import * as SqliteStore from "@vibest/vibest/sqlite-store"
 import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -272,7 +273,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             "seeded-project",
           )
           return (yield* db.insertInbox({ sessionId: "b0050001", kind: "send", message: "queued", details: {} }))[0]!
-        }).pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
+        }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
         yield* Effect.gen(function* () {
@@ -303,7 +304,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
           assert.isFalse(yield* probe(layout.socket))
           const rows = yield* Effect.flatMap(Db, (db) => db.pendingInbox("b0050001")).pipe(
-            Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
+            Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
           )
           assert.deepStrictEqual(rows, [pending])
         }).pipe(Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))), TestClock.withLive, Effect.scoped)

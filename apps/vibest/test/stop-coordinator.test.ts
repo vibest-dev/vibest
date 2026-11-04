@@ -91,10 +91,10 @@ const launched = Effect.gen(function* () {
     runtime: TEST_HERDR,
     pid: HARNESS,
   })
-  yield* db.reportCoordinatorSession(started.sessionId, "pi", "conversation-1")
+  yield* db.reportOwnerConversation(started.sessionId, "pi", "conversation-1")
   const key = yield* repositoryKey(repo)
-  const projectId = yield* db.projectId(key)
-  const coord = (yield* db.coordinatorOf(projectId))!
+  const scope = key
+  const coord = (yield* db.ownerOf(scope))!
   const origin = { runtime: coord.runtime!, address: coord.address! }
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
@@ -123,8 +123,8 @@ const launched = Effect.gen(function* () {
   const stop = c["Project.StopCoordinator"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
     c["Project.CoordinatorSession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
-  const pending = Effect.map(db.coordinatorPending(projectId), (rows) => rows.map((r) => r.message))
-  return { db, herdr, processes, c, paneId, origin, key, projectId, started, stop, startAt, pending }
+  const pending = Effect.map(db.ownerPending(scope), (rows) => rows.map((r) => r.message))
+  return { db, herdr, processes, c, paneId, origin, key, scope, started, stop, startAt, pending }
 })
 
 describe("Project.StopCoordinator", () => {
@@ -173,12 +173,12 @@ describe("Project.StopCoordinator", () => {
       // The harness exits; the pane stays at its shell, and the runtime says its agent is gone.
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       // A delivery round while it has no place (between the stop and the launch) keeps its rows too.
-      yield* (yield* Inbox).deliver(s.projectId)
+      yield* (yield* Inbox).deliver(s.scope)
       yield* untilVirtual(s.pending, (rows) => rows.length === 1)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
       const moved = yield* s.startAt("test/p2")
       assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
-      const row = (yield* s.db.coordinatorOf(s.projectId))!
+      const row = (yield* s.db.ownerOf(s.scope))!
       assert.strictEqual(row.address?.id, "test/p2")
       assert.strictEqual(row.pid, 5151)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
@@ -195,7 +195,7 @@ describe("Project.StopCoordinator", () => {
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.harnessId, "claude")
+      assert.strictEqual((yield* s.db.ownerOf(s.scope))!.harnessId, "claude")
     }),
   )
 
@@ -223,7 +223,7 @@ describe("Project.StopCoordinator", () => {
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
       assert.deepInclude(yield* s.stop, { result: "unsupported" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual((yield* s.db.ownerOf(s.scope))!.address?.id, s.paneId)
     }),
   )
 
@@ -239,7 +239,7 @@ describe("Project.StopCoordinator", () => {
       )
       assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "running" })
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      const row = (yield* s.db.coordinatorOf(s.projectId))!
+      const row = (yield* s.db.ownerOf(s.scope))!
       assert.strictEqual(row.address?.id, s.paneId)
       assert.strictEqual(row.harnessSessionId, "conversation-1")
       assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
@@ -255,9 +255,9 @@ describe("Project.StopCoordinator", () => {
       const s = yield* launched
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
-      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.runtime === null)
+      yield* untilVirtual(s.db.ownerOf(s.scope), (row) => row?.runtime === null)
       yield* Fiber.interrupt(stopping)
-      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.address?.id === s.paneId)
+      yield* untilVirtual(s.db.ownerOf(s.scope), (row) => row?.address?.id === s.paneId)
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
       assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
@@ -270,17 +270,17 @@ describe("Project.StopCoordinator", () => {
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded, a remote machine, or no agent seen but a live PID",
     Effect.gen(function* () {
       const s = yield* launched
-      const restore = s.db.coordinatorLaunch(s.key, "pi", false, s.origin, { pid: HARNESS })
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, { ...s.origin, address: { machine: "local", id: "test/p9" } })
+      const restore = s.db.startOwner(s.key, "pi", false, s.origin, { pid: HARNESS })
+      yield* s.db.startOwner(s.key, "pi", false, { ...s.origin, address: { machine: "local", id: "test/p9" } })
       assert.deepStrictEqual(yield* s.stop, { result: "moved" })
       // No PID recorded (a main agent started by an older vibest).
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, s.origin)
+      yield* s.db.startOwner(s.key, "pi", false, s.origin)
       const old = yield* s.stop
       assert.strictEqual(old.result, "unsupported")
       assert.include(old.reason, "started by an older vibest")
       // Another machine: its PID means nothing here.
       const remote = { ...s.origin, address: { machine: "elsewhere", id: s.paneId } }
-      yield* s.db.coordinatorLaunch(s.key, "pi", false, remote, { pid: HARNESS })
+      yield* s.db.startOwner(s.key, "pi", false, remote, { pid: HARNESS })
       const far = yield* s.c["Project.StopCoordinator"]({
         runtime: remote.runtime,
         address: encodeAddress(remote.address),
@@ -298,7 +298,7 @@ describe("Project.StopCoordinator", () => {
       assert.strictEqual(unseen.result, "unsupported")
       assert.include(unseen.reason, "does not see its harness")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual((yield* s.db.ownerOf(s.scope))!.address?.id, s.paneId)
       // Its PID exited: the harness is already gone, so it moves without a signal.
       yield* s.processes.set(HARNESS, "exited")
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })

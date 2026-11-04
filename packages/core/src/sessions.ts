@@ -126,7 +126,7 @@ const RUNTIME_MARK = Duration.seconds(30)
 
 type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
 
-/** In-memory only; rebuilt from sqlite and the runtime after a restart. Dropped once the session has ended (`forget`). */
+/** In-memory only; rebuilt from the store and the runtime after a restart. Dropped once the session has ended (`forget`). */
 interface Tracked {
   /** When the open turn was last seen working: a state, an event, or a reported turn start. */
   readonly sawWorking: Ref.Ref<boolean>
@@ -216,7 +216,7 @@ export class Sessions extends Context.Service<
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
     /** The last `lines` lines on the session's terminal (`vibest peek`), read on demand; never sent to an agent. */
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
-    readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
+    readonly list: (filter?: { scope?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
     /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
@@ -486,7 +486,6 @@ export class Sessions extends Context.Service<
         ...skillsEnv(Option.isSome(agents) ? agents.value.of(session.agent).skills : undefined),
         ...files,
         VIBEST_SESSION_ID: session.id,
-        VIBEST_PROJECT_ID: String(session.projectId),
         VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
         VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
@@ -845,8 +844,7 @@ export class Sessions extends Context.Service<
           const refuse = (why: string) => new NoSuchSession({ id, message: `--peer ${id}: ${why}` })
           const p = yield* db.getSession(id)
           if (!p) return yield* refuse(`no session ${id}`)
-          // Reads only: a check must not insert a project row as a side effect.
-          if (p.projectId !== (yield* db.projectByKey(input.key))) return yield* refuse("it belongs to another project")
+          if (p.scope !== input.key) return yield* refuse("it belongs to another project")
           if (p.metadata.archived || p.metadata.removed) return yield* refuse("it was archived")
           if (p.runtime !== runtime || p.address.machine !== machineId)
             return yield* refuse(
@@ -933,7 +931,7 @@ export class Sessions extends Context.Service<
             }
             // A new session's directory: the workspace names and reserves it.
             const cwd = shared ?? (yield* workspace.reserve(root).pipe(Effect.mapError((e) => refuse(e.message))))
-            const draft: Omit<SessionRow, "projectId"> = {
+            const draft: Omit<SessionRow, "scope"> = {
               id,
               agent,
               name: input.name,
@@ -1180,7 +1178,7 @@ export class Sessions extends Context.Service<
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
           if (session.exitedAt === null) {
             yield* db.updateSession(id, { status: "unknown", exitedAt: yield* Clock.currentTimeMillis })
-            yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+            yield* recount(session.runtime, session.scope).pipe(Effect.ignore)
           }
           yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
           return
@@ -1443,7 +1441,7 @@ export class Sessions extends Context.Service<
             }),
           )
           // The project workspace's live count no longer includes the archived session.
-          yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+          yield* recount(session.runtime, session.scope).pipe(Effect.ignore)
           return out
         })
 
@@ -1578,7 +1576,7 @@ export class Sessions extends Context.Service<
       })
 
       const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
-      const list = (filter: { projectId?: number; stopped?: boolean } = {}) =>
+      const list = (filter: { scope?: string; stopped?: boolean } = {}) =>
         db.listSessions(filter).pipe(
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>

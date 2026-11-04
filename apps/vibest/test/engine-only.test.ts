@@ -7,17 +7,17 @@ import os from "node:os"
 import path from "node:path"
 
 import { BunServices } from "@effect/platform-bun"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { mayManage } from "@vibest/core/capabilities"
-import { Db, SQL_NAMES } from "@vibest/core/db"
+import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Groups } from "@vibest/core/groups"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
+import * as MemoryStore from "@vibest/core/memory-store"
 import { Layout } from "@vibest/core/paths"
 import { PlacementPolicy } from "@vibest/core/placement"
 import { Plugins } from "@vibest/core/plugins"
@@ -32,12 +32,14 @@ import { Workspace, WorkspaceRefused } from "@vibest/core/workspace"
 import { ActionRefused, Plugin } from "@vibest/plugin"
 import type { Harness as H } from "@vibest/plugin"
 import { Clock, ConfigProvider, Effect, Layer, Ref, type Scope } from "effect"
-import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { FakeRuntime } from "./fake-runtime.ts"
 
 /** The fake harness: typed delivery, its integration reports every turn (the test plays it). */
+/** The product's one grouping of sessions (the engine's scope). */
+const SCOPE = "tiny"
+
 const bot: H.HarnessAdapter = {
   id: "bot",
   binary: "bot",
@@ -130,7 +132,7 @@ const ports = (base: string) =>
         near: () => Effect.succeed(undefined),
         root: (_session, cwd) => Effect.succeed(cwd),
         labelRoot: (_session, cwd) => Effect.succeed(cwd),
-        project: () => Effect.succeed({}),
+        labels: () => Effect.succeed({}),
         alone: () => Effect.succeed(undefined),
       }),
     ),
@@ -166,8 +168,8 @@ const engine = Layer.unwrap(
               const target = yield* db.getSession(to)
               if (!from || !target) return yield* new ActionRefused({ reason: "no such session" })
               const verdict = yield* mayManage(
-                { _tag: "Session", sessionId: as, group: from.projectId, message: agents.of(from.agent).can.message },
-                { id: to, group: target.projectId },
+                { _tag: "Session", sessionId: as, group: from.scope, message: agents.of(from.agent).can.message },
+                { id: to, group: target.scope },
                 { descends: db.descends, shared: groups.shared },
               )
               if (verdict !== "allowed")
@@ -189,7 +191,7 @@ const engine = Layer.unwrap(
       ),
       Layer.provideMerge(Inbox.layer),
       Layer.provideMerge(ports(base)),
-      Layer.provideMerge(Db.layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:", ...SQL_NAMES })))),
+      Layer.provideMerge(MemoryStore.layer),
       Layer.provideMerge(runtime),
       Layer.provideMerge(
         Layer.succeed(Harness, {
@@ -224,7 +226,7 @@ const engine = Layer.unwrap(
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, Sessions | Db | FakeRuntime | SqlClient.SqlClient | Harnesses | Scope.Scope>,
+  program: Effect.Effect<void, E, Sessions | Db | FakeRuntime | Harnesses | Scope.Scope>,
 ) => it.effect(name, () => program.pipe(Effect.provide(engine)), 30_000)
 
 /** `read` until `ok` holds, a real 10 ms between tries (the engine's own clock is the test clock). */
@@ -244,7 +246,7 @@ const start = (prompt: string, agent?: string) =>
     const { id } = yield* (yield* Sessions).spawn({
       machine: { id: "local" },
       root: "/tiny",
-      key: "tiny",
+      key: SCOPE,
       name: prompt.slice(0, 20),
       prompt,
       harness: "bot",
@@ -278,14 +280,11 @@ const answer = (id: string, text: string) =>
     yield* until((yield* Db).getSession(id), (s) => s?.turnState !== "open")
   })
 
-/** Every result row of `about`: who it went to (null: the user) and its status, oldest first. */
-const resultsOf = (about: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    return yield* sql<{ recipient: string | null; status: string }>`SELECT i.recipient_session_id AS recipient,
-      i.status FROM inbox i JOIN event e ON e.id = i.result_event_id WHERE i.kind = 'result' AND e.session_id = ${about}
-      ORDER BY i.id`
-  })
+/** The results of `about` waiting for the user (the rows with no session to go to), through the storage port. */
+const toUser = (about: string) =>
+  Effect.flatMap(Db, (db) => db.userInbox(SCOPE, false)).pipe(
+    Effect.map((rows) => rows.filter((r) => r.kind === "result" && r.sessionId === about).map((r) => r.message)),
+  )
 
 /** The texts typed into `id`'s terminal, in order. */
 const typed = (id: string) =>
@@ -304,23 +303,17 @@ describe("an engine-only product", () => {
       yield* answer(a, "parser done")
       yield* answer(b, "tests done")
       // Nobody else: each first result is the user's.
-      assert.deepStrictEqual(
-        (yield* resultsOf(a)).map((r) => r.recipient),
-        [null],
-      )
+      assert.lengthOf(yield* toUser(a), 1)
 
       const before = (yield* typed(b)).length
       yield* (yield* Sessions).send(b, "do the tests cover empty input?", a)
       yield* opened(b, before)
       assert.include((yield* typed(b)).at(-1), "do the tests cover empty input?")
       yield* answer(b, "yes, they do")
-      assert.deepStrictEqual(
-        (yield* resultsOf(b)).map((r) => r.recipient),
-        [null, a],
-      )
-
-      // B's answer is A's to take: A's turn on it opens, and answers no one.
+      // B's answer is A's, not the user's: A's turn on it opens, and answers no one.
+      assert.lengthOf(yield* toUser(b), 1)
       yield* opened(a, 1)
+      assert.include((yield* typed(a)).at(-1), "yes, they do")
       yield* answer(a, "noted")
 
       // Through the plugin API, checked by the engine's capability rule: a peer may message, a report-only role not.
@@ -345,8 +338,9 @@ describe("an engine-only product", () => {
       const before = (yield* typed(lead)).length
       yield* answer(w1, "one is done")
       yield* answer(w2, "two is done")
-      // A worker's own result reaches no one: kept as its own, dropped.
-      assert.deepStrictEqual(yield* resultsOf(w1), [{ recipient: w1, status: "dropped" }])
+      // A worker's own result reaches no one: kept as its own, dropped (the gather sends the lead one message).
+      assert.strictEqual((yield* (yield* Db).latestInbox(w1, "result"))?.status, "dropped")
+      assert.deepStrictEqual(yield* toUser(w1), [])
       yield* opened(lead, before)
       const last = (yield* typed(lead)).at(-1)!
       assert.include(last, "gathered:")

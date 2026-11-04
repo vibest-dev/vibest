@@ -24,6 +24,7 @@ import {
   type TestServices,
   until,
   writeResult,
+  projectNumber,
 } from "./fakes.ts"
 
 const leads = Plugin.define({
@@ -51,7 +52,10 @@ const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asSession = (sessionId: string) =>
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
-    return authed(yield* client, sessionHeaders({ sessionId, projectId: row && String(row.projectId) }))
+    return authed(
+      yield* client,
+      sessionHeaders({ sessionId, projectId: row && String(yield* projectNumber(row.scope)) }),
+    )
   })
 const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit)

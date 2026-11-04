@@ -14,6 +14,7 @@ import {
   projectRoot,
   workspaceGit,
 } from "./project-create.ts"
+import { Projects } from "./sqlite-store.ts"
 import {
   addWorktree,
   allocationParentBlocked,
@@ -38,6 +39,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const platform = yield* Effect.context<Platform>()
     const layout = yield* Layout
+    const projects = yield* Projects
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto
@@ -241,10 +243,16 @@ export const layer = Layer.effect(
       reserve,
       prepare,
       // The project's scratch directory: the one place under the projects directory its sessions' guard lets them use.
+      // The project's id goes with its files directory: a session's environment names its project (VIBEST_PROJECT_ID).
       files: (key) =>
-        fs
-          .makeDirectory(layout.scratch(key), { recursive: true })
-          .pipe(Effect.as({ directory: layout.scratch(key), env: { VIBEST_SCRATCH: layout.scratch(key) } })),
+        Effect.gen(function* () {
+          yield* fs.makeDirectory(layout.scratch(key), { recursive: true })
+          const project = yield* projects.projectId(key)
+          return {
+            directory: layout.scratch(key),
+            env: { VIBEST_SCRATCH: layout.scratch(key), VIBEST_PROJECT_ID: String(project) },
+          }
+        }),
       state: (at) => run(gitState(at)),
       repositoryStates: (at) => run(workspaceGit(at)),
       release,

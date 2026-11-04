@@ -26,6 +26,8 @@ import {
   writeResult,
   resultText,
   systemPromptFile,
+  launchMain,
+  projectNumber,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -174,15 +176,17 @@ describe("vibest CLI", () => {
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
-          vibest(
-            repo,
-            {
-              ...cli,
-              VIBEST_AGENT: "general",
-              VIBEST_SESSION_ID: sessionId,
-              VIBEST_PROJECT_ID: String(row?.projectId ?? ""),
-            },
-            args,
+          Effect.flatMap(row ? projectNumber(row.scope) : Effect.succeed(undefined), (projectId) =>
+            vibest(
+              repo,
+              {
+                ...cli,
+                VIBEST_AGENT: "general",
+                VIBEST_SESSION_ID: sessionId,
+                VIBEST_PROJECT_ID: String(projectId ?? ""),
+              },
+              args,
+            ),
           ),
         )
 
@@ -221,7 +225,7 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const coord = yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      const coord = yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -237,7 +241,7 @@ describe("vibest CLI", () => {
           args,
         )
       const otherRepo = yield* makeRepository
-      const other = yield* db.coordinatorLaunch(yield* repositoryKey(otherRepo), "pi", false, {
+      const other = yield* launchMain(yield* repositoryKey(otherRepo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w9:p9" },
       })
@@ -336,7 +340,7 @@ describe("vibest CLI", () => {
           ...cli,
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
-          VIBEST_PROJECT_ID: String((yield* db.sessionIdentity(id))!.projectId),
+          VIBEST_PROJECT_ID: String(yield* projectNumber((yield* db.sessionIdentity(id))!.scope)),
         },
         ["report", "--", "prior note"],
       )

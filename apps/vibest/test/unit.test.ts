@@ -3,7 +3,7 @@ import url from "node:url"
 
 // Pure pieces (SPEC §15 Unit tests): sqlite, HarnessAdapter argv, result files and reports, git state.
 import { assert, describe, it, layer } from "@effect/vitest"
-import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
+import { Db, encodeAddress, type SessionRow } from "@vibest/core/db"
 import {
   type CoordinatorInput,
   Harness,
@@ -26,6 +26,8 @@ import { COORDINATOR } from "@vibest/plugin-coordinator"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Launch from "@vibest/vibest/launch"
+import * as SqliteStore from "@vibest/vibest/sqlite-store"
+import { APPLICATION_ID, SCHEMA_VERSION } from "@vibest/vibest/sqlite-store"
 import { entrySystemPrompt } from "@vibest/vibest/system-prompt"
 import {
   copyIncluded,
@@ -44,9 +46,9 @@ import * as Platform from "#platform"
 
 import { makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
 
-const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
+const database = (filename: string) => SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
-const session = (id: string, patch: Partial<Omit<SessionRow, "projectId">> = {}): Omit<SessionRow, "projectId"> => ({
+const session = (id: string, patch: Partial<Omit<SessionRow, "scope">> = {}): Omit<SessionRow, "scope"> => ({
   id,
   agent: "general",
   name: "n",
@@ -188,16 +190,16 @@ describe("Db", () => {
         Effect.gen(function* () {
           const db = yield* Db
           yield* db.insertSession(session("aaaaaaaa"), "r")
-          const coord = yield* db.coordinatorLaunch("r", "pi", false, place)
+          const coord = yield* db.startOwner("r", "pi", false, place)
           yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "m", details: {} })
           assert.strictEqual(coord.sessionId.length, 8)
-          assert.lengthOf(yield* db.coordinatorPending(yield* db.projectId("r")), 1)
+          assert.lengthOf(yield* db.ownerPending("r"), 1)
         }),
       )
       assert.lengthOf(
         yield* withDb(
           Effect.gen(function* () {
-            return yield* (yield* Db).coordinatorPending(yield* (yield* Db).projectId("r"))
+            return yield* (yield* Db).ownerPending("r")
           }),
         ),
         1,
@@ -219,26 +221,26 @@ describe("Db", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* Db
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
+        const first = yield* db.startOwner("r", "pi", false, place)
         assert.isNull(first.harnessSessionId)
-        yield* db.reportCoordinatorSession(first.sessionId, "pi", "s1")
-        const again = yield* db.coordinatorLaunch("r", "pi", false, place)
+        yield* db.reportOwnerConversation(first.sessionId, "pi", "s1")
+        const again = yield* db.startOwner("r", "pi", false, place)
         assert.strictEqual(again.sessionId, first.sessionId)
         assert.strictEqual(again.harnessSessionId, "s1")
-        yield* db.reportCoordinatorSession(first.sessionId, "cursor", "nested")
-        yield* db.reportCoordinatorSession("nope0000", "pi", "x")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId, "s1")
-        const renewed = yield* db.coordinatorLaunch("r", "pi", true, place)
+        yield* db.reportOwnerConversation(first.sessionId, "cursor", "nested")
+        yield* db.reportOwnerConversation("nope0000", "pi", "x")
+        assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).harnessSessionId, "s1")
+        const renewed = yield* db.startOwner("r", "pi", true, place)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         assert.isNull(renewed.harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s4")
-        assert.isNull((yield* db.coordinatorLaunch("r", "claude", false, place)).harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "claude", "c1")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId, renewed.sessionId)
-        assert.isNull((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s6")
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s7")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId, "s7")
+        yield* db.reportOwnerConversation(renewed.sessionId, "pi", "s4")
+        assert.isNull((yield* db.startOwner("r", "claude", false, place)).harnessSessionId)
+        yield* db.reportOwnerConversation(renewed.sessionId, "claude", "c1")
+        assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).sessionId, renewed.sessionId)
+        assert.isNull((yield* db.startOwner("r", "pi", false, place)).harnessSessionId)
+        yield* db.reportOwnerConversation(renewed.sessionId, "pi", "s6")
+        yield* db.reportOwnerConversation(renewed.sessionId, "pi", "s7")
+        assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).harnessSessionId, "s7")
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(
           session("aaaaaaaa", { harnessId: "cursor", startedAt: 1, exitedAt: 1, lastActive: 1 }),
@@ -254,11 +256,11 @@ describe("Db", () => {
         assert.deepStrictEqual(yield* db.listSessions(), [])
         const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
         assert.isTrue(Exit.isFailure(deleted))
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
   const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
-    program.pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))))
+    program.pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))))
 
   it.effect(
     "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id",
@@ -267,7 +269,7 @@ describe("Db", () => {
         Effect.gen(function* () {
           const db = yield* Db
           const sql = yield* SqlClient.SqlClient
-          const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
+          const parent = yield* db.startOwner("r", "pi", false, place)
           yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
           yield* db.beginUserTurn("aaaaaaaa", "typed", { turnPromptedAt: 1 })
           const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
@@ -305,7 +307,7 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
+        const parent = yield* db.startOwner("r", "pi", false, place)
         yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
         yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
         yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
@@ -339,9 +341,9 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "claude", false, place)).sessionId, first.sessionId)
-        const renewed = yield* db.coordinatorLaunch("r", "pi", true, place)
+        const first = yield* db.startOwner("r", "pi", false, place)
+        assert.strictEqual((yield* db.startOwner("r", "claude", false, place)).sessionId, first.sessionId)
+        const renewed = yield* db.startOwner("r", "pi", true, place)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         const [old] = yield* sql<{
           endedAt: number | null
@@ -374,7 +376,7 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
+        const parent = yield* db.startOwner("r", "pi", false, place)
         assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", undefined, parent.sessionId))
         const [row] = yield* sql<{
           parentSessionId: string | null
@@ -521,7 +523,7 @@ describe("Db", () => {
         yield* db.closeTurn("aaaaaaaa", "interrupted", {})
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "completed")
         assert.notProperty((yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa'`)[0], "status")
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
   it.effect("a result goes to the parent while it has not ended, then to the project's current main session", () =>
@@ -555,7 +557,7 @@ describe("Db", () => {
       yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb'`
       yield* round("two")
       assert.strictEqual(yield* recipient, "cccccccc")
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest turn", () =>
@@ -612,7 +614,7 @@ describe("Db", () => {
       })
       assert.isUndefined(briefs.get("00000000"))
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
   it.effect("a result with no coordinator is dropped; a claim takes a pending row once", () =>
     fresh(
@@ -632,11 +634,11 @@ describe("Db", () => {
         )
         assert.strictEqual(dropped!.status, "dropped")
         assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))!.status, "dropped")
-        yield* db.coordinatorLaunch("r", "pi", false, place)
+        yield* db.startOwner("r", "pi", false, place)
         const row = (yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "report", message: "hi", details: {} }))[0]!
         assert.strictEqual(row.status, "pending")
         const guard = {
-          projectId: (yield* db.getSession("aaaaaaaa"))!.projectId,
+          scope: (yield* db.getSession("aaaaaaaa"))!.scope,
           runtime: RUNTIME,
           address: encodeAddress(place.address),
         }
@@ -645,7 +647,7 @@ describe("Db", () => {
         yield* db.setInboxStatus([row.id], "delivered", "sending")
         assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "report"))!.status, "delivered")
         yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "n", details: {} })
-        yield* db.clearCoordinator(RUNTIME, place.address)
+        yield* db.clearOwnerAt(RUNTIME, place.address)
         assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "notice"))!.status, "dropped")
       }),
     ),
@@ -678,7 +680,7 @@ describe("Db", () => {
 
   /** Real `Db` init, but the last schema statement never runs. */
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
-    Db.layer.pipe(
+    SqliteStore.layer.pipe(
       Layer.provide(
         Layer.effect(
           SqlClient.SqlClient,
@@ -712,15 +714,15 @@ describe("Db", () => {
           APPLICATION_ID,
         )
         yield* db.insertSession(session("aaaaaaaa"), "r")
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId, first.sessionId)
+        const first = yield* db.startOwner("r", "pi", false, place)
+        assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).sessionId, first.sessionId)
         return first.sessionId
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
+      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
       assert.strictEqual(
         yield* Effect.gen(function* () {
           const db = yield* Db
           assert.strictEqual((yield* db.getSession("aaaaaaaa"))?.id, "aaaaaaaa")
-          return (yield* db.coordinatorOf(yield* db.projectId("r")))?.id
+          return (yield* db.ownerOf("r"))?.id
         }).pipe(Effect.provide(database(file))),
         opened,
       )
@@ -740,7 +742,7 @@ describe("Db", () => {
         yield* Effect.gen(function* () {
           const db = yield* Db
           assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r"))
-          assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId.length, 8)
+          assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).sessionId.length, 8)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.strictEqual((yield* header(file)).userVersion, SCHEMA_VERSION)
@@ -892,15 +894,15 @@ describe("Db", () => {
       const dir = yield* tempDirectory("vibest-schema-race-")
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
-      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
+      const storeModule = url.fileURLToPath(new URL("../../../packages/vibest/src/sqlite-store.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../../packages/server/src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [
           'import { Effect, Layer } from "effect"',
-          `import { Db } from ${JSON.stringify(dbModule)}`,
+          `import * as SqliteStore from ${JSON.stringify(storeModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )

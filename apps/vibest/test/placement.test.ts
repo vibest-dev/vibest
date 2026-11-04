@@ -6,7 +6,16 @@ import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/vibest/worktree"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 
-import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  sh,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  launchMain,
+} from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -32,7 +41,7 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "main:coord" },
       })
@@ -80,12 +89,12 @@ describe("placement", () => {
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(
+      yield* launchMain(
         yield* repositoryKey(repo),
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } },
-        { projectDirectory: repo },
+        { directory: repo },
       )
 
       const a = yield* sessions.spawn(yield* spawnInput(repo))
@@ -117,7 +126,7 @@ describe("placement", () => {
       // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.coordinatorLaunch(yield* repositoryKey(repo), "pi", false, {
+      yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: "other",
         address: { machine: "local", id: "w1:coord" },
       })

@@ -17,7 +17,16 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, makeRepository, testLayer, type TestServices, until, resultText, startedSince } from "./fakes.ts"
+import {
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestServices,
+  until,
+  resultText,
+  startedSince,
+  launchMain,
+} from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer())))
@@ -75,7 +84,7 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)
-  const main = yield* db.coordinatorLaunch(key, "claude", false, {
+  const main = yield* launchMain(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
   })
@@ -92,6 +101,7 @@ const project = Effect.gen(function* () {
   // Its launch is over and its integration took the task.
   yield* until(db.getSession(worker), (w) => w?.turnState === "open")
   const projectId = main.projectId
+  const scope = main.scope
   const handle = yield* Http.make
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body: unknown = {}) =>
     handle({
@@ -99,7 +109,7 @@ const project = Effect.gen(function* () {
       headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
       body: typeof body === "string" ? body : JSON.stringify(body),
     })
-  return { db, herdr, main: main.sessionId, worker, projectId, call, inbox: yield* Inbox }
+  return { db, herdr, main: main.sessionId, worker, projectId, scope, call, inbox: yield* Inbox }
 })
 
 const statusOf = (db: Db["Service"], worker: string) =>
@@ -109,7 +119,7 @@ describe("vibestd's HTTP API", () => {
   test(
     "the caller is checked: protocol 409, unknown session 404, missing or other project or harness 403, a subagent's poll 403",
     Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
+      const { call, db, main, worker, scope } = yield* project
       const handle = yield* Http.make
       const raw = (headers: Record<string, string>) =>
         handle({ path: "/inbox/poll", headers: Headers.fromInput(headers), body: "{}" })
@@ -154,15 +164,15 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
       // The main agent moved to Pi under the same session id: the old Claude process neither polls nor renames the
       // conversation; Pi, the session's harness now, polls the same route.
-      const key = (yield* db.projectKey(projectId))!
-      yield* db.coordinatorLaunch(key, "pi", false, {
+      const key = scope
+      yield* launchMain(key, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* db.noteHarnessSession(main, "pi-conversation")
       const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
-      assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
+      assert.strictEqual((yield* db.ownerOf(scope))?.harnessSessionId, "pi-conversation")
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 200)
     }),
   )
@@ -170,10 +180,10 @@ describe("vibestd's HTTP API", () => {
   test(
     "the harness's conversation id and the plugin version are recorded in the row when they change, for the main agent and a subagent alike",
     Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
+      const { call, db, main, worker, scope } = yield* project
       const conversation = (id: string) =>
         id === main
-          ? Effect.map(db.coordinatorOf(projectId), (m) => m?.harnessSessionId)
+          ? Effect.map(db.ownerOf(scope), (m) => m?.harnessSessionId)
           : Effect.map(db.getSession(id), (s) => s?.harnessSessionId)
       for (const id of [main, worker]) {
         yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
@@ -194,10 +204,10 @@ describe("vibestd's HTTP API", () => {
   test(
     "the integration version and protocol are recorded per session, also on a protocol mismatch",
     Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
+      const { call, db, main, worker, scope } = yield* project
       const integration = (id: string) =>
         id === main
-          ? Effect.map(db.coordinatorOf(projectId), (m) => m?.integration)
+          ? Effect.map(db.ownerOf(scope), (m) => m?.integration)
           : Effect.map(db.getSession(id), (s) => s?.metadata.integration)
       for (const id of [main, worker]) {
         assert.isUndefined(yield* integration(id))
@@ -221,7 +231,7 @@ describe("vibestd's HTTP API", () => {
   test(
     "poll hands a batch out once, each row leased; ack delivers it; an expired lease hands it out again",
     Effect.gen(function* () {
-      const { call, db, inbox, main, worker, projectId } = yield* project
+      const { call, db, inbox, main, worker, scope } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
       const first = (yield* call("/inbox/poll", { sessionId: main })).body as Http.Reply["body"] & {
         ids: Array<number>
@@ -233,14 +243,14 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(first.text, "hello")
       assert.strictEqual(yield* statusOf(db, worker), "sending")
       // The lease is in sqlite: the row `sending`, its end in the main agent's session metadata.
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      assert.deepStrictEqual((yield* inbox.poll(scope)).ids, [])
       yield* TestClock.adjust(LEASE)
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
+      assert.deepStrictEqual((yield* inbox.poll(scope)).ids, first.ids)
       const acked = yield* call("/inbox/ack", { sessionId: main }, JSON.stringify({ ids: first.ids }))
       assert.deepStrictEqual(acked, { status: 200, body: { acked: first.ids } })
       assert.strictEqual(yield* statusOf(db, worker), "delivered")
       // Again: harmless, nothing changes.
-      assert.deepStrictEqual(yield* inbox.ack(projectId, first.ids), [])
+      assert.deepStrictEqual(yield* inbox.ack(scope, first.ids), [])
       assert.strictEqual((yield* call("/inbox/ack", { sessionId: main }, "{}")).status, 400)
     }),
   )
@@ -248,28 +258,28 @@ describe("vibestd's HTTP API", () => {
   test(
     "each row keeps its own lease: a newer batch does not renew an older one that nobody acked",
     Effect.gen(function* () {
-      const { db, inbox, worker, projectId } = yield* project
+      const { db, inbox, worker, scope } = yield* project
       // Polls every second, as the plugin does, so the away check never fires.
       const wait = (seconds: number) =>
         Effect.gen(function* () {
           for (let i = 0; i < seconds; i++) {
             yield* TestClock.adjust("1 second")
-            assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+            assert.deepStrictEqual((yield* inbox.poll(scope)).ids, [])
           }
         })
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "old", details: {} })
-      const old = yield* inbox.poll(projectId)
+      const old = yield* inbox.poll(scope)
       yield* wait(20)
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "new", details: {} })
-      const newer = yield* inbox.poll(projectId)
+      const newer = yield* inbox.poll(scope)
       assert.notDeepEqual(newer.ids, old.ids)
       yield* wait(9)
       // 30 s after it went out the old row is handed out again; the newer one is still leased.
       yield* TestClock.adjust("1 second")
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, old.ids)
+      assert.deepStrictEqual((yield* inbox.poll(scope)).ids, old.ids)
       // Taken and given back in one ack: the old one delivered, the new one pending for the next poll.
-      assert.deepStrictEqual(yield* inbox.ack(projectId, old.ids, newer.ids), old.ids)
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, newer.ids)
+      assert.deepStrictEqual(yield* inbox.ack(scope, old.ids, newer.ids), old.ids)
+      assert.deepStrictEqual((yield* inbox.poll(scope)).ids, newer.ids)
       assert.strictEqual(yield* statusOf(db, worker), "sending")
     }),
   )
@@ -277,13 +287,13 @@ describe("vibestd's HTTP API", () => {
   test(
     "a vibestd restart puts a polling main agent's handed-out rows back to pending",
     Effect.gen(function* () {
-      const { db, inbox, worker, projectId } = yield* project
+      const { db, inbox, worker, scope } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
-      const { ids } = yield* inbox.poll(projectId)
+      const { ids } = yield* inbox.poll(scope)
       yield* db.recoverSending(["claude"])
       assert.strictEqual(yield* statusOf(db, worker), "pending")
       // The next poll hands the row out again at once.
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, ids)
+      assert.deepStrictEqual((yield* inbox.poll(scope)).ids, ids)
       // A harness that does not poll: a cut-off delivery may have arrived, so it failed.
       yield* db.recoverSending([])
       assert.strictEqual(yield* statusOf(db, worker), "failed")
@@ -293,20 +303,20 @@ describe("vibestd's HTTP API", () => {
   test(
     "a plugin that stopped polling: its lease goes back to pending after AWAY; an ack of a pending row still counts",
     Effect.gen(function* () {
-      const { db, inbox, worker, projectId } = yield* project
+      const { db, inbox, worker, scope } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
-      const { ids } = yield* inbox.poll(projectId)
+      const { ids } = yield* inbox.poll(scope)
       assert.strictEqual(yield* statusOf(db, worker), "sending")
       yield* TestClock.adjust(AWAY)
       yield* TestClock.adjust("2 seconds")
       yield* until(statusOf(db, worker), (s) => s === "pending")
       // Its prompt went in before it left: the ack it sends when it is back still delivers.
-      assert.deepStrictEqual(yield* inbox.ack(projectId, ids), ids)
+      assert.deepStrictEqual(yield* inbox.ack(scope, ids), ids)
       assert.strictEqual(yield* statusOf(db, worker), "delivered")
       // Another project's main agent cannot ack this one's rows.
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "again", details: {} })
-      const next = yield* inbox.poll(projectId)
-      assert.deepStrictEqual(yield* inbox.ack(projectId + 1, next.ids), [])
+      const next = yield* inbox.poll(scope)
+      assert.deepStrictEqual(yield* inbox.ack(`${scope}-other`, next.ids), [])
     }),
   )
 
@@ -357,7 +367,7 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(yield* resultText(main), "")
       assert.strictEqual((yield* call("/events", { sessionId: worker }, { type: "nope" })).status, 400)
       // The guard applies the session's own rules: a subagent may not touch another session's scratch...
-      const key = yield* db.projectKey((yield* db.getSession(worker))!.projectId)
+      const key = (yield* db.getSession(worker))!.scope
       const tool = (file: string) => ({ tool: { kind: "edit", name: "Write", paths: [file], cwd: "/tmp" } })
       const other = yield* call("/guard", { sessionId: worker }, tool(`${layout.projects}/elsewhere/x`))
       assert.isString((other.body as { deny?: string }).deny)
@@ -380,7 +390,7 @@ describe("vibestd's HTTP API", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const key = yield* repositoryKey(repo)
-      const main = yield* db.coordinatorLaunch(key, "claude", false, {
+      const main = yield* launchMain(key, "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

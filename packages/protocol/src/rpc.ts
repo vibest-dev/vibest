@@ -140,13 +140,15 @@ export type CallerShape =
   | {
       readonly _tag: "Coordinator"
       readonly sessionId: string
-      readonly projectId: number
+      /** Its project's key (the engine's scope). */
+      readonly scope: string
       readonly repositoryRoot?: string
     }
   | {
       readonly _tag: "Session"
       readonly sessionId: string
-      readonly projectId: number
+      /** Its project's key (the engine's scope). */
+      readonly scope: string
       /** What its agent definition lets it do (@vibest/plugin AgentDefinition `can`). */
       readonly can: { readonly spawn: boolean; readonly message: "report-only" | "children" | "group" | "project" }
     }

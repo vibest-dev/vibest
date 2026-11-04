@@ -7,11 +7,11 @@ import { Effect } from "effect"
 /** Who asks: the user, a session the product gives a whole group's rights (vibest: the entry agent), or a session. */
 export type Manager =
   | { readonly _tag: "User" }
-  | { readonly _tag: "GroupOwner"; readonly group: number }
+  | { readonly _tag: "GroupOwner"; readonly group: string }
   | {
       readonly _tag: "Session"
       readonly sessionId: string
-      readonly group: number
+      readonly group: string
       readonly message: Agent.AgentDefinition["can"]["message"]
     }
 
@@ -21,7 +21,7 @@ export type Verdict = "allowed" | "outside" | "reportOnly"
 /** May `manager` manage session `target` (in grouping `group`)? `descends` and `shared` read provenance and groups. */
 export const mayManage = (
   manager: Manager,
-  target: { readonly id: string; readonly group: number },
+  target: { readonly id: string; readonly group: string },
   read: {
     /** `id` is `ancestor` or started (transitively) by it. */
     readonly descends: (id: string, ancestor: string) => Effect.Effect<boolean>

@@ -3,15 +3,17 @@ import fs from "node:fs/promises"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 // What vibest relies on from SQLite and @effect/sql-sqlite-bun: file mode, WAL synchronous, the write lock.
 import { assert, describe, it } from "@effect/vitest"
-import { Db, SQL_NAMES } from "@vibest/core/db"
+import { Db } from "@vibest/core/db"
+import * as SqliteStore from "@vibest/vibest/sqlite-store"
+import { SQL_NAMES } from "@vibest/vibest/sqlite-store"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { tempDirectory } from "./fakes.ts"
+import { tempDirectory, launchMain } from "./fakes.ts"
 
-const database = (filename: string) => Db.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
+const database = (filename: string) => SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
 
 const modeOf = (path: string) => Effect.promise(async () => (await fs.stat(path)).mode & 0o777)
 
@@ -145,7 +147,7 @@ describe("a vibestd restart", () => {
           ["a", "claude"],
           ["b", "pi"],
         ] as const) {
-          const { sessionId } = yield* db.coordinatorLaunch(key, harness, false, place(key))
+          const { sessionId } = yield* launchMain(key, harness, false, place(key))
           const row = (yield* db.insertInbox({ sessionId, kind: "notice", message: key, details: {} }))[0]!
           assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
           ids.push(row.id)

@@ -1,10 +1,9 @@
 import type { Polled } from "@vibest/protocol/protocol"
-// Inbox rows and their delivery to a project's coordinator (SPEC §11). Rows live in sqlite. Rows for a session (`send`)
-// are delivered by Sessions; here only coordinator-bound rows (report, result, notice) are pushed. A command-line
-// caller reads a session's latest result with `vibest result`.
-// A coordinator whose harness adapter has `delivery: "poll"` takes its rows itself, by polling vibestd's HTTP socket
-// (`poll` / `ack`): the Claude plugin and the Pi extension alike. Every other idle
-// coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
+// Inbox rows and their delivery to a scope's owner (SPEC §11; docs/architecture.md, delivery). Rows live in the storage
+// port. Rows for a session (`send`, `task`) are delivered by Sessions; here only owner-bound rows (report, result,
+// notice) are pushed. An owner whose harness adapter has `delivery: "poll"` takes its rows itself, by polling
+// vibestd's HTTP socket (`poll` / `ack`). Every other idle owner gets them typed in through the runtime's prompt.
+// Nobody there: the row is `dropped`.
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
 
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
@@ -17,13 +16,13 @@ import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runti
 export const RECONCILE = Duration.seconds(10)
 /** A row a poll handed out and nobody acked goes back to pending after this (each row its own lease). */
 export const LEASE = Duration.seconds(30)
-/** A coordinator that polled and then stopped for this long is gone: its leased rows go back to pending at once. */
+/** A owner that polled and then stopped for this long is gone: its leased rows go back to pending at once. */
 export const AWAY = Duration.seconds(5)
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
-/** What runs at a coordinator's terminal, from the runtime alone (SPEC §1.2; runtime-port.md §3 `state`, §5's `process` fallback). */
-export const coordinatorIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
+/** What runs at a owner's terminal, from the runtime alone (SPEC §1.2; runtime-port.md §3 `state`, §5's `process` fallback). */
+export const ownerIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal)
     // An absent agent is a terminal the runtime cannot name (reused, or its record dropped): its process decides.
@@ -86,25 +85,25 @@ export class Inbox extends Context.Service<
     readonly enqueue: (row: NewInboxRow, to?: ReadonlyArray<string | null>) => Effect.Effect<ReadonlyArray<InboxRow>>
     /** For rows inserted inside another transaction (Db.finishTurn). */
     readonly announce: (row: InboxRow) => Effect.Effect<void>
-    /** Try to hand a project's coordinator its next batch now. */
-    readonly deliver: (projectId: number) => Effect.Effect<void>
-    /** The next coordinator-bound row whose delivery succeeded (`agent.prompt` returned, or the integration acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
+    /** Try to hand a scope's owner its next batch now. */
+    readonly deliver: (scope: string) => Effect.Effect<void>
+    /** The next owner-bound row whose delivery succeeded (`agent.prompt` returned, or the integration acked it); each row once. One taker: Sessions, which runs `done` once it has handled the row. */
     readonly delivered: Effect.Effect<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
     /**
-     * The coordinator's next batch, each row leased for LEASE (answered at once, empty when there is none or vibestd is
+     * The owner's next batch, each row leased for LEASE (answered at once, empty when there is none or vibestd is
      * stopping). Rows whose lease ran out go back to pending first.
      */
-    readonly poll: (projectId: number) => Effect.Effect<Polled>
+    readonly poll: (scope: string) => Effect.Effect<Polled>
     /**
-     * The rows the coordinator took (`ids`: delivered) and gave back (`release`: pending again). Only its own leased or
+     * The rows the owner took (`ids`: delivered) and gave back (`release`: pending again). Only its own leased or
      * pending rows count; repeating is harmless. Returns the rows now delivered.
      */
     readonly ack: (
-      projectId: number,
+      scope: string,
       ids: ReadonlyArray<number>,
       release?: ReadonlyArray<number>,
     ) => Effect.Effect<ReadonlyArray<number>>
-    /** Project locks held or waited on (vibestd-state.md 3): tests check it shrinks back. */
+    /** Scope locks held or waited on (vibestd-state.md 3): tests check it shrinks back. */
     readonly locks: Effect.Effect<number>
   }
 >()("vibest/Inbox") {
@@ -116,7 +115,7 @@ export class Inbox extends Context.Service<
       const runtimes = yield* Runtimes
       const harnesses = yield* Harnesses
       const restarting = yield* Restarting
-      /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
+      /** How the owner of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.delivery
       yield* db.recoverSending(
         harnesses
@@ -124,7 +123,7 @@ export class Inbox extends Context.Service<
           .filter((h) => h.delivery === "poll")
           .map((h) => h.id),
       )
-      const scope = yield* Effect.scope
+      const lifetime = yield* Effect.scope
       const pubsub = yield* PubSub.unbounded<InboxRow>()
       // Made before any delivery runs, so none is missed.
       const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
@@ -148,31 +147,31 @@ export class Inbox extends Context.Service<
         )
 
       // Dropped once released with nobody waiting (vibestd-state.md 3).
-      const locks = keyedLock<number>()
+      const locks = keyedLock<string>()
 
-      const withLock = <A, E, R>(label: string, projectId: number, body: Effect.Effect<A, E, R>, settlement = false) =>
-        drain.work(label, locks.withLock(projectId)(body), settlement)
+      const withLock = <A, E, R>(label: string, scope: string, body: Effect.Effect<A, E, R>, settlement = false) =>
+        drain.work(label, locks.withLock(scope)(body), settlement)
 
-      const deliver = (projectId: number) =>
+      const deliver = (scope: string) =>
         withLock(
-          `deliver project ${projectId}`,
-          projectId,
+          `deliver scope ${scope}`,
+          scope,
           Effect.gen(function* () {
-            const coord = yield* db.coordinatorOf(projectId)
+            const coord = yield* db.ownerOf(scope)
             if (!coord?.address || coord.address.id === "" || !coord.runtime)
-              return yield* db.dropWaiting(projectId, "absent")
+              return yield* db.dropWaiting(scope, "absent")
             // vibestd is restarting its harness in place: the rows wait for the new one.
             if (restarting.has(coord.id)) return
             const address = encodeAddress(coord.address)
-            const guard = { projectId, runtime: coord.runtime, address }
+            const guard = { scope, runtime: coord.runtime, address }
             const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
             if (Option.isNone(h)) return
-            const presence = yield* coordinatorIdle(h.value, coord.address)
-            if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
+            const presence = yield* ownerIdle(h.value, coord.address)
+            if (presence === "gone") return yield* db.dropWaiting(scope, guard)
             if (presence !== "idle") return
             // Its harness takes its rows itself (`poll`); they wait until it does.
             if (inboxOf(coord.harnessId) === "poll") return
-            const batch = nextBatch(yield* db.coordinatorPending(projectId))
+            const batch = nextBatch(yield* db.ownerPending(scope))
             if (batch.length === 0) return
             const claimed = yield* db.claim(
               batch.map((r) => r.id),
@@ -187,39 +186,37 @@ export class Inbox extends Context.Service<
                   Exit.isSuccess(exit) ? markDelivered(claimed) : db.setInboxStatus(claimed, "failed", "sending"),
                 ),
               )
-          }).pipe(
-            Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
-          ),
+          }).pipe(Effect.catchCause((cause) => Effect.logWarning(`deliver to scope ${scope}: ${Cause.pretty(cause)}`))),
         )
 
       const announce = (row: InboxRow) =>
         row.kind === "send" || row.status !== "pending"
           ? Effect.void
           : db
-              .projectOfSession(row.sessionId)
+              .scopeOf(row.sessionId)
               .pipe(
-                Effect.flatMap((projectId) =>
-                  projectId === undefined
+                Effect.flatMap((scope) =>
+                  scope === undefined
                     ? Effect.void
                     : PubSub.publish(pubsub, row).pipe(
-                        Effect.andThen(Effect.forkIn(deliver(projectId), scope)),
+                        Effect.andThen(Effect.forkIn(deliver(scope), lifetime)),
                         Effect.asVoid,
                       ),
                 ),
               )
 
-      /** The project whose coordinator runs at `terminal`, in any registered runtime. */
+      /** The scope whose owner runs at `terminal`, in any registered runtime. */
       const at = (terminal: RuntimeAddress) =>
         Effect.gen(function* () {
           const all = yield* runtimes.all
           for (const h of all) {
-            const project = yield* db.coordinatorAt(h.kind, terminal).pipe(Effect.option)
-            if (Option.isSome(project)) return project.value
+            const owned = yield* db.ownerAt(h.kind, terminal).pipe(Effect.option)
+            if (Option.isSome(owned)) return owned.value
           }
           return undefined
         })
 
-      // Triggers: a coordinator terminal's state changes (or its exit), and the reconcile tick. The registry's merged
+      // Triggers: a owner terminal's state changes (or its exit), and the reconcile tick. The registry's merged
       // `events` stream carries every registered runtime's (each registration's share ends when it unloads); a runtime
       // without `events` of its own is the poll's to cover (§5).
       yield* Effect.forkIn(
@@ -228,47 +225,47 @@ export class Inbox extends Context.Service<
             if (event.type === "exited")
               // The merged stream does not say which runtime it came from; each kind's row matches on its own address.
               return drain.work(
-                "main agent exited",
+                "owner exited",
                 runtimes.all.pipe(
                   Effect.flatMap((all) =>
-                    Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
+                    Effect.forEach(all, (h) => db.clearOwnerAt(h.kind, event.terminal), { discard: true }),
                   ),
                   Effect.ignore,
                 ),
               )
             if (event.type === "state")
               return at(event.terminal).pipe(
-                Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))),
+                Effect.flatMap((scope) => (scope === undefined ? Effect.void : deliver(scope))),
               )
             return Effect.void
           }),
         ),
-        scope,
+        lifetime,
       )
       yield* Effect.forkIn(
-        db.pendingProjects.pipe(
-          Effect.flatMap((projects) => Effect.forEach(projects, deliver, { discard: true })),
+        db.pendingScopes.pipe(
+          Effect.flatMap((scopes) => Effect.forEach(scopes, deliver, { discard: true })),
           Effect.repeat(Schedule.spaced(RECONCILE)),
         ),
-        scope,
+        lifetime,
       )
 
       /**
-       * Claim the coordinator's next batch, under the project's lock. Only for a coordinator whose harness takes its rows
+       * Claim the owner's next batch, under the scope's lock. Only for a owner whose harness takes its rows
        * itself in `mode`, still where `origin` (when given) read it. `hold` runs in the same uninterruptible region as the
        * claim, so a cut-off caller cannot lose the ids.
        */
       const claimNext = (
-        projectId: number,
+        scope: string,
         origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
         hold: (ids: ReadonlyArray<number>) => Effect.Effect<void>,
       ) =>
         withLock(
-          `claim project ${projectId}`,
-          projectId,
+          `claim scope ${scope}`,
+          scope,
           Effect.uninterruptible(
             Effect.gen(function* () {
-              const current = yield* db.coordinatorOf(projectId)
+              const current = yield* db.ownerOf(scope)
               if (!current || inboxOf(current.harnessId) !== "poll" || !current.address || !current.runtime)
                 return undefined
               const address = encodeAddress(current.address)
@@ -279,12 +276,12 @@ export class Inbox extends Context.Service<
                   address !== origin.address)
               )
                 return undefined
-              const pending = yield* db.coordinatorPending(projectId)
+              const pending = yield* db.ownerPending(scope)
               if (pending.length === 0) return undefined
               const batch = nextBatch(pending)
               const claimed = yield* db.claim(
                 batch.map((r) => r.id),
-                { projectId, runtime: current.runtime, address, harnessId: current.harnessId },
+                { scope, runtime: current.runtime, address, harnessId: current.harnessId },
               )
               if (claimed.length === 0) return undefined
               yield* hold(claimed)
@@ -293,45 +290,45 @@ export class Inbox extends Context.Service<
           ),
         )
 
-      // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
-      // its lease ends; changed under the project's lock. Also the last poll per project, for the away check; its entry
-      // goes when the project is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
-      // polling main agent back to pending.
-      const leases = new Map<number, Map<number, number>>()
-      const lastPoll = new Map<number, number>()
-      const forget = (projectId: number, ids: ReadonlyArray<number>) => {
-        const held = leases.get(projectId)
+      // The Claude plugin's leases are memory only: per scope, each leased (`sending`) row of its owner and when
+      // its lease ends; changed under the scope's lock. Also the last poll per scope, for the away check; its entry
+      // goes when the scope is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
+      // polling owner back to pending.
+      const leases = new Map<string, Map<number, number>>()
+      const lastPoll = new Map<string, number>()
+      const forget = (scope: string, ids: ReadonlyArray<number>) => {
+        const held = leases.get(scope)
         if (held === undefined) return
         for (const id of ids) held.delete(id)
-        if (held.size === 0) leases.delete(projectId)
+        if (held.size === 0) leases.delete(scope)
       }
       /** Ends the leases that ran out by `now` (every one when `now` is undefined): their rows still `sending` go back to pending. */
-      const endLeases = (projectId: number, now: number | undefined) =>
+      const endLeases = (scope: string, now: number | undefined) =>
         withLock(
-          `end leases project ${projectId}`,
-          projectId,
+          `end leases scope ${scope}`,
+          scope,
           Effect.suspend(() => {
-            const ended = [...(leases.get(projectId) ?? [])]
+            const ended = [...(leases.get(scope) ?? [])]
               .filter(([, until]) => now === undefined || until <= now)
               .map(([id]) => id)
-            return Effect.tap(db.releaseLeased(projectId, ended), () => Effect.sync(() => forget(projectId, ended)))
+            return Effect.tap(db.releaseLeased(scope, ended), () => Effect.sync(() => forget(scope, ended)))
           }),
           true,
         )
 
-      const poll = (projectId: number) =>
+      const poll = (scope: string) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          lastPoll.set(projectId, now)
+          lastPoll.set(scope, now)
           const empty: Polled = { ids: [], line: "", text: "" }
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
-          yield* endLeases(projectId, now)
-          const rows = yield* claimNext(projectId, undefined, (ids) =>
+          yield* endLeases(scope, now)
+          const rows = yield* claimNext(scope, undefined, (ids) =>
             Effect.sync(() => {
-              const held = leases.get(projectId) ?? new Map<number, number>()
+              const held = leases.get(scope) ?? new Map<number, number>()
               for (const id of ids) held.set(id, now + Duration.toMillis(LEASE))
-              leases.set(projectId, held)
+              leases.set(scope, held)
             }),
           )
           if (rows === undefined) return empty
@@ -344,13 +341,13 @@ export class Inbox extends Context.Service<
           }
         })
 
-      const ack = (projectId: number, ids: ReadonlyArray<number>, release: ReadonlyArray<number> = []) =>
+      const ack = (scope: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number> = []) =>
         withLock(
           `ack inbox ${ids.join(",")}`,
-          projectId,
+          scope,
           Effect.uninterruptible(
-            Effect.map(db.settleLeased(projectId, ids, release), (rows) => {
-              forget(projectId, [...ids, ...release])
+            Effect.map(db.settleLeased(scope, ids, release), (rows) => {
+              forget(scope, [...ids, ...release])
               publishDelivered(rows)
               return rows.map((r) => r.id)
             }),
@@ -362,13 +359,13 @@ export class Inbox extends Context.Service<
       yield* Effect.forkIn(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          for (const [projectId, at] of lastPoll) {
+          for (const [scope, at] of lastPoll) {
             if (now - at <= Duration.toMillis(AWAY)) continue
-            lastPoll.delete(projectId)
-            yield* endLeases(projectId, undefined)
+            lastPoll.delete(scope)
+            yield* endLeases(scope, undefined)
           }
         }).pipe(Effect.repeat(Schedule.spaced("1 second"))),
-        scope,
+        lifetime,
       )
 
       return Inbox.of({

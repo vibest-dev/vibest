@@ -5,7 +5,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 // agents, whose continue notice names the subagents restarted with them.
 import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
-import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
+import type { Db, OwnerRow, SessionRow } from "./db.ts"
 import type { HarnessAdapter, Harnesses, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
@@ -34,7 +34,7 @@ export interface Outdated {
 }
 export interface Restarted {
   readonly id: string
-  readonly projectId: number
+  readonly scope: string
   readonly ok: boolean
   readonly message: string
 }
@@ -108,7 +108,7 @@ type LiveNow = Effect.Effect<
 /** One agent to restart in place: what differs between a subagent and a main agent. */
 interface Target {
   readonly id: string
-  readonly projectId: number
+  readonly scope: string
   /** How messages name it: its id, and "(main agent)" for one. */
   readonly label: string
   readonly adapter: HarnessAdapter
@@ -184,8 +184,8 @@ export const sessionRestart = (deps: {
 
   /** Mark, SIGTERM to its harness pid only, `run` in the same terminal, then wait for it; written once for both kinds. */
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
-    const { id, projectId, label } = t
-    const failed = (why: string): Restarted => ({ id, projectId, ok: false, message: `${label} ${why}` })
+    const { id, scope, label } = t
+    const failed = (why: string): Restarted => ({ id, scope, ok: false, message: `${label} ${why}` })
     return Effect.gen(function* () {
       const blocked = blockedOf(t.adapter, t.h, t.pid, t.harnessSessionId)
       if (blocked !== undefined) return failed(`not restarted: ${blocked}`)
@@ -234,8 +234,7 @@ export const sessionRestart = (deps: {
   /** The harness argv that reopens a subagent's own conversation when the harness can (a first start has none yet). */
   const againArgv = (session: SessionRow) =>
     Effect.gen(function* () {
-      const key = yield* db.projectKey(session.projectId)
-      if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
+      const key = session.scope
       const adapter = harnesses.get(session.harnessId)
       const resume =
         session.harnessSessionId !== null &&
@@ -247,13 +246,12 @@ export const sessionRestart = (deps: {
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
       const session = yield* db.getSession(id)
-      if (session === undefined)
-        return { id, projectId: -1, ok: false, message: `${id} not restarted: no such session` }
+      if (session === undefined) return { id, scope: "", ok: false, message: `${id} not restarted: no such session` }
       // An open round stays open across the restart: the continue is another turn of it, and it reports once.
       const interrupted = session.turnState === "open"
       return yield* inPlace({
         id,
-        projectId: session.projectId,
+        scope: session.scope,
         label: id,
         adapter: harnesses.get(session.harnessId),
         h: yield* routed(session.runtime),
@@ -269,8 +267,8 @@ export const sessionRestart = (deps: {
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
-            const projectId = session.projectId
-            if (!interrupted) return { id, projectId, ok: true, message: `${id} restarted` }
+            const scope = session.scope
+            if (!interrupted) return { id, scope, ok: true, message: `${id} restarted` }
             // The same delivery a `vibest send` gets: a turn of the open round, typed in once the harness takes it.
             const missed = yield* deps.prompt(
               h,
@@ -279,8 +277,8 @@ export const sessionRestart = (deps: {
               continueText(VERSION),
             )
             return missed === undefined
-              ? { id, projectId, ok: true, message: `${id} restarted; its interrupted turn continues` }
-              : { id, projectId, ok: false, message: `${id} restarted, but ${missed}` }
+              ? { id, scope, ok: true, message: `${id} restarted; its interrupted turn continues` }
+              : { id, scope, ok: false, message: `${id} restarted, but ${missed}` }
           }),
       })
     })
@@ -291,12 +289,12 @@ export const sessionRestart = (deps: {
    * restart, which the notice names. `wasWorking`: it was working when the restart was asked (a `vibest update` it
    * ran itself, whose turn may end before the restart comes).
    */
-  const restartMain = (main: CoordinatorRow, before: ReadonlyArray<Restarted>, wasWorking: boolean) =>
+  const restartMain = (main: OwnerRow, before: ReadonlyArray<Restarted>, wasWorking: boolean) =>
     Effect.gen(function* () {
-      const { id, projectId } = main
+      const { id, scope } = main
       const label = `${id} (main agent)`
       if (!main.runtime || !main.address || main.address.id === "")
-        return { id, projectId, ok: false, message: `${label} not restarted: it has no terminal` } satisfies Restarted
+        return { id, scope, ok: false, message: `${label} not restarted: it has no terminal` } satisfies Restarted
       const h = yield* routed(main.runtime)
       const seen =
         h === undefined
@@ -305,7 +303,7 @@ export const sessionRestart = (deps: {
       const interrupted = wasWorking || stateOf(seen) === "working"
       return yield* inPlace({
         id,
-        projectId,
+        scope,
         label,
         adapter: harnesses.get(main.harnessId),
         h,
@@ -317,7 +315,7 @@ export const sessionRestart = (deps: {
         // version on the person's PATH; an older one is refused with a mismatch.
         argv: Effect.succeed(["vibest", "integration", "start", id]),
         liveNow: Effect.gen(function* () {
-          const row = yield* db.coordinatorOf(projectId)
+          const row = yield* db.ownerOf(scope)
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
         }),
         locked: (effect) => effect,
@@ -327,7 +325,7 @@ export const sessionRestart = (deps: {
           Effect.gen(function* () {
             const restarted: Restarted = {
               id,
-              projectId,
+              scope,
               ok: true,
               message: `${label} restarted${interrupted ? "; its interrupted turn continues" : ""}`,
             }
@@ -335,7 +333,7 @@ export const sessionRestart = (deps: {
               yield* inbox.enqueue({
                 sessionId: id,
                 kind: "notice",
-                message: continueNotice(VERSION, [...before.filter((r) => r.projectId === projectId), restarted]),
+                message: continueNotice(VERSION, [...before.filter((r) => r.scope === scope), restarted]),
                 details: {},
               })
             return restarted
@@ -344,7 +342,7 @@ export const sessionRestart = (deps: {
     })
 
   /** A main agent's terminal still runs it: the runtime sees an agent there. */
-  const mainRunning = (main: CoordinatorRow) =>
+  const mainRunning = (main: OwnerRow) =>
     Effect.gen(function* () {
       if (!main.runtime || !main.address || main.address.id === "") return undefined
       const h = yield* routed(main.runtime)
@@ -366,7 +364,7 @@ export const sessionRestart = (deps: {
         row.address.id !== "",
     )
     const mains: Array<Outdated> = []
-    for (const main of yield* db.coordinators) {
+    for (const main of yield* db.owners) {
       if (!reports(main.harnessId) || current(main.integration)) continue
       const seen = yield* mainRunning(main)
       if (seen === undefined) continue
@@ -398,7 +396,7 @@ export const sessionRestart = (deps: {
 
   const restart = (ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
-      const mains = (yield* db.coordinators).filter((main) => ids.includes(main.id))
+      const mains = (yield* db.owners).filter((main) => ids.includes(main.id))
       const agents = ids.filter((id) => !mains.some((main) => main.id === id))
       const first = yield* Effect.forEach(agents, restartAgent, { concurrency: RESTART_CONCURRENCY })
       const last = yield* Effect.forEach(mains, (main) => restartMain(main, first, working.includes(main.id)))
@@ -411,7 +409,7 @@ export const sessionRestart = (deps: {
     Effect.gen(function* () {
       // Read before the wait: a main agent that ran `vibest update` itself is working now, maybe not once it exits.
       const working: Array<string> = []
-      for (const main of yield* db.coordinators)
+      for (const main of yield* db.owners)
         if (ids.includes(main.id) && stateOf((yield* mainRunning(main)) ?? "unknown") === "working")
           working.push(main.id)
       const waited =

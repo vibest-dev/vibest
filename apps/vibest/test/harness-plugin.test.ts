@@ -14,7 +14,7 @@ import { Effect } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, testLayer, until } from "./fakes.ts"
+import { FakeRuntime, makeRepository, testLayer, until, launchMain } from "./fakes.ts"
 import { hookcliPlugin } from "./fixtures/harness-hookcli.ts"
 
 const fake: Harness.HarnessAdapter = {
@@ -38,7 +38,7 @@ it.effect("a plugin harness is spawned by its id", () =>
     const repo = yield* makeRepository
     const db = yield* Db
     const key = yield* repositoryKey(repo)
-    yield* db.coordinatorLaunch(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
+    yield* launchMain(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
     const { id } = yield* (yield* Sessions).spawn({
       machine: { id: "local" },
       root: repo,
@@ -67,7 +67,7 @@ it.effect(
       const sessions = yield* Sessions
       const layout = yield* Layout
       const key = yield* repositoryKey(repo)
-      const main = yield* db.coordinatorLaunch(key, "pi", false, {
+      const main = yield* launchMain(key, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -118,9 +118,9 @@ it.effect(
       yield* sessions.check(id)
       // The result is the main agent's: its Pi integration polls it, and acks it once Pi took it.
       const inbox = yield* Inbox
-      const batch = yield* until(inbox.poll(main.projectId), (b) => b.ids.length > 0)
+      const batch = yield* until(inbox.poll(main.scope), (b) => b.ids.length > 0)
       assert.include(batch.text, "parser done")
-      yield* inbox.ack(main.projectId, batch.ids)
+      yield* inbox.ack(main.scope, batch.ids)
       assert.strictEqual((yield* db.latestInbox(id, "result"))!.status, "delivered")
 
       // The next turn, interrupted: the interrupt key goes in, the stop hook says aborted, and no result arrives.

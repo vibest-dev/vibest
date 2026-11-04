@@ -25,7 +25,7 @@ const storedRow = (
   id: string,
   metadata: SessionRow["metadata"],
   patch: Partial<Omit<SessionRow, "projectId" | "id" | "metadata">> = {},
-): Omit<SessionRow, "projectId"> => ({
+): Omit<SessionRow, "scope"> => ({
   id,
   agent: "general",
   name: "stored",

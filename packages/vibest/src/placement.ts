@@ -20,7 +20,7 @@ export const layer = Layer.effect(
     const path = yield* Path.Path
 
     /** The project directory stored on the main agent, if its start wrote one. Never the lookup key. */
-    const stored = (projectId: number) => db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
+    const stored = (scope: string) => db.ownerOf(scope).pipe(Effect.map((main) => main?.directory))
 
     /** Project name on the workspace: the directory's own name, not the key. */
     const projectName = (root: string) =>
@@ -29,9 +29,9 @@ export const layer = Layer.effect(
         Effect.catch(() => Effect.succeed(path.basename(root))),
       )
 
-    const liveCount = (projectId: number) =>
+    const liveCount = (scope: string) =>
       db
-        .listSessions({ projectId })
+        .listSessions({ scope })
         .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
 
     return PlacementPolicy.of({
@@ -42,28 +42,28 @@ export const layer = Layer.effect(
           const parent = yield* db.parentOf(session.id)
           const lead = parent === undefined ? undefined : yield* db.getSession(parent)
           if (lead?.runtime === kind && lead.exitedAt === null && lead.address.id !== "") return lead.address
-          const main = yield* db.coordinatorOf(session.projectId)
+          const main = yield* db.ownerOf(session.scope)
           return main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined
         }),
       root: (session, cwd) =>
         Effect.gen(function* () {
-          const dir = yield* stored(session.projectId)
+          const dir = yield* stored(session.scope)
           if (yield* workspace.repositories(cwd)) return dir ?? (yield* workspace.project(cwd)).root
           return dir ?? (yield* workspace.mainCheckout(cwd))
         }),
       labelRoot: (session, cwd) =>
         Effect.gen(function* () {
-          return (yield* stored(session.projectId)) ?? (yield* workspace.project(cwd)).root
+          return (yield* stored(session.scope)) ?? (yield* workspace.project(cwd)).root
         }),
-      project: (projectId, root) =>
+      labels: (scope, root) =>
         Effect.gen(function* () {
-          return { project: yield* projectName(root), live: String(yield* liveCount(projectId)) }
+          return { project: yield* projectName(root), live: String(yield* liveCount(scope)) }
         }),
       // shortcut: without a stored project directory the workspace's project token cannot be named again, so it is left as it is
-      alone: (projectId, kind, live) =>
+      alone: (scope, kind, live) =>
         Effect.gen(function* () {
-          const main = yield* db.coordinatorOf(projectId)
-          const dir = yield* stored(projectId)
+          const main = yield* db.ownerOf(scope)
+          const dir = yield* stored(scope)
           if (main?.runtime !== kind || !main.address || main.address.id === "" || dir === undefined) return undefined
           return { terminal: main.address, labels: { project: yield* projectName(dir), live: String(live) } }
         }),

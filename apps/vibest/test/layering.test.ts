@@ -45,6 +45,23 @@ it("the engine runs no git and imports no worktree code or the product", () => {
   assert.notInclude(fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8"), '"@vibest/vibest"')
 })
 
+it("the engine holds no SQL: storage is a port (db.ts), vibest's SQLite store implements it", () => {
+  const core = sources("packages/core/src")
+  assert.deepStrictEqual(
+    core.flatMap((f) =>
+      specifiers(f)
+        .filter((s) => /sql/i.test(s))
+        .map((s) => `${f}: ${s}`),
+    ),
+    [],
+  )
+  assert.deepStrictEqual(importing(core, /\bSqlClient\b|\bsql`/), [])
+  const manifest = fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8")
+  assert.notMatch(manifest, /sql/i)
+  // The schema, its checks and the SQL live in the product's store.
+  assert.match(fs.readFileSync(path.join(root, "packages/vibest/src/sqlite-store.ts"), "utf8"), /CREATE TABLE session/)
+})
+
 it("the engine-only product (engine-only.test.ts) is composed without vibest's product, server or default plugins", () => {
   const files = ["apps/vibest/test/engine-only.test.ts", "apps/vibest/test/fake-runtime.ts"]
   const allowed = /^(node:|\.|effect(\/|$)|@effect\/|@vibest\/(core|plugin|protocol|schema)(\/|$))/
@@ -72,6 +89,13 @@ it("the product's notions stay out of the engine", () => {
   // The shared files directory reaches a session through the workspace's `files`, the guard's area through
   // `GuardArea`: the engine names neither.
   assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH|layout\.projects?\b/), [])
+  // The storage port and the inbox group by an opaque scope with an owner, not by project and coordinator.
+  for (const file of ["db.ts", "inbox.ts", "memory-store.ts", "read-model.ts"])
+    assert.notMatch(
+      fs.readFileSync(path.join(root, "packages/core/src", file), "utf8"),
+      /projectId|coordinator(Of|At|Launch|Pending|s\b)|pendingProjects|projectOfSession|entry_session/,
+      file,
+    )
   // Terminal placement, removal and the system prompt file know no entry agent: the product's policy decides.
   for (const file of ["placement.ts", "remove.ts", "system-prompt.ts", "workspace.ts"])
     assert.notMatch(

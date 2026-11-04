@@ -15,7 +15,8 @@ export type HookCaller = {
   /** Its project's entry session (the main agent): its inbox is the project's, and its turns are no one's round. */
   readonly entry: boolean
   readonly harness: string
-  readonly projectId: number
+  /** Its scope: its project's key. */
+  readonly scope: string
 }
 
 const Failure = Schema.Struct({ kind: Schema.Literals(["limited", "auth", "other"]), message: Schema.String })
@@ -85,7 +86,7 @@ export const apply = (
       case "turn.start": {
         // The rows this turn took (a polling integration names them): delivered, bound to the turn.
         if (event.inbox !== undefined && event.inbox.length > 0) {
-          if (who.entry) yield* inbox.ack(who.projectId, event.inbox)
+          if (who.entry) yield* inbox.ack(who.scope, event.inbox)
           else yield* sessions.consumed(who.id, event.inbox)
         }
         if (who.entry) return

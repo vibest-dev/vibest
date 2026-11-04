@@ -1,5 +1,5 @@
 // Planned shutdown (Daemon.Stop) tracks daemon operations, not agent lifetimes: agents keep running and pending
-// Messages stay in sqlite for the next vibestd. Work deferred while draining wakes once a refused Stop reopens.
+// Messages stay in the store for the next vibestd. Work deferred while draining wakes once a refused Stop reopens.
 import { Context, Deferred, Effect, Layer } from "effect"
 
 const make = Effect.gen(function* () {

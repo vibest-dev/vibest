@@ -16,7 +16,16 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { authed, FakeRuntime, makeRepository, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  makeRepository,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  projectNumber,
+} from "./fakes.ts"
 
 /** A peer messages any session of its project and spawns none. */
 const peers = Plugin.define({
@@ -74,7 +83,10 @@ const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asSession = (sessionId: string) =>
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
-    return authed(yield* client, sessionHeaders({ sessionId, projectId: row && String(row.projectId) }))
+    return authed(
+      yield* client,
+      sessionHeaders({ sessionId, projectId: row && String(yield* projectNumber(row.scope)) }),
+    )
   })
 
 /** Every result row of `about`: who it went to (null: the user) and its status, oldest first. */

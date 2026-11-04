@@ -31,7 +31,7 @@ type Labels = Readonly<Record<string, string>>
 
 /**
  * The product's terminal placement policy (@vibest/vibest/placement): which terminal a new one opens beside, which
- * directory a session's terminals belong to, and what its project's workspace shows. The engine opens, labels and
+ * directory a session's terminals belong to, and what a scope's terminals show together. The engine opens, labels and
  * closes terminals; it asks here where and what.
  */
 export interface PlacementPolicyShape {
@@ -47,11 +47,11 @@ export interface PlacementPolicyShape {
     session: SessionRow,
     cwd: string,
   ) => Effect.Effect<string, NotInRepository | PlatformError.PlatformError>
-  /** The project labels (`present`'s `project` and `live`) on a terminal of the project at `root`. */
-  readonly project: (projectId: number, root: string) => Effect.Effect<Labels>
-  /** No live session of the project is labelled in runtime `kind` (`live` of them still are): the terminal that shows the project alone, and its labels. */
+  /** The scope's labels on a terminal of a session of `scope` placed at `root`. */
+  readonly labels: (scope: string, root: string) => Effect.Effect<Labels>
+  /** No live session of `scope` is labelled in runtime `kind` (`live` of them still are): the terminal that shows the scope alone, and its labels. */
   readonly alone: (
-    projectId: number,
+    scope: string,
     kind: string,
     live: number,
   ) => Effect.Effect<{ readonly terminal: Terminal; readonly labels: Labels } | undefined>
@@ -66,8 +66,7 @@ class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message
 
 export const sessionPlacement = (deps: {
   readonly db: {
-    readonly listSessions: (filter?: { readonly projectId?: number }) => Effect.Effect<ReadonlyArray<SessionRow>>
-    readonly projectKey: (id: number) => Effect.Effect<string | undefined>
+    readonly listSessions: (filter?: { readonly scope?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
@@ -126,7 +125,7 @@ export const sessionPlacement = (deps: {
         title: session.name,
         definition: session.agent,
         session: session.id,
-        ...(yield* policy.project(session.projectId, root)),
+        ...(yield* policy.labels(session.scope, root)),
       })
     }).pipe(Effect.ignore)
 
@@ -212,8 +211,7 @@ export const sessionPlacement = (deps: {
     env?: Readonly<Record<string, string>>,
   ) {
     // The row's own grouping key: its shared files and system prompt are its group's.
-    const key = yield* db.projectKey(session.projectId)
-    if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
+    const key = session.scope
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
     // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
@@ -299,10 +297,10 @@ export const sessionPlacement = (deps: {
    * removed): each remaining live session's terminal relabels it, as `republish` does; with none left, the main agent's
    * terminal publishes the workspace alone, without labels of its own. Best-effort: callers ignore failures.
    */
-  const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: number) {
+  const recount = Effect.fn("Sessions.recount")(function* (kind: string, scope: string) {
     const h = yield* runtimes.route(kind).pipe(Effect.option)
     if (Option.isNone(h)) return
-    const rows = (yield* db.listSessions({ projectId })).filter(
+    const rows = (yield* db.listSessions({ scope })).filter(
       (row) => row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
     )
     let shown = false
@@ -313,7 +311,7 @@ export const sessionPlacement = (deps: {
     }
     if (shown) return
     if (h.value.present === undefined) return
-    const alone = yield* policy.alone(projectId, kind, rows.length)
+    const alone = yield* policy.alone(scope, kind, rows.length)
     if (alone === undefined) return
     yield* h.value
       .present(alone.terminal, { agent: "", harness: "", title: "", definition: "", session: "", ...alone.labels })
@@ -324,8 +322,7 @@ export const sessionPlacement = (deps: {
   const locate = (session: SessionRow) =>
     Effect.gen(function* () {
       const cwd = yield* deps.worktreeOf(session)
-      const key = yield* db.projectKey(session.projectId)
-      if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
+      const key = session.scope
       return { root: yield* policy.root(session, cwd), cwd, key }
     })
 
