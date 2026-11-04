@@ -1,22 +1,11 @@
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, Routing } from "@vibest/schema/plugin"
-import {
-  ProjectConflict,
-  ProjectDeleteInput,
-  ProjectEntry,
-  ProjectInfoResult,
-  ProjectInvalid,
-  ProjectListInput,
-  ProjectReadInput,
-  ProjectReadResult,
-  ProjectSearchInput,
-  ProjectWriteInput,
-  ProjectWriteResult,
-} from "@vibest/schema/project"
+import { ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
 import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
+  AmbiguousSession,
   HARNESS_IDS,
   HarnessUnavailable,
   InboxRow,
@@ -25,6 +14,7 @@ import {
   NoHarnessChosen,
   NoSuchSession,
   NotInRepository,
+  ProjectMoved,
   NoRuntime,
   RuntimeAddress,
   RuntimeIncompatible,
@@ -141,10 +131,10 @@ export type CallerShape =
   | {
       readonly _tag: "Coordinator"
       readonly sessionId: string
-      readonly projectId: number
+      readonly projectId: string
       readonly repositoryRoot?: string
     }
-  | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: number }
+  | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: string }
 
 export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}
 
@@ -242,7 +232,7 @@ export const SessionInfo = Schema.Struct({
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
   turnState: TurnState,
-  projectId: Schema.Number,
+  projectId: Schema.String,
   runtime: Schema.String,
   address: RuntimeAddress,
   worktree: Schema.String,
@@ -308,10 +298,12 @@ export class VibestRpcs extends RpcGroup.make(
           AllocationFailed,
           HarnessUnavailable,
           NotInRepository,
+          ProjectMoved,
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
           NoSuchSession,
+          AmbiguousSession,
           RuntimeUnreachable,
           RuntimeIncompatible,
         ]),
@@ -348,7 +340,15 @@ export class VibestRpcs extends RpcGroup.make(
           place: Schema.String,
           attach: Schema.NullOr(Schema.Array(Schema.String)),
         }),
-        error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, LaunchFailed, NoRuntime, AgentRefused]),
+        error: Schema.Union([
+          InvalidCaller,
+          Forbidden,
+          NotInRepository,
+          ProjectMoved,
+          LaunchFailed,
+          NoRuntime,
+          AgentRefused,
+        ]),
       }),
     ),
   ),
@@ -356,8 +356,10 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Send", {
+        /** `id`: a session id, or a unique prefix of at least 8 characters; the answer names the full id. */
         payload: { id: Schema.String, message: Schema.String },
-        error: Schema.Union([Forbidden, NoSuchSession]),
+        success: Schema.Struct({ id: Schema.String }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
       }),
     ),
   ),
@@ -365,8 +367,8 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Interrupt", {
         payload: { id: Schema.String },
-        success: Schema.Struct({ message: Schema.String }),
-        error: Schema.Union([Forbidden, NoSuchSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        success: Schema.Struct({ id: Schema.String, message: Schema.String }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
       }),
     ),
   ),
@@ -376,7 +378,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
-        error: Schema.Union([Forbidden, NoSuchSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
       }),
     ),
   ),
@@ -392,7 +394,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Get", {
       payload: { id: Schema.String },
       success: SessionStatusInfo,
-      error: Schema.Union([Forbidden, NoSuchSession]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
     }),
   ),
   /**
@@ -403,7 +405,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Peek", {
       payload: { id: Schema.String, lines: Schema.optional(Schema.Number) },
       success: Schema.Struct({ text: Schema.String }),
-      error: Schema.Union([Forbidden, NoSuchSession, NoRuntime, RuntimeUnreachable]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable]),
     }),
   ),
   /** A non-coordinator session: a message to that session's own coordinator. */
@@ -465,11 +467,18 @@ export class VibestRpcs extends RpcGroup.make(
         success: Schema.Struct({
           sessionId: Schema.String,
           harnessSessionId: Schema.NullOr(Schema.String),
-          /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment (absent from an older vibestd). */
-          projectId: Schema.optional(Schema.Number),
+          /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment. */
+          projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
         }),
-        error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
+        error: Schema.Union([
+          InvalidCaller,
+          Forbidden,
+          NotInRepository,
+          ProjectMoved,
+          RuntimeUnreachable,
+          RuntimeIncompatible,
+        ]),
       }),
     ),
   ),
@@ -498,11 +507,36 @@ export class VibestRpcs extends RpcGroup.make(
         InvalidCaller,
         Forbidden,
         NotInRepository,
+        ProjectMoved,
         NoHarnessChosen,
         AgentRefused,
         HarnessUnavailable,
         NoRuntime,
       ]),
+    }),
+  ),
+  /**
+   * `vibest` before anything else (the user's command line only): the project of its directory, found or created.
+   * A checkout that moved is `ProjectMoved` unless `move` says what to do: true moves the project here (its id kept,
+   * vibest's worktrees repaired; `manual` are the commands for the user's own worktrees), false makes a new one.
+   * `candidates`: several moved projects had these origins, so a new one was made; their directories.
+   */
+  scoped(
+    Rpc.make("Project.Open", {
+      payload: { move: Schema.optional(Schema.Boolean) },
+      success: Schema.Struct({
+        projectId: Schema.String,
+        directory: Schema.String,
+        moved: Schema.optional(
+          Schema.Struct({
+            from: Schema.String,
+            repaired: Schema.Array(Schema.String),
+            manual: Schema.Array(Schema.String),
+          }),
+        ),
+        candidates: Schema.optional(Schema.Array(Schema.String)),
+      }),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   /** A coordinator still running in another pane: display text and the opaque address to pass to StopCoordinator. */
@@ -517,7 +551,14 @@ export class VibestRpcs extends RpcGroup.make(
           address: Schema.String,
         }),
       ),
-      error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, RuntimeUnreachable, RuntimeIncompatible]),
+      error: Schema.Union([
+        InvalidCaller,
+        Forbidden,
+        NotInRepository,
+        ProjectMoved,
+        RuntimeUnreachable,
+        RuntimeIncompatible,
+      ]),
     }),
   ),
   /**
@@ -534,7 +575,7 @@ export class VibestRpcs extends RpcGroup.make(
           result: Schema.Literals(["stopped", "running", "moved", "unsupported"]),
           reason: Schema.optional(Schema.String),
         }),
-        error: Schema.Union([Forbidden, NotInRepository, RuntimeUnreachable, NoRuntime, InvalidCaller]),
+        error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, RuntimeUnreachable, NoRuntime, InvalidCaller]),
       }),
     ),
   ),
@@ -549,44 +590,18 @@ export class VibestRpcs extends RpcGroup.make(
       }),
     ),
   ),
-  scoped(Rpc.make("Project.Info", { success: ProjectInfoResult, error: Schema.Union([Forbidden, NotInRepository]) })),
   scoped(
-    Rpc.make("Project.List", {
-      payload: ProjectListInput.fields,
-      success: Schema.Array(ProjectEntry),
-      error: Schema.Union([Forbidden, NotInRepository]),
-    }),
-  ),
-  scoped(
-    Rpc.make("Project.Read", {
-      payload: ProjectReadInput.fields,
-      success: ProjectReadResult,
-      error: Schema.Union([Forbidden, NotInRepository, ProjectInvalid]),
+    Rpc.make("Project.Info", {
+      success: ProjectInfoResult,
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   scoped(
     Rpc.make("Project.Search", {
       payload: ProjectSearchInput.fields,
       success: Schema.Array(Schema.String),
-      error: Schema.Union([Forbidden, NotInRepository]),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Project.Write", {
-        payload: ProjectWriteInput.fields,
-        success: ProjectWriteResult,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectConflict, ProjectInvalid]),
-      }),
-    ),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Project.Delete", {
-        payload: ProjectDeleteInput.fields,
-        error: Schema.Union([Forbidden, NotInRepository, ProjectConflict, ProjectInvalid]),
-      }),
-    ),
   ),
   /**
    * The user's command line only: stop this vibestd (`instance` from its Ping) once its own operations drain (agents keep running), else DaemonBusy and it
@@ -623,7 +638,7 @@ export class VibestRpcs extends RpcGroup.make(
         harnessSessionId: Schema.NullOr(Schema.String),
         provider: Schema.NullOr(Schema.String),
         model: Schema.NullOr(Schema.String),
-        projectId: Schema.Number,
+        projectId: Schema.String,
         runtime: Schema.optional(Schema.String),
         /** The main agent's `vibest --env`, from vibestd's memory (absent after vibestd was stopped or restarted without a handoff). */
         env: Schema.optional(Schema.Record(Schema.String, Schema.String)),

@@ -207,6 +207,13 @@ export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS e
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
 /** A real-path temp directory, removed with the scope. */
+/** The project at `directory`, created on first use: the one vibestd resolves for a repository at that realpath. */
+export const projectOf = (directory: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
+  })
+
 export const tempDirectory = (prefix: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem

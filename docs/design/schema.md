@@ -1,15 +1,17 @@
 # Schema
 
-Status: vibestd runs version 2 (`user_version = 2`, in `packages/core/src/db.ts`). It replaced version 1's
-`message` table and `session.metadata` JSON column with the append-only `event` table, and added the routing
-columns of the engine (architecture.md §1). The `Db` service still answers its callers with the old session row
+Status: vibestd runs version 1 (`user_version = 1`, in `packages/core/src/db.ts`), the baseline: every later change
+is a numbered SQL step, from 1 to 2 onward, run in order on `user_version`. The baseline replaced the earlier shape's
+`message` table and `session.metadata` JSON column with the append-only `event` table, keys projects by a UUID and
+their directory, and added the routing columns of the engine (architecture.md §1). The `Db` service still answers its callers with the old session row
 shape, read from these tables and the memory listed below. Not built yet: rows for the user (nothing writes a null
 `recipient_session_id`), the `replyTo(turn)` routing below (a result or report still goes to
 `report_to_session_id` while it has not ended, else to the entry session).
 
-Four SQLite tables, one purpose each:
+Five SQLite tables, one purpose each:
 
-- `project`: a Project, and its optional entry session.
+- `project`: a Project, where it is, and its optional entry session.
+- `project_repository`: the git repositories of a Project, by the realpath of each main checkout.
 - `session`: one agent's identity and conversation, described by an agent definition; who spawned it and where its
   results go.
 - `inbox`: text for a session or for the user, and whether it was delivered. `status` is its only changing column.
@@ -37,23 +39,48 @@ Four SQLite tables, one purpose each:
 - Leases, the restarting mark, running work and per-session locks are memory only (see Memory).
 - Agent capabilities (spawn, message, tools) come from the agent definition in configuration, not from the
   database. A routing decision is not recorded separately: it is the recipient of the result row.
-- Times are epoch milliseconds. Session ids are 8 hex characters.
+- Times are epoch milliseconds.
+- Project and session ids are UUIDv4 strings from one generator (`newId`, packages/schema/src/id.ts), which draws
+  again when the first 8 characters are already taken. People see the first 8 (`shortId`); every command that takes
+  a session id takes the full id or a unique prefix of 8 or more characters, and JSON output keeps the full id. The
+  herdr agent of a session is `s-` and the first 30 hex digits of its id (herdr names are at most 32 characters).
+
+## Projects
+
+A Project is found by realpath, never by a remote or a key. `projectRoot` of the working directory is a main checkout,
+or the parent directory of a multi-repository project (a plain directory whose direct children are repositories). The
+project is the one whose `directory` is that realpath, else the one with a repository at that path (a repository of
+a multi-repository project belongs to it). Not found: a new project, with an id that never changes. Two clones of one
+remote are two projects. `remote_url` is `remote.origin.url` as git prints it, refreshed on every resolve; it only
+recognizes a moved checkout: a directory with no project, whose origins are exactly those of one project whose
+directory no longer exists, is that project moved (`ProjectMoved`). `vibest` asks `[Y/n]`: yes moves the project there
+(its id kept, its session directories rewritten, vibest's own worktrees repaired; for the user's worktrees it prints
+`git worktree repair`), no makes a new project. Several such projects: a new project, the candidates printed. Its
+folder is `projects/<project id>/` under `VIBEST_HOME` (instructions.md, docs/, memories/, artifacts/). `vibest ls` and the other
+read-only lookups never create one.
 
 ## DDL
 
 ```sql
 PRAGMA application_id = 1986617957;  -- 0x76696265, "vibe"
-PRAGMA user_version = 2;
+PRAGMA user_version = 1;
 
 CREATE TABLE project (
-  id               INTEGER PRIMARY KEY,
-  key              TEXT NOT NULL UNIQUE,              -- projectRoot key; not a path
+  id               TEXT PRIMARY KEY CHECK (length(id) = 36),  -- UUIDv4, never changed
+  directory        TEXT UNIQUE,                       -- realpath of the project root; null: migrated with none known
   entry_session_id TEXT REFERENCES session (id)       -- what a bare `vibest` reopens, and the fallback recipient; not identity
 ) STRICT;
 
+CREATE TABLE project_repository (
+  project_id TEXT NOT NULL REFERENCES project (id),
+  path       TEXT NOT NULL UNIQUE,                    -- realpath of the repository's main checkout
+  remote_url TEXT                                     -- remote.origin.url as git prints it; not identity
+) STRICT;
+CREATE INDEX project_repository_project ON project_repository (project_id);
+
 CREATE TABLE session (
-  id                    TEXT PRIMARY KEY,
-  project_id            INTEGER NOT NULL REFERENCES project (id),
+  id                    TEXT PRIMARY KEY,             -- UUIDv4
+  project_id            TEXT NOT NULL REFERENCES project (id),
   parent_session_id     TEXT REFERENCES session (id), -- who spawned it; null: the user. Rights and placement, never routing
   report_to_session_id  TEXT REFERENCES session (id), -- where its results go; written at spawn, never changed; null: the user
   role                  TEXT NOT NULL,                -- agent definition name (open set)
@@ -155,7 +182,7 @@ terminal). The start with the terminal follows it and copies what the process re
 opened ends `launch_failed`, and the session's current process is then the start before it, if any.
 
 `turn.end` `output` is the harness's answer text (not the rendered result, which is the result row's content); the
-migration takes it out of a v1 result. `Db.finishTurn` takes the whole `turn.end` data.
+migration takes it out of an old-shape result. `Db.finishTurn` takes the whole `turn.end` data.
 
 ## Hot paths
 
@@ -196,26 +223,36 @@ migration takes it out of a v1 result. `Db.finishTurn` takes the whole `turn.end
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 
-## Moving from version 1
+## Moving from the earlier shape
 
-vibestd never migrates by itself: on a version 1 file it refuses to start, names the file, and says it is from an
-older vibest and must be migrated with the migration script given with this release, or moved aside to start empty.
-The script is not part of the repository: it is one self-contained file (bun:sqlite and node built-ins only) handed
-out with the release, which the owner runs by hand after stopping vibestd: `bun migrate-db-v2.ts ~/.vibest/vibest.db`.
-It copies the file to `vibest.db.v1-backup-<time>` first, builds version 2 from that copy into a new file, checks its
-foreign keys, and only then puts it in place with `user_version` 2. The script maps:
+The shape before the baseline also carries vibest's `application_id` and `user_version` 1, so vibestd tells it apart by
+its tables: no `event` table. vibestd never migrates by itself: on such a file it refuses to start, names the file, and
+says it is from an older vibest and must be migrated once with the migration script given with this release, or moved
+aside to start empty. Nothing in the repository migrates anything. The script is not part of the repository: it is one
+self-contained file (bun:sqlite and node built-ins only) handed out with the release, which the owner runs by hand
+after stopping vibestd: `bun migrate-db-v2.ts ~/.vibest/vibest.db`. It recognizes the earlier shape by its tables, not
+by `user_version`, copies the file to `vibest.db.v1-backup-<time>` first, builds the baseline from that copy into a new
+file, checks its foreign keys, and only then puts it in place with `user_version` 1. The script maps:
 
 - `session.report_to_session_id` = `parent_session_id`; when that is null and the role is not `main`, the
   project's `main_session_id`.
-- `project.entry_session_id` = `main_session_id`; `project.key` = `directory`; a main session's `directory` = its
-  `metadata.projectDirectory`.
+- Every project and session id becomes a new UUIDv4 (the script prints the old to new mapping), rewritten wherever
+  it is held: `session.id`, `parent_session_id`, `report_to_session_id`, `project.entry_session_id`, the inbox sender
+  and recipient, `event.session_id`, and a session id held as a value in event data. Harness conversation ids and
+  message text are kept as they are. Stop every agent first: a running one still carries its old id.
+- `project.entry_session_id` = `main_session_id`; a main session's `directory` = its `metadata.projectDirectory`.
+  `project.directory` is the realpath of the main session's project directory (else the main checkout of a
+  subagent's), with its repositories and their origins; projects claim directories newest first, and one with
+  none known keeps a null directory (history only). `projects/<old key>/` is renamed `projects/<project id>/`, and
+  inside it `memory/` becomes `memories/` and `scratch/` becomes `artifacts/`; any failure puts every renamed
+  directory back and leaves the old file untouched.
 - The session's harness, runtime, terminal and conversation become its `process.start`; its pid, ready time and
   integration a `process.ready`; its exit (or archive) a `process.end`; each usage-limit attempt a `process.start`
   and `process.end` (limited).
 - Each `message` row becomes a `turn.start` (typed, when it had no inbox row and some input), the `inbox.status`
   delivered of the rows it consumed, and a `turn.end` unless it was still working.
 - Inbox `sender_type` becomes the kind: `user` is the session's `task` (its `metadata.task`) or a `send`, `session`
-  a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`. A v1 result row's
+  a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`. An old-shape result row's
   content is empty; its text is the message's output (the rendered result), which becomes the row's content.
 - A turn end left in `results/<id>.json` that vibestd had not collected (newer than the open turn's start, or than
   the last turn's end for a turn typed in the pane) becomes that turn's `turn.end`; `results/` and `reports/` are
@@ -223,7 +260,7 @@ foreign keys, and only then puts it in place with `user_version` 2. The script m
 - Dropped: stop records, the runtime's last status, a result's parsed details (derived again from its text), and
   every other `metadata` key.
 
-From version 3 on, upgrades run step by step on `user_version`.
+From the baseline on, upgrades run step by step on `user_version`: 1 to 2, then 2 to 3, each a numbered SQL step.
 
 ## Not stored
 

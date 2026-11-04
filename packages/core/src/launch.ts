@@ -1,12 +1,11 @@
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
-import { Config, Effect, Option } from "effect"
+import { Config, Effect, FileSystem, Option } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
-import { projectKey } from "./project-create.ts"
 import { type Machine, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
 import {
@@ -37,7 +36,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     {
       readonly sessionId: string
       readonly harnessSessionId: string | null
-      readonly projectId?: number | undefined
+      readonly projectId: string
       readonly runtime?: string | undefined
     },
     E,
@@ -56,7 +55,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   // The plugin's pre-tool hook keeps a Coordinator from editing files and from what else it refuses (guard.ts).
   const pluginDir = yield* harness.plugin(input.harness)
-  const key = yield* projectKey(input.root).pipe(Effect.orDie)
   // The temporary directory is checked before `session`, which supersedes the running Coordinator's launch.
   yield* unsafeOnly(systemPromptRoot)
   const env: Record<string, string> = {
@@ -72,21 +70,33 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
   const saved = yield* input.session
   const systemPromptFile = yield* unsafeOnly(
-    writeSystemPrompt(saved.sessionId, coordinatorSystemPrompt({ ...(yield* projectText(layout.project(key))) })),
+    writeSystemPrompt(
+      saved.sessionId,
+      coordinatorSystemPrompt({
+        projectDir: layout.project(saved.projectId),
+        ...(yield* projectText(layout.project(saved.projectId))),
+      }),
+    ),
   )
+  // The project folder the Coordinator writes in (--add-dir must exist).
+  yield* (yield* FileSystem.FileSystem)
+    .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
+    .pipe(Effect.ignore)
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
-    ...(saved.projectId !== undefined ? { VIBEST_PROJECT_ID: String(saved.projectId) } : {}),
+    VIBEST_PROJECT_ID: saved.projectId,
+    VIBEST_PROJECT_DIR: layout.project(saved.projectId),
     ...(saved.runtime !== undefined ? { VIBEST_RUNTIME: saved.runtime } : {}),
   }
   return {
     file: adapter.binary,
     args: adapter.coordinatorArgs({
       root: input.root,
+      projectDir: layout.project(saved.projectId),
       systemPromptFile,
       provider: input.provider,
       model: input.model,

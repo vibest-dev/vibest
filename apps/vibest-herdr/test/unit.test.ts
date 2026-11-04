@@ -22,27 +22,21 @@ import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
+import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
 import { coordinatorSystemPrompt, privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
-import {
-  copyIncluded,
-  git,
-  gitState,
-  mainCheckout,
-  normalizeRemote,
-  repositoryDirectoryName,
-  repositoryKey,
-} from "@vibest/core/worktree"
+import { copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { agentName, KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
+import { makeRepository, sh, tempDirectory, TURNS, projectOf } from "./fakes.ts"
 
 const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
@@ -67,6 +61,26 @@ const session = (id: string, patch: Partial<Omit<SessionRow, "projectId">> = {})
   ...patch,
 })
 const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }
+
+describe("ids", () => {
+  it.effect("a new id is a UUIDv4; one whose first 8 characters are taken is drawn again", () =>
+    Effect.gen(function* () {
+      assert.match(yield* newId(), ID)
+      const asked: Array<string> = []
+      const id = yield* newId((short) => Effect.sync(() => asked.push(short) < 3))
+      assert.match(id, ID)
+      assert.lengthOf(asked, 3)
+      assert.strictEqual(shortId(id), asked[2])
+      assert.strictEqual(shortId(id).length, 8)
+    }),
+  )
+
+  it("a session's herdr agent name fits herdr's 32 characters", () => {
+    const id = "0123abcd-4567-4abc-8def-0123456789ab"
+    assert.strictEqual(agentName(id), "s-0123abcd45674abc8def0123456789")
+    assert.match(agentName(id), /^[a-z][a-z0-9_-]{0,31}$/)
+  })
+})
 
 describe("System prompt directory", () => {
   const refused = <A, E, R>(e: Effect.Effect<A, E, R>) =>
@@ -118,7 +132,7 @@ describe("System prompt directory", () => {
 
 describe("Rules", () => {
   it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
     assert.include(rules, "`delegate`")
     assert.include(rules, "`pipeline`")
     assert.notInclude(rules, "--archive-on-completion")
@@ -132,7 +146,7 @@ describe("Rules", () => {
   })
 
   it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorSystemPrompt({ instructions: "", memory: "" })
+    const rules = coordinatorSystemPrompt({ projectDir: "/p", instructions: "", memories: "" })
     assert.include(rules, "in plain, complete sentences with no shorthand only you know")
     assert.include(rules, "a space between every word, identifier and number")
     assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
@@ -152,13 +166,13 @@ describe("envelope", () => {
       envelope(
         "agent-result",
         [
-          ["agent-id", "a1b2c3d4"],
+          ["agent-id", "a1b2c3d4-a1b2-4a1b-8a1b-a1b2c3d4a1b2"],
           ["summary", outcome('fix "x" <y>', undefined)],
           ["branch", ""],
         ],
         ["result", "a <b> & c"],
       ),
-      '<agent-result>\n<agent-id>a1b2c3d4</agent-id>\n<summary>Agent "fix "x" &lt;y&gt;" finished</summary>\n<result>\na <b> & c\n</result>\n</agent-result>',
+      '<agent-result>\n<agent-id>a1b2c3d4-a1b2-4a1b-8a1b-a1b2c3d4a1b2</agent-id>\n<summary>Agent "fix "x" &lt;y&gt;" finished</summary>\n<result>\na <b> & c\n</result>\n</agent-result>',
     )
     assert.strictEqual(outcome("t", "rate_limit"), 'Agent "t" failed: rate_limit')
     assert.isTrue(isUsageLimitError("rate_limit"))
@@ -187,17 +201,22 @@ describe("Db", () => {
       yield* withDb(
         Effect.gen(function* () {
           const db = yield* Db
-          yield* db.insertSession(session("aaaaaaaa"), "r")
-          const coord = yield* db.coordinatorLaunch("r", "pi", false, place)
-          yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "m", details: {} })
-          assert.strictEqual(coord.sessionId.length, 8)
-          assert.lengthOf(yield* db.coordinatorPending(yield* db.projectId("r")), 1)
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+          const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+          yield* db.insertInbox({
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            kind: "notice",
+            message: "m",
+            details: {},
+          })
+          assert.match(coord.sessionId, ID)
+          assert.lengthOf(yield* db.coordinatorPending(yield* projectOf("r")), 1)
         }),
       )
       assert.lengthOf(
         yield* withDb(
           Effect.gen(function* () {
-            return yield* (yield* Db).coordinatorPending(yield* (yield* Db).projectId("r"))
+            return yield* (yield* Db).coordinatorPending(yield* projectOf("r"))
           }),
         ),
         1,
@@ -219,37 +238,51 @@ describe("Db", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* Db
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
+        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
         assert.isNull(first.harnessSessionId)
         yield* db.reportCoordinatorSession(first.sessionId, "pi", "s1")
-        const again = yield* db.coordinatorLaunch("r", "pi", false, place)
+        const again = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
         assert.strictEqual(again.sessionId, first.sessionId)
         assert.strictEqual(again.harnessSessionId, "s1")
         yield* db.reportCoordinatorSession(first.sessionId, "cursor", "nested")
-        yield* db.reportCoordinatorSession("nope0000", "pi", "x")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId, "s1")
-        const renewed = yield* db.coordinatorLaunch("r", "pi", true, place)
+        yield* db.reportCoordinatorSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", "pi", "x")
+        assert.strictEqual(
+          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId,
+          "s1",
+        )
+        const renewed = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", true, place)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         assert.isNull(renewed.harnessSessionId)
         yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s4")
-        assert.isNull((yield* db.coordinatorLaunch("r", "claude", false, place)).harnessSessionId)
+        assert.isNull((yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).harnessSessionId)
         yield* db.reportCoordinatorSession(renewed.sessionId, "claude", "c1")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId, renewed.sessionId)
-        assert.isNull((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId)
+        assert.strictEqual(
+          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId,
+          renewed.sessionId,
+        )
+        assert.isNull((yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId)
         yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s6")
         yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s7")
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).harnessSessionId, "s7")
+        assert.strictEqual(
+          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId,
+          "s7",
+        )
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(
-          session("aaaaaaaa", { harnessId: "cursor", startedAt: 1, exitedAt: 1, lastActive: 1 }),
-          "r",
+          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+            harnessId: "cursor",
+            startedAt: 1,
+            exitedAt: 1,
+            lastActive: 1,
+          }),
+          yield* projectOf("r"),
         )
-        assert.isNull((yield* db.getSession("aaaaaaaa"))!.harnessSessionId)
-        yield* db.updateSession("aaaaaaaa", { harnessSessionId: "w1" })
-        assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.harnessSessionId, "w1")
+        assert.isNull((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.harnessSessionId)
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { harnessSessionId: "w1" })
+        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.harnessSessionId, "w1")
         assert.deepStrictEqual(
           (yield* db.listSessions({ stopped: true })).map((w) => w.id),
-          [first.sessionId, "aaaaaaaa"],
+          [first.sessionId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         )
         assert.deepStrictEqual(yield* db.listSessions(), [])
         const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
@@ -267,31 +300,38 @@ describe("Db", () => {
         Effect.gen(function* () {
           const db = yield* Db
           const sql = yield* SqlClient.SqlClient
-          const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
-          yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
-          yield* db.beginUserTurn("aaaaaaaa", "typed", { turnPromptedAt: 1 })
+          const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+          yield* db.insertSession(
+            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            yield* projectOf("r"),
+            undefined,
+            "/w",
+            "do it",
+            parent.sessionId,
+          )
+          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", { turnPromptedAt: 1 })
           const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
             sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
-          VALUES ('aaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
+          VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
           yield* inbox("send", parent.sessionId, "from parent", "delivered")
           yield* inbox("send", null, "later send", "delivered")
           yield* inbox("notice", parent.sessionId, "a notice", "delivered")
           yield* inbox("send", null, "still pending", "pending")
-          assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
+          assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "typed",
             delivered: "later send",
             parentSessionId: parent.sessionId,
           })
-          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
-          yield* db.beginUserTurn("aaaaaaaa", "", { turnPromptedAt: 2 })
-          assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).working, "")
-          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
-          assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
+          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", { turnPromptedAt: 2 })
+          assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
+          assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "",
             delivered: "later send",
             parentSessionId: parent.sessionId,
           })
-          assert.deepStrictEqual(yield* db.rescheduleSource("00000000"), {
+          assert.deepStrictEqual(yield* db.rescheduleSource("00000000-0000-4000-8000-000000000000"), {
             working: "",
             delivered: "",
             parentSessionId: undefined,
@@ -305,31 +345,41 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
-        yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
-        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
-        yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
+        const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        yield* db.insertSession(
+          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+          yield* projectOf("r"),
+          undefined,
+          "/w",
+          "do it",
+          parent.sessionId,
+        )
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
         // The second turn consumed a send; the open third consumed nothing.
-        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 3 })
-        const follow = yield* db.insertSend("aaaaaaaa", "add tests")
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 3 })
+        const follow = yield* db.insertSend("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "add tests")
         yield* db.setInboxStatus([follow!.id], "delivered")
-        yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
-        yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
         const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
           sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
-          VALUES ('aaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
+          VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
         yield* row("send", parent.sessionId, "from parent")
         yield* row("send", null, "and docs")
-        assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).delivered, "and docs")
+        assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).delivered, "and docs")
         yield* row("send", null, "also types")
-        assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa"), {
+        assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
           working: "",
           delivered: "and docs\n\nalso types",
           parentSessionId: parent.sessionId,
         })
         yield* row("send", null, "still pending", "pending")
         yield* row("notice", parent.sessionId, "a notice")
-        assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa")).delivered, "and docs\n\nalso types")
+        assert.strictEqual(
+          (yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).delivered,
+          "and docs\n\nalso types",
+        )
       }),
     ),
   )
@@ -339,9 +389,12 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "claude", false, place)).sessionId, first.sessionId)
-        const renewed = yield* db.coordinatorLaunch("r", "pi", true, place)
+        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        assert.strictEqual(
+          (yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).sessionId,
+          first.sessionId,
+        )
+        const renewed = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", true, place)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         const [old] = yield* sql<{
           endedAt: number | null
@@ -353,7 +406,7 @@ describe("Db", () => {
         assert.strictEqual(ends.at(-1)?.reason, "archived")
         const [project] = yield* sql<{
           main: string
-        }>`SELECT entry_session_id AS main FROM project WHERE key = 'r'`
+        }>`SELECT entry_session_id AS main FROM project WHERE id = ${yield* projectOf("r")}`
         assert.strictEqual(project!.main, renewed.sessionId)
         assert.deepStrictEqual(yield* db.listSessions(), [])
         assert.isUndefined(yield* db.getSession(renewed.sessionId))
@@ -374,11 +427,20 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch("r", "pi", false, place)
-        assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", undefined, parent.sessionId))
+        const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        assert.isTrue(
+          yield* db.insertSession(
+            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            yield* projectOf("r"),
+            undefined,
+            "/w",
+            undefined,
+            parent.sessionId,
+          ),
+        )
         const [row] = yield* sql<{
           parentSessionId: string | null
-        }>`SELECT parent_session_id FROM session WHERE id = 'aaaaaaaa'`
+        }>`SELECT parent_session_id FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
         assert.strictEqual(row!.parentSessionId, parent.sessionId)
       }),
     ),
@@ -396,40 +458,48 @@ describe("Db", () => {
               inboxId: number | null
               input: string
             }>`SELECT inbox_id, input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
-          yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
-          yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
-          const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`
-          const [opened] = yield* round("aaaaaaaa")
+          yield* db.insertSession(
+            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            yield* projectOf("r"),
+            undefined,
+            "/w",
+            "do it",
+          )
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
+          const [task] = yield* sql<{
+            id: number
+          }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
+          const [opened] = yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.strictEqual(opened!.inboxId, task!.id)
           assert.strictEqual(opened!.input, "do it")
-          yield* db.updateSession("aaaaaaaa", { turnState: "completed" })
-          yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 9 })
-          const [again] = yield* round("aaaaaaaa")
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 9 })
+          const [again] = yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.isNull(again!.inboxId)
           assert.strictEqual(again!.input, "")
 
-          yield* db.insertSession(session("bbbbbbbb"), "r")
-          const sent = yield* db.insertSend("bbbbbbbb", "ping")
-          yield* db.updateSession("bbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
+          const sent = yield* db.insertSend("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "ping")
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
           yield* db.setInboxStatus([sent!.id], "delivered")
-          const [sendRound] = yield* round("bbbbbbbb")
+          const [sendRound] = yield* round("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
           assert.strictEqual(sendRound!.inboxId, sent!.id)
           assert.strictEqual(sendRound!.input, "ping")
 
-          yield* db.insertSession(session("cccccccc"), "r")
-          const first = yield* db.insertSend("cccccccc", "add a test")
-          const second = yield* db.insertSend("cccccccc", "also update the readme")
-          yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 4 })
+          yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
+          const first = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "add a test")
+          const second = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "also update the readme")
+          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { turnState: "open", turnPromptedAt: 4 })
           yield* db.setInboxStatus([first!.id, second!.id], "delivered")
-          const [merged] = yield* round("cccccccc")
+          const [merged] = yield* round("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(merged!.inboxId, second!.id)
           assert.strictEqual(merged!.input, "add a test\n\nalso update the readme")
           // The next round takes only what came after the whole merged batch.
-          yield* db.updateSession("cccccccc", { turnState: "completed" })
-          const third = yield* db.insertSend("cccccccc", "and the docs")
-          yield* db.updateSession("cccccccc", { turnState: "open", turnPromptedAt: 6 })
+          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { turnState: "completed" })
+          const third = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "and the docs")
+          yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { turnState: "open", turnPromptedAt: 6 })
           yield* db.setInboxStatus([third!.id], "delivered")
-          const [next] = yield* round("cccccccc")
+          const [next] = yield* round("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(next!.inboxId, third!.id)
           assert.strictEqual(next!.input, "and the docs")
         }),
@@ -441,11 +511,15 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(session("aaaaaaaa"), "r")
-        assert.isTrue(yield* db.beginUserTurn("aaaaaaaa", "kept", { turnPromptedAt: 1 }))
-        assert.isFalse(yield* db.beginUserTurn("aaaaaaaa", "dropped", { turnPromptedAt: 2 }))
+        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        assert.isTrue(yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "kept", { turnPromptedAt: 1 }))
+        assert.isFalse(
+          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dropped", { turnPromptedAt: 2 }),
+        )
         assert.deepStrictEqual(
-          yield* sql<{ input: string }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`,
+          yield* sql<{
+            input: string
+          }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
           [{ input: "kept" }],
         )
       }),
@@ -456,13 +530,23 @@ describe("Db", () => {
     fresh(
       Effect.gen(function* () {
         const db = yield* Db
-        assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r", 1))
-        assert.isFalse(yield* db.insertSession(session("bbbbbbbb"), "r", 1))
-        yield* db.updateSession("aaaaaaaa", { status: "unknown", startedAt: 1, exitedAt: 1 })
-        assert.isTrue(yield* db.insertSession(session("bbbbbbbb"), "r", 1))
+        assert.isTrue(
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), 1),
+        )
+        assert.isFalse(
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), 1),
+        )
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+          status: "unknown",
+          startedAt: 1,
+          exitedAt: 1,
+        })
+        assert.isTrue(
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), 1),
+        )
         assert.deepStrictEqual(
           (yield* db.listSessions()).map((w) => w.id),
-          ["bbbbbbbb"],
+          ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
         )
       }),
     ),
@@ -474,39 +558,56 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
+        yield* db.insertSession(
+          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+          yield* projectOf("r"),
+          undefined,
+          "/w",
+          "do it",
+        )
         assert.deepStrictEqual(
-          yield* sql`SELECT kind, content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa'`,
+          yield* sql`SELECT kind, content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
           [{ kind: "task", content: "do it", status: "delivered" }],
         )
-        assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa"), [])
-        assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "none")
-        assert.isFalse(yield* db.turnTaken("aaaaaaaa"), "no open turn")
-        yield* db.updateSession("aaaaaaaa", { status: "working", turnState: "open", turnPromptedAt: 5 })
+        assert.deepStrictEqual(yield* db.pendingInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), [])
+        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "none")
+        assert.isFalse(yield* db.turnTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "no open turn")
+        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+          status: "working",
+          turnState: "open",
+          turnPromptedAt: 5,
+        })
         // The task delivered into the open turn is the stored proof it was taken up (after a vibestd restart too).
-        assert.isTrue(yield* db.turnTaken("aaaaaaaa"))
+        assert.isTrue(yield* db.turnTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         assert.strictEqual(
-          (yield* sql<{ status: string }>`SELECT status FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`)[0]
+          (yield* sql<{
+            status: string
+          }>`SELECT status FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0]
             ?.status,
           "working",
         )
-        assert.deepInclude(yield* db.getSession("aaaaaaaa"), {
+        assert.deepInclude(yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
           status: "working",
           turnState: "open",
           turnPromptedAt: 5,
         })
         yield* db.finishTurn(
-          "aaaaaaaa",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { status: "completed", output: "the answer", failure: { message: "late" } },
           { turnState: "completed" },
-          { sessionId: "aaaaaaaa", kind: "result", message: "<summary>done</summary>", details: { summary: "done" } },
+          {
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            kind: "result",
+            message: "<summary>done</summary>",
+            details: { summary: "done" },
+          },
         )
-        assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "completed")
+        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
         const turns = yield* sql<{
           status: string
           output: string
           endedAt: number | null
-        }>`SELECT status, output, ended_at FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa'`
+        }>`SELECT status, output, ended_at FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
         assert.strictEqual(turns.length, 1)
         assert.deepInclude(turns[0], { status: "completed", output: "<summary>done</summary>" })
         // The whole turn.end data, as finishTurn was given it.
@@ -517,10 +618,15 @@ describe("Db", () => {
           failure: { message: "late" },
         })
         assert.isNotNull(turns[0]!.endedAt)
-        assert.deepInclude((yield* db.latestInbox("aaaaaaaa", "result"))!.details, { summary: "done" })
-        yield* db.closeTurn("aaaaaaaa", "interrupted", {})
-        assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "completed")
-        assert.notProperty((yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa'`)[0], "status")
+        assert.deepInclude((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))!.details, {
+          summary: "done",
+        })
+        yield* db.closeTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "interrupted", {})
+        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
+        assert.notProperty(
+          (yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0],
+          "status",
+        )
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
@@ -528,11 +634,11 @@ describe("Db", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
-      yield* db.insertSession(session("bbbbbbbb"), "r")
-      yield* db.insertSession(session("cccccccc"), "r")
-      yield* db.insertSession(session("aaaaaaaa"), "r")
-      yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb', report_to_session_id = 'bbbbbbbb' WHERE id = 'aaaaaaaa'`
-      yield* sql`UPDATE project SET entry_session_id = 'cccccccc'`
+      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
+      yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
+      yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+      yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', report_to_session_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
+      yield* sql`UPDATE project SET entry_session_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`
       const recipient = Effect.flatMap(
         sql<{
           recipient: string
@@ -541,20 +647,25 @@ describe("Db", () => {
       )
       const round = (summary: string) =>
         Effect.gen(function* () {
-          yield* db.updateSession("aaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
+          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
           yield* db.finishTurn(
-            "aaaaaaaa",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             { status: "completed" },
             { turnState: "completed" },
-            { sessionId: "aaaaaaaa", kind: "result", message: summary, details: { summary } },
+            {
+              sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              kind: "result",
+              message: summary,
+              details: { summary },
+            },
           )
         })
       yield* round("one")
-      assert.strictEqual(yield* recipient, "bbbbbbbb")
+      assert.strictEqual(yield* recipient, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
       // `vibest --new` ended the old main conversation.
-      yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb'`
+      yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'`
       yield* round("two")
-      assert.strictEqual(yield* recipient, "cccccccc")
+      assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
@@ -578,39 +689,68 @@ describe("Db", () => {
             yield* sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, result_event_id, status)
               VALUES (${id}, 'result', ${id}, ${end.result}, ${last!.id}, 'dropped')`
         })
-      yield* db.insertSession(session("bbbbbbbb"), "r")
-      yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "from parent", "bbbbbbbb")
-      yield* db.insertSend("aaaaaaaa", "later send")
-      yield* turn("aaaaaaaa", 1, { at: 10, status: "completed", result: "<summary>old summary</summary>" })
-      yield* turn("aaaaaaaa", 2, { at: 20, status: "failed", output: "new line\nmore" })
-      yield* db.insertSession(session("dddddddd"), "r", undefined, "/w", "do it")
-      yield* db.insertSession(session("eeeeeeee"), "r")
-      yield* db.updateSession("eeeeeeee", { turnState: "open", turnPromptedAt: 5 })
-      yield* db.insertSession(session("ffffffff"), "r")
-      yield* turn("ffffffff", 3, { at: 7, status: "interrupted", output: "fallback\nrest" })
-      yield* db.insertSession(session("11111111"), "r")
+      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
+      yield* db.insertSession(
+        session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        yield* projectOf("r"),
+        undefined,
+        "/w",
+        "from parent",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      )
+      yield* db.insertSend("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "later send")
+      yield* turn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 1, {
+        at: 10,
+        status: "completed",
+        result: "<summary>old summary</summary>",
+      })
+      yield* turn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2, { at: 20, status: "failed", output: "new line\nmore" })
+      yield* db.insertSession(
+        session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        yield* projectOf("r"),
+        undefined,
+        "/w",
+        "do it",
+      )
+      yield* db.insertSession(session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), yield* projectOf("r"))
+      yield* db.updateSession("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", { turnState: "open", turnPromptedAt: 5 })
+      yield* db.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), yield* projectOf("r"))
+      yield* turn("ffffffff-ffff-4fff-8fff-ffffffffffff", 3, { at: 7, status: "interrupted", output: "fallback\nrest" })
+      yield* db.insertSession(session("11111111-1111-4111-8111-111111111111"), yield* projectOf("r"))
       // A result's summary, even empty, wins over the output's first line.
-      yield* turn("11111111", 4, { at: 8, status: "lost", output: "hidden", result: "<summary></summary>" })
+      yield* turn("11111111-1111-4111-8111-111111111111", 4, {
+        at: 8,
+        status: "lost",
+        output: "hidden",
+        result: "<summary></summary>",
+      })
 
-      const briefs = yield* db.sessionBriefs(["aaaaaaaa", "dddddddd", "eeeeeeee", "ffffffff", "11111111", "00000000"])
-      assert.deepStrictEqual(briefs.get("aaaaaaaa"), {
+      const briefs = yield* db.sessionBriefs([
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "11111111-1111-4111-8111-111111111111",
+        "00000000-0000-4000-8000-000000000000",
+      ])
+      assert.deepStrictEqual(briefs.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
         task: "from parent",
         latest: { status: "failed", summary: "new line", endedAt: 20 },
       })
-      assert.deepStrictEqual(briefs.get("dddddddd"), { task: "do it", latest: null })
-      assert.deepStrictEqual(briefs.get("eeeeeeee"), {
+      assert.deepStrictEqual(briefs.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), { task: "do it", latest: null })
+      assert.deepStrictEqual(briefs.get("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), {
         task: null,
         latest: { status: "working", summary: "", endedAt: null },
       })
-      assert.deepStrictEqual(briefs.get("ffffffff"), {
+      assert.deepStrictEqual(briefs.get("ffffffff-ffff-4fff-8fff-ffffffffffff"), {
         task: null,
         latest: { status: "interrupted", summary: "fallback", endedAt: 7 },
       })
-      assert.deepStrictEqual(briefs.get("11111111"), {
+      assert.deepStrictEqual(briefs.get("11111111-1111-4111-8111-111111111111"), {
         task: null,
         latest: { status: "lost", summary: "", endedAt: 8 },
       })
-      assert.isUndefined(briefs.get("00000000"))
+      assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
@@ -618,35 +758,51 @@ describe("Db", () => {
     fresh(
       Effect.gen(function* () {
         const db = yield* Db
-        yield* db.insertSession(session("aaaaaaaa", { turnState: "open" }), "r")
+        yield* db.insertSession(
+          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open" }),
+          yield* projectOf("r"),
+        )
         const dropped = yield* db.finishTurn(
-          "aaaaaaaa",
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { status: "completed" },
           { turnState: "completed", status: "idle" },
           {
-            sessionId: "aaaaaaaa",
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             kind: "result",
             message: "m",
             details: { status: "completed" },
           },
         )
         assert.strictEqual(dropped.status, "dropped")
-        assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))!.status, "dropped")
-        yield* db.coordinatorLaunch("r", "pi", false, place)
-        const row = yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "report", message: "hi", details: {} })
+        assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))!.status, "dropped")
+        yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        const row = yield* db.insertInbox({
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          kind: "report",
+          message: "hi",
+          details: {},
+        })
         assert.strictEqual(row.status, "pending")
         const guard = {
-          projectId: (yield* db.getSession("aaaaaaaa"))!.projectId,
+          projectId: (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId,
           runtime: RUNTIME,
           address: encodeAddress(place.address),
         }
         assert.deepStrictEqual(yield* db.claim([row.id], guard), [row.id])
         assert.deepStrictEqual(yield* db.claim([row.id], guard), [])
         yield* db.setInboxStatus([row.id], "delivered", "sending")
-        assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "report"))!.status, "delivered")
-        yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "n", details: {} })
+        assert.strictEqual(
+          (yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "report"))!.status,
+          "delivered",
+        )
+        yield* db.insertInbox({
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          kind: "notice",
+          message: "n",
+          details: {},
+        })
         yield* db.clearCoordinator(RUNTIME, place.address)
-        assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "notice"))!.status, "dropped")
+        assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"))!.status, "dropped")
       }),
     ),
   )
@@ -711,16 +867,22 @@ describe("Db", () => {
           (yield* sql<{ applicationId: number }>`PRAGMA application_id`)[0]?.applicationId,
           APPLICATION_ID,
         )
-        yield* db.insertSession(session("aaaaaaaa"), "r")
-        const first = yield* db.coordinatorLaunch("r", "pi", false, place)
-        assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId, first.sessionId)
+        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        assert.strictEqual(
+          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId,
+          first.sessionId,
+        )
         return first.sessionId
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
       assert.strictEqual(
         yield* Effect.gen(function* () {
           const db = yield* Db
-          assert.strictEqual((yield* db.getSession("aaaaaaaa"))?.id, "aaaaaaaa")
-          return (yield* db.coordinatorOf(yield* db.projectId("r")))?.id
+          assert.strictEqual(
+            (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))?.id,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          )
+          return (yield* db.coordinatorOf(yield* projectOf("r")))?.id
         }).pipe(Effect.provide(database(file))),
         opened,
       )
@@ -739,8 +901,8 @@ describe("Db", () => {
         assert.deepStrictEqual(yield* header(file), { applicationId: 0, userVersion: 0, objects: 0 })
         yield* Effect.gen(function* () {
           const db = yield* Db
-          assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r"))
-          assert.strictEqual((yield* db.coordinatorLaunch("r", "pi", false, place)).sessionId.length, 8)
+          assert.isTrue(yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")))
+          assert.match((yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.strictEqual((yield* header(file)).userVersion, SCHEMA_VERSION)
@@ -748,23 +910,26 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("an incomplete v2 is rejected and left byte-identical", () =>
+  it.effect("an incomplete file is rejected and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const dir = yield* tempDirectory("vibest-schema-partial-")
       const pragma = [`PRAGMA application_id = ${APPLICATION_ID}`, `PRAGMA user_version = ${SCHEMA_VERSION}`]
       const tables = [
-        "CREATE TABLE project (id INTEGER PRIMARY KEY) STRICT",
+        "CREATE TABLE project (id TEXT PRIMARY KEY) STRICT",
+        "CREATE TABLE project_repository (project_id TEXT, path TEXT) STRICT",
         "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT, machine TEXT, directory TEXT) STRICT",
         "CREATE TABLE inbox (id INTEGER PRIMARY KEY) STRICT",
+        "CREATE TABLE event (id INTEGER PRIMARY KEY) STRICT",
       ]
       const cases = [
-        ["missing-table.db", [...pragma, tables[0]!], "missing session"],
+        ["missing-table.db", [...pragma, tables[0]!, tables[4]!], "missing project_repository"],
         [
           "missing-index.db",
           [
             ...pragma,
             ...tables,
+            "CREATE INDEX project_repository_project ON project_repository (project_id)",
             "CREATE INDEX session_project ON session (project_id)",
             "CREATE INDEX session_parent ON session (parent_session_id)",
             "CREATE INDEX session_live ON session (machine, directory)",
@@ -787,23 +952,40 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a version 1 vibest database is refused, naming its path and the release's migration script", () =>
+  it.effect("a file without project_repository is refused and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
-      yield* writeSql(file, [
-        `PRAGMA application_id = ${APPLICATION_ID}`,
-        "PRAGMA user_version = 1",
-        "CREATE TABLE project (id INTEGER)",
-      ])
+      const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-v2-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      yield* writeSql(file, ["DROP INDEX project_repository_project", "DROP TABLE project_repository"])
       const before = yield* fs.readFile(file)
-      const pretty = yield* refusal(file)
-      assert.include(pretty, `${file} is from an older vibest`)
-      assert.include(pretty, "migration script given with this release")
-      assert.include(pretty, "move it aside to start empty")
-      assert.notInclude(pretty, "scripts/migrate")
+      assert.include(yield* refusal(file), "missing project_repository")
       assert.deepStrictEqual(yield* fs.readFile(file), before)
     }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and the release's migration script",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
+        yield* writeSql(file, [
+          `PRAGMA application_id = ${APPLICATION_ID}`,
+          "PRAGMA user_version = 1",
+          "CREATE TABLE project (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, main_session_id TEXT)",
+          "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER NOT NULL)",
+          "CREATE TABLE inbox (id INTEGER PRIMARY KEY)",
+        ])
+        assert.strictEqual(SCHEMA_VERSION, 1)
+        const before = yield* fs.readFile(file)
+        const pretty = yield* refusal(file)
+        assert.include(pretty, `${file} is from an older vibest`)
+        assert.include(pretty, "migration script given with this release")
+        assert.include(pretty, "move it aside to start empty")
+        assert.notInclude(pretty, "scripts/migrate")
+        assert.deepStrictEqual(yield* fs.readFile(file), before)
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>
@@ -916,16 +1098,20 @@ describe("Db", () => {
 })
 
 const launchInput: LaunchInput = {
-  worktree: "/h/.vibest/worktrees/abcd1234",
-  scratch: "/h/.vibest/projects/k/scratch/cli",
-  systemPromptFile: "/tmp/vibest/abcd1234/system-prompt.md",
+  worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
+  projectDir: "/h/.vibest/projects/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b",
+  systemPromptFile: "/tmp/vibest/abcd1234-abcd-4abc-8abc-abcd1234abcd/system-prompt.md",
   provider: null,
   model: null,
   sessionId: "uuid-1",
   resume: false,
   pluginDir: "/opt/vibest/harnesses/x",
   vibest: ["/usr/bin/bun", "/src/main.ts"],
-  env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234", VIBEST_SCRATCH: "/h/.vibest/projects/k/scratch/cli" },
+  env: {
+    VIBEST_AGENT: "general",
+    VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+    VIBEST_PROJECT_DIR: "/h/.vibest/projects/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b",
+  },
 }
 
 describe("HarnessAdapter", () => {
@@ -965,6 +1151,7 @@ describe("HarnessAdapter", () => {
     assert.strictEqual(after(ADAPTERS.pi.launchArgs(input), "-e"), `${dir}/extension.mjs`)
     const coordinator = {
       root: "/r",
+      projectDir: "/p",
       systemPromptFile: "/r.md",
       provider: null,
       model: null,
@@ -1062,10 +1249,11 @@ describe("HarnessAdapter", () => {
     assert.notInclude(ADAPTERS.claude.launchArgs(input), "--settings")
   })
 
-  it("Coordinator argv: rules and the inspection tools, no MCP server at all; cursor cannot be one", () => {
+  it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {
     const input: CoordinatorInput = {
       root: "/repo",
-      systemPromptFile: "/tmp/vibest/c0ffee00/system-prompt.md",
+      projectDir: "/h/p",
+      systemPromptFile: "/tmp/vibest/c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff/system-prompt.md",
       provider: null,
       model: "m",
       sessionId: null,
@@ -1074,8 +1262,16 @@ describe("HarnessAdapter", () => {
     }
     const claude = ADAPTERS.claude.coordinatorArgs!(input)
     assert.deepStrictEqual(
-      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 5),
-      ["--strict-mcp-config", "--tools", "Bash,Read,Grep,Glob,Skill", "--allowedTools", "Bash,Read,Grep,Glob,Skill"],
+      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 7),
+      [
+        "--strict-mcp-config",
+        "--tools",
+        "Bash,Read,Grep,Glob,Skill,Edit,Write",
+        "--add-dir",
+        "/h/p",
+        "--allowedTools",
+        "Bash,Read,Grep,Glob,Skill,Read(//h/p/**),Edit(//h/p/**)",
+      ],
     )
     assert.notInclude(claude, "--mcp-config")
     assert.include(claude, "--append-system-prompt-file")
@@ -1083,7 +1279,7 @@ describe("HarnessAdapter", () => {
       "--system-prompt",
       input.systemPromptFile,
       "--tools",
-      "read,bash,codemode,grep,find,ls",
+      "read,bash,codemode,grep,find,ls,write,edit",
       "--no-mcp",
       "-e",
       `${input.pluginDir}/extension.mjs`,
@@ -1106,7 +1302,7 @@ describe("HarnessAdapter", () => {
       if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
   })
 
-  it("Sessions get no vibest MCP server: claude may run vibest report", () => {
+  it("Sessions get no vibest MCP server: claude may run vibest report, and read and edit in the project folder", () => {
     for (const id of HARNESS_IDS)
       assert.isEmpty(
         ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
@@ -1115,8 +1311,9 @@ describe("HarnessAdapter", () => {
     const claude = ADAPTERS.claude.launchArgs(input)
     assert.strictEqual(
       claude[claude.indexOf("--allowedTools") + 1],
-      "Bash(vibest report:*),Bash(/usr/bin/bun /src/main.ts report:*)",
+      `Bash(vibest report:*),Bash(/usr/bin/bun /src/main.ts report:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
     )
+    assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
   })
 })
 
@@ -1222,30 +1419,166 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
     }),
   )
 
-  it.effect("repository key: origin, else a path hash of the main checkout", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const repo = yield* makeRepository
-      const key = yield* repositoryKey(repo)
-      assert.match(key, /^[a-f0-9]{12}$/)
-      // A linked worktree is the same project, remote or not.
-      const wt = path.join(yield* tempDirectory("vibest-wt-"), "w")
-      yield* sh(repo, "worktree", "add", "-q", "--detach", wt)
-      assert.strictEqual(yield* repositoryKey(wt), key)
-      yield* sh(repo, "remote", "add", "origin", "git@github.com:a/b.git")
-      assert.strictEqual(yield* repositoryKey(repo), "github.com/a/b")
-      assert.strictEqual(yield* repositoryKey(wt), "github.com/a/b")
-      // Another clone of the same remote, over https, is the same project too.
-      const clone = path.join(yield* tempDirectory("vibest-clone-"), "c")
-      yield* sh(repo, "clone", "-q", repo, clone)
-      yield* sh(clone, "remote", "set-url", "origin", "https://github.com/A/b.git")
-      assert.strictEqual(yield* repositoryKey(clone), "github.com/a/b")
-      // VIBEST_PROJECT_KEY overrides it (VIBEST_PROJECT_ID is the numeric project id, not this).
-      const overridden = yield* repositoryKey(repo).pipe(
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { VIBEST_PROJECT_KEY: "my/key" } }))),
-      )
-      assert.strictEqual(overridden, "my/key")
-    }),
+  it.effect(
+    "a project is found by the realpath of its directory or of one of its repositories, origin kept as git prints it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const file = path.join(yield* tempDirectory("vibest-identity-"), "vibest.db")
+        const repositories = (id: string) => {
+          const reader = new Database(file, { readonly: true })
+          const rows = reader
+            .query("SELECT path, remote_url AS remote FROM project_repository WHERE project_id = ? ORDER BY path")
+            .all(id)
+          reader.close()
+          return rows
+        }
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          const resolve = (directory: string) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+          const repo = yield* makeRepository
+          const first = yield* resolve(repo)
+          assert.match(first.id, ID)
+          assert.strictEqual(first.directory, repo)
+          assert.deepStrictEqual(yield* resolve(repo), first)
+          // The same checkout through a symlink, or a linked worktree of it: the same project.
+          const link = path.join(yield* tempDirectory("vibest-link-"), "l")
+          yield* fs.symlink(repo, link)
+          assert.deepStrictEqual(yield* resolve(link), first)
+          const wt = path.join(yield* tempDirectory("vibest-wt-"), "w")
+          yield* sh(repo, "worktree", "add", "-q", "--detach", wt)
+          assert.deepStrictEqual(yield* resolve(wt), first)
+          assert.deepStrictEqual(repositories(first.id), [{ path: repo, remote: null }])
+          // origin is stored raw and refreshed on the next resolve.
+          yield* sh(repo, "remote", "add", "origin", "git@github.com:A/b.git")
+          yield* resolve(repo)
+          assert.deepStrictEqual(repositories(first.id), [{ path: repo, remote: "git@github.com:A/b.git" }])
+          yield* sh(repo, "remote", "set-url", "origin", "https://github.com/A/b.git")
+          yield* resolve(wt)
+          assert.deepStrictEqual(repositories(first.id), [{ path: repo, remote: "https://github.com/A/b.git" }])
+          // Another clone of the same remote is another project.
+          const clone = path.join(yield* tempDirectory("vibest-clone-"), "c")
+          yield* sh(repo, "clone", "-q", repo, clone)
+          yield* sh(clone, "remote", "set-url", "origin", "https://github.com/A/b.git")
+          assert.notStrictEqual((yield* resolve(clone)).id, first.id)
+          // A repository of a multi-repository directory belongs to that directory's project.
+          const parent = yield* tempDirectory("vibest-multi-")
+          for (const name of ["app", "sdk"]) {
+            const child = path.join(parent, name)
+            yield* fs.makeDirectory(child)
+            yield* sh(child, "init", "-q", "-b", "main")
+            yield* sh(
+              child,
+              "-c",
+              "user.email=t@example.com",
+              "-c",
+              "user.name=t",
+              "commit",
+              "-q",
+              "--allow-empty",
+              "-m",
+              "i",
+            )
+          }
+          const multi = yield* resolve(parent)
+          assert.strictEqual(multi.directory, parent)
+          assert.deepStrictEqual(
+            repositories(multi.id).map((row) => (row as { path: string }).path),
+            [path.join(parent, "app"), path.join(parent, "sdk")],
+          )
+          assert.deepStrictEqual(yield* resolve(path.join(parent, "app")), multi)
+          // Looking a project up creates nothing.
+          assert.isUndefined(yield* db.projectAt(yield* tempDirectory("vibest-none-")))
+        }).pipe(
+          Effect.provide(database(file)),
+          Effect.provide(Layer.effect(Layout, Layout.make(path.join(path.dirname(file), "home")))),
+        )
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a moved checkout: ProjectMoved; move keeps the id and repairs vibest's worktrees, not the user's; no move, or the old directory still there, is another project",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-move-")
+        const file = path.join(dir, "vibest.db")
+        const home = path.join(dir, "home")
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          const layout = yield* Layout
+          const resolve = (directory: string, move?: boolean) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located, move))
+          const repo = path.join(dir, "a", "repo")
+          yield* fs.makeDirectory(repo, { recursive: true })
+          yield* sh(repo, "init", "-q", "-b", "main")
+          yield* sh(
+            repo,
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+          )
+          yield* sh(repo, "remote", "add", "origin", "git@github.com:O/R.git")
+          const first = yield* resolve(repo)
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), first.id, undefined, repo)
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), first.id, undefined, `${repo}/sub`)
+          yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), first.id, undefined, `${repo}-other`)
+          const ours = layout.allocationWorktree("repo", "ab12")
+          yield* fs.makeDirectory(path.dirname(ours), { recursive: true })
+          yield* sh(repo, "worktree", "add", "-q", "--detach", ours)
+          const theirs = path.join(dir, "theirs")
+          yield* sh(repo, "worktree", "add", "-q", "--detach", theirs)
+          const theirsGit = yield* fs.readFileString(path.join(theirs, ".git"))
+          // The old directory still there: a copy is another project, nothing asked.
+          const copy = path.join(dir, "copy")
+          yield* sh(dir, "clone", "-q", repo, copy)
+          yield* sh(copy, "remote", "set-url", "origin", "git@github.com:O/R.git")
+          assert.notStrictEqual((yield* resolve(copy)).id, first.id)
+          // Moved: asked, nothing changed until it is answered.
+          const moved = path.join(dir, "b", "repo")
+          yield* fs.makeDirectory(path.dirname(moved))
+          yield* fs.rename(repo, moved)
+          const asked = yield* Effect.flip(resolve(moved))
+          assert.strictEqual(asked._tag, "ProjectMoved")
+          assert.deepStrictEqual(asked._tag === "ProjectMoved" ? [asked.projectId, asked.from, asked.to] : [], [
+            first.id,
+            repo,
+            moved,
+          ])
+          assert.isUndefined(yield* db.projectAt(moved))
+          const done = yield* resolve(moved, true)
+          assert.strictEqual(done.id, first.id)
+          assert.strictEqual(done.directory, moved)
+          assert.deepStrictEqual("moved" in done && done.moved, {
+            from: repo,
+            repaired: [ours],
+            manual: [`git -C ${moved} worktree repair ${theirs}`],
+          })
+          assert.deepStrictEqual(yield* db.projectAt(moved), { id: first.id, directory: moved })
+          assert.strictEqual(yield* db.sessionDirectory("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), moved)
+          assert.strictEqual(yield* db.sessionDirectory("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), `${moved}/sub`)
+          assert.strictEqual(yield* db.sessionDirectory("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), `${repo}-other`)
+          // vibest's worktree works again; the user's own is left as it was.
+          assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
+          assert.strictEqual(yield* fs.readFileString(path.join(theirs, ".git")), theirsGit)
+          // Moved again, answered no: a second project; the first stays where it was.
+          const again = path.join(dir, "c")
+          yield* fs.rename(moved, again)
+          const other = yield* resolve(again, false)
+          assert.notStrictEqual(other.id, first.id)
+          assert.deepStrictEqual(yield* db.projectAt(again), { id: other.id, directory: again })
+          assert.strictEqual(yield* db.projectDirectory(first.id), moved)
+        }).pipe(Effect.provide(database(file)), Effect.provide(Layer.effect(Layout, Layout.make(home))))
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("repository directory name is the remote's own name, or the main checkout's, not the key", () =>
@@ -1259,12 +1592,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.notStrictEqual(base, "pkg")
       yield* sh(repo, "remote", "add", "origin", "git@github.com:Org/MyRepo.git")
       assert.strictEqual(yield* repositoryDirectoryName(path.join(repo, "pkg")), "MyRepo")
-      assert.strictEqual(yield* repositoryKey(repo), "github.com/org/myrepo")
       yield* sh(repo, "remote", "set-url", "origin", "https://example.com/Repo.git/")
       assert.strictEqual(yield* repositoryDirectoryName(repo), "Repo")
       assert.isTrue(safeRepositoryDirectory("MyRepo"))
       assert.isTrue(safeRepositoryDirectory("pi-orchestrator"))
-      assert.isFalse(safeRepositoryDirectory("abcd1234"))
+      assert.isFalse(safeRepositoryDirectory("abcd1234-abcd-4abc-8abc-abcd1234abcd"))
       assert.strictEqual(safeRepositoryDirectory("ABCD1234"), !caseFoldedWorktrees)
       assert.isFalse(safeRepositoryDirectory(".."))
       assert.isFalse(safeRepositoryDirectory("a/b"))
@@ -1299,6 +1631,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         })
         const claudeDir = yield* tempDirectory("vibest-claude-")
         const tmp = yield* tempDirectory("vibest-tmp-")
+        const PROJECT = "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e"
         const run = (
           h: "claude" | "pi" | "cursor",
           harnessSessionId: string | null = null,
@@ -1306,9 +1639,9 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           session: Effect.Effect<{
             sessionId: string
             harnessSessionId: string | null
-            projectId?: number
+            projectId: string
             runtime?: string
-          }> = Effect.succeed({ sessionId, harnessSessionId }),
+          }> = Effect.succeed({ sessionId, harnessSessionId, projectId: PROJECT }),
         ) =>
           Launch.coordinatorCommand({
             harness: h,
@@ -1342,6 +1675,8 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           VIBEST_HOME: home,
           VIBEST_COMMAND: '["/bin/vibest"]',
           VIBEST_SESSION_ID: "",
+          VIBEST_PROJECT_ID: PROJECT,
+          VIBEST_PROJECT_DIR: `${home}/projects/${PROJECT}`,
           HERDR_PANE_ID: "w1:p1",
           HERDR_SOCKET_PATH: "/h/herdr.sock",
         })
@@ -1356,34 +1691,42 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         assert.notInclude(rules, "VIBEST_COMMAND")
         assert.notInclude(rules, "mcp__")
         // The coordinator's session id is in the shell's variables too.
-        const launched = yield* run("claude", null, "abcd1234")
-        assert.strictEqual(launched.env.VIBEST_SESSION_ID, "abcd1234")
+        const launched = yield* run("claude", null, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+        assert.strictEqual(launched.env.VIBEST_SESSION_ID, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         // The project id and the runtime, when vibestd says them.
         const placed = yield* run(
           "claude",
           null,
-          "abcd1234",
+          "abcd1234-abcd-4abc-8abc-abcd1234abcd",
           Effect.succeed({
-            sessionId: "abcd1234",
+            sessionId: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
             harnessSessionId: null,
-            projectId: 7,
+            projectId: "07e40000-07e4-407e-807e-07e4000007e4",
             runtime: '{"runtime":"herdr"}',
           }),
         )
-        assert.strictEqual(placed.env.VIBEST_PROJECT_ID, "7")
+        assert.strictEqual(placed.env.VIBEST_PROJECT_ID, "07e40000-07e4-407e-807e-07e4000007e4")
         assert.strictEqual(placed.env.VIBEST_RUNTIME, '{"runtime":"herdr"}')
         // `--resume` only once Claude has written the session; otherwise a new conversation, its id Claude's to choose
         // (the plugin reports it on every request).
-        const unwritten = yield* run("claude", "s1", "abcd1234")
+        const unwritten = yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         assert.notInclude(unwritten.args, "--resume")
         assert.notInclude(unwritten.args, "--session-id")
         const transcript = path.join(claudeDir, "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"), "s1.jsonl")
         yield* fs.makeDirectory(path.dirname(transcript), { recursive: true })
         yield* fs.writeFileString(transcript, "{}\n")
-        assert.deepStrictEqual((yield* run("claude", "s1", "abcd1234")).args.slice(0, 2), ["--resume", "s1"])
+        assert.deepStrictEqual((yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")).args.slice(0, 2), [
+          "--resume",
+          "s1",
+        ])
         // A refused launch never asks vibestd for the session, so it does not supersede the running Coordinator's launch.
         let asked = 0
-        const counted = Effect.sync(() => (asked++, { sessionId: "abcd1234", harnessSessionId: null }))
+        const counted = Effect.sync(
+          () => (
+            asked++,
+            { sessionId: "abcd1234-abcd-4abc-8abc-abcd1234abcd", harnessSessionId: null, projectId: PROJECT }
+          ),
+        )
         assert.strictEqual((yield* Effect.flip(run("cursor", null, "", counted)))._tag, "HarnessUnavailable")
         assert.include((yield* Effect.flip(run("pi", null, "", counted))).message, "vibest's pi plugin is missing")
         assert.strictEqual(asked, 0)
@@ -1864,15 +2207,5 @@ describe("pure", () => {
     assert.strictEqual(shellQuote("a b"), "'a b'")
     assert.strictEqual(shellQuote("it's"), "'it'\\''s'")
     assert.strictEqual(shellQuote(""), "''")
-  })
-
-  it("remote normalization", () => {
-    for (const url of [
-      "git@github.com:iamdin/orchestrate-my-agent-cli.git",
-      "https://user:token@github.com/iamdin/orchestrate-my-agent-cli.git",
-      "ssh://git@github.com/iamdin/orchestrate-my-agent-cli",
-      "https://GitHub.com/iamdin/orchestrate-my-agent-cli/",
-    ])
-      assert.strictEqual(normalizeRemote(url), "github.com/iamdin/orchestrate-my-agent-cli")
   })
 })

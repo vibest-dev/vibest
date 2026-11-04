@@ -70,8 +70,6 @@ export const sessionMove = (deps: {
       readonly project: string
       readonly cwd: string
       readonly argv: ReadonlyArray<string>
-      /** The project key: its scratch directory is the session's VIBEST_SCRATCH. */
-      readonly key: string
       readonly near?: Terminal | undefined
     },
   ) => Effect.Effect<Terminal, unknown, MovePlatform>
@@ -81,15 +79,14 @@ export const sessionMove = (deps: {
     terminal: Terminal,
     root: string,
   ) => Effect.Effect<void, unknown, MovePlatform>
-  /** Where the session works now, and which project key its system prompt uses. */
+  /** Where the session works now. */
   readonly locate: (
     session: SessionRow,
-  ) => Effect.Effect<{ readonly root: string; readonly cwd: string; readonly key: string }, unknown, MovePlatform>
+  ) => Effect.Effect<{ readonly root: string; readonly cwd: string }, unknown, MovePlatform>
   /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
-    key: string,
   ) => Effect.Effect<ReadonlyArray<string>, unknown, MovePlatform>
   readonly finish: (
     session: SessionRow,
@@ -100,7 +97,7 @@ export const sessionMove = (deps: {
   /** The reported turn ends: the old harness's end is dropped (turn-ends.ts). */
   readonly turnEnds: { readonly drop: (id: string) => Effect.Effect<void> }
   /** The session's system prompt, made now from its row and the project files (sessions.ts `systemPromptOf`). */
-  readonly systemPromptOf: (session: SessionRow, key: string) => Effect.Effect<string, unknown, MovePlatform>
+  readonly systemPromptOf: (session: SessionRow) => Effect.Effect<string, unknown, MovePlatform>
   readonly uuid: Effect.Effect<string>
   /** SIGTERM to the harness pid alone (never its group: that is the terminal's shell). */
   readonly terminate: (pid: number) => Effect.Effect<"sent" | "gone" | "denied">
@@ -247,7 +244,7 @@ export const sessionMove = (deps: {
       )
     }
     // The move stays in the session's directory with its system prompt: what both hook calls repeat.
-    const { root, cwd, key } = yield* deps.locate(session)
+    const { root, cwd } = yield* deps.locate(session)
     const base = {
       project: root,
       agentType: session.agent,
@@ -343,7 +340,7 @@ export const sessionMove = (deps: {
         model: next.model ?? null,
         harnessSessionId,
       }
-      const argv = yield* deps.launchArgv(nextRow, false, key)
+      const argv = yield* deps.launchArgv(nextRow, false)
       // In place the terminal is the same: the next harness's process starts there before it runs, so what it reports
       // while starting is its own.
       if (inPlace)
@@ -355,7 +352,7 @@ export const sessionMove = (deps: {
         })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
-        : yield* deps.open(h, machine, nextRow, { project: root, cwd, key, argv }).pipe(Effect.exit)
+        : yield* deps.open(h, machine, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         // The one error type has a `code`, and that is all core may decide on: `open`'s `failed` is the start dying
         // inside the terminal (its own limit, a crash) — skip to the next harness. Any other code is a placement
@@ -391,7 +388,7 @@ export const sessionMove = (deps: {
       row = (yield* db.getSession(row.id))!
       yield* deps.turnEnds.drop(row.id)
       const text = harnesses.get(row.harnessId).systemPromptInPrompt
-        ? `${yield* deps.systemPromptOf(row, key)}\n\n# Task\n\n${next.prompt}`
+        ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
       const prompted = yield* deps.prompt(h, row, terminal, text, Effect.void, { keepRound: true }).pipe(Effect.exit)
       // A reason is the runtime taking the text and the turn never starting. Same as a failed prompt: try the next one.

@@ -44,12 +44,10 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 
 | ID  | Capability                                                              | Method | Pass when                                            |
 | --- | ----------------------------------------------------------------------- | ------ | ---------------------------------------------------- |
-| P1  | `project info` in a repository                                          | script | instructions path and empty kinds                    |
-| P2  | `project write/read/list/search/delete` for `docs`, `memory`, `scratch` | script | each round-trips; search hits `kind/path:line: text` |
-| P3  | `--if-version` conflict on write and delete                             | script | non-zero exit, entry unchanged                       |
-| P4  | secret refusal (a key-like value)                                       | script | non-zero exit, nothing written                       |
-| P5  | entries survive `daemon restart`                                        | script | read after restart equals the write                  |
-| P6  | path escape (`../`, absolute) refused                                   | script | non-zero exit                                        |
+| P1  | `project info` in a repository                                          | script | the folder `projects/<id>` and its subfolder paths   |
+| P2  | `project search` over `docs`, `memories`, `artifacts`                   | script | hits `kind/path:line: text`                          |
+| P7  | a moved checkout: `vibest` asks `[Y/n]`, y moves it                     | script | same project id, new path, memories, worktree ok     |
+| P8  | Pi main, Pi and Claude subagents use the folder with file tools (fakes) | script | each writes and reads `artifacts/`; other project no |
 
 ## Plugins
 
@@ -85,21 +83,21 @@ user's own login and config, read only; the user's real config files keep their 
 | I6  | the user's own harness config files do not change                                                           | script | real `~/.claude/settings.json`, `~/.cursor/hooks.json`, `~/.pi/agent/settings.json` modification times unchanged (`~/.cursor/cli-config.json` is out: vibest never writes it and cursor-agent rewrites it itself)                                                                                                                          |
 | I7  | every Claude main-loop turn end is the plugin's turn.complete: answer, the person's Esc, `vibest interrupt` | script | `vibest run claude` in a herdr session: an answer is a completed result; Esc in the pane is exactly one failed result with "interrupted: the turn was stopped in its terminal (Esc) before it ended"; after `vibest interrupt` the aborted turn.complete reaches vibest (vibestd logs the end), no result; skipped without herdr or claude |
 | I8  | `vibest peek <id> [--lines N]` reads a session's terminal on demand (results carry no screen text)          | script | `vibest run claude` in a herdr session: peek prints its screen (Claude's input box), at most N lines with `--lines`; an unknown id fails with `NoSuchSession`; skipped without herdr or claude                                                                                                                                             |
-| I9  | Claude starts with no `--settings`; the plugin's `tool.call` guard holds its deny rules                     | script | a real `vibest run claude` session is refused Read of a project's instructions.md, `find` of its memory, `grep` of the project and `herdr --help`, each with the guard's reason in Claude's transcript, and no refused file's text reaches Claude; skipped without herdr or claude                                                         |
+| I9  | Claude starts with no `--settings`; the plugin's `tool.call` guard holds its deny rules                     | script | a real `vibest run claude` session is refused Read of another project's instructions.md, `find` of its memories, `grep` of the project and `herdr --help`, each with the guard's reason in Claude's transcript, and no refused file's text reaches Claude; skipped without herdr or claude                                                 |
 
 ## Guard (harness adapters)
 
 `vibest integration guard --harness <h>` as a harness plugin runs it: the tool call on stdin, the agent's environment.
 
-| ID  | Capability                                                                                       | Method  | Pass when                                                                        |
-| --- | ------------------------------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------- |
-| R1  | an agent (session or coordinator) driving herdr itself (`herdr pane list`) is denied             | script  | deny in that harness's format (Claude `hookSpecificOutput`, Cursor `permission`) |
-| R2  | a session reading the Project store's `docs/` or `memory/` directly is denied                    | script  | deny, with the `vibest project` hint                                             |
-| R3  | ordinary work (`git status`, `git log`) is allowed for both roles; the coordinator edits no file | script  | allow / no output; `Write` denied for the coordinator                            |
-| R4  | without a vibest agent the guard answers nothing and fails                                       | script  | non-zero exit, no decision (the plugin only asks for a vibest agent)             |
-| R5  | input vibest cannot read                                                                         | script  | non-zero exit, which the plugin turns into a refusal                             |
-| R6  | Pi: the same rules inside the Pi extension                                                       | runtime |                                                                                  |
-| R7  | Claude: the plugin's `tool.call` and `turn.complete` reach vibest in a running Claude            | runtime |                                                                                  |
+| ID  | Capability                                                                                | Method  | Pass when                                                                        |
+| --- | ----------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| R1  | an agent (session or coordinator) driving herdr itself (`herdr pane list`) is denied      | script  | deny in that harness's format (Claude `hookSpecificOutput`, Cursor `permission`) |
+| R2  | a session reads and writes its own project folder; another project's folder is denied     | script  | own: allow / no output; another: deny                                            |
+| R3  | ordinary work is allowed for both roles; the coordinator edits only in its project folder | script  | allow / no output; `Write` denied for the coordinator outside its folder         |
+| R4  | without a vibest agent the guard answers nothing and fails                                | script  | non-zero exit, no decision (the plugin only asks for a vibest agent)             |
+| R5  | input vibest cannot read                                                                  | script  | non-zero exit, which the plugin turns into a refusal                             |
+| R6  | Pi: the same rules inside the Pi extension                                                | runtime |                                                                                  |
+| R7  | Claude: the plugin's `tool.call` and `turn.complete` reach vibest in a running Claude     | runtime |                                                                                  |
 
 ## Sessions, delivery and the main Agent (runtime)
 
@@ -124,3 +122,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S15 | Claude coordinator over HTTP: two sessions, mid-turn, lease after the poller left, curl, daemon restart           | inbox: `tools/e2e` S15                                          |
 | S18 | a subagent whose first turn outlasts herdr's agent.start window keeps its terminal (no false exit)                | inbox: `tools/e2e` S18                                          |
 | S19 | a Pi subagent under herdr's Pi hook gets its first prompt within seconds; restart and interrupt work              | inbox: `tools/e2e` S19                                          |
+| S20 | ids: `run` answers a UUID, herdr agent `s-<30 hex>`, `result <8>`, `peek <12>`, system prompt file                | inbox: `tools/e2e` S20                                          |

@@ -10,11 +10,11 @@ import {
   createIsolatedWorktrees,
   createProject,
   listProjectRepositories,
-  plainDirectoryKey,
+  projectRepositories,
   projectRoot,
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
-import { git, repositoryKey } from "@vibest/core/worktree"
+import { git } from "@vibest/core/worktree"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
@@ -24,7 +24,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { liveDaemon } from "../src/herdr-plugin.ts"
-import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult } from "./fakes.ts"
+import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult, projectOf } from "./fakes.ts"
 
 // Not from fakes.ts: this suite needs no herdr, db or harness doubles.
 const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
@@ -307,15 +307,24 @@ describe("multi-repository project", () => {
       yield* repository(root, "sdk")
       const multi = yield* projectRoot(root)
       assert.strictEqual(multi.root, root)
-      assert.strictEqual(multi.key, yield* plainDirectoryKey(root))
       const single = yield* projectRoot(app)
       assert.strictEqual(single.root, app)
-      assert.strictEqual(single.key, yield* repositoryKey(app))
       const sub = path.join(app, "src")
       yield* fs.makeDirectory(sub)
       const inside = yield* projectRoot(sub)
       assert.strictEqual(inside.root, app)
-      assert.strictEqual(inside.key, single.key)
+      // Each repository by its main checkout's realpath, with origin as git prints it; through a symlink too.
+      yield* sh(app, "remote", "add", "origin", "git@github.com:O/App.git")
+      const link = path.join(parent, "link")
+      yield* fs.symlink(root, link)
+      for (const at of [root, link])
+        assert.deepStrictEqual(yield* projectRepositories(at), [
+          { path: app, remote: "git@github.com:O/App.git" },
+          { path: path.join(root, "sdk"), remote: undefined },
+        ])
+      assert.deepStrictEqual(yield* projectRepositories(path.join(link, "app")), [
+        { path: app, remote: "git@github.com:O/App.git" },
+      ])
     }),
   )
 
@@ -342,8 +351,6 @@ describe("multi-repository project", () => {
       // A workspace of linked worktrees is not a second Project.
       const fromWorkspace = yield* projectRoot(workspace)
       assert.strictEqual(fromWorkspace.root, root)
-      assert.strictEqual(fromWorkspace.key, yield* plainDirectoryKey(root))
-      assert.notStrictEqual(fromWorkspace.key, yield* plainDirectoryKey(workspace))
     }),
   )
 
@@ -409,7 +416,7 @@ describe("multi-repository project", () => {
       assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
-      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234" }, [
+      const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
         "project",
         "create",
         again,
@@ -459,7 +466,7 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repository(root, "app")
       const sdk = yield* repository(root, "sdk")
-      yield* db.coordinatorLaunch(yield* plainDirectoryKey(root), "pi", false, {
+      yield* db.coordinatorLaunch(yield* projectOf(root), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -467,7 +474,7 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* sessions.spawn({
         machine: { id: "local" },
         root,
-        key: yield* plainDirectoryKey(root),
+        projectId: yield* projectOf(root),
         name: "task",
         prompt: "do it",
         harness: "pi",
@@ -580,9 +587,8 @@ describe("multi-repository isolated workspace", () => {
         ),
       )
       assert.strictEqual(command.env.VIBEST_AGENT, "coordinator")
-      const main = yield* db.coordinatorOf(yield* db.projectId(yield* plainDirectoryKey(root)))
+      const main = yield* db.coordinatorOf(yield* projectOf(root))
       assert.strictEqual(main?.projectDirectory, root)
-      assert.notStrictEqual(main?.directory, root)
     }),
   )
 
@@ -613,7 +619,7 @@ describe("multi-repository isolated workspace", () => {
       })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
-      assert.strictEqual(yield* db.projectKey(row.projectId), yield* plainDirectoryKey(root))
+      assert.strictEqual(row.projectId, (yield* db.projectAt(root))?.id)
       const workspace = (yield* db.sessionDirectory(row.id))!
       assert.isTrue(yield* fs.exists(path.join(workspace, "app")))
       assert.isTrue(yield* fs.exists(path.join(workspace, "sdk")))
@@ -640,9 +646,8 @@ describe("multi-repository isolated workspace", () => {
       yield* cli["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "coord" })
       const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.turnState === "open")
-      const key = yield* plainDirectoryKey(root)
-      assert.strictEqual(yield* db.projectKey((yield* db.getSession(id))!.projectId), key)
-      assert.notStrictEqual(key, yield* plainDirectoryKey(workspace))
+      assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
+      assert.isUndefined(yield* db.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
 
       const listed = yield* liveDaemon().list(workspace)
@@ -660,7 +665,6 @@ describe("multi-repository isolated workspace", () => {
       yield* sessions.send(id, "again")
       const places = yield* until(herdr.callsTo("open"), (calls) => calls.length > before)
       assert.strictEqual(places.at(-1)!.project, root)
-      assert.notStrictEqual(places.at(-1)!.project, key)
       assert.strictEqual((yield* herdr.callsTo("present")).at(-1)!.info.project, "combo")
     }),
   )

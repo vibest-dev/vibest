@@ -34,7 +34,7 @@ export interface Outdated {
 }
 export interface Restarted {
   readonly id: string
-  readonly projectId: number
+  readonly projectId: string
   readonly ok: boolean
   readonly message: string
 }
@@ -108,7 +108,7 @@ type LiveNow = Effect.Effect<
 /** One agent to restart in place: what differs between a subagent and a main agent. */
 interface Target {
   readonly id: string
-  readonly projectId: number
+  readonly projectId: string
   /** How messages name it: its id, and "(main agent)" for one. */
   readonly label: string
   readonly adapter: HarnessAdapter
@@ -143,11 +143,7 @@ export const sessionRestart = (deps: {
   /** The session's lock, as every session change takes it. */
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   /** The harness argv that starts the session (resume: on its conversation). */
-  readonly launchArgv: (
-    session: SessionRow,
-    resume: boolean,
-    key: string,
-  ) => Effect.Effect<ReadonlyArray<string>, unknown>
+  readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
   /** vibestd's platform services, for a harness's own `canResume`. */
   readonly withPlatform: <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) => Effect.Effect<A, E>
@@ -234,21 +230,19 @@ export const sessionRestart = (deps: {
   /** The harness argv that reopens a subagent's own conversation when the harness can (a first start has none yet). */
   const againArgv = (session: SessionRow) =>
     Effect.gen(function* () {
-      const key = yield* db.projectKey(session.projectId)
-      if (key === undefined) return yield* Effect.die(`project ${session.projectId} has no key`)
       const adapter = harnesses.get(session.harnessId)
       const resume =
         session.harnessSessionId !== null &&
         (adapter.canResume === undefined ||
           (yield* adapter.canResume(yield* deps.worktreeOf(session), session.harnessSessionId)))
-      return yield* deps.launchArgv(session, resume, key)
+      return yield* deps.launchArgv(session, resume)
     }).pipe(deps.withPlatform)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {
       const session = yield* db.getSession(id)
       if (session === undefined)
-        return { id, projectId: -1, ok: false, message: `${id} not restarted: no such session` }
+        return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
       // An open round stays open across the restart: the continue is another turn of it, and it reports once.
       const interrupted = session.turnState === "open"
       return yield* inPlace({

@@ -1,8 +1,7 @@
 // `vibest project create <directory> --from <repository>…` (architecture D7, §3 Project and Workspace; plan phase 7):
 // copy each git repository into one new directory as a folder named after it, and one detached worktree per repository
 // for a writing subagent's isolated Workspace.
-import { Config, Crypto, Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
-import { Hex } from "effect/encoding"
+import { Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
 import {
@@ -12,7 +11,6 @@ import {
   gitState,
   mainCheckout,
   repositoryDirectoryName,
-  repositoryKey,
   type GitState,
 } from "./worktree.ts"
 
@@ -219,18 +217,6 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
   return found.length > 0 ? found : undefined
 })
 
-/** Identity of a directory that is not a git repository: `VIBEST_PROJECT_KEY`, else sha256(realpath)[:12], same as `repositoryKey`. */
-export const plainDirectoryKey = Effect.fn("plainDirectoryKey")(function* (directory: string) {
-  const override = yield* Config.option(Config.String("VIBEST_PROJECT_KEY")).pipe(
-    Effect.orElseSucceed(() => Option.none()),
-  )
-  if (Option.isSome(override) && override.value) return override.value
-  const fs = yield* FileSystem.FileSystem
-  const crypto = yield* Crypto.Crypto
-  const real = yield* fs.realPath(directory)
-  return Hex.encode(yield* crypto.digest("SHA-256", new TextEncoder().encode(real))).slice(0, 12)
-})
-
 /** A main checkout: `git-dir` is `git-common-dir`. A linked worktree is not. */
 const isMainCheckout = (dir: string) =>
   git(dir, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").pipe(
@@ -242,9 +228,9 @@ const isMainCheckout = (dir: string) =>
   )
 
 /**
- * The project `directory` belongs to, and that project's key. A directory is a project when every child checkout is a
- * main checkout (`plainDirectoryKey`). A directory of linked worktrees is a Workspace: the project is the shared parent
- * of those main checkouts, not a new key for the workspace. Anything else is its own main checkout (`repositoryKey`).
+ * The root of the project `directory` belongs to. A directory is a project when every child checkout is a main
+ * checkout. A directory of linked worktrees is a Workspace: the project is the shared parent of those main checkouts,
+ * not the workspace. Anything else is its own main checkout.
  */
 export const projectRoot = Effect.fn("projectRoot")(function* (directory: string) {
   const children = yield* listProjectRepositories(directory)
@@ -267,24 +253,42 @@ export const projectRoot = Effect.fn("projectRoot")(function* (directory: string
       if (linkedParent === undefined) linkedParent = parent
       else if (linkedParent !== parent) same = false
     }
-    if (mains === children.length) return { root: directory, key: yield* plainDirectoryKey(directory) }
+    if (mains === children.length) return { root: directory }
     // One level: the shared parent is the project (its own checkouts), not another workspace.
     if (same && mains === 0 && linkedParent !== undefined) {
       const nested = yield* listProjectRepositories(linkedParent)
       let nestedMains = nested !== undefined
       if (nested) for (const child of nested) if (!(yield* isMainCheckout(child.path))) nestedMains = false
-      if (nested && nestedMains) return { root: linkedParent, key: yield* plainDirectoryKey(linkedParent) }
-      const root = yield* mainCheckout(linkedParent)
-      return { root, key: yield* repositoryKey(root) }
+      if (nested && nestedMains) return { root: linkedParent }
+      return { root: yield* mainCheckout(linkedParent) }
     }
   }
-  const root = yield* mainCheckout(directory)
-  return { root, key: yield* repositoryKey(root) }
+  return { root: yield* mainCheckout(directory) }
 })
 
-/** `projectRoot`'s key. */
-export const projectKey = Effect.fn("projectKey")(function* (directory: string) {
-  return (yield* projectRoot(directory)).key
+/** A repository of a project: its main checkout's realpath and `remote.origin.url` as git prints it (not identity). */
+export interface RepositoryPlace {
+  readonly path: string
+  readonly remote: string | undefined
+}
+
+/**
+ * The repositories of the project at `root` (as `projectRoot` returns it): the main checkout itself, or each direct
+ * child repository's main checkout of a multi-repository project.
+ */
+export const projectRepositories = Effect.fn("projectRepositories")(function* (root: string) {
+  const fs = yield* FileSystem.FileSystem
+  const children = yield* listProjectRepositories(root)
+  const checkouts = children
+    ? yield* Effect.forEach(children, (child) => mainCheckout(child.path))
+    : [yield* mainCheckout(root)]
+  const places: RepositoryPlace[] = []
+  for (const checkout of checkouts) {
+    const path = yield* fs.realPath(checkout)
+    if (places.some((place) => place.path === path)) continue
+    places.push({ path, remote: (yield* optionalGit(path, "config", "--get", "remote.origin.url")) || undefined })
+  }
+  return places
 })
 
 /** Remove each worktree (from its repository, without force: it refuses on anything not clean), then `workspace` when it is empty. Never deletes a branch. */

@@ -6,7 +6,6 @@ import { Db } from "@vibest/core/db"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
 import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { Clock, Duration, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
@@ -27,6 +26,7 @@ import {
   writeResult,
   resultText,
   systemPromptFile,
+  projectOf,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -41,7 +41,7 @@ const workingSession = Effect.gen(function* () {
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
-    key: yield* repositoryKey(repo),
+    projectId: yield* projectOf(repo),
     name: "task",
     prompt: "do it",
     harness: "pi",

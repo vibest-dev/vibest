@@ -6,7 +6,8 @@ import { type Claim, type VibestClient, withVibest } from "@vibest/client/client
 import { VibestCommand } from "@vibest/core/paths"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { callerMachine } from "@vibest/runtime-herdr/caller"
-import { KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+import { agentName, KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+import { shortId } from "@vibest/schema/id"
 import { RuntimeAddress } from "@vibest/schema/session"
 import { Config, Console, Effect, Option, Schema } from "effect"
 import { Herdr } from "effect-herdr-sdk"
@@ -106,7 +107,9 @@ const requireDirectory = (context: PluginContext) => {
 export const formatRuns = (sessions: ReadonlyArray<LiveSession>) => {
   if (sessions.length === 0) return "no live sessions"
   return sessions
-    .map((session) => [session.id, session.agent, session.harness, session.status, session.paneId ?? "-"].join("  "))
+    .map((session) =>
+      [shortId(session.id), session.agent, session.harness, session.status, session.paneId ?? "-"].join("  "),
+    )
     .join("\n")
 }
 
@@ -115,9 +118,7 @@ export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
   return usage.map((window) => `${window.harness}  ${window.window}  ${window.percent}%  ${window.status}`).join("\n")
 }
 
-const AGENT_NAME = /^s-([0-9a-f]{8})$/
-
-/** The live subagent in the focused pane, else the session whose herdr agent name is `s-<id>`. The main agent is not one. */
+/** The live subagent in the focused pane, else the session whose herdr agent name is `agentName(id)`. The main agent is not one. */
 export const sessionToStop = (
   sessions: ReadonlyArray<LiveSession>,
   paneId: string | undefined,
@@ -126,8 +127,7 @@ export const sessionToStop = (
   const live = sessions.filter((session) => session.agent !== "main")
   const byPane = paneId === undefined ? undefined : live.find((session) => session.paneId === paneId)
   if (byPane) return byPane.id
-  const id = agent === undefined ? undefined : AGENT_NAME.exec(agent)?.[1]
-  return id === undefined ? undefined : live.find((session) => session.id === id)?.id
+  return agent === undefined ? undefined : live.find((session) => agentName(session.id) === agent)?.id
 }
 
 /** Numbered menu. startup is a hook, and the palette does not list itself. */
@@ -175,7 +175,7 @@ export const perform = <E, R>(
           // shortcut: one line. A multi-line prompt is `vibest run`.
           const prompt = (yield* readLine()).trim()
           if (prompt === "") return yield* new EmptyInput({ message: "the prompt is empty" })
-          return `started ${yield* daemon.spawn(yield* requireDirectory(context), prompt)}`
+          return `started ${shortId(yield* daemon.spawn(yield* requireDirectory(context), prompt))}`
         }
         case "stop": {
           const id = sessionToStop(yield* daemon.list(undefined), context.focusedPaneId, context.focusedPaneAgent)
@@ -186,7 +186,7 @@ export const perform = <E, R>(
           }
           // Stop ends the turn; the session, its pane and its worktree stay (archive is `vibest rm`).
           yield* daemon.interrupt(id)
-          return `stopped ${id}`
+          return `stopped ${shortId(id)}`
         }
         case "runs":
           return formatRuns(yield* daemon.list(yield* requireDirectory(context)))

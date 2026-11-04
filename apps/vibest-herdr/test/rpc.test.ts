@@ -13,13 +13,12 @@ import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { projectRoot } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
-import { repositoryKey } from "@vibest/core/worktree"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, type Scope, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -38,6 +37,7 @@ import {
   type TestServices,
   until,
   writeResult,
+  projectOf,
 } from "./fakes.ts"
 
 const served = (options?: TestOptions) =>
@@ -106,6 +106,36 @@ describe("vibest.sock", () => {
       )
       assert.deepStrictEqual(yield* raw.List({}, { headers: cliHeaders(repo) }), [])
       assert.deepStrictEqual(yield* asCli(raw, repo).List({}), [])
+    }),
+  )
+
+  test(
+    "a session is named by its full id or a unique prefix of 8 or more characters; the answers name the full id",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      for (const named of [id, id.slice(0, 8), id.slice(0, 12)])
+        assert.strictEqual((yield* c.Get({ id: named })).id, id)
+      const short = yield* Effect.flip(c.Get({ id: id.slice(0, 7) }))
+      assert.strictEqual(short._tag, "NoSuchSession")
+      assert.include(short.message, "at least 8")
+      assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
+      assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
+      // `--peer` takes a prefix too.
+      const peer = yield* c.Spawn({ harness: "pi", prompt: "beside it", peer: id.slice(0, 10) })
+      assert.strictEqual(yield* db.sessionDirectory(peer.id), yield* db.sessionDirectory(id))
+      // Another id with the same first 8 characters: those 8 no longer name one session.
+      const twin = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
+      const row = (yield* db.getSession(id))!
+      yield* db.insertSession({ ...row, id: twin }, row.projectId)
+      const ambiguous = yield* Effect.flip(c.Get({ id: id.slice(0, 8) }))
+      assert.strictEqual(ambiguous._tag, "AmbiguousSession")
+      assert.include(ambiguous.message, id)
+      assert.include(ambiguous.message, twin)
+      assert.strictEqual((yield* c.Get({ id: id.slice(0, 12) })).id, id)
     }),
   )
 
@@ -266,7 +296,7 @@ describe("vibest.sock", () => {
       const reported = yield* db.latestInbox(id, "report")
       assert.match(
         reported!.message,
-        /^<agent-message>\n<agent-id>[a-f0-9]{8}<\/agent-id>\n<summary>Agent "do it" sent a message before finishing<\/summary>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
+        /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<summary>Agent "do it" sent a message before finishing<\/summary>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
       )
       const refused: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         w.Spawn({ harness: "pi", prompt: "more" }),
@@ -276,8 +306,7 @@ describe("vibest.sock", () => {
         w.Interrupt({ id }),
         w.Remove({ id }),
         w["Project.Info"](),
-        w["Project.Read"]({ kind: "docs", path: "a.md" }),
-        w["Project.Write"]({ kind: "memory", path: "a.md", content: "x", ifVersion: "new" }),
+        w["Project.Search"]({ query: "x" }),
         w.Launch({ argv: [], focus: false }),
         w["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/p1" }),
       ]
@@ -335,7 +364,10 @@ describe("vibest.sock", () => {
         assert.strictEqual(failureTag(exit), "Forbidden")
         assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another coordinator/)
       }
-      assert.strictEqual(failureTag(yield* Effect.exit(b.Send({ id: "nope0000", message: "x" }))), "NoSuchSession")
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(b.Send({ id: "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", message: "x" }))),
+        "NoSuchSession",
+      )
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       yield* a.Send({ id, message: "from its own Coordinator" })
@@ -376,6 +408,7 @@ describe("vibest.sock", () => {
         ["Spawn", c.Spawn({ harness: "pi", prompt: "more" })],
         ["Launch", c.Launch({ argv: [], focus: false })],
         ["Project.StartMain", c["Project.StartMain"]({})],
+        ["Project.Open", c["Project.Open"]({})],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
@@ -386,11 +419,7 @@ describe("vibest.sock", () => {
         ["Project.RunningCoordinator", c["Project.RunningCoordinator"]({ terminal: "test/p1" })],
         ["Project.StopCoordinator", c["Project.StopCoordinator"]({ runtime: "herdr", address: "{}" })],
         ["Project.Info", c["Project.Info"]()],
-        ["Project.List", c["Project.List"]({ kind: "docs" })],
-        ["Project.Read", c["Project.Read"]({ kind: "docs", path: "a.md" })],
         ["Project.Search", c["Project.Search"]({ query: "x" })],
-        ["Project.Write", c["Project.Write"]({ kind: "memory", path: "a.md", content: "x", ifVersion: "new" })],
-        ["Project.Delete", c["Project.Delete"]({ kind: "memory", path: "a.md", ifVersion: "new" })],
         ["Send", c.Send({ id, message: "x" })],
         ["Interrupt", c.Interrupt({ id })],
         ["Peek", c.Peek({ id })],
@@ -399,8 +428,8 @@ describe("vibest.sock", () => {
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
         // Another session's start or report: a session speaks only for itself.
-        ["Session.Start", c["Session.Start"]({ id: "other000" })],
-        ["Session.Ready", c["Session.Ready"]({ id: "other000" })],
+        ["Session.Start", c["Session.Start"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
+        ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
       ]
@@ -631,14 +660,14 @@ describe("vibest.sock", () => {
         })
       assert.deepStrictEqual(
         yield* ask(
-          `{"jsonrpc":"2.0","id":"hook:1","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"},"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
+          `{"jsonrpc":"2.0","id":"hook:1","method":"TurnEnd","params":{"sessionId":"deadbeef-dead-4dea-8dea-deadbeefdead","harness":"pi","event":"{}"},"headers":[["vibest-protocol","${PROTOCOL}"]]}\n`,
         ),
         '{"jsonrpc":"2.0","id":"hook:1","result":null}',
       )
       assert.include(
         yield* (
           ask(
-            '{"jsonrpc":"2.0","id":"hook:2","method":"TurnEnd","params":{"sessionId":"deadbeef","harness":"pi","event":"{}"}}\n',
+            '{"jsonrpc":"2.0","id":"hook:2","method":"TurnEnd","params":{"sessionId":"deadbeef-dead-4dea-8dea-deadbeefdead","harness":"pi","event":"{}"}}\n',
           ) ?? ""
         ),
         "ProtocolRejected",
@@ -685,7 +714,7 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual(failureTag(refused), "Forbidden")
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
-      const project = yield* db.projectId(yield* repositoryKey(repo))
+      const project = yield* projectOf(repo)
       const row = (yield* db.coordinatorOf(project))!
       assert.strictEqual(row.address?.id, "test/p1")
       assert.strictEqual(row.harnessId, "claude")
@@ -778,18 +807,18 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
-      yield* db.coordinatorLaunch("r", "cursor", false, {
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
+      yield* db.coordinatorLaunch(yield* projectOf("r"), "cursor", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p9" },
       })
       yield* herdr.seedAgent("w1:p9")
-      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
-      yield* inbox.enqueue(row("aaaaaaaa", "one"))
-      yield* inbox.enqueue(row("aaaaaaaa", "two"))
-      yield* inbox.enqueue(row("bbbbbbbb", "three"))
+      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"))
+      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two"))
+      yield* inbox.enqueue(row("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"))
       yield* until(db.coordinatorPending(project), (rows) => rows.length === 1)
       const prompts = (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9")
       assert.deepStrictEqual(
@@ -831,20 +860,20 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
-      yield* db.insertSession({ id: "cccccccc", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p8", "ws", "/")
       yield* herdr.seedAgent("w1:p8")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p8" },
       })
-      const project = (yield* db.getSession("aaaaaaaa"))!.projectId
+      const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
-      yield* inbox.enqueue(row("aaaaaaaa", "one"))
-      yield* inbox.enqueue(row("aaaaaaaa", "two"))
-      yield* inbox.enqueue(row("bbbbbbbb", "three"))
+      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"))
+      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two"))
+      yield* inbox.enqueue(row("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"))
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
@@ -854,7 +883,7 @@ describe("vibest.sock", () => {
       const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
       yield* until(db.coordinatorPending(project), (rows) => rows.length === 0)
-      yield* inbox.enqueue(row("cccccccc", "four"))
+      yield* inbox.enqueue(row("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four"))
       assert.deepStrictEqual(Array.from(yield* Fiber.join(received)), ["one\n\ntwo", "three", "four"])
       assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
       assert.deepStrictEqual(
@@ -889,16 +918,26 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
-      yield* db.insertSession({ id: "bbbbbbbb", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
+      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p7", "ws", "/")
       yield* herdr.seedAgent("w1:p7")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
-      yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "one", details: {} })
-      yield* inbox.enqueue({ sessionId: "bbbbbbbb", kind: "result", message: "two", details: {} })
+      yield* inbox.enqueue({
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        kind: "result",
+        message: "one",
+        details: {},
+      })
+      yield* inbox.enqueue({
+        sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        kind: "result",
+        message: "two",
+        details: {},
+      })
       const sock = yield* Effect.promise(
         () =>
           new Promise<net.Socket>((resolve, reject) => {
@@ -922,16 +961,19 @@ describe("vibest.sock", () => {
           ["vibest-project-id", String(coord.projectId)],
         ]),
       )
-      const claimed = yield* until(db.latestInbox("aaaaaaaa", "result"), (row) => row?.status !== "pending")
+      const claimed = yield* until(
+        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
+        (row) => row?.status !== "pending",
+      )
       assert.strictEqual(claimed?.status, "sending")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb", "result"))?.status, "pending")
+      assert.strictEqual((yield* db.latestInbox("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "result"))?.status, "pending")
       sock.destroy()
       const closed = yield* until(
-        db.latestInbox("aaaaaaaa", "result"),
+        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
         (row) => row?.status === "failed" || row?.status === "delivered",
       )
       assert.strictEqual(closed?.status, "failed")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb", "result"))?.status, "pending")
+      assert.strictEqual((yield* db.latestInbox("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "result"))?.status, "pending")
     }),
     undefined,
     15_000,
@@ -961,14 +1003,19 @@ describe("vibest.sock", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession({ id: "aaaaaaaa", ...general }, "r")
+      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p6", "ws", "/")
       yield* herdr.seedAgent("w1:p6")
-      const coord = yield* db.coordinatorLaunch("r", "pi", false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p6" },
       })
-      yield* inbox.enqueue({ sessionId: "aaaaaaaa", kind: "result", message: "one", details: {} })
+      yield* inbox.enqueue({
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        kind: "result",
+        message: "one",
+        details: {},
+      })
       const c = yield* asSession(yield* client, coord.sessionId)
       const got = yield* Deferred.make<string>()
       const fiber = yield* c["Inbox.Subscribe"](undefined).pipe(
@@ -976,10 +1023,13 @@ describe("vibest.sock", () => {
         Effect.forkChild,
       )
       assert.strictEqual(yield* Deferred.await(got), "one")
-      yield* until(db.latestInbox("aaaaaaaa", "result"), (row) => row?.status === "delivered")
+      yield* until(
+        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
+        (row) => row?.status === "delivered",
+      )
       yield* Fiber.interrupt(fiber)
       yield* TestClock.withLive(Effect.sleep("50 millis"))
-      assert.strictEqual((yield* db.latestInbox("aaaaaaaa", "result"))?.status, "delivered")
+      assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))?.status, "delivered")
     }),
     undefined,
     15_000,
@@ -1184,7 +1234,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       assert.strictEqual((yield* c["Project.StartMain"]({ harness: "pi" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
-      assert.notStrictEqual(seenDirectory.project, yield* repositoryKey(repo))
+      assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
     }),
     {
       plugins: [
@@ -1273,6 +1323,22 @@ describe("vibest.sock", () => {
       // Back at its shell: `state` reports idle now (§3), a live status of its own.
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
       assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "idle" })
+    }),
+  )
+
+  test(
+    "Remove names the resolved session when the runtime is unreachable, not the prefix typed",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* Ref.set(herdr.reachable, false)
+      const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
+      assert.strictEqual(failed._tag, "RuntimeUnreachable")
+      assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
     }),
   )
 })

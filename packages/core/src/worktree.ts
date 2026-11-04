@@ -1,7 +1,6 @@
 import { NotInRepository } from "@vibest/schema/session"
 // git side of a session's worktree (SPEC §8.2, §8.7). git is the authority; nothing here is cached.
-import { Config, Crypto, Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect"
-import { Hex } from "effect/encoding"
+import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 export { NotInRepository } from "@vibest/schema/session"
 
@@ -70,31 +69,6 @@ export const mainCheckout = Effect.fn("mainCheckout")(function* (dir: string) {
   return gitDir === common ? top : (yield* Path.Path).dirname(common)
 })
 
-/** `remote.origin.url` without protocol, credentials and `.git`; scp form becomes host/path. */
-export const normalizeRemote = (url: string) =>
-  url
-    .trim()
-    .toLowerCase()
-    .replace(/^(git\+ssh|ssh|git|https?):\/\//, "")
-    .replace(/^[^@]*@/, "")
-    .replace(/^([^:/]*):/, "$1/")
-    .replace(/\.git$/, "")
-    .replace(/\/+$/, "")
-
-/** Project identity (SPEC §4): VIBEST_PROJECT_KEY → normalized origin → sha256(realpath(main checkout))[:12], so linked worktrees share it. */
-export const repositoryKey = Effect.fn("repositoryKey")(function* (root: string) {
-  const override = yield* Config.option(Config.String("VIBEST_PROJECT_KEY")).pipe(
-    Effect.orElseSucceed(() => Option.none()),
-  )
-  if (Option.isSome(override) && override.value) return override.value
-  const remote = yield* tryGit(root, "config", "--get", "remote.origin.url")
-  if (remote) return normalizeRemote(remote)
-  const fs = yield* FileSystem.FileSystem
-  const crypto = yield* Crypto.Crypto
-  const real = yield* fs.realPath(yield* mainCheckout(root))
-  return Hex.encode(yield* crypto.digest("SHA-256", new TextEncoder().encode(real))).slice(0, 12)
-})
-
 /** Last path segment of a remote URL, case kept. Trailing slashes go before `.git`, so `Repo.git/` is `Repo`. */
 const remoteRepositoryName = (url: string) => {
   const bare = url
@@ -107,7 +81,7 @@ const remoteRepositoryName = (url: string) => {
 
 /**
  * Directory name under `worktrees/`. Origin's repository name when `remote.origin.url` is set;
- * otherwise the main checkout's own directory name. Not the repository key, and not a nested cwd.
+ * otherwise the main checkout's own directory name. Not a nested cwd.
  */
 export const repositoryDirectoryName = Effect.fn("repositoryDirectoryName")(function* (dir: string) {
   const main = yield* mainCheckout(dir)

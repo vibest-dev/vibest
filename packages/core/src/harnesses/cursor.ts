@@ -26,7 +26,7 @@ export const cursor: HarnessAdapter = {
     // One argument: `--resume [chatId]` takes an optional value, so a separate id starting with - would be read as a flag.
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
     "--add-dir",
-    i.scratch,
+    i.projectDir,
     "--trust",
     "--plugin-dir",
     i.pluginDir,

@@ -1,8 +1,10 @@
 // ~/.vibest layout (SPEC §5.1). Everything on disk is derived from VIBEST_HOME plus a session id or repository key.
+import { ID } from "@vibest/schema/id"
 import { type Duration, Effect, FileSystem, Option, Path, Random, Stdio, Stream } from "effect"
 export { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 
-const SESSION_ID = /^[0-9a-f]{8}$/
+/** An old build named a worktree directory by its 8-hex session id. */
+const LEGACY_SESSION_DIRECTORY = /^[0-9a-f]{8}$/
 export const ALLOCATION_LEAF = /^[0-9a-f]{4}$/
 export const ALLOCATION_NAME_ATTEMPTS = 16
 
@@ -14,7 +16,7 @@ export const caseFoldedWorktrees = hostPlatform === "darwin" || hostPlatform ===
 export const sameWorktreeBucket = (a: string, b: string) =>
   caseFoldedWorktrees ? a.toLowerCase() === b.toLowerCase() : a === b
 
-/** One ordinary directory name. A name that is a legacy session id on this filesystem is not a bucket. */
+/** One ordinary directory name. A name that is a session id, or a legacy one, on this filesystem is not a bucket. */
 export const safeRepositoryDirectory = (name: string) =>
   name.length > 0 &&
   name.length <= 255 &&
@@ -23,7 +25,8 @@ export const safeRepositoryDirectory = (name: string) =>
   !name.includes("/") &&
   !name.includes("\\") &&
   !name.includes("\0") &&
-  !SESSION_ID.test(caseFoldedWorktrees ? name.toLowerCase() : name)
+  !LEGACY_SESSION_DIRECTORY.test(caseFoldedWorktrees ? name.toLowerCase() : name) &&
+  !ID.test(caseFoldedWorktrees ? name.toLowerCase() : name)
 
 /** Readers never see half a file (SPEC §5.5): write a sibling temp file, then rename over the target. */
 export const writeAtomic = Effect.fn("writeAtomic")(function* (
@@ -45,11 +48,8 @@ export const interactive = Effect.gen(function* () {
   return (yield* stdio.stdinIsTerminal) && (yield* stdio.stdoutIsTerminal)
 })
 
-/**
- * Print `question` (no newline) and read a line: y / yes is a yes; anything else, EOF or no answer within `timeout` is a no.
- * `defaultYes` (a `[Y/n]` question): an empty line is a yes too.
- */
-export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes", defaultYes = false) =>
+/** Print `question` (no newline) and read one line: none on EOF or no answer within `timeout`. */
+export const askLine = (question: string, timeout: Duration.Input = "2 minutes") =>
   Effect.gen(function* () {
     const stdio = yield* Stdio.Stdio
     yield* Stream.run(Stream.make(question), stdio.stdout()).pipe(Effect.ignore)
@@ -59,7 +59,15 @@ export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes"
       Effect.timeoutOption(timeout),
       Effect.orElseSucceed(() => Option.none()),
     )
-    const line = Option.flatten(answer)
+    return Option.flatten(answer)
+  })
+
+/**
+ * Print `question` (no newline) and read a line: y / yes is a yes; anything else, EOF or no answer within `timeout` is a no.
+ * `defaultYes` (a `[Y/n]` question): an empty line is a yes too.
+ */
+export const askYesNo = (question: string, timeout: Duration.Input = "2 minutes", defaultYes = false) =>
+  Effect.map(askLine(question, timeout), (line) => {
     if (defaultYes && Option.isSome(line) && line.value.trim() === "") return true
     return /^\s*y(es)?\s*$/i.test(Option.getOrElse(line, () => ""))
   })

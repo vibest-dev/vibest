@@ -73,6 +73,28 @@ export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSe
   id: Schema.String,
   message: Schema.String,
 }) {}
+/** A session id prefix that more than one session's id starts with. */
+export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("AmbiguousSession", {
+  prefix: Schema.String,
+  matches: Schema.Array(Schema.String),
+}) {
+  override get message() {
+    return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
+  }
+}
+/**
+ * The directory has no project, and exactly one project with the same origins is recorded at a directory that no
+ * longer exists: the checkout moved. `vibest` there asks to move the project (`Project.Open`).
+ */
+export class ProjectMoved extends Schema.TaggedError<ProjectMoved>()("ProjectMoved", {
+  projectId: Schema.String,
+  from: Schema.String,
+  to: Schema.String,
+}) {
+  override get message() {
+    return `the project moved from ${this.from} to ${this.to}; run vibest here to move it`
+  }
+}
 export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
   message: Schema.String,
 }) {}

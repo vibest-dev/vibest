@@ -1,3 +1,4 @@
+import { newId, shortId } from "@vibest/schema/id"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
@@ -105,7 +106,7 @@ export {
 } from "@vibest/schema/session"
 
 /** Test barrier after `--peer` validation and before insert, while the owner's session lock is held. Production leaves this void. */
-/** The lock key of a session directory, beside the session-id keys (8 hex, never a path). */
+/** The lock key of a session directory, beside the session-id keys (UUIDs, never a path). */
 const directoryLock = (directory: string) => `directory:${directory}`
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -147,8 +148,8 @@ export interface SpawnInput {
   readonly machine: Machine
   /** The main checkout (`mainCheckout`): worktrees are created only from it. */
   readonly root: string
-  /** The project key of `root` (`projectRoot(root).key`), computed once by the caller: the row, the scratch directory and the system prompt all use it. */
-  readonly key: string
+  /** The project `root` is (vibestd resolved it once): the row, the project folder and the system prompt use it. */
+  readonly projectId: string
   readonly name: string
   readonly prompt: string
   /** Optional when a plugin picks it (plugins.md §5). */
@@ -207,7 +208,7 @@ export class Sessions extends Context.Service<
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
     /** The last `lines` lines on the session's terminal (`vibest peek`), read on demand; never sent to an agent. */
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
-    readonly list: (filter?: { projectId?: number; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
+    readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
     /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
@@ -419,12 +420,12 @@ export class Sessions extends Context.Service<
         })
 
       /** vibest's variables in the session's terminal, which the integration and `vibest` recognize it by (SPEC §8.2 step 1b). */
-      // VIBEST_SCRATCH: the session's own scratch directory, the one place under projects its guard lets it use.
+      // VIBEST_PROJECT_DIR: the session's project folder, the one place under projects its guard lets it use.
       // VIBEST_RUNTIME names no terminal: the one it gets is opened after this.
-      const vibestEnv = (session: SessionRow, scratch: string) => ({
+      const vibestEnv = (session: SessionRow) => ({
         VIBEST_SESSION_ID: session.id,
-        VIBEST_PROJECT_ID: String(session.projectId),
-        VIBEST_SCRATCH: scratch,
+        VIBEST_PROJECT_ID: session.projectId,
+        VIBEST_PROJECT_DIR: layout.project(session.projectId),
         VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
         VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
@@ -432,26 +433,22 @@ export class Sessions extends Context.Service<
         VIBEST_COMMAND: encodeCommand(vibest),
       })
 
-      /** The session's system prompt, made now from its row and the project files (`key`: the row's project). */
-      const systemPromptOf = (session: SessionRow, key: string) =>
+      /** The session's system prompt, made now from its row and its project's files. */
+      const systemPromptOf = (session: SessionRow) =>
         Effect.gen(function* () {
           return sessionSystemPrompt({
             id: session.id,
             // It joined another live session's directory with --peer: that one was there first. The owner keeps its own.
             peer: yield* db.earlierSharer(session.id),
-            scratch: layout.scratch(key),
+            projectDir: layout.project(session.projectId),
             vibest,
-            ...(yield* projectText(layout.project(key))),
+            ...(yield* projectText(layout.project(session.projectId))),
           })
         })
 
       /** The argv that starts the session's harness in a terminal (what `open` runs); writes its system prompt anew. */
-      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (
-        session: SessionRow,
-        resume: boolean,
-        key: string,
-      ) {
-        const file = yield* systemPromptOf(session, key).pipe(
+      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (session: SessionRow, resume: boolean) {
+        const file = yield* systemPromptOf(session).pipe(
           Effect.flatMap((text) => writeSystemPrompt(session.id, text)),
           Effect.provideContext(platform),
         )
@@ -462,7 +459,7 @@ export class Sessions extends Context.Service<
           adapter.binary,
           ...adapter.launchArgs({
             worktree: yield* worktreeOf(session),
-            scratch: layout.scratch(key),
+            projectDir: layout.project(session.projectId),
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
@@ -470,7 +467,7 @@ export class Sessions extends Context.Service<
             resume,
             pluginDir,
             vibest,
-            env: vibestEnv(session, layout.scratch(key)),
+            env: vibestEnv(session),
           }),
         ]
       })
@@ -638,19 +635,12 @@ export class Sessions extends Context.Service<
       // ---- spawn ----
 
       /** The first turn, once the terminal exists: the system prompt in front where the harness has no flag for it, else the text alone. */
-      const afterOpen = (
-        h: Runtime,
-        session: SessionRow,
-        terminal: Terminal,
-        root: string,
-        key: string,
-        firstPrompt: string,
-      ) =>
+      const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
           const first = harnesses.get(session.harnessId).systemPromptInPrompt
-            ? `${yield* systemPromptOf(session, key)}\n\n# Task\n\n${firstPrompt}`
+            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${firstPrompt}`
             : firstPrompt
           const notStarted = yield* prompt(h, session, terminal, first)
           if (notStarted) yield* notice(session, notStarted)
@@ -688,13 +678,11 @@ export class Sessions extends Context.Service<
         launchArgv,
         turnEnds,
         systemPromptOf,
-        uuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+        uuid: newId(),
         terminate: processes.terminate,
         platform,
       })
       limit.move.rerun = move.rerun
-
-      const newId = crypto.randomBytes(4).pipe(Effect.map(Hex.encode), Effect.orDie)
 
       /** The `machines[]` of `agent.start.before` (§7), via the shared helper. */
       const machinesListing = machines(
@@ -731,8 +719,7 @@ export class Sessions extends Context.Service<
           const refuse = (why: string) => new NoSuchSession({ id, message: `--peer ${id}: ${why}` })
           const p = yield* db.getSession(id)
           if (!p) return yield* refuse(`no session ${id}`)
-          // Reads only: a check must not insert a project row as a side effect.
-          if (p.projectId !== (yield* db.projectByKey(input.key))) return yield* refuse("it belongs to another project")
+          if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
           if (p.metadata.archived || p.metadata.removed) return yield* refuse("it was archived")
           if (p.runtime !== runtime || p.address.machine !== machineId)
             return yield* refuse(
@@ -802,11 +789,7 @@ export class Sessions extends Context.Service<
         )
         const adapter = harnesses.get(harnessId)
         const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
-        const id = yield* newId.pipe(
-          Effect.flatMap((id) => db.sessionExists(id).pipe(Effect.map((taken) => (taken ? undefined : id)))),
-          Effect.repeat({ until: (id) => id !== undefined }),
-          Effect.map((id) => id!),
-        )
+        const id = yield* db.newSessionId
         const now = yield* Clock.currentTimeMillis
         /** `shared`: the directory of the session `--peer` named, which this one works in too. */
         const admit = (shared: string | undefined) =>
@@ -815,7 +798,6 @@ export class Sessions extends Context.Service<
             const folders = yield* listProjectRepositories(root).pipe(
               Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
             )
-            const key = input.key
             const base = {
               ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
               ...(input.archive ? { archive: true } : {}),
@@ -828,7 +810,7 @@ export class Sessions extends Context.Service<
                 : yield* repositoryDirectoryName(root).pipe(Effect.mapError((e) => refuse(e.message)))
               if (!safeRepositoryDirectory(repository))
                 return yield* refuse(
-                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or an 8-hex legacy session id)`,
+                  `repository name ${JSON.stringify(repository)} cannot be a directory under worktrees (empty, unsafe, or a session id)`,
                 )
               const parentPath = path.join(layout.worktrees, repository)
               if (
@@ -868,7 +850,7 @@ export class Sessions extends Context.Service<
               harnessId,
               provider: provider ?? null,
               model: model ?? null,
-              harnessSessionId: adapter.ownSessionId ? yield* crypto.randomUUIDv4.pipe(Effect.orDie) : null,
+              harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
               runtime: runtimeKind,
               address: { machine: machine.id, id: "" },
               status: "unknown",
@@ -882,7 +864,7 @@ export class Sessions extends Context.Service<
             }
             const inserted = yield* db.insertSession(
               draft,
-              key,
+              input.projectId,
               options.maxSessions,
               cwd,
               decision.prompt,
@@ -994,7 +976,7 @@ export class Sessions extends Context.Service<
             const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
             yield* notice(
               session,
-              `${id} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${id} to see the request.`,
+              `${shortId(id)} (${session.harnessId}) has been waiting for a permission decision since ${hhmm}. Run vibest peek ${shortId(id)} to see the request.`,
             )
           }
           return
@@ -1365,7 +1347,7 @@ export class Sessions extends Context.Service<
       })
 
       const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
-      const list = (filter: { projectId?: number; stopped?: boolean } = {}) =>
+      const list = (filter: { projectId?: string; stopped?: boolean } = {}) =>
         db.listSessions(filter).pipe(
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
@@ -1448,7 +1430,7 @@ export class Sessions extends Context.Service<
         inbox,
         scope,
         locked: (id) => locked(id),
-        launchArgv: (session, resume, key) => launchArgv(session, resume, key).pipe(Effect.provideContext(platform)),
+        launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
         worktreeOf,
         withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
         awaitReady,
